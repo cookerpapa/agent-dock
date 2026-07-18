@@ -15,6 +15,8 @@ Tested baseline: `@earendil-works/pi-coding-agent` `0.80.10`.
 | `ui.select()`, `ui.input()`, `ui.editor()` | Blocking request/response | Adapter-mapped and unit-tested; live Pi round trip pending |
 | Status, widget, title, editor text | Fire-and-forget requests | Protocol-supported; not yet mapped to web events |
 | Tools, hooks, providers, compaction hooks | Run in Pi's native extension runtime | Planned integration coverage |
+| `appendEntry()` state + `session_start` reconstruction | Native portable-state lifecycle | Verified across disposed SDK runtimes and a fresh backend instance |
+| `session_shutdown` cleanup | Native extension lifecycle event | Verified for every embedded activation through `AgentSessionRuntime.dispose()` |
 | Package/resource discovery | Native Pi behavior | Planned integration coverage |
 | `ui.custom()` | Returns `undefined` in RPC mode | Unsupported |
 | Custom header/footer/editor components | No-op in RPC mode | Unsupported |
@@ -25,3 +27,15 @@ Tested baseline: `@earendil-works/pi-coding-agent` `0.80.10`.
 An extension executes arbitrary Node.js code with the Pi process's permissions.
 Compatibility never implies trust: user and project extensions must remain inside
 the sandbox rather than loading into the AgentDock control plane.
+
+## Cloud portability classes
+
+| Class | State shape | Eligible backend |
+| --- | --- | --- |
+| `portable` | Stateless, or reconstructed from Pi session entries | Trusted embedded worker, isolated RPC, or hibernation |
+| `workspace` | Reconstructed from durable workspace files | Isolated workspace restore or hibernation |
+| `process-bound` | Depends on heap, subprocesses, sockets, or browser state | Long-lived isolated process or compatible hibernation |
+| `untrusted` | Arbitrary user/project code regardless of state shape | Isolated process/container/microVM only |
+
+The embedded spike uses a trusted inline extension. It does not establish that
+arbitrary project extensions are safe to co-locate in one Node process.

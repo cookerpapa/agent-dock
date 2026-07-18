@@ -1,0 +1,18 @@
+{
+  "name": "@agent-dock/pi-embedded-rehydrate-spike",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "spike": "node src/run-spike.ts",
+    "density": "node --expose-gc src/run-density-probe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10"
+  }
+}

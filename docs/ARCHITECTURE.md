@@ -4,15 +4,16 @@
 
 AgentDock owns the cloud control plane, execution scheduling, sandbox lifecycle,
 durability, policy, extension Web-UI bridge, and user-facing event stream. A
-pinned Pi RPC process owns the agent loop, extension/resource discovery,
+pinned Pi runtime owns the agent loop, extension/resource discovery,
 conversation context, model/tool interaction, compaction, retry behavior, and
-session-tree format inside each active sandbox.
+session-tree format inside an execution worker or active sandbox.
 
 AgentDock must not fork Pi unless a required capability cannot be implemented
-through the public RPC protocol or extensions. Raw Pi RPC messages are hidden
-behind a supervisor adapter so that upstream upgrades do not leak into the
-control-plane domain model. Direct SDK embedding is deferred until measured
-process overhead or a missing RPC capability justifies it.
+through the public RPC protocol, SDK, or extensions. Raw Pi RPC messages are
+hidden behind a supervisor adapter so that upstream upgrades do not leak into
+the control-plane domain model. ADR-0005 permits direct SDK embedding only as an
+execution-side backend for trusted portable extensions. Pi and extension code
+never load into the NestJS control-plane process.
 
 ## 2. Components
 
@@ -48,6 +49,28 @@ Responsibilities:
 - propagate cancellation and shutdown to the complete Pi/tool process tree;
 - manage Git worktrees and workspace snapshots;
 - report heartbeat, resource usage, and health.
+
+### Execution backend boundary
+
+The durable session identity is independent from its current execution
+mechanism. The execution layer supports three explicit recovery tiers:
+
+- `embedded-rehydrate` recreates a short-lived Pi SDK `AgentSession` from Pi
+  JSONL for each activation. It is restricted to trusted portable extensions
+  inside an execution worker/sandbox;
+- `isolated-process` starts pinned Pi RPC in an isolated process or sandbox and
+  remains the default compatibility path;
+- `hibernate` delegates full process/filesystem checkpointing to an optional
+  external sandbox backend.
+
+Every backend consumes the same durable command, lease, fencing, event, and
+snapshot contracts. Recovery claims distinguish event replay, semantic session
+restore, workflow-step restore, workspace restore, and process-memory restore.
+
+The embedded rehydrate spike demonstrates that several logical sessions can
+share one worker process while every activation constructs and disposes its own
+Pi runtime. It does not authorize untrusted extension code in that shared
+process.
 
 ### Pi RPC process
 
@@ -124,7 +147,8 @@ implementation.
 4. The session coordinator acquires the session execution lease.
 5. The scheduler assigns or creates a sandbox runner.
 6. The supervisor validates the fencing token and loads session/workspace state.
-7. The supervisor starts Pi RPC, which loads approved extensions and executes the agent loop.
+7. The selected execution backend activates Pi, loads policy-approved
+   extensions, and executes the agent loop.
 8. The supervisor translates and emits sequenced events; the control plane persists and ACKs them.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
@@ -168,6 +192,9 @@ liveness but cannot make a stale fencing token current.
   or human confirmation after an ambiguous crash.
 - Recovery initially returns to the last settled turn, not an arbitrary point
   in the middle of a shell command.
+- A non-empty Pi `sessionFile` path is not itself a durable boundary. Pi may
+  defer JSONL creation until an assistant message exists, so snapshots are
+  published only after the settled assistant state is durably present.
 - Lease expiry creates a new fencing token; stale runners are rejected.
 
 ## 6. Session lifecycle
@@ -216,6 +243,11 @@ compatibility:
 - project-local extensions load only after a recorded trust decision;
 - all extension code remains inside the sandbox because it has arbitrary Node
   process permissions.
+
+Extension state is classified as `portable` (stateless or reconstructed from
+session entries), `workspace` (reconstructed from durable files), or
+`process-bound` (heap, subprocess, socket, or browser state). Only trusted
+portable extensions are eligible for a shared embedded worker.
 
 ## 9. Deferred infrastructure
 

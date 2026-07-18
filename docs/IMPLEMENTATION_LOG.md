@@ -80,3 +80,42 @@
 - 下一步：实现 session、turn、sandbox、approval 和 agent-node 的显式状态机。
   原因是数据库和 API 必须共享同一组合法转换，先建表再补状态规则容易产生
   双 turn 并发、过期 approval 被接受、sandbox 已失效却继续写入等漏洞。
+
+## 2026-07-18 — Agent 云化调研与 Embedded Pi rehydrate 实验
+
+- 目标：回答“逻辑会话是否必须永久占用 Pi 进程”，并厘清应用状态恢复、
+  workspace 恢复和完整进程休眠的能力边界。
+- 调研：核对 OpenClaw、Microsoft Agent Framework、Flink Agents、
+  LangGraph、OpenHands、agentserver、E2B、Agent Substrate、Kubernetes Agent
+  Sandbox 和 Google AX 的源码。结论是没有单一项目覆盖完整 Agent 云化；
+  AgentDock 应把会话控制面与执行后端解耦。详细证据保存在
+  `docs/research/2026-07-18-agent-cloud-runtime-landscape.md`，决策记录在
+  ADR-0005。
+- 实现：新增 `spikes/pi-embedded-rehydrate/`。同一个 Node worker 内，每轮
+  创建并 dispose Pi `AgentSessionRuntime`；session lane 保证同会话 FIFO，
+  fair semaphore 限制跨会话全局 activation；checkpoint path 必须属于后端
+  session 目录，且不能被两个逻辑 session 复用。
+- portable extension：counter closure 每次 activation 都重新从 0 创建；
+  `session_start` 扫描自定义 entries，命令通过 `pi.appendEntry()` 写回状态，
+  `session_shutdown` 记录清理。fresh backend instance 只拿 JSONL checkpoint
+  就把 counter 从 2 恢复到 3，之后继续到 5。
+- 关键发现：Pi 返回 `sessionFile` 不代表文件已经存在。没有 assistant
+  message 时，Pi 会延迟 JSONL 创建；因此稳定 checkpoint 必须位于 settled
+  assistant 边界。无模型实验用一个明确标记的零 token synthetic assistant
+  message 触发公开落盘机制，生产 turn 不使用这个标记。
+- 验证：3 个逻辑 session 共用一个 Node PID；同 session 活跃峰值为 1，
+  跨 session 峰值为配置上限 2；8 次 activation 全部触发 shutdown 并释放；
+  3 个 Vitest 用例覆盖恢复、串行/并发、非法 checkpoint 和失败后释放；
+  model call 与 Pi child process 都为 0。
+- 密度探针：两次实际完成 1000 个逻辑 session 的首次 activation 和冷却，
+  用时 2701–2875 ms；随后 10 个 session 同时唤醒，runtime 峰值为 10，
+  结束后为 0。强制 GC 后 heap 相比基线增加约 3.55–3.59 MB（约
+  3.55–3.59 KB/session）。RSS 增量为约 135–168 MB，但它包含 allocator
+  high-water 和模块缓存，不作为空闲 session 活跃内存结论。该数据只代表
+  当前本机、无模型和无真实工具的结构探针。
+- 边界：这只证明 trusted portable extension 的低成本 rehydrate。任意用户
+  extension、heap/子进程/socket 和 in-flight tool call 仍需隔离进程、
+  sandbox 或完整 hibernation。
+- 下一步：回到显式 domain state machine。原因是实验已经证明执行后端
+  可以替换，接下来必须让 session/turn/lease 状态独立于具体 backend，才
+  能把 RPC 和 embedded 两条路径接入同一个可靠控制面。

@@ -8,6 +8,8 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] ADR-0001: TypeScript runtime language, sandbox boundary, and RPC-first Pi integration
 - [x] ADR-0003: state ownership across PostgreSQL, Pi JSONL, object storage, and the event spool
 - [x] ADR-0004: command idempotency, event sequence, lease, and fencing model
+- [x] Research existing application-state, sandbox, and process-hibernation runtimes
+- [x] ADR-0005: pluggable execution and recovery tiers
 - [x] Create `spikes/pi-extension-compat/`
 - [x] Pin a Pi version and start `pi --mode rpc --no-session` from a TypeScript supervisor
 - [x] Add an unchanged sample extension with a `/cloud-check` command
@@ -19,6 +21,9 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Publish the initial extension compatibility matrix
 - [x] Define the public AgentDock event envelope
 - [x] Define supervisor registration, command, event, ACK, and heartbeat messages
+- [x] Prove SDK rehydration of Pi messages and `appendEntry` extension state
+- [x] Prove same-session FIFO and bounded cross-session SDK activations
+- [x] Record that Pi JSONL becomes durable only after an assistant message exists
 - [ ] Model session, turn, sandbox, approval, and agent-node states
 - [ ] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology

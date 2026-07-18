@@ -14,6 +14,8 @@ Deliverables:
 - an initial extension capability matrix;
 - repository conventions and architecture decision records;
 - public event envelope and TypeBox command/event schemas;
+- a source-backed execution/recovery capability model and no-token Pi SDK
+  rehydration spike;
 - database model and migration strategy;
 - Docker Compose development environment;
 - deterministic OpenAI-compatible fake model server;

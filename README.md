@@ -86,12 +86,14 @@ only after a measured requirement appears.
 - [Vibe coding playbook](docs/VIBE_CODING_PLAYBOOK.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
 - [Extension compatibility matrix](docs/EXTENSION_COMPATIBILITY.md)
+- [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
 - [ADR-0004: command delivery, sequence, leases, and fencing](docs/adr/0004-command-delivery-sequence-and-fencing.md)
+- [ADR-0005: pluggable execution and recovery tiers](docs/adr/0005-pluggable-execution-recovery-tiers.md)
 
-## Current executable spike
+## Current executable spikes
 
 The first compatibility boundary lives in
 [`spikes/pi-extension-compat`](spikes/pi-extension-compat). It starts a real,
@@ -103,12 +105,23 @@ adapter live in [`packages/protocol`](packages/protocol) and
 exchange now passes through the versioned supervisor wire contract and a bounded
 reference spool that verifies cumulative ACK and reconnect replay behavior.
 
+The execution-density experiment lives in
+[`spikes/pi-embedded-rehydrate`](spikes/pi-embedded-rehydrate). Without calling
+a model or spawning a Pi child process, it runs three logical Pi sessions in one
+Node worker, recreates and disposes the SDK runtime for every activation,
+restores messages and `appendEntry` extension state from JSONL, enforces
+same-session FIFO plus bounded cross-session concurrency, and resumes through a
+fresh backend instance using only a durable checkpoint path. This backend is for
+trusted portable extensions only; it does not weaken the production sandbox
+boundary.
+
 ## Current status
 
 Phase 0: the public event envelope, Pi UI adapter, bidirectional
 supervisor/control-plane wire contract, and executable ACK/replay semantics are
-implemented. The local Pi RPC extension compatibility spike passes end to end.
-The hardened non-root Docker run remains to be verified once Docker is available
-in WSL. The next slice is the explicit domain state machines, because legal
-session/turn/sandbox/approval transitions must be fixed before PostgreSQL tables
-and API handlers encode them.
+implemented. The local Pi RPC extension compatibility spike passes end to end,
+and the embedded rehydration spike proves that cold logical sessions do not need
+dedicated Pi processes. The hardened non-root Docker run remains to be verified
+once Docker is available in WSL. The next slice is still the explicit domain
+state machines, because legal session/turn/sandbox/approval transitions must be
+fixed before PostgreSQL tables and API handlers encode them.

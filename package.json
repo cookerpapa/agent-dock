@@ -15,7 +15,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "spike:pi": "npm run spike --workspace @agent-dock/pi-extension-compat-spike",
-    "check": "npm run typecheck && npm test && npm run spike:pi",
+    "spike:embedded": "npm run spike --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "spike:density": "npm run density --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
     "security:audit": "npm audit --omit=dev"
   },
   "devDependencies": {
