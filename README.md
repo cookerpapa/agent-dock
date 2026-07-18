@@ -92,6 +92,7 @@ only after a measured requirement appears.
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
 - [ADR-0004: command delivery, sequence, leases, and fencing](docs/adr/0004-command-delivery-sequence-and-fencing.md)
 - [ADR-0005: pluggable execution and recovery tiers](docs/adr/0005-pluggable-execution-recovery-tiers.md)
+- [ADR-0006: v0 scope, model profiles, and credentials](docs/adr/0006-v0-product-scope-model-profiles-and-credentials.md)
 
 ## Current executable spikes
 
@@ -115,13 +116,24 @@ fresh backend instance using only a durable checkpoint path. This backend is for
 trusted portable extensions only; it does not weaken the production sandbox
 boundary.
 
+An explicitly enabled live-provider probe shares the same embedded boundary and
+can verify ChatGPT-subscription token usage plus JSONL rehydration. It is never
+part of `npm run check`, disables tools and extensions, uses temporary session
+state, and requires an explicit quota-consumption environment flag.
+
 ## Current status
 
 Phase 0: the public event envelope, Pi UI adapter, bidirectional
 supervisor/control-plane wire contract, and executable ACK/replay semantics are
 implemented. The local Pi RPC extension compatibility spike passes end to end,
 and the embedded rehydration spike proves that cold logical sessions do not need
-dedicated Pi processes. The hardened non-root Docker run remains to be verified
-once Docker is available in WSL. The next slice is still the explicit domain
-state machines, because legal session/turn/sandbox/approval transitions must be
-fixed before PostgreSQL tables and API handlers encode them.
+dedicated Pi processes. The domain package now enforces explicit session, turn,
+sandbox, approval, and agent-node transitions plus allowlisted model-profile
+resolution. The hardened non-root Docker run remains to be verified once Docker
+is available in WSL. The next slice is the initial PostgreSQL schema and Kysely
+migrations so persistence encodes the already-tested invariants.
+
+ADR-0006 fixes the first product slice as single-user and self-hosted with one
+operator-configured default model profile. The durable model schema remains
+selection-ready, while a frontend model picker and multi-tenant credential
+flows are deliberately deferred.

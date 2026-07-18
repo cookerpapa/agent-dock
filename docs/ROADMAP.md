@@ -16,6 +16,8 @@ Deliverables:
 - public event envelope and TypeBox command/event schemas;
 - a source-backed execution/recovery capability model and no-token Pi SDK
   rehydration spike;
+- a fixed v0 product/model/credential boundary and optional real-provider
+  rehydration probe that cannot run from the default test path;
 - database model and migration strategy;
 - Docker Compose development environment;
 - deterministic OpenAI-compatible fake model server;
@@ -33,7 +35,9 @@ Deliverables:
 - TypeScript supervisor using a pinned Pi RPC process behind an AgentDock adapter;
 - one sandboxed Git workspace;
 - prompt, streaming text, tool events, cancellation, and final diff;
-- minimal React session page using SSE.
+- minimal React session page using SSE;
+- one operator-configured model profile; the domain remains model-selection
+  ready without requiring a frontend picker.
 
 Exit criteria: from a clean checkout, a user can ask Pi to fix a test in a
 sample Java repository and observe the complete event flow.

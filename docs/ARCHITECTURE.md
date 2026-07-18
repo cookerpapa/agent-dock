@@ -50,6 +50,21 @@ Responsibilities:
 - manage Git worktrees and workspace snapshots;
 - report heartbeat, resource usage, and health.
 
+### Model profiles and credentials
+
+The control plane exposes allowlisted model profiles rather than accepting raw
+provider endpoints from clients. v0 has one operator-configured default profile
+and no required model picker. A session references the desired profile; every
+turn snapshots the resolved provider, model, thinking level, and opaque
+credential-binding version so later policy changes do not rewrite history.
+
+Credential material is not conversation state. Refresh tokens never enter Pi
+JSONL, workspace snapshots, browser events, logs, or the untrusted tool
+environment. The target execution path obtains request-scoped authorization
+from a trusted credential broker or model gateway. A local, explicitly enabled
+ChatGPT-subscription probe may reuse the owner's Pi login only as a Phase 0 SDK
+integration test; it is not the production credential boundary. See ADR-0006.
+
 ### Execution backend boundary
 
 The durable session identity is independent from its current execution
@@ -110,6 +125,10 @@ Authoritative for control state:
 - event sequence/index;
 - usage ledger;
 - transactional outbox.
+
+It also stores model-profile policy, opaque credential bindings, the desired
+session profile, and each turn's immutable resolved model snapshot. It never
+stores provider tokens in ordinary session or turn rows.
 
 Important uniqueness constraints include `(session_id, idempotency_key)` and
 `(session_id, seq)`.
@@ -209,6 +228,33 @@ IDLE -> EVICTING -> COLD
 
 Cold sessions retain durable state without retaining a process, platform thread,
 or sandbox. Idle sessions are evicted with an LRU policy after safe snapshotting.
+
+The executable transition tables live in `@agent-dock/domain`. Self-transitions
+are rejected: duplicate messages are handled by command/event idempotency before
+they reach a state transition, rather than being confused with a second valid
+transition.
+
+Turn execution follows:
+
+```text
+QUEUED -> DISPATCHING -> RUNNING -> COMPLETED
+                    |          -> WAITING_APPROVAL -> RUNNING
+                    |          -> CANCELLING -> CANCELLED
+                    |          -> FAILED
+                    -> QUEUED
+```
+
+`DISPATCHING -> QUEUED` is permitted only because execution has not been
+observed to start. `RUNNING -> QUEUED` is forbidden: after a runner crash, an
+in-flight turn becomes failed/ambiguous and is reconciled instead of blindly
+replaying arbitrary tool side effects.
+
+Approvals leave `pending` exactly once through `resolved`, `expired`, or
+`cancelled`. Sandboxes move through provisioning, ready/leased, draining, and
+terminated states; a failed sandbox may be terminated but never returned to the
+ready pool. Agent nodes use the same explicit waiting, cancelling, and terminal
+discipline. These rules are pure domain code so API handlers, database workers,
+and supervisor consumers cannot invent different legal transitions.
 
 ## 7. Subagents
 

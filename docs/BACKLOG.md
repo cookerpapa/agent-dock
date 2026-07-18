@@ -10,6 +10,7 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] ADR-0004: command idempotency, event sequence, lease, and fencing model
 - [x] Research existing application-state, sandbox, and process-hibernation runtimes
 - [x] ADR-0005: pluggable execution and recovery tiers
+- [x] ADR-0006: single-user v0 scope, model profiles, and credential ownership
 - [x] Create `spikes/pi-extension-compat/`
 - [x] Pin a Pi version and start `pi --mode rpc --no-session` from a TypeScript supervisor
 - [x] Add an unchanged sample extension with a `/cloud-check` command
@@ -24,7 +25,8 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Prove SDK rehydration of Pi messages and `appendEntry` extension state
 - [x] Prove same-session FIFO and bounded cross-session SDK activations
 - [x] Record that Pi JSONL becomes durable only after an assistant message exists
-- [ ] Model session, turn, sandbox, approval, and agent-node states
+- [x] Add an explicit opt-in real-provider rehydration probe that is excluded from CI
+- [x] Model session, turn, sandbox, approval, and agent-node states
 - [ ] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology
 - [ ] Implement deterministic fake model server

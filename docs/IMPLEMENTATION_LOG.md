@@ -119,3 +119,47 @@
 - 下一步：回到显式 domain state machine。原因是实验已经证明执行后端
   可以替换，接下来必须让 session/turn/lease 状态独立于具体 backend，才
   能把 RPC 和 embedded 两条路径接入同一个可靠控制面。
+
+## 2026-07-18 — v0 产品边界与模型策略
+
+- 目标：明确“Pi 云化”第一版究竟交付什么，并避免把模型下拉框误当作云化
+  核心能力。
+- 决策：ADR-0006 把 v0 定为单用户、自托管；页面先使用一个由部署者配置
+  的默认 model profile，不要求模型选择 UI，但 session 保存期望 profile，
+  每个 turn 固化实际 provider/model/thinking/credential-binding 版本。模型只
+  能在 settled turn 之间显式切换。
+- 凭据边界：refresh token 不进入 Pi JSONL、workspace、浏览器事件或普通
+  session/turn 数据；生产目标是可信 credential broker/model gateway 给执行
+  边界提供 request-scoped auth。Phase 0 读取本机 Pi 登录的探针只用于显式
+  启用的集成验证，不代表生产方案。
+- 探针：embedded backend 默认仍拒绝普通模型 prompt；只有同时提供显式
+  model 配置和 opt-in 标志时才允许真实调用。探针禁用 tool/extension，使用
+  临时 transcript，设计为真实首轮落盘、fresh backend 恢复和第二轮 nonce
+  验证，并且不进入 `npm run check`。
+- 当前实测：原有 OAuth access 已过期；受限 Node 进程未采用主机 HTTP
+  proxy，refresh 在模型请求前失败，因此尚未得到真实 token usage 结果。
+  用户暂停了带代理的重试；没有遗留探针进程。这里不把未完成实验记为通过。
+- 下一步：实现 domain state machine。原因是 Web/API 必须先共享 session、
+  turn、sandbox 和 approval 的合法转换，否则命令接受、取消和恢复会被多个
+  handler 分散实现并产生竞态。
+
+## 2026-07-18 — Domain 状态机与 model profile
+
+- 目标：在数据库和 API 之前，把 session、turn、sandbox、approval、
+  agent-node 的合法状态变化写成唯一、可执行的规则。
+- 实现：新增 `@agent-dock/domain`。状态集合是闭合 union，所有 transition
+  都经过纯函数；非法跳转、自跳转和终态复活抛出带 entity/from/to 的
+  `DomainTransitionError`。approval 只能从 pending 离开一次；sandbox 失败后
+  只能清理，不能重回池中；agent-node 显式表达 waiting/cancelling/terminal。
+- 崩溃语义：runner 尚未确认执行时允许 `dispatching -> queued`；一旦进入
+  running 就禁止回队列，只能 completed/failed/cancelling。原因是 shell 和
+  外部副作用不能靠重新发送伪装成 exactly-once。
+- 模型策略：`ModelProfileSchema` 只接受 allowlisted provider/model/thinking
+  和 opaque credential binding；额外的 token、baseUrl 等字段会被闭合 schema
+  拒绝。每个 turn 由 profile 解析出独立 snapshot，不依赖以后修改的默认值。
+- 验证：domain package 严格类型检查通过；18 个测试覆盖完整 session/turn
+  路径、四个取消入口、失败恢复、approval 终态、sandbox 清理、agent 等待、
+  model profile 解析和 secret 字段拒绝。
+- 下一步：创建 PostgreSQL/Kysely schema 和 migration。原因是状态、模型
+  快照、幂等键、lease/fence 与 event seq 规则已经固定，现在可以让数据库
+  约束承担持久化层的不变量，而不是只依赖应用代码。
