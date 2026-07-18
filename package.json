@@ -12,6 +12,7 @@
     "spikes/*"
   ],
   "scripts": {
+    "ci": "npm run format:check && npm run check && npm run security:audit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -24,7 +25,7 @@
     "db:migrate": "npm run migrate --workspace @agent-dock/database",
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
-    "security:audit": "npm audit --omit=dev"
+    "security:audit": "npm audit --audit-level=high"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
