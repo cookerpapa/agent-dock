@@ -21,6 +21,32 @@ export {
 } from "./protocol-primitives.ts";
 
 export {
+  AcceptTurnRequestSchema,
+  AcceptedTurnResourceSchema,
+  ControlPlaneApiErrorSchema,
+  ControlPlaneApiValidationError,
+  CreateProjectRequestSchema,
+  CreateSessionRequestSchema,
+  IdempotencyKeySchema,
+  ProjectResourceSchema,
+  SessionResourceSchema,
+  TurnThinkingLevelSchema,
+  parseAcceptTurnRequest,
+  parseCreateProjectRequest,
+  parseCreateSessionRequest,
+  parseIdempotencyKey,
+  parseUuidPathParameter,
+  type AcceptTurnRequest,
+  type AcceptedTurnResource,
+  type ControlPlaneApiError,
+  type CreateProjectRequest,
+  type CreateSessionRequest,
+  type ProjectResource,
+  type SessionResource,
+  type TurnThinkingLevel,
+} from "./control-plane-api.ts";
+
+export {
   AgentDockWireProtocolError,
   CancelTurnCommandMessageSchema,
   CommandAckMessageSchema,

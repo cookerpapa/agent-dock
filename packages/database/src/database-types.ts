@@ -23,7 +23,11 @@ type GeneratedInt8 = ColumnType<
 >;
 type GeneratedBoolean = ColumnType<boolean, boolean | undefined, boolean>;
 type GeneratedInteger = ColumnType<number, number | undefined, number>;
-type JsonObject = JSONColumnType<Record<string, unknown>>;
+type JsonObject = JSONColumnType<
+  Record<string, unknown>,
+  Record<string, unknown>,
+  Record<string, unknown>
+>;
 
 export type CredentialBindingStatus = "active" | "disabled" | "revoked";
 export type CredentialKind = "oauth" | "api_key" | "brokered";
