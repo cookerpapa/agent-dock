@@ -1,0 +1,24 @@
+{
+  "name": "@agent-dock/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run",
+    "migrate": "node src/migrate.ts up",
+    "migrate:down": "node src/migrate.ts down"
+  },
+  "dependencies": {
+    "@agent-dock/domain": "0.1.0",
+    "kysely": "0.29.4",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.4",
+    "@types/pg": "8.20.0"
+  }
+}

@@ -86,6 +86,7 @@ only after a measured requirement appears.
 - [Vibe coding playbook](docs/VIBE_CODING_PLAYBOOK.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
 - [Extension compatibility matrix](docs/EXTENSION_COMPATIBILITY.md)
+- [Web UI direction](docs/WEB_UI_DIRECTION.md)
 - [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
@@ -129,11 +130,18 @@ implemented. The local Pi RPC extension compatibility spike passes end to end,
 and the embedded rehydration spike proves that cold logical sessions do not need
 dedicated Pi processes. The domain package now enforces explicit session, turn,
 sandbox, approval, and agent-node transitions plus allowlisted model-profile
-resolution. The hardened non-root Docker run remains to be verified once Docker
-is available in WSL. The next slice is the initial PostgreSQL schema and Kysely
-migrations so persistence encodes the already-tested invariants.
+resolution. The database package now supplies an 18-table Kysely/PostgreSQL
+migration with executable ownership, idempotency, ordering, fencing, ACK, and
+usage constraints. The hardened non-root Docker run remains to be verified once
+Docker is available in WSL. The next executable slice is the deterministic fake
+model server so streaming and provider failures can be tested without tokens.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
 selection-ready, while a frontend model picker and multi-tenant credential
 flows are deliberately deferred.
+
+The future React session page follows the compact Pi `/export` HTML visual
+language—resizable tree sidebar, narrow transcript, monospace theme, and
+collapsible tool/thinking blocks—while using AgentDock REST/SSE rather than
+letting the browser manage Pi processes or JSONL directly.

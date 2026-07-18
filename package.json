@@ -18,6 +18,8 @@
     "spike:embedded": "npm run spike --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "spike:density": "npm run density --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "spike:live-model": "npm run live-model --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "db:migrate": "npm run migrate --workspace @agent-dock/database",
+    "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
     "security:audit": "npm audit --omit=dev"
   },

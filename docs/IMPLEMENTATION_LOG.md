@@ -163,3 +163,32 @@
 - 下一步：创建 PostgreSQL/Kysely schema 和 migration。原因是状态、模型
   快照、幂等键、lease/fence 与 event seq 规则已经固定，现在可以让数据库
   约束承担持久化层的不变量，而不是只依赖应用代码。
+
+## 2026-07-18 — PostgreSQL/Kysely 初始持久化模型
+
+- 目标：把 ADR-0003/0004/0006 和 domain 状态机中的不变量落实为可执行的
+  PostgreSQL schema，而不是只画 ER 图。
+- 实现：新增 `@agent-dock/database`，包含 typed Kysely `Database`、`pg`
+  runtime client、静态 migration provider、up/down CLI 和一份初始 migration。
+  18 张表覆盖 ownership、workspace、credential binding metadata、model
+  profile、session/turn/agent、sandbox/lease、command、approval、event/cursor、
+  outbox、artifact 和 usage ledger。
+- 核心约束：数据库拒绝跨 tenant 关联、重复 idempotency key、重复 session
+  seq、第二个非 queued active turn、ACK 超过 durable seq、非正 fencing token、
+  越界 sandbox capacity、错误 approval outcome/timestamp 和负 token/cost。
+  queued turn 可以有多个，保留 mailbox 能力。
+- 凭据边界：普通表只有 opaque `secret_ref`/binding version，没有 access、
+  refresh、API key 列；turn 和 agent-node 保存的是模型/credential binding
+  snapshot，不是凭据值。
+- 验证方式：当前 WSL 没有 Docker/psql，因此加入 test-only PGlite。测试先用
+  Kysely PostgreSQL dialect 编译 DDL，再在内存 PostgreSQL 引擎真实执行、插入
+  合法/非法数据，最后执行 down。10 个 migration/constraint 测试通过；PGlite
+  不进入生产运行依赖。
+- Web 方向：只读审查 Pi `0.80.10` `/export` template 和现有 Session Tree
+  Browser 源码，没有读取真实 transcript。设计基线记录在
+  `docs/WEB_UI_DIRECTION.md`：保留等宽紧凑风格、可缩放 tree、800px transcript
+  和 tool/thinking 折叠；云端页面改走 AgentDock REST/SSE，不在浏览器直接
+  操作 Pi 进程或 JSONL。
+- 下一步：实现 deterministic OpenAI-compatible fake model server。原因是
+  它能在不消耗 subscription token 的情况下稳定复现 text/tool stream、429、
+  timeout、malformed response 和断流，之后 Web/API 的失败行为才可重复测试。

@@ -133,6 +133,14 @@ stores provider tokens in ordinary session or turn rows.
 Important uniqueness constraints include `(session_id, idempotency_key)` and
 `(session_id, seq)`.
 
+The initial Kysely migration also enforces tenant-consistent composite foreign
+keys, one non-queued active turn per session, positive fencing tokens, bounded
+sandbox capacity, approval outcome/state consistency, ACK cursors that cannot
+advance beyond durable events, and non-negative usage. Multiple queued turns
+remain legal and are consumed in mailbox order. Database checks constrain
+persisted values; `@agent-dock/domain` remains the single authority for legal
+transition order.
+
 ### Pi session JSONL
 
 Authoritative for model conversation history and Pi's session tree. Only one
@@ -301,3 +309,13 @@ Flink or Kafka may later consume AgentDock events for analytics, audit pipelines
 cost aggregation, or batch workloads. They are not the interactive session
 coordinator. Redis or a dedicated workflow engine is deferred until PostgreSQL
 queue/lease behavior is measured and shown to be insufficient.
+
+## 10. Web presentation
+
+The first React session surface uses Pi `/export` as its visual reference:
+compact monospace typography, a resizable tree sidebar, a narrow readable
+transcript, and collapsible thinking/tool blocks. AgentDock adds durable SSE
+replay status, turn cancellation, approval cards, and sandbox health. The Web
+client consumes only AgentDock-owned REST/event schemas; it never reads Pi JSONL
+directly or starts/manages Pi runtimes. Detailed direction is recorded in
+`docs/WEB_UI_DIRECTION.md`.

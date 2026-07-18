@@ -27,7 +27,7 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Record that Pi JSONL becomes durable only after an assistant message exists
 - [x] Add an explicit opt-in real-provider rehydration probe that is excluded from CI
 - [x] Model session, turn, sandbox, approval, and agent-node states
-- [ ] Create initial PostgreSQL schema and Kysely migrations
+- [x] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology
 - [ ] Implement deterministic fake model server
 - [ ] Script fake text streaming and tool-call scenarios

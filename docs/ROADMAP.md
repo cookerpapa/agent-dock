@@ -35,7 +35,7 @@ Deliverables:
 - TypeScript supervisor using a pinned Pi RPC process behind an AgentDock adapter;
 - one sandboxed Git workspace;
 - prompt, streaming text, tool events, cancellation, and final diff;
-- minimal React session page using SSE;
+- minimal Pi-export-inspired React session page using SSE;
 - one operator-configured model profile; the domain remains model-selection
   ready without requiring a frontend picker.
 
