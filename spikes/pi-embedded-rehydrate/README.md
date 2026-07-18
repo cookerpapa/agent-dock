@@ -3,7 +3,8 @@
 This spike tests the lowest-cost execution tier proposed by ADR-0005. It embeds
 the pinned Pi SDK inside an execution-side worker, creates a short-lived
 `AgentSession` for one activation, and disposes the complete runtime at the end.
-It never calls an LLM and never starts a Pi child process.
+The default spike never calls an LLM and never starts a Pi child process. A
+separate, explicitly authorized live-provider probe is documented below.
 
 ## What it proves
 
@@ -43,6 +44,29 @@ The Vitest suite also covers same-session concurrent submission, cross-session
 concurrency, a failing extension command, and rejection of a checkpoint outside
 the backend-owned session directory.
 
+## Optional live ChatGPT-subscription probe
+
+The live probe verifies the boundary that the zero-token tests intentionally do
+not exercise: a real assistant turn creates the JSONL checkpoint naturally, a
+fresh backend restores it, and a second model turn sees the first turn's
+context. It uses `openai-codex/gpt-5.4-mini` with thinking disabled, enables no
+tools or extensions, stores the temporary transcript outside the repository,
+and deletes it on exit.
+
+It is excluded from `npm run check` and refuses to start unless quota use is
+explicitly authorized:
+
+```bash
+AGENT_DOCK_ALLOW_SUBSCRIPTION_USAGE=1 npm run spike:live-model
+```
+
+The owner must already have completed Pi's `/login` ChatGPT-subscription flow.
+Only token counts and pass/fail assertions are printed; OAuth values and
+conversation text are not. If the host reaches OpenAI through an HTTP proxy,
+the Node process must also be configured to use that proxy. This local probe's
+access to the owner's Pi credential directory is not the production
+credential-distribution design described in ADR-0006.
+
 ## What it does not prove
 
 - safety for arbitrary or untrusted extensions in a shared process;
@@ -50,6 +74,7 @@ the backend-owned session directory.
   calls;
 - process-crash recovery, distributed leases, fencing, or durable command ACKs;
 - production memory density or horizontal routing;
+- production OAuth storage or credential brokering;
 - compatibility with every Pi extension and future Pi version.
 
 The inline counter is intentionally trusted and portable. User/project

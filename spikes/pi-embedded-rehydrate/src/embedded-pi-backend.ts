@@ -25,6 +25,64 @@ export type ExecuteEmbeddedCommand = {
   checkpoint?: EmbeddedPiCheckpoint;
 };
 
+export type EmbeddedPiThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+export type EmbeddedPiModelSelection = {
+  provider: string;
+  modelId: string;
+  thinkingLevel?: EmbeddedPiThinkingLevel;
+};
+
+export type EmbeddedPiAssistantObservation = {
+  text: string;
+  stopReason: string;
+  errorCategory?: "authentication" | "network" | "rate_limit" | "timeout" | "provider";
+  provider: string;
+  model: string;
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    totalTokens: number;
+    cost: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+  };
+};
+
+function classifyAssistantError(
+  value: string | undefined,
+): EmbeddedPiAssistantObservation["errorCategory"] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (/timed?\s*out|timeout/i.test(value)) {
+    return "timeout";
+  }
+  if (/fetch failed|network|ECONN|ENOTFOUND|socket/i.test(value)) {
+    return "network";
+  }
+  if (/429|rate.?limit|quota/i.test(value)) {
+    return "rate_limit";
+  }
+  if (/oauth|authenticat|credential|api.?key|\b401\b|\b403\b/i.test(value)) {
+    return "authentication";
+  }
+  return "provider";
+}
+
 export type EmbeddedPiExecutionResult = {
   logicalSessionId: string;
   piSessionId: string;
@@ -35,6 +93,7 @@ export type EmbeddedPiExecutionResult = {
   restoredMessageCount: number;
   restoredMessageRoles: string[];
   finalMessageCount: number;
+  lastAssistant: EmbeddedPiAssistantObservation | null;
   entries: SessionEntry[];
 };
 
@@ -55,6 +114,9 @@ export type EmbeddedPiBackendOptions = {
   sessionDir: string;
   maxConcurrentActivations: number;
   extensionFactories: InlineExtension[];
+  allowModelPrompts?: boolean;
+  model?: EmbeddedPiModelSelection;
+  systemPrompt?: string;
 };
 
 class FairSemaphore {
@@ -118,10 +180,48 @@ function assertLogicalSessionId(value: string): void {
   }
 }
 
-function assertExtensionCommand(value: string): void {
-  if (!value.startsWith("/") || value.length < 2) {
+function assertCommand(value: string, allowModelPrompts: boolean): void {
+  if (value.trim().length === 0) {
+    throw new Error("Embedded Pi command must not be empty");
+  }
+  if ((!value.startsWith("/") || value.length < 2) && !allowModelPrompts) {
     throw new Error("The embedded spike accepts extension commands only; LLM prompts are disabled");
   }
+}
+
+function observeLastAssistant(session: AgentSession): EmbeddedPiAssistantObservation | null {
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    const message = session.messages[index];
+    if (!message || message.role !== "assistant") {
+      continue;
+    }
+    const errorCategory = classifyAssistantError(message.errorMessage);
+    return {
+      text: message.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join(""),
+      stopReason: message.stopReason,
+      ...(errorCategory === undefined ? {} : { errorCategory }),
+      provider: message.provider,
+      model: message.model,
+      usage: {
+        input: message.usage.input,
+        output: message.usage.output,
+        cacheRead: message.usage.cacheRead,
+        cacheWrite: message.usage.cacheWrite,
+        totalTokens: message.usage.totalTokens,
+        cost: {
+          input: message.usage.cost.input,
+          output: message.usage.cost.output,
+          cacheRead: message.usage.cost.cacheRead,
+          cacheWrite: message.usage.cost.cacheWrite,
+          total: message.usage.cost.total,
+        },
+      },
+    };
+  }
+  return null;
 }
 
 function assertOwnedCheckpoint(sessionDir: string, sessionFile: string): string {
@@ -143,6 +243,9 @@ export class EmbeddedPiBackend {
   readonly #agentDir: string;
   readonly #sessionDir: string;
   readonly #extensionFactories: InlineExtension[];
+  readonly #allowModelPrompts: boolean;
+  readonly #model: EmbeddedPiModelSelection | undefined;
+  readonly #systemPrompt: string | undefined;
   readonly #capacity: FairSemaphore;
   readonly #backendInstanceId = randomUUID();
   readonly #sessionTails = new Map<string, Promise<void>>();
@@ -155,6 +258,15 @@ export class EmbeddedPiBackend {
     this.#agentDir = resolve(options.agentDir);
     this.#sessionDir = resolve(options.sessionDir);
     this.#extensionFactories = [...options.extensionFactories];
+    this.#allowModelPrompts = options.allowModelPrompts ?? false;
+    this.#model = options.model;
+    this.#systemPrompt = options.systemPrompt;
+    if (this.#allowModelPrompts && !this.#model) {
+      throw new Error("allowModelPrompts requires an explicit model selection");
+    }
+    if (!this.#allowModelPrompts && this.#model) {
+      throw new Error("A model selection requires allowModelPrompts=true");
+    }
     this.#capacity = new FairSemaphore(options.maxConcurrentActivations);
   }
 
@@ -173,7 +285,7 @@ export class EmbeddedPiBackend {
 
   execute(input: ExecuteEmbeddedCommand): Promise<EmbeddedPiExecutionResult> {
     assertLogicalSessionId(input.logicalSessionId);
-    assertExtensionCommand(input.command);
+    assertCommand(input.command, this.#allowModelPrompts);
     return this.#inSessionLane(input.logicalSessionId, () => this.#activate(input));
   }
 
@@ -208,13 +320,26 @@ export class EmbeddedPiBackend {
             noPromptTemplates: true,
             noThemes: true,
             noContextFiles: true,
+            ...(this.#systemPrompt === undefined ? {} : { systemPrompt: this.#systemPrompt }),
           },
         });
+        const model = this.#model
+          ? services.modelRuntime.getModel(this.#model.provider, this.#model.modelId)
+          : undefined;
+        if (this.#model && !model) {
+          throw new Error(
+            `Configured model is not available: ${this.#model.provider}/${this.#model.modelId}`,
+          );
+        }
         const created = await createAgentSessionFromServices({
           services,
           sessionManager: runtimeOptions.sessionManager,
           sessionStartEvent: runtimeOptions.sessionStartEvent ?? sessionStartEvent,
           noTools: "all",
+          ...(model ? { model } : {}),
+          ...(this.#model?.thinkingLevel === undefined
+            ? {}
+            : { thinkingLevel: this.#model.thinkingLevel }),
         });
         return {
           ...created,
@@ -268,6 +393,7 @@ export class EmbeddedPiBackend {
           restoredMessageCount,
           restoredMessageRoles,
           finalMessageCount: runtime.session.messages.length,
+          lastAssistant: observeLastAssistant(runtime.session),
           entries: runtime.session.sessionManager.getEntries(),
         };
       } finally {

@@ -9,6 +9,7 @@
   "scripts": {
     "spike": "node src/run-spike.ts",
     "density": "node --expose-gc src/run-density-probe.ts",
+    "live-model": "node src/run-live-model-probe.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run"
   },

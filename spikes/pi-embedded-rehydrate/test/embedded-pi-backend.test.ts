@@ -95,6 +95,12 @@ describe("EmbeddedPiBackend experiment", () => {
       expect(readPortableCounter(first.entries)).toBe(1);
       expect(first.restoredMessageCount).toBe(0);
       expect(first.finalMessageCount).toBe(1);
+      expect(first.lastAssistant).toMatchObject({
+        provider: "agent-dock",
+        model: "no-model",
+        stopReason: "stop",
+        usage: { totalTokens: 0 },
+      });
       expect(readPortableCounter(second.entries)).toBe(2);
       expect(second.restoredMessageCount).toBe(1);
       expect(second.restoredMessageRoles).toEqual(["assistant"]);
@@ -128,6 +134,22 @@ describe("EmbeddedPiBackend experiment", () => {
         activeActivations: 0,
         sessionLaneCount: 0,
       });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("requires an explicit opt-in before accepting a model prompt", async () => {
+    const fixture = await createFixture();
+    try {
+      expect(() =>
+        fixture.backend.execute({
+          logicalSessionId: "session-a",
+          command: "This would call a model if it were enabled.",
+        }),
+      ).toThrow("LLM prompts are disabled");
+      expect(fixture.backend.metrics.activationCount).toBe(0);
+      expect(fixture.backend.metrics.activeActivations).toBe(0);
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

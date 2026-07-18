@@ -1,9 +1,12 @@
 export {
   EmbeddedPiBackend,
+  type EmbeddedPiAssistantObservation,
   type EmbeddedPiBackendMetrics,
   type EmbeddedPiBackendOptions,
   type EmbeddedPiCheckpoint,
   type EmbeddedPiExecutionResult,
+  type EmbeddedPiModelSelection,
+  type EmbeddedPiThinkingLevel,
   type ExecuteEmbeddedCommand,
 } from "./embedded-pi-backend.ts";
 

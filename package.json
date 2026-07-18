@@ -17,6 +17,7 @@
     "spike:pi": "npm run spike --workspace @agent-dock/pi-extension-compat-spike",
     "spike:embedded": "npm run spike --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "spike:density": "npm run density --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "spike:live-model": "npm run live-model --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
     "security:audit": "npm audit --omit=dev"
   },
