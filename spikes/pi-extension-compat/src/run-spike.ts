@@ -24,12 +24,30 @@ type ExitResult = {
   signal: NodeJS.Signals | null;
 };
 
+type RuntimeIdentity = {
+  uid: number | null;
+  gid: number | null;
+  nonRoot: boolean;
+  nonRootRequired: boolean;
+};
+
 const EXPECTED_CONFIRM_TITLE = "AgentDock compatibility check";
 const EXPECTED_NOTIFICATION = "AgentDock extension UI round trip succeeded.";
 const WIRE_COMMAND_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const WIRE_LEASE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const REQUEST_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
+
+function inspectRuntimeIdentity(): RuntimeIdentity {
+  const uid = process.getuid?.() ?? null;
+  const gid = process.getgid?.() ?? null;
+  const nonRootRequired = process.env.AGENT_DOCK_REQUIRE_NON_ROOT === "1";
+  const nonRoot = uid !== null && uid !== 0;
+  if (nonRootRequired && !nonRoot) {
+    throw new Error("The Pi RPC compatibility spike must run as a non-root Unix user");
+  }
+  return { uid, gid, nonRoot, nonRootRequired };
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -159,6 +177,7 @@ async function stopChild(
 }
 
 async function main(): Promise<void> {
+  const runtimeIdentity = inspectRuntimeIdentity();
   const sourceDirectory = dirname(fileURLToPath(import.meta.url));
   const spikeDirectory = resolve(sourceDirectory, "..");
   const repositoryDirectory = resolve(spikeDirectory, "../..");
@@ -465,6 +484,7 @@ async function main(): Promise<void> {
         {
           status: "passed",
           piCommand,
+          runtimeIdentity,
           checks: {
             commandDiscovered: true,
             confirmRoundTrip: true,

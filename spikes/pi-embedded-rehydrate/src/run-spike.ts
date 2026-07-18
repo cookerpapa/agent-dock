@@ -9,6 +9,15 @@ import {
   type PortableCounterActivity,
 } from "./index.ts";
 
+const uid = process.getuid?.() ?? null;
+const gid = process.getgid?.() ?? null;
+const nonRootRequired = process.env.AGENT_DOCK_REQUIRE_NON_ROOT === "1";
+const nonRoot = uid !== null && uid !== 0;
+if (nonRootRequired && !nonRoot) {
+  throw new Error("The embedded rehydrate spike must run as a non-root Unix user");
+}
+const runtimeIdentity = { uid, gid, nonRoot, nonRootRequired };
+
 const root = await mkdtemp(join(tmpdir(), "agent-dock-embedded-spike-"));
 const activeBySession = new Map<string, number>();
 let activeGlobal = 0;
@@ -117,6 +126,7 @@ try {
       {
         result: "passed",
         piVersion: "0.80.10",
+        runtimeIdentity,
         workerPid: process.pid,
         logicalSessionsExercised: 3,
         sessionACounterAfterRehydrate: readPortableCounter(fifthA.entries),

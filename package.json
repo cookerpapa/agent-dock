@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "ci": "npm run format:check && npm run check && npm run security:audit",
+    "container:config": "docker compose config --quiet",
+    "container:check": "npm run container:config && docker compose build --pull && docker compose run --rm --no-deps pi-extension-compat && docker compose run --rm --no-deps pi-embedded-rehydrate",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -31,6 +33,7 @@
     "@types/node": "24.12.4",
     "prettier": "3.9.5",
     "typescript": "5.9.3",
-    "vitest": "3.2.7"
+    "vitest": "3.2.7",
+    "yaml": "2.9.0"
   }
 }

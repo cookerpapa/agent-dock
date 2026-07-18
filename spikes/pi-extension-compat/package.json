@@ -8,6 +8,7 @@
   },
   "scripts": {
     "spike": "node src/run-spike.ts",
+    "test": "vitest --run",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run spike"
   },
