@@ -14,6 +14,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { ensureEmbeddedPiHttpRuntime } from "./http-runtime.ts";
 
 export type EmbeddedPiCheckpoint = {
   sessionFile: string;
@@ -120,6 +121,7 @@ export type EmbeddedPiBackendOptions = {
   model?: EmbeddedPiModelSelection;
   systemPrompt?: string;
   transport?: EmbeddedPiTransport;
+  httpIdleTimeoutMs?: number;
 };
 
 class FairSemaphore {
@@ -271,6 +273,9 @@ export class EmbeddedPiBackend {
     }
     if (!this.#allowModelPrompts && this.#model) {
       throw new Error("A model selection requires allowModelPrompts=true");
+    }
+    if (this.#allowModelPrompts) {
+      ensureEmbeddedPiHttpRuntime(options.httpIdleTimeoutMs);
     }
     this.#capacity = new FairSemaphore(options.maxConcurrentActivations);
   }

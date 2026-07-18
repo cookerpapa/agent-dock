@@ -18,3 +18,9 @@ export {
   type PortableCounterActivity,
   type PortableCounterObserver,
 } from "./portable-counter-extension.ts";
+
+export {
+  DEFAULT_EMBEDDED_HTTP_IDLE_TIMEOUT_MS,
+  ensureEmbeddedPiHttpRuntime,
+  type EmbeddedPiHttpRuntimeStatus,
+} from "./http-runtime.ts";

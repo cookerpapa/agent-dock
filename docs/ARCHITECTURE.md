@@ -83,7 +83,9 @@ mechanism. The execution layer supports three explicit recovery tiers:
 
 - `embedded-rehydrate` recreates a short-lived Pi SDK `AgentSession` from Pi
   JSONL for each activation. It is restricted to trusted portable extensions
-  inside an execution worker/sandbox;
+  inside an execution worker/sandbox. Because this path bypasses Pi's CLI entry
+  point, the worker installs a pinned, environment-aware Undici dispatcher before
+  model calls rather than relying on ambient Node fetch behavior;
 - `isolated-process` starts pinned Pi RPC in an isolated process or sandbox and
   remains the default compatibility path;
 - `hibernate` delegates full process/filesystem checkpointing to an optional

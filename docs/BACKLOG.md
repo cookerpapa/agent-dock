@@ -25,7 +25,8 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Prove SDK rehydration of Pi messages and `appendEntry` extension state
 - [x] Prove same-session FIFO and bounded cross-session SDK activations
 - [x] Record that Pi JSONL becomes durable only after an assistant message exists
-- [x] Add an explicit opt-in real-provider rehydration probe that is excluded from CI
+- [x] Add an explicit opt-in real-provider rehydration probe, including SDK HTTP
+  bootstrap, excluded from CI
 - [x] Model session, turn, sandbox, approval, and agent-node states
 - [x] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology

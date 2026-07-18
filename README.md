@@ -118,9 +118,11 @@ trusted portable extensions only; it does not weaken the production sandbox
 boundary.
 
 An explicitly enabled live-provider probe shares the same embedded boundary and
-can verify ChatGPT-subscription token usage plus JSONL rehydration. It is never
-part of `npm run check`, disables tools and extensions, uses temporary session
-state, and requires an explicit quota-consumption environment flag.
+has verified ChatGPT-subscription token usage plus JSONL rehydration across a
+fresh backend instance. The embedded worker owns the environment-aware HTTP
+bootstrap that Pi's CLI would otherwise perform. The probe is never part of
+`npm run check`, disables tools and extensions, uses temporary session state,
+and requires an explicit quota-consumption environment flag.
 
 The deterministic model boundary lives in
 [`packages/fake-model-server`](packages/fake-model-server). It serves real

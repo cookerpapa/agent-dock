@@ -228,3 +228,27 @@
 - 下一步：补 Phase 0 的 CI formatting/unit/secret-scan enforcement。原因是现有
   合同测试已经足够多，应该先确保每次提交自动执行并阻止敏感信息进入仓库；
   Docker Compose/非 root 容器仍需等当前 WSL 的 Docker 可用后做真实验证。
+
+## 2026-07-18 — Embedded SDK HTTP bootstrap and live rehydration proof
+
+- 现象澄清：probe 输出的 `network` 是 AgentDock 对 `fetch/socket` 类错误的粗粒度
+  分类，不表示 Pi CLI、账号或 OpenAI 服务整体不可用。用户手动运行的 Pi
+  `0.79.3` 可以快速返回；随后使用 AgentDock 依赖的同一个 Pi `0.80.10` CLI、
+  同一 OAuth 和同一 `gpt-5.4-mini` 发送最小请求，也在 4.2 秒内返回 `OK`。
+- 根因：Pi CLI 入口会在 provider SDK 发请求前调用 `configureHttpDispatcher()`，
+  安装 npm Undici 的 `EnvHttpProxyAgent` 和对应 global fetch；AgentDock 直接调用
+  SDK 的 embedded path 绕过了 CLI `main()`，因此漏掉这一步。Node 自带的
+  `--use-env-proxy` 不能替代 Pi 所用 npm Undici 实例的完整初始化。
+- 修复：embedded backend 仅在显式允许模型调用时安装 AgentDock 自有的、进程级
+  幂等 HTTP runtime；直接 pin `undici@8.5.0`，从 worker 环境读取 proxy/no-proxy，
+  但不返回或记录代理 URL/凭据。相同 idle timeout 可重复初始化，不同 timeout
+  会被明确拒绝，避免一个共享 worker 悄悄采用互相冲突的网络策略。
+- 合同测试：在隔离子进程中验证 dispatcher 类型、global fetch 安装、幂等行为、
+  proxy 环境识别以及冲突 timeout 拒绝，避免污染其余 Vitest 进程。
+- 真实验证：修复后的两轮 subscription probe 在 3.7 秒内通过，共报告 295 tokens。
+  第一轮精确返回 ACK；runtime 释放后，新 backend 仅凭 JSONL 恢复同一个 Pi
+  session，并在第二轮精确取回 nonce。tools/extensions 均为 0，临时 transcript
+  在退出时删除，OAuth 值和对话正文没有输出。
+- 后续理由：默认 CI 仍只运行 fake provider 和无 token 合同测试；真实订阅 probe
+  必须继续 opt-in。生产凭据仍需 ADR-0006 所述 broker/gateway，不能把本机
+  `~/.pi/agent` 挂载进 sandbox。
