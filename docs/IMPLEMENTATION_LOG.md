@@ -215,9 +215,16 @@
   完成方式，不保留 Authorization 或 message 内容。
 - 验证：6 个 HTTP/lifecycle 测试和 7 个 Pi provider contract 测试覆盖 discovery、
   auth、日志脱敏、text/tool、429、timeout、abort、malformed 与 disconnect。
-- 真实 provider：经用户明确授权后运行 subscription probe；现有 OAuth 在第一轮
-  请求前刷新失败并被归类为 `authentication`，因此没有把这次尝试记为真实调用
-  通过。临时目录仍由 `finally` 删除，重新 `/login` 后再复验。
+- 真实 provider：经用户明确授权后运行 subscription probe；第一次因旧 OAuth
+  刷新失败。用户重新执行 Pi `/login` 后，确认 `~/.pi/agent/auth.json` 中的
+  `openai-codex` 登录可刷新且未过期，证明当前本地 probe 会复用 Pi 默认
+  agentDir，但这不代表生产 credential broker 已实现。
+- 网络诊断：本机 `curl` 可通过 `127.0.0.1:10808` proxy 到达 Codex endpoint，
+  Node 24 直连失败；`--use-env-proxy` 后无凭据 GET/POST 分别快速得到 405/401。
+  为把 WebSocket proxy 问题与 rehydration 解耦，embedded backend 新增显式
+  transport 选项，live probe 固定 SSE。真实第一轮仍在约 50 秒后被归类为
+  `network`，所以没有把它记为通过，也没有取得成功 token usage；停止继续重试。
+  所有失败路径仍由 `finally` 删除临时 transcript。
 - 下一步：补 Phase 0 的 CI formatting/unit/secret-scan enforcement。原因是现有
   合同测试已经足够多，应该先确保每次提交自动执行并阻止敏感信息进入仓库；
   Docker Compose/非 root 容器仍需等当前 WSL 的 Docker 可用后做真实验证。

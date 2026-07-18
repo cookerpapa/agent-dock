@@ -112,6 +112,7 @@ try {
     extensionFactories: [],
     allowModelPrompts: true,
     model: { provider, modelId, thinkingLevel },
+    transport: "sse",
     systemPrompt:
       "You are a deterministic test assistant. Follow exact output-format instructions. Do not use tools.",
   };

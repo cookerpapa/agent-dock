@@ -7,6 +7,7 @@ export {
   type EmbeddedPiExecutionResult,
   type EmbeddedPiModelSelection,
   type EmbeddedPiThinkingLevel,
+  type EmbeddedPiTransport,
   type ExecuteEmbeddedCommand,
 } from "./embedded-pi-backend.ts";
 

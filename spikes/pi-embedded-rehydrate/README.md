@@ -63,8 +63,10 @@ AGENT_DOCK_ALLOW_SUBSCRIPTION_USAGE=1 npm run spike:live-model
 The owner must already have completed Pi's `/login` ChatGPT-subscription flow.
 Only token counts and pass/fail assertions are printed; OAuth values and
 conversation text are not. If the host reaches OpenAI through an HTTP proxy,
-the Node process must also be configured to use that proxy. This local probe's
-access to the owner's Pi credential directory is not the production
+the Node process must also be configured to use that proxy. On Node 24, run the
+probe with `NODE_OPTIONS=--use-env-proxy`; the probe pins transport to SSE so a
+separate WebSocket proxy limitation cannot mask the rehydration result. This
+local probe's access to the owner's Pi credential directory is not the production
 credential-distribution design described in ADR-0006.
 
 ## What it does not prove

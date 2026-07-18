@@ -34,6 +34,8 @@ export type EmbeddedPiThinkingLevel =
   | "xhigh"
   | "max";
 
+export type EmbeddedPiTransport = "sse" | "websocket" | "websocket-cached" | "auto";
+
 export type EmbeddedPiModelSelection = {
   provider: string;
   modelId: string;
@@ -117,6 +119,7 @@ export type EmbeddedPiBackendOptions = {
   allowModelPrompts?: boolean;
   model?: EmbeddedPiModelSelection;
   systemPrompt?: string;
+  transport?: EmbeddedPiTransport;
 };
 
 class FairSemaphore {
@@ -246,6 +249,7 @@ export class EmbeddedPiBackend {
   readonly #allowModelPrompts: boolean;
   readonly #model: EmbeddedPiModelSelection | undefined;
   readonly #systemPrompt: string | undefined;
+  readonly #transport: EmbeddedPiTransport | undefined;
   readonly #capacity: FairSemaphore;
   readonly #backendInstanceId = randomUUID();
   readonly #sessionTails = new Map<string, Promise<void>>();
@@ -261,6 +265,7 @@ export class EmbeddedPiBackend {
     this.#allowModelPrompts = options.allowModelPrompts ?? false;
     this.#model = options.model;
     this.#systemPrompt = options.systemPrompt;
+    this.#transport = options.transport;
     if (this.#allowModelPrompts && !this.#model) {
       throw new Error("allowModelPrompts requires an explicit model selection");
     }
@@ -312,6 +317,7 @@ export class EmbeddedPiBackend {
           agentDir: runtimeOptions.agentDir,
           settingsManager: SettingsManager.inMemory({
             compaction: { enabled: false },
+            ...(this.#transport === undefined ? {} : { transport: this.#transport }),
           }),
           resourceLoaderOptions: {
             extensionFactories: [...this.#extensionFactories],
