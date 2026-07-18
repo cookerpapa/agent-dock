@@ -389,3 +389,42 @@
   command/turn 状态推进到 running/completed。原因是先验证“durable command 真的
   会被后台消费且不会由 HTTP handler 直接执行”，之后接 Pi RPC 和 SSE 时才有
   稳定的异步执行边界。
+
+## 2026-07-18 — Phase 1 transactional outbox dispatcher
+
+- 目标：让已经 durable accepted 的 turn 真正由独立后台边界领取，而不是让 HTTP
+  handler 等待或直接执行 agent；本切片仍不假装已经接通真实 Pi。
+- 领取：`OutboxDispatcher.dispatchNext()` 在 PostgreSQL transaction 中使用
+  `FOR UPDATE SKIP LOCKED` 领取一条到期 outbox，并同时锁住所属 session。查询只让
+  每个 session 最早的 non-terminal command 进入执行，两个 dispatcher 不能领取
+  同一 turn，也不能让后续 turn 越过正在执行或等待重试的 turn。
+- 状态：domain 新增 command 状态机。领取把 `pending/queued` 推进到
+  `dispatched/dispatching`；backend 必须先 await `lifecycle.started()`，ACK 落库后才
+  推进到 `acknowledged/running` 并把 outbox 标记为已交付；成功时 command/turn
+  一起终结，session 回到 `idle`。因此 ACK 后崩溃会准确表现为“命令已交付、执行态
+  待协调”，而不是错误地表现为 outbox 尚未投递。
+- 故障：ACK 前的 retryable failure 会回到 `pending/queued` 并延后 outbox 的
+  `available_at`；超过 attempt limit 或 non-retryable failure 会终态失败。ACK 后
+  不自动重放，因为此时 model/tool side effect 可能已经发生，只能记录 terminal
+  failure。进程若在 ACK 前崩溃可由 claim timeout 重新领取；ACK 后崩溃暂时保持
+  ambiguous，留给下一步的 supervisor lease/fencing/reconciliation。
+- 测试 backend：新增 `DeterministicExecutionBackend`，可脚本化 complete、ACK 前
+  failure 和 ACK 后 failure。它不调用 model，执行记录只含 command/session/turn ID
+  和 outcome，不保存 prompt 或 credential；生产 `main.ts` 没有自动启动它，避免
+  将真实请求假装执行成功。
+- 协议：`control.command.pending.v1` payload 现在有 closed TypeBox schema，只允许
+  schema version、command/session/turn ID 和 `turn.execute` kind，额外字段会被拒绝。
+- 验证：新增 2 个 command-state tests、2 个 outbox-schema tests 和 6 个 dispatcher
+  integration tests，全仓从 85 增至 95 tests。测试还把递增的 outbox attempt 当作
+  local fencing token，证明 lease 到期后旧 claimant 即使恢复，也不能越过新 claimant
+  的 attempt 去 ACK 或开始执行。PGlite suite 与一次性、仅绑定 `127.0.0.1` 的
+  PostgreSQL `15.2-alpine` suite 均通过，测试 container 已删除。完整
+  `npm run ci`（format、typecheck、95 tests、两个 zero-token Pi spike、0 high-severity
+  vulnerabilities）及重新构建的 `npm run container:check` 也全部通过。
+- backlog：只新增并勾选 deterministic dispatcher 的内部验收项；“supervisor 使用
+  pinned Pi RPC”仍保持未完成。
+- 下一步：把 deterministic backend 替换为本地 supervisor adapter，发出已有
+  versioned `turn.execute` wire command，并且只有 supervisor 持有有效 lease/fencing
+  token 且返回 durable ACK 后才调用 `lifecycle.started()`。原因是这一步会把当前
+  可靠的数据库边界接到真实 Pi RPC，同时保留以后横向扩容、runner 重连和 stale
+  writer 拒绝所需的协议语义。

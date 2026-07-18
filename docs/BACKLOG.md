@@ -44,6 +44,8 @@ the turn, and inspect the final Git diff.
 Acceptance criteria:
 
 - [x] The command is durably accepted before execution starts
+- [x] A transactional-outbox dispatcher proves exclusive mailbox claim,
+  pre-ACK retry, and post-ACK terminal failure with a deterministic backend
 - [ ] The supervisor uses a pinned Pi RPC process through an AgentDock adapter
 - [ ] The workspace and all extensions run outside the NestJS control-plane process
 - [ ] Text and tool events carry session, turn, agent, and sequence identifiers

@@ -46,8 +46,27 @@ command, and outbox rows commit in one PostgreSQL transaction before the API
 returns `202 Accepted`. A same-key/same-body retry returns the original turn,
 while same-key/different-body reuse returns `409`. The command retains a SHA-256
 request fingerprint and the outbox carries only identifiers; neither duplicates
-the prompt or credential material. This slice stops at durable intake—the
-dispatcher, supervisor execution, and SSE event path remain subsequent slices.
+the prompt or credential material.
+
+The second Phase 1 slice adds an explicit transactional-outbox dispatcher. It
+claims one due command using `FOR UPDATE SKIP LOCKED`, locks the owning session,
+and enforces oldest-nonterminal-command mailbox order. The claim transaction
+moves `pending/queued` to `dispatched/dispatching` and gives the outbox record a
+bounded reclaim time. The incremented attempt acts as a local fencing token, so
+a superseded pre-ACK claimant cannot later start. An execution backend must
+persist `started()` before doing work; this advances the command to
+`acknowledged`, the turn to `running`, and the session to `running`, and marks
+the outbox delivery published. A retryable pre-ACK failure returns the command
+to the mailbox, while completion or any
+post-ACK failure settles command, turn, and session state transactionally. The
+deterministic backend used by tests stores no prompt or credential data in its
+execution records.
+
+This is the local execution boundary, not the production runner transport. It
+is deliberately not auto-started by the HTTP application. Reclaim before ACK is
+implemented; a crash after ACK is left ambiguous rather than replaying possible
+tool side effects. Supervisor leases, fencing, event reconciliation, and the
+real Pi adapter are the next slice.
 
 ### TypeScript sandbox supervisor
 
@@ -210,6 +229,10 @@ implementation.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
 
+Steps 1-3 and the local claim/ACK/settlement state transitions are executable.
+The deterministic backend substitutes only for steps 4-9 in tests; it does not
+claim that sandbox assignment, Pi execution, or event delivery are implemented.
+
 ## 5. Delivery and recovery semantics
 
 ### Internal supervisor wire contract
@@ -267,10 +290,12 @@ IDLE -> EVICTING -> COLD
 Cold sessions retain durable state without retaining a process, platform thread,
 or sandbox. Idle sessions are evicted with an LRU policy after safe snapshotting.
 
-The executable transition tables live in `@agent-dock/domain`. Self-transitions
-are rejected: duplicate messages are handled by command/event idempotency before
-they reach a state transition, rather than being confused with a second valid
-transition.
+The executable transition tables live in `@agent-dock/domain`, including the
+command lifecycle `PENDING -> DISPATCHED -> ACKNOWLEDGED -> COMPLETED`. Only
+`DISPATCHED -> PENDING` may retry; both `COMPLETED` and `FAILED` are terminal.
+Self-transitions are rejected: duplicate messages are handled by command/event
+idempotency before they reach a state transition, rather than being confused
+with a second valid transition.
 
 Turn execution follows:
 
