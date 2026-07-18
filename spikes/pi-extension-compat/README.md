@@ -60,10 +60,12 @@ root filesystem, a 64 MiB `/tmp`, no network or host volume, all capabilities
 dropped, `no-new-privileges`, and CPU/memory/PID/file limits. The spike also
 rejects root at runtime when Compose sets `AGENT_DOCK_REQUIRE_NON_ROOT=1`.
 
-The Dockerfiles and Compose document have executable static contracts, and their
-production-only npm layouts pass outside Docker. A real container run is still
-required before claiming that the host engine enforced namespaces, cgroups, and
-mount options.
+The Dockerfiles and Compose document have executable static contracts. The root
+runner also creates each container, inspects its effective Docker `HostConfig`,
+rejects missing isolation or resource limits, removes that stopped container,
+and then runs the actual probe. This passed on Docker Engine `29.4.2` with
+Compose `5.1.3`; both probes reported UID/GID `1000:1000` from inside their
+containers.
 
 ## Data flow
 

@@ -318,3 +318,31 @@
 - 下一步：先启用 Docker Desktop WSL integration，或把仓库 push 到个人 GitHub
   触发 container job。原因是继续写 Phase 1 API 不能替代这最后一个 Phase 0
   runtime 证据；容器真实通过后再开始 NestJS vertical slice。
+
+## 2026-07-18 — Real Docker runtime verification and Phase 0 completion
+
+- 目标：在真实 Docker daemon 中验证 Phase 0 的两个 runner，并证明 Compose 中
+  声明的隔离和资源限制确实进入了容器 `HostConfig`，不只停留在 YAML 静态检查。
+- 实测环境：Docker Desktop Engine `29.4.2`、Compose `5.1.3`。两个 digest-pinned
+  image 均从 allowlisted build context 成功构建；检查用的 stopped container 和
+  实际运行 container 已清理，本地 image/build cache 保留用于复现。
+- 有效隔离：逐个 `docker inspect` 确认 UID/GID `1000:1000`、read-only rootfs、
+  `network_mode: none`、private IPC、init、`cap_drop: ALL`、
+  `no-new-privileges`、128 PID、512 MiB、1 CPU，以及带 `noexec,nosuid,nodev`
+  的 64 MiB `/tmp`。同时确认没有 host bind、volume、port、device、host PID/IPC
+  或 privileged mode，运行环境中也没有 credential-like 变量名。
+- 真实执行：Pi RPC container 完成命令发现、confirm/notify UI 往返、公共事件
+  映射、wire 校验、累计 ACK/replay、spool drain、abort 与 clean exit；embedded
+  container 在同一 worker 中运行 3 个 logical session，完成 JSONL/checkpoint
+  rehydrate、同 session FIFO 与跨 session bounded concurrency，最后 active runtime
+  回到 0。两个进程都从容器内报告 UID/GID `1000:1000`，`modelCalls` 为 0。
+- 可重复检查：新增 `scripts/run-container-check.mjs`，让本地与 GitHub Actions
+  使用同一条 `npm run container:check`；任一实际 `HostConfig` 约束缺失都会在
+  probe 运行前失败。workflow 经 checksum-verified actionlint `1.7.12` 校验通过。
+- 回归：`npm run ci` 再次通过，包括严格类型检查、75 个测试、两个本地零 token
+  spike 和 `npm audit` 0 vulnerabilities。Phase 0 backlog 最后一项已勾选，Phase 0
+  至此完成；仓库尚无 remote，所以 hosted CI 结果仍需首次 push 后确认。
+- 下一步：开始 Phase 1 的 single-user NestJS vertical slice，先贯通“创建 session
+  -> durable accept turn -> supervisor 执行 -> SSE 事件”这一条最短路径。原因是
+  Phase 0 已固定协议、状态、存储与执行隔离边界，现在需要用一个端到端用户故事
+  验证这些边界能组合成产品，而不是继续增加互不连通的底层模块。

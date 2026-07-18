@@ -145,7 +145,8 @@ zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
 
-When Docker is available, the hardened Phase 0 runner topology is exercised with:
+The hardened Phase 0 runner topology, including its effective Docker
+`HostConfig`, is exercised with:
 
 ```bash
 npm run container:check
@@ -163,12 +164,14 @@ resolution. The database package now supplies an 18-table Kysely/PostgreSQL
 migration with executable ownership, idempotency, ordering, fencing, ACK, and
 usage constraints. A hardened two-service Docker Compose topology, pinned runner
 images, and executable container-configuration contracts are implemented. The
-actual Docker Engine run remains to be verified because this WSL distribution
-does not expose Docker. The deterministic fake model server makes streaming and
-provider failures executable without tokens. Formatting, tests, zero-token
-spikes, dependency audit, container probes, and full-history secret scanning are
-defined in GitHub Actions. Their first hosted runs will occur after the repository
-is pushed. Phase 0 completion now waits only on a real non-root container run.
+two images and probes pass on Docker Engine `29.4.2` with Compose `5.1.3`. Runtime
+inspection confirms UID/GID `1000:1000`, a read-only root filesystem, no network,
+no host mounts or published ports, dropped capabilities, `no-new-privileges`,
+and enforced CPU, memory, PID, and `/tmp` limits. The deterministic fake model
+server makes streaming and provider failures executable without tokens.
+Formatting, tests, zero-token spikes, dependency audit, effective container
+checks, and full-history secret scanning are defined in GitHub Actions. Their
+first hosted runs will occur after the repository is pushed. Phase 0 is complete.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

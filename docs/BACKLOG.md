@@ -18,7 +18,7 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Make `/cloud-check` call `ctx.ui.confirm()` and `ctx.ui.notify()`
 - [x] Proxy `extension_ui_request` to a test client and return `extension_ui_response`
 - [x] Verify clean cancellation and complete Pi child-process termination
-- [ ] Run the spike inside a non-root Docker container
+- [x] Run the spike inside a non-root Docker container
 - [x] Publish the initial extension compatibility matrix
 - [x] Define the public AgentDock event envelope
 - [x] Define supervisor registration, command, event, ACK, and heartbeat messages
