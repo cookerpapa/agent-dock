@@ -130,6 +130,21 @@ OpenAI-compatible HTTP/SSE on loopback and the pinned Pi `0.80.10` adapter
 contract-tests text, fragmented tool calls, 429, request timeout, explicit
 abort, malformed SSE, and mid-stream disconnect without provider tokens.
 
+## Local verification and CI
+
+The same quality command used by GitHub Actions is reproducible from a clean
+checkout:
+
+```bash
+npm ci --ignore-scripts
+npm run ci
+```
+
+It checks Prettier formatting, TypeScript types, 73 unit/contract tests, the two
+zero-token Pi spikes, and high-severity dependency advisories. The separate
+Gitleaks job scans complete Git history with read-only repository permissions.
+The opt-in live subscription probe is deliberately excluded from both commands.
+
 ## Current status
 
 Phase 0: the public event envelope, Pi UI adapter, bidirectional
@@ -142,9 +157,11 @@ resolution. The database package now supplies an 18-table Kysely/PostgreSQL
 migration with executable ownership, idempotency, ordering, fencing, ACK, and
 usage constraints. The hardened non-root Docker run remains to be verified once
 Docker is available in WSL. The deterministic fake model server now makes
-streaming and provider failures executable without tokens. The remaining Phase
-0 infrastructure slices are local Docker Compose/container verification and CI
-formatting, unit-test, and secret-scan enforcement.
+streaming and provider failures executable without tokens. Formatting, tests,
+zero-token spikes, dependency audit, and full-history secret scanning are now
+enforced by a locally validated GitHub Actions workflow. Its first hosted run
+will occur after the repository is pushed. The remaining Phase 0 infrastructure
+slice is local Docker Compose/non-root container verification.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

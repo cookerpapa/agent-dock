@@ -252,3 +252,32 @@
 - 后续理由：默认 CI 仍只运行 fake provider 和无 token 合同测试；真实订阅 probe
   必须继续 opt-in。生产凭据仍需 ADR-0006 所述 broker/gateway，不能把本机
   `~/.pi/agent` 挂载进 sandbox。
+
+## 2026-07-18 — Reproducible CI and secret-history enforcement
+
+- 目标：把 format、typecheck、全部单元/合同测试、两个零 token Pi spike、依赖
+  audit 和 Git 历史 secret scan 变成 push/PR 的自动门禁；真实 subscription
+  probe 明确不进入 CI。
+- 格式基线：pin `prettier@3.9.5`，只格式化代码与 JSON/YAML，不重排 Markdown
+  正文。18 个既有代码文件的纯机械格式化单独保存为 commit `bbb4ecd`，避免以后
+  的 CI 行为变更被格式噪声淹没。
+- Quality job：Node 固定为 `24.12.0`，使用 `npm ci --ignore-scripts` 从 lockfile
+  安装，随后执行可在本地复现的 `npm run ci`。该命令覆盖格式、所有 workspace
+  typecheck、73 个 Vitest 测试、RPC/embedded 两个零 token spike，以及包含 dev
+  dependency 的 high-severity `npm audit`。
+- Secret job：checkout 完整历史后运行 Gitleaks；关闭 PR comment 和 SARIF artifact
+  上传，workflow token 仅有 `contents: read`。个人 GitHub 账号无需 Gitleaks
+  license；如果以后迁移到 organization，需要按 upstream 要求配置
+  `GITLEAKS_LICENSE`。
+- 供应链：`actions/checkout v7.0.0`、`actions/setup-node v7.0.0` 和
+  `gitleaks-action v3.0.0` 均固定到不可变 commit SHA，不依赖可移动 major tag。
+- 验证：workflow 通过 checksum 验证后的 `actionlint 1.7.12`；官方 Gitleaks
+  `8.30.1` 对当前目录和 10 个 Git commits 均报告 no leaks。临时 detached
+  worktree 从空 `node_modules` 执行 `npm ci --ignore-scripts && npm run ci` 全部
+  通过，之后已删除。
+- 证据边界：当前仓库尚未配置 Git remote，所以还没有 GitHub-hosted runner
+  记录；这里只声明 workflow、clean-checkout 和本地 scanner 已通过。首次 push
+  后应确认两个 hosted jobs 都为绿色。
+- 下一步：补 Docker Compose 和 non-root container spike。原因是 Phase 0 现在只
+  剩执行隔离没有在真实容器中验证；这也是进入 NestJS/API vertical slice 前最
+  重要的安全前提。

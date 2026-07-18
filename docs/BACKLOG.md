@@ -33,7 +33,7 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Implement deterministic fake model server
 - [x] Script fake text streaming and tool-call scenarios
 - [x] Script 429, timeout, malformed response, and stream-disconnect scenarios
-- [ ] Add CI for formatting, unit tests, and secret scanning
+- [x] Add CI for formatting, unit tests, and secret scanning
 
 ## First vertical-slice story
 
