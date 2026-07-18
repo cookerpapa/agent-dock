@@ -11,3 +11,41 @@ export {
   type AgentDockEventIdentity,
   type AgentDockEventType,
 } from "./event-envelope.ts";
+
+export {
+  NonNegativeSafeIntegerSchema,
+  OpaqueIdSchema,
+  PositiveSafeIntegerSchema,
+  UtcTimestampSchema,
+  UuidSchema,
+} from "./protocol-primitives.ts";
+
+export {
+  AgentDockWireProtocolError,
+  CancelTurnCommandMessageSchema,
+  CommandAckMessageSchema,
+  ControlToSupervisorMessageSchema,
+  EventAckMessageSchema,
+  EventPublishMessageSchema,
+  ExecuteTurnCommandMessageSchema,
+  ResolveApprovalCommandMessageSchema,
+  SupervisorHeartbeatAckMessageSchema,
+  SupervisorHeartbeatMessageSchema,
+  SupervisorRegisterMessageSchema,
+  SupervisorRegisteredMessageSchema,
+  SupervisorToControlMessageSchema,
+  parseControlToSupervisorMessage,
+  parseSupervisorToControlMessage,
+  type CancelTurnCommandMessage,
+  type CommandAckMessage,
+  type ControlToSupervisorMessage,
+  type EventAckMessage,
+  type EventPublishMessage,
+  type ExecuteTurnCommandMessage,
+  type ResolveApprovalCommandMessage,
+  type SupervisorHeartbeatAckMessage,
+  type SupervisorHeartbeatMessage,
+  type SupervisorRegisterMessage,
+  type SupervisorRegisteredMessage,
+  type SupervisorToControlMessage,
+} from "./supervisor-wire.ts";

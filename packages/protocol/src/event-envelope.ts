@@ -1,13 +1,11 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-
-const OpaqueIdSchema = Type.String({ minLength: 1, maxLength: 256 });
-const EventIdSchema = Type.String({
-  pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-});
-const UtcTimestampSchema = Type.String({
-  pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$",
-});
+import {
+  OpaqueIdSchema,
+  PositiveSafeIntegerSchema,
+  UtcTimestampSchema,
+  UuidSchema,
+} from "./protocol-primitives.ts";
 
 export const SessionStateSchema = Type.Union([
   Type.Literal("cold"),
@@ -23,10 +21,10 @@ export const SessionStateSchema = Type.Union([
 
 const CommonEnvelopeProperties = {
   schemaVersion: Type.Literal(1),
-  eventId: EventIdSchema,
+  eventId: UuidSchema,
   sessionId: OpaqueIdSchema,
   agentId: OpaqueIdSchema,
-  seq: Type.Integer({ minimum: 1 }),
+  seq: PositiveSafeIntegerSchema,
   occurredAt: UtcTimestampSchema,
 };
 
@@ -118,7 +116,7 @@ const ToolCompletedEventSchema = Type.Object(
 
 const ConfirmApprovalPayloadSchema = Type.Object(
   {
-    approvalId: EventIdSchema,
+    approvalId: UuidSchema,
     kind: Type.Literal("confirm"),
     title: Type.String({ maxLength: 4_096 }),
     message: Type.String({ maxLength: 16_384 }),
@@ -129,7 +127,7 @@ const ConfirmApprovalPayloadSchema = Type.Object(
 
 const SelectApprovalPayloadSchema = Type.Object(
   {
-    approvalId: EventIdSchema,
+    approvalId: UuidSchema,
     kind: Type.Literal("select"),
     title: Type.String({ maxLength: 4_096 }),
     options: Type.Array(Type.String({ maxLength: 4_096 }), { minItems: 1, maxItems: 100 }),
@@ -140,7 +138,7 @@ const SelectApprovalPayloadSchema = Type.Object(
 
 const InputApprovalPayloadSchema = Type.Object(
   {
-    approvalId: EventIdSchema,
+    approvalId: UuidSchema,
     kind: Type.Literal("input"),
     title: Type.String({ maxLength: 4_096 }),
     placeholder: Type.Optional(Type.String({ maxLength: 4_096 })),
@@ -151,7 +149,7 @@ const InputApprovalPayloadSchema = Type.Object(
 
 const EditorApprovalPayloadSchema = Type.Object(
   {
-    approvalId: EventIdSchema,
+    approvalId: UuidSchema,
     kind: Type.Literal("editor"),
     title: Type.String({ maxLength: 4_096 }),
     initialValue: Type.Optional(Type.String({ maxLength: 100_000 })),
@@ -179,7 +177,7 @@ const ApprovalResolvedEventSchema = Type.Object(
     type: Type.Literal("approval.resolved"),
     payload: Type.Object(
       {
-        approvalId: EventIdSchema,
+        approvalId: UuidSchema,
         outcome: Type.Union([
           Type.Literal("approved"),
           Type.Literal("rejected"),

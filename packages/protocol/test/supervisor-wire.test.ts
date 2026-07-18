@@ -1,0 +1,308 @@
+import { describe, expect, it } from "vitest";
+import {
+  AgentDockWireProtocolError,
+  createAgentDockEventFactory,
+  parseControlToSupervisorMessage,
+  parseSupervisorToControlMessage,
+} from "../src/index.ts";
+
+const IDS = {
+  message: "11111111-1111-4111-8111-111111111111",
+  message2: "22222222-2222-4222-8222-222222222222",
+  message3: "33333333-3333-4333-8333-333333333333",
+  boot: "44444444-4444-4444-8444-444444444444",
+  connection: "55555555-5555-4555-8555-555555555555",
+  lease: "66666666-6666-4666-8666-666666666666",
+  command: "77777777-7777-4777-8777-777777777777",
+  approval: "88888888-8888-4888-8888-888888888888",
+  event: "99999999-9999-4999-8999-999999999999",
+};
+
+const SENT_AT = "2026-07-18T08:00:00.000Z";
+
+function envelope(messageId = IDS.message) {
+  return {
+    protocolVersion: 1,
+    messageId,
+    sentAt: SENT_AT,
+  } as const;
+}
+
+function commandIdentity() {
+  return {
+    commandId: IDS.command,
+    idempotencyKey: "request-1",
+    tenantId: "tenant-1",
+    projectId: "project-1",
+    workspaceId: "workspace-1",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    agentId: "root",
+    leaseId: IDS.lease,
+    fencingToken: 7,
+  } as const;
+}
+
+function registration() {
+  return {
+    ...envelope(),
+    type: "supervisor.register",
+    payload: {
+      supervisorId: "supervisor-1",
+      bootId: IDS.boot,
+      sandboxId: "sandbox-1",
+      supervisorVersion: "0.1.0",
+      pi: {
+        packageName: "@earendil-works/pi-coding-agent",
+        version: "0.80.10",
+      },
+      supportedProtocolVersions: [1],
+      capabilities: ["pi.rpc", "event.replay", "extension_ui.confirm"],
+      maxConcurrentSessions: 4,
+    },
+  } as const;
+}
+
+function heartbeat() {
+  return {
+    ...envelope(IDS.message2),
+    type: "supervisor.heartbeat",
+    payload: {
+      supervisorId: "supervisor-1",
+      bootId: IDS.boot,
+      connectionId: IDS.connection,
+      acceptingAssignments: true,
+      maxConcurrentSessions: 4,
+      sessions: [
+        {
+          sessionId: "session-1",
+          turnId: "turn-1",
+          state: "running",
+          leaseId: IDS.lease,
+          fencingToken: 7,
+          lastProducedSeq: 12,
+          lastAcknowledgedSeq: 10,
+        },
+      ],
+    },
+  } as const;
+}
+
+describe("supervisor/control-plane wire protocol", () => {
+  it("parses registration only in the supervisor-to-control direction", () => {
+    const message = registration();
+
+    expect(parseSupervisorToControlMessage(message)).toEqual(message);
+    expect(() => parseControlToSupervisorMessage(message)).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("requires registration to advertise the envelope protocol version", () => {
+    const message = registration();
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...message,
+        payload: { ...message.payload, supportedProtocolVersions: [2] },
+      }),
+    ).toThrow("must include its envelope protocolVersion");
+  });
+
+  it("parses each control-plane command and rejects unreviewed fields", () => {
+    const execute = {
+      ...envelope(),
+      type: "command.turn.execute",
+      payload: {
+        ...commandIdentity(),
+        nextEventSeq: 11,
+        input: { kind: "prompt", text: "Fix the failing test" },
+      },
+    } as const;
+    const cancel = {
+      ...envelope(IDS.message2),
+      type: "command.turn.cancel",
+      payload: {
+        ...commandIdentity(),
+        reason: "user_request",
+        gracePeriodMs: 2_000,
+      },
+    } as const;
+    const resolve = {
+      ...envelope(IDS.message3),
+      type: "command.approval.resolve",
+      payload: {
+        ...commandIdentity(),
+        approvalId: IDS.approval,
+        decision: { outcome: "approved", value: "yes" },
+      },
+    } as const;
+
+    expect([execute, cancel, resolve].map((message) => parseControlToSupervisorMessage(message).type)).toEqual([
+      "command.turn.execute",
+      "command.turn.cancel",
+      "command.approval.resolve",
+    ]);
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...execute,
+        payload: { ...execute.payload, rawPiCommand: { type: "prompt" } },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("wraps only validated AgentDock events and keeps publication direction explicit", () => {
+    const eventFactory = createAgentDockEventFactory(
+      { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
+      {
+        clock: () => new Date(SENT_AT),
+        idGenerator: () => IDS.event,
+      },
+    );
+    const event = eventFactory.next({
+      type: "assistant.text.delta",
+      payload: { text: "hello" },
+    });
+    const publish = {
+      ...envelope(),
+      type: "event.publish",
+      payload: {
+        leaseId: IDS.lease,
+        fencingToken: 7,
+        commandId: IDS.command,
+        event,
+      },
+    } as const;
+
+    expect(parseSupervisorToControlMessage(publish)).toEqual(publish);
+    expect(() => parseControlToSupervisorMessage(publish)).toThrow(AgentDockWireProtocolError);
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...publish,
+        payload: {
+          ...publish.payload,
+          event: { ...event, rawPiEvent: { type: "message_update" } },
+        },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("validates command acknowledgements in the return direction", () => {
+    const accepted = {
+      ...envelope(),
+      type: "command.ack",
+      payload: {
+        commandId: IDS.command,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        leaseId: IDS.lease,
+        fencingToken: 7,
+        status: "accepted",
+      },
+    } as const;
+
+    expect(parseSupervisorToControlMessage(accepted)).toEqual(accepted);
+    expect(() => parseControlToSupervisorMessage(accepted)).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("checks heartbeat capacity, uniqueness, and sequence observations", () => {
+    const message = heartbeat();
+    expect(parseSupervisorToControlMessage(message)).toEqual(message);
+
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...message,
+        payload: {
+          ...message.payload,
+          sessions: [
+            ...message.payload.sessions,
+            { ...message.payload.sessions[0], turnId: "turn-2" },
+          ],
+        },
+      }),
+    ).toThrow("duplicate sessionId");
+
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...message,
+        payload: {
+          ...message.payload,
+          sessions: [{ ...message.payload.sessions[0], lastAcknowledgedSeq: 13 }],
+        },
+      }),
+    ).toThrow("acknowledges beyond its produced sequence");
+
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...message,
+        payload: { ...message.payload, maxConcurrentSessions: 0 },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("validates registration and heartbeat acknowledgements from the control plane", () => {
+    const registered = {
+      ...envelope(),
+      type: "supervisor.registered",
+      payload: {
+        supervisorId: "supervisor-1",
+        bootId: IDS.boot,
+        connectionId: IDS.connection,
+        selectedProtocolVersion: 1,
+        heartbeatIntervalMs: 5_000,
+        heartbeatTimeoutMs: 15_000,
+        serverTime: SENT_AT,
+      },
+    } as const;
+    const heartbeatAck = {
+      ...envelope(IDS.message2),
+      type: "supervisor.heartbeat.ack",
+      payload: {
+        acknowledgedMessageId: IDS.message,
+        connectionId: IDS.connection,
+        leaseRenewals: [
+          {
+            sessionId: "session-1",
+            leaseId: IDS.lease,
+            fencingToken: 7,
+            validUntil: "2026-07-18T08:01:00.000Z",
+          },
+        ],
+      },
+    } as const;
+
+    expect(parseControlToSupervisorMessage(registered)).toEqual(registered);
+    expect(parseControlToSupervisorMessage(heartbeatAck)).toEqual(heartbeatAck);
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...registered,
+        payload: { ...registered.payload, heartbeatTimeoutMs: 5_000 },
+      }),
+    ).toThrow("must be greater than heartbeatIntervalMs");
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...heartbeatAck,
+        payload: {
+          ...heartbeatAck.payload,
+          leaseRenewals: [
+            heartbeatAck.payload.leaseRenewals[0],
+            heartbeatAck.payload.leaseRenewals[0],
+          ],
+        },
+      }),
+    ).toThrow("duplicate sessionId");
+  });
+
+  it("accepts a cumulative event ACK only in the control-to-supervisor direction", () => {
+    const ack = {
+      ...envelope(),
+      type: "event.ack",
+      payload: {
+        sessionId: "session-1",
+        leaseId: IDS.lease,
+        fencingToken: 7,
+        acknowledgedThroughSeq: 12,
+      },
+    } as const;
+
+    expect(parseControlToSupervisorMessage(ack)).toEqual(ack);
+    expect(() => parseSupervisorToControlMessage(ack)).toThrow(AgentDockWireProtocolError);
+  });
+});

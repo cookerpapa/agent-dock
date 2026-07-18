@@ -1,5 +1,10 @@
-import { createAgentDockEventFactory, type AgentDockEvent } from "@agent-dock/protocol";
-import { PiRpcEventAdapter } from "@agent-dock/sandbox-supervisor";
+import {
+  createAgentDockEventFactory,
+  type AgentDockEvent,
+  type EventAckMessage,
+  type EventPublishMessage,
+} from "@agent-dock/protocol";
+import { InMemoryEventSpool, PiRpcEventAdapter } from "@agent-dock/sandbox-supervisor";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -21,6 +26,8 @@ type ExitResult = {
 
 const EXPECTED_CONFIRM_TITLE = "AgentDock compatibility check";
 const EXPECTED_NOTIFICATION = "AgentDock extension UI round trip succeeded.";
+const WIRE_COMMAND_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const WIRE_LEASE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const REQUEST_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 
@@ -164,6 +171,27 @@ async function main(): Promise<void> {
     agentId: "root",
   });
   const piEventAdapter = new PiRpcEventAdapter(eventFactory);
+  const eventSpool = new InMemoryEventSpool({
+    sessionId: "compat-session",
+    leaseId: WIRE_LEASE_ID,
+    fencingToken: 1,
+  });
+  const publishEvent = (event: AgentDockEvent): void => {
+    const message: EventPublishMessage = {
+      protocolVersion: 1,
+      messageId: globalThis.crypto.randomUUID(),
+      sentAt: new Date().toISOString(),
+      type: "event.publish",
+      payload: {
+        leaseId: WIRE_LEASE_ID,
+        fencingToken: 1,
+        commandId: WIRE_COMMAND_ID,
+        event,
+      },
+    };
+    eventSpool.append(message);
+    agentDockEvents.push(event);
+  };
   let notification: ReturnType<typeof createDeferred<AgentDockEvent>> | undefined;
   let fatalProtocolError: Error | undefined;
   let requestNumber = 0;
@@ -249,7 +277,7 @@ async function main(): Promise<void> {
       failProtocol(new Error(`Pi UI event was not mapped: ${adapted.kind} (${adapted.reason})`));
       return;
     }
-    agentDockEvents.push(adapted.event);
+    publishEvent(adapted.event);
 
     if (message.method === "confirm") {
       const title = requireString(message.title, "confirm request title");
@@ -266,7 +294,7 @@ async function main(): Promise<void> {
         approvalId: adapted.event.payload.approvalId,
         outcome: "approved",
       });
-      agentDockEvents.push(resolution.event);
+      publishEvent(resolution.event);
       sendLine(child, { ...resolution.piResponse });
       return;
     }
@@ -382,6 +410,40 @@ async function main(): Promise<void> {
       throw new Error("The Pi adapter retained a resolved approval");
     }
 
+    const replayedAfterDisconnect = eventSpool.replayAfter(0);
+    if (
+      replayedAfterDisconnect.length !== 3 ||
+      !replayedAfterDisconnect.every((message, index) => message.payload.event.seq === index + 1)
+    ) {
+      throw new Error("The event spool did not replay the complete ordered suffix after disconnect");
+    }
+
+    const createEventAck = (acknowledgedThroughSeq: number): EventAckMessage => ({
+      protocolVersion: 1,
+      messageId: globalThis.crypto.randomUUID(),
+      sentAt: new Date().toISOString(),
+      type: "event.ack",
+      payload: {
+        sessionId: "compat-session",
+        leaseId: WIRE_LEASE_ID,
+        fencingToken: 1,
+        acknowledgedThroughSeq,
+      },
+    });
+    const firstAck = eventSpool.acknowledge(createEventAck(2));
+    const replayedAfterAck = eventSpool.replayAfter(2);
+    if (
+      firstAck.removedCount !== 2 ||
+      replayedAfterAck.length !== 1 ||
+      replayedAfterAck[0]?.payload.event.seq !== 3
+    ) {
+      throw new Error("Cumulative event ACK did not retain exactly the unacknowledged suffix");
+    }
+    eventSpool.acknowledge(createEventAck(3));
+    if (eventSpool.pendingCount !== 0) {
+      throw new Error("The event spool retained events after the final durable ACK");
+    }
+
     await request("abort");
     shutdown = await stopChild(child, exitPromise);
 
@@ -401,6 +463,9 @@ async function main(): Promise<void> {
             confirmRoundTrip: true,
             notificationObserved: true,
             eventEnvelopeMapped: true,
+            wireProtocolValidated: true,
+            cumulativeAckAndReplay: true,
+            spoolDrained: true,
             abortAcknowledged: true,
             cleanExit: true,
           },

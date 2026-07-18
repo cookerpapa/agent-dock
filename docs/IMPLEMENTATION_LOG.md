@@ -53,3 +53,30 @@
 - 下一步：定义 supervisor 与 control plane 之间的注册、命令、事件、ACK 和
   heartbeat 消息。原因是目前事件只在单进程内有序；先定义网络传输、确认
   和重连语义，后续数据库持久化与 SSE 才不会各自发明一套不兼容协议。
+
+## 2026-07-18 — Supervisor wire protocol 与 ACK/replay
+
+- 目标：让 supervisor 与未来 control plane 对命令交付、事件持久化、断线
+  重放、租约和存活检测拥有同一套可执行语义。
+- 决策：ADR-0003 明确 PostgreSQL、Pi JSONL、对象存储、workspace 和本地
+  spool 的唯一职责；ADR-0004 明确命令/事件使用 at-least-once、session 级
+  连续序号、累计 durable ACK，以及 lease ID + 单调 fencing token。
+- 协议：新增双向 TypeBox 闭合消息联合。Supervisor 发送注册、command ACK、
+  `event.publish` 和 heartbeat；control plane 发送注册确认、执行/取消 turn、
+  审批决策、`event.ack` 和带续租结果的 heartbeat ACK。错误方向和附加 raw
+  Pi 字段都会被拒绝。
+- Spool：新增单 session、容量有界的 `InMemoryEventSpool`。它要求连续 seq，
+  拒绝错误 session、旧 lease/fence、冲突重复事件、倒退/越界 ACK；重复的
+  当前 ACK 幂等；只删除累计 ACK 覆盖的事件，并按顺序重放未确认后缀。
+- 为什么先做内存版：它用于固定并测试状态机，不冒充生产持久化。等真实
+  WebSocket 和 sandbox 生命周期存在后，再用磁盘实现替换相同接口，避免
+  现在过早选择 LevelDB/SQLite 等存储。
+- 真实链路：Pi extension 的 confirm/notify 已实际经过
+  `Pi RPC -> adapter -> AgentDockEvent -> event.publish -> spool`。模拟断线时
+  重放 1/2/3；累计 ACK 到 2 后只剩 3；最终 ACK 后 spool 为空。
+- 验证：协议与 supervisor 共 27 个测试通过，覆盖消息方向、闭合 schema、
+  heartbeat 交叉约束、累计 ACK、重放、fencing、冲突和 backpressure；真实
+  Pi `0.80.10` spike 同时通过 wire、ACK/replay、abort 和干净退出检查。
+- 下一步：实现 session、turn、sandbox、approval 和 agent-node 的显式状态机。
+  原因是数据库和 API 必须共享同一组合法转换，先建表再补状态规则容易产生
+  双 turn 并发、过期 approval 被接受、sandbox 已失效却继续写入等漏洞。

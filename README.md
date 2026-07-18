@@ -88,6 +88,8 @@ only after a measured requirement appears.
 - [Extension compatibility matrix](docs/EXTENSION_COMPATIBILITY.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
+- [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
+- [ADR-0004: command delivery, sequence, leases, and fencing](docs/adr/0004-command-delivery-sequence-and-fencing.md)
 
 ## Current executable spike
 
@@ -97,13 +99,16 @@ pinned Pi RPC process, loads an extension, bridges a confirm/notify exchange,
 maps that exchange through the public event contract, and verifies clean
 shutdown without spending model tokens. The reusable TypeBox contract and Pi
 adapter live in [`packages/protocol`](packages/protocol) and
-[`packages/sandbox-supervisor`](packages/sandbox-supervisor).
+[`packages/sandbox-supervisor`](packages/sandbox-supervisor). The same live
+exchange now passes through the versioned supervisor wire contract and a bounded
+reference spool that verifies cumulative ACK and reconnect replay behavior.
 
 ## Current status
 
-Phase 0: the versioned public event envelope and Pi UI adapter are implemented,
-and the local Pi RPC extension compatibility spike passes end to end. The
-hardened non-root Docker run remains to be verified once Docker is available
-in WSL. The next slice is the supervisor/control-plane wire protocol, because
-events need registration, commands, ACKs, replay, and heartbeat semantics
-before they can safely cross a network boundary.
+Phase 0: the public event envelope, Pi UI adapter, bidirectional
+supervisor/control-plane wire contract, and executable ACK/replay semantics are
+implemented. The local Pi RPC extension compatibility spike passes end to end.
+The hardened non-root Docker run remains to be verified once Docker is available
+in WSL. The next slice is the explicit domain state machines, because legal
+session/turn/sandbox/approval transitions must be fixed before PostgreSQL tables
+and API handlers encode them.

@@ -1,4 +1,12 @@
 export {
+  EventSpoolError,
+  InMemoryEventSpool,
+  type EventSpoolAckResult,
+  type EventSpoolAppendResult,
+  type InMemoryEventSpoolOptions,
+} from "./in-memory-event-spool.ts";
+
+export {
   PiRpcAdapterError,
   PiRpcEventAdapter,
   type ApprovalDecision,

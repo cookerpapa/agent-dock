@@ -15,8 +15,10 @@ The runner must:
 4. observe the subsequent `ctx.ui.notify()` request;
 5. map the confirm, resolution, and notification to versioned AgentDock events
    without exposing Pi's private UI request ID;
-6. receive a successful RPC `abort` response and then close Pi cleanly through EOF;
-7. avoid passing provider credentials to the child process.
+6. validate each event as `event.publish`, retain it in the bounded spool, replay
+   the complete suffix after a simulated disconnect, and apply cumulative ACKs;
+7. receive a successful RPC `abort` response and then close Pi cleanly through EOF;
+8. avoid passing provider credentials to the child process.
 
 This checks the protocol seam. Active model/tool cancellation and killing a full
 tool process tree belong to the later sandbox vertical slice and are not claimed here.
@@ -69,12 +71,16 @@ run-spike.ts -> JSONL get_commands -> Pi RPC -> cloud-check.ts
 run-spike.ts <- extension_ui_request(confirm) <- Pi RPC
 run-spike.ts -> extension_ui_response(true) -> Pi RPC
 run-spike.ts <- extension_ui_request(notify) <- Pi RPC
-run-spike.ts -> AgentDockEvent v1 -> future persistence/SSE client
+run-spike.ts -> AgentDockEvent v1 -> event.publish -> event spool
+run-spike.ts <- event.ack(throughSeq) <- simulated durable control plane
+run-spike.ts -> replay(unacknowledged suffix) -> future WebSocket transport
 ```
 
 The supervisor parses stdout as byte-delimited JSONL, correlates responses by
 request ID, bounds every wait with a timeout, and closes stdin for graceful Pi
 shutdown. It escalates to process-group `SIGTERM`/`SIGKILL` only on a hung exit.
+The in-memory spool is a protocol reference, not a claim of crash-safe local
+durability; production storage is added with the real supervisor transport.
 
 The verified `0.80.10` lockfile currently reports zero production dependency
 vulnerabilities through `npm audit --omit=dev`.

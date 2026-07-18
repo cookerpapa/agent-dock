@@ -6,8 +6,8 @@ in `ROADMAP.md` until their prerequisites are complete.
 ## Phase 0
 
 - [x] ADR-0001: TypeScript runtime language, sandbox boundary, and RPC-first Pi integration
-- [ ] ADR-003: state ownership across PostgreSQL, Pi JSONL, and object storage
-- [ ] ADR-004: command idempotency, event sequence, lease, and fencing model
+- [x] ADR-0003: state ownership across PostgreSQL, Pi JSONL, object storage, and the event spool
+- [x] ADR-0004: command idempotency, event sequence, lease, and fencing model
 - [x] Create `spikes/pi-extension-compat/`
 - [x] Pin a Pi version and start `pi --mode rpc --no-session` from a TypeScript supervisor
 - [x] Add an unchanged sample extension with a `/cloud-check` command
@@ -18,7 +18,7 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [ ] Run the spike inside a non-root Docker container
 - [x] Publish the initial extension compatibility matrix
 - [x] Define the public AgentDock event envelope
-- [ ] Define supervisor registration, command, event, ACK, and heartbeat messages
+- [x] Define supervisor registration, command, event, ACK, and heartbeat messages
 - [ ] Model session, turn, sandbox, approval, and agent-node states
 - [ ] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology

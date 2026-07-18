@@ -107,6 +107,15 @@ Authoritative for cold artifacts:
 - patches, test reports, and generated artifacts;
 - crash diagnostic bundles.
 
+### Supervisor delivery spool
+
+The supervisor retains only unacknowledged event delivery copies. A cumulative
+ACK permits deletion only after PostgreSQL has durably stored every event up to
+that sequence and advanced the cursor in the same transaction. The current
+in-memory spool is an executable reference for ordering, fencing, bounded
+backpressure, ACK, and replay behavior; it is not the final crash-safe storage
+implementation.
+
 ## 4. Execution flow
 
 1. Client submits a command with an idempotency key.
@@ -122,16 +131,38 @@ Authoritative for cold artifacts:
 
 ## 5. Delivery and recovery semantics
 
+### Internal supervisor wire contract
+
+Every internal message carries `protocolVersion`, `messageId`, `sentAt`, a
+discriminator, and a closed typed payload. The contract is transport-neutral
+JSON intended for the supervisor's outbound WebSocket connection.
+
+Supervisor-to-control messages are registration, command ACK, event publication,
+and heartbeat. Control-to-supervisor messages are registration acceptance, turn
+execution/cancellation, approval resolution, cumulative event ACK, and heartbeat
+ACK with lease renewals. Registration advertises the exact Pi/supervisor versions
+and capabilities. Post-registration mutations carry a lease ID and fencing token.
+
+Authentication is established by the transport/sandbox assignment rather than
+by trusting tenant identity supplied by the sandbox. A heartbeat demonstrates
+liveness but cannot make a stale fencing token current.
+
+### Event and command semantics
+
 - Public events use an AgentDock-owned, versioned, closed TypeBox union rather
   than raw Pi RPC objects. Version 1 carries `eventId`, `sessionId`, `turnId`,
   `agentId`, per-session `seq`, `occurredAt`, `type`, and a typed `payload`.
 - Only session-level state events may use a null `turnId`; turn, tool, approval,
   assistant, and notification events require a concrete turn identity.
-- Event validation succeeds before an in-memory sequence is committed. Durable
-  sequence allocation, ACKs, leases, and fencing are specified in the next
-  control-protocol/state-ownership decisions.
-- Commands use at-least-once delivery plus idempotency.
-- Events use monotonic sequence numbers and ACK/replay.
+- Event validation succeeds before an in-memory sequence is committed.
+- Commands use at-least-once delivery plus durable idempotency. Command ACK says
+  that the current fenced supervisor accepted responsibility, not that execution
+  completed.
+- Events use contiguous per-session sequence numbers and at-least-once delivery.
+  ACK is cumulative and means durably persisted, so an ACK lost in transit can
+  safely cause replay.
+- Duplicate current ACKs are idempotent. Regressing ACKs, ACKs beyond the highest
+  publication, sequence gaps, and stale lease/fencing metadata are rejected.
 - Read-only tool calls may be retried when safe.
 - Mutating or external side effects require an execution ledger, reconciliation,
   or human confirmation after an ambiguous crash.
