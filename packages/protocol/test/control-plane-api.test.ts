@@ -5,6 +5,7 @@ import {
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseIdempotencyKey,
+  parseLastEventIdHeader,
   parseUuidPathParameter,
 } from "../src/index.ts";
 
@@ -48,6 +49,18 @@ describe("control-plane public API schemas", () => {
     expect(() => parseIdempotencyKey(["one", "two"])).toThrow(ControlPlaneApiValidationError);
     expect(() => parseIdempotencyKey("contains whitespace")).toThrow(
       ControlPlaneApiValidationError,
+    );
+  });
+
+  it("parses canonical resumable SSE cursors", () => {
+    expect(parseLastEventIdHeader(undefined)).toBe(0);
+    expect(parseLastEventIdHeader("0")).toBe(0);
+    expect(parseLastEventIdHeader("42")).toBe(42);
+    for (const invalid of ["", "01", "-1", "+1", " 1", ["1", "2"], 1]) {
+      expect(() => parseLastEventIdHeader(invalid)).toThrow(ControlPlaneApiValidationError);
+    }
+    expect(() => parseLastEventIdHeader(String(Number.MAX_SAFE_INTEGER + 1))).toThrow(
+      "outside the supported integer range",
     );
   });
 });

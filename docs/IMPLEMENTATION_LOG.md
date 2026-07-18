@@ -473,3 +473,49 @@
   `Last-Event-ID` 的 SSE replay。原因是当前 Pi 事件已经可信地产生，但只进入测试
   collector；先让事件在数据库 commit 后才 ACK，Web 才能实时显示并在断线后无损
   续传，之后再接 cancellation 和可恢复 Pi session。
+
+## 2026-07-18 — Durable event ACK and resumable SSE
+
+- 目标：把真实 Pi 已经产生的公开事件从 test collector 变成可恢复的权威日志，并
+  让 supervisor 只在 PostgreSQL commit 后删除投递副本；浏览器实时流和断线补发必须
+  使用同一份 session sequence。
+- 决策：新增 ADR-0008，固定 `event.publish -> transaction commit -> event.ack` 边界、
+  精确重复投递语义以及 SSE subscribe-before-replay 的无缝衔接。新增向前迁移 002：
+  `session_events.agent_id` 保存 `root` 这类公开 opaque ID，`agent_node_id` 继续保留为
+  可选内部 UUID；`command_id` 通过 tenant/session/turn 复合外键绑定原命令。旧事件会
+  显式回填为内部 node ID 或 `legacy`，不会伪造为当前 `root`。
+- 写入：`DurableEventStore` 锁 session 与 cursor，核对 tenant/session/turn/command、
+  当前未过期 lease/fence、`last_persisted_seq + 1` 与 `sessions.next_event_seq`，然后在
+  同一 transaction 写完整事件、推进 persisted/ACK-eligible cursor 和下一序号。gap、
+  stale fence、复用 event ID 与冲突 duplicate 都不会改变数据库。
+- 丢 ACK 恢复：lease 已在 terminal settlement 中释放后，如果 supervisor 重投的
+  event ID/body/time/command/lease/fence 与持久化行完全相同，control plane 仍可只读地
+  重发到该序号的 ACK；内容有任何变化都会得到 `event_conflict`。这样解决“commit
+  成功但 ACK 包恰好丢失”的窗口，同时旧 runner 仍不能追加或篡改历史。
+- Supervisor：local supervisor 每次发布前先 append 到 bounded `InMemoryEventSpool`；
+  local execution backend 现在必须注入 durable ingestor，验证返回 ACK 的
+  session/lease/fence/seq 后，spool 才累计删除。该 spool 仍是 memory-only，runner
+  进程重启后的持久化重投留在 Phase 2。
+- Web：新增 `GET /v1/sessions/:sessionId/events`。SSE frame 使用 session seq 作为
+  `id`、AgentDock type 作为 `event`、完整 versioned event 作为 JSON `data`；严格校验
+  canonical non-negative `Last-Event-ID`，拒绝超过 durable high-water 的 cursor。
+  stream 先订阅 bounded process-local hub，再分页读取固定 replay window，最后按 seq
+  去重 live overlap，并用 heartbeat 保活。因此 control-plane 重启后的浏览器 replay
+  已安全；多 control-plane replica 的无缝 live fan-out 仍需 `LISTEN/NOTIFY` 或 broker。
+- 端到端证据：测试在 Pi 执行前先打开 SSE，pinned Pi `0.80.10` 通过 loopback fake
+  model 产生 `turn.started`、两段 text delta、`turn.completed`；数据库事件与 ACK 均为
+  `1/2/3/4`，SSE 实时收到同样四条，`Last-Event-ID: 2` 只补 `3/4`。同一测试还证明
+  gap 与 stale fence 被拒绝、terminal exact duplicate 在 lease 释放后可重 ACK、篡改
+  duplicate 被拒绝，且全程不读取订阅凭证、不消耗 provider token。
+- 验证：全仓 `npm run ci` 通过（format、typecheck、112 tests、两个 zero-token Pi
+  spikes、0 high-severity vulnerabilities）；同一套 16 个 control-plane tests 在一次性
+  PostgreSQL `15.2-alpine` 上通过，容器随后自动删除。重新构建后的两个 hardened
+  image 也通过 non-root、read-only rootfs、no network、resource limit 和零 token
+  runtime 检查，临时容器全部清理。
+- 当前边界：生产 HTTP entry point 已有 durable event table 与 SSE endpoint，但不会
+  自动启动 dispatcher/supervisor；live hub 只覆盖单个 control-plane process，runner
+  spool 不是 crash-safe，Pi JSONL/workspace snapshot、lease renewal、cancellation 和
+  React session page 仍未完成。
+- 下一步：实现 durable cancel command 到 Pi/process-tree termination 的完整路径。
+  原因是现在用户已经能实时观察长 turn，但还不能主动停止模型请求或工具子进程；
+  cancellation 是把当前“可看”链路变成可安全操作的云端 session 的最小下一闭环。

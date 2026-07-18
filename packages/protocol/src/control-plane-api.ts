@@ -148,3 +148,19 @@ export function parseIdempotencyKey(value: unknown): string {
 export function parseUuidPathParameter(value: unknown, name: string): string {
   return parseSchema(UuidSchema, value, `${name} path parameter`);
 }
+
+export function parseLastEventIdHeader(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/.test(value)) {
+    throw new ControlPlaneApiValidationError(
+      "Last-Event-ID must be a canonical non-negative integer",
+    );
+  }
+  const sequence = Number(value);
+  if (!Number.isSafeInteger(sequence)) {
+    throw new ControlPlaneApiValidationError(
+      "Last-Event-ID is outside the supported integer range",
+    );
+  }
+  return sequence;
+}

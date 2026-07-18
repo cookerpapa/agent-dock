@@ -7,6 +7,7 @@ import {
   AgentDockWireProtocolError,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
+  type EventAckMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
@@ -17,6 +18,7 @@ import {
   type TurnExecutionRequest,
   type TurnExecutionResult,
 } from "./outbox-dispatcher.ts";
+import { DurableEventStoreError, type DurableEventIngestor } from "./durable-event-store.ts";
 import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
@@ -25,6 +27,7 @@ import {
 export type LocalSupervisorExecutionBackendOptions = {
   supervisor: LocalSandboxSupervisor;
   leaseCoordinator: SessionLeaseCoordinator;
+  eventIngestor: DurableEventIngestor;
   onEvent?: (message: EventPublishMessage) => Promise<void> | void;
   clock?: () => Date;
   idGenerator?: () => string;
@@ -55,6 +58,9 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
     return new TurnExecutionBackendError(error.code, error.message, error.retryable);
   }
+  if (error instanceof DurableEventStoreError) {
+    return new TurnExecutionBackendError(error.code, error.message, error.retryable);
+  }
   if (error instanceof LocalSandboxSupervisorError) {
     return new TurnExecutionBackendError(error.code, error.message, false);
   }
@@ -70,6 +76,24 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
     "Local supervisor execution failed",
     true,
   );
+}
+
+function validateEventAck(eventMessage: EventPublishMessage, value: unknown): EventAckMessage {
+  const parsed = parseControlToSupervisorMessage(value);
+  if (
+    parsed.type !== "event.ack" ||
+    parsed.payload.sessionId !== eventMessage.payload.event.sessionId ||
+    parsed.payload.leaseId !== eventMessage.payload.leaseId ||
+    parsed.payload.fencingToken !== eventMessage.payload.fencingToken ||
+    parsed.payload.acknowledgedThroughSeq !== eventMessage.payload.event.seq
+  ) {
+    throw new TurnExecutionBackendError(
+      "backend_protocol_violation",
+      "Event ACK identity does not match the published event",
+      false,
+    );
+  }
+  return parsed;
 }
 
 function validateAck(
@@ -104,6 +128,7 @@ function validateAck(
 export class LocalSupervisorExecutionBackend implements TurnExecutionBackend {
   readonly #supervisor: LocalSandboxSupervisor;
   readonly #leaseCoordinator: SessionLeaseCoordinator;
+  readonly #eventIngestor: DurableEventIngestor;
   readonly #onEvent: ((message: EventPublishMessage) => Promise<void> | void) | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
@@ -111,6 +136,7 @@ export class LocalSupervisorExecutionBackend implements TurnExecutionBackend {
   constructor(options: LocalSupervisorExecutionBackendOptions) {
     this.#supervisor = options.supervisor;
     this.#leaseCoordinator = options.leaseCoordinator;
+    this.#eventIngestor = options.eventIngestor;
     this.#onEvent = options.onEvent;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
@@ -186,8 +212,12 @@ export class LocalSupervisorExecutionBackend implements TurnExecutionBackend {
             false,
           );
         }
-        await this.#leaseCoordinator.assertCurrentLease(request, acknowledgement);
+        const eventAck = validateEventAck(
+          eventMessage,
+          await this.#eventIngestor.ingest(eventMessage),
+        );
         await this.#onEvent?.(eventMessage);
+        return eventAck;
       });
       const ack = validateAck(request, command, prepared.ack);
       if (ack.payload.status === "rejected") {

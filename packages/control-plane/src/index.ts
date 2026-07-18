@@ -1,6 +1,14 @@
 export { createControlPlaneApplication } from "./application.ts";
 export { ControlPlaneModule } from "./control-plane.module.ts";
 export {
+  DurableEventStore,
+  DurableEventStoreError,
+  type DurableEventIngestor,
+  type DurableEventStoreErrorCode,
+  type DurableEventStoreOptions,
+  type EventReplayWindow,
+} from "./durable-event-store.ts";
+export {
   DeterministicExecutionBackend,
   type DeterministicExecutionOutcome,
   type DeterministicExecutionRecord,
@@ -28,6 +36,16 @@ export {
   SessionLeaseCoordinatorError,
   type SessionLeaseCoordinatorOptions,
 } from "./session-lease-coordinator.ts";
+export {
+  SessionEventHub,
+  SessionEventSubscription,
+  type SessionEventHubOptions,
+} from "./session-event-hub.ts";
+export {
+  OpenSessionEventStream,
+  SessionEventStream,
+  type SessionEventStreamOptions,
+} from "./session-event-stream.ts";
 export {
   ControlPlaneStore,
   ControlPlaneStoreError,

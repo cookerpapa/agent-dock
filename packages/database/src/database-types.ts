@@ -220,6 +220,8 @@ export interface SessionEventTable {
   session_id: string;
   turn_id: string | null;
   agent_node_id: string | null;
+  agent_id: string;
+  command_id: string | null;
   seq: Int8;
   schema_version: number;
   type: string;

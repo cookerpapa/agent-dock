@@ -35,6 +35,7 @@ Deliverables:
 - TypeScript supervisor using a pinned Pi RPC process behind an AgentDock adapter;
 - one sandboxed Git workspace;
 - prompt, streaming text, tool events, cancellation, and final diff;
+- fenced PostgreSQL event ingestion and resumable session SSE;
 - minimal Pi-export-inspired React session page using SSE;
 - one operator-configured model profile; the domain remains model-selection
   ready without requiring a frontend picker.
@@ -50,7 +51,7 @@ Deliverables:
 - session and turn state machines;
 - idempotency keys;
 - prompt, steer, and follow-up semantics;
-- event sequence, persistence, and SSE replay;
+- durable supervisor-side event replay and cross-replica live notification;
 - Pi JSONL and artifact upload to MinIO;
 - leases, fencing tokens, cold load, and settled-turn recovery.
 

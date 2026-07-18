@@ -2,6 +2,7 @@ import { Catch, type ArgumentsHost, type ExceptionFilter, HttpException } from "
 import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@agent-dock/protocol";
 import type { FastifyReply } from "fastify";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
+import { DurableEventStoreError } from "./durable-event-store.ts";
 
 type ErrorResponse = {
   status: number;
@@ -24,6 +25,17 @@ function mappedError(error: unknown): ErrorResponse {
           : error.code === "conflict" || error.code === "idempotency_conflict"
             ? 409
             : 503;
+    return { status, body: { error: { code: error.code, message: error.message } } };
+  }
+  if (error instanceof DurableEventStoreError) {
+    const status =
+      error.code === "not_found"
+        ? 404
+        : error.code === "cursor_ahead" || error.code === "event_conflict"
+          ? 409
+          : error.code === "event_store_invariant"
+            ? 503
+            : 400;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof HttpException) {

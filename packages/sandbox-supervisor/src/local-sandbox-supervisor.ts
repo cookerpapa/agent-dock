@@ -2,10 +2,12 @@ import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type CommandAckMessage,
+  type EventAckMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { isDeepStrictEqual } from "node:util";
+import { EventSpoolError, InMemoryEventSpool } from "./in-memory-event-spool.ts";
 import type { PiRpcEventPublisher, PiRpcTurnResult } from "./pi-rpc-turn-runner.ts";
 
 export interface SupervisorTurnRunner {
@@ -32,7 +34,8 @@ type AssignmentState = "prepared" | "running" | "completed" | "failed" | "supers
 
 type Assignment = {
   command: ExecuteTurnCommandMessage;
-  publishEvent: (message: EventPublishMessage) => Promise<void> | void;
+  publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage;
+  eventSpool: InMemoryEventSpool;
   state: AssignmentState;
   runPromise?: Promise<PiRpcTurnResult>;
 };
@@ -91,7 +94,7 @@ export class LocalSandboxSupervisor {
 
   prepare(
     value: unknown,
-    publishEvent: (message: EventPublishMessage) => Promise<void> | void,
+    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
   ): PreparedTurnExecution {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.execute") {
@@ -129,6 +132,12 @@ export class LocalSandboxSupervisor {
     const assignment: Assignment = {
       command,
       publishEvent,
+      eventSpool: new InMemoryEventSpool({
+        sessionId: command.payload.sessionId,
+        leaseId: command.payload.leaseId,
+        fencingToken: command.payload.fencingToken,
+        acknowledgedThroughSeq: command.payload.nextEventSeq - 1,
+      }),
       state: "prepared",
     };
     this.#highestFenceBySession.set(command.payload.sessionId, command.payload.fencingToken);
@@ -218,7 +227,24 @@ export class LocalSandboxSupervisor {
             "Runner event identity does not match its assignment",
           );
         }
-        await assignment.publishEvent(message);
+        try {
+          assignment.eventSpool.append(message);
+        } catch (error: unknown) {
+          if (!(error instanceof EventSpoolError)) throw error;
+          throw new LocalSandboxSupervisorError(
+            "invalid_event_delivery",
+            "Supervisor event delivery contract was violated",
+          );
+        }
+        const acknowledgement = await assignment.publishEvent(message);
+        try {
+          assignment.eventSpool.acknowledge(acknowledgement);
+        } catch {
+          throw new LocalSandboxSupervisorError(
+            "invalid_event_delivery",
+            "Supervisor event acknowledgement was invalid",
+          );
+        }
       })
       .then(
         (result) => {

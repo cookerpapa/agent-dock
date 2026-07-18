@@ -95,6 +95,7 @@ only after a measured requirement appears.
 - [ADR-0005: pluggable execution and recovery tiers](docs/adr/0005-pluggable-execution-recovery-tiers.md)
 - [ADR-0006: v0 scope, model profiles, and credentials](docs/adr/0006-v0-product-scope-model-profiles-and-credentials.md)
 - [ADR-0007: supervisor execution handshake and model snapshot](docs/adr/0007-supervisor-execution-handshake-and-model-snapshot.md)
+- [ADR-0008: durable event ACK and resumable SSE replay](docs/adr/0008-durable-event-ack-and-sse-replay.md)
 
 ## Current executable spikes
 
@@ -141,7 +142,7 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 95 unit/contract tests, the two
+It checks Prettier formatting, TypeScript types, 112 unit/contract tests, the two
 zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -182,14 +183,21 @@ The dispatcher acquires a durable session lease and monotonically increasing
 fence, delivers a closed `turn.execute` command containing the immutable model
 snapshot, persists the exact supervisor ACK, and only then lets pinned Pi
 `0.80.10` receive the prompt. Pi text deltas and completion are translated into
-versioned AgentDock events; completion and post-ACK failure both release lease
-and sandbox capacity transactionally.
+versioned AgentDock events. Each event is stored with its command/lease/fence,
+the contiguous database cursor advances in the same transaction, and only the
+committed prefix is cumulatively ACKed to the supervisor spool. The session SSE
+endpoint joins live delivery with durable `Last-Event-ID` replay without a
+query/subscribe gap. Completion and post-ACK failure both release lease and
+sandbox capacity transactionally.
 
 The full database-to-Pi path is covered with the loopback fake model, so it uses
 no subscription token. The in-process supervisor transport and local workspace
 are integration scaffolding and are not started by the production HTTP entry
-point. Durable event persistence/ACK, SSE, cancellation, a real isolated
-workspace transport, and the React page are not connected yet.
+point. The event table and SSE API are production entry-point capabilities, but
+live fan-out is currently process-local and the supervisor spool is memory-only.
+Cancellation, a real isolated workspace transport, durable Pi/workspace
+snapshots, lease renewal/reconciliation, and the React page are not connected
+yet.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

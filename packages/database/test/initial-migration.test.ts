@@ -1,6 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { downInitialControlPlane, upInitialControlPlane } from "../src/index.ts";
+import {
+  downDurableEventDelivery,
+  downInitialControlPlane,
+  upDurableEventDelivery,
+  upInitialControlPlane,
+} from "../src/index.ts";
 import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.ts";
 
 const IDS = {
@@ -255,6 +260,47 @@ describe("initial PostgreSQL migration", () => {
     );
   });
 
+  it("migrates public agent and command identity onto durable events", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(upDurableEventDelivery));
+    const columns = await postgres.query<{ column_name: string; is_nullable: string }>(
+      `select column_name, is_nullable
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'session_events'
+          and column_name in ('agent_id', 'command_id')
+        order by column_name`,
+    );
+    expect(columns.rows).toEqual([
+      { column_name: "agent_id", is_nullable: "NO" },
+      { column_name: "command_id", is_nullable: "YES" },
+    ]);
+    const backfilled = await postgres.query<{ agent_id: string; command_id: string | null }>(
+      `select agent_id, command_id from session_events where event_id = $1`,
+      [IDS.event1],
+    );
+    expect(backfilled.rows[0]).toEqual({ agent_id: IDS.agent, command_id: null });
+
+    await postgres.query(
+      `insert into commands
+         (id, tenant_id, session_id, turn_id, idempotency_key, kind, payload)
+       values ($1, $2, $3, $4, 'request-2', 'turn.execute', '{}'::jsonb)`,
+      [IDS.command2, IDS.tenant, IDS.session, IDS.turn2],
+    );
+    await expect(
+      postgres.query(`update session_events set command_id = $1 where event_id = $2`, [
+        IDS.command2,
+        IDS.event1,
+      ]),
+    ).rejects.toThrow();
+    await postgres.query(
+      `update session_events set agent_id = 'root', command_id = $1 where event_id = $2`,
+      [IDS.command1, IDS.event1],
+    );
+    await expect(
+      postgres.query(`update session_events set agent_id = '' where event_id = $1`, [IDS.event1]),
+    ).rejects.toThrow();
+  });
+
   it("requires approval outcome and resolution time to match state", async () => {
     await expect(
       postgres.query(
@@ -311,6 +357,8 @@ describe("initial PostgreSQL migration", () => {
   });
 
   it("drops every application table in reverse dependency order", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(downDurableEventDelivery));
+    await applyCompiledQueries(postgres, await compileMigration(upDurableEventDelivery));
     await applyCompiledQueries(postgres, await compileMigration(downInitialControlPlane));
     const result = await postgres.query<{ table_name: string }>(
       `select table_name

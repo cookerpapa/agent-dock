@@ -75,11 +75,14 @@ post-ACK failure release the matching lease and capacity in the settlement
 transaction; a stale lease or event fence is rejected.
 
 This remains an integration boundary, not the production runner transport. The
-in-process transport, temporary local workspace resolver, and event collector
-are deliberately not auto-started by the HTTP application. Event persistence,
-cumulative ACK, SSE replay, lease renewal/reconciliation, cancellation, and the
-real sandbox transport remain later slices. A crash after durable ACK is still
-treated as ambiguous rather than replaying possible tool side effects.
+in-process transport and temporary local workspace resolver are deliberately
+not auto-started by the HTTP application. PostgreSQL event persistence,
+cumulative ACK, and the SSE replay endpoint are now executable. The live SSE hub
+is process-local and the supervisor spool is still memory-only; lease
+renewal/reconciliation, cancellation, durable snapshots, cross-replica event
+notification, and the real sandbox transport remain later slices. A crash after
+durable command ACK is still treated as ambiguous rather than replaying possible
+tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -245,10 +248,13 @@ implementation.
 Steps 1-8 and 10 are executable through the local integration boundary: the
 control plane acquires a real PostgreSQL lease/fence, persists ACK before run,
 starts pinned Pi RPC, and receives public text/terminal events from the loopback
-fake model. Step 8 currently validates and collects events but does not yet
-persist or cumulatively ACK them. Step 9 and production sandbox assignment are
-also not implemented, so this does not claim reconnect-safe event delivery or
-durable Pi/workspace snapshots.
+fake model. Step 8 stores each complete event plus command/lease/fence identity,
+advances the session cursor and next sequence atomically, and returns the
+cumulative ACK only after commit. The same durable log is available through SSE
+and resumes after a browser reconnect with `Last-Event-ID`. Step 9, a durable
+supervisor-side spool, cross-control-plane live notification, and production
+sandbox assignment are not implemented, so this does not yet claim runner
+reconnect recovery or durable Pi/workspace snapshots.
 
 ## 5. Delivery and recovery semantics
 
@@ -278,7 +284,7 @@ liveness but cannot make a stale fencing token current.
   `agentId`, per-session `seq`, `occurredAt`, `type`, and a typed `payload`.
 - Only session-level state events may use a null `turnId`; turn, tool, approval,
   assistant, and notification events require a concrete turn identity.
-- Event validation succeeds before an in-memory sequence is committed.
+- Event validation succeeds before the supervisor spool accepts a sequence.
 - Commands use at-least-once delivery plus durable idempotency. Command ACK says
   that the current fenced supervisor accepted responsibility, not that execution
   completed.
@@ -287,6 +293,14 @@ liveness but cannot make a stale fencing token current.
   safely cause replay.
 - Duplicate current ACKs are idempotent. Regressing ACKs, ACKs beyond the highest
   publication, sequence gaps, and stale lease/fencing metadata are rejected.
+- `GET /v1/sessions/:sessionId/events` emits the session sequence as SSE `id`,
+  the AgentDock event type as `event`, and the complete versioned event as JSON
+  `data`. It subscribes before reading the durable suffix and deduplicates the
+  replay/live overlap. Exact durable redelivery may be re-ACKed after lease
+  release when the earlier ACK packet was lost; it cannot add or alter history.
+- The current in-process live hub is bounded and single-replica. PostgreSQL is
+  authoritative for reconnect, while multi-replica live fan-out awaits
+  `LISTEN/NOTIFY` or a measured broker requirement.
 - Read-only tool calls may be retried when safe.
 - Mutating or external side effects require an execution ledger, reconciliation,
   or human confirmation after an ambiguous crash.

@@ -1,4 +1,8 @@
-import type { EventPublishMessage, ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type {
+  EventAckMessage,
+  EventPublishMessage,
+  ExecuteTurnCommandMessage,
+} from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
 import { LocalSandboxSupervisor, type SupervisorTurnRunner } from "../src/index.ts";
 
@@ -57,11 +61,15 @@ class RecordingRunner implements SupervisorTurnRunner {
   }
 }
 
+function rejectUnexpectedEvent(): never {
+  throw new Error("Recording runner did not expect to publish an event");
+}
+
 describe("LocalSandboxSupervisor", () => {
   it("returns a side-effect-free ACK and starts the runner only after run", async () => {
     const runner = new RecordingRunner();
     const supervisor = new LocalSandboxSupervisor({ runner });
-    const prepared = supervisor.prepare(command(), () => undefined);
+    const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
 
     expect(prepared.ack.payload).toMatchObject({ status: "accepted", fencingToken: 1 });
     expect(runner.calls).toHaveLength(0);
@@ -75,8 +83,8 @@ describe("LocalSandboxSupervisor", () => {
   it("deduplicates the same command and reuses one execution promise", async () => {
     const runner = new RecordingRunner();
     const supervisor = new LocalSandboxSupervisor({ runner });
-    const first = supervisor.prepare(command(), () => undefined);
-    const duplicate = supervisor.prepare(command(), () => undefined);
+    const first = supervisor.prepare(command(), rejectUnexpectedEvent);
+    const duplicate = supervisor.prepare(command(), rejectUnexpectedEvent);
 
     expect(duplicate.ack.payload.status).toBe("duplicate");
     await Promise.all([first.run(), duplicate.run()]);
@@ -86,12 +94,12 @@ describe("LocalSandboxSupervisor", () => {
   it("rejects a reused command ID when the immutable payload changed", () => {
     const runner = new RecordingRunner();
     const supervisor = new LocalSandboxSupervisor({ runner });
-    supervisor.prepare(command(), () => undefined);
+    supervisor.prepare(command(), rejectUnexpectedEvent);
     const changed = command();
     if (changed.payload.input.kind !== "prompt") throw new Error("Expected prompt input");
     changed.payload.input.text = "different prompt";
 
-    const conflict = supervisor.prepare(changed, () => undefined);
+    const conflict = supervisor.prepare(changed, rejectUnexpectedEvent);
     expect(conflict.ack.payload).toMatchObject({
       status: "rejected",
       code: "invalid_command",
@@ -104,11 +112,11 @@ describe("LocalSandboxSupervisor", () => {
     const supervisor = new LocalSandboxSupervisor({ runner });
     const current = supervisor.prepare(
       command({ leaseId: IDS.lease2, fencingToken: 2 }),
-      () => undefined,
+      rejectUnexpectedEvent,
     );
     current.releaseBeforeStart();
 
-    const stale = supervisor.prepare(command({ fencingToken: 1 }), () => undefined);
+    const stale = supervisor.prepare(command({ fencingToken: 1 }), rejectUnexpectedEvent);
     expect(stale.ack.payload).toMatchObject({
       status: "rejected",
       code: "stale_fence",
@@ -120,14 +128,14 @@ describe("LocalSandboxSupervisor", () => {
   it("rejects capacity overflow without invoking the second command", () => {
     const runner = new RecordingRunner();
     const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
-    supervisor.prepare(command(), () => undefined);
+    supervisor.prepare(command(), rejectUnexpectedEvent);
     const overflow = supervisor.prepare(
       command({
         commandId: IDS.command2,
         leaseId: IDS.lease2,
         sessionId: "session-2",
       }),
-      () => undefined,
+      rejectUnexpectedEvent,
     );
 
     expect(overflow.ack.payload).toMatchObject({
@@ -167,8 +175,53 @@ describe("LocalSandboxSupervisor", () => {
       },
     };
     const supervisor = new LocalSandboxSupervisor({ runner: badRunner });
-    const prepared = supervisor.prepare(command(), () => undefined);
+    const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
 
     await expect(prepared.run()).rejects.toThrow("does not match its assignment");
+  });
+
+  it("retains the spooled event when the control-plane ACK is invalid", async () => {
+    const publishingRunner: SupervisorTurnRunner = {
+      async run(value, publishEvent) {
+        await publishEvent({
+          protocolVersion: 1,
+          messageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          sentAt: "2026-07-18T08:00:00.000Z",
+          type: "event.publish",
+          payload: {
+            leaseId: value.payload.leaseId,
+            fencingToken: value.payload.fencingToken,
+            commandId: value.payload.commandId,
+            event: {
+              schemaVersion: 1,
+              eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              sessionId: value.payload.sessionId,
+              turnId: value.payload.turnId,
+              agentId: "root",
+              seq: 1,
+              occurredAt: "2026-07-18T08:00:00.000Z",
+              type: "turn.started",
+              payload: { inputKind: "prompt" },
+            },
+          },
+        });
+        return { stopReason: "stop" };
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({ runner: publishingRunner });
+    const prepared = supervisor.prepare(command(), (message): EventAckMessage => ({
+      protocolVersion: 1,
+      messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      sentAt: "2026-07-18T08:00:00.000Z",
+      type: "event.ack",
+      payload: {
+        sessionId: message.payload.event.sessionId,
+        leaseId: message.payload.leaseId,
+        fencingToken: message.payload.fencingToken,
+        acknowledgedThroughSeq: 2,
+      },
+    }));
+
+    await expect(prepared.run()).rejects.toThrow("acknowledgement was invalid");
   });
 });

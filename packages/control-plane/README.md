@@ -1,8 +1,8 @@
 # AgentDock control plane
 
-This package contains the Phase 1 NestJS/Fastify durable-intake boundary and an
-explicit outbox dispatcher. It is not yet the production Pi executor or browser
-event surface.
+This package contains the Phase 1 NestJS/Fastify durable-intake boundary, an
+explicit outbox dispatcher, fenced event ingestion, and the resumable browser
+event surface. It is not yet the production Pi executor.
 
 ## Implemented endpoints
 
@@ -12,6 +12,8 @@ event surface.
 - `POST /v1/sessions/:sessionId/turns` requires `Idempotency-Key` and returns
   `202 Accepted` only after the queued turn, pending command, and transactional
   outbox record commit together.
+- `GET /v1/sessions/:sessionId/events` streams versioned AgentDock events as SSE
+  and resumes strictly after a validated `Last-Event-ID` session sequence.
 
 The turn stores the prompt and immutable model/credential-binding snapshot. The
 command stores only a request fingerprint, and the outbox carries IDs rather
@@ -46,6 +48,23 @@ appear completed. The current dispatcher lease safely reclaims a crash before
 ACK; a crash after ACK intentionally remains for the later supervisor
 lease/fencing and reconciliation slice.
 
+## Durable event boundary
+
+`DurableEventStore` accepts only the closed `event.publish` wire message. A
+transaction locks the session/cursor, validates turn/command ownership and the
+current unexpired lease/fence, rejects sequence gaps, inserts the complete event
+identity, and advances both cursor and `sessions.next_event_seq`. Only after
+commit does it publish to the live hub and return `event.ack`. Exact redelivery
+is idempotent—even just after lease release when an ACK packet was lost—while a
+changed event at the same sequence is rejected.
+
+The SSE stream subscribes before querying its durable replay window, sends
+database rows first, then drops duplicates from the queued live overlap. Slow
+subscribers have a bounded queue and reconnect from their last received ID.
+This closes the single-process replay/live race; multi-control-plane live fan-out
+still needs PostgreSQL notification or a broker. PostgreSQL replay itself is
+restart-safe.
+
 ## Verification boundary
 
 ```bash
@@ -53,18 +72,21 @@ npm run test --workspace @agent-dock/control-plane
 ```
 
 The test starts official PGlite behind its PostgreSQL wire-compatible socket,
-runs the Kysely migration, creates the NestJS application, and sends real
-Fastify HTTP requests without opening a public port. It covers validation,
+runs all Kysely migrations, creates the NestJS application, and sends real
+Fastify requests on an ephemeral loopback port. It covers validation,
 durable acceptance, idempotent replay, conflicting reuse, model-policy
 rejection, generic error redaction, rollback when the outbox step fails,
-successful ACK/completion, concurrent claim exclusion, pre-ACK retry, and
-post-ACK terminal failure.
+successful ACK/completion, concurrent claim exclusion, pre-ACK retry, post-ACK
+terminal failure, commit-before-event-ACK, gap/fence/conflict rejection, live
+SSE, and `Last-Event-ID` replay. Its end-to-end path starts pinned Pi against the
+loopback fake model without provider tokens.
 
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
-remain explicit deployment steps. A continuously running production worker, Pi
-execution, SSE, cancellation, and the React page are not claimed by this slice.
+remain explicit deployment steps. A continuously running production worker,
+production supervisor transport, durable runner spool, cancellation, and the
+React page are not claimed by this slice.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

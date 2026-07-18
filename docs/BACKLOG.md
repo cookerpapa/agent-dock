@@ -47,9 +47,10 @@ Acceptance criteria:
 - [x] A transactional-outbox dispatcher proves exclusive mailbox claim,
   pre-ACK retry, and post-ACK terminal failure with a deterministic backend
 - [x] The supervisor uses a pinned Pi RPC process through an AgentDock adapter
+- [x] Fenced events commit to PostgreSQL before cumulative supervisor ACK
 - [ ] The workspace and all extensions run outside the NestJS control-plane process
 - [ ] Text and tool events carry session, turn, agent, and sequence identifiers
-- [ ] SSE reconnect resumes from the last acknowledged event
+- [x] SSE reconnect resumes from the last acknowledged event
 - [ ] Cancellation stops the model request and complete tool process tree
 - [ ] No provider credential appears in logs or the workspace
 - [ ] A clean-checkout command reproduces the demo

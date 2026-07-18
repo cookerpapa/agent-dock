@@ -35,6 +35,7 @@ export {
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseIdempotencyKey,
+  parseLastEventIdHeader,
   parseUuidPathParameter,
   type AcceptTurnRequest,
   type AcceptedTurnResource,

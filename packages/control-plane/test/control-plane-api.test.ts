@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, upInitialControlPlane, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type {
   AcceptedTurnResource,
@@ -9,6 +9,7 @@ import type {
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
+import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
 import {
   LocalSandboxSupervisor,
   PiRpcTurnError,
@@ -23,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
   DeterministicExecutionBackend,
+  DurableEventStore,
   LocalSupervisorExecutionBackend,
   OutboxDispatcher,
   OutboxDispatcherStaleClaimError,
@@ -44,6 +46,8 @@ let socketServer: PGLiteSocketServer | undefined;
 let database: Kysely<Database>;
 let application: NestFastifyApplication;
 let http: FastifyInstance;
+let baseUrl: string;
+let durableEventStore: DurableEventStore;
 let project: ProjectResource;
 let session: SessionResource;
 let firstAccepted: AcceptedTurnResource;
@@ -141,6 +145,64 @@ async function readTurnExecution(accepted: AcceptedTurnResource) {
     .executeTakeFirstOrThrow();
 }
 
+type ParsedSseEvent = {
+  id: number;
+  event: string;
+  data: Record<string, unknown>;
+};
+
+async function readSseEvents(
+  response: Response,
+  count: number,
+  timeoutMs = 10_000,
+): Promise<readonly ParsedSseEvent[]> {
+  if (response.body === null) throw new Error("SSE response did not include a body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const events: ParsedSseEvent[] = [];
+  let buffer = "";
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Timed out reading SSE events")), timeoutMs);
+    timer.unref();
+  });
+  const reading = (async () => {
+    while (events.length < count) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("SSE stream ended before all events arrived");
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+        if (frame.startsWith(":")) continue;
+        const fields = new Map(
+          frame.split("\n").map((line) => {
+            const separator = line.indexOf(":");
+            return [line.slice(0, separator), line.slice(separator + 1).trimStart()];
+          }),
+        );
+        events.push({
+          id: Number(fields.get("id")),
+          event: fields.get("event") ?? "",
+          data: JSON.parse(fields.get("data") ?? "{}") as Record<string, unknown>,
+        });
+        if (events.length === count) return events;
+      }
+    }
+    return events;
+  })();
+  try {
+    return await Promise.race([reading, timeout]);
+  } catch (error: unknown) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 beforeAll(async () => {
   let connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL;
   if (!connectionString) {
@@ -158,14 +220,17 @@ beforeAll(async () => {
     connectionString,
     maxConnections: 2,
   });
-  await upInitialControlPlane(database as unknown as Kysely<unknown>);
+  await runMigrations(database, "up");
   await seedSingleUserProfile();
   application = await createControlPlaneApplication({
     database,
     tenantId: IDS.tenant,
     defaultModelProfileId: IDS.profile,
   });
+  await application.listen(0, "127.0.0.1");
   http = application.getHttpAdapter().getInstance() as FastifyInstance;
+  baseUrl = await application.getUrl();
+  durableEventStore = application.get(DurableEventStore);
 }, 30_000);
 
 afterAll(async () => {
@@ -722,6 +787,10 @@ describe.sequential("single-user durable turn intake API", () => {
     const fakeModel = new FakeModelServer();
     const workspaceDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-workspace-"));
     const events: EventPublishMessage[] = [];
+    const acknowledgedSequences: number[] = [];
+    const persistedSequencesBeforeAck: number[] = [];
+    let rejectedGap = false;
+    let rejectedStaleFence = false;
     const durableStatesAtPublish: Array<{
       commandState: string;
       turnState: string;
@@ -751,6 +820,41 @@ describe.sequential("single-user durable turn intake API", () => {
       const backend = new LocalSupervisorExecutionBackend({
         supervisor,
         leaseCoordinator,
+        eventIngestor: {
+          async ingest(value) {
+            const message = parseSupervisorToControlMessage(value);
+            if (message.type !== "event.publish") throw new Error("Expected event publication");
+            if (message.payload.event.seq === 1) {
+              const gap = structuredClone(message);
+              gap.messageId = globalThis.crypto.randomUUID();
+              gap.payload.event.eventId = globalThis.crypto.randomUUID();
+              gap.payload.event.seq = 2;
+              await expect(durableEventStore.ingest(gap)).rejects.toMatchObject({
+                code: "sequence_gap",
+              });
+              rejectedGap = true;
+
+              const stale = structuredClone(message);
+              stale.messageId = globalThis.crypto.randomUUID();
+              stale.payload.fencingToken += 1;
+              await expect(durableEventStore.ingest(stale)).rejects.toMatchObject({
+                code: "stale_fence",
+              });
+              rejectedStaleFence = true;
+            }
+            const acknowledgement = await durableEventStore.ingest(message);
+            const persisted = await database
+              .selectFrom("session_events")
+              .select(["event_id", "seq"])
+              .where("session_id", "=", message.payload.event.sessionId)
+              .where("seq", "=", String(message.payload.event.seq))
+              .executeTakeFirstOrThrow();
+            expect(persisted.event_id).toBe(message.payload.event.eventId);
+            persistedSequencesBeforeAck.push(Number(persisted.seq));
+            acknowledgedSequences.push(acknowledgement.payload.acknowledgedThroughSeq);
+            return acknowledgement;
+          },
+        },
         async onEvent(message) {
           events.push(message);
           const state = await readTurnExecution(accepted);
@@ -769,7 +873,16 @@ describe.sequential("single-user durable turn intake API", () => {
         leaseManager: leaseCoordinator,
       });
 
+      const liveAbort = new AbortController();
+      const liveResponse = await fetch(`${baseUrl}/v1/sessions/${piSession.sessionId}/events`, {
+        signal: liveAbort.signal,
+      });
+      expect(liveResponse.status).toBe(200);
+      expect(liveResponse.headers.get("content-type")).toContain("text/event-stream");
+      const liveEventsPromise = readSseEvents(liveResponse, 4);
       const dispatchResult = await dispatcher.dispatchNext();
+      const liveEvents = await liveEventsPromise;
+      liveAbort.abort();
       expect(dispatchResult).toEqual({
         status: "completed",
         commandId: accepted.commandId,
@@ -785,6 +898,18 @@ describe.sequential("single-user durable turn intake API", () => {
         "turn.completed",
       ]);
       expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3, 4]);
+      expect(acknowledgedSequences).toEqual([1, 2, 3, 4]);
+      expect(persistedSequencesBeforeAck).toEqual([1, 2, 3, 4]);
+      expect(rejectedGap).toBe(true);
+      expect(rejectedStaleFence).toBe(true);
+      expect(liveEvents.map((event) => event.id)).toEqual([1, 2, 3, 4]);
+      expect(liveEvents.map((event) => event.event)).toEqual([
+        "turn.started",
+        "assistant.text.delta",
+        "assistant.text.delta",
+        "turn.completed",
+      ]);
+      expect(liveEvents.map((event) => event.data.seq)).toEqual([1, 2, 3, 4]);
       expect(
         events
           .filter((message) => message.payload.event.type === "assistant.text.delta")
@@ -841,7 +966,68 @@ describe.sequential("single-user durable turn intake API", () => {
         .select(["last_fencing_token", "next_event_seq"])
         .where("id", "=", piSession.sessionId)
         .executeTakeFirstOrThrow();
-      expect(persistedSession).toEqual({ last_fencing_token: "1", next_event_seq: "1" });
+      expect(persistedSession).toEqual({ last_fencing_token: "1", next_event_seq: "5" });
+      const persistedEvents = await database
+        .selectFrom("session_events")
+        .select(["seq", "type", "agent_id", "command_id", "lease_id", "fencing_token"])
+        .where("session_id", "=", piSession.sessionId)
+        .orderBy("seq", "asc")
+        .execute();
+      expect(persistedEvents).toEqual(
+        events.map((message) => ({
+          seq: String(message.payload.event.seq),
+          type: message.payload.event.type,
+          agent_id: "root",
+          command_id: accepted.commandId,
+          lease_id: message.payload.leaseId,
+          fencing_token: String(message.payload.fencingToken),
+        })),
+      );
+      const cursor = await database
+        .selectFrom("session_event_cursors")
+        .select(["last_persisted_seq", "acknowledged_through_seq"])
+        .where("session_id", "=", piSession.sessionId)
+        .executeTakeFirstOrThrow();
+      expect(cursor).toEqual({ last_persisted_seq: "4", acknowledged_through_seq: "4" });
+
+      const duplicate = structuredClone(events[3]!);
+      duplicate.messageId = globalThis.crypto.randomUUID();
+      await expect(durableEventStore.ingest(duplicate)).resolves.toMatchObject({
+        type: "event.ack",
+        payload: { acknowledgedThroughSeq: 4 },
+      });
+      const conflict = structuredClone(events[3]!);
+      conflict.messageId = globalThis.crypto.randomUUID();
+      if (conflict.payload.event.type !== "turn.completed") {
+        throw new Error("Expected terminal completion event");
+      }
+      conflict.payload.event.payload.stopReason = "conflicting-redelivery";
+      await expect(durableEventStore.ingest(conflict)).rejects.toMatchObject({
+        code: "event_conflict",
+      });
+
+      const replayAbort = new AbortController();
+      const replayResponse = await fetch(`${baseUrl}/v1/sessions/${piSession.sessionId}/events`, {
+        headers: { "Last-Event-ID": "2" },
+        signal: replayAbort.signal,
+      });
+      expect(replayResponse.status).toBe(200);
+      const replayedEvents = await readSseEvents(replayResponse, 2);
+      replayAbort.abort();
+      expect(replayedEvents.map((event) => event.id)).toEqual([3, 4]);
+
+      const malformedCursor = await http.inject({
+        method: "GET",
+        url: `/v1/sessions/${piSession.sessionId}/events`,
+        headers: { "last-event-id": "01" },
+      });
+      expect(malformedCursor.statusCode).toBe(400);
+      const futureCursor = await http.inject({
+        method: "GET",
+        url: `/v1/sessions/${piSession.sessionId}/events`,
+        headers: { "last-event-id": "5" },
+      });
+      expect(futureCursor.statusCode).toBe(409);
       await expect(
         leaseCoordinator.assertCurrentLease(
           {
@@ -906,6 +1092,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const backend = new LocalSupervisorExecutionBackend({
       supervisor,
       leaseCoordinator,
+      eventIngestor: durableEventStore,
     });
     const dispatcher = new OutboxDispatcher({
       database,

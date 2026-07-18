@@ -13,8 +13,10 @@ export {
 } from "./database-types.ts";
 
 export {
+  downDurableEventDelivery,
   downInitialControlPlane,
   migrationProvider,
+  upDurableEventDelivery,
   upInitialControlPlane,
 } from "./migrations/index.ts";
 
