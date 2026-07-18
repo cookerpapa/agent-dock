@@ -48,21 +48,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate Compose configuration
-        run: docker compose config --quiet
+      - name: Set up Node.js for the runtime verifier
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
 
-      - name: Build pinned Phase 0 images
-        run: docker compose build --pull
-
-      - name: Run Pi RPC compatibility container
-        run: docker compose run --rm --no-deps pi-extension-compat
-
-      - name: Run embedded rehydrate container
-        run: docker compose run --rm --no-deps pi-embedded-rehydrate
-
-      - name: Remove Compose resources
-        if: always()
-        run: docker compose down --remove-orphans
+      - name: Verify effective HostConfig and run both containers
+        run: npm run container:check
 
   secrets:
     name: Secret history scan
