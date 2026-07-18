@@ -18,7 +18,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("display_name", "text", (column) => column.notNull())
     .addColumn("created_at", "timestamptz", (column) => column.notNull().defaultTo(sql`now()`))
     .addUniqueConstraint("users_tenant_id_id_unique", ["tenant_id", "id"])
-    .addCheckConstraint("users_display_name_nonempty", sql`char_length(display_name) between 1 and 256`)
+    .addCheckConstraint(
+      "users_display_name_nonempty",
+      sql`char_length(display_name) between 1 and 256`,
+    )
     .execute();
 
   await db.schema
@@ -66,10 +69,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       "id",
       "version",
     ])
-    .addCheckConstraint("credential_bindings_provider_nonempty", sql`char_length(provider) between 1 and 256`)
-    .addCheckConstraint("credential_bindings_secret_ref_nonempty", sql`char_length(secret_ref) between 1 and 1024`)
+    .addCheckConstraint(
+      "credential_bindings_provider_nonempty",
+      sql`char_length(provider) between 1 and 256`,
+    )
+    .addCheckConstraint(
+      "credential_bindings_secret_ref_nonempty",
+      sql`char_length(secret_ref) between 1 and 1024`,
+    )
     .addCheckConstraint("credential_bindings_version_positive", sql`version > 0`)
-    .addCheckConstraint("credential_bindings_kind_valid", sql`kind in ('oauth', 'api_key', 'brokered')`)
+    .addCheckConstraint(
+      "credential_bindings_kind_valid",
+      sql`kind in ('oauth', 'api_key', 'brokered')`,
+    )
     .addCheckConstraint(
       "credential_bindings_status_valid",
       sql`status in ('active', 'disabled', 'revoked')`,
@@ -99,8 +111,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       ["tenant_id", "id", "version"],
     )
     .addCheckConstraint("model_profiles_name_nonempty", sql`char_length(name) between 1 and 256`)
-    .addCheckConstraint("model_profiles_provider_nonempty", sql`char_length(provider) between 1 and 256`)
-    .addCheckConstraint("model_profiles_model_id_nonempty", sql`char_length(model_id) between 1 and 256`)
+    .addCheckConstraint(
+      "model_profiles_provider_nonempty",
+      sql`char_length(provider) between 1 and 256`,
+    )
+    .addCheckConstraint(
+      "model_profiles_model_id_nonempty",
+      sql`char_length(model_id) between 1 and 256`,
+    )
     .addCheckConstraint(
       "model_profiles_thinking_levels_valid",
       sql`cardinality(allowed_thinking_levels) > 0
@@ -176,12 +194,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("settled_at", "timestamptz")
     .addUniqueConstraint("turns_tenant_session_id_unique", ["tenant_id", "session_id", "id"])
     .addUniqueConstraint("turns_session_id_id_unique", ["session_id", "id"])
-    .addForeignKeyConstraint(
-      "turns_tenant_session_fk",
-      ["tenant_id", "session_id"],
-      "sessions",
-      ["tenant_id", "id"],
-    )
+    .addForeignKeyConstraint("turns_tenant_session_fk", ["tenant_id", "session_id"], "sessions", [
+      "tenant_id",
+      "id",
+    ])
     .addForeignKeyConstraint(
       "turns_tenant_model_profile_fk",
       ["tenant_id", "model_profile_id"],
@@ -204,7 +220,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           or (input_kind = 'continue' and input_text is null)`,
     )
     .addCheckConstraint("turns_thinking_level_valid", sql`thinking_level = any(${thinkingLevels})`)
-    .addCheckConstraint("turns_credential_binding_version_positive", sql`credential_binding_version > 0`)
+    .addCheckConstraint(
+      "turns_credential_binding_version_positive",
+      sql`credential_binding_version > 0`,
+    )
     .addCheckConstraint(
       "turns_settled_at_matches_state",
       sql`(state in ('completed', 'failed', 'cancelled') and settled_at is not null)
@@ -282,9 +301,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       sql`state in ('pending', 'running', 'waiting', 'cancelling', 'completed', 'failed', 'cancelled')`,
     )
     .addCheckConstraint("agent_nodes_depth_nonnegative", sql`depth >= 0`)
-    .addCheckConstraint("agent_nodes_thinking_level_valid", sql`thinking_level = any(${thinkingLevels})`)
-    .addCheckConstraint("agent_nodes_credential_binding_version_positive", sql`credential_binding_version > 0`)
-    .addCheckConstraint("agent_nodes_token_budget_positive", sql`token_budget is null or token_budget > 0`)
+    .addCheckConstraint(
+      "agent_nodes_thinking_level_valid",
+      sql`thinking_level = any(${thinkingLevels})`,
+    )
+    .addCheckConstraint(
+      "agent_nodes_credential_binding_version_positive",
+      sql`credential_binding_version > 0`,
+    )
+    .addCheckConstraint(
+      "agent_nodes_token_budget_positive",
+      sql`token_budget is null or token_budget > 0`,
+    )
     .addCheckConstraint(
       "agent_nodes_wall_time_budget_positive",
       sql`wall_time_budget_ms is null or wall_time_budget_ms > 0`,
@@ -373,7 +401,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       "turns",
       ["tenant_id", "session_id", "id"],
     )
-    .addCheckConstraint("commands_idempotency_key_nonempty", sql`char_length(idempotency_key) between 1 and 256`)
+    .addCheckConstraint(
+      "commands_idempotency_key_nonempty",
+      sql`char_length(idempotency_key) between 1 and 256`,
+    )
     .addCheckConstraint(
       "commands_kind_valid",
       sql`kind in ('turn.execute', 'turn.cancel', 'approval.resolve')`,
@@ -411,7 +442,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       "turns",
       ["tenant_id", "session_id", "id"],
     )
-    .addCheckConstraint("approvals_kind_valid", sql`kind in ('confirm', 'select', 'input', 'editor')`)
+    .addCheckConstraint(
+      "approvals_kind_valid",
+      sql`kind in ('confirm', 'select', 'input', 'editor')`,
+    )
     .addCheckConstraint(
       "approvals_resolution_matches_state",
       sql`(state = 'pending' and outcome is null and resolved_at is null)
@@ -419,7 +453,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           or (state = 'expired' and outcome is null and resolved_at is not null)
           or (state = 'cancelled' and outcome = 'cancelled' and resolved_at is not null)`,
     )
-    .addCheckConstraint("approvals_expiry_valid", sql`expires_at is null or expires_at > requested_at`)
+    .addCheckConstraint(
+      "approvals_expiry_valid",
+      sql`expires_at is null or expires_at > requested_at`,
+    )
     .execute();
 
   await db.schema
@@ -534,7 +571,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       "artifacts_kind_valid",
       sql`kind in ('pi_session_snapshot', 'workspace_snapshot', 'tool_output', 'patch', 'report', 'crash_bundle')`,
     )
-    .addCheckConstraint("artifacts_object_key_nonempty", sql`char_length(object_key) between 1 and 2048`)
+    .addCheckConstraint(
+      "artifacts_object_key_nonempty",
+      sql`char_length(object_key) between 1 and 2048`,
+    )
     .addCheckConstraint("artifacts_sha256_valid", sql`sha256 ~ '^[0-9a-f]{64}$'`)
     .addCheckConstraint("artifacts_size_nonnegative", sql`size_bytes >= 0`)
     .execute();

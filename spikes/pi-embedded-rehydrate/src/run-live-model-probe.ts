@@ -33,7 +33,11 @@ async function readOpenAiOAuthStatus(authPath: string): Promise<OAuthStatus> {
     throw new Error("Pi has no openai-codex credential");
   }
   const fields = credential as Record<string, unknown>;
-  if (fields.type !== "oauth" || typeof fields.refresh !== "string" || fields.refresh.length === 0) {
+  if (
+    fields.type !== "oauth" ||
+    typeof fields.refresh !== "string" ||
+    fields.refresh.length === 0
+  ) {
     throw new Error("Pi openai-codex credential is not a refreshable OAuth login");
   }
   if (typeof fields.expires !== "number" || !Number.isFinite(fields.expires)) {
@@ -69,9 +73,12 @@ function requireSuccessfulAssistant(
 
 function normalizeExactReply(value: string): string {
   let normalized = value.trim();
-  normalized = normalized.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim();
+  normalized = normalized
+    .replace(/^```(?:text)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
   const quote = normalized.at(0);
-  if (quote && (quote === "\"" || quote === "'" || quote === "`") && normalized.at(-1) === quote) {
+  if (quote && (quote === '"' || quote === "'" || quote === "`") && normalized.at(-1) === quote) {
     normalized = normalized.slice(1, -1).trim();
   }
   return normalized;

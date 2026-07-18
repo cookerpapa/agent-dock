@@ -135,11 +135,9 @@ describe("supervisor/control-plane wire protocol", () => {
       },
     } as const;
 
-    expect([execute, cancel, resolve].map((message) => parseControlToSupervisorMessage(message).type)).toEqual([
-      "command.turn.execute",
-      "command.turn.cancel",
-      "command.approval.resolve",
-    ]);
+    expect(
+      [execute, cancel, resolve].map((message) => parseControlToSupervisorMessage(message).type),
+    ).toEqual(["command.turn.execute", "command.turn.cancel", "command.approval.resolve"]);
     expect(() =>
       parseControlToSupervisorMessage({
         ...execute,

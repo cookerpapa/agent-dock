@@ -9,4 +9,7 @@ export const migrationProvider: MigrationProvider = {
   },
 };
 
-export { down as downInitialControlPlane, up as upInitialControlPlane } from "./001_initial_control_plane.ts";
+export {
+  down as downInitialControlPlane,
+  up as upInitialControlPlane,
+} from "./001_initial_control_plane.ts";

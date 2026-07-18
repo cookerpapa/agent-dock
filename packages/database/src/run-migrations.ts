@@ -15,7 +15,8 @@ export async function runMigrations(
   direction: MigrationDirection,
 ): Promise<MigrationRunResult> {
   const migrator = new Migrator({ db, provider: migrationProvider });
-  const result = direction === "up" ? await migrator.migrateToLatest() : await migrator.migrateDown();
+  const result =
+    direction === "up" ? await migrator.migrateToLatest() : await migrator.migrateDown();
   if (result.error) {
     throw result.error;
   }

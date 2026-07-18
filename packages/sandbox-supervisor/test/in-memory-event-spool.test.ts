@@ -28,8 +28,7 @@ function createFixture(initialSequence = 0) {
     {
       initialSequence,
       clock: () => new Date(SENT_AT),
-      idGenerator: () =>
-        `${String(++eventNumber).padStart(8, "0")}-0000-4000-8000-000000000000`,
+      idGenerator: () => `${String(++eventNumber).padStart(8, "0")}-0000-4000-8000-000000000000`,
     },
   );
 
@@ -189,9 +188,7 @@ describe("InMemoryEventSpool", () => {
 
     spool.append(first);
     spool.append(second);
-    expect(() => spool.acknowledge(fixture.ack(3))).toThrow(
-      "exceeds highest published sequence 2",
-    );
+    expect(() => spool.acknowledge(fixture.ack(3))).toThrow("exceeds highest published sequence 2");
     spool.acknowledge(fixture.ack(2));
     expect(() => spool.acknowledge(fixture.ack(1))).toThrow("ACK regression from 2 to 1");
     expect(() =>

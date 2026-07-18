@@ -25,10 +25,10 @@ function walkTurn(initial: TurnState, transitions: readonly TurnState[]): TurnSt
 
 describe("domain state machines", () => {
   it("walks a session through activation, approval, cancellation, and eviction", () => {
-    expect(walkSession("cold", ["starting", "idle", "running", "waiting_approval", "running", "idle"]))
-      .toBe("idle");
-    expect(walkSession("idle", ["running", "cancelling", "idle", "evicting", "cold"]))
-      .toBe("cold");
+    expect(
+      walkSession("cold", ["starting", "idle", "running", "waiting_approval", "running", "idle"]),
+    ).toBe("idle");
+    expect(walkSession("idle", ["running", "cancelling", "idle", "evicting", "cold"])).toBe("cold");
   });
 
   it("requires explicit session recovery after a failure", () => {

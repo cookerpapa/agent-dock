@@ -192,9 +192,16 @@ describe("PiRpcEventAdapter", () => {
   it("does not publish malformed or unknown Pi output", () => {
     const adapter = createAdapter();
     expect(
-      adapter.adaptOutput({ type: "extension_ui_request", id: "x", method: "confirm", title: "missing message" }),
+      adapter.adaptOutput({
+        type: "extension_ui_request",
+        id: "x",
+        method: "confirm",
+        title: "missing message",
+      }),
     ).toMatchObject({ kind: "invalid", sourceType: "extension_ui_request.confirm" });
-    expect(adapter.adaptOutput({ type: "brand_new_pi_event", secretField: "must-not-pass" })).toEqual({
+    expect(
+      adapter.adaptOutput({ type: "brand_new_pi_event", secretField: "must-not-pass" }),
+    ).toEqual({
       kind: "unsupported",
       sourceType: "brand_new_pi_event",
       reason: "No reviewed AgentDock v1 mapping exists for this Pi output type",
@@ -215,6 +222,8 @@ describe("PiRpcEventAdapter", () => {
     }
     const approvalId = mapped.event.payload.approvalId;
     adapter.resolveApproval({ approvalId, outcome: "rejected" });
-    expect(() => adapter.resolveApproval({ approvalId, outcome: "rejected" })).toThrow(PiRpcAdapterError);
+    expect(() => adapter.resolveApproval({ approvalId, outcome: "rejected" })).toThrow(
+      PiRpcAdapterError,
+    );
   });
 });

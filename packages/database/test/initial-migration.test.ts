@@ -56,10 +56,11 @@ async function seedControlPlane(): Promise<void> {
     IDS.project,
     IDS.tenant,
   ]);
-  await postgres.query(
-    `insert into workspaces (id, tenant_id, project_id) values ($1, $2, $3)`,
-    [IDS.workspace, IDS.tenant, IDS.project],
-  );
+  await postgres.query(`insert into workspaces (id, tenant_id, project_id) values ($1, $2, $3)`, [
+    IDS.workspace,
+    IDS.tenant,
+    IDS.project,
+  ]);
   await postgres.query(
     `insert into credential_bindings
        (id, tenant_id, provider, kind, secret_ref, version, status)
@@ -194,9 +195,10 @@ describe("initial PostgreSQL migration", () => {
 
     await postgres.query(`update turns set state = 'queued' where id = $1`, [IDS.turn1]);
     await postgres.query(`update turns set state = 'dispatching' where id = $1`, [IDS.turn2]);
-    const result = await postgres.query<{ state: string }>(`select state from turns where id = $1`, [
-      IDS.turn2,
-    ]);
+    const result = await postgres.query<{ state: string }>(
+      `select state from turns where id = $1`,
+      [IDS.turn2],
+    );
     expect(result.rows[0]?.state).toBe("dispatching");
   });
 

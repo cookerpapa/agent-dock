@@ -345,10 +345,7 @@ export type SupervisorHeartbeatMessage = Static<typeof SupervisorHeartbeatMessag
 export type SupervisorHeartbeatAckMessage = Static<typeof SupervisorHeartbeatAckMessageSchema>;
 
 export type SupervisorToControlMessage =
-  | SupervisorRegisterMessage
-  | CommandAckMessage
-  | EventPublishMessage
-  | SupervisorHeartbeatMessage;
+  SupervisorRegisterMessage | CommandAckMessage | EventPublishMessage | SupervisorHeartbeatMessage;
 
 export type ControlToSupervisorMessage =
   | SupervisorRegisteredMessage
@@ -380,7 +377,9 @@ function assertUniqueSessionIds(
   const sessionIds = new Set<string>();
   for (const value of values) {
     if (sessionIds.has(value.sessionId)) {
-      throw new AgentDockWireProtocolError(`${description} contains duplicate sessionId ${value.sessionId}`);
+      throw new AgentDockWireProtocolError(
+        `${description} contains duplicate sessionId ${value.sessionId}`,
+      );
     }
     sessionIds.add(value.sessionId);
   }

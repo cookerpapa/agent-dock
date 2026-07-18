@@ -1,10 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Socket } from "node:net";
 
@@ -23,11 +18,7 @@ export const fakeModelScenarios = [
 export type FakeModelScenario = (typeof fakeModelScenarios)[number];
 
 export type FakeModelRequestCompletion =
-  | "pending"
-  | "completed"
-  | "client_aborted"
-  | "server_disconnected"
-  | "server_stopped";
+  "pending" | "completed" | "client_aborted" | "server_disconnected" | "server_stopped";
 
 export type FakeModelRequestObservation = {
   requestId: string;
@@ -397,7 +388,8 @@ export class FakeModelServer {
     if (Array.isArray(scenarioHeader)) {
       throw new SafeHttpError(400, "x-agent-dock-scenario must have one value");
     }
-    const scenario = scenarioHeader === undefined ? this.#defaultScenario : parseScenario(scenarioHeader);
+    const scenario =
+      scenarioHeader === undefined ? this.#defaultScenario : parseScenario(scenarioHeader);
     if (!scenario) {
       throw new SafeHttpError(400, "Unknown fake model scenario");
     }
@@ -457,11 +449,20 @@ export class FakeModelServer {
     const created = 1_700_000_000 + sequence;
     const splitAt = Math.max(1, Math.floor(text.length / 2));
     openEventStream(response);
-    writeEvent(response, completionChunk(requestId, created, model, { role: "assistant", content: "" }));
+    writeEvent(
+      response,
+      completionChunk(requestId, created, model, { role: "assistant", content: "" }),
+    );
     await yieldToSocket();
-    writeEvent(response, completionChunk(requestId, created, model, { content: text.slice(0, splitAt) }));
+    writeEvent(
+      response,
+      completionChunk(requestId, created, model, { content: text.slice(0, splitAt) }),
+    );
     await yieldToSocket();
-    writeEvent(response, completionChunk(requestId, created, model, { content: text.slice(splitAt) }));
+    writeEvent(
+      response,
+      completionChunk(requestId, created, model, { content: text.slice(splitAt) }),
+    );
     writeEvent(response, completionChunk(requestId, created, model, {}, "stop"));
     writeEvent(response, usageChunk(requestId, created, model, 5));
     writeDone(response);
@@ -476,7 +477,10 @@ export class FakeModelServer {
   ): Promise<void> {
     const created = 1_700_000_000 + sequence;
     openEventStream(response);
-    writeEvent(response, completionChunk(requestId, created, model, { role: "assistant", content: "" }));
+    writeEvent(
+      response,
+      completionChunk(requestId, created, model, { role: "assistant", content: "" }),
+    );
     await yieldToSocket();
     writeEvent(
       response,
@@ -518,7 +522,10 @@ export class FakeModelServer {
   ): Promise<void> {
     const created = 1_700_000_000 + sequence;
     openEventStream(response);
-    writeEvent(response, completionChunk(requestId, created, model, { role: "assistant", content: "" }));
+    writeEvent(
+      response,
+      completionChunk(requestId, created, model, { role: "assistant", content: "" }),
+    );
     writeEvent(
       response,
       completionChunk(requestId, created, model, { content: "partial-before-disconnect" }),
@@ -528,10 +535,7 @@ export class FakeModelServer {
     response.destroy();
   }
 
-  #holdUntilClientCloses(
-    response: ServerResponse,
-    observation: MutableObservation,
-  ): Promise<void> {
+  #holdUntilClientCloses(response: ServerResponse, observation: MutableObservation): Promise<void> {
     // Deliberately do not send response headers. The OpenAI SDK's timeoutMs
     // covers waiting for the HTTP response; an already-open but idle SSE body
     // is a separate stream-idle concern owned by the caller/supervisor.

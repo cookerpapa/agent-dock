@@ -27,13 +27,7 @@ export type ExecuteEmbeddedCommand = {
 };
 
 export type EmbeddedPiThinkingLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+  "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type EmbeddedPiTransport = "sse" | "websocket" | "websocket-cached" | "auto";
 
@@ -463,7 +457,9 @@ export class EmbeddedPiBackend {
       ? assertOwnedCheckpoint(this.#sessionDir, input.checkpoint.sessionFile)
       : undefined;
     if (cached && supplied && cached !== supplied) {
-      throw new Error(`Logical session ${input.logicalSessionId} was given a conflicting checkpoint`);
+      throw new Error(
+        `Logical session ${input.logicalSessionId} was given a conflicting checkpoint`,
+      );
     }
     const selected = cached ?? supplied;
     if (selected) {

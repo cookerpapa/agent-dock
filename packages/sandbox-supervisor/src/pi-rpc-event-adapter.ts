@@ -87,7 +87,8 @@ export class PiRpcEventAdapter {
 
   constructor(eventFactory: AgentDockEventFactory, options: PiRpcEventAdapterOptions = {}) {
     this.#eventFactory = eventFactory;
-    this.#approvalIdGenerator = options.approvalIdGenerator ?? (() => globalThis.crypto.randomUUID());
+    this.#approvalIdGenerator =
+      options.approvalIdGenerator ?? (() => globalThis.crypto.randomUUID());
   }
 
   get pendingApprovalCount(): number {
@@ -133,7 +134,8 @@ export class PiRpcEventAdapter {
           return {
             kind: "unsupported",
             sourceType: `extension_ui_request.${method}`,
-            reason: "This fire-and-forget or TUI capability has not been mapped to a public v1 event",
+            reason:
+              "This fire-and-forget or TUI capability has not been mapped to a public v1 event",
           };
       }
     } catch (error: unknown) {
@@ -189,7 +191,11 @@ export class PiRpcEventAdapter {
   }
 
   #adaptSelect(message: JsonRecord): PiRpcAdapterOutcome {
-    if (!Array.isArray(message.options) || message.options.length === 0 || !message.options.every((x) => typeof x === "string")) {
+    if (
+      !Array.isArray(message.options) ||
+      message.options.length === 0 ||
+      !message.options.every((x) => typeof x === "string")
+    ) {
       throw new PiRpcAdapterError("select.options must be a non-empty string array");
     }
     const options = [...message.options] as string[];

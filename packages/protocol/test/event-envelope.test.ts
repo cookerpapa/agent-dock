@@ -41,7 +41,10 @@ describe("AgentDockEventSchema", () => {
       { type: "turn.started", payload: { inputKind: "continue" } },
       { type: "session.state.changed", payload: { from: "idle", to: "running" } },
       { type: "assistant.text.delta", payload: { text: "partial" } },
-      { type: "tool.started", payload: { toolCallId: "call-1", toolName: "read", input: { path: "a" } } },
+      {
+        type: "tool.started",
+        payload: { toolCallId: "call-1", toolName: "read", input: { path: "a" } },
+      },
       { type: "tool.completed", payload: { toolCallId: "call-1", isError: false, output: "ok" } },
       {
         type: "approval.requested",
@@ -58,7 +61,10 @@ describe("AgentDockEventSchema", () => {
       },
       { type: "ui.notification", payload: { message: "done", level: "info" } },
       { type: "turn.completed", payload: { stopReason: "agent_end" } },
-      { type: "turn.failed", payload: { code: "model_timeout", message: "timed out", retryable: true } },
+      {
+        type: "turn.failed",
+        payload: { code: "model_timeout", message: "timed out", retryable: true },
+      },
     ];
 
     let id = 0;
@@ -74,13 +80,16 @@ describe("AgentDockEventSchema", () => {
   });
 
   it("rejects missing identity, invalid sequence, and extra raw fields", () => {
-    const valid = createFactory().next({ type: "ui.notification", payload: { message: "ok", level: "info" } });
+    const valid = createFactory().next({
+      type: "ui.notification",
+      payload: { message: "ok", level: "info" },
+    });
 
     expect(() => parseAgentDockEvent({ ...valid, sessionId: "" })).toThrow(AgentDockProtocolError);
     expect(() => parseAgentDockEvent({ ...valid, seq: 0 })).toThrow(AgentDockProtocolError);
-    expect(() => parseAgentDockEvent({ ...valid, piRawEvent: { type: "extension_ui_request" } })).toThrow(
-      AgentDockProtocolError,
-    );
+    expect(() =>
+      parseAgentDockEvent({ ...valid, piRawEvent: { type: "extension_ui_request" } }),
+    ).toThrow(AgentDockProtocolError);
   });
 
   it("rejects an invalid initial sequence", () => {
@@ -103,9 +112,9 @@ describe("AgentDockEventSchema", () => {
     });
     expect(stateEvent).toMatchObject({ seq: 1, turnId: null });
 
-    expect(() =>
-      factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
-    ).toThrow(AgentDockProtocolError);
+    expect(() => factory.next({ type: "turn.started", payload: { inputKind: "prompt" } })).toThrow(
+      AgentDockProtocolError,
+    );
     expect(factory.currentSequence()).toBe(1);
   });
 

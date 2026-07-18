@@ -49,7 +49,11 @@ function requireString(value: unknown, description: string): string {
   return value;
 }
 
-function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   return new Promise<T>((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
       rejectPromise(new Error(`${label} timed out after ${timeoutMs} ms`));
@@ -103,7 +107,10 @@ function sendLine(child: ChildProcessWithoutNullStreams, message: JsonRecord): v
   }
 }
 
-function terminateProcessGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+function terminateProcessGroup(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+): void {
   if (process.platform !== "win32" && child.pid !== undefined) {
     try {
       process.kill(-child.pid, signal);
@@ -379,7 +386,8 @@ async function main(): Promise<void> {
     }
 
     const cloudCheck = data.commands.find(
-      (command) => isRecord(command) && command.name === "cloud-check" && command.source === "extension",
+      (command) =>
+        isRecord(command) && command.name === "cloud-check" && command.source === "extension",
     );
     if (cloudCheck === undefined) {
       throw new Error("Pi did not discover the /cloud-check extension command");
@@ -390,10 +398,7 @@ async function main(): Promise<void> {
     // the Promise.all below attaches its semantic waiter.
     void notification.promise.catch(() => undefined);
     const promptPromise = request("prompt", { message: "/cloud-check" });
-    await Promise.all([
-      promptPromise,
-      withTimeout(notification.promise, "extension notification"),
-    ]);
+    await Promise.all([promptPromise, withTimeout(notification.promise, "extension notification")]);
 
     if (!confirmRequestObserved) {
       throw new Error("The extension completed without an observable confirm round trip");
@@ -415,7 +420,9 @@ async function main(): Promise<void> {
       replayedAfterDisconnect.length !== 3 ||
       !replayedAfterDisconnect.every((message, index) => message.payload.event.seq === index + 1)
     ) {
-      throw new Error("The event spool did not replay the complete ordered suffix after disconnect");
+      throw new Error(
+        "The event spool did not replay the complete ordered suffix after disconnect",
+      );
     }
 
     const createEventAck = (acknowledgedThroughSeq: number): EventAckMessage => ({
@@ -487,7 +494,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

@@ -1,0 +1,12 @@
+**/*.md
+.cache/
+artifacts/
+coverage/
+crash-dumps/
+dist/
+logs/
+node_modules/
+sessions/
+snapshots/
+tmp/
+workspaces/

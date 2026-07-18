@@ -11,17 +11,12 @@ export type EmbeddedPiHttpRuntimeStatus = {
 let configuredIdleTimeoutMs: number | undefined;
 
 function hasProxyEnvironment(): boolean {
-  return [
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ].some((name) => {
-    const value = process.env[name];
-    return typeof value === "string" && value.trim().length > 0;
-  });
+  return ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"].some(
+    (name) => {
+      const value = process.env[name];
+      return typeof value === "string" && value.trim().length > 0;
+    },
+  );
 }
 
 function assertIdleTimeout(value: number): void {
