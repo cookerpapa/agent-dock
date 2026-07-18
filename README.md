@@ -140,7 +140,7 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 75 unit/contract tests, the two
+It checks Prettier formatting, TypeScript types, 85 unit/contract tests, the two
 zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -172,6 +172,14 @@ server makes streaming and provider failures executable without tokens.
 Formatting, tests, zero-token spikes, dependency audit, effective container
 checks, and full-history secret scanning are defined in GitHub Actions. Their
 first hosted runs will occur after the repository is pushed. Phase 0 is complete.
+
+Phase 1 has started with a NestJS/Fastify durable-intake slice. The public API can
+atomically create a project/workspace and cold session, then accept an
+idempotent turn only after PostgreSQL commits the turn, command, and outbox rows.
+Same-request retries return the original turn, conflicting idempotency-key reuse
+returns `409`, and injected outbox failure rolls the transaction back. The
+dispatcher, Pi execution, SSE, cancellation, and React page are not connected
+yet.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

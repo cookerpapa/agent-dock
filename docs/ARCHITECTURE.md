@@ -38,6 +38,17 @@ without allowing untrusted extension code into the control-plane process.
 The HTTP request that submits a turn must not wait for the agent to finish. It
 returns after durable acceptance, while execution continues as a background job.
 
+The first Phase 1 intake slice makes the beginning of that flow executable.
+`POST /v1/projects` creates a project and initial workspace;
+`POST /v1/projects/:projectId/sessions` creates a cold session; and
+`POST /v1/sessions/:sessionId/turns` requires an `Idempotency-Key`. Turn,
+command, and outbox rows commit in one PostgreSQL transaction before the API
+returns `202 Accepted`. A same-key/same-body retry returns the original turn,
+while same-key/different-body reuse returns `409`. The command retains a SHA-256
+request fingerprint and the outbox carries only identifiers; neither duplicates
+the prompt or credential material. This slice stops at durable intake—the
+dispatcher, supervisor execution, and SSE event path remain subsequent slices.
+
 ### TypeScript sandbox supervisor
 
 Responsibilities:

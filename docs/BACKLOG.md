@@ -43,7 +43,7 @@ the turn, and inspect the final Git diff.
 
 Acceptance criteria:
 
-- [ ] The command is durably accepted before execution starts
+- [x] The command is durably accepted before execution starts
 - [ ] The supervisor uses a pinned Pi RPC process through an AgentDock adapter
 - [ ] The workspace and all extensions run outside the NestJS control-plane process
 - [ ] Text and tool events carry session, turn, agent, and sequence identifiers

@@ -346,3 +346,46 @@
   -> durable accept turn -> supervisor 执行 -> SSE 事件”这一条最短路径。原因是
   Phase 0 已固定协议、状态、存储与执行隔离边界，现在需要用一个端到端用户故事
   验证这些边界能组合成产品，而不是继续增加互不连通的底层模块。
+
+## 2026-07-18 — Phase 1 durable turn-intake vertical slice
+
+- 目标：先实现端到端路径的第一个事务边界，让 HTTP API 只有在 turn、command
+  和 outbox 一起持久化之后才返回 `202 Accepted`；本切片暂不假装已经接通 Pi、
+  SSE 或 Web UI。
+- 公共 API：`@agent-dock/protocol` 新增 closed TypeBox schema 和 parser，覆盖创建
+  project、创建 session、提交 prompt、thinking level、UUID path、
+  `Idempotency-Key`、成功 resource 与统一 error envelope。额外字段、空白名称/
+  prompt、不合法 UUID/header 和不受当前 model profile 允许的 thinking level
+  都在写库前拒绝。
+- NestJS/Fastify：新增 `@agent-dock/control-plane`，实现
+  `POST /v1/projects`、`POST /v1/projects/:projectId/sessions` 和
+  `POST /v1/sessions/:sessionId/turns`。v0 继续使用部署者配置的 tenant 与默认
+  model profile，没有提前加入登录、多租户或前端 model picker。
+- 持久化语义：project 与初始 workspace 同事务创建；session 同时初始化 event
+  cursor。turn intake 在一个 Kysely/PostgreSQL transaction 内写 queued turn、
+  pending command 和 `control.command.pending.v1` outbox。turn 固化 provider、model、
+  thinking level 与 opaque credential-binding version；command 只保存 SHA-256 请求
+  指纹，outbox 只保存 ID，不复制 prompt 或凭据。
+- 幂等：同 session 下相同 key + 相同 body 返回原 turn/command，并标记
+  `replayed: true`；相同 key + 不同 body 返回 `409 idempotency_conflict`。数据库
+  unique constraint 仍是并发竞争的最终裁决，应用层在事务回滚后读取胜出的记录。
+- 故障边界：未知数据库错误只返回通用 `internal_error`，不向客户端暴露 SQL、
+  表名、prompt 或 stack。测试在 command 写入之后注入 outbox failure，确认
+  turn 与 command 一起回滚；404、请求验证和 model policy 错误也有显式响应。
+- 测试依赖选择：在线核对官方包后使用 NestJS/Fastify `11.1.28`/`5.10.0`；测试
+  使用 ElectricSQL 官方 PGlite `0.5.4` + socket `0.2.7` 暴露 PostgreSQL wire，
+  让生产 `pg`/Kysely client、migration 和真实 HTTP request 同时参与测试，避免
+  引入版本滞后的第三方 Kysely dialect。PGlite 仍是 test-only。
+- 验证：新增 4 个 public-schema tests 和 6 个 HTTP/database integration tests，
+  全仓从 75 增至 85 tests；`npm run ci`、0-vulnerability audit 以及两套重新构建
+  的 hardened Docker probe 全部通过。同一套 6-test HTTP suite 还通过可选
+  `AGENT_DOCK_TEST_DATABASE_URL` 在仅绑定 `127.0.0.1` 的一次性
+  PostgreSQL `15.2-alpine` container 中复跑成功，container 随后已删除。
+- backlog：第一条 vertical-slice acceptance criterion“command 在 execution 前
+  durable accepted”已完成。其余 criterion 保持未完成，因为 supervisor dispatch、
+  Pi turn、SSE reconnect、process-tree cancellation 和最终 Git diff 尚未接通。
+- 下一步：实现 transaction outbox dispatcher 与单个本地 supervisor adapter，
+  把 pending `turn.execute` 从数据库送到一个受控的 fake execution backend，并把
+  command/turn 状态推进到 running/completed。原因是先验证“durable command 真的
+  会被后台消费且不会由 HTTP handler 直接执行”，之后接 Pi RPC 和 SSE 时才有
+  稳定的异步执行边界。
