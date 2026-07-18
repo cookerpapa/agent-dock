@@ -1,20 +1,32 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, upInitialControlPlane, type Database } from "@agent-dock/database";
+import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type {
   AcceptedTurnResource,
   ControlPlaneApiError,
+  EventPublishMessage,
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
+import {
+  LocalSandboxSupervisor,
+  PiRpcTurnError,
+  PiRpcTurnRunner,
+} from "@agent-dock/sandbox-supervisor";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
   DeterministicExecutionBackend,
+  LocalSupervisorExecutionBackend,
   OutboxDispatcher,
   OutboxDispatcherStaleClaimError,
+  SessionLeaseCoordinator,
   type TurnExecutionBackend,
   createControlPlaneApplication,
 } from "../src/index.ts";
@@ -23,6 +35,8 @@ const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
   credential: "30000000-0000-4000-8000-000000000001",
   profile: "40000000-0000-4000-8000-000000000001",
+  sandbox: "50000000-0000-4000-8000-000000000001",
+  sandboxBoot: "60000000-0000-4000-8000-000000000001",
 };
 
 let pglite: PGlite | undefined;
@@ -674,6 +688,262 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(durable.commandCompletedAt).not.toBeNull();
     expect(durable.settledAt).not.toBeNull();
     expect(durable.publishedAt).not.toBeNull();
+  });
+
+  it("executes a fenced command through pinned Pi RPC and the loopback fake model", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const piSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${piSession.sessionId}/turns`,
+      headers: { "idempotency-key": "pinned-pi-fake-model" },
+      payload: { prompt: "Return the deterministic fake response." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+
+    await database
+      .insertInto("sandboxes")
+      .values({
+        id: IDS.sandbox,
+        supervisor_id: "local-pi-rpc-test",
+        boot_id: IDS.sandboxBoot,
+        state: "ready",
+        max_concurrent_sessions: 1,
+        active_sessions: 0,
+      })
+      .executeTakeFirstOrThrow();
+
+    const fakeModel = new FakeModelServer();
+    const workspaceDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-workspace-"));
+    const events: EventPublishMessage[] = [];
+    const durableStatesAtPublish: Array<{
+      commandState: string;
+      turnState: string;
+      sessionState: string;
+      publishedAt: Date | string | null;
+    }> = [];
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.sandbox,
+      leaseDurationMs: 120_000,
+    });
+
+    try {
+      await fakeModel.start();
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => workspaceDirectory,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+          reasoning: false,
+        }),
+      });
+      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+      const backend = new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        async onEvent(message) {
+          events.push(message);
+          const state = await readTurnExecution(accepted);
+          durableStatesAtPublish.push({
+            commandState: state.commandState,
+            turnState: state.turnState,
+            sessionState: state.sessionState,
+            publishedAt: state.publishedAt,
+          });
+        },
+      });
+      const dispatcher = new OutboxDispatcher({
+        database,
+        tenantId: IDS.tenant,
+        backend,
+        leaseManager: leaseCoordinator,
+      });
+
+      const dispatchResult = await dispatcher.dispatchNext();
+      expect(dispatchResult).toEqual({
+        status: "completed",
+        commandId: accepted.commandId,
+        sessionId: piSession.sessionId,
+        turnId: accepted.turnId,
+        attempt: 1,
+      });
+
+      expect(events.map((message) => message.payload.event.type)).toEqual([
+        "turn.started",
+        "assistant.text.delta",
+        "assistant.text.delta",
+        "turn.completed",
+      ]);
+      expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3, 4]);
+      expect(
+        events
+          .filter((message) => message.payload.event.type === "assistant.text.delta")
+          .map((message) =>
+            message.payload.event.type === "assistant.text.delta"
+              ? message.payload.event.payload.text
+              : "",
+          )
+          .join(""),
+      ).toBe("AgentDock fake stream OK.");
+      expect(
+        events.every(
+          (message) =>
+            message.payload.commandId === accepted.commandId &&
+            message.payload.leaseId === events[0]?.payload.leaseId &&
+            message.payload.fencingToken === 1,
+        ),
+      ).toBe(true);
+      expect(durableStatesAtPublish).toHaveLength(4);
+      expect(
+        durableStatesAtPublish.every(
+          (state) =>
+            state.commandState === "acknowledged" &&
+            state.turnState === "running" &&
+            state.sessionState === "running" &&
+            state.publishedAt !== null,
+        ),
+      ).toBe(true);
+      expect(fakeModel.observations).toHaveLength(1);
+      expect(fakeModel.observations[0]).toMatchObject({
+        model: "gpt-5.4-mini",
+        messageCount: 2,
+        toolCount: 0,
+        authorizationPresent: true,
+        completion: "completed",
+      });
+
+      const durable = await readTurnExecution(accepted);
+      expect(durable).toMatchObject({
+        commandState: "completed",
+        turnState: "completed",
+        sessionState: "idle",
+        stopReason: "stop",
+        attempts: 1,
+      });
+      const sandbox = await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.sandbox)
+        .executeTakeFirstOrThrow();
+      expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
+      const persistedSession = await database
+        .selectFrom("sessions")
+        .select(["last_fencing_token", "next_event_seq"])
+        .where("id", "=", piSession.sessionId)
+        .executeTakeFirstOrThrow();
+      expect(persistedSession).toEqual({ last_fencing_token: "1", next_event_seq: "1" });
+      await expect(
+        leaseCoordinator.assertCurrentLease(
+          {
+            tenantId: IDS.tenant,
+            projectId: project.projectId,
+            workspaceId: project.workspaceId,
+            sessionId: piSession.sessionId,
+            turnId: accepted.turnId,
+            commandId: accepted.commandId,
+            idempotencyKey: "pinned-pi-fake-model",
+            nextEventSeq: "1",
+            input: { kind: "prompt", prompt: "Return the deterministic fake response." },
+            model: {
+              profileId: IDS.profile,
+              provider: "openai-codex",
+              modelId: "gpt-5.4-mini",
+              thinkingLevel: "off",
+              credentialBindingId: IDS.credential,
+              credentialBindingVersion: "1",
+            },
+          },
+          {
+            leaseId: events[0]!.payload.leaseId,
+            fencingToken: events[0]!.payload.fencingToken,
+          },
+        ),
+      ).rejects.toThrow("stale");
+    } finally {
+      await fakeModel.stop();
+      await rm(workspaceDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("releases the fenced lease after a post-ACK supervisor failure", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const failedSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${failedSession.sessionId}/turns`,
+      headers: { "idempotency-key": "fenced-post-ack-failure" },
+      payload: { prompt: "Exercise fenced failure cleanup." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.sandbox,
+      leaseDurationMs: 120_000,
+    });
+    const supervisor = new LocalSandboxSupervisor({
+      runner: {
+        async run() {
+          throw new PiRpcTurnError("model_timeout", "Model request timed out", true);
+        },
+      },
+    });
+    const backend = new LocalSupervisorExecutionBackend({
+      supervisor,
+      leaseCoordinator,
+    });
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+      leaseManager: leaseCoordinator,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      sessionId: failedSession.sessionId,
+      turnId: accepted.turnId,
+      attempt: 1,
+      phase: "after_start",
+      failureCode: "model_timeout",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      turnState: "failed",
+      sessionState: "idle",
+      turnFailureCode: "model_timeout",
+      failureMessage: "Model request timed out",
+      failureRetryable: true,
+      attempts: 1,
+    });
+    const leaseCount = await database
+      .selectFrom("session_leases")
+      .select((expression) => expression.fn.countAll<string>().as("count"))
+      .where("session_id", "=", failedSession.sessionId)
+      .executeTakeFirstOrThrow();
+    expect(leaseCount.count).toBe("0");
+    const sandbox = await database
+      .selectFrom("sandboxes")
+      .select(["state", "active_sessions"])
+      .where("id", "=", IDS.sandbox)
+      .executeTakeFirstOrThrow();
+    expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
   });
 
   it("rolls back the turn and command if the outbox write fails", async () => {

@@ -21,6 +21,8 @@ export type TurnExecutionRequest = {
   sessionId: string;
   turnId: string;
   commandId: string;
+  idempotencyKey: string;
+  nextEventSeq: string;
   input: {
     kind: "prompt";
     prompt: string;
@@ -35,8 +37,13 @@ export type TurnExecutionRequest = {
   };
 };
 
+export type TurnExecutionAcknowledgement = {
+  leaseId: string;
+  fencingToken: number;
+};
+
 export type TurnExecutionLifecycle = {
-  started(): Promise<void>;
+  started(acknowledgement?: TurnExecutionAcknowledgement): Promise<void>;
 };
 
 export type TurnExecutionResult = {
@@ -48,6 +55,21 @@ export interface TurnExecutionBackend {
     request: TurnExecutionRequest,
     lifecycle: TurnExecutionLifecycle,
   ): Promise<TurnExecutionResult>;
+}
+
+export interface TurnExecutionLeaseManager {
+  assertCurrent(
+    transaction: Transaction<Database>,
+    request: TurnExecutionRequest,
+    acknowledgement: TurnExecutionAcknowledgement,
+    now: Date,
+  ): Promise<void>;
+  releaseCurrent(
+    transaction: Transaction<Database>,
+    request: TurnExecutionRequest,
+    acknowledgement: TurnExecutionAcknowledgement,
+    now: Date,
+  ): Promise<void>;
 }
 
 export class TurnExecutionBackendError extends Error {
@@ -111,6 +133,7 @@ export type OutboxDispatcherOptions = {
   claimLeaseMs?: number;
   retryDelayMs?: number;
   maxAttempts?: number;
+  leaseManager?: TurnExecutionLeaseManager;
 };
 
 type ClaimedTurn = {
@@ -177,6 +200,7 @@ export class OutboxDispatcher {
   readonly #claimLeaseMs: number;
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
+  readonly #leaseManager: TurnExecutionLeaseManager | undefined;
 
   constructor(options: OutboxDispatcherOptions) {
     this.#database = options.database;
@@ -192,6 +216,7 @@ export class OutboxDispatcher {
       "retryDelayMs",
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
+    this.#leaseManager = options.leaseManager;
   }
 
   async dispatchNext(): Promise<DispatchNextResult> {
@@ -199,11 +224,29 @@ export class OutboxDispatcher {
     if (!claim) return { status: "idle" };
 
     let started = false;
+    let acknowledgement: TurnExecutionAcknowledgement | undefined;
     let startedPromise: Promise<void> | undefined;
     let startFailure: unknown;
     const lifecycle: TurnExecutionLifecycle = {
-      started: () => {
-        startedPromise ??= this.#markStarted(claim).then(
+      started: (candidate) => {
+        if (this.#leaseManager !== undefined && candidate === undefined) {
+          return Promise.reject(
+            new OutboxDispatcherInvariantError(
+              "A fenced execution acknowledgement is required by the configured lease manager",
+            ),
+          );
+        }
+        if (
+          startedPromise !== undefined &&
+          (candidate?.leaseId !== acknowledgement?.leaseId ||
+            candidate?.fencingToken !== acknowledgement?.fencingToken)
+        ) {
+          return Promise.reject(
+            new OutboxDispatcherInvariantError("Execution acknowledgement changed after start"),
+          );
+        }
+        acknowledgement = candidate;
+        startedPromise ??= this.#markStarted(claim, candidate).then(
           () => {
             started = true;
           },
@@ -247,10 +290,10 @@ export class OutboxDispatcher {
         }
       }
       if (startFailure !== undefined) throw startFailure;
-      return this.#recordFailure(claim, started, normalizeFailure(error));
+      return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
     }
 
-    await this.#complete(claim, executionResult.stopReason);
+    await this.#complete(claim, executionResult.stopReason, acknowledgement);
     return {
       status: "completed",
       commandId: claim.request.commandId,
@@ -290,6 +333,7 @@ export class OutboxDispatcher {
           "outbox.payload as outboxPayload",
           "outbox.attempts as attempts",
           "command.id as commandId",
+          "command.idempotency_key as idempotencyKey",
           "command.state as commandState",
           "turn.id as turnId",
           "turn.state as turnState",
@@ -305,6 +349,7 @@ export class OutboxDispatcher {
           "session_row.state as sessionState",
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
+          "session_row.next_event_seq as nextEventSeq",
         ])
         .where("outbox.tenant_id", "=", this.#tenantId)
         .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
@@ -423,6 +468,8 @@ export class OutboxDispatcher {
           sessionId: row.sessionId,
           turnId: row.turnId,
           commandId: row.commandId,
+          idempotencyKey: row.idempotencyKey,
+          nextEventSeq: row.nextEventSeq,
           input: { kind: "prompt", prompt: row.inputText },
           model: {
             profileId: row.modelProfileId,
@@ -437,7 +484,10 @@ export class OutboxDispatcher {
     });
   }
 
-  async #markStarted(claim: ClaimedTurn): Promise<void> {
+  async #markStarted(
+    claim: ClaimedTurn,
+    acknowledgement: TurnExecutionAcknowledgement | undefined,
+  ): Promise<void> {
     const now = safeDate(this.#clock);
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
@@ -450,6 +500,9 @@ export class OutboxDispatcher {
         throw new OutboxDispatcherInvariantError(
           "An unpublished outbox record is required before command acknowledgement",
         );
+      }
+      if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
+        await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
       }
 
       let nextSessionState: SessionState;
@@ -514,7 +567,11 @@ export class OutboxDispatcher {
     });
   }
 
-  async #complete(claim: ClaimedTurn, stopReason: string): Promise<void> {
+  async #complete(
+    claim: ClaimedTurn,
+    stopReason: string,
+    acknowledgement: TurnExecutionAcknowledgement | undefined,
+  ): Promise<void> {
     const now = safeDate(this.#clock);
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
@@ -568,6 +625,9 @@ export class OutboxDispatcher {
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
       expectOne(sessionUpdate.numUpdatedRows, "settling a session");
+      if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
+        await this.#leaseManager.releaseCurrent(transaction, claim.request, acknowledgement, now);
+      }
     });
   }
 
@@ -575,6 +635,7 @@ export class OutboxDispatcher {
     claim: ClaimedTurn,
     started: boolean,
     failure: ExecutionFailure,
+    acknowledgement: TurnExecutionAcknowledgement | undefined,
   ): Promise<DispatchNextResult> {
     const now = safeDate(this.#clock);
     const shouldRetry = !started && failure.retryable && claim.attempt < this.#maxAttempts;
@@ -684,6 +745,9 @@ export class OutboxDispatcher {
           .where("state", "=", rows.sessionState)
           .executeTakeFirst();
         expectOne(sessionUpdate.numUpdatedRows, "settling a failed session");
+        if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
+          await this.#leaseManager.releaseCurrent(transaction, claim.request, acknowledgement, now);
+        }
       }
 
       if (!started) {

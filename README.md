@@ -94,6 +94,7 @@ only after a measured requirement appears.
 - [ADR-0004: command delivery, sequence, leases, and fencing](docs/adr/0004-command-delivery-sequence-and-fencing.md)
 - [ADR-0005: pluggable execution and recovery tiers](docs/adr/0005-pluggable-execution-recovery-tiers.md)
 - [ADR-0006: v0 scope, model profiles, and credentials](docs/adr/0006-v0-product-scope-model-profiles-and-credentials.md)
+- [ADR-0007: supervisor execution handshake and model snapshot](docs/adr/0007-supervisor-execution-handshake-and-model-snapshot.md)
 
 ## Current executable spikes
 
@@ -173,17 +174,22 @@ Formatting, tests, zero-token spikes, dependency audit, effective container
 checks, and full-history secret scanning are defined in GitHub Actions. Their
 first hosted runs will occur after the repository is pushed. Phase 0 is complete.
 
-Phase 1 now has a NestJS/Fastify durable-intake API and an explicit transactional
-outbox dispatcher boundary. The public API atomically creates a project/workspace
-and cold session, then accepts an idempotent turn only after PostgreSQL commits
-the turn, command, and outbox rows. A separate dispatcher uses PostgreSQL row
-locking to claim due mailbox work, records outbox delivery and command ACK before
-`running`, retries only before ACK, and later settles command/turn/session state
-transactionally.
-Concurrent-dispatch, retry, and post-ACK failure tests pass against PGlite and
-real PostgreSQL 15.2. The included deterministic execution backend is test-only
-and is not started by the production HTTP entry point. A real supervisor/Pi
-adapter, SSE, cancellation, and React page are not connected yet.
+Phase 1 now has a NestJS/Fastify durable-intake API, transactional outbox
+dispatcher, and a local supervisor integration boundary. The public API
+atomically creates a project/workspace and cold session, then accepts an
+idempotent turn only after PostgreSQL commits the turn, command, and outbox rows.
+The dispatcher acquires a durable session lease and monotonically increasing
+fence, delivers a closed `turn.execute` command containing the immutable model
+snapshot, persists the exact supervisor ACK, and only then lets pinned Pi
+`0.80.10` receive the prompt. Pi text deltas and completion are translated into
+versioned AgentDock events; completion and post-ACK failure both release lease
+and sandbox capacity transactionally.
+
+The full database-to-Pi path is covered with the loopback fake model, so it uses
+no subscription token. The in-process supervisor transport and local workspace
+are integration scaffolding and are not started by the production HTTP entry
+point. Durable event persistence/ACK, SSE, cancellation, a real isolated
+workspace transport, and the React page are not connected yet.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

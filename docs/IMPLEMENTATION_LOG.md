@@ -428,3 +428,48 @@
   token 且返回 durable ACK 后才调用 `lifecycle.started()`。原因是这一步会把当前
   可靠的数据库边界接到真实 Pi RPC，同时保留以后横向扩容、runner 重连和 stale
   writer 拒绝所需的协议语义。
+
+## 2026-07-18 — Fenced local supervisor and pinned Pi execution
+
+- 目标：把 durable outbox 真正接到 Pi，而不是继续用“假执行成功”的 backend；同时
+  保证 Pi 在 ACK 落库之前不能收到 prompt。
+- 协议：ADR-0007 固定 `prepare -> durable ACK -> run` 三段边界。
+  `command.turn.execute` 新增 turn 已固化的 model profile、provider、model、thinking
+  level 与 opaque credential-binding version；wire 中不出现 key、token、secret ref
+  或任意 base URL。
+- 租约：新增 PostgreSQL `SessionLeaseCoordinator`。它锁 session/sandbox、递增
+  `last_fencing_token`、写 `session_leases` 并占用容量；ACK transaction 再次核对
+  lease/fence 与有效期。成功和 ACK 后失败都在 turn settlement transaction 中删除
+  当前 lease、归还容量；旧 lease 在释放后再次写入会得到 `stale_fence`。
+- Supervisor：新增 side-effect-free prepare、command payload 去重、session fence
+  high-water、容量拒绝和 event identity 检查。同 command ID 如果 prompt/model 等
+  immutable payload 改变会被拒绝，不能借“duplicate”偷换执行内容。
+- Pi runtime：`@agent-dock/sandbox-supervisor` 直接精确依赖 Pi `0.80.10`，每次测试
+  activation 使用独立临时 agent dir、环境变量引用的 request credential、严格 LF
+  JSONL、8 MiB stdout 上限、4 KiB 且不外泄正文的 stderr 边界、RPC/turn timeout，
+  ambient credential/process-injection env 过滤，以及 stdin EOF、process-group
+  SIGTERM/SIGKILL 的回收路径。默认关闭 telemetry、extension、tool、skill、context
+  file 和 session 落盘。
+- 事件：新增普通 agent event adapter，将 `agent_start`、assistant `text_delta`、tool
+  start/end 和 `agent_settled` 转成 AgentDock `turn.started`、文本、工具与 terminal
+  event；原始 Pi message/partial/provider error 不越过 supervisor。测试中两段 delta
+  合并为 `AgentDock fake stream OK.`，序号为 1/2/3/4，所有 publication 使用同一个
+  command/lease/fence。
+- ACK 证据：端到端测试在每次 Pi event 到达时回查数据库，四次都已看到 command
+  `acknowledged`、turn/session `running` 且 outbox `published_at` 非空，证明不是在
+  model 执行之后补写 ACK。
+- 安全与验证：默认只访问 loopback fake model，不读取本机 Pi 登录，也不消耗订阅
+  token；event 中没有 prompt/fake key，临时 workspace 为空，fake server observation
+  只记录安全 metadata。全仓 107 个测试、两个 zero-token spike、format/typecheck 和
+  high-severity audit 全部通过；同一套 14 个控制面测试又在一次性、仅绑定
+  `127.0.0.1` 的 PostgreSQL `15.2-alpine` 中通过，容器随后已删除。
+  两个 hardened Phase 0 image 也从新 lockfile 重新构建并通过 non-root、无网络、
+  read-only rootfs、资源限制和零 token runtime 检查，临时运行容器已清理。
+- 当前边界：这是 test/integration 用的 in-process transport；production `main.ts`
+  没有启动 dispatcher/supervisor。每个 turn 仍启动一个 ephemeral Pi RPC process，
+  没有恢复 Pi JSONL，也没有 event 持久化/ACK/SSE，因此还不能称为完整的多轮云化
+  runtime，更不能声称 workspace sandbox 已完成。
+- 下一步：实现 fenced durable event ingestion、累计 event ACK 和基于
+  `Last-Event-ID` 的 SSE replay。原因是当前 Pi 事件已经可信地产生，但只进入测试
+  collector；先让事件在数据库 commit 后才 ACK，Web 才能实时显示并在断线后无损
+  续传，之后再接 cancellation 和可恢复 Pi session。

@@ -59,6 +59,28 @@ const ContinueInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ModelThinkingLevelSchema = Type.Union([
+  Type.Literal("off"),
+  Type.Literal("minimal"),
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
+  Type.Literal("xhigh"),
+  Type.Literal("max"),
+]);
+
+const TurnModelSnapshotSchema = Type.Object(
+  {
+    profileId: OpaqueIdSchema,
+    provider: OpaqueIdSchema,
+    modelId: OpaqueIdSchema,
+    thinkingLevel: ModelThinkingLevelSchema,
+    credentialBindingId: OpaqueIdSchema,
+    credentialBindingVersion: PositiveSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ApprovalResolutionSchema = Type.Union([
   Type.Object(
     {
@@ -144,6 +166,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         ...CommandIdentityProperties,
         nextEventSeq: PositiveSafeIntegerSchema,
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
+        model: TurnModelSnapshotSchema,
       },
       { additionalProperties: false },
     ),

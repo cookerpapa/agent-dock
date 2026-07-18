@@ -43,6 +43,17 @@ function commandIdentity() {
   } as const;
 }
 
+function modelSnapshot() {
+  return {
+    profileId: "profile-1",
+    provider: "agent-dock-fake",
+    modelId: "agent-dock-fake",
+    thinkingLevel: "off",
+    credentialBindingId: "credential-binding-1",
+    credentialBindingVersion: 3,
+  } as const;
+}
+
 function registration() {
   return {
     ...envelope(),
@@ -114,6 +125,7 @@ describe("supervisor/control-plane wire protocol", () => {
         ...commandIdentity(),
         nextEventSeq: 11,
         input: { kind: "prompt", text: "Fix the failing test" },
+        model: modelSnapshot(),
       },
     } as const;
     const cancel = {
@@ -142,6 +154,15 @@ describe("supervisor/control-plane wire protocol", () => {
       parseControlToSupervisorMessage({
         ...execute,
         payload: { ...execute.payload, rawPiCommand: { type: "prompt" } },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...execute,
+        payload: {
+          ...execute.payload,
+          model: { ...execute.payload.model, apiKey: "must-not-cross-the-wire" },
+        },
       }),
     ).toThrow(AgentDockWireProtocolError);
   });

@@ -62,11 +62,24 @@ post-ACK failure settles command, turn, and session state transactionally. The
 deterministic backend used by tests stores no prompt or credential data in its
 execution records.
 
-This is the local execution boundary, not the production runner transport. It
-is deliberately not auto-started by the HTTP application. Reclaim before ACK is
-implemented; a crash after ACK is left ambiguous rather than replaying possible
-tool side effects. Supervisor leases, fencing, event reconciliation, and the
-real Pi adapter are the next slice.
+The third Phase 1 slice connects that dispatcher to a local supervisor adapter.
+`command.turn.execute` now carries the immutable turn model snapshot and opaque
+credential-binding version. A database coordinator reserves sandbox capacity,
+increments the session fencing token, and creates a lease. The supervisor's
+side-effect-free `prepare` returns an exact command ACK; the dispatcher validates
+the lease and persists that ACK before `run` can send the prompt to Pi. The
+supervisor owns a pinned Pi `0.80.10` RPC child, isolated temporary agent config,
+strict LF-delimited JSONL, bounded diagnostics, process-group shutdown, and the
+reviewed Pi-to-AgentDock text/tool/terminal event mapping. Completion and
+post-ACK failure release the matching lease and capacity in the settlement
+transaction; a stale lease or event fence is rejected.
+
+This remains an integration boundary, not the production runner transport. The
+in-process transport, temporary local workspace resolver, and event collector
+are deliberately not auto-started by the HTTP application. Event persistence,
+cumulative ACK, SSE replay, lease renewal/reconciliation, cancellation, and the
+real sandbox transport remain later slices. A crash after durable ACK is still
+treated as ambiguous rather than replaying possible tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -229,9 +242,13 @@ implementation.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
 
-Steps 1-3 and the local claim/ACK/settlement state transitions are executable.
-The deterministic backend substitutes only for steps 4-9 in tests; it does not
-claim that sandbox assignment, Pi execution, or event delivery are implemented.
+Steps 1-8 and 10 are executable through the local integration boundary: the
+control plane acquires a real PostgreSQL lease/fence, persists ACK before run,
+starts pinned Pi RPC, and receives public text/terminal events from the loopback
+fake model. Step 8 currently validates and collects events but does not yet
+persist or cumulatively ACK them. Step 9 and production sandbox assignment are
+also not implemented, so this does not claim reconnect-safe event delivery or
+durable Pi/workspace snapshots.
 
 ## 5. Delivery and recovery semantics
 
@@ -246,6 +263,9 @@ and heartbeat. Control-to-supervisor messages are registration acceptance, turn
 execution/cancellation, approval resolution, cumulative event ACK, and heartbeat
 ACK with lease renewals. Registration advertises the exact Pi/supervisor versions
 and capabilities. Post-registration mutations carry a lease ID and fencing token.
+The execute command additionally carries the turn's immutable provider, model,
+thinking level, and opaque credential-binding snapshot; it never carries a
+credential value or arbitrary provider endpoint.
 
 Authentication is established by the transport/sandbox assignment rather than
 by trusting tenant identity supplied by the sandbox. A heartbeat demonstrates

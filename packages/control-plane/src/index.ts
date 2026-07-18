@@ -6,6 +6,10 @@ export {
   type DeterministicExecutionRecord,
 } from "./deterministic-execution-backend.ts";
 export {
+  LocalSupervisorExecutionBackend,
+  type LocalSupervisorExecutionBackendOptions,
+} from "./local-supervisor-execution-backend.ts";
+export {
   OutboxDispatcher,
   OutboxDispatcherInvariantError,
   OutboxDispatcherStaleClaimError,
@@ -13,10 +17,17 @@ export {
   type DispatchNextResult,
   type OutboxDispatcherOptions,
   type TurnExecutionBackend,
+  type TurnExecutionAcknowledgement,
+  type TurnExecutionLeaseManager,
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
 } from "./outbox-dispatcher.ts";
+export {
+  SessionLeaseCoordinator,
+  SessionLeaseCoordinatorError,
+  type SessionLeaseCoordinatorOptions,
+} from "./session-lease-coordinator.ts";
 export {
   ControlPlaneStore,
   ControlPlaneStoreError,

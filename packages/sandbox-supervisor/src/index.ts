@@ -15,3 +15,26 @@ export {
   type PiRpcEventAdapterOptions,
   type ResolvedApproval,
 } from "./pi-rpc-event-adapter.ts";
+
+export {
+  PiRpcAgentEventAdapter,
+  type PiRpcAgentEventAdapterOutcome,
+} from "./pi-rpc-agent-event-adapter.ts";
+
+export {
+  PINNED_PI_CODING_AGENT_VERSION,
+  PiRpcTurnError,
+  PiRpcTurnRunner,
+  type PiModelRuntimeConfig,
+  type PiRpcEventPublisher,
+  type PiRpcTurnResult,
+  type PiRpcTurnRunnerOptions,
+} from "./pi-rpc-turn-runner.ts";
+
+export {
+  LocalSandboxSupervisor,
+  LocalSandboxSupervisorError,
+  type LocalSandboxSupervisorOptions,
+  type PreparedTurnExecution,
+  type SupervisorTurnRunner,
+} from "./local-sandbox-supervisor.ts";
