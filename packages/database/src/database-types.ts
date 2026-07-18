@@ -1,6 +1,7 @@
 import type {
   AgentNodeState,
   ApprovalState,
+  CommandState as DomainCommandState,
   ModelThinkingLevel,
   SandboxState,
   SessionState,
@@ -33,7 +34,7 @@ export type CredentialBindingStatus = "active" | "disabled" | "revoked";
 export type CredentialKind = "oauth" | "api_key" | "brokered";
 export type TurnInputKind = "prompt" | "continue";
 export type CommandKind = "turn.execute" | "turn.cancel" | "approval.resolve";
-export type CommandState = "pending" | "dispatched" | "acknowledged" | "completed" | "failed";
+export type CommandState = DomainCommandState;
 export type ApprovalKind = "confirm" | "select" | "input" | "editor";
 export type ApprovalOutcome = "approved" | "rejected" | "cancelled";
 export type ArtifactKind =

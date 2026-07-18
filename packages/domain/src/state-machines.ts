@@ -40,12 +40,22 @@ export const AgentNodeStateSchema = Type.Union([
   Type.Literal("cancelled"),
 ]);
 
+export const CommandStateSchema = Type.Union([
+  Type.Literal("pending"),
+  Type.Literal("dispatched"),
+  Type.Literal("acknowledged"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+]);
+
 export type TurnState = Static<typeof TurnStateSchema>;
 export type SandboxState = Static<typeof SandboxStateSchema>;
 export type ApprovalState = Static<typeof ApprovalStateSchema>;
 export type AgentNodeState = Static<typeof AgentNodeStateSchema>;
+export type CommandState = Static<typeof CommandStateSchema>;
 
-export type DomainEntityKind = "session" | "turn" | "sandbox" | "approval" | "agent_node";
+export type DomainEntityKind =
+  "session" | "turn" | "sandbox" | "approval" | "agent_node" | "command";
 
 type TransitionTable<State extends string> = Readonly<Record<State, readonly State[]>>;
 
@@ -97,6 +107,14 @@ const agentNodeTransitions = {
   failed: [],
   cancelled: [],
 } as const satisfies TransitionTable<AgentNodeState>;
+
+const commandTransitions = {
+  pending: ["dispatched", "failed"],
+  dispatched: ["pending", "acknowledged", "failed"],
+  acknowledged: ["completed", "failed"],
+  completed: [],
+  failed: [],
+} as const satisfies TransitionTable<CommandState>;
 
 export class DomainTransitionError extends Error {
   readonly entityKind: DomainEntityKind;
@@ -172,6 +190,14 @@ export function transitionAgentNode(from: AgentNodeState, to: AgentNodeState): A
   return transition("agent_node", agentNodeTransitions, from, to);
 }
 
+export function canTransitionCommand(from: CommandState, to: CommandState): boolean {
+  return canTransition(commandTransitions, from, to);
+}
+
+export function transitionCommand(from: CommandState, to: CommandState): CommandState {
+  return transition("command", commandTransitions, from, to);
+}
+
 export function isTerminalTurnState(state: TurnState): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
@@ -186,4 +212,8 @@ export function isTerminalSandboxState(state: SandboxState): boolean {
 
 export function isTerminalAgentNodeState(state: AgentNodeState): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
+}
+
+export function isTerminalCommandState(state: CommandState): boolean {
+  return state === "completed" || state === "failed";
 }

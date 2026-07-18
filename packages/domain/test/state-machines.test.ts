@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   DomainTransitionError,
+  canTransitionCommand,
   canTransitionTurn,
   isTerminalAgentNodeState,
   isTerminalApprovalState,
+  isTerminalCommandState,
   isTerminalSandboxState,
   isTerminalTurnState,
   transitionAgentNode,
   transitionApproval,
+  transitionCommand,
   transitionSandbox,
   transitionSession,
   transitionTurn,
@@ -65,6 +68,24 @@ describe("domain state machines", () => {
     expect(canTransitionTurn("running", "queued")).toBe(false);
     expect(() => transitionTurn("running", "queued")).toThrow(DomainTransitionError);
     expect(transitionTurn("running", "failed")).toBe("failed");
+  });
+
+  it("retries commands only before acknowledgement", () => {
+    expect(transitionCommand("pending", "dispatched")).toBe("dispatched");
+    expect(transitionCommand("dispatched", "pending")).toBe("pending");
+    expect(canTransitionCommand("acknowledged", "pending")).toBe(false);
+    expect(() => transitionCommand("acknowledged", "pending")).toThrow(DomainTransitionError);
+  });
+
+  it("makes completed and failed commands terminal", () => {
+    expect(
+      isTerminalCommandState(
+        transitionCommand(transitionCommand("pending", "dispatched"), "acknowledged"),
+      ),
+    ).toBe(false);
+    expect(isTerminalCommandState(transitionCommand("acknowledged", "completed"))).toBe(true);
+    expect(isTerminalCommandState(transitionCommand("dispatched", "failed"))).toBe(true);
+    expect(() => transitionCommand("completed", "failed")).toThrow(DomainTransitionError);
   });
 
   it("makes every approval outcome terminal", () => {

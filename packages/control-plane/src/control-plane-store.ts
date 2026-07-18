@@ -12,6 +12,7 @@ import type {
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
+import { TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
 import type { Kysely, Transaction } from "kysely";
 
 export type ControlPlaneStoreOptions = {
@@ -58,8 +59,6 @@ type ModelSnapshotRow = {
   credentialStatus: string;
   credentialProvider: string;
 };
-
-const COMMAND_TOPIC = "control.command.pending.v1";
 
 function isoTimestamp(value: Date | string): string {
   const timestamp = value instanceof Date ? value : new Date(value);
@@ -333,7 +332,7 @@ export class ControlPlaneStore {
           tenant_id: this.#tenantId,
           aggregate_type: "session",
           aggregate_id: session.id,
-          topic: COMMAND_TOPIC,
+          topic: TURN_COMMAND_OUTBOX_TOPIC,
           payload: {
             schemaVersion: 1,
             commandId: command.id,

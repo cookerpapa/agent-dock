@@ -10,8 +10,14 @@ import type {
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Kysely, KyselyPlugin } from "kysely";
-import { createControlPlaneApplication } from "../src/index.ts";
+import { sql, type Kysely, type KyselyPlugin } from "kysely";
+import {
+  DeterministicExecutionBackend,
+  OutboxDispatcher,
+  OutboxDispatcherStaleClaimError,
+  type TurnExecutionBackend,
+  createControlPlaneApplication,
+} from "../src/index.ts";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -26,6 +32,7 @@ let application: NestFastifyApplication;
 let http: FastifyInstance;
 let project: ProjectResource;
 let session: SessionResource;
+let firstAccepted: AcceptedTurnResource;
 
 const rejectOutboxInsertPlugin: KyselyPlugin = {
   transformQuery({ node }) {
@@ -77,6 +84,49 @@ async function seedSingleUserProfile(): Promise<void> {
     .executeTakeFirstOrThrow();
 }
 
+async function acceptTurn(idempotencyKey: string, prompt: string): Promise<AcceptedTurnResource> {
+  const response = await http.inject({
+    method: "POST",
+    url: `/v1/sessions/${session.sessionId}/turns`,
+    headers: { "idempotency-key": idempotencyKey },
+    payload: { prompt },
+  });
+  expect(response.statusCode).toBe(202);
+  return response.json() as AcceptedTurnResource;
+}
+
+async function readTurnExecution(accepted: AcceptedTurnResource) {
+  return database
+    .selectFrom("commands as command")
+    .innerJoin("turns as turn", "turn.id", "command.turn_id")
+    .innerJoin("sessions as session_row", "session_row.id", "turn.session_id")
+    .innerJoin("outbox", (join) =>
+      join
+        .onRef("outbox.tenant_id", "=", "command.tenant_id")
+        .on(sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${accepted.commandId}`),
+    )
+    .select([
+      "command.state as commandState",
+      "command.acknowledged_at as acknowledgedAt",
+      "command.completed_at as commandCompletedAt",
+      "command.failure_code as commandFailureCode",
+      "turn.state as turnState",
+      "turn.started_at as startedAt",
+      "turn.settled_at as settledAt",
+      "turn.stop_reason as stopReason",
+      "turn.failure_code as turnFailureCode",
+      "turn.failure_message as failureMessage",
+      "turn.failure_retryable as failureRetryable",
+      "session_row.state as sessionState",
+      "outbox.attempts as attempts",
+      "outbox.published_at as publishedAt",
+      "outbox.last_error as lastError",
+    ])
+    .where("command.id", "=", accepted.commandId)
+    .where("turn.id", "=", accepted.turnId)
+    .executeTakeFirstOrThrow();
+}
+
 beforeAll(async () => {
   let connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL;
   if (!connectionString) {
@@ -92,7 +142,7 @@ beforeAll(async () => {
   }
   database = createDatabase({
     connectionString,
-    maxConnections: 1,
+    maxConnections: 2,
   });
   await upInitialControlPlane(database as unknown as Kysely<unknown>);
   await seedSingleUserProfile();
@@ -206,8 +256,8 @@ describe.sequential("single-user durable turn intake API", () => {
       payload: { prompt: "fix the failing test", thinkingLevel: "low" },
     });
     expect(response.statusCode).toBe(202);
-    const accepted = response.json() as AcceptedTurnResource;
-    expect(accepted).toMatchObject({
+    firstAccepted = response.json() as AcceptedTurnResource;
+    expect(firstAccepted).toMatchObject({
       sessionId: session.sessionId,
       state: "queued",
       replayed: false,
@@ -226,22 +276,22 @@ describe.sequential("single-user durable turn intake API", () => {
         "outbox.topic as topic",
         "outbox.payload as outboxPayload",
       ])
-      .where("turn.id", "=", accepted.turnId)
-      .where("command.id", "=", accepted.commandId)
+      .where("turn.id", "=", firstAccepted.turnId)
+      .where("command.id", "=", firstAccepted.commandId)
       .where("outbox.topic", "=", "control.command.pending.v1")
       .executeTakeFirstOrThrow();
     expect(durable).toMatchObject({
-      turnId: accepted.turnId,
+      turnId: firstAccepted.turnId,
       inputText: "fix the failing test",
       thinkingLevel: "low",
-      commandId: accepted.commandId,
+      commandId: firstAccepted.commandId,
       commandState: "pending",
       topic: "control.command.pending.v1",
       outboxPayload: {
         schemaVersion: 1,
-        commandId: accepted.commandId,
+        commandId: firstAccepted.commandId,
         sessionId: session.sessionId,
-        turnId: accepted.turnId,
+        turnId: firstAccepted.turnId,
         kind: "turn.execute",
       },
     });
@@ -291,6 +341,339 @@ describe.sequential("single-user durable turn intake API", () => {
         message: "Idempotency-Key was already used for a different turn request",
       },
     });
+  });
+
+  it("dispatches a durable command through ACK to a completed turn", async () => {
+    const backend = new DeterministicExecutionBackend([{ kind: "complete", stopReason: "done" }]);
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: firstAccepted.commandId,
+      turnId: firstAccepted.turnId,
+      attempt: 1,
+    });
+    const durable = await readTurnExecution(firstAccepted);
+    expect(durable).toMatchObject({
+      commandState: "completed",
+      turnState: "completed",
+      sessionState: "idle",
+      stopReason: "done",
+      attempts: 1,
+      lastError: null,
+    });
+    expect(durable.acknowledgedAt).not.toBeNull();
+    expect(durable.startedAt).not.toBeNull();
+    expect(durable.commandCompletedAt).not.toBeNull();
+    expect(durable.settledAt).not.toBeNull();
+    expect(durable.publishedAt).not.toBeNull();
+    expect(backend.records).toEqual([
+      {
+        commandId: firstAccepted.commandId,
+        sessionId: session.sessionId,
+        turnId: firstAccepted.turnId,
+        outcome: "complete",
+      },
+    ]);
+    expect(JSON.stringify(backend.records)).not.toContain("fix the failing test");
+  });
+
+  it("does not let two dispatchers execute the same claimed turn", async () => {
+    const accepted = await acceptTurn("concurrent-dispatch", "run exactly once");
+    let allowAcknowledgement!: () => void;
+    let releaseExecution!: () => void;
+    let reportClaimed!: () => void;
+    let reportAcknowledged!: () => void;
+    const claimed = new Promise<void>((resolve) => {
+      reportClaimed = resolve;
+    });
+    const acknowledgementAllowed = new Promise<void>((resolve) => {
+      allowAcknowledgement = resolve;
+    });
+    const acknowledged = new Promise<void>((resolve) => {
+      reportAcknowledged = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseExecution = resolve;
+    });
+    let executions = 0;
+    const backend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        executions += 1;
+        reportClaimed();
+        await acknowledgementAllowed;
+        await lifecycle.started();
+        reportAcknowledged();
+        await release;
+        return { stopReason: "agent_end" };
+      },
+    };
+    const firstDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+    });
+    const secondDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+    });
+
+    const dispatches = [firstDispatcher.dispatchNext(), secondDispatcher.dispatchNext()];
+    await claimed;
+    const earlyResult = await Promise.race(dispatches);
+    const executionsBeforeAcknowledgement = executions;
+    allowAcknowledgement();
+    await acknowledged;
+    const duringExecution = await readTurnExecution(accepted);
+    releaseExecution();
+    const results = await Promise.all(dispatches);
+
+    expect(earlyResult).toEqual({ status: "idle" });
+    expect(executionsBeforeAcknowledgement).toBe(1);
+    expect(duringExecution).toMatchObject({
+      commandState: "acknowledged",
+      turnState: "running",
+      sessionState: "running",
+      attempts: 1,
+      publishedAt: expect.anything(),
+      lastError: null,
+    });
+    expect(results.map((result) => result.status).sort()).toEqual(["completed", "idle"]);
+    expect(results.find((result) => result.status === "completed")).toMatchObject({
+      commandId: accepted.commandId,
+    });
+    expect((await readTurnExecution(accepted)).attempts).toBe(1);
+  });
+
+  it("fences a dispatcher whose pre-ACK claim lease was superseded", async () => {
+    const accepted = await acceptTurn("stale-dispatch", "only the current claimant may start");
+    let now = new Date(Date.now() + 1_000);
+    let releaseStaleClaim!: () => void;
+    let reportClaimed!: () => void;
+    const claimed = new Promise<void>((resolve) => {
+      reportClaimed = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseStaleClaim = resolve;
+    });
+    let staleBackendWorkStarted = false;
+    const staleBackend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        reportClaimed();
+        await release;
+        await lifecycle.started();
+        staleBackendWorkStarted = true;
+        return { stopReason: "stale_backend_must_not_finish" };
+      },
+    };
+    const staleDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: staleBackend,
+      clock: () => new Date(now),
+      claimLeaseMs: 10,
+    });
+
+    const staleDispatch = staleDispatcher.dispatchNext();
+    const staleOutcome = staleDispatch.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await claimed;
+
+    now = new Date(now.valueOf() + 11);
+    const currentBackend = new DeterministicExecutionBackend();
+    const currentDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: currentBackend,
+      clock: () => new Date(now),
+      claimLeaseMs: 10,
+    });
+    const currentResult = await currentDispatcher.dispatchNext();
+    releaseStaleClaim();
+    const staleError = await staleOutcome;
+
+    expect(currentResult).toMatchObject({
+      status: "completed",
+      commandId: accepted.commandId,
+      attempt: 2,
+    });
+    expect(staleError).toBeInstanceOf(OutboxDispatcherStaleClaimError);
+    expect(staleBackendWorkStarted).toBe(false);
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "completed",
+      turnState: "completed",
+      attempts: 2,
+      publishedAt: expect.anything(),
+    });
+  });
+
+  it("requeues a retryable pre-ACK failure without letting a later turn overtake it", async () => {
+    const accepted = await acceptTurn("retry-before-start", "retry without leaking this prompt");
+    let now = new Date(Date.now() + 1_000);
+    const backend = new DeterministicExecutionBackend([
+      {
+        kind: "fail_before_start",
+        code: "runner_busy",
+        safeMessage: "No runner capacity was available",
+        retryable: true,
+      },
+      { kind: "complete" },
+    ]);
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+      clock: () => new Date(now),
+      retryDelayMs: 10,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "retry_scheduled",
+      commandId: accepted.commandId,
+      attempt: 1,
+      failureCode: "runner_busy",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "pending",
+      turnState: "queued",
+      sessionState: "idle",
+      attempts: 1,
+      publishedAt: null,
+      lastError: "runner_busy",
+    });
+
+    const follower = await acceptTurn("retry-follower", "wait behind the retrying turn");
+    await database
+      .updateTable("commands")
+      .set({ created_at: new Date(0) })
+      .where("id", "=", accepted.commandId)
+      .executeTakeFirstOrThrow();
+    await expect(dispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+    expect(await readTurnExecution(follower)).toMatchObject({
+      commandState: "pending",
+      turnState: "queued",
+      attempts: 0,
+      publishedAt: null,
+    });
+
+    now = new Date(now.valueOf() + 11);
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: accepted.commandId,
+      attempt: 2,
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "completed",
+      turnState: "completed",
+      sessionState: "idle",
+      attempts: 2,
+      publishedAt: expect.anything(),
+      lastError: null,
+    });
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: follower.commandId,
+      attempt: 1,
+    });
+    expect(backend.records).toHaveLength(3);
+    expect(JSON.stringify(backend.records)).not.toContain("retry without leaking this prompt");
+  });
+
+  it("stops pre-ACK retry after the configured attempt limit", async () => {
+    const accepted = await acceptTurn("retry-exhausted", "eventually fail before start");
+    let now = new Date(Date.now() + 1_000);
+    const failure = {
+      kind: "fail_before_start",
+      code: "runner_busy",
+      safeMessage: "No runner capacity was available",
+      retryable: true,
+    } as const;
+    const backend = new DeterministicExecutionBackend([failure, failure]);
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+      clock: () => new Date(now),
+      retryDelayMs: 10,
+      maxAttempts: 2,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "retry_scheduled",
+      attempt: 1,
+    });
+    now = new Date(now.valueOf() + 11);
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      attempt: 2,
+      phase: "before_start",
+      failureCode: "runner_busy",
+    });
+
+    const durable = await readTurnExecution(accepted);
+    expect(durable).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "runner_busy",
+      turnState: "failed",
+      turnFailureCode: "runner_busy",
+      failureRetryable: true,
+      sessionState: "idle",
+      attempts: 2,
+      publishedAt: expect.anything(),
+      lastError: "runner_busy",
+    });
+    expect(durable.acknowledgedAt).toBeNull();
+    expect(durable.startedAt).toBeNull();
+  });
+
+  it("makes an execution failure terminal after ACK", async () => {
+    const accepted = await acceptTurn("failure-after-start", "fail after acknowledgement");
+    const backend = new DeterministicExecutionBackend([
+      {
+        kind: "fail_after_start",
+        code: "model_timeout",
+        safeMessage: "The model call timed out",
+        retryable: true,
+      },
+    ]);
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      attempt: 1,
+      phase: "after_start",
+      failureCode: "model_timeout",
+    });
+    const durable = await readTurnExecution(accepted);
+    expect(durable).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "model_timeout",
+      turnState: "failed",
+      turnFailureCode: "model_timeout",
+      failureMessage: "The model call timed out",
+      failureRetryable: true,
+      sessionState: "idle",
+      attempts: 1,
+      lastError: null,
+    });
+    expect(durable.acknowledgedAt).not.toBeNull();
+    expect(durable.startedAt).not.toBeNull();
+    expect(durable.commandCompletedAt).not.toBeNull();
+    expect(durable.settledAt).not.toBeNull();
+    expect(durable.publishedAt).not.toBeNull();
   });
 
   it("rolls back the turn and command if the outbox write fails", async () => {
