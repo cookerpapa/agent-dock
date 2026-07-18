@@ -1,0 +1,26 @@
+{
+  "name": "agent-dock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "spikes/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "spike:pi": "npm run spike --workspace @agent-dock/pi-extension-compat-spike",
+    "check": "npm run typecheck && npm test && npm run spike:pi",
+    "security:audit": "npm audit --omit=dev"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

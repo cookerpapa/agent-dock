@@ -1,0 +1,41 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+auth.json
+
+# Agent/session data and user workspaces
+.pi/
+sessions/
+workspaces/
+artifacts/
+snapshots/
+crash-dumps/
+
+# Java
+.gradle/
+build/
+target/
+*.class
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+.next/
+*.tsbuildinfo
+
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs and local runtime data
+*.log
+logs/
+tmp/
+.cache/
