@@ -1,0 +1,17 @@
+{
+  "name": "@agent-dock/fake-model-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run",
+    "start": "node src/run-server.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10"
+  }
+}

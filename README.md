@@ -122,6 +122,12 @@ can verify ChatGPT-subscription token usage plus JSONL rehydration. It is never
 part of `npm run check`, disables tools and extensions, uses temporary session
 state, and requires an explicit quota-consumption environment flag.
 
+The deterministic model boundary lives in
+[`packages/fake-model-server`](packages/fake-model-server). It serves real
+OpenAI-compatible HTTP/SSE on loopback and the pinned Pi `0.80.10` adapter
+contract-tests text, fragmented tool calls, 429, request timeout, explicit
+abort, malformed SSE, and mid-stream disconnect without provider tokens.
+
 ## Current status
 
 Phase 0: the public event envelope, Pi UI adapter, bidirectional
@@ -133,8 +139,10 @@ sandbox, approval, and agent-node transitions plus allowlisted model-profile
 resolution. The database package now supplies an 18-table Kysely/PostgreSQL
 migration with executable ownership, idempotency, ordering, fencing, ACK, and
 usage constraints. The hardened non-root Docker run remains to be verified once
-Docker is available in WSL. The next executable slice is the deterministic fake
-model server so streaming and provider failures can be tested without tokens.
+Docker is available in WSL. The deterministic fake model server now makes
+streaming and provider failures executable without tokens. The remaining Phase
+0 infrastructure slices are local Docker Compose/container verification and CI
+formatting, unit-test, and secret-scan enforcement.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

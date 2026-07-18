@@ -65,6 +65,17 @@ from a trusted credential broker or model gateway. A local, explicitly enabled
 ChatGPT-subscription probe may reuse the owner's Pi login only as a Phase 0 SDK
 integration test; it is not the production credential boundary. See ADR-0006.
 
+### Deterministic model test boundary
+
+The loopback-only fake model server implements the OpenAI Chat Completions SSE
+shape used by the pinned Pi adapter. A typed scenario header selects text,
+fragmented tool calls, HTTP 429, no-response timeout, malformed SSE, or
+mid-stream disconnect. This is executable failure injection, not a production
+model gateway: it accepts only a fixed valueless test key, refuses non-loopback
+bind addresses, and records request metadata without authorization values or
+message content. Default tests send real HTTP requests through Pi's provider
+adapter but consume no provider quota.
+
 ### Execution backend boundary
 
 The durable session identity is independent from its current execution

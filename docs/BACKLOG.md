@@ -29,9 +29,9 @@ in `ROADMAP.md` until their prerequisites are complete.
 - [x] Model session, turn, sandbox, approval, and agent-node states
 - [x] Create initial PostgreSQL schema and Kysely migrations
 - [ ] Create local Docker Compose topology
-- [ ] Implement deterministic fake model server
-- [ ] Script fake text streaming and tool-call scenarios
-- [ ] Script 429, timeout, malformed response, and stream-disconnect scenarios
+- [x] Implement deterministic fake model server
+- [x] Script fake text streaming and tool-call scenarios
+- [x] Script 429, timeout, malformed response, and stream-disconnect scenarios
 - [ ] Add CI for formatting, unit tests, and secret scanning
 
 ## First vertical-slice story

@@ -192,3 +192,32 @@
 - 下一步：实现 deterministic OpenAI-compatible fake model server。原因是
   它能在不消耗 subscription token 的情况下稳定复现 text/tool stream、429、
   timeout、malformed response 和断流，之后 Web/API 的失败行为才可重复测试。
+
+## 2026-07-18 — Deterministic fake model server
+
+- 目标：让模型正常流式输出和失败路径都能从 clean checkout 稳定重现，CI 不
+  依赖外网、真实 token 或订阅额度。
+- 实现：新增 `@agent-dock/fake-model-server`，在 loopback 上提供真实
+  OpenAI Chat Completions HTTP/SSE。通过 `x-agent-dock-scenario` 固定选择
+  `text`、`tool_call`、`rate_limit`、`timeout`、`malformed` 或
+  `disconnect`；tool-call arguments 分成两段发送，tool result 到达后返回最终
+  文本，因此能验证多次模型请求的工具回路协议。
+- Pi 合同：测试不是自写客户端解析自己的响应，而是由 pinned Pi `0.80.10`
+  的 `openai-completions` adapter 发出请求并解析 text delta、usage、tool call
+  和错误。这样 Pi 升级导致兼容性变化时会直接失败。
+- 失败语义：429 禁止客户端自动重试；timeout 故意不发送 HTTP headers，验证
+  request timeout；显式 AbortSignal 验证取消；malformed SSE 和发送部分文本后
+  断流都必须得到 error，而不能误报成功。测试过程中还确认：收到 SSE headers
+  后的 idle stream 不属于 OpenAI SDK `timeoutMs` 的同一语义，后续应由
+  supervisor 的 stream-idle watchdog 处理。
+- 安全边界：服务器拒绝非 loopback bind；固定 key 只用于本地测试且没有外部
+  价值；观测只保留 request ID、scenario、model、message/tool 数量、状态码和
+  完成方式，不保留 Authorization 或 message 内容。
+- 验证：6 个 HTTP/lifecycle 测试和 7 个 Pi provider contract 测试覆盖 discovery、
+  auth、日志脱敏、text/tool、429、timeout、abort、malformed 与 disconnect。
+- 真实 provider：经用户明确授权后运行 subscription probe；现有 OAuth 在第一轮
+  请求前刷新失败并被归类为 `authentication`，因此没有把这次尝试记为真实调用
+  通过。临时目录仍由 `finally` 删除，重新 `/login` 后再复验。
+- 下一步：补 Phase 0 的 CI formatting/unit/secret-scan enforcement。原因是现有
+  合同测试已经足够多，应该先确保每次提交自动执行并阻止敏感信息进入仓库；
+  Docker Compose/非 root 容器仍需等当前 WSL 的 Docker 可用后做真实验证。
