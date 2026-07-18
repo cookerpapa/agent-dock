@@ -29,7 +29,7 @@ in `ROADMAP.md` until their prerequisites are complete.
   bootstrap, excluded from CI
 - [x] Model session, turn, sandbox, approval, and agent-node states
 - [x] Create initial PostgreSQL schema and Kysely migrations
-- [ ] Create local Docker Compose topology
+- [x] Create local hardened Docker Compose topology and configuration contracts
 - [x] Implement deterministic fake model server
 - [x] Script fake text streaming and tool-call scenarios
 - [x] Script 429, timeout, malformed response, and stream-disconnect scenarios

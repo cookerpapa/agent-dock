@@ -123,6 +123,12 @@ Minimum controls:
 - restricted network egress;
 - no long-lived model/provider secrets exposed to the agent.
 
+The Phase 0 Compose topology is a zero-token security probe, not the production
+network or workspace design. Its two one-shot runners have no network, ports, or
+host volumes; a real coding session later receives an isolated writable workspace
+and policy-controlled egress rather than weakening the read-only control-plane
+boundary.
+
 ## 3. State ownership
 
 ### PostgreSQL

@@ -281,3 +281,40 @@
 - 下一步：补 Docker Compose 和 non-root container spike。原因是 Phase 0 现在只
   剩执行隔离没有在真实容器中验证；这也是进入 NestJS/API vertical slice 前最
   重要的安全前提。
+
+## 2026-07-18 — Hardened Phase 0 Compose topology
+
+- 目标：把 Pi RPC compatibility 和 embedded rehydrate 两个零 token probe
+  打包为可重复的一次性 runner，并让 non-root、只读文件系统、无网络、无宿主
+  挂载和资源限制成为机器可检查的配置，而不是 README 中的一条建议命令。
+- Topology：根目录 `compose.yaml` 定义两个独立 service；没有加入 PostgreSQL、
+  MinIO 或 Toxiproxy，因为当前 Phase 0 runner 没有组件会使用它们。提前启动未
+  连通的基础设施不会增加证据，只会掩盖真实数据流尚未实现。
+- 运行边界：两个 service 均显式使用 UID/GID `1000:1000`、read-only rootfs、
+  64 MiB `/tmp` tmpfs、`network_mode: none`、`cap_drop: ALL`、
+  `no-new-privileges`、128 PID、512 MiB memory、1 CPU 和 1024 nofile；没有
+  volume、port、host PID/IPC、device 或 Compose secret。
+- 双重 non-root 检查：Compose 设置 `AGENT_DOCK_REQUIRE_NON_ROOT=1`；两个 spike
+  启动时读取真实 Unix UID/GID，UID 为 0 或无法确认时直接失败，并在成功 JSON
+  中记录 runtime identity。普通本地运行不会被这个容器专用开关误伤。
+- 构建供应链：Node `24.12.0-bookworm-slim` 固定到官方 multi-arch OCI index
+  digest `sha256:7326fb…d92c99`；镜像只执行 `npm ci --omit=dev --ignore-scripts`。
+  `.dockerignore` 改为 allowlist，因此 `.git`、home、OAuth、session、workspace、
+  `.env` 和 `.npmrc` 不会进入 build context。
+- 合同测试：新增 2 个 Vitest 用例解析 Compose YAML，并检查每个 service 的
+  hardening、禁止的 host boundary、两个 Dockerfile 的 digest/non-root/install
+  顺序以及 build-context allowlist。全仓总计 75 个测试。
+- 无 daemon 验证：checksum 校验后的 Docker Compose `v5.3.1` 成功执行
+  `config --quiet`。随后在两个临时目录逐条模拟 Dockerfile 的 COPY 和 production
+  npm install；RPC 布局安装 144 packages、embedded 布局安装 142 packages，
+  两个 probe 均以 required non-root `1000:1000` 通过，临时目录已删除。
+- CI：新增独立 container job；GitHub-hosted runner 会 build 两个 digest-pinned
+  image 并顺序运行，再在 `always()` cleanup。运行时完全断网，且不注入 OAuth、
+  provider key 或真实 model call。
+- 证据边界：当前 WSL 仍没有 Docker CLI/daemon，仓库也没有 remote，因此还不能
+  声称真实 Docker namespaces/cgroups/read-only mount 已通过。backlog 中
+  “Run the spike inside a non-root Docker container”继续保持未完成；首次 hosted
+  CI 或本机 `npm run container:check` 成功后才能勾选。
+- 下一步：先启用 Docker Desktop WSL integration，或把仓库 push 到个人 GitHub
+  触发 container job。原因是继续写 Phase 1 API 不能替代这最后一个 Phase 0
+  runtime 证据；容器真实通过后再开始 NestJS vertical slice。

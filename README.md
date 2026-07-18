@@ -140,10 +140,16 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 73 unit/contract tests, the two
+It checks Prettier formatting, TypeScript types, 75 unit/contract tests, the two
 zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
+
+When Docker is available, the hardened Phase 0 runner topology is exercised with:
+
+```bash
+npm run container:check
+```
 
 ## Current status
 
@@ -155,13 +161,14 @@ dedicated Pi processes. The domain package now enforces explicit session, turn,
 sandbox, approval, and agent-node transitions plus allowlisted model-profile
 resolution. The database package now supplies an 18-table Kysely/PostgreSQL
 migration with executable ownership, idempotency, ordering, fencing, ACK, and
-usage constraints. The hardened non-root Docker run remains to be verified once
-Docker is available in WSL. The deterministic fake model server now makes
-streaming and provider failures executable without tokens. Formatting, tests,
-zero-token spikes, dependency audit, and full-history secret scanning are now
-enforced by a locally validated GitHub Actions workflow. Its first hosted run
-will occur after the repository is pushed. The remaining Phase 0 infrastructure
-slice is local Docker Compose/non-root container verification.
+usage constraints. A hardened two-service Docker Compose topology, pinned runner
+images, and executable container-configuration contracts are implemented. The
+actual Docker Engine run remains to be verified because this WSL distribution
+does not expose Docker. The deterministic fake model server makes streaming and
+provider failures executable without tokens. Formatting, tests, zero-token
+spikes, dependency audit, container probes, and full-history secret scanning are
+defined in GitHub Actions. Their first hosted runs will occur after the repository
+is pushed. Phase 0 completion now waits only on a real non-root container run.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

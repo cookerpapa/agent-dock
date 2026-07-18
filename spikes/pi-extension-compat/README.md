@@ -35,9 +35,8 @@ references. Project and extension source remains under strict type checking.
 Run these commands from the repository root:
 
 ```bash
-npm ci
-npm run check
-npm audit --omit=dev
+npm ci --ignore-scripts
+npm run ci
 ```
 
 `npm run spike` uses the locally pinned Pi binary. To probe another compatible
@@ -49,20 +48,22 @@ PI_COMMAND=/absolute/path/to/pi npm run spike:pi
 
 ## Run as a non-root container
 
-Run from the repository root so the image can include the protocol and adapter workspaces:
+Run both Phase 0 images from the repository root:
 
 ```bash
-docker build -f spikes/pi-extension-compat/Dockerfile -t agent-dock/pi-extension-compat .
-docker run --rm --read-only \
-  --tmpfs /tmp:rw,nosuid,size=64m \
-  --cap-drop=ALL \
-  --security-opt=no-new-privileges \
-  agent-dock/pi-extension-compat
+npm run container:check
 ```
 
-The container runs as the image's unprivileged `node` user. The read-only and
-resource/security flags are deliberately supplied by the sandbox launcher,
-because an image cannot enforce its own runtime limits.
+Compose builds digest-pinned Node images and sequentially runs this RPC probe and
+the embedded rehydrate probe. Each service uses UID/GID `1000:1000`, a read-only
+root filesystem, a 64 MiB `/tmp`, no network or host volume, all capabilities
+dropped, `no-new-privileges`, and CPU/memory/PID/file limits. The spike also
+rejects root at runtime when Compose sets `AGENT_DOCK_REQUIRE_NON_ROOT=1`.
+
+The Dockerfiles and Compose document have executable static contracts, and their
+production-only npm layouts pass outside Docker. A real container run is still
+required before claiming that the host engine enforced namespaces, cgroups, and
+mount options.
 
 ## Data flow
 
@@ -82,5 +83,5 @@ shutdown. It escalates to process-group `SIGTERM`/`SIGKILL` only on a hung exit.
 The in-memory spool is a protocol reference, not a claim of crash-safe local
 durability; production storage is added with the real supervisor transport.
 
-The verified `0.80.10` lockfile currently reports zero production dependency
-vulnerabilities through `npm audit --omit=dev`.
+The verified `0.80.10` lockfile currently reports zero dependency vulnerabilities
+through the root `npm run security:audit` command.

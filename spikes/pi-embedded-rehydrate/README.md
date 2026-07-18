@@ -25,6 +25,12 @@ Run it with:
 npm run spike:embedded
 ```
 
+The same zero-token probe is packaged as the second service in the hardened
+Phase 0 Compose topology. From the repository root, `npm run container:check`
+builds both digest-pinned images and requires this process to report a non-root
+runtime identity. See the Pi extension compatibility spike README for the full
+container restrictions and current Docker Engine verification boundary.
+
 An opt-in density probe activates and cools 1,000 logical sessions, then wakes
 10 concurrently and reports measured heap/RSS instead of adding a slow benchmark
 to every CI run:
