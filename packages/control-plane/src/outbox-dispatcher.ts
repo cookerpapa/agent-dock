@@ -8,6 +8,7 @@ import {
   type TurnState,
 } from "@agent-dock/domain";
 import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
+import type { CancelTurnCommandMessage } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
@@ -84,6 +85,18 @@ export class TurnExecutionBackendError extends Error {
   }
 }
 
+export class TurnExecutionCancelledError extends TurnExecutionBackendError {
+  readonly reason: CancelTurnCommandMessage["payload"]["reason"];
+  readonly forced: boolean;
+
+  constructor(reason: CancelTurnCommandMessage["payload"]["reason"], forced: boolean) {
+    super("turn_cancelled", "Turn cancellation was confirmed", false);
+    this.name = "TurnExecutionCancelledError";
+    this.reason = reason;
+    this.forced = forced;
+  }
+}
+
 export class OutboxDispatcherInvariantError extends Error {
   constructor(message: string) {
     super(message);
@@ -100,6 +113,13 @@ export class OutboxDispatcherStaleClaimError extends Error {
 
 export type DispatchNextResult =
   | { status: "idle" }
+  | {
+      status: "cancellation_pending" | "cancelled";
+      commandId: string;
+      sessionId: string;
+      turnId: string;
+      attempt: number;
+    }
   | {
       status: "completed";
       commandId: string;
@@ -144,6 +164,7 @@ type ClaimedTurn = {
 
 type LifecycleRows = {
   commandState: CommandState;
+  commandFailureCode: string | null;
   turnState: TurnState;
   sessionState: SessionState;
   outboxAttempts: number;
@@ -290,6 +311,15 @@ export class OutboxDispatcher {
         }
       }
       if (startFailure !== undefined) throw startFailure;
+      if (started) {
+        const externallySettled = await this.#observeCancellation(claim);
+        if (externallySettled !== undefined) return externallySettled;
+        if (error instanceof TurnExecutionCancelledError) {
+          throw new OutboxDispatcherInvariantError(
+            "Cancellation confirmation arrived before its durable lifecycle",
+          );
+        }
+      }
       return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
     }
 
@@ -301,6 +331,57 @@ export class OutboxDispatcher {
       turnId: claim.request.turnId,
       attempt: claim.attempt,
     };
+  }
+
+  async #observeCancellation(claim: ClaimedTurn): Promise<DispatchNextResult | undefined> {
+    return this.#database.transaction().execute(async (transaction) => {
+      const rows = await this.#lockLifecycleRows(transaction, claim);
+      if (
+        rows.commandState === "acknowledged" &&
+        rows.turnState === "cancelling" &&
+        rows.sessionState === "cancelling" &&
+        rows.outboxPublishedAt !== null
+      ) {
+        return {
+          status: "cancellation_pending",
+          commandId: claim.request.commandId,
+          sessionId: claim.request.sessionId,
+          turnId: claim.request.turnId,
+          attempt: claim.attempt,
+        };
+      }
+      if (
+        rows.commandState === "completed" &&
+        rows.turnState === "cancelled" &&
+        rows.sessionState === "idle" &&
+        rows.outboxPublishedAt !== null
+      ) {
+        return {
+          status: "cancelled",
+          commandId: claim.request.commandId,
+          sessionId: claim.request.sessionId,
+          turnId: claim.request.turnId,
+          attempt: claim.attempt,
+        };
+      }
+      if (
+        rows.commandState === "failed" &&
+        rows.turnState === "failed" &&
+        rows.sessionState === "failed" &&
+        rows.outboxPublishedAt !== null
+      ) {
+        return {
+          status: "failed",
+          commandId: claim.request.commandId,
+          sessionId: claim.request.sessionId,
+          turnId: claim.request.turnId,
+          attempt: claim.attempt,
+          phase: "after_start",
+          failureCode: rows.commandFailureCode ?? "cancellation_failed",
+        };
+      }
+      return undefined;
+    });
   }
 
   async #claimNext(): Promise<ClaimedTurn | undefined> {
@@ -807,6 +888,7 @@ export class OutboxDispatcher {
       )
       .select([
         "command.state as commandState",
+        "command.failure_code as commandFailureCode",
         "turn.state as turnState",
         "session_row.state as sessionState",
         "outbox.attempts as outboxAttempts",

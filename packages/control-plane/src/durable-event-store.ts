@@ -420,13 +420,28 @@ export class DurableEventStore implements DurableEventIngestor {
 
     const turn = await transaction
       .selectFrom("turns")
-      .select("id")
+      .select(["id", "state"])
       .where("tenant_id", "=", this.#tenantId)
       .where("session_id", "=", event.sessionId)
       .where("id", "=", event.turnId)
       .executeTakeFirst();
     if (turn === undefined) {
       throw new DurableEventStoreError("invalid_event", "Event turn does not belong to session");
+    }
+    if (
+      turn.state === "cancelling" &&
+      (event.type === "turn.completed" || event.type === "turn.failed")
+    ) {
+      throw new DurableEventStoreError(
+        "invalid_event",
+        "A cancelling turn cannot publish a completion or failure terminal event",
+      );
+    }
+    if (event.type === "turn.cancelled" && turn.state !== "cancelling") {
+      throw new DurableEventStoreError(
+        "invalid_event",
+        "A cancellation terminal event requires a cancelling turn",
+      );
     }
 
     if (message.payload.commandId === undefined) return;

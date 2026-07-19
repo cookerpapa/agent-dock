@@ -19,6 +19,13 @@ export const SessionStateSchema = Type.Union([
   Type.Literal("evicting"),
 ]);
 
+export const TurnCancellationReasonSchema = Type.Union([
+  Type.Literal("user_request"),
+  Type.Literal("timeout"),
+  Type.Literal("lease_revoked"),
+  Type.Literal("shutdown"),
+]);
+
 const CommonEnvelopeProperties = {
   schemaVersion: Type.Literal(1),
   eventId: UuidSchema,
@@ -236,6 +243,21 @@ const TurnFailedEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const TurnCancelledEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("turn.cancelled"),
+    payload: Type.Object(
+      {
+        reason: TurnCancellationReasonSchema,
+        forced: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const AgentDockEventSchema = Type.Union([
   TurnStartedEventSchema,
   SessionStateChangedEventSchema,
@@ -247,6 +269,7 @@ export const AgentDockEventSchema = Type.Union([
   UiNotificationEventSchema,
   TurnCompletedEventSchema,
   TurnFailedEventSchema,
+  TurnCancelledEventSchema,
 ]);
 
 export type AgentDockEvent =
@@ -259,7 +282,8 @@ export type AgentDockEvent =
   | Static<typeof ApprovalResolvedEventSchema>
   | Static<typeof UiNotificationEventSchema>
   | Static<typeof TurnCompletedEventSchema>
-  | Static<typeof TurnFailedEventSchema>;
+  | Static<typeof TurnFailedEventSchema>
+  | Static<typeof TurnCancelledEventSchema>;
 export type AgentDockEventType = AgentDockEvent["type"];
 
 type EventBody<Event> = Event extends AgentDockEvent ? Pick<Event, "type" | "payload"> : never;

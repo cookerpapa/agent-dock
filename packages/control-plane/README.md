@@ -1,8 +1,9 @@
 # AgentDock control plane
 
 This package contains the Phase 1 NestJS/Fastify durable-intake boundary, an
-explicit outbox dispatcher, fenced event ingestion, and the resumable browser
-event surface. It is not yet the production Pi executor.
+explicit execution dispatcher, an independent durable cancellation dispatcher,
+fenced event ingestion, and the resumable browser event surface. It is not yet
+the production Pi executor.
 
 ## Implemented endpoints
 
@@ -12,6 +13,9 @@ event surface. It is not yet the production Pi executor.
 - `POST /v1/sessions/:sessionId/turns` requires `Idempotency-Key` and returns
   `202 Accepted` only after the queued turn, pending command, and transactional
   outbox record commit together.
+- `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` requires a distinct
+  `Idempotency-Key` and returns `202 Accepted` only after cancellation intent is
+  durable. It does not imply that Pi has already stopped.
 - `GET /v1/sessions/:sessionId/events` streams versioned AgentDock events as SSE
   and resumes strictly after a validated `Last-Event-ID` session sequence.
 
@@ -19,7 +23,8 @@ The turn stores the prompt and immutable model/credential-binding snapshot. The
 command stores only a request fingerprint, and the outbox carries IDs rather
 than copying the prompt or any credential material. Repeating the same key and
 request returns the original acceptance; reusing the key for different content
-returns `409`.
+returns `409`. Cancellation has the same semantic replay check, including its
+grace period, and targets only an acknowledged active turn in v0.
 
 ## Dispatcher boundary
 
@@ -47,6 +52,18 @@ backend, is never wired into `src/main.ts`, and cannot make a production task
 appear completed. The current dispatcher lease safely reclaims a crash before
 ACK; a crash after ACK intentionally remains for the later supervisor
 lease/fencing and reconciliation slice.
+
+`CancellationDispatcher.dispatchNext()` consumes a separate outbox topic, so it
+can interrupt a model call while the execution dispatcher is awaiting that
+call. The supervisor first returns a side-effect-free ACK. Its database commit
+changes turn/session to `cancelling` and is the race's linearization point;
+only afterward may the backend send Pi's native abort. Natural completion
+committed before this point wins. After it, the execution dispatcher observes
+rather than overwrites cancellation settlement. A matching durable
+`turn.cancelled` event and process-tree confirmation are required before both
+commands complete, the session returns to `idle`, and the exact lease is
+released. Failure after cancellation ACK instead fails the turn/session and
+retains the unconfirmed reservation for reconciliation.
 
 ## Durable event boundary
 
@@ -78,15 +95,18 @@ durable acceptance, idempotent replay, conflicting reuse, model-policy
 rejection, generic error redaction, rollback when the outbox step fails,
 successful ACK/completion, concurrent claim exclusion, pre-ACK retry, post-ACK
 terminal failure, commit-before-event-ACK, gap/fence/conflict rejection, live
-SSE, and `Last-Event-ID` replay. Its end-to-end path starts pinned Pi against the
-loopback fake model without provider tokens.
+SSE, and `Last-Event-ID` replay. Cancellation coverage includes queued rejection,
+idempotency, competing requests, natural-completion races, post-ACK failure
+quarantine semantics, native Pi abort, forced POSIX descendant termination, and
+SSE terminal delivery. Its end-to-end path starts pinned Pi against the loopback
+fake model without provider tokens.
 
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
 remain explicit deployment steps. A continuously running production worker,
-production supervisor transport, durable runner spool, cancellation, and the
-React page are not claimed by this slice.
+production supervisor transport, durable runner spool, acknowledged-cancellation
+crash recovery, and the React page are not claimed by this slice.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

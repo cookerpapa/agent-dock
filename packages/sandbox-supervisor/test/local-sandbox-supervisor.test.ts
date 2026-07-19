@@ -1,15 +1,21 @@
 import type {
   EventAckMessage,
   EventPublishMessage,
+  CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
-import { LocalSandboxSupervisor, type SupervisorTurnRunner } from "../src/index.ts";
+import {
+  LocalSandboxSupervisor,
+  PiRpcTurnCancelledError,
+  type SupervisorTurnRunner,
+} from "../src/index.ts";
 
 const IDS = {
   message: "11111111-1111-4111-8111-111111111111",
   command: "22222222-2222-4222-8222-222222222222",
   command2: "33333333-3333-4333-8333-333333333333",
+  cancellation: "66666666-6666-4666-8666-666666666666",
   lease: "44444444-4444-4444-8444-444444444444",
   lease2: "55555555-5555-4555-8555-555555555555",
 };
@@ -48,6 +54,30 @@ function command(
         credentialBindingId: "credential-1",
         credentialBindingVersion: 1,
       },
+    },
+  };
+}
+
+function cancellation(target: ExecuteTurnCommandMessage = command()): CancelTurnCommandMessage {
+  return {
+    protocolVersion: 1,
+    messageId: "77777777-7777-4777-8777-777777777777",
+    sentAt: "2026-07-18T08:00:01.000Z",
+    type: "command.turn.cancel",
+    payload: {
+      commandId: IDS.cancellation,
+      targetCommandId: target.payload.commandId,
+      idempotencyKey: "cancel-1",
+      tenantId: target.payload.tenantId,
+      projectId: target.payload.projectId,
+      workspaceId: target.payload.workspaceId,
+      sessionId: target.payload.sessionId,
+      turnId: target.payload.turnId,
+      agentId: target.payload.agentId,
+      leaseId: target.payload.leaseId,
+      fencingToken: target.payload.fencingToken,
+      reason: "user_request",
+      gracePeriodMs: 50,
     },
   };
 }
@@ -223,5 +253,40 @@ describe("LocalSandboxSupervisor", () => {
     }));
 
     await expect(prepared.run()).rejects.toThrow("acknowledgement was invalid");
+  });
+
+  it("prepares cancellation without side effects, then aborts the exact running assignment", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const abortingRunner: SupervisorTurnRunner = {
+      async run(_value, _publishEvent, signal) {
+        observedSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const reason = signal.reason as { reason: "user_request" };
+              reject(new PiRpcTurnCancelledError(reason.reason, false));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner });
+    const execute = command();
+    const preparedExecution = supervisor.prepare(execute, rejectUnexpectedEvent);
+    const execution = preparedExecution.run();
+    void execution.catch(() => undefined);
+    const preparedCancellation = supervisor.prepareCancellation(cancellation(execute));
+
+    expect(preparedCancellation.ack.payload.status).toBe("accepted");
+    expect(observedSignal?.aborted).toBe(false);
+    await expect(preparedCancellation.run()).resolves.toEqual({
+      reason: "user_request",
+      forced: false,
+    });
+    await expect(execution).rejects.toBeInstanceOf(PiRpcTurnCancelledError);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(supervisor.activeSessionCount).toBe(0);
   });
 });

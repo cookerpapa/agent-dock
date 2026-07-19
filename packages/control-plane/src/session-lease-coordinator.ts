@@ -234,6 +234,55 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
     });
   }
 
+  async currentAssignment(request: TurnExecutionRequest): Promise<TurnExecutionAcknowledgement> {
+    const now = validDate(this.#clock);
+    return this.#database.transaction().execute(async (transaction) => {
+      const session = await transaction
+        .selectFrom("sessions")
+        .select(["tenant_id", "project_id", "workspace_id", "state", "last_fencing_token"])
+        .where("id", "=", request.sessionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (
+        session === undefined ||
+        session.tenant_id !== request.tenantId ||
+        session.project_id !== request.projectId ||
+        session.workspace_id !== request.workspaceId
+      ) {
+        throw new SessionLeaseCoordinatorError(
+          "session_unavailable",
+          "Session is unavailable for cancellation",
+          false,
+        );
+      }
+      if (session.state !== "running" && session.state !== "waiting_approval") {
+        throw new SessionLeaseCoordinatorError(
+          "invalid_state",
+          "Session no longer has an active execution to cancel",
+          false,
+        );
+      }
+
+      const lease = await transaction
+        .selectFrom("session_leases")
+        .select(["lease_id", "sandbox_id", "fencing_token", "valid_until"])
+        .where("session_id", "=", request.sessionId)
+        .forUpdate()
+        .executeTakeFirst();
+      const fencingToken =
+        lease === undefined ? -1 : safeInteger(lease.fencing_token, "lease fencing token");
+      if (
+        lease === undefined ||
+        lease.sandbox_id !== this.#sandboxId ||
+        new Date(lease.valid_until).valueOf() <= now.valueOf() ||
+        fencingToken !== safeInteger(session.last_fencing_token, "session fencing token")
+      ) {
+        throw new SessionLeaseCoordinatorError("stale_fence", "Execution lease is stale", false);
+      }
+      return { leaseId: lease.lease_id, fencingToken };
+    });
+  }
+
   async releaseCurrent(
     transaction: Transaction<Database>,
     request: TurnExecutionRequest,

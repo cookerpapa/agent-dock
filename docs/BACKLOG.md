@@ -51,6 +51,6 @@ Acceptance criteria:
 - [ ] The workspace and all extensions run outside the NestJS control-plane process
 - [ ] Text and tool events carry session, turn, agent, and sequence identifiers
 - [x] SSE reconnect resumes from the last acknowledged event
-- [ ] Cancellation stops the model request and complete tool process tree
+- [x] Cancellation stops the model request and complete tool process tree on POSIX
 - [ ] No provider credential appears in logs or the workspace
 - [ ] A clean-checkout command reproduces the demo

@@ -96,6 +96,7 @@ only after a measured requirement appears.
 - [ADR-0006: v0 scope, model profiles, and credentials](docs/adr/0006-v0-product-scope-model-profiles-and-credentials.md)
 - [ADR-0007: supervisor execution handshake and model snapshot](docs/adr/0007-supervisor-execution-handshake-and-model-snapshot.md)
 - [ADR-0008: durable event ACK and resumable SSE replay](docs/adr/0008-durable-event-ack-and-sse-replay.md)
+- [ADR-0009: durable turn cancellation and process-exit confirmation](docs/adr/0009-durable-turn-cancellation.md)
 
 ## Current executable spikes
 
@@ -142,7 +143,7 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 112 unit/contract tests, the two
+It checks Prettier formatting, TypeScript types, 124 unit/contract tests, the two
 zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -190,14 +191,27 @@ endpoint joins live delivery with durable `Last-Event-ID` replay without a
 query/subscribe gap. Completion and post-ACK failure both release lease and
 sandbox capacity transactionally.
 
+The fourth Phase 1 slice adds durable cancellation as an independent command
+path, so a cancel can reach Pi while the execute dispatcher is blocked awaiting
+the model. The API returns `202` only after cancellation intent commits. A
+side-effect-free supervisor ACK is then persisted as the race's linearization
+point before Pi receives its native `abort`. On POSIX, an uncooperative Pi or
+tool descendant is escalated through process-group `SIGTERM`/`SIGKILL`, and
+`turn.cancelled` is published only after the complete group has disappeared.
+The terminal event remains fenced, durable, ordered, resumable through SSE, and
+owns final turn/session settlement. Natural completion wins if it commits first;
+a post-ACK cancellation failure fails the session without returning an
+unconfirmed sandbox reservation to the ready pool.
+
 The full database-to-Pi path is covered with the loopback fake model, so it uses
 no subscription token. The in-process supervisor transport and local workspace
 are integration scaffolding and are not started by the production HTTP entry
 point. The event table and SSE API are production entry-point capabilities, but
 live fan-out is currently process-local and the supervisor spool is memory-only.
-Cancellation, a real isolated workspace transport, durable Pi/workspace
-snapshots, lease renewal/reconciliation, and the React page are not connected
-yet.
+Queued-turn withdrawal, a real isolated workspace transport, durable
+Pi/workspace snapshots, acknowledged-cancellation crash recovery, lease
+renewal/reconciliation, Windows Job Object containment, and the React page are
+not connected yet.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains

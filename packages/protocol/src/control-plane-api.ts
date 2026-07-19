@@ -74,6 +74,26 @@ export const AcceptedTurnResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const CreateTurnCancellationRequestSchema = Type.Object(
+  {
+    gracePeriodMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000 })),
+  },
+  { additionalProperties: false },
+);
+
+export const AcceptedTurnCancellationResourceSchema = Type.Object(
+  {
+    commandId: UuidSchema,
+    targetCommandId: UuidSchema,
+    turnId: UuidSchema,
+    sessionId: UuidSchema,
+    state: Type.Literal("pending"),
+    acceptedAt: UtcTimestampSchema,
+    replayed: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 export const ControlPlaneApiErrorSchema = Type.Object(
   {
     error: Type.Object(
@@ -94,6 +114,10 @@ export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
 export type SessionResource = Static<typeof SessionResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
+export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellationRequestSchema>;
+export type AcceptedTurnCancellationResource = Static<
+  typeof AcceptedTurnCancellationResourceSchema
+>;
 export type ControlPlaneApiError = Static<typeof ControlPlaneApiErrorSchema>;
 
 export class ControlPlaneApiValidationError extends Error {
@@ -139,6 +163,14 @@ export function parseAcceptTurnRequest(value: unknown): AcceptTurnRequest {
     throw new ControlPlaneApiValidationError("Turn prompt must contain a non-whitespace character");
   }
   return request;
+}
+
+export function parseCreateTurnCancellationRequest(value: unknown): CreateTurnCancellationRequest {
+  return parseSchema(
+    CreateTurnCancellationRequestSchema,
+    value,
+    "create-turn-cancellation request",
+  );
 }
 
 export function parseIdempotencyKey(value: unknown): string {

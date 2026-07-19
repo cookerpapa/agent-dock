@@ -14,6 +14,7 @@ const IDS = {
   connection: "55555555-5555-4555-8555-555555555555",
   lease: "66666666-6666-4666-8666-666666666666",
   command: "77777777-7777-4777-8777-777777777777",
+  targetCommand: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   approval: "88888888-8888-4888-8888-888888888888",
   event: "99999999-9999-4999-8999-999999999999",
 };
@@ -133,6 +134,7 @@ describe("supervisor/control-plane wire protocol", () => {
       type: "command.turn.cancel",
       payload: {
         ...commandIdentity(),
+        targetCommandId: IDS.targetCommand,
         reason: "user_request",
         gracePeriodMs: 2_000,
       },

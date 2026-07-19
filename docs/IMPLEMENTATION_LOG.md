@@ -519,3 +519,50 @@
 - 下一步：实现 durable cancel command 到 Pi/process-tree termination 的完整路径。
   原因是现在用户已经能实时观察长 turn，但还不能主动停止模型请求或工具子进程；
   cancellation 是把当前“可看”链路变成可安全操作的云端 session 的最小下一闭环。
+
+## 2026-07-19 — Durable cancellation and confirmed process-tree teardown
+
+- 目标：让浏览器发出的取消请求先成为可重试、可审计的 durable intent，再真正中断
+  blocked model call；只有 Pi 与完整工具进程组均停止且 terminal event 已持久化后，
+  turn 才能对外成为 `cancelled`。
+- 决策：新增 ADR-0009 和独立 `control.command.cancel.pending.v1` outbox。公开
+  `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` 强制使用
+  `Idempotency-Key`；同 key/同 request 可重放，变更 grace period 会冲突，另一条活跃
+  cancellation 也不会重复发 abort。取消命令使用自己的 command ID，并显式保存
+  `targetCommandId`，因此 acceptance、target execution 和 cancellation audit 不混淆。
+- 竞态边界：cancellation dispatcher 在 supervisor 的 side-effect-free prepare 后，
+  再锁定并复核 target command、turn/session、lease/fence。将 cancel command 写为
+  `acknowledged` 且 turn/session 写为 `cancelling` 的同一 transaction 是线性化点：此前
+  已提交的自然完成获胜并让 cancellation 得到 `cancellation_too_late`；此后 execute
+  dispatcher 不再抢 terminal settlement，而由 cancellation path 持有终局所有权。
+- Supervisor 与 Pi：prepare 只校验精确 assignment，不触发 AbortController；数据库 ACK
+  成功后才发送 Pi JSONL `abort`。在 POSIX 上 grace period 后对独立 process group 发送
+  `SIGTERM`，必要时 `SIGKILL`，并用负 PGID 探测确认包括 tool descendant 在内的进程组
+  消失。测试 fixture 故意忽略 Pi abort 和 descendant `SIGTERM`，最终仍确认记录的 PID
+  不存在且公开 event 为 `turn.cancelled { forced: true }`。
+- Event 与 settlement：预期 abort 不再伪装为 `turn.failed`。Supervisor 在进程树回收后
+  才发布 `turn.cancelled`；control plane 仍用 target execute command 的当前 lease/fence
+  将其持久化和累计 ACK，SSE 实时及重连都使用同一条有序事件。只有 exact terminal
+  event 存在后，dispatcher 才把两个 commands 完成、turn 设为 cancelled、session 设为
+  idle 并精确归还容量。cancelling 状态下晚到的 completed/failed event 会被拒绝。
+- 失败策略：pre-ACK 失败仍可安全 retry；post-ACK 若不能证明停止，则 cancel/execute
+  command、turn 和 session 进入 failed，且不把 lease/sandbox 容量盲目放回 ready pool，
+  留给后续 reconciler 隔离或终止。
+- 端到端证据：真实 pinned Pi `0.80.10` 正阻塞在 loopback fake model 时，HTTP 取消能
+  独立推进；fake server 观察到 client abort，SSE 顺序为 `turn.started ->
+  turn.cancelled`，最终 durable state、lease 删除和容量归还一致。全仓 124 个测试通过，
+  包括 idempotency、重复取消、queued rejection、自然完成竞态、stale fence、forced
+  descendant kill 和事件终局所有权；测试不读取本机 Pi 登录，也不消耗 provider token。
+- 验证：本轮 PGlite、真实 Pi、真实 loopback HTTP 和 POSIX process-group 测试已通过；
+  同一套 20 个 control-plane tests 也在仅绑定 `127.0.0.1` 的一次性 PostgreSQL
+  `15.2-alpine` 上通过，覆盖真实 row lock、`SKIP LOCKED`、JSONB outbox join 与上述
+  cancellation races。带 `--rm` 的测试容器随后已停止并确认删除。完整 `npm run ci`
+  通过 format、全仓 typecheck、124 tests、两个 zero-token Pi spikes 和 0 vulnerabilities。
+- 当前边界：production `main.ts` 仍不自动启动两个 dispatchers 或远程 supervisor；
+  in-process transport、memory-only event spool、每 turn ephemeral Pi process、临时本地
+  workspace 仍是 integration scaffolding。queued withdrawal、ACK 后 crash recovery、
+  lease renewal、Windows Job Object 和真实容器 workspace transport 尚未实现。
+- 下一步：把 supervisor transport 接入已验证的 hardened Docker sandbox，并用 sample
+  Java repo 贯通真实 workspace、工具执行与 final Git diff。原因是 durable intake、
+  streaming、fencing 和 cancellation 已闭环；现在最大的“云化”缺口是 agent 仍在本机
+  integration workspace 中运行，尚未证明不可信代码与 control plane 隔离。

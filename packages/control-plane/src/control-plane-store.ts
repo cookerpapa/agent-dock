@@ -8,11 +8,13 @@ import {
 } from "@agent-dock/domain";
 import type {
   AcceptTurnRequest,
+  AcceptedTurnCancellationResource,
   AcceptedTurnResource,
+  CreateTurnCancellationRequest,
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
-import { TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
+import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
 import type { Kysely, Transaction } from "kysely";
 
 export type ControlPlaneStoreOptions = {
@@ -40,6 +42,14 @@ export class ControlPlaneStoreError extends Error {
 }
 
 type AcceptedTurnRow = {
+  commandId: string;
+  turnId: string;
+  sessionId: string;
+  commandCreatedAt: Date | string;
+  commandPayload: Record<string, unknown>;
+};
+
+type AcceptedTurnCancellationRow = {
   commandId: string;
   turnId: string;
   sessionId: string;
@@ -93,7 +103,9 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
   );
 }
 
-function requestFingerprint(request: AcceptTurnRequest): string {
+const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
+
+function turnRequestFingerprint(request: AcceptTurnRequest): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -101,6 +113,19 @@ function requestFingerprint(request: AcceptTurnRequest): string {
         inputKind: "prompt",
         prompt: request.prompt,
         thinkingLevel: request.thinkingLevel ?? null,
+      }),
+    )
+    .digest("hex");
+}
+
+function cancellationRequestFingerprint(gracePeriodMs: number): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "turn.cancel",
+        reason: "user_request",
+        gracePeriodMs,
       }),
     )
     .digest("hex");
@@ -133,6 +158,43 @@ function acceptedTurnResource(
     sessionId: row.sessionId,
     commandId: row.commandId,
     state: "queued",
+    acceptedAt: isoTimestamp(row.commandCreatedAt),
+    replayed,
+  };
+}
+
+function payloadString(
+  payload: Record<string, unknown>,
+  property: string,
+  description: string,
+): string {
+  const value = payload[property];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new ControlPlaneStoreError(
+      "control_plane_misconfigured",
+      `Stored cancellation command has an invalid ${description}`,
+    );
+  }
+  return value;
+}
+
+function acceptedTurnCancellationResource(
+  row: AcceptedTurnCancellationRow,
+  expectedRequestHash: string,
+  replayed: boolean,
+): AcceptedTurnCancellationResource {
+  if (parseRequestHash(row.commandPayload) !== expectedRequestHash) {
+    throw new ControlPlaneStoreError(
+      "idempotency_conflict",
+      "Idempotency-Key was already used for a different cancellation request",
+    );
+  }
+  return {
+    commandId: row.commandId,
+    targetCommandId: payloadString(row.commandPayload, "targetCommandId", "target command ID"),
+    turnId: row.turnId,
+    sessionId: row.sessionId,
+    state: "pending",
     acceptedAt: isoTimestamp(row.commandCreatedAt),
     replayed,
   };
@@ -234,7 +296,7 @@ export class ControlPlaneStore {
     idempotencyKey: string,
     request: AcceptTurnRequest,
   ): Promise<AcceptedTurnResource> {
-    const fingerprint = requestFingerprint(request);
+    const fingerprint = turnRequestFingerprint(request);
     const existing = await this.#findAcceptedTurn(sessionId, idempotencyKey);
     if (existing) {
       return acceptedTurnResource(existing, fingerprint, true);
@@ -254,6 +316,46 @@ export class ControlPlaneStore {
         );
       }
       return acceptedTurnResource(concurrentWinner, fingerprint, true);
+    }
+  }
+
+  async acceptTurnCancellation(
+    sessionId: string,
+    turnId: string,
+    idempotencyKey: string,
+    request: CreateTurnCancellationRequest,
+  ): Promise<AcceptedTurnCancellationResource> {
+    const gracePeriodMs = request.gracePeriodMs ?? DEFAULT_CANCELLATION_GRACE_PERIOD_MS;
+    const fingerprint = cancellationRequestFingerprint(gracePeriodMs);
+    const existing = await this.#findAcceptedTurnCancellation(sessionId, idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.turnId !== turnId) {
+        throw new ControlPlaneStoreError(
+          "idempotency_conflict",
+          "Idempotency-Key was already used for a different cancellation request",
+        );
+      }
+      return acceptedTurnCancellationResource(existing, fingerprint, true);
+    }
+
+    try {
+      return await this.#acceptNewTurnCancellation(
+        sessionId,
+        turnId,
+        idempotencyKey,
+        gracePeriodMs,
+        fingerprint,
+      );
+    } catch (error) {
+      if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) throw error;
+      const concurrentWinner = await this.#findAcceptedTurnCancellation(sessionId, idempotencyKey);
+      if (concurrentWinner === undefined || concurrentWinner.turnId !== turnId) {
+        throw new ControlPlaneStoreError(
+          "idempotency_conflict",
+          "Idempotency-Key was already used for a different command",
+        );
+      }
+      return acceptedTurnCancellationResource(concurrentWinner, fingerprint, true);
     }
   }
 
@@ -379,6 +481,158 @@ export class ControlPlaneStore {
       .where("command.kind", "=", "turn.execute")
       .executeTakeFirst();
     return row;
+  }
+
+  async #acceptNewTurnCancellation(
+    sessionId: string,
+    turnId: string,
+    idempotencyKey: string,
+    gracePeriodMs: number,
+    fingerprint: string,
+  ): Promise<AcceptedTurnCancellationResource> {
+    const commandId = this.#idGenerator();
+    const outboxId = this.#idGenerator();
+    return this.#database.transaction().execute(async (transaction) => {
+      const lifecycle = await transaction
+        .selectFrom("turns as turn")
+        .innerJoin("sessions as session_row", (join) =>
+          join
+            .onRef("session_row.tenant_id", "=", "turn.tenant_id")
+            .onRef("session_row.id", "=", "turn.session_id"),
+        )
+        .select([
+          "turn.id as turnId",
+          "turn.state as turnState",
+          "session_row.id as sessionId",
+          "session_row.state as sessionState",
+        ])
+        .where("turn.tenant_id", "=", this.#tenantId)
+        .where("turn.session_id", "=", sessionId)
+        .where("turn.id", "=", turnId)
+        .forUpdate(["turn", "session_row"])
+        .executeTakeFirst();
+      if (lifecycle === undefined) {
+        throw new ControlPlaneStoreError("not_found", "Turn was not found");
+      }
+      const activePair =
+        (lifecycle.turnState === "running" && lifecycle.sessionState === "running") ||
+        (lifecycle.turnState === "waiting_approval" &&
+          lifecycle.sessionState === "waiting_approval");
+      if (!activePair) {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          "Only an active turn can accept a cancellation request",
+        );
+      }
+
+      const target = await transaction
+        .selectFrom("commands")
+        .select(["id", "state"])
+        .where("tenant_id", "=", this.#tenantId)
+        .where("session_id", "=", sessionId)
+        .where("turn_id", "=", turnId)
+        .where("kind", "=", "turn.execute")
+        .forUpdate()
+        .executeTakeFirst();
+      if (target === undefined || target.state !== "acknowledged") {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          "Turn does not have one acknowledged execution to cancel",
+        );
+      }
+
+      const activeCancellation = await transaction
+        .selectFrom("commands")
+        .select("id")
+        .where("tenant_id", "=", this.#tenantId)
+        .where("session_id", "=", sessionId)
+        .where("turn_id", "=", turnId)
+        .where("kind", "=", "turn.cancel")
+        .where("state", "in", ["pending", "dispatched", "acknowledged"])
+        .executeTakeFirst();
+      if (activeCancellation !== undefined) {
+        throw new ControlPlaneStoreError("conflict", "Turn cancellation is already in progress");
+      }
+
+      const command = await transaction
+        .insertInto("commands")
+        .values({
+          id: commandId,
+          tenant_id: this.#tenantId,
+          session_id: sessionId,
+          turn_id: turnId,
+          idempotency_key: idempotencyKey,
+          kind: "turn.cancel",
+          state: "pending",
+          payload: {
+            schemaVersion: 1,
+            requestHash: fingerprint,
+            targetCommandId: target.id,
+            reason: "user_request",
+            gracePeriodMs,
+          },
+          dispatched_at: null,
+          acknowledged_at: null,
+          completed_at: null,
+          failure_code: null,
+        })
+        .returning(["id", "created_at", "payload"])
+        .executeTakeFirstOrThrow();
+
+      await transaction
+        .insertInto("outbox")
+        .values({
+          id: outboxId,
+          tenant_id: this.#tenantId,
+          aggregate_type: "session",
+          aggregate_id: sessionId,
+          topic: TURN_CANCELLATION_OUTBOX_TOPIC,
+          payload: {
+            schemaVersion: 1,
+            commandId: command.id,
+            targetCommandId: target.id,
+            sessionId,
+            turnId,
+            kind: "turn.cancel",
+          },
+          published_at: null,
+          last_error: null,
+        })
+        .executeTakeFirstOrThrow();
+
+      return acceptedTurnCancellationResource(
+        {
+          commandId: command.id,
+          turnId,
+          sessionId,
+          commandCreatedAt: command.created_at,
+          commandPayload: command.payload,
+        },
+        fingerprint,
+        false,
+      );
+    });
+  }
+
+  async #findAcceptedTurnCancellation(
+    sessionId: string,
+    idempotencyKey: string,
+  ): Promise<AcceptedTurnCancellationRow | undefined> {
+    return this.#database
+      .selectFrom("commands as command")
+      .innerJoin("turns as turn", "turn.id", "command.turn_id")
+      .select([
+        "command.id as commandId",
+        "command.created_at as commandCreatedAt",
+        "command.payload as commandPayload",
+        "turn.id as turnId",
+        "turn.session_id as sessionId",
+      ])
+      .where("command.tenant_id", "=", this.#tenantId)
+      .where("command.session_id", "=", sessionId)
+      .where("command.idempotency_key", "=", idempotencyKey)
+      .where("command.kind", "=", "turn.cancel")
+      .executeTakeFirst();
   }
 
   async #resolveModelSnapshot(

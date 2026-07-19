@@ -1,4 +1,17 @@
 export { createControlPlaneApplication } from "./application.ts";
+export {
+  CancellationDispatcher,
+  CancellationDispatcherInvariantError,
+  CancellationDispatcherStaleClaimError,
+  TurnCancellationBackendError,
+  type CancellationDispatchNextResult,
+  type CancellationDispatcherOptions,
+  type TurnCancellationBackend,
+  type TurnCancellationLifecycle,
+  type TurnCancellationReason,
+  type TurnCancellationRequest,
+  type TurnCancellationResult,
+} from "./cancellation-dispatcher.ts";
 export { ControlPlaneModule } from "./control-plane.module.ts";
 export {
   DurableEventStore,
@@ -22,6 +35,7 @@ export {
   OutboxDispatcherInvariantError,
   OutboxDispatcherStaleClaimError,
   TurnExecutionBackendError,
+  TurnExecutionCancelledError,
   type DispatchNextResult,
   type OutboxDispatcherOptions,
   type TurnExecutionBackend,

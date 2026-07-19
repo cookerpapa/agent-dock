@@ -1,6 +1,8 @@
 import {
   createAgentDockEventFactory,
   parseSupervisorToControlMessage,
+  type AgentDockEvent,
+  type CancelTurnCommandMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
@@ -52,6 +54,12 @@ export type PiRpcTurnResult = {
   stopReason: string;
 };
 
+export type PiRpcCancellationSignal = {
+  kind: "agent-dock.turn-cancellation";
+  reason: CancelTurnCommandMessage["payload"]["reason"];
+  gracePeriodMs: number;
+};
+
 export type PiRpcEventPublisher = (message: EventPublishMessage) => Promise<void> | void;
 
 export const PINNED_PI_CODING_AGENT_VERSION = "0.80.10";
@@ -72,6 +80,18 @@ export class PiRpcTurnError extends Error {
     this.name = "PiRpcTurnError";
     this.code = code;
     this.retryable = retryable;
+  }
+}
+
+export class PiRpcTurnCancelledError extends PiRpcTurnError {
+  readonly reason: PiRpcCancellationSignal["reason"];
+  readonly forced: boolean;
+
+  constructor(reason: PiRpcCancellationSignal["reason"], forced: boolean) {
+    super("turn_cancelled", "Turn cancellation was confirmed", false);
+    this.name = "PiRpcTurnCancelledError";
+    this.reason = reason;
+    this.forced = forced;
   }
 }
 
@@ -206,6 +226,79 @@ function terminateProcessGroup(
   child.kill(signal);
 }
 
+function processGroupExists(child: ChildProcessWithoutNullStreams): boolean {
+  if (process.platform === "win32" || child.pid === undefined) {
+    return child.exitCode === null && child.signalCode === null;
+  }
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === "ESRCH") return false;
+    if (isRecord(error) && error.code === "EPERM") return true;
+    throw error;
+  }
+}
+
+async function waitForProcessGroupExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(child)) {
+    if (Date.now() >= deadline) {
+      throw new PiRpcTurnError("pi_process_tree_alive", "Pi process tree did not terminate", false);
+    }
+    await new Promise<void>((resolvePromise) => {
+      const timer = setTimeout(resolvePromise, 10);
+      timer.unref();
+    });
+  }
+}
+
+async function stopCancelledChild(
+  child: ChildProcessWithoutNullStreams,
+  exitPromise: Promise<ExitResult>,
+  timeoutMs: number,
+): Promise<void> {
+  if (process.platform === "win32") {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    try {
+      await withTimeout(exitPromise, timeoutMs, "Pi cancellation shutdown");
+    } catch {
+      child.kill("SIGKILL");
+      await withTimeout(exitPromise, timeoutMs, "Pi cancellation SIGKILL shutdown");
+    }
+    return;
+  }
+
+  if (processGroupExists(child)) terminateProcessGroup(child, "SIGTERM");
+  await withTimeout(exitPromise, timeoutMs, "Pi cancellation SIGTERM shutdown").catch(
+    () => undefined,
+  );
+  if (processGroupExists(child)) terminateProcessGroup(child, "SIGKILL");
+  if (child.exitCode === null && child.signalCode === null) {
+    await withTimeout(exitPromise, timeoutMs, "Pi cancellation SIGKILL shutdown");
+  }
+  await waitForProcessGroupExit(child, timeoutMs);
+}
+
+function cancellationSignal(value: unknown): PiRpcCancellationSignal {
+  if (
+    !isRecord(value) ||
+    value.kind !== "agent-dock.turn-cancellation" ||
+    (value.reason !== "user_request" &&
+      value.reason !== "timeout" &&
+      value.reason !== "lease_revoked" &&
+      value.reason !== "shutdown") ||
+    !Number.isSafeInteger(value.gracePeriodMs) ||
+    (value.gracePeriodMs as number) < 0
+  ) {
+    throw new PiRpcTurnError("invalid_cancellation", "Turn cancellation signal was invalid", false);
+  }
+  return value as PiRpcCancellationSignal;
+}
+
 async function stopChild(
   child: ChildProcessWithoutNullStreams,
   exitPromise: Promise<ExitResult>,
@@ -299,6 +392,7 @@ export class PiRpcTurnRunner {
   async run(
     command: ExecuteTurnCommandMessage,
     publishEvent: PiRpcEventPublisher,
+    signal?: AbortSignal,
   ): Promise<PiRpcTurnResult> {
     if (command.payload.input.kind !== "prompt") {
       throw new PiRpcTurnError(
@@ -387,9 +481,45 @@ export class PiRpcTurnRunner {
     let stderr = "";
     let messageChain = Promise.resolve();
     let fatalError: Error | undefined;
+    let cancellationEvent: EventPublishMessage | undefined;
+    let cancellationError: PiRpcTurnCancelledError | undefined;
+    let cancellationTask: Promise<void> | undefined;
+    let removeAbortListener: (() => void) | undefined;
 
     const fail = (error: Error): void => {
       if (fatalError !== undefined) return;
+      fatalError = error;
+      terminal.reject(error);
+      for (const pending of pendingRequests.values()) pending.reject(error);
+      pendingRequests.clear();
+    };
+
+    const eventMessage = (event: AgentDockEvent): EventPublishMessage => {
+      const candidate = parseSupervisorToControlMessage({
+        protocolVersion: 1,
+        messageId: this.#idGenerator(),
+        sentAt: validDate(this.#clock).toISOString(),
+        type: "event.publish",
+        payload: {
+          leaseId: command.payload.leaseId,
+          fencingToken: command.payload.fencingToken,
+          commandId: command.payload.commandId,
+          event,
+        },
+      });
+      if (candidate.type !== "event.publish") {
+        throw new PiRpcTurnError("pi_protocol_error", "Pi event envelope was invalid", false);
+      }
+      return candidate;
+    };
+
+    const settleCancellation = (
+      error: PiRpcTurnCancelledError,
+      event: EventPublishMessage,
+    ): void => {
+      if (cancellationError !== undefined) return;
+      cancellationError = error;
+      cancellationEvent = event;
       fatalError = error;
       terminal.reject(error);
       for (const pending of pendingRequests.values()) pending.reject(error);
@@ -428,20 +558,13 @@ export class PiRpcTurnRunner {
       if (outcome.kind === "invalid") {
         throw new PiRpcTurnError("pi_protocol_error", outcome.reason, false);
       }
-      const candidate = parseSupervisorToControlMessage({
-        protocolVersion: 1,
-        messageId: this.#idGenerator(),
-        sentAt: validDate(this.#clock).toISOString(),
-        type: "event.publish",
-        payload: {
-          leaseId: command.payload.leaseId,
-          fencingToken: command.payload.fencingToken,
-          commandId: command.payload.commandId,
-          event: outcome.event,
-        },
-      });
-      if (candidate.type !== "event.publish") {
-        throw new PiRpcTurnError("pi_protocol_error", "Pi event envelope was invalid", false);
+      const candidate = eventMessage(outcome.event);
+      if (outcome.event.type === "turn.cancelled") {
+        settleCancellation(
+          new PiRpcTurnCancelledError(outcome.event.payload.reason, outcome.event.payload.forced),
+          candidate,
+        );
+        return;
       }
       await publishEvent(candidate);
       if (!outcome.terminal) return;
@@ -550,15 +673,92 @@ export class PiRpcTurnRunner {
       return withTimeout(response.promise, this.#requestTimeoutMs, `Pi RPC ${type}`);
     };
 
+    let result: PiRpcTurnResult | undefined;
+    let runError: unknown;
+    let terminationError: unknown;
     try {
       await request("set_auto_retry", { enabled: false });
       const promptAck = request("prompt", { message: command.payload.input.text });
+      if (signal !== undefined) {
+        const beginCancellation = (): void => {
+          if (cancellationTask !== undefined) return;
+          cancellationTask = (async () => {
+            const cancellation = cancellationSignal(signal.reason);
+            eventAdapter.requestCancellation(cancellation.reason);
+            void request("abort").catch(() => undefined);
+            const observed = await Promise.race([
+              terminal.promise.then(
+                () => "other" as const,
+                (error: unknown) =>
+                  error instanceof PiRpcTurnCancelledError
+                    ? ("cancelled" as const)
+                    : ("other" as const),
+              ),
+              new Promise<"grace_expired">((resolvePromise) => {
+                const timer = setTimeout(
+                  () => resolvePromise("grace_expired"),
+                  cancellation.gracePeriodMs,
+                );
+                timer.unref();
+              }),
+            ]);
+            if (observed === "cancelled" || cancellationError !== undefined) return;
+            const forced = eventAdapter.forceCancellation(cancellation.reason);
+            if (forced.kind !== "mapped" || forced.event.type !== "turn.cancelled") {
+              throw new PiRpcTurnError(
+                "pi_protocol_error",
+                "Pi cancellation did not create a terminal event",
+                false,
+              );
+            }
+            settleCancellation(
+              new PiRpcTurnCancelledError(cancellation.reason, true),
+              eventMessage(forced.event),
+            );
+          })().catch((error: unknown) => {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          });
+        };
+        signal.addEventListener("abort", beginCancellation, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", beginCancellation);
+        if (signal.aborted) beginCancellation();
+      }
       await Promise.all([promptAck, withTimeout(terminal.promise, this.#turnTimeoutMs, "Pi turn")]);
-      return await terminal.promise;
+      result = await terminal.promise;
+    } catch (error: unknown) {
+      runError = error;
     } finally {
-      await stopChild(child, exitPromise, this.#shutdownTimeoutMs).catch(() => undefined);
+      if (cancellationTask !== undefined) await cancellationTask.catch(() => undefined);
+      if (cancellationError !== undefined) {
+        try {
+          await stopCancelledChild(child, exitPromise, this.#shutdownTimeoutMs);
+        } catch (error: unknown) {
+          terminationError = error;
+        }
+      } else {
+        await stopChild(child, exitPromise, this.#shutdownTimeoutMs).catch(() => undefined);
+      }
       await messageChain.catch(() => undefined);
+      if (cancellationEvent !== undefined && terminationError === undefined) {
+        try {
+          await publishEvent(cancellationEvent);
+        } catch (error: unknown) {
+          terminationError = error;
+        }
+      }
+      removeAbortListener?.();
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+    if (terminationError !== undefined) throw terminationError;
+    if (cancellationError !== undefined) throw cancellationError;
+    if (runError !== undefined) throw runError;
+    if (result === undefined) {
+      throw new PiRpcTurnError(
+        "pi_protocol_error",
+        "Pi turn ended without a terminal result",
+        false,
+      );
+    }
+    return result;
   }
 }

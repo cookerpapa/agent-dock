@@ -3,10 +3,12 @@ import {
   parseAcceptTurnRequest,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
+  parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseUuidPathParameter,
   type AcceptedTurnResource,
+  type AcceptedTurnCancellationResource,
   type ProjectResource,
   type SessionResource,
 } from "@agent-dock/protocol";
@@ -50,6 +52,26 @@ export class ControlPlaneController {
     const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
     const request = parseAcceptTurnRequest(body);
     return this.controlPlaneStore.acceptTurn(sessionId, idempotencyKey, request);
+  }
+
+  @Post("sessions/:sessionId/turns/:turnId/cancellations")
+  @HttpCode(202)
+  async acceptTurnCancellation(
+    @Param("sessionId") sessionIdValue: unknown,
+    @Param("turnId") turnIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<AcceptedTurnCancellationResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const turnId = parseUuidPathParameter(turnIdValue, "turnId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    const request = parseCreateTurnCancellationRequest(body);
+    return this.controlPlaneStore.acceptTurnCancellation(
+      sessionId,
+      turnId,
+      idempotencyKey,
+      request,
+    );
   }
 
   @Get("sessions/:sessionId/events")

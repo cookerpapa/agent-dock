@@ -4,6 +4,7 @@ import {
   parseAcceptTurnRequest,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
+  parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseUuidPathParameter,
@@ -48,6 +49,22 @@ describe("control-plane public API schemas", () => {
     expect(() => parseIdempotencyKey(undefined)).toThrow(ControlPlaneApiValidationError);
     expect(() => parseIdempotencyKey(["one", "two"])).toThrow(ControlPlaneApiValidationError);
     expect(() => parseIdempotencyKey("contains whitespace")).toThrow(
+      ControlPlaneApiValidationError,
+    );
+  });
+
+  it("accepts a bounded cancellation grace period and rejects extra fields", () => {
+    expect(parseCreateTurnCancellationRequest({})).toEqual({});
+    expect(parseCreateTurnCancellationRequest({ gracePeriodMs: 2_000 })).toEqual({
+      gracePeriodMs: 2_000,
+    });
+    expect(() => parseCreateTurnCancellationRequest({ gracePeriodMs: -1 })).toThrow(
+      ControlPlaneApiValidationError,
+    );
+    expect(() => parseCreateTurnCancellationRequest({ gracePeriodMs: 30_001 })).toThrow(
+      ControlPlaneApiValidationError,
+    );
+    expect(() => parseCreateTurnCancellationRequest({ reason: "shutdown" })).toThrow(
       ControlPlaneApiValidationError,
     );
   });

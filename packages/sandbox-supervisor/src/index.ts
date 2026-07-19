@@ -23,9 +23,11 @@ export {
 
 export {
   PINNED_PI_CODING_AGENT_VERSION,
+  PiRpcTurnCancelledError,
   PiRpcTurnError,
   PiRpcTurnRunner,
   type PiModelRuntimeConfig,
+  type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
   type PiRpcTurnResult,
   type PiRpcTurnRunnerOptions,
@@ -35,6 +37,8 @@ export {
   LocalSandboxSupervisor,
   LocalSandboxSupervisorError,
   type LocalSandboxSupervisorOptions,
+  type PreparedTurnCancellation,
   type PreparedTurnExecution,
+  type SupervisorTurnCancellationResult,
   type SupervisorTurnRunner,
 } from "./local-sandbox-supervisor.ts";

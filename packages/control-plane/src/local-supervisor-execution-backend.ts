@@ -1,6 +1,7 @@
 import {
   LocalSandboxSupervisor,
   LocalSandboxSupervisorError,
+  PiRpcTurnCancelledError,
   PiRpcTurnError,
 } from "@agent-dock/sandbox-supervisor";
 import {
@@ -9,10 +10,19 @@ import {
   parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
+  type CancelTurnCommandMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import {
+  TurnCancellationBackendError,
+  type TurnCancellationBackend,
+  type TurnCancellationLifecycle,
+  type TurnCancellationRequest,
+  type TurnCancellationResult,
+} from "./cancellation-dispatcher.ts";
+import {
   TurnExecutionBackendError,
+  TurnExecutionCancelledError,
   type TurnExecutionBackend,
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
@@ -55,6 +65,9 @@ function positiveSafeInteger(value: string, name: string): number {
 
 function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof TurnExecutionBackendError) return error;
+  if (error instanceof PiRpcTurnCancelledError) {
+    return new TurnExecutionCancelledError(error.reason, error.forced);
+  }
   if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
     return new TurnExecutionBackendError(error.code, error.message, error.retryable);
   }
@@ -74,6 +87,28 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   return new TurnExecutionBackendError(
     "local_supervisor_error",
     "Local supervisor execution failed",
+    true,
+  );
+}
+
+function normalizeCancellationError(error: unknown): TurnCancellationBackendError {
+  if (error instanceof TurnCancellationBackendError) return error;
+  if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
+    return new TurnCancellationBackendError(error.code, error.message, error.retryable);
+  }
+  if (error instanceof LocalSandboxSupervisorError) {
+    return new TurnCancellationBackendError(error.code, error.message, false);
+  }
+  if (error instanceof AgentDockWireProtocolError) {
+    return new TurnCancellationBackendError(
+      "backend_protocol_violation",
+      "Supervisor wire protocol validation failed",
+      false,
+    );
+  }
+  return new TurnCancellationBackendError(
+    "local_supervisor_error",
+    "Local supervisor cancellation failed",
     true,
   );
 }
@@ -125,7 +160,38 @@ function validateAck(
   return parsed;
 }
 
-export class LocalSupervisorExecutionBackend implements TurnExecutionBackend {
+function validateCancellationAck(
+  request: TurnCancellationRequest,
+  command: CancelTurnCommandMessage,
+  value: unknown,
+) {
+  const parsed = parseSupervisorToControlMessage(value);
+  if (parsed.type !== "command.ack") {
+    throw new TurnCancellationBackendError(
+      "backend_protocol_violation",
+      "Supervisor returned a non-ACK cancellation response",
+      false,
+    );
+  }
+  if (
+    parsed.payload.commandId !== request.commandId ||
+    parsed.payload.sessionId !== request.target.sessionId ||
+    parsed.payload.turnId !== request.target.turnId ||
+    parsed.payload.leaseId !== command.payload.leaseId ||
+    parsed.payload.fencingToken !== command.payload.fencingToken
+  ) {
+    throw new TurnCancellationBackendError(
+      "backend_protocol_violation",
+      "Supervisor cancellation ACK identity does not match the delivered command",
+      false,
+    );
+  }
+  return parsed;
+}
+
+export class LocalSupervisorExecutionBackend
+  implements TurnExecutionBackend, TurnCancellationBackend
+{
   readonly #supervisor: LocalSandboxSupervisor;
   readonly #leaseCoordinator: SessionLeaseCoordinator;
   readonly #eventIngestor: DurableEventIngestor;
@@ -242,6 +308,58 @@ export class LocalSupervisorExecutionBackend implements TurnExecutionBackend {
         }
       }
       throw normalizeBackendError(error);
+    }
+  }
+
+  async cancel(
+    request: TurnCancellationRequest,
+    lifecycle: TurnCancellationLifecycle,
+  ): Promise<TurnCancellationResult> {
+    try {
+      const acknowledgement = await this.#leaseCoordinator.currentAssignment(request.target);
+      const parsed = parseControlToSupervisorMessage({
+        protocolVersion: 1,
+        messageId: this.#idGenerator(),
+        sentAt: validDate(this.#clock).toISOString(),
+        type: "command.turn.cancel",
+        payload: {
+          commandId: request.commandId,
+          targetCommandId: request.target.commandId,
+          idempotencyKey: request.idempotencyKey,
+          tenantId: request.target.tenantId,
+          projectId: request.target.projectId,
+          workspaceId: request.target.workspaceId,
+          sessionId: request.target.sessionId,
+          turnId: request.target.turnId,
+          agentId: "root",
+          leaseId: acknowledgement.leaseId,
+          fencingToken: acknowledgement.fencingToken,
+          reason: request.reason,
+          gracePeriodMs: request.gracePeriodMs,
+        },
+      });
+      if (parsed.type !== "command.turn.cancel") {
+        throw new TurnCancellationBackendError(
+          "backend_protocol_violation",
+          "Constructed supervisor cancellation command was invalid",
+          false,
+        );
+      }
+      const command = parsed;
+      const prepared = this.#supervisor.prepareCancellation(command);
+      const ack = validateCancellationAck(request, command, prepared.ack);
+      if (ack.payload.status === "rejected") {
+        throw new TurnCancellationBackendError(
+          ack.payload.code,
+          ack.payload.message,
+          ack.payload.retryable,
+        );
+      }
+
+      await lifecycle.started(acknowledgement);
+      return await prepared.run();
+    } catch (error: unknown) {
+      throw normalizeCancellationError(error);
     }
   }
 }

@@ -74,15 +74,33 @@ reviewed Pi-to-AgentDock text/tool/terminal event mapping. Completion and
 post-ACK failure release the matching lease and capacity in the settlement
 transaction; a stale lease or event fence is rejected.
 
+The fourth Phase 1 slice makes cancellation an independent durable command
+path. `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` requires its own
+idempotency key and commits a cancellation command plus outbox record before it
+returns `202`; acceptance does not claim that the process has stopped. A second
+dispatcher can reach the active assignment while the execute dispatcher is
+waiting for Pi. Its supervisor prepare step is side-effect-free. Persisting that
+exact ACK and moving turn/session to `cancelling` is the linearization point:
+natural terminal settlement before it wins, while execute settlement defers to
+cancellation after it. Only then does the supervisor send Pi's native `abort`.
+On POSIX, grace-period expiry escalates to process-group `SIGTERM` and `SIGKILL`,
+including tool descendants. The public `turn.cancelled` event is emitted only
+after process-tree teardown, persisted under the target execute command's
+lease/fence, and cumulatively ACKed. That event authorizes final cancelled/idle
+settlement and exact capacity release. Failure after cancellation ACK instead
+fails the turn/session and retains the unconfirmed reservation for later
+reconciliation.
+
 This remains an integration boundary, not the production runner transport. The
 in-process transport and temporary local workspace resolver are deliberately
 not auto-started by the HTTP application. PostgreSQL event persistence,
 cumulative ACK, and the SSE replay endpoint are now executable. The live SSE hub
 is process-local and the supervisor spool is still memory-only; lease
-renewal/reconciliation, cancellation, durable snapshots, cross-replica event
-notification, and the real sandbox transport remain later slices. A crash after
-durable command ACK is still treated as ambiguous rather than replaying possible
-tool side effects.
+renewal/reconciliation, acknowledged-cancellation crash recovery, durable
+snapshots, cross-replica event notification, Windows Job Object containment,
+and the real sandbox transport remain later slices. A crash after durable
+command ACK is still treated as ambiguous rather than replaying possible tool
+side effects.
 
 ### TypeScript sandbox supervisor
 

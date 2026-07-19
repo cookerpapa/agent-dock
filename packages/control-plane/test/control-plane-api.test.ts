@@ -4,6 +4,7 @@ import { createDatabase, runMigrations, type Database } from "@agent-dock/databa
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type {
   AcceptedTurnResource,
+  AcceptedTurnCancellationResource,
   ControlPlaneApiError,
   EventPublishMessage,
   ProjectResource,
@@ -23,13 +24,17 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
+  CancellationDispatcher,
   DeterministicExecutionBackend,
   DurableEventStore,
   LocalSupervisorExecutionBackend,
   OutboxDispatcher,
   OutboxDispatcherStaleClaimError,
   SessionLeaseCoordinator,
+  TurnCancellationBackendError,
+  type TurnCancellationBackend,
   type TurnExecutionBackend,
+  type TurnExecutionLeaseManager,
   createControlPlaneApplication,
 } from "../src/index.ts";
 
@@ -39,6 +44,8 @@ const IDS = {
   profile: "40000000-0000-4000-8000-000000000001",
   sandbox: "50000000-0000-4000-8000-000000000001",
   sandboxBoot: "60000000-0000-4000-8000-000000000001",
+  cancellationSandbox: "50000000-0000-4000-8000-000000000002",
+  cancellationSandboxBoot: "60000000-0000-4000-8000-000000000002",
 };
 
 let pglite: PGlite | undefined;
@@ -200,6 +207,17 @@ async function readSseEvents(
     throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function waitForCondition(
+  predicate: () => Promise<boolean> | boolean,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for test condition");
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
   }
 }
 
@@ -375,6 +393,29 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     });
     expect(JSON.stringify(durable.outboxPayload)).not.toContain("fix the failing test");
+  });
+
+  it("does not report a queued turn as cancellable in the active-turn v0 API", async () => {
+    const response = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${session.sessionId}/turns/${firstAccepted.turnId}/cancellations`,
+      headers: { "idempotency-key": "cancel-before-running" },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        code: "conflict",
+        message: "Only an active turn can accept a cancellation request",
+      },
+    });
+    const count = await database
+      .selectFrom("commands")
+      .select((expression) => expression.fn.countAll<string>().as("count"))
+      .where("session_id", "=", session.sessionId)
+      .where("idempotency_key", "=", "cancel-before-running")
+      .executeTakeFirstOrThrow();
+    expect(count.count).toBe("0");
   });
 
   it("replays the original acceptance for the same idempotency key and request", async () => {
@@ -755,6 +796,252 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(durable.publishedAt).not.toBeNull();
   });
 
+  it("records cancellation as too late when natural completion wins before its ACK", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const raceSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${raceSession.sessionId}/turns`,
+      headers: { "idempotency-key": "completion-cancellation-race" },
+      payload: { prompt: "Complete before cancellation delivery." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+
+    let reportStarted!: () => void;
+    let releaseExecution!: () => void;
+    const started = new Promise<void>((resolvePromise) => {
+      reportStarted = resolvePromise;
+    });
+    const release = new Promise<void>((resolvePromise) => {
+      releaseExecution = resolvePromise;
+    });
+    const executionBackend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        await lifecycle.started();
+        reportStarted();
+        await release;
+        return { stopReason: "natural_completion" };
+      },
+    };
+    const executionDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: executionBackend,
+    });
+    const execution = executionDispatcher.dispatchNext();
+    await started;
+
+    const cancellationResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${raceSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+      headers: { "idempotency-key": "too-late-cancellation" },
+      payload: {},
+    });
+    expect(cancellationResponse.statusCode).toBe(202);
+    const cancellation = cancellationResponse.json() as AcceptedTurnCancellationResource;
+
+    releaseExecution();
+    await expect(execution).resolves.toMatchObject({ status: "completed" });
+    const cancellationBackend: TurnCancellationBackend = {
+      async cancel() {
+        throw new TurnCancellationBackendError(
+          "cancellation_too_late",
+          "Turn completed before cancellation delivery",
+          false,
+        );
+      },
+    };
+    const unusedLeaseManager: TurnExecutionLeaseManager = {
+      async assertCurrent() {
+        throw new Error("Too-late cancellation must not assert a lease");
+      },
+      async releaseCurrent() {
+        throw new Error("Too-late cancellation must not release a lease");
+      },
+    };
+    const cancellationDispatcher = new CancellationDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: cancellationBackend,
+      leaseManager: unusedLeaseManager,
+    });
+    await expect(cancellationDispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "failed",
+      commandId: cancellation.commandId,
+      targetCommandId: accepted.commandId,
+      phase: "before_start",
+      failureCode: "cancellation_too_late",
+    });
+
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "completed",
+      turnState: "completed",
+      sessionState: "idle",
+      stopReason: "natural_completion",
+    });
+    const failedCancellation = await database
+      .selectFrom("commands as cancellation")
+      .innerJoin("outbox", (join) =>
+        join
+          .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
+          .on(
+            sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
+          ),
+      )
+      .select([
+        "cancellation.state as commandState",
+        "cancellation.failure_code as failureCode",
+        "outbox.attempts as attempts",
+        "outbox.published_at as publishedAt",
+      ])
+      .where("cancellation.id", "=", cancellation.commandId)
+      .executeTakeFirstOrThrow();
+    expect(failedCancellation).toMatchObject({
+      commandState: "failed",
+      failureCode: "cancellation_too_late",
+      attempts: 1,
+    });
+    expect(failedCancellation.publishedAt).not.toBeNull();
+  });
+
+  it("retains the fenced reservation when cancellation fails after its durable ACK", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const failedSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${failedSession.sessionId}/turns`,
+      headers: { "idempotency-key": "post-ack-cancellation-failure-target" },
+      payload: { prompt: "Remain isolated if cancellation cannot confirm termination." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+
+    const acknowledgement = {
+      leaseId: "70000000-0000-4000-8000-000000000001",
+      fencingToken: 7,
+    };
+    let reportExecutionStarted!: () => void;
+    let interruptExecution!: () => void;
+    const executionStarted = new Promise<void>((resolvePromise) => {
+      reportExecutionStarted = resolvePromise;
+    });
+    const executionInterrupted = new Promise<void>((resolvePromise) => {
+      interruptExecution = resolvePromise;
+    });
+    const executionBackend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        await lifecycle.started(acknowledgement);
+        reportExecutionStarted();
+        await executionInterrupted;
+        throw new Error("Injected target interruption");
+      },
+    };
+    let leaseAssertions = 0;
+    let leaseReleases = 0;
+    const retainedLeaseManager: TurnExecutionLeaseManager = {
+      async assertCurrent(_transaction, _request, candidate) {
+        expect(candidate).toEqual(acknowledgement);
+        leaseAssertions += 1;
+      },
+      async releaseCurrent() {
+        leaseReleases += 1;
+      },
+    };
+    const executionDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: executionBackend,
+      leaseManager: retainedLeaseManager,
+    });
+    const execution = executionDispatcher.dispatchNext();
+    await executionStarted;
+
+    const cancellationResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${failedSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+      headers: { "idempotency-key": "post-ack-cancellation-failure" },
+      payload: { gracePeriodMs: 0 },
+    });
+    expect(cancellationResponse.statusCode).toBe(202);
+    const cancellation = cancellationResponse.json() as AcceptedTurnCancellationResource;
+    const cancellationBackend: TurnCancellationBackend = {
+      async cancel(_request, lifecycle) {
+        await lifecycle.started(acknowledgement);
+        interruptExecution();
+        throw new TurnCancellationBackendError(
+          "pi_process_tree_alive",
+          "Pi process tree termination could not be confirmed",
+          false,
+        );
+      },
+    };
+    const cancellationDispatcher = new CancellationDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: cancellationBackend,
+      leaseManager: retainedLeaseManager,
+    });
+
+    const [cancellationResult, executionResult] = await Promise.all([
+      cancellationDispatcher.dispatchNext(),
+      execution,
+    ]);
+    expect(cancellationResult).toMatchObject({
+      status: "failed",
+      commandId: cancellation.commandId,
+      targetCommandId: accepted.commandId,
+      phase: "after_start",
+      failureCode: "pi_process_tree_alive",
+    });
+    expect(["cancellation_pending", "failed"]).toContain(executionResult.status);
+    expect(leaseAssertions).toBe(2);
+    expect(leaseReleases).toBe(0);
+
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "pi_process_tree_alive",
+      turnState: "failed",
+      turnFailureCode: "pi_process_tree_alive",
+      failureMessage: "Pi process tree termination could not be confirmed",
+      failureRetryable: false,
+      sessionState: "failed",
+    });
+    const failedCancellation = await database
+      .selectFrom("commands as cancellation")
+      .innerJoin("outbox", (join) =>
+        join
+          .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
+          .on(
+            sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
+          ),
+      )
+      .select([
+        "cancellation.state as commandState",
+        "cancellation.failure_code as failureCode",
+        "cancellation.acknowledged_at as acknowledgedAt",
+        "outbox.published_at as publishedAt",
+      ])
+      .where("cancellation.id", "=", cancellation.commandId)
+      .executeTakeFirstOrThrow();
+    expect(failedCancellation).toMatchObject({
+      commandState: "failed",
+      failureCode: "pi_process_tree_alive",
+    });
+    expect(failedCancellation.acknowledgedAt).not.toBeNull();
+    expect(failedCancellation.publishedAt).not.toBeNull();
+  });
+
   it("executes a fenced command through pinned Pi RPC and the loopback fake model", async () => {
     const sessionResponse = await http.inject({
       method: "POST",
@@ -1055,6 +1342,306 @@ describe.sequential("single-user durable turn intake API", () => {
           },
         ),
       ).rejects.toThrow("stale");
+    } finally {
+      await fakeModel.stop();
+      await rm(workspaceDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("durably cancels a live Pi turn through an independent fenced dispatcher", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const cancellationSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${cancellationSession.sessionId}/turns`,
+      headers: { "idempotency-key": "live-pi-cancellation-target" },
+      payload: { prompt: "Wait until this turn is cancelled." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+
+    await database
+      .insertInto("sandboxes")
+      .values({
+        id: IDS.cancellationSandbox,
+        supervisor_id: "local-pi-rpc-cancellation-test",
+        boot_id: IDS.cancellationSandboxBoot,
+        state: "ready",
+        max_concurrent_sessions: 1,
+        active_sessions: 0,
+      })
+      .executeTakeFirstOrThrow();
+
+    const fakeModel = new FakeModelServer({ defaultScenario: "timeout" });
+    const workspaceDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-cancel-workspace-"));
+    const events: EventPublishMessage[] = [];
+    let rejectedLateCompletion = false;
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.cancellationSandbox,
+      leaseDurationMs: 120_000,
+    });
+    try {
+      await fakeModel.start();
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => workspaceDirectory,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+          reasoning: false,
+        }),
+        turnTimeoutMs: 20_000,
+      });
+      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+      const backend = new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        eventIngestor: {
+          async ingest(value) {
+            const message = parseSupervisorToControlMessage(value);
+            if (
+              message.type === "event.publish" &&
+              message.payload.event.type === "turn.cancelled"
+            ) {
+              await expect(
+                durableEventStore.ingest({
+                  ...message,
+                  messageId: globalThis.crypto.randomUUID(),
+                  payload: {
+                    ...message.payload,
+                    event: {
+                      ...message.payload.event,
+                      eventId: globalThis.crypto.randomUUID(),
+                      type: "turn.completed",
+                      payload: { stopReason: "late_completion" },
+                    },
+                  },
+                }),
+              ).rejects.toMatchObject({ code: "invalid_event" });
+              rejectedLateCompletion = true;
+            }
+            return durableEventStore.ingest(message);
+          },
+        },
+        onEvent(message) {
+          events.push(message);
+        },
+      });
+      const executionDispatcher = new OutboxDispatcher({
+        database,
+        tenantId: IDS.tenant,
+        backend,
+        leaseManager: leaseCoordinator,
+      });
+      const cancellationDispatcher = new CancellationDispatcher({
+        database,
+        tenantId: IDS.tenant,
+        backend,
+        leaseManager: leaseCoordinator,
+      });
+
+      const liveAbort = new AbortController();
+      const liveResponse = await fetch(
+        `${baseUrl}/v1/sessions/${cancellationSession.sessionId}/events`,
+        { signal: liveAbort.signal },
+      );
+      expect(liveResponse.status).toBe(200);
+      const liveEventsPromise = readSseEvents(liveResponse, 2);
+      const execution = executionDispatcher.dispatchNext();
+      void execution.catch(() => undefined);
+      await waitForCondition(async () => {
+        const lifecycle = await readTurnExecution(accepted);
+        return (
+          lifecycle.commandState === "acknowledged" &&
+          lifecycle.turnState === "running" &&
+          lifecycle.sessionState === "running" &&
+          fakeModel.activeRequests === 1
+        );
+      });
+
+      const cancellationResponse = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+        headers: { "idempotency-key": "cancel-live-pi-turn" },
+        payload: { gracePeriodMs: 2_000 },
+      });
+      expect(cancellationResponse.statusCode).toBe(202);
+      const cancellation = cancellationResponse.json() as AcceptedTurnCancellationResource;
+      expect(cancellation).toMatchObject({
+        targetCommandId: accepted.commandId,
+        sessionId: cancellationSession.sessionId,
+        turnId: accepted.turnId,
+        state: "pending",
+        replayed: false,
+      });
+
+      const durableIntent = await database
+        .selectFrom("commands as cancellation")
+        .innerJoin("outbox", (join) =>
+          join
+            .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
+            .on(
+              sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
+            ),
+        )
+        .select([
+          "cancellation.kind as kind",
+          "cancellation.state as commandState",
+          "cancellation.payload as commandPayload",
+          "outbox.topic as topic",
+          "outbox.payload as outboxPayload",
+          "outbox.published_at as publishedAt",
+        ])
+        .where("cancellation.id", "=", cancellation.commandId)
+        .executeTakeFirstOrThrow();
+      expect(durableIntent).toMatchObject({
+        kind: "turn.cancel",
+        commandState: "pending",
+        commandPayload: {
+          schemaVersion: 1,
+          targetCommandId: accepted.commandId,
+          reason: "user_request",
+          gracePeriodMs: 2_000,
+        },
+        topic: "control.command.cancel.pending.v1",
+        outboxPayload: {
+          schemaVersion: 1,
+          commandId: cancellation.commandId,
+          targetCommandId: accepted.commandId,
+          sessionId: cancellationSession.sessionId,
+          turnId: accepted.turnId,
+          kind: "turn.cancel",
+        },
+        publishedAt: null,
+      });
+      expect(JSON.stringify(durableIntent)).not.toContain("Wait until this turn is cancelled.");
+
+      const replayResponse = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+        headers: { "idempotency-key": "cancel-live-pi-turn" },
+        payload: { gracePeriodMs: 2_000 },
+      });
+      expect(replayResponse.statusCode).toBe(202);
+      expect(replayResponse.json()).toMatchObject({
+        commandId: cancellation.commandId,
+        replayed: true,
+      });
+      const changedReplay = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+        headers: { "idempotency-key": "cancel-live-pi-turn" },
+        payload: { gracePeriodMs: 1 },
+      });
+      expect(changedReplay.statusCode).toBe(409);
+      const competingCancellation = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+        headers: { "idempotency-key": "competing-live-pi-cancel" },
+        payload: {},
+      });
+      expect(competingCancellation.statusCode).toBe(409);
+
+      const cancellationDispatch = cancellationDispatcher.dispatchNext();
+      const [cancellationResult, executionResult, liveEvents] = await Promise.all([
+        cancellationDispatch,
+        execution,
+        liveEventsPromise,
+      ]);
+      liveAbort.abort();
+      expect(cancellationResult).toMatchObject({
+        status: "cancelled",
+        commandId: cancellation.commandId,
+        targetCommandId: accepted.commandId,
+        sessionId: cancellationSession.sessionId,
+        turnId: accepted.turnId,
+        attempt: 1,
+        forced: false,
+      });
+      expect(["cancellation_pending", "cancelled"]).toContain(executionResult.status);
+      expect(liveEvents.map((event) => event.event)).toEqual(["turn.started", "turn.cancelled"]);
+      expect(liveEvents.map((event) => event.id)).toEqual([1, 2]);
+      expect(liveEvents[1]?.data).toMatchObject({
+        type: "turn.cancelled",
+        payload: { reason: "user_request", forced: false },
+      });
+
+      const executionState = await readTurnExecution(accepted);
+      expect(executionState).toMatchObject({
+        commandState: "completed",
+        turnState: "cancelled",
+        sessionState: "idle",
+        stopReason: "cancelled",
+        attempts: 1,
+      });
+      const cancellationState = await database
+        .selectFrom("commands as cancellation")
+        .innerJoin("outbox", (join) =>
+          join
+            .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
+            .on(
+              sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
+            ),
+        )
+        .select([
+          "cancellation.state as commandState",
+          "cancellation.acknowledged_at as acknowledgedAt",
+          "cancellation.completed_at as completedAt",
+          "outbox.attempts as attempts",
+          "outbox.published_at as publishedAt",
+        ])
+        .where("cancellation.id", "=", cancellation.commandId)
+        .executeTakeFirstOrThrow();
+      expect(cancellationState).toMatchObject({
+        commandState: "completed",
+        attempts: 1,
+      });
+      expect(cancellationState.acknowledgedAt).not.toBeNull();
+      expect(cancellationState.completedAt).not.toBeNull();
+      expect(cancellationState.publishedAt).not.toBeNull();
+      expect(events.map((message) => message.payload.event.type)).toEqual([
+        "turn.started",
+        "turn.cancelled",
+      ]);
+      expect(rejectedLateCompletion).toBe(true);
+      expect(events.every((message) => message.payload.commandId === accepted.commandId)).toBe(
+        true,
+      );
+      await waitForCondition(() => fakeModel.observations[0]?.completion === "client_aborted");
+      expect(fakeModel.observations[0]).toMatchObject({ completion: "client_aborted" });
+
+      const leaseCount = await database
+        .selectFrom("session_leases")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("session_id", "=", cancellationSession.sessionId)
+        .executeTakeFirstOrThrow();
+      expect(leaseCount.count).toBe("0");
+      const sandbox = await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.cancellationSandbox)
+        .executeTakeFirstOrThrow();
+      expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
+
+      const replayAfterSettlement = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
+        headers: { "idempotency-key": "cancel-live-pi-turn" },
+        payload: { gracePeriodMs: 2_000 },
+      });
+      expect(replayAfterSettlement.statusCode).toBe(202);
+      expect(replayAfterSettlement.json()).toMatchObject({
+        commandId: cancellation.commandId,
+        replayed: true,
+      });
     } finally {
       await fakeModel.stop();
       await rm(workspaceDirectory, { recursive: true, force: true });

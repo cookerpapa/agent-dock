@@ -83,6 +83,37 @@ describe("PiRpcAgentEventAdapter", () => {
     expect(JSON.stringify(settled)).not.toContain("must-not-pass");
   });
 
+  it("maps an expected Pi abort to a public cancellation instead of failure", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+    adapter.requestCancellation("user_request");
+    adapter.adapt({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "aborted" },
+    });
+
+    expect(adapter.adapt({ type: "agent_settled" })).toMatchObject({
+      kind: "mapped",
+      terminal: true,
+      event: {
+        type: "turn.cancelled",
+        payload: { reason: "user_request", forced: false },
+      },
+    });
+  });
+
+  it("can synthesize a forced cancellation when Pi does not settle", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+
+    expect(adapter.forceCancellation("shutdown")).toMatchObject({
+      kind: "mapped",
+      terminal: true,
+      event: { type: "turn.cancelled", payload: { reason: "shutdown", forced: true } },
+    });
+    expect(adapter.adapt({ type: "agent_settled" })).toMatchObject({ kind: "invalid" });
+  });
+
   it("maps tool boundaries and rejects unknown Pi events", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });

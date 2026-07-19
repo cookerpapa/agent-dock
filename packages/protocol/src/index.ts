@@ -2,6 +2,7 @@ export {
   AgentDockEventSchema,
   AgentDockProtocolError,
   SessionStateSchema,
+  TurnCancellationReasonSchema,
   createAgentDockEventFactory,
   parseAgentDockEvent,
   type AgentDockEvent,
@@ -22,11 +23,13 @@ export {
 
 export {
   AcceptTurnRequestSchema,
+  AcceptedTurnCancellationResourceSchema,
   AcceptedTurnResourceSchema,
   ControlPlaneApiErrorSchema,
   ControlPlaneApiValidationError,
   CreateProjectRequestSchema,
   CreateSessionRequestSchema,
+  CreateTurnCancellationRequestSchema,
   IdempotencyKeySchema,
   ProjectResourceSchema,
   SessionResourceSchema,
@@ -34,14 +37,17 @@ export {
   parseAcceptTurnRequest,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
+  parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseUuidPathParameter,
   type AcceptTurnRequest,
+  type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ControlPlaneApiError,
   type CreateProjectRequest,
   type CreateSessionRequest,
+  type CreateTurnCancellationRequest,
   type ProjectResource,
   type SessionResource,
   type TurnThinkingLevel,
@@ -76,6 +82,14 @@ export {
   type SupervisorRegisteredMessage,
   type SupervisorToControlMessage,
 } from "./supervisor-wire.ts";
+
+export {
+  TURN_CANCELLATION_OUTBOX_TOPIC,
+  TurnCancellationOutboxPayloadSchema,
+  TurnCancellationOutboxProtocolError,
+  parseTurnCancellationOutboxPayload,
+  type TurnCancellationOutboxPayload,
+} from "./turn-cancellation-outbox.ts";
 
 export {
   TURN_COMMAND_OUTBOX_TOPIC,

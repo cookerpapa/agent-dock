@@ -1,8 +1,13 @@
-import type { AgentDockEvent, AgentDockEventFactory } from "@agent-dock/protocol";
+import type {
+  AgentDockEvent,
+  AgentDockEventFactory,
+  CancelTurnCommandMessage,
+} from "@agent-dock/protocol";
 
 type JsonRecord = Record<string, unknown>;
 
 type AssistantStopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
+type TurnCancellationReason = CancelTurnCommandMessage["payload"]["reason"];
 
 export type PiRpcAgentEventAdapterOutcome =
   | { kind: "mapped"; event: AgentDockEvent; terminal: boolean }
@@ -56,16 +61,40 @@ export class PiRpcAgentEventAdapter {
   #agentStarted = false;
   #settled = false;
   #lastAssistantStopReason: AssistantStopReason | undefined;
+  #cancellationReason: TurnCancellationReason | undefined;
 
   constructor(eventFactory: AgentDockEventFactory, options: { inputKind: "prompt" | "continue" }) {
     this.#eventFactory = eventFactory;
     this.#inputKind = options.inputKind;
   }
 
+  requestCancellation(reason: TurnCancellationReason): void {
+    if (this.#settled) {
+      throw new Error("Pi run already settled before cancellation");
+    }
+    if (this.#cancellationReason !== undefined && this.#cancellationReason !== reason) {
+      throw new Error("Pi cancellation reason changed during one run");
+    }
+    this.#cancellationReason = reason;
+  }
+
+  forceCancellation(reason: TurnCancellationReason): PiRpcAgentEventAdapterOutcome {
+    this.requestCancellation(reason);
+    this.#settled = true;
+    return this.#cancelled(reason, true);
+  }
+
   adapt(value: unknown): PiRpcAgentEventAdapterOutcome {
     const type = sourceType(value);
     if (!isRecord(value) || typeof value.type !== "string") {
       return { kind: "invalid", sourceType: type, reason: "Pi event must be a JSON object" };
+    }
+    if (this.#settled) {
+      return {
+        kind: "invalid",
+        sourceType: value.type,
+        reason: "Pi emitted an event after the run settled",
+      };
     }
 
     if (value.type === "agent_start") {
@@ -204,6 +233,9 @@ export class PiRpcAgentEventAdapter {
         };
       }
       this.#settled = true;
+      if (this.#cancellationReason !== undefined) {
+        return this.#cancelled(this.#cancellationReason, false);
+      }
       if (this.#lastAssistantStopReason === "error") {
         return {
           kind: "mapped",
@@ -256,6 +288,17 @@ export class PiRpcAgentEventAdapter {
       kind: "invalid",
       sourceType: value.type,
       reason: "No reviewed AgentDock v1 mapping exists for this Pi event type",
+    };
+  }
+
+  #cancelled(reason: TurnCancellationReason, forced: boolean): PiRpcAgentEventAdapterOutcome {
+    return {
+      kind: "mapped",
+      terminal: true,
+      event: this.#eventFactory.next({
+        type: "turn.cancelled",
+        payload: { reason, forced },
+      }),
     };
   }
 }

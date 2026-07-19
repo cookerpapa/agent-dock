@@ -1,10 +1,10 @@
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type { EventPublishMessage, ExecuteTurnCommandMessage } from "@agent-dock/protocol";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PiRpcTurnRunner } from "../src/index.ts";
+import { PiRpcTurnCancelledError, PiRpcTurnRunner } from "../src/index.ts";
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -34,6 +34,31 @@ const command: ExecuteTurnCommandMessage = {
     },
   },
 };
+
+async function waitFor(
+  predicate: () => Promise<boolean> | boolean,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for integration condition");
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return !(
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ESRCH"
+    );
+  }
+}
 
 describe("PiRpcTurnRunner integration", () => {
   it("runs pinned Pi against the loopback fake model and emits only public events", async () => {
@@ -81,4 +106,129 @@ describe("PiRpcTurnRunner integration", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("aborts a live Pi model request and publishes cancellation only after teardown", async () => {
+    const fakeModel = new FakeModelServer({ defaultScenario: "timeout" });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-cancel-test-"));
+    const events: EventPublishMessage[] = [];
+    const controller = new AbortController();
+    try {
+      await fakeModel.start();
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        turnTimeoutMs: 20_000,
+      });
+
+      const running = runner.run(
+        command,
+        (message) => {
+          events.push(message);
+        },
+        controller.signal,
+      );
+      void running.catch(() => undefined);
+      await waitFor(() => fakeModel.activeRequests === 1);
+      controller.abort({
+        kind: "agent-dock.turn-cancellation",
+        reason: "user_request",
+        gracePeriodMs: 2_000,
+      });
+
+      await expect(running).rejects.toMatchObject({
+        name: "PiRpcTurnCancelledError",
+        reason: "user_request",
+        forced: false,
+      } satisfies Partial<PiRpcTurnCancelledError>);
+      expect(events.map((message) => message.payload.event.type)).toEqual([
+        "turn.started",
+        "turn.cancelled",
+      ]);
+      expect(events[1]?.payload.event).toMatchObject({
+        type: "turn.cancelled",
+        payload: { reason: "user_request", forced: false },
+      });
+      await waitFor(() => fakeModel.observations[0]?.completion === "client_aborted");
+      expect(await readdir(workspace)).toEqual([]);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it.runIf(process.platform !== "win32")(
+    "kills and confirms a descendant process when RPC abort is ignored",
+    async () => {
+      const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-force-cancel-test-"));
+      const events: EventPublishMessage[] = [];
+      const controller = new AbortController();
+      let descendantPid: number | undefined;
+      try {
+        const runner = new PiRpcTurnRunner({
+          resolveWorkspaceDirectory: () => workspace,
+          resolveModelRuntime: (model) => ({
+            provider: model.provider,
+            modelId: model.modelId,
+            baseUrl: "http://127.0.0.1:1/v1",
+            api: "openai-completions",
+            apiKey: FAKE_MODEL_API_KEY,
+          }),
+          piRpcEntryPath: resolve(import.meta.dirname, "fixtures/ignore-abort-rpc.mjs"),
+          turnTimeoutMs: 10_000,
+          shutdownTimeoutMs: 500,
+        });
+
+        const running = runner.run(
+          command,
+          (message) => {
+            events.push(message);
+          },
+          controller.signal,
+        );
+        void running.catch(() => undefined);
+        await waitFor(async () => {
+          const value = await readFile(resolve(workspace, "descendant.pid"), "utf8").catch(
+            () => undefined,
+          );
+          if (value === undefined) return false;
+          descendantPid = Number(value.trim());
+          return Number.isSafeInteger(descendantPid) && descendantPid > 0;
+        });
+        if (descendantPid === undefined) throw new Error("Descendant PID was not recorded");
+        expect(processExists(descendantPid)).toBe(true);
+
+        controller.abort({
+          kind: "agent-dock.turn-cancellation",
+          reason: "shutdown",
+          gracePeriodMs: 25,
+        });
+        await expect(running).rejects.toMatchObject({
+          name: "PiRpcTurnCancelledError",
+          reason: "shutdown",
+          forced: true,
+        });
+        await waitFor(() => !processExists(descendantPid!), 2_000);
+        expect(events.map((message) => message.payload.event.type)).toEqual([
+          "turn.started",
+          "turn.cancelled",
+        ]);
+        expect(events[1]?.payload.event).toMatchObject({
+          type: "turn.cancelled",
+          payload: { reason: "shutdown", forced: true },
+        });
+      } finally {
+        if (descendantPid !== undefined && processExists(descendantPid)) {
+          process.kill(descendantPid, "SIGKILL");
+        }
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });

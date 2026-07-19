@@ -65,6 +65,7 @@ describe("AgentDockEventSchema", () => {
         type: "turn.failed",
         payload: { code: "model_timeout", message: "timed out", retryable: true },
       },
+      { type: "turn.cancelled", payload: { reason: "user_request", forced: false } },
     ];
 
     let id = 0;

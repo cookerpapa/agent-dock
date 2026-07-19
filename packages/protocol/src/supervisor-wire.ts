@@ -1,6 +1,10 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { AgentDockEventSchema, SessionStateSchema } from "./event-envelope.ts";
+import {
+  AgentDockEventSchema,
+  SessionStateSchema,
+  TurnCancellationReasonSchema,
+} from "./event-envelope.ts";
 import {
   NonNegativeSafeIntegerSchema,
   OpaqueIdSchema,
@@ -181,12 +185,8 @@ export const CancelTurnCommandMessageSchema = Type.Object(
     payload: Type.Object(
       {
         ...CommandIdentityProperties,
-        reason: Type.Union([
-          Type.Literal("user_request"),
-          Type.Literal("timeout"),
-          Type.Literal("lease_revoked"),
-          Type.Literal("shutdown"),
-        ]),
+        targetCommandId: UuidSchema,
+        reason: TurnCancellationReasonSchema,
         gracePeriodMs: Type.Optional(NonNegativeSafeIntegerSchema),
       },
       { additionalProperties: false },
