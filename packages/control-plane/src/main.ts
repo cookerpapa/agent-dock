@@ -15,22 +15,25 @@ import {
 } from "./supervisor-boot-provisioner.ts";
 import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
+import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
 import {
   createRemoteControlPlaneRuntime,
   type RemoteControlPlaneRuntime,
 } from "./remote-control-plane-runtime.ts";
 
-async function verifyBootstrap(
-  database: ReturnType<typeof createDatabase>,
-  tenantId: string,
-  modelProfileId: string,
-): Promise<void> {
+async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
-    .selectFrom("model_profiles")
-    .select(["tenant_id", "enabled"])
-    .where("id", "=", modelProfileId)
+    .selectFrom("tenant_runtime_policies as policy")
+    .innerJoin("model_profiles as profile", (join) =>
+      join
+        .onRef("profile.tenant_id", "=", "policy.tenant_id")
+        .onRef("profile.id", "=", "policy.default_model_profile_id"),
+    )
+    .select("policy.tenant_id")
+    .where("profile.enabled", "=", true)
+    .limit(1)
     .executeTakeFirst();
-  if (profile?.tenant_id !== tenantId || !profile.enabled) {
+  if (profile === undefined) {
     throw new Error("Production database bootstrap is missing or inconsistent");
   }
 }
@@ -40,11 +43,10 @@ export async function startControlPlane(): Promise<void> {
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
   const notifications = new PostgresSessionEventNotifications({
     connectionString: config.databaseUrl,
-    tenantId: config.tenantId,
   });
   let runtime: RemoteControlPlaneRuntime | undefined;
   try {
-    await verifyBootstrap(database, config.tenantId, config.defaultModelProfileId);
+    await verifyBootstrap(database);
     const managementClient = new HttpSupervisorManagementClient({
       baseUrl: config.supervisorManagementBaseUrl,
       managementToken: config.supervisorManagementToken,
@@ -58,7 +60,7 @@ export async function startControlPlane(): Promise<void> {
     });
     const provisioningGateway = new SupervisorProvisioningGateway({ provisioner });
     const httpGateway = new ProductionHttpGateway({
-      apiToken: config.apiToken,
+      authenticator: new PostgresTenantApiAuthenticator({ database }),
       readiness: async () => {
         if (runtime?.state !== "running") return false;
         await sql`select 1`.execute(database);
@@ -67,8 +69,6 @@ export async function startControlPlane(): Promise<void> {
     });
     runtime = await createRemoteControlPlaneRuntime({
       database,
-      tenantId: config.tenantId,
-      defaultModelProfileId: config.defaultModelProfileId,
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),

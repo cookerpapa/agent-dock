@@ -1,10 +1,12 @@
 import type { Database } from "@agent-dock/database";
 import type { Kysely } from "kysely";
 import type { ProductionBootstrapConfig } from "./production-config.ts";
+import { tenantApiTokenDigest } from "./tenant-identity.ts";
 
 export type ProductionBootstrapResult = {
   tenantId: string;
   userId: string;
+  apiCredentialId: string;
   credentialBindingId: string;
   modelProfileId: string;
 };
@@ -31,7 +33,15 @@ function exact(value: boolean, description: string): void {
 export async function bootstrapProductionDatabase(
   database: Kysely<Database>,
   config: ProductionBootstrapConfig,
+  apiToken: string,
 ): Promise<ProductionBootstrapResult> {
+  if (config.maximumConcurrentTurns > config.maximumUnsettledTurns) {
+    throw new ProductionBootstrapError(
+      "bootstrap_policy_invalid",
+      "Tenant concurrent-turn limit cannot exceed its unsettled-turn limit",
+    );
+  }
+  const apiTokenSha256 = tenantApiTokenDigest(apiToken);
   await database.transaction().execute(async (transaction) => {
     await transaction
       .insertInto("tenants")
@@ -136,10 +146,72 @@ export async function bootstrapProductionDatabase(
         profile.enabled,
       "model profile",
     );
+
+    await transaction
+      .insertInto("tenant_runtime_policies")
+      .values({
+        tenant_id: config.tenantId,
+        default_model_profile_id: config.modelProfileId,
+        enabled: true,
+        maximum_projects: config.maximumProjects,
+        maximum_sessions: config.maximumSessions,
+        maximum_unsettled_turns: config.maximumUnsettledTurns,
+        maximum_concurrent_turns: config.maximumConcurrentTurns,
+      })
+      .onConflict((conflict) => conflict.column("tenant_id").doNothing())
+      .executeTakeFirst();
+    const policy = await transaction
+      .selectFrom("tenant_runtime_policies")
+      .select([
+        "default_model_profile_id",
+        "enabled",
+        "maximum_projects",
+        "maximum_sessions",
+        "maximum_unsettled_turns",
+        "maximum_concurrent_turns",
+      ])
+      .where("tenant_id", "=", config.tenantId)
+      .executeTakeFirstOrThrow();
+    exact(
+      policy.default_model_profile_id === config.modelProfileId &&
+        policy.enabled &&
+        policy.maximum_projects === config.maximumProjects &&
+        policy.maximum_sessions === config.maximumSessions &&
+        policy.maximum_unsettled_turns === config.maximumUnsettledTurns &&
+        policy.maximum_concurrent_turns === config.maximumConcurrentTurns,
+      "tenant runtime policy",
+    );
+
+    await transaction
+      .insertInto("tenant_api_credentials")
+      .values({
+        credential_id: config.apiCredentialId,
+        tenant_id: config.tenantId,
+        user_id: config.userId,
+        label: "production bootstrap owner",
+        role: "owner",
+        secret_sha256: apiTokenSha256,
+      })
+      .onConflict((conflict) => conflict.column("credential_id").doNothing())
+      .executeTakeFirst();
+    const apiCredential = await transaction
+      .selectFrom("tenant_api_credentials")
+      .select(["tenant_id", "user_id", "label", "role", "secret_sha256"])
+      .where("credential_id", "=", config.apiCredentialId)
+      .executeTakeFirstOrThrow();
+    exact(
+      apiCredential.tenant_id === config.tenantId &&
+        apiCredential.user_id === config.userId &&
+        apiCredential.label === "production bootstrap owner" &&
+        apiCredential.role === "owner" &&
+        apiCredential.secret_sha256 === apiTokenSha256,
+      "tenant API credential",
+    );
   });
   return {
     tenantId: config.tenantId,
     userId: config.userId,
+    apiCredentialId: config.apiCredentialId,
     credentialBindingId: config.credentialBindingId,
     modelProfileId: config.modelProfileId,
   };

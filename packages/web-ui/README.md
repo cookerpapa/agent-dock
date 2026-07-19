@@ -14,6 +14,9 @@ JSONL, launches a process, talks to Docker, or receives a provider credential.
 - displays session, turn, connection, sandbox, and sequence state in text as
   well as color;
 - provides a keyboard-resizable desktop tree and mobile sidebar overlay.
+- verifies a pasted tenant credential through `/v1/identity`, displays the
+  tenant/user/role, keeps the token only in memory, clears session state on
+  logout, and disables mutation controls for `viewer`.
 
 All API resources and events are validated with `@agent-dock/protocol`. Markdown
 raw HTML is disabled by default, remote images are replaced with inert labels,

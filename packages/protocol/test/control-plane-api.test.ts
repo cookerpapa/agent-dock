@@ -12,6 +12,7 @@ import {
   parseLastEventIdHeader,
   parseProjectResource,
   parseSessionResource,
+  parseTenantIdentityResource,
   parseUuidPathParameter,
 } from "../src/index.ts";
 
@@ -65,6 +66,15 @@ describe("control-plane public API schemas", () => {
         error: { code: "conflict", message: "Session already has an active turn" },
       }),
     ).toMatchObject({ error: { code: "conflict" } });
+    expect(
+      parseTenantIdentityResource({
+        tenantId: "80000000-0000-4000-8000-000000000001",
+        tenantSlug: "private-alpha",
+        userId: "80000000-0000-4000-8000-000000000002",
+        displayName: "Alpha Operator",
+        role: "member",
+      }),
+    ).toMatchObject({ tenantSlug: "private-alpha", role: "member" });
   });
 
   it("rejects malformed public resources", () => {
@@ -88,6 +98,16 @@ describe("control-plane public API schemas", () => {
     expect(() => parseControlPlaneApiError({ error: { message: "missing code" } })).toThrow(
       /control-plane API error/,
     );
+    expect(() =>
+      parseTenantIdentityResource({
+        tenantId: "80000000-0000-4000-8000-000000000001",
+        tenantSlug: "private-alpha",
+        userId: "80000000-0000-4000-8000-000000000002",
+        displayName: "Alpha Operator",
+        role: "admin",
+        secretSha256: "must-never-cross-the-API",
+      }),
+    ).toThrow(/tenant identity resource/);
   });
 
   it("normalizes project names and preserves prompt text", () => {

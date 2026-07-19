@@ -57,7 +57,6 @@ export type RemoteSupervisorWorkerActivity =
 
 export type RemoteSupervisorWorkerRuntimeOptions = {
   database: Kysely<Database>;
-  tenantId: string;
   bindingSource: RemoteSupervisorDispatchBindingSource;
   maintenanceRunner: SupervisorMaintenanceRunner;
   bindingDiscoveryIntervalMs?: number;
@@ -128,7 +127,6 @@ function abortableWait(delayMs: number, signal: AbortSignal): Promise<void> {
 
 export class RemoteSupervisorWorkerRuntime {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string;
   readonly #bindingSource: RemoteSupervisorDispatchBindingSource;
   readonly #maintenanceRunner: SupervisorMaintenanceRunner;
   readonly #bindingDiscoveryIntervalMs: number;
@@ -147,7 +145,6 @@ export class RemoteSupervisorWorkerRuntime {
 
   constructor(options: RemoteSupervisorWorkerRuntimeOptions) {
     this.#database = options.database;
-    this.#tenantId = requireUuid(options.tenantId, "tenantId");
     this.#bindingSource = options.bindingSource;
     this.#maintenanceRunner = options.maintenanceRunner;
     this.#bindingDiscoveryIntervalMs = positiveInteger(
@@ -303,14 +300,12 @@ export class RemoteSupervisorWorkerRuntime {
     for (let lane = 0; lane < laneCount; lane += 1) {
       const executionDispatcher = new OutboxDispatcher({
         database: this.#database,
-        tenantId: this.#tenantId,
         backend: binding.backend,
         leaseManager: binding.leaseCoordinator,
         supervisorAffinity: binding.supervisorAffinity,
       });
       const cancellationDispatcher = new CancellationDispatcher({
         database: this.#database,
-        tenantId: this.#tenantId,
         backend: binding.backend,
         leaseManager: binding.leaseCoordinator,
         supervisorAffinity: binding.supervisorAffinity,

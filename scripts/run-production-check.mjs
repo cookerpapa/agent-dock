@@ -98,6 +98,29 @@ function composeRun(args) {
   return run("docker", composeArguments(args));
 }
 
+async function tenantAdmin(args) {
+  const output = await composeCapture(
+    [
+      "run",
+      "--rm",
+      "--no-deps",
+      "database-bootstrap",
+      "/app/packages/control-plane/src/tenant-admin.ts",
+      ...args,
+    ],
+    120_000,
+  );
+  for (const line of output.split(/\r?\n/).reverse()) {
+    try {
+      const parsed = JSON.parse(line);
+      if (typeof parsed?.operation === "string") return parsed;
+    } catch {
+      // Docker Compose may print non-JSON lifecycle lines around the one-time result.
+    }
+  }
+  throw new Error("Tenant administration did not return its bounded JSON result");
+}
+
 async function availablePort() {
   const server = createServer();
   await new Promise((resolvePromise, rejectPromise) => {
@@ -164,23 +187,30 @@ async function http(path, options = {}, expectedStatus) {
   return { response, body, text };
 }
 
-function authenticatedHeaders(extra = {}) {
-  return { authorization: `Bearer ${apiToken}`, ...extra };
+function authenticatedHeaders(extra = {}, token = apiToken) {
+  return { authorization: `Bearer ${token}`, ...extra };
 }
 
-async function post(path, body, expectedStatus, idempotencyKey) {
+async function postAs(token, path, body, expectedStatus, idempotencyKey) {
   return http(
     path,
     {
       method: "POST",
-      headers: authenticatedHeaders({
-        "content-type": "application/json",
-        ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
-      }),
+      headers: authenticatedHeaders(
+        {
+          "content-type": "application/json",
+          ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
+        },
+        token,
+      ),
       body: JSON.stringify(body),
     },
     expectedStatus,
   );
+}
+
+async function post(path, body, expectedStatus, idempotencyKey) {
+  return postAs(apiToken, path, body, expectedStatus, idempotencyKey);
 }
 
 function parseSseFrame(raw) {
@@ -201,7 +231,13 @@ function parseSseFrame(raw) {
   return { id, eventName, value: JSON.parse(data.join("\n")) };
 }
 
-async function readSessionEventsUntil(sessionId, afterSequence, predicate, timeoutMs = 120_000) {
+async function readSessionEventsUntil(
+  sessionId,
+  afterSequence,
+  predicate,
+  timeoutMs = 120_000,
+  token = apiToken,
+) {
   const deadline = Date.now() + timeoutMs;
   const events = [];
   let cursor = afterSequence;
@@ -212,10 +248,13 @@ async function readSessionEventsUntil(sessionId, afterSequence, predicate, timeo
       const response = await fetch(
         `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events`,
         {
-          headers: authenticatedHeaders({
-            accept: "text/event-stream",
-            "last-event-id": String(cursor),
-          }),
+          headers: authenticatedHeaders(
+            {
+              accept: "text/event-stream",
+              "last-event-id": String(cursor),
+            },
+            token,
+          ),
           signal: controller.signal,
         },
       );
@@ -322,7 +361,7 @@ async function waitForLatestBootDifferent(previous) {
   }, "fresh Supervisor boot");
 }
 
-async function assertCheckpointObjects(sessionId, expectedCount) {
+async function assertCheckpointObjects(sessionId, expectedCount, tenantId) {
   const output = await psql(
     `select kind || '|' || object_key from artifacts where session_id = ${sqlLiteral(
       sessionId,
@@ -336,6 +375,9 @@ async function assertCheckpointObjects(sessionId, expectedCount) {
     const objectKey = row.slice(separator + 1);
     assert(["pi_session_snapshot", "workspace_snapshot"].includes(kind));
     assert.match(objectKey, /^[a-zA-Z0-9/_.-]+$/);
+    if (tenantId !== undefined) {
+      assert.equal(objectKey.startsWith(`checkpoints/${tenantId}/${sessionId}/`), true);
+    }
     await composeCapture([
       "exec",
       "-T",
@@ -436,6 +478,32 @@ async function assertOnlyWebPublished() {
     assert.equal(bindings["8080/tcp"].length, 1);
     assert.equal(bindings["8080/tcp"][0].HostIp, "127.0.0.1");
     assert.equal(bindings["8080/tcp"][0].HostPort, String(httpPort));
+  }
+}
+
+async function assertTenantNeutralControlPlaneRuntime() {
+  const ids = await serviceContainerIds("control-plane");
+  assert(ids.length >= 1);
+  for (const id of ids) {
+    const inspected = JSON.parse(await capture("docker", ["inspect", id]))[0];
+    const environment = inspected.Config.Env ?? [];
+    for (const prefix of [
+      "AGENT_DOCK_API_TOKEN=",
+      "AGENT_DOCK_API_TOKEN_FILE=",
+      "AGENT_DOCK_TENANT_ID=",
+      "AGENT_DOCK_USER_ID=",
+      "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID=",
+      "AGENT_DOCK_CREDENTIAL_BINDING_ID=",
+    ]) {
+      assert.equal(
+        environment.some((value) => value.startsWith(prefix)),
+        false,
+      );
+    }
+    assert.equal(
+      inspected.Mounts.some((mount) => mount.Destination === "/run/agent-dock-secrets/api-token"),
+      false,
+    );
   }
 }
 
@@ -610,6 +678,7 @@ async function main() {
   await composeRun(["run", "--rm", "--no-deps", "database-bootstrap"]);
   await assertOnlyWebPublished();
   await assertApplicationIdentity();
+  await assertTenantNeutralControlPlaneRuntime();
   await assertObjectStorePolicy(applicationAccessKey);
 
   const health = await http("/healthz", {}, 200);
@@ -635,13 +704,121 @@ async function main() {
     401,
   );
 
+  report("create_second_private_tenant");
+  const createdTenantB = await tenantAdmin([
+    "create",
+    "--slug",
+    `tenant-${suffix}`,
+    "--display-name",
+    "Production Tenant B",
+    "--maximum-projects",
+    "10",
+    "--maximum-sessions",
+    "20",
+    "--maximum-unsettled-turns",
+    "10",
+    "--maximum-concurrent-turns",
+    "1",
+  ]);
+  assert.equal(createdTenantB.operation, "tenant.created");
+  assert.equal(Object.hasOwn(createdTenantB.credential, "secretSha256"), false);
+  const tenantBToken = createdTenantB.credential.token;
+  const tenantBId = createdTenantB.tenantId;
+  assert.match(tenantBToken, /^adk_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43,}$/i);
+  assert.match(tenantBId, /^[0-9a-f-]{36}$/i);
+  secretValues.push(tenantBToken);
+  const issuedViewerB = await tenantAdmin([
+    "issue",
+    "--tenant",
+    tenantBId,
+    "--user-id",
+    createdTenantB.ownerUserId,
+    "--label",
+    "production viewer",
+    "--role",
+    "viewer",
+  ]);
+  assert.equal(issuedViewerB.operation, "credential.issued");
+  assert.equal(Object.hasOwn(issuedViewerB.credential, "secretSha256"), false);
+  const viewerBToken = issuedViewerB.credential.token;
+  secretValues.push(viewerBToken);
+
+  const [identityA, identityB, viewerIdentityB] = await Promise.all([
+    http("/v1/identity", { headers: authenticatedHeaders() }, 200),
+    http("/v1/identity", { headers: authenticatedHeaders({}, tenantBToken) }, 200),
+    http("/v1/identity", { headers: authenticatedHeaders({}, viewerBToken) }, 200),
+  ]);
+  assert.notEqual(identityA.body.tenantId, identityB.body.tenantId);
+  assert.equal(identityB.body.tenantId, tenantBId);
+  assert.equal(identityB.body.role, "owner");
+  assert.equal(viewerIdentityB.body.role, "viewer");
+  await postAs(viewerBToken, "/v1/projects", { name: "viewer denied" }, 403);
+
+  const sharedProjectName = `Production repair ${suffix}`;
+  const projectB = (await postAs(tenantBToken, "/v1/projects", { name: sharedProjectName }, 201))
+    .body;
+  const sessionB = (
+    await postAs(
+      tenantBToken,
+      `/v1/projects/${projectB.projectId}/sessions`,
+      { workspaceId: projectB.workspaceId },
+      201,
+    )
+  ).body;
+  const repairPrompt = "Run the tests, repair the Java bug, and verify the result.";
+  const repairB = (
+    await postAs(
+      tenantBToken,
+      `/v1/sessions/${sessionB.sessionId}/turns`,
+      { prompt: repairPrompt },
+      202,
+      `production-tenant-b-repair-${suffix}`,
+    )
+  ).body;
+  const tenantBStream = await readSessionEventsUntil(
+    sessionB.sessionId,
+    0,
+    isTerminalFor(repairB.turnId),
+    120_000,
+    tenantBToken,
+  );
+  assert.equal(tenantBStream.events.at(-1).type, "turn.completed");
+  await assertCursor(sessionB.sessionId, 10);
+  await assertCheckpointObjects(sessionB.sessionId, 2, tenantBId);
+
+  await postAs(
+    apiToken,
+    `/v1/projects/${projectB.projectId}/sessions`,
+    { workspaceId: projectB.workspaceId },
+    404,
+  );
+  await postAs(
+    apiToken,
+    `/v1/sessions/${sessionB.sessionId}/turns`,
+    { prompt: "foreign tenant probe" },
+    404,
+    `foreign-turn-${suffix}`,
+  );
+  await postAs(
+    apiToken,
+    `/v1/sessions/${sessionB.sessionId}/turns/${repairB.turnId}/cancellations`,
+    {},
+    404,
+    `foreign-cancel-${suffix}`,
+  );
+  await http(
+    `/v1/sessions/${sessionB.sessionId}/events`,
+    { headers: authenticatedHeaders({ "last-event-id": "0" }) },
+    404,
+  );
+
   const bootBeforeReconnect = await latestBoot();
   assert.equal(bootBeforeReconnect.state, "ready");
   const supervisorContainer = (await serviceContainerIds("supervisor-host"))[0];
   const supervisorStartedAt = await containerStartedAt(supervisorContainer);
 
   report("repair_with_control_plane_restart", { bootId: bootBeforeReconnect.bootId });
-  const project = (await post("/v1/projects", { name: `Production repair ${suffix}` }, 201)).body;
+  const project = (await post("/v1/projects", { name: sharedProjectName }, 201)).body;
   const interruptedSession = (
     await post(
       `/v1/projects/${project.projectId}/sessions`,
@@ -649,7 +826,6 @@ async function main() {
       201,
     )
   ).body;
-  const repairPrompt = "Run the tests, repair the Java bug, and verify the result.";
   const repair = (
     await post(
       `/v1/sessions/${interruptedSession.sessionId}/turns`,
@@ -778,17 +954,18 @@ async function main() {
       `select next_event_seq from sessions where id = ${sqlLiteral(interruptedSession.sessionId)}`,
     ),
   );
-  assert.equal(
-    await capture("docker", [
-      "exec",
-      supervisorContainer,
-      "find",
-      `/var/lib/agent-dock/spool-volume/state/active/${bootBeforeReconnect.bootId}`,
-      "-type",
-      "f",
-    ]),
-    "",
-  );
+  const quarantinedAssignmentDirectory = rejectionPath
+    .slice(`${quarantineRoot}/`.length)
+    .split("/")[0];
+  assert.match(quarantinedAssignmentDirectory, /^[0-9a-f]{64}$/);
+  await capture("docker", [
+    "exec",
+    supervisorContainer,
+    "test",
+    "!",
+    "-e",
+    `/var/lib/agent-dock/spool-volume/state/active/${bootBeforeReconnect.bootId}/${quarantinedAssignmentDirectory}`,
+  ]);
 
   report("repair_after_same_boot_reconnect", { bootId: bootAfterReconnect.bootId });
   const session = (
@@ -843,6 +1020,7 @@ async function main() {
     "control-plane",
   ]);
   await waitForHealthyService("control-plane", 2);
+  await assertTenantNeutralControlPlaneRuntime();
   const followUp = (
     await post(
       `/v1/sessions/${session.sessionId}/turns`,
@@ -878,6 +1056,7 @@ async function main() {
     "control-plane",
   ]);
   await waitForHealthyService("control-plane", 1);
+  await assertTenantNeutralControlPlaneRuntime();
   await waitForHealthyService("supervisor-host");
   assert.equal((await latestBoot()).bootId, bootBeforeReconnect.bootId);
 
@@ -987,7 +1166,33 @@ async function main() {
     Array.from({ length: 22 }, (_, index) => index + 1),
   );
 
+  const identityBAfterRestarts = await http(
+    "/v1/identity",
+    { headers: authenticatedHeaders({}, tenantBToken) },
+    200,
+  );
+  assert.equal(identityBAfterRestarts.body.tenantId, tenantBId);
+  const tenantBReplay = await readSessionEventsUntil(
+    sessionB.sessionId,
+    0,
+    (event) => event.seq === 10,
+    120_000,
+    tenantBToken,
+  );
+  assert.equal(tenantBReplay.events.length, 10);
+  await assertCheckpointObjects(sessionB.sessionId, 2, tenantBId);
+  assert.equal(
+    await psql(
+      `select count(distinct tenant_id) from sessions where id in (${sqlLiteral(
+        session.sessionId,
+      )}, ${sqlLiteral(sessionB.sessionId)})`,
+    ),
+    "2",
+  );
+
   await assertNoSecretsInDeployment(secretValues, [
+    ...tenantBStream.events,
+    ...tenantBReplay.events,
     ...repairEvents,
     ...followUpStream.events,
     ...postRestartStream.events,
@@ -998,6 +1203,7 @@ async function main() {
   report("production_check_passed", {
     projectName,
     repairedSessionId: session.sessionId,
+    secondTenantSessionId: sessionB.sessionId,
     oldBootId: bootBeforeReconnect.bootId,
     freshBootId: freshBoot.bootId,
     durableEvents: 22,

@@ -49,14 +49,13 @@ describe("PostgreSQL session event notifications", () => {
   });
 
   it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(
-    "publishes only after commit, filters tenants, and reconnects a dedicated real PostgreSQL listener",
+    "publishes all tenant hints only after commit and reconnects one deployment listener",
     async () => {
       const connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL!;
       const database: Kysely<Database> = createDatabase({ connectionString, maxConnections: 2 });
       const applicationName = `agent-dock-notify-${globalThis.crypto.randomUUID().slice(0, 20)}`;
       const listener = new PostgresSessionEventNotifications({
         connectionString,
-        tenantId: TENANT_ID,
         applicationName,
         initialReconnectDelayMs: 20,
         maxReconnectDelayMs: 100,
@@ -64,7 +63,6 @@ describe("PostgreSQL session event notifications", () => {
       });
       const foreignPublisher = new PostgresSessionEventNotifications({
         connectionString,
-        tenantId: FOREIGN_TENANT_ID,
       });
       const received: SessionEventNotification[] = [];
       let resyncs = 0;
@@ -99,8 +97,8 @@ describe("PostgreSQL session event notifications", () => {
           .execute((transaction) =>
             foreignPublisher.publish(transaction, notification(1, FOREIGN_TENANT_ID)),
           );
-        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 100));
-        expect(received).toEqual([notification(1)]);
+        await waitFor(() => received.length === 2);
+        expect(received).toEqual([notification(1), notification(1, FOREIGN_TENANT_ID)]);
 
         const terminated = await sql<{ terminated: boolean }>`
           select pg_terminate_backend(pid) as terminated
@@ -115,8 +113,12 @@ describe("PostgreSQL session event notifications", () => {
         await database
           .transaction()
           .execute((transaction) => listener.publish(transaction, notification(2)));
-        await waitFor(() => received.length === 2);
-        expect(received).toEqual([notification(1), notification(2)]);
+        await waitFor(() => received.length === 3);
+        expect(received).toEqual([
+          notification(1),
+          notification(1, FOREIGN_TENANT_ID),
+          notification(2),
+        ]);
       } finally {
         await listener.stop();
         await database.destroy();

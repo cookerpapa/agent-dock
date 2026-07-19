@@ -136,6 +136,17 @@ async function seedSingleUserProfile(): Promise<void> {
       enabled: true,
     })
     .executeTakeFirstOrThrow();
+  await database
+    .insertInto("tenant_runtime_policies")
+    .values({
+      tenant_id: IDS.tenant,
+      default_model_profile_id: IDS.profile,
+      maximum_projects: 10_000,
+      maximum_sessions: 10_000,
+      maximum_unsettled_turns: 10_000,
+      maximum_concurrent_turns: 256,
+    })
+    .executeTakeFirstOrThrow();
 }
 
 async function acceptTurn(idempotencyKey: string, prompt: string): Promise<AcceptedTurnResource> {
@@ -406,7 +417,6 @@ beforeAll(async () => {
   if (pglite === undefined) {
     sessionEventNotifications = new PostgresSessionEventNotifications({
       connectionString: databaseConnectionString,
-      tenantId: IDS.tenant,
       applicationName: `agent-dock-api-test-${process.pid}`,
       initialReconnectDelayMs: 20,
       maxReconnectDelayMs: 100,
@@ -1769,7 +1779,6 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       const secondNotifications = new PostgresSessionEventNotifications({
         connectionString: databaseConnectionString,
-        tenantId: IDS.tenant,
         applicationName: `agent-dock-second-api-test-${process.pid}`,
         initialReconnectDelayMs: 20,
         maxReconnectDelayMs: 100,
@@ -2125,7 +2134,7 @@ describe.sequential("single-user durable turn intake API", () => {
     90_000,
   );
 
-  it("durably cancels a live Pi turn through an independent fenced dispatcher", async () => {
+  it("durably cancels a live Pi turn globally even after tenant intake is disabled", async () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
@@ -2220,7 +2229,6 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       const cancellationDispatcher = new CancellationDispatcher({
         database,
-        tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
       });
@@ -2327,6 +2335,12 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       expect(competingCancellation.statusCode).toBe(409);
 
+      await database
+        .updateTable("tenant_runtime_policies")
+        .set({ enabled: false })
+        .where("tenant_id", "=", IDS.tenant)
+        .executeTakeFirstOrThrow();
+
       const cancellationDispatch = cancellationDispatcher.dispatchNext();
       const [cancellationResult, executionResult, liveEvents] = await Promise.all([
         cancellationDispatch,
@@ -2420,6 +2434,11 @@ describe.sequential("single-user durable turn intake API", () => {
         replayed: true,
       });
     } finally {
+      await database
+        .updateTable("tenant_runtime_policies")
+        .set({ enabled: true })
+        .where("tenant_id", "=", IDS.tenant)
+        .execute();
       await fakeModel.stop();
       await rm(workspaceDirectory, { recursive: true, force: true });
     }

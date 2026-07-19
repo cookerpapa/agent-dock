@@ -46,7 +46,7 @@ type GatewayConfiguration = Omit<
 
 type WorkerConfiguration = Omit<
   RemoteSupervisorWorkerRuntimeOptions,
-  "database" | "tenantId" | "bindingSource" | "maintenanceRunner"
+  "database" | "bindingSource" | "maintenanceRunner"
 >;
 
 export type RemoteControlPlaneRuntimeOptions = Omit<
@@ -148,7 +148,6 @@ export async function createRemoteControlPlaneRuntime(
   const eventHub = new SessionEventHub();
   const eventStore = new DurableEventStore({
     database: options.database,
-    tenantId: options.tenantId,
     eventHub,
     ...(options.sessionEventNotifications === undefined
       ? {}
@@ -179,7 +178,6 @@ export async function createRemoteControlPlaneRuntime(
   const worker = new RemoteSupervisorWorkerRuntime({
     ...options.worker,
     database: options.database,
-    tenantId: options.tenantId,
     bindingSource: gateway,
     maintenanceRunner: connectionManager,
   });
@@ -188,8 +186,10 @@ export async function createRemoteControlPlaneRuntime(
   try {
     application = await createControlPlaneApplication({
       database: options.database,
-      tenantId: options.tenantId,
-      defaultModelProfileId: options.defaultModelProfileId,
+      ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+      ...(options.defaultModelProfileId === undefined
+        ? {}
+        : { defaultModelProfileId: options.defaultModelProfileId }),
       supervisorWebSocketGateway: gateway,
       ...(options.supervisorProvisioningGateway === undefined
         ? {}

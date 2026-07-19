@@ -69,6 +69,8 @@ export {
   IdempotencyKeySchema,
   ProjectResourceSchema,
   SessionResourceSchema,
+  TenantApiRoleSchema,
+  TenantIdentityResourceSchema,
   TurnThinkingLevelSchema,
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
@@ -81,6 +83,7 @@ export {
   parseLastEventIdHeader,
   parseProjectResource,
   parseSessionResource,
+  parseTenantIdentityResource,
   parseUuidPathParameter,
   type AcceptTurnRequest,
   type AcceptedTurnCancellationResource,
@@ -91,6 +94,8 @@ export {
   type CreateTurnCancellationRequest,
   type ProjectResource,
   type SessionResource,
+  type TenantApiRole,
+  type TenantIdentityResource,
   type TurnThinkingLevel,
 } from "./control-plane-api.ts";
 

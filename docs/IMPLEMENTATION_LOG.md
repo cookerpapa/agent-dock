@@ -1174,3 +1174,50 @@
 - 下一步（不属于本里程碑）：优先实现 generic repository import + request-scoped model gateway，而不是继续给
   deterministic fixture 堆功能。原因是部署与 runtime correctness 已有可执行证据，下一项决定它能否成为真正可用
   coding agent 产品的瓶颈已经变成“用户代码和模型凭据如何安全进入”，不是 agent loop 或进程数量。
+
+## 2026-07-19 — 私有多租户 identity、quota 与全局公平调度
+
+- 目标：在不开放公网注册、不引入 OIDC/计费、也不复制一套 Supervisor 的前提下，让同一单机部署真正服务多个
+  私有 tenant。不能只给表加 `tenant_id`：HTTP auth、SSE、进程内 wake、后台 claim、checkpoint 与 Web token
+  切换都必须使用同一个可信 tenant authority。
+- 决策：新增 ADR-0025。API token 采用 `adk_<credential UUID>.<random secret>`，数据库只保存 SHA-256；旧生产
+  token 通过 bounded digest lookup 原样迁移。credential 精确绑定 tenant-local user 与 `owner/member/viewer`，
+  tenant 创建、发证、列表与撤销只允许可信宿主运行 offline CLI，不新增 platform-admin HTTP bearer。
+- 请求隔离：Fastify 在进入 Nest controller 前解析 bearer 并把只读 identity 绑定到 request；controller 按该
+  identity 临时构造 tenant store。`GET /v1/identity` 只返回 slug/display name/role。已知的 foreign project、
+  session、turn、cancellation 与 SSE UUID 和不存在 UUID 一样返回 `404`，客户端不能用 header/body 选择 tenant。
+- Admission：新增 `tenant_runtime_policies`，在创建 project/session/turn 的同一 transaction 内锁 policy 并检查
+  project、session、unsettled-turn 上限；同一 idempotency key 的已接受 replay 在 quota 前返回。稳定过载结果为
+  `429 tenant_quota_exceeded`。禁用 intake 不会使安全取消失效。
+- 调度：execute worker 不再保存 process-wide tenant。global claim 锁 policy，排除 disabled/并发饱和 tenant，先按
+  least-recently-served cursor，再按既有 mailbox/outbox 顺序；cursor 在同一 transaction 单调前进。并发 lane
+  共享 per-tenant active-turn 上限。cancel claim 故意不参加普通 fairness/quota，并从 durable cancellation command
+  读取 tenant，避免 active work 因停用或拥塞无法终止。
+- 事件与对象：`DurableEventStore` 从已锁 durable session/command 推导 tenant；PostgreSQL listener 接收全部合法
+  tenant high-water hint，进程内 hub 用 `(tenantId, sessionId)` 分区，SSE replay 每次查询仍带认证 tenant。
+  checkpoint key 已有的 `checkpoints/<tenant>/<session>/<turn>/...` 前缀继续作为不可变对象边界。
+- Web：生产登录卡先调用 `/v1/identity`，成功后显示 tenant/user/role；token 只留在 React 内存，不再写
+  `sessionStorage`。logout/token 变化会清空 session、cursor 与 stream，viewer composer/new-session/cancel 控件禁用。
+- 生产配置：常驻 control-plane 不再读取 tenant/user/default-profile，也不挂载 `api-token`。只有一次性的
+  database bootstrap/admin 容器读取初始 token；新 runtime 生成 indexed token 与独立 credential ID，旧 runtime
+  继续用原 token/IDs。bootstrap 尊重已经撤销的初始 credential，不会在升级时重新启用。
+- 仓库门禁：完整 `npm run ci` 通过 production Web build、所有 workspace typecheck、251 passed/7 conditional
+  skipped tests、两个 zero-model-call Pi compatibility/rehydration spikes，以及 `npm audit --audit-level=high`
+  （0 vulnerabilities）。其中双 tenant REST/SSE foreign probe、role、quota、global fairness、并发上限、disabled-policy
+  cancellation 和真实 remote Supervisor 自动执行/取消都进入自动测试，不依赖手工判断。
+- Docker 验收：fresh disposable topology 创建第二 tenant 和 viewer，两边分别执行真实 Java repair，验证同名 project
+  可并存、foreign project/session/turn/cancellation/SSE UUID 全部不可枚举、两个租户各有 10 条连续事件和两个
+  tenant-prefixed S3 checkpoint object。常驻 control plane 的 env/mount inspection 证明它没有 tenant、default-profile
+  或 API token。same-boot reconnect、stale-fence quarantine、`1 -> 2 -> 1`、fresh Supervisor boot、checkpoint restore 和
+  active cancellation 全部通过，最终输出 `production_check_passed`（project `agent-dock-check-4dd5955455`，22 durable
+  events）并只清理自己的随机资源。第一次 run 暴露验收器把“整个 boot 的 active spool 为空”当作单租户事实；双租户
+  完成态本来就会保留 ACK manifest，因此修成只断言被拒绝的 exact assignment 已原子移入 quarantine，再从头通过。
+- 现有部署升级：默认 `agent-dock-production` 在保留原 PostgreSQL/MinIO volumes、稳定 tenant/user ID 和既有 API token
+  的情况下运行 `production:deploy` 成功。五个常驻 service 全部 healthy，旧 token 经 `/v1/identity` 解析为原
+  `agent-dock` owner；offline `production:tenant -- list --tenant agent-dock` 能读取无 secret 的 credential metadata。
+  `docker inspect` 再次确认常驻 control plane 只挂载 database、Supervisor enrollment/management 三个 secret。
+- 当前边界与下一步：这个里程碑已经是可完整部署的私有、单宿主、多租户 deterministic AgentDock，不是公网 SaaS。
+  public signup/OIDC、计费/滥用控制、跨宿主 mTLS、generic repository、request-scoped real-model gateway、extension
+  policy、warm-pool cost accounting 和可观测性仍未宣称完成。若继续产品能力，优先做 generic repository import +
+  request-scoped model gateway；原因是多租户 runtime correctness 已有真实部署证据，当前可用性的主要瓶颈已经是
+  安全接入用户代码和模型凭据。

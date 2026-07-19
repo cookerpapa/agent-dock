@@ -1,9 +1,11 @@
 # Production deployment runbook
 
 This runbook deploys AgentDock's currently supported production slice on one
-Linux Docker host. The result is a durable, authenticated, single-user service
-with PostgreSQL metadata, MinIO checkpoint bytes, a remote control plane, one
-trusted Supervisor host, isolated one-shot Pi workers, and a static Web UI.
+Linux Docker host. The result is a durable, authenticated, private multi-tenant service
+with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral remote control
+plane, one shared trusted Supervisor host, isolated one-shot Pi workers, and a
+static Web UI. Multiple private tenants can share this runtime without sharing
+their API resources, event streams, quotas, or checkpoint namespaces.
 
 The word _production_ here means that this bounded slice has explicit
 configuration, durable storage, health checks, restart behavior, security
@@ -11,13 +13,17 @@ boundaries, and a destructive disposable acceptance test. It does not turn the
 sample into a general coding-agent SaaS. The worker currently supports only the
 image-owned Java repair/follow-up fixture and deterministic embedded model. It
 does not yet support arbitrary repository import, real-provider credentials,
-policy-approved third-party extensions, multi-tenancy, Kubernetes, or direct
-Internet exposure. Those limits are part of the product contract, not hidden
+policy-approved third-party extensions, public multi-tenant SaaS, Kubernetes, or direct
+Internet exposure. Multi-tenancy here is an application boundary for a trusted
+private operator; it is not public signup, billing, OIDC, or a mutually hostile
+Docker-host boundary. Those limits are part of the product contract, not hidden
 deployment TODOs.
 
 The architecture and safety rationale are recorded in
 [ADR-0023](adr/0023-production-supervisor-host-and-self-hosted-topology.md) and
-[ADR-0024](adr/0024-permanent-event-rejection-and-spool-quarantine.md).
+[ADR-0024](adr/0024-permanent-event-rejection-and-spool-quarantine.md). Private
+tenant identity, quotas, isolation, and fair dispatch are recorded in
+[ADR-0025](adr/0025-private-multi-tenant-identity-and-fair-scheduling.md).
 
 ## Prerequisites
 
@@ -55,16 +61,18 @@ and waits for every long-running service to become healthy. A completed runtime
 directory is reused on later invocations. A non-empty partial directory is
 rejected rather than silently replacing credentials.
 
-The default ingress is `http://127.0.0.1:8080`. Obtain the single-user API token
-only on the trusted host:
+The default ingress is `http://127.0.0.1:8080`. Obtain the initial bootstrap
+owner token only on the trusted host:
 
 ```bash
 npm run production:token
 ```
 
 Open the ingress URL, paste the token into the login card, and submit the
-supported Java-repair prompt. The browser keeps the token in `sessionStorage`,
-not in a URL or durable server-side session. The token command intentionally
+supported Java-repair prompt. The browser first resolves `/v1/identity`, shows
+the tenant, user, and role, and keeps the token only in JavaScript memory—not in
+Web Storage, a URL, or a durable server-side session. Reloading or logging out
+therefore requires the token again. The token command intentionally
 writes a secret to stdout, so do not run it in CI logs, shell tracing, a screen
 recording, or an untrusted terminal multiplexer.
 
@@ -158,6 +166,52 @@ Container logs use Docker's bounded `json-file` policy: three files of at most
 identifiers, but operators should still grant log access as privileged
 operational access.
 
+## Private tenant administration
+
+Tenant lifecycle is an offline operator action. It is deliberately not exposed
+through `/v1`, so a leaked tenant bearer token cannot create tenants or grant
+itself a stronger role. Create a tenant from the trusted host:
+
+```bash
+npm run production:tenant -- create \
+  --slug team-alpha \
+  --display-name "Alpha owner" \
+  --maximum-projects 100 \
+  --maximum-sessions 1000 \
+  --maximum-unsettled-turns 100 \
+  --maximum-concurrent-turns 1
+```
+
+The JSON result contains stable tenant/user/profile IDs and the initial owner
+token. The token is printed exactly once; transfer it through a separate secure
+channel and do not paste the command output into logs or tickets. To create a
+second credential for an existing tenant-local user:
+
+```bash
+npm run production:tenant -- issue \
+  --tenant team-alpha \
+  --user-id USER_UUID_FROM_CREATE \
+  --label "read-only browser" \
+  --role viewer
+```
+
+Roles are `owner`, `member`, and `viewer`. Owner and member may use the current
+project/session/turn/cancellation API; viewer may authenticate and read an event
+stream but cannot mutate resources. Inspect safe credential metadata or revoke
+one credential without revealing any token digest:
+
+```bash
+npm run production:tenant -- list --tenant team-alpha
+npm run production:tenant -- revoke \
+  --tenant team-alpha \
+  --credential-id CREDENTIAL_UUID
+```
+
+Switching tenants in the Web UI means logging out and presenting a credential
+for the other tenant. There is no client-supplied tenant selector. The running
+control plane does not mount the bootstrap/API-token file and has no configured
+default tenant; it derives every public request scope from the verified token.
+
 ## TLS and network exposure
 
 The bundled Caddy configuration intentionally serves plain HTTP on loopback. It
@@ -173,9 +227,10 @@ unreachable. Add host firewall rules and an identity-aware access layer if more
 than the trusted operator can reach the endpoint. Binding
 `AGENT_DOCK_HTTP_BIND_ADDRESS=0.0.0.0` without those controls is unsupported.
 
-The included public bearer token is a single-user boundary, not account login,
-RBAC, CSRF-resistant cookie authentication, tenant isolation, rate limiting, or
-abuse protection.
+The included bearer credentials provide private tenant identity and three
+coarse roles. They are not public account login, OIDC, CSRF-resistant cookie
+authentication, per-route enterprise RBAC, rate limiting, billing, or abuse
+protection.
 
 ## Health and operations
 
@@ -263,9 +318,11 @@ unknown newer schema merely because its container starts.
 Processes read mounted secrets only at startup. Rotate during a maintenance
 window, with a coordinated backup and no active turns:
 
-- Public API token: replace `secrets/api-token` atomically with a new private
-  regular file, recreate the control plane, and distribute the new token over a
-  separate secure channel. Existing browser tabs must log in again.
+- Tenant API credentials: issue a replacement with `production:tenant`, verify
+  it through `/v1/identity`, then revoke the old credential by ID. The initial
+  `secrets/api-token` remains bootstrap identity material and is not mounted by
+  the running control plane; revoking its database credential does not make a
+  later idempotent deployment recreate or re-enable it.
 - Enrollment and management tokens: replace the matching files atomically in
   both consumers and recreate the control plane and Supervisor host together.
   The host restart creates a fresh boot credential and revokes the old one.
@@ -290,8 +347,11 @@ npm run production:check
 
 The command creates a random project name, private temporary runtime, random
 loopback port, fresh volumes, and fresh credentials. It builds images, starts
-real PostgreSQL and MinIO, proves public/internal authentication and port
-isolation, reruns both bootstrap jobs to prove idempotency and the bucket-scoped
+real PostgreSQL and MinIO, creates a second tenant and viewer credential, proves
+cross-tenant UUID/SSE isolation, per-role authorization, tenant-prefixed S3
+checkpoints, a tenant-neutral control-plane container, public/internal
+authentication and port isolation, reruns both bootstrap jobs to prove
+idempotency and the bucket-scoped
 no-delete credential, repairs Java, interrupts and reconnects the control plane, verifies
 ambiguous-command failure and spool quarantine, scales the control plane from
 one to two and back, restores a follow-up from S3, restarts the Supervisor into
@@ -312,6 +372,6 @@ After the deployment acceptance passes, run the complete repository gate:
 npm run ci
 ```
 
-Together these commands are the executable boundary for the supported
-single-user deterministic production slice. Any claim beyond that boundary
+Together these commands are the executable boundary for the supported private
+multi-tenant deterministic production slice. Any claim beyond that boundary
 requires its own ADR, threat model, and acceptance evidence.

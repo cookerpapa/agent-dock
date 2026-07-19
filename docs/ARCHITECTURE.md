@@ -206,15 +206,20 @@ The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted host, static Web
 ingress, isolated networks, private secret-file mounts, health checks, bounded
 resources/logs, and four declared volumes. Only Web publishes a loopback port.
-This topology is complete for the deterministic single-user fixture; it does not
-imply generic repository/provider/extension support, multi-tenancy, Kubernetes,
-or direct Internet hardening. See ADR-0023 and the production runbook.
+This topology is complete for the deterministic private multi-tenant fixture;
+it does not imply generic repository/provider/extension support, public SaaS,
+Kubernetes, or direct Internet hardening. The running control plane is
+tenant-neutral: it mounts no tenant API token and reads no default tenant or
+profile. A verified bearer credential creates request scope, while one shared
+Supervisor pool executes globally fair tenant work. See ADR-0023, ADR-0025, and
+the production runbook.
 
 ### Model profiles and credentials
 
-The control plane exposes allowlisted model profiles rather than accepting raw
-provider endpoints from clients. v0 has one operator-configured default profile
-and no required model picker. A session references the desired profile; every
+The control plane exposes tenant-owned allowlisted model profiles rather than
+accepting raw provider endpoints from clients. Every tenant runtime policy owns
+one operator-configured default profile and no frontend model picker is required.
+A session references the resolved profile; every
 turn snapshots the resolved provider, model, thinking level, and opaque
 credential-binding version so later policy changes do not rewrite history.
 
@@ -309,9 +314,10 @@ Authoritative for control state:
 - usage ledger;
 - transactional outbox.
 
-It also stores model-profile policy, opaque credential bindings, the desired
+It also stores model-profile policy, opaque credential bindings, tenant runtime
+limits/fairness cursors, SHA-256 tenant API credential digests, the desired
 session profile, and each turn's immutable resolved model snapshot. It never
-stores provider tokens in ordinary session or turn rows.
+stores provider tokens or plaintext tenant API tokens in ordinary rows.
 
 Important uniqueness constraints include `(session_id, idempotency_key)`, one
 positive execute-command `mailbox_position` per session, and
@@ -538,9 +544,10 @@ second command broker. See ADR-0019.
   replay/live overlap. Exact durable redelivery may be re-ACKed after lease
   release when the earlier ACK packet was lost; it cannot add or alter history.
 - Event commit transactionally emits a PostgreSQL `NOTIFY` containing only the
-  tenant, session, and durable high-water sequence. Each replica filters its
-  dedicated listener by tenant and uses the local hub to coalesce one high-water
-  wake per SSE subscriber; it never queues event bodies. The stream reads the
+  tenant, session, and durable high-water sequence. Each replica accepts valid
+  hints for all tenants and uses `(tenant, session)` in the local hub to
+  coalesce one high-water wake per exact SSE subscriber; it never queues event
+  bodies. The stream reads the
   missing durable suffix on a wake and on an idle heartbeat, so duplicate or
   missed notifications cannot create a sequence gap. Listener reconnect wakes
   every local subscription.

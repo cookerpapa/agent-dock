@@ -110,6 +110,14 @@ async function seed(): Promise<ControlPlaneStore> {
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("tenant_runtime_policies")
+    .values({
+      tenant_id: IDS.tenant,
+      default_model_profile_id: IDS.profile,
+      maximum_concurrent_turns: 3,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("sandboxes")
     .values({
       id: IDS.sandbox,
@@ -177,7 +185,6 @@ describe.sequential("remote control-plane runtime composition", () => {
     let maxActiveMaintenance = 0;
     const runtime = new RemoteSupervisorWorkerRuntime({
       database,
-      tenantId: IDS.tenant,
       bindingSource: {
         async listRemoteDispatchBindings() {
           discoveryCalls += 1;
@@ -258,7 +265,6 @@ describe.sequential("remote control-plane runtime composition", () => {
     });
     const runtime = new RemoteSupervisorWorkerRuntime({
       database,
-      tenantId: IDS.tenant,
       bindingSource: {
         async listRemoteDispatchBindings() {
           discoveryStarted = true;

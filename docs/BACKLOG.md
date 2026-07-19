@@ -93,3 +93,20 @@ extension-policy support would overstate the current boundary.
 - [x] Add pinned production images, persistent PostgreSQL/MinIO, private networks/secrets, Web ingress, health checks, and one-command deployment
 - [x] Prove the production topology across control-plane reconnect/scale, Supervisor fresh boot/retirement, S3 restore, cancellation, secret audit, and cleanup
 - [ ] Design mTLS/SPIFFE credentials for a multi-host or Kubernetes topology after that deployment target exists
+
+## Phase 4 private multi-tenant slice
+
+- [x] ADR-0025: private identity, roles, quotas, fair scheduling, and threat boundary
+- [x] Store only indexed SHA-256 tenant credential digests and migrate the existing token unchanged
+- [x] Add offline create/issue/list/revoke tenant administration
+- [x] Derive every REST/SSE store scope from authenticated request identity
+- [x] Return indistinguishable `404` responses for known foreign tenant UUIDs
+- [x] Key process-local and PostgreSQL event wakes by tenant plus session
+- [x] Enforce project, session, unsettled-turn, and concurrent-turn policy limits
+- [x] Dispatch globally by least-recently-served tenant without breaking mailbox FIFO
+- [x] Keep cancellation global and independent of normal tenant admission/fairness
+- [x] Remove tenant identity and tenant API token from the running control-plane container
+- [x] Show verified tenant/user/role in Web, retain token only in memory, and disable viewer writes
+- [x] Prove two-tenant HTTP isolation, role denial, fair lanes, quota isolation, restart/scale, SSE, and S3 prefixes
+- [ ] Add public identity federation, billing, abuse controls, and a separate mutually hostile SaaS threat model
+- [ ] Add measured warm-pool eviction and tenant token/cost accounting

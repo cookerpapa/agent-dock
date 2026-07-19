@@ -10,19 +10,29 @@ type PendingRead = {
 };
 
 export class SessionEventSubscription {
+  readonly #tenantId: string;
   readonly #sessionId: string;
   readonly #onClose: (subscription: SessionEventSubscription) => void;
   #queuedWake: SessionEventWake | undefined;
   #pendingRead: PendingRead | undefined;
   #closed = false;
 
-  constructor(sessionId: string, onClose: (subscription: SessionEventSubscription) => void) {
+  constructor(
+    tenantId: string,
+    sessionId: string,
+    onClose: (subscription: SessionEventSubscription) => void,
+  ) {
+    this.#tenantId = tenantId;
     this.#sessionId = sessionId;
     this.#onClose = onClose;
   }
 
   get sessionId(): string {
     return this.#sessionId;
+  }
+
+  get tenantId(): string {
+    return this.#tenantId;
   }
 
   get closed(): boolean {
@@ -91,23 +101,26 @@ export class SessionEventSubscription {
 export class SessionEventHub implements OnApplicationShutdown {
   readonly #subscriptions = new Map<string, Set<SessionEventSubscription>>();
 
-  subscribe(sessionId: string): SessionEventSubscription {
-    const subscription = new SessionEventSubscription(sessionId, (closed) => this.#remove(closed));
-    const current = this.#subscriptions.get(sessionId);
+  subscribe(tenantId: string, sessionId: string): SessionEventSubscription {
+    const key = this.#key(tenantId, sessionId);
+    const subscription = new SessionEventSubscription(tenantId, sessionId, (closed) =>
+      this.#remove(closed),
+    );
+    const current = this.#subscriptions.get(key);
     if (current === undefined) {
-      this.#subscriptions.set(sessionId, new Set([subscription]));
+      this.#subscriptions.set(key, new Set([subscription]));
     } else {
       current.add(subscription);
     }
     return subscription;
   }
 
-  publish(event: AgentDockEvent): void {
-    this.notifyThrough(event.sessionId, event.seq);
+  publish(tenantId: string, event: AgentDockEvent): void {
+    this.notifyThrough(tenantId, event.sessionId, event.seq);
   }
 
-  notifyThrough(sessionId: string, throughSequence: number): void {
-    const current = this.#subscriptions.get(sessionId);
+  notifyThrough(tenantId: string, sessionId: string, throughSequence: number): void {
+    const current = this.#subscriptions.get(this.#key(tenantId, sessionId));
     if (current === undefined) return;
     for (const subscription of [...current]) subscription.notifyThrough(throughSequence);
   }
@@ -125,9 +138,17 @@ export class SessionEventHub implements OnApplicationShutdown {
   }
 
   #remove(subscription: SessionEventSubscription): void {
-    const current = this.#subscriptions.get(subscription.sessionId);
+    const key = this.#key(subscription.tenantId, subscription.sessionId);
+    const current = this.#subscriptions.get(key);
     if (current === undefined) return;
     current.delete(subscription);
-    if (current.size === 0) this.#subscriptions.delete(subscription.sessionId);
+    if (current.size === 0) this.#subscriptions.delete(key);
+  }
+
+  #key(tenantId: string, sessionId: string): string {
+    if (tenantId.includes("\0") || sessionId.includes("\0")) {
+      throw new TypeError("Tenant and session identities must not contain NUL bytes");
+    }
+    return `${tenantId}\0${sessionId}`;
   }
 }

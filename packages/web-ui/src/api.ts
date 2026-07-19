@@ -4,10 +4,12 @@ import {
   parseControlPlaneApiError,
   parseProjectResource,
   parseSessionResource,
+  parseTenantIdentityResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ProjectResource,
   type SessionResource,
+  type TenantIdentityResource,
   type TurnThinkingLevel,
 } from "@agent-dock/protocol";
 
@@ -102,6 +104,12 @@ export class AgentDockApi {
       throw new TypeError("authorizationToken is invalid");
     }
     this.#authorizationToken = authorizationToken;
+  }
+
+  async getIdentity(): Promise<TenantIdentityResource> {
+    return parseTenantIdentityResource(
+      await request(this.#fetch, "/v1/identity", { method: "GET" }, this.#authorizationToken),
+    );
   }
 
   async createProject(name: string): Promise<ProjectResource> {

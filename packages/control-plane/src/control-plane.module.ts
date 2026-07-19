@@ -1,16 +1,23 @@
 import { Module, type DynamicModule } from "@nestjs/common";
-import { ControlPlaneController, CONTROL_PLANE_STORE } from "./control-plane.controller.ts";
-import { ControlPlaneStore, type ControlPlaneStoreOptions } from "./control-plane-store.ts";
+import { ControlPlaneController } from "./control-plane.controller.ts";
+import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
+import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 import { DurableEventStore } from "./durable-event-store.ts";
 import { SessionEventHub } from "./session-event-hub.ts";
 import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
 import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
 import { SessionEventStream, type SessionEventStreamOptions } from "./session-event-stream.ts";
+import type { TenantRequestIdentity } from "./tenant-identity.ts";
+import { TenantRequestContext } from "./tenant-request-context.ts";
 
-export type ControlPlaneModuleOptions = ControlPlaneStoreOptions & {
+export type ControlPlaneModuleOptions = Omit<
+  ControlPlaneStoreOptions,
+  "tenantId" | "defaultModelProfileId"
+> & {
   sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
+  staticRequestIdentity?: TenantRequestIdentity;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -26,7 +33,6 @@ export class ControlPlaneModule {
       options.eventRuntime?.eventStore ??
       new DurableEventStore({
         database: options.database,
-        tenantId: options.tenantId,
         eventHub,
         ...(options.sessionEventNotifications === undefined
           ? {}
@@ -41,8 +47,15 @@ export class ControlPlaneModule {
       controllers: [ControlPlaneController],
       providers: [
         {
-          provide: CONTROL_PLANE_STORE,
-          useValue: new ControlPlaneStore(options),
+          provide: ControlPlaneStoreFactory,
+          useValue: new ControlPlaneStoreFactory({
+            database: options.database,
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
+        {
+          provide: TenantRequestContext,
+          useValue: new TenantRequestContext(options.staticRequestIdentity),
         },
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },

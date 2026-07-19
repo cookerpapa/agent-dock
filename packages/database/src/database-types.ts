@@ -53,6 +53,7 @@ export type SupervisorConnectionState = "active" | "superseded" | "fenced";
 export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementState = "pending" | "claimed" | "blocked" | "completed";
+export type TenantApiCredentialRole = "owner" | "member" | "viewer";
 
 export interface TenantTable {
   id: string;
@@ -65,6 +66,32 @@ export interface UserTable {
   tenant_id: string;
   display_name: string;
   created_at: GeneratedTimestamp;
+}
+
+export interface TenantRuntimePolicyTable {
+  tenant_id: string;
+  default_model_profile_id: string;
+  enabled: GeneratedBoolean;
+  maximum_projects: GeneratedInteger;
+  maximum_sessions: GeneratedInteger;
+  maximum_unsettled_turns: GeneratedInteger;
+  maximum_concurrent_turns: GeneratedInteger;
+  last_scheduled_at: GeneratedTimestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface TenantApiCredentialTable {
+  credential_id: string;
+  tenant_id: string;
+  user_id: string;
+  label: string;
+  role: TenantApiCredentialRole;
+  secret_sha256: string;
+  created_at: GeneratedTimestamp;
+  expires_at: NullableTimestamp;
+  revoked_at: NullableTimestamp;
+  last_used_at: NullableTimestamp;
 }
 
 export interface ProjectTable {
@@ -357,6 +384,8 @@ export interface UsageLedgerTable {
 export interface Database {
   tenants: TenantTable;
   users: UserTable;
+  tenant_runtime_policies: TenantRuntimePolicyTable;
+  tenant_api_credentials: TenantApiCredentialTable;
   projects: ProjectTable;
   workspaces: WorkspaceTable;
   credential_bindings: CredentialBindingTable;

@@ -3,6 +3,7 @@ import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@agen
 import type { FastifyReply } from "fastify";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
 import { DurableEventStoreError } from "./durable-event-store.ts";
+import { TenantRequestContextError } from "./tenant-request-context.ts";
 
 type ErrorResponse = {
   status: number;
@@ -16,15 +17,23 @@ function mappedError(error: unknown): ErrorResponse {
       body: { error: { code: "invalid_request", message: error.message } },
     };
   }
+  if (error instanceof TenantRequestContextError) {
+    return {
+      status: error.code === "authentication_required" ? 401 : 403,
+      body: { error: { code: error.code, message: error.message } },
+    };
+  }
   if (error instanceof ControlPlaneStoreError) {
     const status =
       error.code === "invalid_request"
         ? 400
         : error.code === "not_found"
           ? 404
-          : error.code === "conflict" || error.code === "idempotency_conflict"
-            ? 409
-            : 503;
+          : error.code === "tenant_quota_exceeded"
+            ? 429
+            : error.code === "conflict" || error.code === "idempotency_conflict"
+              ? 409
+              : 503;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof DurableEventStoreError) {

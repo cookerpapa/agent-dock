@@ -230,6 +230,14 @@ async function createAcceptedTurn(): Promise<{
       enabled: true,
     })
     .executeTakeFirstOrThrow();
+  await database
+    .insertInto("tenant_runtime_policies")
+    .values({
+      tenant_id: tenantId,
+      default_model_profile_id: profileId,
+      maximum_concurrent_turns: 4,
+    })
+    .executeTakeFirstOrThrow();
   const store = new ControlPlaneStore({
     database,
     tenantId,

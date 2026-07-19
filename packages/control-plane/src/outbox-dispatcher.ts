@@ -153,7 +153,7 @@ export type DispatchNextResult =
 
 export type OutboxDispatcherOptions = {
   database: Kysely<Database>;
-  tenantId: string;
+  tenantId?: string;
   backend: TurnExecutionBackend;
   clock?: () => Date;
   claimLeaseMs?: number;
@@ -235,7 +235,7 @@ function expectOne(updatedRows: bigint, description: string): void {
 
 export class OutboxDispatcher {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string;
+  readonly #tenantId: string | undefined;
   readonly #backend: TurnExecutionBackend;
   readonly #clock: () => Date;
   readonly #claimLeaseMs: number;
@@ -434,10 +434,12 @@ export class OutboxDispatcher {
             .onRef("session_row.tenant_id", "=", "command.tenant_id")
             .onRef("session_row.id", "=", "command.session_id"),
         )
+        .innerJoin("tenant_runtime_policies as policy", "policy.tenant_id", "command.tenant_id")
         .select([
           "outbox.id as outboxId",
           "outbox.payload as outboxPayload",
           "outbox.attempts as attempts",
+          "command.tenant_id as tenantId",
           "command.id as commandId",
           "command.idempotency_key as idempotencyKey",
           "command.mailbox_position as mailboxPosition",
@@ -458,7 +460,12 @@ export class OutboxDispatcher {
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
         ])
-        .where("outbox.tenant_id", "=", this.#tenantId)
+        .where(
+          this.#tenantId === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`${sql.ref("outbox.tenant_id")} = ${this.#tenantId}`,
+        )
+        .where("policy.enabled", "=", true)
         .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
@@ -513,11 +520,22 @@ export class OutboxDispatcher {
           )`,
         )
         .where("session_row.state", "in", ["cold", "idle"])
+        .where(
+          sql<boolean>`(
+            select count(*)
+            from turns as tenant_active_turn
+            where tenant_active_turn.tenant_id = ${sql.ref("command.tenant_id")}
+              and tenant_active_turn.id <> ${sql.ref("command.turn_id")}
+              and tenant_active_turn.state in ('dispatching', 'running', 'waiting_approval', 'cancelling')
+          ) < ${sql.ref("policy.maximum_concurrent_turns")}`,
+        )
+        .orderBy("policy.last_scheduled_at", "asc")
+        .orderBy("command.tenant_id", "asc")
         .orderBy("outbox.available_at", "asc")
         .orderBy("outbox.created_at", "asc")
         .orderBy("outbox.id", "asc")
         .limit(1)
-        .forUpdate(["outbox", "session_row"])
+        .forUpdate(["outbox", "session_row", "policy"])
         .skipLocked()
         .executeTakeFirst();
 
@@ -545,6 +563,20 @@ export class OutboxDispatcher {
       }
       safeMailboxPosition(row.mailboxPosition);
 
+      const policyUpdate = await transaction
+        .updateTable("tenant_runtime_policies")
+        .set({
+          last_scheduled_at: sql<Date>`greatest(
+            ${sql.ref("last_scheduled_at")} + interval '1 microsecond',
+            ${now}
+          )`,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", row.tenantId)
+        .where("enabled", "=", true)
+        .executeTakeFirst();
+      expectOne(policyUpdate.numUpdatedRows, "advancing tenant scheduling fairness");
+
       if (row.commandState === "pending" && row.turnState === "queued") {
         const commandUpdate = await transaction
           .updateTable("commands")
@@ -553,7 +585,7 @@ export class OutboxDispatcher {
             dispatched_at: now,
             failure_code: null,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", row.tenantId)
           .where("id", "=", row.commandId)
           .where("state", "=", row.commandState)
           .executeTakeFirst();
@@ -562,7 +594,7 @@ export class OutboxDispatcher {
         const turnUpdate = await transaction
           .updateTable("turns")
           .set({ state: transitionTurn(row.turnState, "dispatching") })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", row.tenantId)
           .where("id", "=", row.turnId)
           .where("state", "=", row.turnState)
           .executeTakeFirst();
@@ -578,7 +610,7 @@ export class OutboxDispatcher {
           available_at: leaseUntil,
           last_error: null,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", row.tenantId)
         .where("id", "=", row.outboxId)
         .where("published_at", "is", null)
         .executeTakeFirst();
@@ -588,7 +620,7 @@ export class OutboxDispatcher {
         outboxId: row.outboxId,
         attempt: row.attempts + 1,
         request: {
-          tenantId: this.#tenantId,
+          tenantId: row.tenantId,
           projectId: row.projectId,
           workspaceId: row.workspaceId,
           sessionId: row.sessionId,
@@ -650,7 +682,7 @@ export class OutboxDispatcher {
           state: transitionCommand(rows.commandState, "acknowledged"),
           acknowledged_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.commandState)
         .executeTakeFirst();
@@ -662,7 +694,7 @@ export class OutboxDispatcher {
           state: transitionTurn(rows.turnState, "running"),
           started_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.turnId)
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
@@ -676,7 +708,7 @@ export class OutboxDispatcher {
           updated_at: now,
           last_active_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.sessionId)
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
@@ -685,7 +717,7 @@ export class OutboxDispatcher {
       const outboxUpdate = await transaction
         .updateTable("outbox")
         .set({ published_at: now, last_error: null })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.outboxId)
         .where("published_at", "is", null)
         .executeTakeFirst();
@@ -719,7 +751,7 @@ export class OutboxDispatcher {
           completed_at: now,
           failure_code: null,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.commandState)
         .executeTakeFirst();
@@ -732,7 +764,7 @@ export class OutboxDispatcher {
           stop_reason: stopReason,
           settled_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.turnId)
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
@@ -746,7 +778,7 @@ export class OutboxDispatcher {
           updated_at: now,
           last_active_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.sessionId)
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
@@ -782,7 +814,7 @@ export class OutboxDispatcher {
         const commandUpdate = await transaction
           .updateTable("commands")
           .set({ state: transitionCommand(rows.commandState, "pending") })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.tenantId)
           .where("id", "=", claim.request.commandId)
           .where("state", "=", rows.commandState)
           .executeTakeFirst();
@@ -791,7 +823,7 @@ export class OutboxDispatcher {
         const turnUpdate = await transaction
           .updateTable("turns")
           .set({ state: transitionTurn(rows.turnState, "queued") })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.tenantId)
           .where("id", "=", claim.request.turnId)
           .where("state", "=", rows.turnState)
           .executeTakeFirst();
@@ -803,7 +835,7 @@ export class OutboxDispatcher {
             available_at: new Date(now.valueOf() + this.#retryDelayMs),
             last_error: failure.code,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.tenantId)
           .where("id", "=", claim.outboxId)
           .where("published_at", "is", null)
           .executeTakeFirst();
@@ -831,7 +863,7 @@ export class OutboxDispatcher {
           completed_at: now,
           failure_code: failure.code,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.commandState)
         .executeTakeFirst();
@@ -846,7 +878,7 @@ export class OutboxDispatcher {
           failure_retryable: failure.retryable,
           settled_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.tenantId)
         .where("id", "=", claim.request.turnId)
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
@@ -869,7 +901,7 @@ export class OutboxDispatcher {
             updated_at: now,
             last_active_at: now,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.tenantId)
           .where("id", "=", claim.request.sessionId)
           .where("state", "=", rows.sessionState)
           .executeTakeFirst();
@@ -883,7 +915,7 @@ export class OutboxDispatcher {
         const outboxUpdate = await transaction
           .updateTable("outbox")
           .set({ published_at: now, last_error: failure.code })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.tenantId)
           .where("id", "=", claim.outboxId)
           .where("published_at", "is", null)
           .executeTakeFirst();
@@ -942,7 +974,7 @@ export class OutboxDispatcher {
         "outbox.attempts as outboxAttempts",
         "outbox.published_at as outboxPublishedAt",
       ])
-      .where("command.tenant_id", "=", this.#tenantId)
+      .where("command.tenant_id", "=", claim.request.tenantId)
       .where("command.id", "=", claim.request.commandId)
       .where("turn.id", "=", claim.request.turnId)
       .where("session_row.id", "=", claim.request.sessionId)

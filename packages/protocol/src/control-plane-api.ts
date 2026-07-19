@@ -22,6 +22,23 @@ export const IdempotencyKeySchema = Type.String({
   pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
 });
 
+export const TenantApiRoleSchema = Type.Union([
+  Type.Literal("owner"),
+  Type.Literal("member"),
+  Type.Literal("viewer"),
+]);
+
+export const TenantIdentityResourceSchema = Type.Object(
+  {
+    tenantId: UuidSchema,
+    tenantSlug: Type.String({ minLength: 1, maxLength: 256 }),
+    userId: UuidSchema,
+    displayName: Type.String({ minLength: 1, maxLength: 256 }),
+    role: TenantApiRoleSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const CreateProjectRequestSchema = Type.Object(
   {
     name: Type.String({ minLength: 1, maxLength: 256 }),
@@ -113,6 +130,8 @@ export const ControlPlaneApiErrorSchema = Type.Object(
 );
 
 export type TurnThinkingLevel = Static<typeof TurnThinkingLevelSchema>;
+export type TenantApiRole = Static<typeof TenantApiRoleSchema>;
+export type TenantIdentityResource = Static<typeof TenantIdentityResourceSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
@@ -156,6 +175,10 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
     );
   }
   return { name };
+}
+
+export function parseTenantIdentityResource(value: unknown): TenantIdentityResource {
+  return parseSchema(TenantIdentityResourceSchema, value, "tenant identity resource");
 }
 
 export function parseCreateSessionRequest(value: unknown): CreateSessionRequest {

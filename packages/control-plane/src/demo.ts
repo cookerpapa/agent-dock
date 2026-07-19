@@ -134,6 +134,17 @@ async function seedDemoRuntime(database: ReturnType<typeof createDatabase>): Pro
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("tenant_runtime_policies")
+    .values({
+      tenant_id: DEMO_IDS.tenant,
+      default_model_profile_id: DEMO_IDS.profile,
+      maximum_projects: 100,
+      maximum_sessions: 1_000,
+      maximum_unsettled_turns: 100,
+      maximum_concurrent_turns: 1,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("sandboxes")
     .values({
       id: DEMO_IDS.sandbox,

@@ -27,6 +27,7 @@
     "production:logs": "node scripts/production-compose.mjs logs --follow",
     "production:down": "node scripts/production-compose.mjs down",
     "production:token": "node scripts/print-production-token.mjs",
+    "production:tenant": "node scripts/production-compose.mjs run --rm --no-deps database-bootstrap /app/packages/control-plane/src/tenant-admin.ts",
     "production:check": "node scripts/run-production-check.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

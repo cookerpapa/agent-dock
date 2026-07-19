@@ -112,7 +112,7 @@ export type CancellationDispatchNextResult =
 
 export type CancellationDispatcherOptions = {
   database: Kysely<Database>;
-  tenantId: string;
+  tenantId?: string;
   backend: TurnCancellationBackend;
   leaseManager: TurnExecutionLeaseManager;
   clock?: () => Date;
@@ -212,7 +212,7 @@ function expectOne(changedRows: bigint, description: string): void {
 
 export class CancellationDispatcher {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string;
+  readonly #tenantId: string | undefined;
   readonly #backend: TurnCancellationBackend;
   readonly #leaseManager: TurnExecutionLeaseManager;
   readonly #clock: () => Date;
@@ -358,6 +358,7 @@ export class CancellationDispatcher {
             .onRef("session_row.id", "=", "cancellation.session_id"),
         )
         .select([
+          "outbox.tenant_id as tenantId",
           "outbox.id as outboxId",
           "outbox.payload as outboxPayload",
           "outbox.attempts as attempts",
@@ -381,7 +382,11 @@ export class CancellationDispatcher {
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
         ])
-        .where("outbox.tenant_id", "=", this.#tenantId)
+        .where(
+          this.#tenantId === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`${sql.ref("outbox.tenant_id")} = ${this.#tenantId}`,
+        )
         .where("outbox.topic", "=", TURN_CANCELLATION_OUTBOX_TOPIC)
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
@@ -440,7 +445,7 @@ export class CancellationDispatcher {
             dispatched_at: now,
             failure_code: null,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", row.tenantId)
           .where("id", "=", row.cancellationCommandId)
           .where("state", "=", row.cancellationCommandState)
           .executeTakeFirst();
@@ -454,7 +459,7 @@ export class CancellationDispatcher {
           available_at: leaseUntil,
           last_error: null,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", row.tenantId)
         .where("id", "=", row.outboxId)
         .where("published_at", "is", null)
         .executeTakeFirst();
@@ -469,7 +474,7 @@ export class CancellationDispatcher {
           reason: commandPayload.reason,
           gracePeriodMs: commandPayload.gracePeriodMs,
           target: {
-            tenantId: this.#tenantId,
+            tenantId: row.tenantId,
             projectId: row.projectId,
             workspaceId: row.workspaceId,
             sessionId: row.sessionId,
@@ -517,7 +522,7 @@ export class CancellationDispatcher {
       const priorTerminalEvent = await transaction
         .selectFrom("session_events")
         .select("event_id")
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("session_id", "=", claim.request.target.sessionId)
         .where("turn_id", "=", claim.request.target.turnId)
         .where("command_id", "=", claim.request.target.commandId)
@@ -543,7 +548,7 @@ export class CancellationDispatcher {
           state: transitionCommand(rows.cancellationCommandState, "acknowledged"),
           acknowledged_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.cancellationCommandState)
         .executeTakeFirst();
@@ -552,7 +557,7 @@ export class CancellationDispatcher {
       const turnUpdate = await transaction
         .updateTable("turns")
         .set({ state: transitionTurn(rows.turnState, "cancelling") })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.target.turnId)
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
@@ -566,7 +571,7 @@ export class CancellationDispatcher {
           updated_at: now,
           last_active_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.target.sessionId)
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
@@ -575,7 +580,7 @@ export class CancellationDispatcher {
       const outboxUpdate = await transaction
         .updateTable("outbox")
         .set({ published_at: now, last_error: null })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.outboxId)
         .where("published_at", "is", null)
         .executeTakeFirst();
@@ -606,7 +611,7 @@ export class CancellationDispatcher {
       const terminalEvent = await transaction
         .selectFrom("session_events")
         .select(["payload", "lease_id", "fencing_token"])
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("session_id", "=", claim.request.target.sessionId)
         .where("turn_id", "=", claim.request.target.turnId)
         .where("command_id", "=", claim.request.target.commandId)
@@ -634,7 +639,7 @@ export class CancellationDispatcher {
           completed_at: now,
           failure_code: null,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.cancellationCommandState)
         .executeTakeFirst();
@@ -647,7 +652,7 @@ export class CancellationDispatcher {
           completed_at: now,
           failure_code: null,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.target.commandId)
         .where("state", "=", rows.targetCommandState)
         .executeTakeFirst();
@@ -660,7 +665,7 @@ export class CancellationDispatcher {
           stop_reason: "cancelled",
           settled_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.target.turnId)
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
@@ -674,7 +679,7 @@ export class CancellationDispatcher {
           updated_at: now,
           last_active_at: now,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.target.sessionId)
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
@@ -708,7 +713,7 @@ export class CancellationDispatcher {
         const commandUpdate = await transaction
           .updateTable("commands")
           .set({ state: transitionCommand(rows.cancellationCommandState, "pending") })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.request.commandId)
           .where("state", "=", rows.cancellationCommandState)
           .executeTakeFirst();
@@ -720,7 +725,7 @@ export class CancellationDispatcher {
             available_at: new Date(now.valueOf() + this.#retryDelayMs),
             last_error: failure.code,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.outboxId)
           .where("published_at", "is", null)
           .executeTakeFirst();
@@ -745,7 +750,7 @@ export class CancellationDispatcher {
           completed_at: now,
           failure_code: failure.code,
         })
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", claim.request.target.tenantId)
         .where("id", "=", claim.request.commandId)
         .where("state", "=", rows.cancellationCommandState)
         .executeTakeFirst();
@@ -768,7 +773,7 @@ export class CancellationDispatcher {
             completed_at: now,
             failure_code: failure.code,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.request.target.commandId)
           .where("state", "=", rows.targetCommandState)
           .executeTakeFirst();
@@ -783,7 +788,7 @@ export class CancellationDispatcher {
             failure_retryable: false,
             settled_at: now,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.request.target.turnId)
           .where("state", "=", rows.turnState)
           .executeTakeFirst();
@@ -797,7 +802,7 @@ export class CancellationDispatcher {
             updated_at: now,
             last_active_at: now,
           })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.request.target.sessionId)
           .where("state", "=", rows.sessionState)
           .executeTakeFirst();
@@ -806,7 +811,7 @@ export class CancellationDispatcher {
         const outboxUpdate = await transaction
           .updateTable("outbox")
           .set({ published_at: now, last_error: failure.code })
-          .where("tenant_id", "=", this.#tenantId)
+          .where("tenant_id", "=", claim.request.target.tenantId)
           .where("id", "=", claim.outboxId)
           .where("published_at", "is", null)
           .executeTakeFirst();
@@ -874,7 +879,7 @@ export class CancellationDispatcher {
         "outbox.attempts as outboxAttempts",
         "outbox.published_at as outboxPublishedAt",
       ])
-      .where("cancellation.tenant_id", "=", this.#tenantId)
+      .where("cancellation.tenant_id", "=", claim.request.target.tenantId)
       .where("cancellation.id", "=", claim.request.commandId)
       .where("target.id", "=", claim.request.target.commandId)
       .where("turn.id", "=", claim.request.target.turnId)

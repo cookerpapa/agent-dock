@@ -18,7 +18,6 @@ const MAX_NOTIFICATION_PAYLOAD_BYTES = 7_900;
 
 export type PostgresSessionEventNotificationsOptions = {
   connectionString: string;
-  tenantId: string;
   applicationName?: string;
   connectTimeoutMs?: number;
   initialReconnectDelayMs?: number;
@@ -111,7 +110,6 @@ function validatedNotification(value: SessionEventNotification): SessionEventNot
 
 export class PostgresSessionEventNotifications implements SessionEventNotificationTransport {
   readonly #connectionString: string;
-  readonly #tenantId: string;
   readonly #applicationName: string;
   readonly #connectTimeoutMs: number;
   readonly #initialReconnectDelayMs: number;
@@ -132,7 +130,6 @@ export class PostgresSessionEventNotifications implements SessionEventNotificati
       throw new TypeError("connectionString must not be empty");
     }
     this.#connectionString = options.connectionString;
-    this.#tenantId = requireUuid(options.tenantId, "tenantId");
     const applicationName = options.applicationName ?? "agent-dock-session-event-listener";
     if (
       Buffer.byteLength(applicationName, "utf8") < 1 ||
@@ -180,9 +177,6 @@ export class PostgresSessionEventNotifications implements SessionEventNotificati
     notification: SessionEventNotification,
   ): Promise<void> {
     const parsed = validatedNotification(notification);
-    if (parsed.tenantId !== this.#tenantId) {
-      throw new TypeError("session event notification tenant does not match transport tenant");
-    }
     const payload = JSON.stringify(parsed);
     if (Buffer.byteLength(payload, "utf8") > MAX_NOTIFICATION_PAYLOAD_BYTES) {
       throw new TypeError("session event notification payload is too large");
@@ -314,7 +308,7 @@ export class PostgresSessionEventNotifications implements SessionEventNotificati
   #receive(message: Notification): void {
     if (message.channel !== SESSION_EVENT_NOTIFICATION_CHANNEL) return;
     const notification = parseSessionEventNotificationPayload(message.payload);
-    if (notification === undefined || notification.tenantId !== this.#tenantId) return;
+    if (notification === undefined) return;
     try {
       this.#handlers?.onNotification(notification);
     } catch {

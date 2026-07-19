@@ -82,7 +82,9 @@ are not required to prove tenant isolation in a private deployment.
 8. Project, session, and turn intake locks the policy row and enforces its
    configured bound in the same transaction as resource creation. Rejection is
    a stable `429 tenant_quota_exceeded`, and an idempotent retry of an already
-   accepted turn is returned before consuming quota again.
+   accepted turn is returned before consuming quota again. Disabling runtime
+   intake does not invalidate otherwise valid credentials: existing resources
+   remain readable and cancellation remains available as safety work.
 9. Execute dispatch is global rather than process-tenant-specific. An eligible
    claim joins the command's tenant policy, excludes disabled or concurrency-
    saturated tenants, and orders first by the least recently scheduled tenant,

@@ -37,7 +37,6 @@ export class DurableEventStoreError extends Error {
 
 export type DurableEventStoreOptions = {
   database: Kysely<Database>;
-  tenantId: string;
   eventHub?: SessionEventHub;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   clock?: () => Date;
@@ -169,7 +168,6 @@ function eventSelect() {
 
 export class DurableEventStore implements DurableEventIngestor {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string;
   readonly #eventHub: SessionEventHub | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #clock: () => Date;
@@ -177,7 +175,6 @@ export class DurableEventStore implements DurableEventIngestor {
 
   constructor(options: DurableEventStoreOptions) {
     this.#database = options.database;
-    this.#tenantId = options.tenantId;
     this.#eventHub = options.eventHub;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#clock = options.clock ?? (() => new Date());
@@ -194,17 +191,22 @@ export class DurableEventStore implements DurableEventIngestor {
       const ingested = await this.#ingestTransaction(transaction, parsed, now);
       await this.#eventNotificationPublisher?.publish(transaction, {
         schemaVersion: 1,
-        tenantId: this.#tenantId,
+        tenantId: ingested.tenantId,
         sessionId: parsed.payload.event.sessionId,
         throughSequence: ingested.acknowledgedThroughSeq,
       });
       return ingested;
     });
-    this.#eventHub?.notifyThrough(parsed.payload.event.sessionId, result.acknowledgedThroughSeq);
+    this.#eventHub?.notifyThrough(
+      result.tenantId,
+      parsed.payload.event.sessionId,
+      result.acknowledgedThroughSeq,
+    );
     return this.#acknowledgement(parsed, result.acknowledgedThroughSeq, now);
   }
 
   async openReplayWindow(
+    tenantId: string,
     sessionId: string,
     afterSequence: number,
     pageSize = DEFAULT_REPLAY_PAGE_SIZE,
@@ -217,7 +219,7 @@ export class DurableEventStore implements DurableEventIngestor {
       .selectFrom("sessions as session_row")
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
       .select("cursor.last_persisted_seq as highWaterMark")
-      .where("session_row.tenant_id", "=", this.#tenantId)
+      .where("session_row.tenant_id", "=", tenantId)
       .where("session_row.id", "=", sessionId)
       .executeTakeFirst();
     if (cursor === undefined) {
@@ -231,12 +233,19 @@ export class DurableEventStore implements DurableEventIngestor {
       );
     }
     return {
-      events: await this.readReplayPage(sessionId, afterSequence, highWaterMark, pageSize),
+      events: await this.readReplayPage(
+        tenantId,
+        sessionId,
+        afterSequence,
+        highWaterMark,
+        pageSize,
+      ),
       highWaterMark,
     };
   }
 
   async readReplayPage(
+    tenantId: string,
     sessionId: string,
     afterSequence: number,
     throughSequence: number,
@@ -254,7 +263,7 @@ export class DurableEventStore implements DurableEventIngestor {
     const rows = await this.#database
       .selectFrom("session_events")
       .select(eventSelect())
-      .where("tenant_id", "=", this.#tenantId)
+      .where("tenant_id", "=", tenantId)
       .where("session_id", "=", sessionId)
       .where("seq", ">", String(afterSequence))
       .where("seq", "<=", String(throughSequence))
@@ -268,7 +277,7 @@ export class DurableEventStore implements DurableEventIngestor {
     transaction: Transaction<Database>,
     message: EventPublishMessage,
     now: Date,
-  ): Promise<{ acknowledgedThroughSeq: number }> {
+  ): Promise<{ tenantId: string; acknowledgedThroughSeq: number }> {
     const event = message.payload.event;
     const session = await transaction
       .selectFrom("sessions")
@@ -276,9 +285,10 @@ export class DurableEventStore implements DurableEventIngestor {
       .where("id", "=", event.sessionId)
       .forUpdate()
       .executeTakeFirst();
-    if (session === undefined || session.tenant_id !== this.#tenantId) {
+    if (session === undefined) {
       throw new DurableEventStoreError("not_found", "Event session was not found");
     }
+    const tenantId = session.tenant_id;
     const cursor = await transaction
       .selectFrom("session_event_cursors")
       .select(["last_persisted_seq", "acknowledged_through_seq"])
@@ -305,7 +315,7 @@ export class DurableEventStore implements DurableEventIngestor {
       const existing = await transaction
         .selectFrom("session_events")
         .select(eventSelect())
-        .where("tenant_id", "=", this.#tenantId)
+        .where("tenant_id", "=", tenantId)
         .where("session_id", "=", event.sessionId)
         .where("seq", "=", String(event.seq))
         .executeTakeFirst();
@@ -321,7 +331,7 @@ export class DurableEventStore implements DurableEventIngestor {
           `Conflicting event publication at sequence ${event.seq}`,
         );
       }
-      return { acknowledgedThroughSeq: event.seq };
+      return { tenantId, acknowledgedThroughSeq: event.seq };
     }
 
     const expectedSequence = lastPersisted + 1;
@@ -333,7 +343,7 @@ export class DurableEventStore implements DurableEventIngestor {
       );
     }
 
-    await this.#validateEventOwnership(transaction, message);
+    await this.#validateEventOwnership(transaction, tenantId, message);
     const lease = await transaction
       .selectFrom("session_leases")
       .select(["lease_id", "fencing_token", "valid_until"])
@@ -367,7 +377,7 @@ export class DurableEventStore implements DurableEventIngestor {
       .insertInto("session_events")
       .values({
         event_id: event.eventId,
-        tenant_id: this.#tenantId,
+        tenant_id: tenantId,
         session_id: event.sessionId,
         turn_id: event.turnId,
         agent_node_id: null,
@@ -405,17 +415,18 @@ export class DurableEventStore implements DurableEventIngestor {
         updated_at: now,
         last_active_at: now,
       })
-      .where("tenant_id", "=", this.#tenantId)
+      .where("tenant_id", "=", tenantId)
       .where("id", "=", event.sessionId)
       .where("next_event_seq", "=", session.next_event_seq)
       .executeTakeFirst();
     expectOne(sessionUpdate.numUpdatedRows, "advancing the session event sequence");
 
-    return { acknowledgedThroughSeq: event.seq };
+    return { tenantId, acknowledgedThroughSeq: event.seq };
   }
 
   async #validateEventOwnership(
     transaction: Transaction<Database>,
+    tenantId: string,
     message: EventPublishMessage,
   ): Promise<void> {
     const event = message.payload.event;
@@ -432,7 +443,7 @@ export class DurableEventStore implements DurableEventIngestor {
     const turn = await transaction
       .selectFrom("turns")
       .select(["id", "state"])
-      .where("tenant_id", "=", this.#tenantId)
+      .where("tenant_id", "=", tenantId)
       .where("session_id", "=", event.sessionId)
       .where("id", "=", event.turnId)
       .executeTakeFirst();
@@ -459,7 +470,7 @@ export class DurableEventStore implements DurableEventIngestor {
     const command = await transaction
       .selectFrom("commands")
       .select(["id", "state"])
-      .where("tenant_id", "=", this.#tenantId)
+      .where("tenant_id", "=", tenantId)
       .where("session_id", "=", event.sessionId)
       .where("turn_id", "=", event.turnId)
       .where("id", "=", message.payload.commandId)

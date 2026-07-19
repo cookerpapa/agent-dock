@@ -1,24 +1,13 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { bindTenantRequestIdentity, type TenantApiAuthenticator } from "./tenant-identity.ts";
 
 export const CONTROL_PLANE_LIVE_PATH = "/health/live";
 export const CONTROL_PLANE_READY_PATH = "/health/ready";
 
 export type ProductionHttpGatewayOptions = {
-  apiToken: string;
+  authenticator: TenantApiAuthenticator;
   readiness: () => boolean | Promise<boolean>;
 };
-
-function tokenDigest(value: string): Buffer {
-  return createHash("sha256").update(value, "utf8").digest();
-}
-
-function boundedToken(value: string): string {
-  if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(value)) {
-    throw new TypeError("apiToken must contain 32-4096 bounded ASCII bytes");
-  }
-  return value;
-}
 
 function bearerToken(value: string | undefined): string | undefined {
   if (value === undefined || value.length > 4_103) return undefined;
@@ -26,12 +15,12 @@ function bearerToken(value: string | undefined): string | undefined {
 }
 
 export class ProductionHttpGateway {
-  readonly #apiDigest: Buffer;
+  readonly #authenticator: TenantApiAuthenticator;
   readonly #readiness: () => boolean | Promise<boolean>;
   #installed = false;
 
   constructor(options: ProductionHttpGatewayOptions) {
-    this.#apiDigest = tokenDigest(boundedToken(options.apiToken));
+    this.#authenticator = options.authenticator;
     this.#readiness = options.readiness;
   }
 
@@ -42,8 +31,22 @@ export class ProductionHttpGateway {
       const path = request.raw.url?.split("?", 1)[0] ?? "";
       if (!path.startsWith("/v1/") && path !== "/v1") return;
       const token = bearerToken(request.headers.authorization);
-      const candidate = token === undefined ? Buffer.alloc(32) : tokenDigest(token);
-      if (token !== undefined && timingSafeEqual(this.#apiDigest, candidate)) return;
+      let identity;
+      try {
+        identity = token === undefined ? undefined : await this.#authenticator.authenticate(token);
+      } catch {
+        await reply.code(503).send({
+          error: {
+            code: "authentication_unavailable",
+            message: "The AgentDock identity service is temporarily unavailable",
+          },
+        });
+        return;
+      }
+      if (identity !== undefined) {
+        bindTenantRequestIdentity(request, identity);
+        return;
+      }
       await reply
         .code(401)
         .header("www-authenticate", "Bearer")

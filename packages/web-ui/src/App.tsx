@@ -9,6 +9,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { TenantIdentityResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import {
   activeTurn,
@@ -25,7 +26,6 @@ const MIN_SIDEBAR_WIDTH = 216;
 const MAX_SIDEBAR_WIDTH = 420;
 const MAX_RENDERED_VALUE_LENGTH = 16_000;
 const AUTH_REQUIRED = import.meta.env.VITE_AGENT_DOCK_AUTH_REQUIRED === "true";
-const SESSION_TOKEN_KEY = "agent-dock.api-token";
 
 function shortId(value: string): string {
   return value.slice(0, 8);
@@ -277,11 +277,10 @@ function apiFailureMessage(error: unknown): string {
 }
 
 export default function App() {
-  const [apiToken, setApiToken] = useState(() => {
-    if (!AUTH_REQUIRED || typeof window === "undefined") return "";
-    return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? "";
-  });
+  const [apiToken, setApiToken] = useState("");
+  const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [credentialInput, setCredentialInput] = useState("");
+  const [credentialChecking, setCredentialChecking] = useState(false);
   const api = useMemo(
     () => new AgentDockApi(globalThis.fetch.bind(globalThis), apiToken || undefined),
     [apiToken],
@@ -294,6 +293,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const lastSequenceRef = useRef(0);
   const currentTurn = activeTurn(state);
+  const canMutate = identity?.role !== "viewer";
   const sessionCanQueueTurn =
     state.session === null ||
     state.sessionState === "cold" ||
@@ -333,24 +333,39 @@ export default function App() {
     return () => controller.abort();
   }, [state.session?.sessionId, reconnectGeneration, apiToken]);
 
-  function acceptCredential(): void {
+  async function acceptCredential(): Promise<void> {
     const token = credentialInput.trim();
     if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(token)) {
       update({ type: "api.error", message: "API credential format is invalid." });
       return;
     }
-    window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
-    setApiToken(token);
-    setCredentialInput("");
+    setCredentialChecking(true);
     update({ type: "api.error.cleared" });
+    try {
+      const candidateApi = new AgentDockApi(globalThis.fetch.bind(globalThis), token);
+      const resolvedIdentity = await candidateApi.getIdentity();
+      lastSequenceRef.current = 0;
+      setState(createInitialSessionView());
+      setIdentity(resolvedIdentity);
+      setApiToken(token);
+      setCredentialInput("");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setCredentialChecking(false);
+    }
   }
 
   function forgetCredential(): void {
-    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    lastSequenceRef.current = 0;
+    setState(createInitialSessionView());
+    setIdentity(null);
     setApiToken("");
+    setOperation(null);
   }
 
   async function createSession() {
+    if (!canMutate) return undefined;
     setOperation("creating");
     update({ type: "api.error.cleared" });
     try {
@@ -370,7 +385,7 @@ export default function App() {
 
   async function submitTurn(): Promise<void> {
     const normalizedPrompt = prompt.trim();
-    if (normalizedPrompt.length === 0 || !sessionCanQueueTurn || operation !== null) {
+    if (normalizedPrompt.length === 0 || !canMutate || !sessionCanQueueTurn || operation !== null) {
       return;
     }
     setOperation("submitting");
@@ -398,7 +413,14 @@ export default function App() {
   }
 
   async function cancelActiveTurn(): Promise<void> {
-    if (state.session === null || currentTurn?.status !== "running" || operation !== null) return;
+    if (
+      !canMutate ||
+      state.session === null ||
+      currentTurn?.status !== "running" ||
+      operation !== null
+    ) {
+      return;
+    }
     setOperation("cancelling");
     update({ type: "api.error.cleared" });
     try {
@@ -446,14 +468,14 @@ export default function App() {
     );
   }
 
-  if (AUTH_REQUIRED && apiToken.length === 0) {
+  if (AUTH_REQUIRED && (apiToken.length === 0 || identity === null)) {
     return (
       <main className="credential-gate">
         <form
           className="credential-card"
           onSubmit={(event) => {
             event.preventDefault();
-            acceptCredential();
+            void acceptCredential();
           }}
         >
           <div className="brand-mark" aria-hidden="true">
@@ -461,7 +483,7 @@ export default function App() {
           </div>
           <span className="empty-kicker">SELF-HOSTED ACCESS</span>
           <h1>Connect to AgentDock</h1>
-          <p>Enter the deployment API token. It is kept only in this browser tab session.</p>
+          <p>Enter a tenant API token. It is verified first and kept only in browser memory.</p>
           <label htmlFor="api-credential">API token</label>
           <input
             autoComplete="off"
@@ -472,7 +494,9 @@ export default function App() {
             value={credentialInput}
           />
           {state.apiError ? <div className="credential-error">{state.apiError}</div> : null}
-          <button type="submit">continue</button>
+          <button disabled={credentialChecking} type="submit">
+            {credentialChecking ? "verifying…" : "continue"}
+          </button>
         </form>
       </main>
     );
@@ -501,7 +525,7 @@ export default function App() {
         </header>
         <div className="sidebar-actions">
           <button
-            disabled={currentTurn !== undefined || operation !== null}
+            disabled={!canMutate || currentTurn !== undefined || operation !== null}
             onClick={() => void createSession()}
             type="button"
           >
@@ -545,6 +569,15 @@ export default function App() {
           )}
         </nav>
         <footer className="sidebar-footer">
+          {identity ? (
+            <div className="tenant-identity">
+              <span>tenant</span>
+              <strong>{identity.tenantSlug}</strong>
+              <small>
+                {identity.displayName} · {identity.role}
+              </small>
+            </div>
+          ) : null}
           <div>
             <span>model</span>
             <strong>embedded fake · fixed</strong>
@@ -628,7 +661,7 @@ export default function App() {
           <div className="composer">
             <textarea
               aria-label="Turn prompt"
-              disabled={!sessionCanQueueTurn || operation !== null}
+              disabled={!canMutate || !sessionCanQueueTurn || operation !== null}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -657,7 +690,7 @@ export default function App() {
                 {currentTurn?.status === "running" ? (
                   <button
                     className="cancel-button"
-                    disabled={operation !== null}
+                    disabled={!canMutate || operation !== null}
                     onClick={() => void cancelActiveTurn()}
                     type="button"
                   >
@@ -666,19 +699,23 @@ export default function App() {
                 ) : null}
                 <button
                   className="send-button"
-                  disabled={!sessionCanQueueTurn || operation !== null || prompt.trim() === ""}
+                  disabled={
+                    !canMutate || !sessionCanQueueTurn || operation !== null || prompt.trim() === ""
+                  }
                   onClick={() => void submitTurn()}
                   type="button"
                 >
-                  {operation === "submitting" || operation === "creating"
-                    ? "accepting…"
-                    : sessionNeedsReset
-                      ? "new session required"
-                      : currentTurn !== undefined
-                        ? "queue follow-up"
-                        : hasSettledTurn
-                          ? "send follow-up"
-                          : "run repair"}
+                  {!canMutate
+                    ? "viewer · read only"
+                    : operation === "submitting" || operation === "creating"
+                      ? "accepting…"
+                      : sessionNeedsReset
+                        ? "new session required"
+                        : currentTurn !== undefined
+                          ? "queue follow-up"
+                          : hasSettledTurn
+                            ? "send follow-up"
+                            : "run repair"}
                 </button>
               </div>
             </div>

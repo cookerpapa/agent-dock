@@ -243,9 +243,11 @@ const minioApplicationPassword = randomSecret();
 const identities = {
   tenantId: randomUUID(),
   userId: randomUUID(),
+  apiCredentialId: randomUUID(),
   credentialBindingId: randomUUID(),
   modelProfileId: randomUUID(),
 };
+const apiToken = `adk_${identities.apiCredentialId}.${randomBytes(32).toString("base64url")}`;
 const application = applicationIdentity();
 const imageVersion = boundedEnvironmentValue(
   "AGENT_DOCK_IMAGE_VERSION",
@@ -272,7 +274,7 @@ await writePrivateFile(
 );
 await writePrivateFile(resolve(secretsDirectory, "minio-root-user"), `${minioRootUser}\n`);
 await writePrivateFile(resolve(secretsDirectory, "minio-root-password"), `${minioRootPassword}\n`);
-await writePrivateFile(resolve(secretsDirectory, "api-token"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "api-token"), `${apiToken}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "supervisor-enrollment-token"),
   `${randomSecret()}\n`,
@@ -303,6 +305,7 @@ const environment = [
   "AGENT_DOCK_TENANT_SLUG=agent-dock",
   `AGENT_DOCK_TENANT_ID=${identities.tenantId}`,
   `AGENT_DOCK_USER_ID=${identities.userId}`,
+  `AGENT_DOCK_API_CREDENTIAL_ID=${identities.apiCredentialId}`,
   `AGENT_DOCK_CREDENTIAL_BINDING_ID=${identities.credentialBindingId}`,
   `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID=${identities.modelProfileId}`,
   `AGENT_DOCK_SUPERVISOR_ID=${supervisorId}`,

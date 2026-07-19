@@ -14,34 +14,35 @@ x-application-security: &application-security
   security_opt:
     - no-new-privileges:true
 
-x-control-plane-environment: &control-plane-environment
+x-control-plane-runtime-environment: &control-plane-runtime-environment
   NODE_ENV: production
   HOST: 0.0.0.0
   PORT: "3000"
   DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-  AGENT_DOCK_API_TOKEN_FILE: /run/agent-dock-secrets/api-token
   AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
-  AGENT_DOCK_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
-  AGENT_DOCK_TENANT_SLUG: ${AGENT_DOCK_TENANT_SLUG:-agent-dock}
-  AGENT_DOCK_USER_ID: ${AGENT_DOCK_USER_ID:?run npm run production:init first}
-  AGENT_DOCK_CREDENTIAL_BINDING_ID: ${AGENT_DOCK_CREDENTIAL_BINDING_ID:?run npm run production:init first}
-  AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID: ${AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
-  AGENT_DOCK_MODEL_PROFILE_NAME: deterministic-java-repair
   AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
   AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR: ${AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR:-8}
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: http://supervisor-host:4100
 
-x-control-plane-secrets: &control-plane-secrets
+x-bootstrap-environment: &bootstrap-environment
+  NODE_ENV: production
+  DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+  AGENT_DOCK_API_TOKEN_FILE: /run/agent-dock-secrets/api-token
+  AGENT_DOCK_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
+  AGENT_DOCK_TENANT_SLUG: ${AGENT_DOCK_TENANT_SLUG:-agent-dock}
+  AGENT_DOCK_USER_ID: ${AGENT_DOCK_USER_ID:?run npm run production:init first}
+  AGENT_DOCK_API_CREDENTIAL_ID: ${AGENT_DOCK_API_CREDENTIAL_ID:-${AGENT_DOCK_USER_ID:?run npm run production:init first}}
+  AGENT_DOCK_CREDENTIAL_BINDING_ID: ${AGENT_DOCK_CREDENTIAL_BINDING_ID:?run npm run production:init first}
+  AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID: ${AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
+  AGENT_DOCK_MODEL_PROFILE_NAME: deterministic-java-repair
+
+x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
     target: /run/agent-dock-secrets/database-url
-    read_only: true
-  - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/api-token
-    target: /run/agent-dock-secrets/api-token
     read_only: true
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
@@ -50,6 +51,16 @@ x-control-plane-secrets: &control-plane-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
     target: /run/agent-dock-secrets/supervisor-management-token
+    read_only: true
+
+x-bootstrap-secrets: &bootstrap-secrets
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+    target: /run/agent-dock-secrets/database-url
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/api-token
+    target: /run/agent-dock-secrets/api-token
     read_only: true
 
 services:
@@ -201,8 +212,8 @@ services:
         condition: service_healthy
     command: [/app/packages/control-plane/src/bootstrap-main.ts]
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
-    environment: *control-plane-environment
-    volumes: *control-plane-secrets
+    environment: *bootstrap-environment
+    volumes: *bootstrap-secrets
     networks:
       - database
     <<: *application-security
@@ -224,9 +235,9 @@ services:
         condition: service_completed_successfully
       minio-bootstrap:
         condition: service_completed_successfully
-    environment: *control-plane-environment
+    environment: *control-plane-runtime-environment
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
-    volumes: *control-plane-secrets
+    volumes: *control-plane-runtime-secrets
     networks:
       - api
       - database

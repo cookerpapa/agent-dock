@@ -14,7 +14,11 @@ export class SessionEventNotificationBridge implements OnModuleInit, OnApplicati
   async onModuleInit(): Promise<void> {
     await this.#transport.start({
       onNotification: (notification) =>
-        this.#hub.notifyThrough(notification.sessionId, notification.throughSequence),
+        this.#hub.notifyThrough(
+          notification.tenantId,
+          notification.sessionId,
+          notification.throughSequence,
+        ),
       onResync: () => this.#hub.resyncAll(),
     });
   }

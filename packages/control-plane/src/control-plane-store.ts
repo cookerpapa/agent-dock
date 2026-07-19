@@ -30,6 +30,7 @@ export type ControlPlaneStoreErrorCode =
   | "not_found"
   | "conflict"
   | "idempotency_conflict"
+  | "tenant_quota_exceeded"
   | "control_plane_misconfigured";
 
 export class ControlPlaneStoreError extends Error {
@@ -72,6 +73,13 @@ type ModelSnapshotRow = {
   credentialProvider: string;
 };
 
+type TenantRuntimePolicy = {
+  defaultModelProfileId: string;
+  maximumProjects: number;
+  maximumSessions: number;
+  maximumUnsettledTurns: number;
+};
+
 function isoTimestamp(value: Date | string): string {
   const timestamp = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(timestamp.valueOf())) {
@@ -89,6 +97,17 @@ function positiveSafeInteger(value: string, description: string): number {
     throw new ControlPlaneStoreError(
       "control_plane_misconfigured",
       `${description} must be a positive safe integer`,
+    );
+  }
+  return parsed;
+}
+
+function nonNegativeSafeInteger(value: string | number | bigint, description: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ControlPlaneStoreError(
+      "control_plane_misconfigured",
+      `${description} must be a non-negative safe integer`,
     );
   }
   return parsed;
@@ -228,6 +247,21 @@ export class ControlPlaneStore {
     const workspaceId = this.#idGenerator();
     try {
       return await this.#database.transaction().execute(async (transaction) => {
+        const policy = await this.#lockTenantPolicy(transaction);
+        const projectCount = await transaction
+          .selectFrom("projects")
+          .select((expression) => expression.fn.countAll<string>().as("count"))
+          .where("tenant_id", "=", this.#tenantId)
+          .executeTakeFirstOrThrow();
+        if (
+          nonNegativeSafeInteger(projectCount.count, "Tenant project count") >=
+          policy.maximumProjects
+        ) {
+          throw new ControlPlaneStoreError(
+            "tenant_quota_exceeded",
+            "Tenant project quota has been reached",
+          );
+        }
         const project = await transaction
           .insertInto("projects")
           .values({ id: projectId, tenant_id: this.#tenantId, name })
@@ -260,6 +294,7 @@ export class ControlPlaneStore {
   async createSession(projectId: string, workspaceId: string): Promise<SessionResource> {
     const sessionId = this.#idGenerator();
     return this.#database.transaction().execute(async (transaction) => {
+      const policy = await this.#lockTenantPolicy(transaction);
       const workspace = await transaction
         .selectFrom("workspaces")
         .select(["id", "project_id"])
@@ -270,6 +305,19 @@ export class ControlPlaneStore {
       if (!workspace) {
         throw new ControlPlaneStoreError("not_found", "Project workspace was not found");
       }
+      const sessionCount = await transaction
+        .selectFrom("sessions")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", this.#tenantId)
+        .executeTakeFirstOrThrow();
+      if (
+        nonNegativeSafeInteger(sessionCount.count, "Tenant session count") >= policy.maximumSessions
+      ) {
+        throw new ControlPlaneStoreError(
+          "tenant_quota_exceeded",
+          "Tenant session quota has been reached",
+        );
+      }
 
       await this.#resolveModelSnapshot(transaction);
       const session = await transaction
@@ -279,7 +327,7 @@ export class ControlPlaneStore {
           tenant_id: this.#tenantId,
           project_id: workspace.project_id,
           workspace_id: workspace.id,
-          desired_model_profile_id: this.#defaultModelProfileId,
+          desired_model_profile_id: policy.defaultModelProfileId,
           state: "cold",
           pi_session_snapshot_key: null,
           workspace_snapshot_key: null,
@@ -295,7 +343,7 @@ export class ControlPlaneStore {
         projectId: session.project_id,
         workspaceId: session.workspace_id,
         state: "cold",
-        modelProfileId: this.#defaultModelProfileId,
+        modelProfileId: policy.defaultModelProfileId,
         createdAt: isoTimestamp(session.created_at),
       };
     });
@@ -379,6 +427,7 @@ export class ControlPlaneStore {
     const commandId = this.#idGenerator();
     const outboxId = this.#idGenerator();
     return this.#database.transaction().execute(async (transaction) => {
+      const policy = await this.#lockTenantPolicy(transaction);
       const session = await transaction
         .selectFrom("sessions")
         .select(["id", "desired_model_profile_id", "state", "next_mailbox_position"])
@@ -399,6 +448,27 @@ export class ControlPlaneStore {
         throw new ControlPlaneStoreError(
           "conflict",
           `Session cannot accept a queued follow-up while it is ${session.state}`,
+        );
+      }
+      const unsettled = await transaction
+        .selectFrom("turns")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", this.#tenantId)
+        .where("state", "in", [
+          "queued",
+          "dispatching",
+          "running",
+          "waiting_approval",
+          "cancelling",
+        ])
+        .executeTakeFirstOrThrow();
+      if (
+        nonNegativeSafeInteger(unsettled.count, "Tenant unsettled-turn count") >=
+        policy.maximumUnsettledTurns
+      ) {
+        throw new ControlPlaneStoreError(
+          "tenant_quota_exceeded",
+          "Tenant unsettled-turn quota has been reached",
         );
       }
       const mailboxPosition = positiveSafeInteger(
@@ -749,5 +819,41 @@ export class ControlPlaneStore {
       }
       throw error;
     }
+  }
+
+  async #lockTenantPolicy(transaction: Transaction<Database>): Promise<TenantRuntimePolicy> {
+    const policy = await transaction
+      .selectFrom("tenant_runtime_policies")
+      .select([
+        "default_model_profile_id as defaultModelProfileId",
+        "enabled",
+        "maximum_projects as maximumProjects",
+        "maximum_sessions as maximumSessions",
+        "maximum_unsettled_turns as maximumUnsettledTurns",
+      ])
+      .where("tenant_id", "=", this.#tenantId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (policy === undefined || !policy.enabled) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Tenant runtime policy is unavailable",
+      );
+    }
+    if (policy.defaultModelProfileId !== this.#defaultModelProfileId) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Tenant runtime policy changed during request authentication",
+      );
+    }
+    return {
+      defaultModelProfileId: policy.defaultModelProfileId,
+      maximumProjects: positiveSafeInteger(String(policy.maximumProjects), "Project quota"),
+      maximumSessions: positiveSafeInteger(String(policy.maximumSessions), "Session quota"),
+      maximumUnsettledTurns: positiveSafeInteger(
+        String(policy.maximumUnsettledTurns),
+        "Unsettled-turn quota",
+      ),
+    };
   }
 }

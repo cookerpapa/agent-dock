@@ -101,6 +101,14 @@ async function seedTurn(): Promise<SeededTurn> {
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("tenant_runtime_policies")
+    .values({
+      tenant_id: tenantId,
+      default_model_profile_id: profileId,
+      maximum_concurrent_turns: 4,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("sandboxes")
     .values({
       id: identity.sandboxId,
@@ -168,7 +176,7 @@ async function startNetwork(
   runner: SupervisorTurnRunner,
 ): Promise<NetworkHarness> {
   const eventMessages: EventPublishMessage[] = [];
-  const eventStore = new DurableEventStore({ database, tenantId: seeded.tenantId });
+  const eventStore = new DurableEventStore({ database });
   const router = new SupervisorCommandRouter({
     eventIngestor: eventStore,
     onEvent(message) {
@@ -321,7 +329,7 @@ afterAll(async () => {
 describe.sequential("remote two-phase supervisor execution", () => {
   it("moves execute and cancellation claim ownership to the current socket replica", async () => {
     const seeded = await seedTurn();
-    const eventStore = new DurableEventStore({ database, tenantId: seeded.tenantId });
+    const eventStore = new DurableEventStore({ database });
     const eventMessages: EventPublishMessage[] = [];
     const routerOptions = {
       eventIngestor: eventStore,
@@ -590,7 +598,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
     const seeded = await seedTurn();
     const eventMessages: EventPublishMessage[] = [];
     const router = new SupervisorCommandRouter({
-      eventIngestor: new DurableEventStore({ database, tenantId: seeded.tenantId }),
+      eventIngestor: new DurableEventStore({ database }),
       onEvent(message) {
         eventMessages.push(message);
       },

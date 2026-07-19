@@ -114,6 +114,7 @@ only after a measured requirement appears.
 - [ADR-0022: remote control-plane worker lifecycle](docs/adr/0022-remote-control-plane-worker-lifecycle.md)
 - [ADR-0023: production Supervisor host and self-hosted topology](docs/adr/0023-production-supervisor-host-and-self-hosted-topology.md)
 - [ADR-0024: permanent event rejection and spool quarantine](docs/adr/0024-permanent-event-rejection-and-spool-quarantine.md)
+- [ADR-0025: private multi-tenant identity and fair scheduling](docs/adr/0025-private-multi-tenant-identity-and-fair-scheduling.md)
 
 ## Current executable spikes
 
@@ -228,9 +229,11 @@ networkless Pi workers. Only the Web ingress publishes a loopback port. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
 
-This is production-complete for the deterministic single-user Java fixture. It
+This is production-complete for the deterministic private multi-tenant Java
+fixture. Request identity, roles, resource/event/checkpoint isolation, quotas,
+and fair global dispatch share one bounded Supervisor pool. It
 is not yet a generic repository service, real-provider deployment, arbitrary
-extension host, multi-tenant SaaS, Kubernetes release, or direct Internet
+extension host, public multi-tenant SaaS, Kubernetes release, or direct Internet
 ingress.
 
 ## Current status
@@ -434,10 +437,12 @@ lease channel releases uncommitted preparations and revokes running assignments.
 This preserves persist-before-side-effect ordering but does not claim
 distributed exactly-once execution.
 
-ADR-0006 fixes the first product slice as single-user and self-hosted with one
-operator-configured default model profile. The durable model schema remains
-selection-ready, while a frontend model picker and multi-tenant credential
-flows are deliberately deferred.
+ADR-0006 fixed the first product slice as single-user and self-hosted. ADR-0025
+now adds private multi-tenant credentials (`owner`, `member`, `viewer`),
+request-scoped stores and SSE, transactional admission quotas, tenant-prefixed
+checkpoints, and least-recently-served global dispatch. The running control
+plane has no configured tenant and does not mount a tenant API token. Public
+signup/OIDC/billing and a frontend model picker remain deliberately deferred.
 
 Phase 1 is complete: from a clean checkout, `npm run demo` lets a user submit the
 Java repair, watch all ten durable events and three tool calls, inspect the

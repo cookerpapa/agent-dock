@@ -2,28 +2,24 @@ import { createDatabase, runMigrations } from "@agent-dock/database";
 import { pathToFileURL } from "node:url";
 import { bootstrapProductionDatabase } from "./production-bootstrap.ts";
 import {
+  loadProductionApiToken,
   loadProductionBootstrapConfig,
-  loadProductionControlPlaneConfig,
+  loadProductionDatabaseUrl,
 } from "./production-config.ts";
 
 export async function runProductionBootstrap(): Promise<void> {
-  const [runtimeConfig, bootstrapConfig] = await Promise.all([
-    loadProductionControlPlaneConfig(),
-    Promise.resolve(loadProductionBootstrapConfig()),
+  const bootstrapConfig = loadProductionBootstrapConfig();
+  const [databaseUrl, apiToken] = await Promise.all([
+    loadProductionDatabaseUrl(),
+    loadProductionApiToken(),
   ]);
-  if (
-    runtimeConfig.tenantId !== bootstrapConfig.tenantId ||
-    runtimeConfig.defaultModelProfileId !== bootstrapConfig.modelProfileId
-  ) {
-    throw new Error("Production runtime and bootstrap identities do not match");
-  }
   const database = createDatabase({
-    connectionString: runtimeConfig.databaseUrl,
+    connectionString: databaseUrl,
     maxConnections: 2,
   });
   try {
     const migration = await runMigrations(database, "up");
-    const result = await bootstrapProductionDatabase(database, bootstrapConfig);
+    const result = await bootstrapProductionDatabase(database, bootstrapConfig, apiToken);
     process.stdout.write(
       `${JSON.stringify({
         migrations: migration.results.map((item) => ({

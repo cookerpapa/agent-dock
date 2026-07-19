@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Amended by: ADR-0025 replaces the single-user public-token/runtime-tenant
+  assumptions; the Supervisor-host and deployment trust boundaries remain.
 
 ## Context
 

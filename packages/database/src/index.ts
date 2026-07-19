@@ -13,6 +13,7 @@ export {
   type SandboxRetirementState,
   type SupervisorConnectionCloseReason,
   type SupervisorConnectionState,
+  type TenantApiCredentialRole,
   type TurnInputKind,
 } from "./database-types.ts";
 
@@ -20,11 +21,13 @@ export {
   downDurableEventDelivery,
   downExplicitSessionMailbox,
   downInitialControlPlane,
+  downPrivateMultiTenantIdentity,
   downSupervisorConnectionHealth,
   migrationProvider,
   upDurableEventDelivery,
   upExplicitSessionMailbox,
   upInitialControlPlane,
+  upPrivateMultiTenantIdentity,
   upSupervisorConnectionHealth,
 } from "./migrations/index.ts";
 

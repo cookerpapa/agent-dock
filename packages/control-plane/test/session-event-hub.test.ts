@@ -16,15 +16,15 @@ function fixture() {
 describe("SessionEventHub", () => {
   it("delivers committed high-water hints to all current subscribers", async () => {
     const hub = new SessionEventHub();
-    const first = hub.subscribe("session-1");
-    const second = hub.subscribe("session-1");
+    const first = hub.subscribe("tenant-1", "session-1");
+    const second = hub.subscribe("tenant-1", "session-1");
     const event = fixture().next({
       type: "assistant.text.delta",
       payload: { text: "hello" },
     });
 
     const pending = first.next();
-    hub.publish(event);
+    hub.publish("tenant-1", event);
     await expect(pending).resolves.toEqual({ throughSequence: 1 });
     await expect(second.next()).resolves.toEqual({ throughSequence: 1 });
     first.close();
@@ -33,19 +33,29 @@ describe("SessionEventHub", () => {
 
   it("coalesces high-water hints, isolates sessions, and supports reconnect resync", async () => {
     const hub = new SessionEventHub();
-    const first = hub.subscribe("session-1");
-    const other = hub.subscribe("session-2");
+    const first = hub.subscribe("tenant-1", "session-1");
+    const other = hub.subscribe("tenant-1", "session-2");
+    const foreign = hub.subscribe("tenant-2", "session-1");
     const factory = fixture();
-    hub.publish(factory.next({ type: "assistant.text.delta", payload: { text: "one" } }));
-    hub.publish(factory.next({ type: "assistant.text.delta", payload: { text: "two" } }));
+    hub.publish(
+      "tenant-1",
+      factory.next({ type: "assistant.text.delta", payload: { text: "one" } }),
+    );
+    hub.publish(
+      "tenant-1",
+      factory.next({ type: "assistant.text.delta", payload: { text: "two" } }),
+    );
 
     await expect(first.next()).resolves.toEqual({ throughSequence: 2 });
     expect(other.closed).toBe(false);
+    expect(foreign.closed).toBe(false);
     hub.resyncAll();
     await expect(first.next()).resolves.toEqual({ throughSequence: null });
     await expect(other.next()).resolves.toEqual({ throughSequence: null });
+    await expect(foreign.next()).resolves.toEqual({ throughSequence: null });
     hub.onApplicationShutdown();
     expect(first.closed).toBe(true);
     expect(other.closed).toBe(true);
+    expect(foreign.closed).toBe(true);
   });
 });

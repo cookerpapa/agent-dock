@@ -9,9 +9,6 @@ export type ProductionControlPlaneEnvironment = Readonly<Record<string, string |
 
 export type ProductionControlPlaneConfig = {
   databaseUrl: string;
-  tenantId: string;
-  defaultModelProfileId: string;
-  apiToken: string;
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
   supervisorId: string;
@@ -27,9 +24,14 @@ export type ProductionBootstrapConfig = {
   tenantId: string;
   tenantSlug: string;
   userId: string;
+  apiCredentialId: string;
   credentialBindingId: string;
   modelProfileId: string;
   modelProfileName: string;
+  maximumProjects: number;
+  maximumSessions: number;
+  maximumUnsettledTurns: number;
+  maximumConcurrentTurns: number;
 };
 
 function required(environment: ProductionControlPlaneEnvironment, name: string): string {
@@ -138,16 +140,7 @@ export async function loadProductionControlPlaneConfig(
     "AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP",
   );
   return {
-    databaseUrl: await secret(environment, "DATABASE_URL", allowInlineSecrets),
-    tenantId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_TENANT_ID"),
-      "AGENT_DOCK_TENANT_ID",
-    ),
-    defaultModelProfileId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID"),
-      "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID",
-    ),
-    apiToken: await secret(environment, "AGENT_DOCK_API_TOKEN", allowInlineSecrets),
+    databaseUrl: await loadProductionDatabaseUrl(environment),
     supervisorEnrollmentToken: await secret(
       environment,
       "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",
@@ -186,9 +179,33 @@ export async function loadProductionControlPlaneConfig(
   };
 }
 
+export async function loadProductionDatabaseUrl(
+  environment: ProductionControlPlaneEnvironment = process.env,
+): Promise<string> {
+  return secret(
+    environment,
+    "DATABASE_URL",
+    booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS"),
+  );
+}
+
+export async function loadProductionApiToken(
+  environment: ProductionControlPlaneEnvironment = process.env,
+): Promise<string> {
+  return secret(
+    environment,
+    "AGENT_DOCK_API_TOKEN",
+    booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS"),
+  );
+}
+
 export function loadProductionBootstrapConfig(
   environment: ProductionControlPlaneEnvironment = process.env,
 ): ProductionBootstrapConfig {
+  const userId = parseUuidPathParameter(
+    required(environment, "AGENT_DOCK_USER_ID"),
+    "AGENT_DOCK_USER_ID",
+  );
   return {
     tenantId: parseUuidPathParameter(
       required(environment, "AGENT_DOCK_TENANT_ID"),
@@ -198,9 +215,10 @@ export function loadProductionBootstrapConfig(
       environment.AGENT_DOCK_TENANT_SLUG ?? "agent-dock",
       "AGENT_DOCK_TENANT_SLUG",
     ),
-    userId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_USER_ID"),
-      "AGENT_DOCK_USER_ID",
+    userId,
+    apiCredentialId: parseUuidPathParameter(
+      environment.AGENT_DOCK_API_CREDENTIAL_ID ?? userId,
+      "AGENT_DOCK_API_CREDENTIAL_ID",
     ),
     credentialBindingId: parseUuidPathParameter(
       required(environment, "AGENT_DOCK_CREDENTIAL_BINDING_ID"),
@@ -213,6 +231,34 @@ export function loadProductionBootstrapConfig(
     modelProfileName: bounded(
       environment.AGENT_DOCK_MODEL_PROFILE_NAME ?? "deterministic-java-repair",
       "AGENT_DOCK_MODEL_PROFILE_NAME",
+    ),
+    maximumProjects: integerValue(
+      environment,
+      "AGENT_DOCK_TENANT_MAXIMUM_PROJECTS",
+      100,
+      1,
+      1_000_000,
+    ),
+    maximumSessions: integerValue(
+      environment,
+      "AGENT_DOCK_TENANT_MAXIMUM_SESSIONS",
+      1_000,
+      1,
+      1_000_000,
+    ),
+    maximumUnsettledTurns: integerValue(
+      environment,
+      "AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS",
+      100,
+      1,
+      1_000_000,
+    ),
+    maximumConcurrentTurns: integerValue(
+      environment,
+      "AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS",
+      2,
+      1,
+      256,
     ),
   };
 }

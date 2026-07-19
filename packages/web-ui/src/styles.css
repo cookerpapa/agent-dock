@@ -283,6 +283,22 @@ a {
   white-space: nowrap;
 }
 
+.sidebar-footer .tenant-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 5px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tenant-identity small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-resizer {
   z-index: 21;
   width: 4px;

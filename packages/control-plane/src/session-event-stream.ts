@@ -77,6 +77,7 @@ async function nextWithHeartbeat(
 export class OpenSessionEventStream {
   readonly #store: DurableEventStore;
   readonly #subscription: SessionEventSubscription;
+  readonly #tenantId: string;
   readonly #sessionId: string;
   readonly #highWaterMark: number;
   readonly #initialEvents: readonly AgentDockEvent[];
@@ -87,6 +88,7 @@ export class OpenSessionEventStream {
   constructor(options: {
     store: DurableEventStore;
     subscription: SessionEventSubscription;
+    tenantId: string;
     sessionId: string;
     highWaterMark: number;
     initialEvents: readonly AgentDockEvent[];
@@ -96,6 +98,7 @@ export class OpenSessionEventStream {
   }) {
     this.#store = options.store;
     this.#subscription = options.subscription;
+    this.#tenantId = options.tenantId;
     this.#sessionId = options.sessionId;
     this.#highWaterMark = options.highWaterMark;
     this.#initialEvents = options.initialEvents;
@@ -153,6 +156,7 @@ export class OpenSessionEventStream {
     minimumThroughSequence: number | null,
   ): Promise<ReplayWriteResult> {
     const replay = await this.#store.openReplayWindow(
+      this.#tenantId,
       this.#sessionId,
       lastSentSequence,
       this.#replayPageSize,
@@ -197,6 +201,7 @@ export class OpenSessionEventStream {
       }
       if (lastSentSequence >= replay.highWaterMark) break;
       page = await this.#store.readReplayPage(
+        this.#tenantId,
         this.#sessionId,
         lastSentSequence,
         replay.highWaterMark,
@@ -230,10 +235,15 @@ export class SessionEventStream {
     );
   }
 
-  async open(sessionId: string, afterSequence: number): Promise<OpenSessionEventStream> {
-    const subscription = this.#hub.subscribe(sessionId);
+  async open(
+    tenantId: string,
+    sessionId: string,
+    afterSequence: number,
+  ): Promise<OpenSessionEventStream> {
+    const subscription = this.#hub.subscribe(tenantId, sessionId);
     try {
       const replay = await this.#store.openReplayWindow(
+        tenantId,
         sessionId,
         afterSequence,
         this.#replayPageSize,
@@ -241,6 +251,7 @@ export class SessionEventStream {
       return new OpenSessionEventStream({
         store: this.#store,
         subscription,
+        tenantId,
         sessionId,
         highWaterMark: replay.highWaterMark,
         initialEvents: replay.events,

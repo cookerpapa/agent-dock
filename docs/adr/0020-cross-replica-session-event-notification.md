@@ -2,6 +2,9 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Amended by: ADR-0025 makes the listener deployment-wide and keys the local
+  hub/subscriber by `(tenantId, sessionId)` instead of filtering one configured
+  tenant.
 
 ## Context
 

@@ -4,10 +4,13 @@ This package contains AgentDock's NestJS/Fastify durable-intake boundary, an
 explicit execution dispatcher, an independent durable cancellation dispatcher,
 fenced event ingestion, the resumable browser event surface, and an explicit
 remote Supervisor worker composition. It is not yet a complete production Pi
-deployment because the trusted provisioner/owner adapters remain external.
+deployment for arbitrary repositories/providers, but the deterministic private
+multi-tenant slice is composed in the supported single-host topology.
 
 ## Implemented endpoints
 
+- `GET /v1/identity` returns the verified tenant slug, tenant-local user, and
+  `owner`/`member`/`viewer` role without credential metadata.
 - `POST /v1/projects` creates a project and its initial workspace atomically.
 - `POST /v1/projects/:projectId/sessions` creates a cold session using the
   operator-configured default model profile.
@@ -35,7 +38,9 @@ it consumes no process, container, or lease until it reaches the head.
 `OutboxDispatcher.dispatchNext()` is an explicit worker primitive; the HTTP
 handler never invokes it. A claim transaction selects one due outbox row with
 `FOR UPDATE SKIP LOCKED`, locks the owning session, preserves per-session mailbox
-order by the lowest nonterminal execute-command `mailbox_position`, and advances
+order by the lowest nonterminal execute-command `mailbox_position`, applies the
+tenant concurrent-turn limit, orders eligible tenants by a durable
+least-recently-served cursor, and advances
 `pending/queued` to `dispatched/dispatching`. Timestamp and UUID order are not
 correctness inputs. The injected
 backend must await `lifecycle.started()` before doing execution work. That ACK
@@ -234,16 +239,14 @@ one row. The ephemeral browser demo uses the same file-spool implementation;
 its PGlite database and spool directory are deliberately temporary.
 
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
-requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
-`AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
-remain explicit deployment steps. The continuously running remote worker,
+requires the database plus Supervisor enrollment/management configuration; it
+has no process-wide tenant/default profile and mounts no tenant API token.
+Database migration, initial bootstrap, and offline tenant/credential
+administration remain explicit deployment steps. The continuously running remote worker,
 authenticated Supervisor transport, and in-flight lease/assignment
-reconciliation are available as explicit library components and composition.
-The concrete provisioner/mTLS authorizer, exact owner-process adapter,
-Supervisor host entry point, acknowledged-cancellation crash recovery, generic
-repository restore, and a real model gateway are not claimed by this slice. The
-React page is connected only through the explicit ephemeral demo described
-above.
+reconciliation are composed in production. Generic repository restore, public
+identity federation, mTLS for multi-host placement, policy-approved arbitrary
+extensions, and a real model gateway are not claimed by this slice.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

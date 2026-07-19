@@ -1,4 +1,33 @@
 export {
+  PostgresTenantApiAuthenticator,
+  bindTenantRequestIdentity,
+  generateTenantApiCredential,
+  issueTenantApiCredential,
+  revokeTenantApiCredential,
+  tenantApiTokenDigest,
+  tenantRequestIdentity,
+  type GeneratedTenantApiCredential,
+  type IssueTenantApiCredentialOptions,
+  type TenantApiAuthenticator,
+  type TenantRequestIdentity,
+} from "./tenant-identity.ts";
+
+export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+export { TenantRequestContext, TenantRequestContextError } from "./tenant-request-context.ts";
+
+export {
+  TenantAdministrationError,
+  createPrivateTenant,
+  issuePrivateTenantCredential,
+  listPrivateTenantCredentials,
+  revokePrivateTenantCredential,
+  type CreatePrivateTenantOptions,
+  type CreatedPrivateTenant,
+  type TenantCredentialMetadata,
+  type TenantQuotaConfiguration,
+} from "./tenant-administration.ts";
+
+export {
   createControlPlaneApplication,
   type ControlPlaneApplicationOptions,
 } from "./application.ts";
@@ -157,8 +186,10 @@ export {
   type ProductionHttpGatewayOptions,
 } from "./production-http-gateway.ts";
 export {
+  loadProductionApiToken,
   loadProductionBootstrapConfig,
   loadProductionControlPlaneConfig,
+  loadProductionDatabaseUrl,
   type ProductionBootstrapConfig,
   type ProductionControlPlaneConfig,
   type ProductionControlPlaneEnvironment,

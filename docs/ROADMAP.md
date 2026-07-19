@@ -116,7 +116,7 @@ listener, coalesces wakes without copying event bodies, and makes SSE read the
 durable suffix; heartbeat polling and `Last-Event-ID` retain correctness across
 lost notifications and browser reconnects.
 
-The bounded single-user production slice is deployable with pinned images,
+The bounded private multi-tenant production slice is deployable with pinned images,
 private secret files/networks, persistent PostgreSQL/MinIO/boot/spool volumes,
 explicit migration/bootstrap jobs, authenticated Web ingress, and a full
 disposable restart/scale/recovery acceptance command. A permanently stale event
@@ -154,6 +154,18 @@ Deliverables:
 
 Exit criteria: one noisy tenant cannot starve another, stale workers cannot
 write after lease loss, and cold sessions consume no live runner resources.
+
+Current status: the private single-host subset is complete. SHA-256-only API
+credentials resolve exact tenant-local users and `owner`/`member`/`viewer`
+roles; REST, cancellation, SSE wake/replay, events, and checkpoints are scoped
+by authenticated tenant. Project/session/unsettled-turn admission and
+concurrent-turn limits are transactional. One tenant-neutral worker pool uses a
+least-recently-served cursor while preserving per-session mailbox order, and
+cancellation bypasses normal fairness as safety work. Dual-tenant integration
+and production tests cover known foreign UUID probes, quota isolation, role
+denial, restart/scale, and tenant-prefixed S3 restore. Warm-pool eviction,
+token/cost accounting, overload metrics, public identity federation, and a
+mutually hostile/public SaaS threat model remain open.
 
 ## Phase 5: cloud-aware subagents (3 weeks)
 
