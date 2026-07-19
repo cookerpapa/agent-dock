@@ -135,14 +135,21 @@ SSE terminal delivery. Its default end-to-end path starts pinned Pi against the
 loopback fake model without provider tokens. The opt-in Docker case additionally
 persists and streams the ten-event Java repair and final patch.
 
+The local supervisor also has a crash-safe file event spool. A PostgreSQL
+integration test commits an event, drops the returning ACK path, releases the
+lease during terminal failure handling, constructs a fresh spool store, and
+redelivers the exact event. PostgreSQL returns a duplicate-safe ACK and retains
+one row. The ephemeral browser demo uses the same file-spool implementation;
+its PGlite database and spool directory are deliberately temporary.
+
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
 remain explicit deployment steps. A continuously running production worker,
-production supervisor transport, durable runner spool, acknowledged-cancellation
-crash recovery, generic repository restore, and a real model gateway are not
-claimed by this slice. The React page is connected only through the explicit
-ephemeral demo described above.
+production supervisor transport, in-flight runner/lease reconciliation,
+acknowledged-cancellation crash recovery, generic repository restore, and a real
+model gateway are not claimed by this slice. The React page is connected only
+through the explicit ephemeral demo described above.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

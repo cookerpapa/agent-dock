@@ -1,7 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations } from "@agent-dock/database";
-import { DockerSandboxTurnRunner, LocalSandboxSupervisor } from "@agent-dock/sandbox-supervisor";
+import {
+  DockerSandboxTurnRunner,
+  FileEventSpoolStore,
+  LocalSandboxSupervisor,
+} from "@agent-dock/sandbox-supervisor";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -38,6 +42,7 @@ export type DemoRuntimeOptions = {
   image?: string;
   dockerCommand?: string;
   checkpointDirectory?: string;
+  eventSpoolDirectory?: string;
 };
 
 function demoPort(): number {
@@ -148,6 +153,12 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
     ? resolve(configuredCheckpointDirectory)
     : await mkdtemp(resolve(tmpdir(), "agent-dock-demo-checkpoints-"));
   const removeCheckpointDirectory = configuredCheckpointDirectory === undefined;
+  const configuredEventSpoolDirectory =
+    options.eventSpoolDirectory ?? process.env.AGENT_DOCK_DEMO_EVENT_SPOOL_DIR;
+  const eventSpoolDirectory = configuredEventSpoolDirectory
+    ? resolve(configuredEventSpoolDirectory)
+    : await mkdtemp(resolve(tmpdir(), "agent-dock-demo-event-spool-"));
+  const removeEventSpoolDirectory = configuredEventSpoolDirectory === undefined;
   const pglite = await PGlite.create();
   const socketServer = new PGLiteSocketServer({
     db: pglite,
@@ -184,6 +195,7 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
       database,
       objectStore: new FileCheckpointObjectStore({ rootDirectory: checkpointDirectory }),
     });
+    const eventSpoolStore = new FileEventSpoolStore({ rootDirectory: eventSpoolDirectory });
     const runner = new DockerSandboxTurnRunner({
       image:
         options.image ?? process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
@@ -192,7 +204,15 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
       checkpointStore,
       executionTimeoutMs: 60_000,
     });
-    const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+    const supervisor = new LocalSandboxSupervisor({
+      runner,
+      eventSpoolFactory: (spoolOptions) => eventSpoolStore.open(spoolOptions),
+      eventSpoolRecovery: eventSpoolStore,
+      maxConcurrentSessions: 1,
+    });
+    await supervisor.recoverPendingEvents((message) =>
+      application!.get(DurableEventStore).ingest(message),
+    );
     const backend = new LocalSupervisorExecutionBackend({
       supervisor,
       leaseCoordinator,
@@ -235,6 +255,9 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
           if (removeCheckpointDirectory) {
             await rm(checkpointDirectory, { recursive: true, force: true });
           }
+          if (removeEventSpoolDirectory) {
+            await rm(eventSpoolDirectory, { recursive: true, force: true });
+          }
         })();
         return closing;
       },
@@ -248,6 +271,9 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
     await pglite.close().catch(() => undefined);
     if (removeCheckpointDirectory) {
       await rm(checkpointDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+    if (removeEventSpoolDirectory) {
+      await rm(eventSpoolDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
     throw error;
   }

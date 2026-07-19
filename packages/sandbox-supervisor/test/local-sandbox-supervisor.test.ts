@@ -4,8 +4,12 @@ import type {
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  FileEventSpoolStore,
   LocalSandboxSupervisor,
   PiRpcTurnCancelledError,
   type SupervisorTurnRunner,
@@ -253,6 +257,81 @@ describe("LocalSandboxSupervisor", () => {
     }));
 
     await expect(prepared.run()).rejects.toThrow("acknowledgement was invalid");
+  });
+
+  it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-local-supervisor-spool-"));
+    try {
+      const durableStore = new FileEventSpoolStore({ rootDirectory: root });
+      const event: EventPublishMessage = {
+        protocolVersion: 1,
+        messageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sentAt: "2026-07-18T08:00:00.000Z",
+        type: "event.publish",
+        payload: {
+          leaseId: IDS.lease,
+          fencingToken: 1,
+          commandId: IDS.command,
+          event: {
+            schemaVersion: 1,
+            eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            agentId: "root",
+            seq: 1,
+            occurredAt: "2026-07-18T08:00:00.000Z",
+            type: "turn.started",
+            payload: { inputKind: "prompt" },
+          },
+        },
+      };
+      const publishingRunner: SupervisorTurnRunner = {
+        async run(_value, publishEvent) {
+          await publishEvent(event);
+          return { stopReason: "stop" };
+        },
+      };
+      let committed: EventPublishMessage | undefined;
+      const supervisor = new LocalSandboxSupervisor({
+        runner: publishingRunner,
+        eventSpoolFactory: (options) => durableStore.open(options),
+      });
+      const prepared = supervisor.prepare(command(), (message) => {
+        committed = message;
+        throw new Error("simulated connection loss after durable commit");
+      });
+
+      await expect(prepared.run()).rejects.toThrow("simulated connection loss");
+      expect(committed).toEqual(event);
+
+      const replayed: EventPublishMessage[] = [];
+      const restartedStore = new FileEventSpoolStore({ rootDirectory: root });
+      const restartedSupervisor = new LocalSandboxSupervisor({
+        runner: new RecordingRunner(),
+        eventSpoolFactory: (options) => restartedStore.open(options),
+        eventSpoolRecovery: restartedStore,
+      });
+      await expect(
+        restartedSupervisor.recoverPendingEvents((message) => {
+          replayed.push(message);
+          return {
+            protocolVersion: 1,
+            messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            sentAt: "2026-07-18T08:00:01.000Z",
+            type: "event.ack",
+            payload: {
+              sessionId: message.payload.event.sessionId,
+              leaseId: message.payload.leaseId,
+              fencingToken: message.payload.fencingToken,
+              acknowledgedThroughSeq: message.payload.event.seq,
+            },
+          };
+        }),
+      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 });
+      expect(replayed).toEqual([event]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("prepares cancellation without side effects, then aborts the exact running assignment", async () => {

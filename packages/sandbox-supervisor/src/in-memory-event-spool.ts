@@ -14,6 +14,32 @@ export type InMemoryEventSpoolOptions = {
   maxPendingEvents?: number;
 };
 
+export type SupervisorEventSpool = {
+  readonly sessionId: string;
+  readonly acknowledgedThroughSeq: number;
+  readonly highestProducedSeq: number;
+  readonly pendingCount: number;
+  append(value: unknown): EventSpoolAppendResult | Promise<EventSpoolAppendResult>;
+  acknowledge(value: unknown): EventSpoolAckResult | Promise<EventSpoolAckResult>;
+  replayAfter(sequence: number): readonly EventPublishMessage[];
+};
+
+export type SupervisorEventSpoolFactory = (
+  options: InMemoryEventSpoolOptions,
+) => SupervisorEventSpool | Promise<SupervisorEventSpool>;
+
+export type SupervisorEventSpoolRecoveryResult = {
+  scannedSpools: number;
+  replayedSpools: number;
+  replayedEvents: number;
+};
+
+export interface SupervisorEventSpoolRecovery {
+  redeliverPending(
+    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
+  ): Promise<SupervisorEventSpoolRecoveryResult>;
+}
+
 export type EventSpoolAppendResult = "appended" | "duplicate";
 
 export type EventSpoolAckResult = {
@@ -54,7 +80,7 @@ function requirePositiveSafeInteger(value: number, field: string): void {
  * crash-safe spool. It proves ordering, fencing, duplicate delivery, bounded
  * buffering, and replay behavior before the storage implementation is chosen.
  */
-export class InMemoryEventSpool {
+export class InMemoryEventSpool implements SupervisorEventSpool {
   readonly #sessionId: string;
   readonly #leaseId: string;
   readonly #fencingToken: number;

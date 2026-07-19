@@ -99,6 +99,7 @@ only after a measured requirement appears.
 - [ADR-0009: durable turn cancellation and process-exit confirmation](docs/adr/0009-durable-turn-cancellation.md)
 - [ADR-0010: ephemeral Docker sandbox and bounded final patch](docs/adr/0010-ephemeral-docker-sandbox-and-bounded-patch.md)
 - [ADR-0011: settled checkpoint commit and cold restore](docs/adr/0011-settled-checkpoint-commit-and-cold-restore.md)
+- [ADR-0012: crash-safe supervisor event spool and restart replay](docs/adr/0012-crash-safe-supervisor-event-spool.md)
 
 ## Current executable spikes
 
@@ -147,7 +148,7 @@ npm run ci
 ```
 
 It checks Prettier formatting, the production frontend build, TypeScript types,
-141 unit/contract tests, the two zero-token Pi spikes, and high-severity
+156 unit/contract tests, the two zero-token Pi spikes, and high-severity
 dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -268,10 +269,19 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, crash-safe supervisor spool, restart reconciliation, and cross-replica
-live fan-out remain separate work. Queued-turn withdrawal,
+gateway, full runner/lease restart reconciliation, and cross-replica live
+fan-out remain separate work. Queued-turn withdrawal,
 acknowledged-cancellation crash recovery, lease renewal/reconciliation, and
 Windows Job Object containment are also deferred.
+
+Supervisor event delivery now has a replaceable crash-safe file spool. The demo
+uses it to atomically persist each closed `event.publish` before transport and
+advance a synced cumulative cursor before deleting ACKed files. A fresh store
+instance can scan and redeliver the pending suffix; a PostgreSQL integration
+test proves that an event committed before its ACK connection fails is
+re-ACKed after lease release without creating a duplicate row. This protects
+already-produced events, but does not pretend to resume an in-flight tool or
+settle an acknowledged command with an unknown execution outcome.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
@@ -284,5 +294,5 @@ bounded Git patch, or cancel a second run and observe confirmed sandbox teardown
 The first Phase 2 slice now adds cold Pi/workspace rehydration: a follow-up runs
 in another container, sees the previous assistant message, verifies the
 previous Java edit, continues event sequence numbers, and replaces the settled
-checkpoint. Phase 2 next addresses crash-safe command/event delivery and
-restart reconciliation rather than keeping a process per conversation.
+checkpoint. Phase 2 next addresses runner/lease reconciliation and ordered
+mailbox pressure rather than keeping a process per conversation.

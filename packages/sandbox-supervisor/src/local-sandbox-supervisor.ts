@@ -8,7 +8,14 @@ import {
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { isDeepStrictEqual } from "node:util";
-import { EventSpoolError, InMemoryEventSpool } from "./in-memory-event-spool.ts";
+import {
+  EventSpoolError,
+  InMemoryEventSpool,
+  type SupervisorEventSpool,
+  type SupervisorEventSpoolFactory,
+  type SupervisorEventSpoolRecovery,
+  type SupervisorEventSpoolRecoveryResult,
+} from "./in-memory-event-spool.ts";
 import {
   PiRpcTurnCancelledError,
   type PiRpcCancellationSignal,
@@ -42,6 +49,8 @@ export type PreparedTurnCancellation = {
 
 export type LocalSandboxSupervisorOptions = {
   runner: SupervisorTurnRunner;
+  eventSpoolFactory?: SupervisorEventSpoolFactory;
+  eventSpoolRecovery?: SupervisorEventSpoolRecovery;
   maxConcurrentSessions?: number;
   clock?: () => Date;
   idGenerator?: () => string;
@@ -53,7 +62,7 @@ type AssignmentState =
 type Assignment = {
   command: ExecuteTurnCommandMessage;
   publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage;
-  eventSpool: InMemoryEventSpool;
+  eventSpool?: SupervisorEventSpool;
   abortController: AbortController;
   state: AssignmentState;
   runPromise?: Promise<PiRpcTurnResult>;
@@ -106,6 +115,8 @@ function sameCancellationIdentity(
 
 export class LocalSandboxSupervisor {
   readonly #runner: SupervisorTurnRunner;
+  readonly #eventSpoolFactory: SupervisorEventSpoolFactory;
+  readonly #eventSpoolRecovery: SupervisorEventSpoolRecovery | undefined;
   readonly #maxConcurrentSessions: number;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
@@ -113,9 +124,13 @@ export class LocalSandboxSupervisor {
   readonly #byCommand = new Map<string, Assignment>();
   readonly #cancellationsByCommand = new Map<string, Cancellation>();
   readonly #highestFenceBySession = new Map<string, number>();
+  #recoveringPendingEvents = false;
 
   constructor(options: LocalSandboxSupervisorOptions) {
     this.#runner = options.runner;
+    this.#eventSpoolFactory =
+      options.eventSpoolFactory ?? ((spoolOptions) => new InMemoryEventSpool(spoolOptions));
+    this.#eventSpoolRecovery = options.eventSpoolRecovery;
     this.#maxConcurrentSessions = positiveInteger(
       options.maxConcurrentSessions ?? 1,
       "maxConcurrentSessions",
@@ -126,6 +141,29 @@ export class LocalSandboxSupervisor {
 
   get activeSessionCount(): number {
     return this.#currentBySession.size;
+  }
+
+  async recoverPendingEvents(
+    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
+  ): Promise<SupervisorEventSpoolRecoveryResult> {
+    if (this.#currentBySession.size !== 0 || this.#recoveringPendingEvents) {
+      throw new LocalSandboxSupervisorError(
+        "invalid_state",
+        "Pending event recovery requires an idle supervisor",
+      );
+    }
+    this.#recoveringPendingEvents = true;
+    try {
+      return (
+        (await this.#eventSpoolRecovery?.redeliverPending(publishEvent)) ?? {
+          scannedSpools: 0,
+          replayedSpools: 0,
+          replayedEvents: 0,
+        }
+      );
+    } finally {
+      this.#recoveringPendingEvents = false;
+    }
   }
 
   prepare(
@@ -140,6 +178,14 @@ export class LocalSandboxSupervisor {
       );
     }
     const command = parsed;
+    if (this.#recoveringPendingEvents) {
+      return this.#rejected(
+        command,
+        "invalid_state",
+        "Supervisor is recovering pending event delivery",
+        true,
+      );
+    }
     const duplicate = this.#byCommand.get(command.payload.commandId);
     if (duplicate !== undefined) {
       if (!sameIdentity(duplicate.command, command)) {
@@ -168,12 +214,6 @@ export class LocalSandboxSupervisor {
     const assignment: Assignment = {
       command,
       publishEvent,
-      eventSpool: new InMemoryEventSpool({
-        sessionId: command.payload.sessionId,
-        leaseId: command.payload.leaseId,
-        fencingToken: command.payload.fencingToken,
-        acknowledgedThroughSeq: command.payload.nextEventSeq - 1,
-      }),
       abortController: new AbortController(),
       state: "prepared",
     };
@@ -330,51 +370,27 @@ export class LocalSandboxSupervisor {
       );
     }
     assignment.state = "running";
-    assignment.runPromise = this.#runner
-      .run(
-        assignment.command,
-        async (message) => {
-          const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
-          if (
-            latest !== assignment ||
-            (assignment.state !== "running" && assignment.state !== "cancelling")
-          ) {
-            throw new LocalSandboxSupervisorError(
-              "stale_fence",
-              "Stale assignment cannot publish events",
-            );
-          }
-          if (
-            message.payload.leaseId !== assignment.command.payload.leaseId ||
-            message.payload.fencingToken !== assignment.command.payload.fencingToken ||
-            message.payload.commandId !== assignment.command.payload.commandId
-          ) {
-            throw new LocalSandboxSupervisorError(
-              "invalid_event",
-              "Runner event identity does not match its assignment",
-            );
-          }
-          try {
-            assignment.eventSpool.append(message);
-          } catch (error: unknown) {
-            if (!(error instanceof EventSpoolError)) throw error;
-            throw new LocalSandboxSupervisorError(
-              "invalid_event_delivery",
-              "Supervisor event delivery contract was violated",
-            );
-          }
-          const acknowledgement = await assignment.publishEvent(message);
-          try {
-            assignment.eventSpool.acknowledge(acknowledgement);
-          } catch {
-            throw new LocalSandboxSupervisorError(
-              "invalid_event_delivery",
-              "Supervisor event acknowledgement was invalid",
-            );
-          }
-        },
-        assignment.abortController.signal,
-      )
+    let execution: Promise<PiRpcTurnResult>;
+    try {
+      const eventSpool = this.#eventSpoolFactory({
+        sessionId: assignment.command.payload.sessionId,
+        leaseId: assignment.command.payload.leaseId,
+        fencingToken: assignment.command.payload.fencingToken,
+        acknowledgedThroughSeq: assignment.command.payload.nextEventSeq - 1,
+      });
+      execution =
+        eventSpool instanceof Promise
+          ? eventSpool.then(
+              (resolved) => this.#runWithEventSpool(assignment, resolved),
+              (error: unknown) => {
+                throw this.#spoolOpenError(error);
+              },
+            )
+          : this.#runWithEventSpool(assignment, eventSpool);
+    } catch (error: unknown) {
+      execution = Promise.reject(this.#spoolOpenError(error));
+    }
+    assignment.runPromise = execution
       .then(
         (result) => {
           assignment.state = "completed";
@@ -395,6 +411,67 @@ export class LocalSandboxSupervisor {
         }
       });
     return assignment.runPromise;
+  }
+
+  #runWithEventSpool(
+    assignment: Assignment,
+    eventSpool: SupervisorEventSpool,
+  ): Promise<PiRpcTurnResult> {
+    assignment.eventSpool = eventSpool;
+    return this.#runner.run(
+      assignment.command,
+      async (message) => {
+        const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
+        if (
+          latest !== assignment ||
+          (assignment.state !== "running" && assignment.state !== "cancelling")
+        ) {
+          throw new LocalSandboxSupervisorError(
+            "stale_fence",
+            "Stale assignment cannot publish events",
+          );
+        }
+        if (
+          message.payload.leaseId !== assignment.command.payload.leaseId ||
+          message.payload.fencingToken !== assignment.command.payload.fencingToken ||
+          message.payload.commandId !== assignment.command.payload.commandId
+        ) {
+          throw new LocalSandboxSupervisorError(
+            "invalid_event",
+            "Runner event identity does not match its assignment",
+          );
+        }
+        try {
+          await eventSpool.append(message);
+        } catch (error: unknown) {
+          if (!(error instanceof EventSpoolError)) throw error;
+          throw new LocalSandboxSupervisorError(
+            "invalid_event_delivery",
+            "Supervisor event delivery contract was violated",
+          );
+        }
+        const acknowledgement = await assignment.publishEvent(message);
+        try {
+          await eventSpool.acknowledge(acknowledgement);
+        } catch {
+          throw new LocalSandboxSupervisorError(
+            "invalid_event_delivery",
+            "Supervisor event acknowledgement was invalid",
+          );
+        }
+      },
+      assignment.abortController.signal,
+    );
+  }
+
+  #spoolOpenError(error: unknown): Error {
+    if (error instanceof LocalSandboxSupervisorError) return error;
+    return new LocalSandboxSupervisorError(
+      "event_spool_unavailable",
+      error instanceof EventSpoolError
+        ? "Supervisor durable event spool could not be opened"
+        : "Supervisor event spool initialization failed",
+    );
   }
 
   #runCancellation(cancellation: Cancellation): Promise<SupervisorTurnCancellationResult> {

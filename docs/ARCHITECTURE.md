@@ -107,7 +107,9 @@ This is a real sandbox/workspace transport behind an integration-only local
 control-plane adapter, not yet the production remote supervisor connection. The
 HTTP application deliberately does not auto-start dispatchers. PostgreSQL event
 persistence, cumulative ACK, SSE replay, and Docker execution are executable;
-the live SSE hub is process-local and the supervisor spool is memory-only.
+the live SSE hub is process-local. The local supervisor can use a private,
+crash-safe file spool that syncs every event before transport and replays an
+unacknowledged suffix from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
 gateway, lease renewal/reconciliation, acknowledged-cancellation crash
 recovery, durable snapshots, cross-replica event notification, and Windows Job
@@ -260,10 +262,14 @@ Authoritative for cold artifacts:
 
 The supervisor retains only unacknowledged event delivery copies. A cumulative
 ACK permits deletion only after PostgreSQL has durably stored every event up to
-that sequence and advanced the cursor in the same transaction. The current
-in-memory spool is an executable reference for ordering, fencing, bounded
-backpressure, ACK, and replay behavior; it is not the final crash-safe storage
-implementation.
+that sequence and advanced the cursor in the same transaction. The in-memory
+implementation remains a fast protocol reference. The file implementation
+stores a hashed closed manifest per assignment and one hashed, canonical event
+file per sequence. It atomically publishes and syncs an event before transport,
+atomically advances the cumulative cursor before compaction, rejects corrupt or
+gapped state, and redelivers pending files from a fresh store instance. It
+assumes one trusted supervisor owns its private persistent-volume root; it is
+not shared-filesystem coordination or process-memory recovery.
 
 ## 4. Execution flow
 
@@ -294,10 +300,11 @@ metadata under the current fence, and restored into the next fresh container.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
 worker crash after upload but before terminal publication falls back to the
 previous settled pair. The development adapter uses a private host directory;
-MinIO/S3, a durable supervisor-side spool, cross-control-plane live
-notification, generic repository snapshot import/export, and production remote
-sandbox assignment remain unimplemented. Runner reconnect recovery is therefore
-not yet claimed.
+MinIO/S3, cross-control-plane live notification, generic repository snapshot
+import/export, and production remote sandbox assignment remain unimplemented.
+The local file spool now protects already-produced events across a supervisor
+process restart, including the PostgreSQL-commit/ACK-loss window. Recreating an
+unknown in-flight execution and reconciling its lease are still not claimed.
 
 ## 5. Delivery and recovery semantics
 

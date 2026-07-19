@@ -73,7 +73,7 @@ extension-policy support would overstate the current boundary.
 - [x] Prove a second same-session turn in a different container sees prior messages and files
 - [x] Re-enable the Web composer for same-session follow-up turns
 - [ ] Replace the development file object store with a MinIO/S3 adapter
-- [ ] Make the supervisor event spool crash-safe and replay it after runner restart
+- [x] Make the supervisor event spool crash-safe and replay it after supervisor restart
 - [ ] Add cross-replica live event notification
 - [ ] Prove five queued same-session inputs preserve mailbox order
 - [ ] Specify and implement steer versus queued follow-up semantics

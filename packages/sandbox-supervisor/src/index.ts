@@ -4,7 +4,22 @@ export {
   type EventSpoolAckResult,
   type EventSpoolAppendResult,
   type InMemoryEventSpoolOptions,
+  type SupervisorEventSpool,
+  type SupervisorEventSpoolFactory,
+  type SupervisorEventSpoolRecovery,
+  type SupervisorEventSpoolRecoveryResult,
 } from "./in-memory-event-spool.ts";
+
+export {
+  DEFAULT_FILE_EVENT_SPOOL_BYTES,
+  FileEventSpool,
+  FileEventSpoolStore,
+  MAX_FILE_EVENT_SPOOL_DIRECTORIES,
+  MAX_FILE_EVENT_SPOOL_MESSAGE_BYTES,
+  type FileEventSpoolOpenOptions,
+  type FileEventSpoolReplayResult,
+  type FileEventSpoolStoreOptions,
+} from "./file-event-spool.ts";
 
 export {
   PiRpcAdapterError,

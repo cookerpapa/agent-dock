@@ -700,3 +700,32 @@
   已能在 cold activation 中恢复，Phase 2 现在最大的 durability 缺口是 supervisor 在收到
   command ACK 或发出尚未 ACK 的 event 后崩溃；若不先补这层，仍不能诚实满足 runner
   reconnect 不丢事件的退出标准。
+
+## 2026-07-19 — Crash-safe supervisor event spool
+
+- 目标：让已由 runner 产生、但尚未拿到 durable control-plane ACK 的 AgentDock event 不因
+  supervisor 进程退出而消失，同时覆盖“PostgreSQL 已 commit、返回 ACK 丢失”的反向窗口。
+- 决策：新增 ADR-0012 和 replaceable `SupervisorEventSpool` boundary。内存实现继续用于快速
+  contract tests；文件实现要求一个 supervisor 独占 private persistent-volume root，不引入
+  Kafka/Redis，也不允许 execution side 直写 control-plane database。
+- 文件格式：每个 session/lease/fence assignment 使用 SHA-256 directory；closed manifest
+  记录 immutable identity、累计 ACK cursor、event/byte capacity。每个 sequence 使用单独的
+  canonical JSON envelope 与显式 SHA-256，拒绝 symlink、special/unknown entry、非法 schema、
+  hash/bytes 不符、gap、conflicting duplicate、stale fence、ACK regression 和越界容量。
+- 崩溃顺序：append 先写 `0600` temp、fsync、atomic no-overwrite link、directory fsync，成功后
+  才能调用 transport。ACK 先 atomic replace + fsync manifest cursor，再删除 covered files；
+  因此任一 crash window 最多造成 exact duplicate，不会先删除唯一 delivery copy。
+- Supervisor：`LocalSandboxSupervisor` 可注入 async spool factory，默认同步内存路径的既有
+  cancellation 时序保持不变。demo runtime 改用文件 spool。fresh `FileEventSpoolStore` 可扫描
+  所有 assignment，按 session/fence/seq 重投并应用 matching cumulative ACK。
+- PostgreSQL 证据：integration test 先让 `DurableEventStore` commit `turn.started`，随后在 ACK
+  返回路径故意抛错并让 dispatcher 释放 lease。新 store 实例重投完全相同的 event 后仍得到
+  ACK，`session_events` 始终只有一行，第二次扫描为 empty。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、156
+  passed/4 skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。
+- 安全边界：该能力只恢复已经 durable append 的 public event，不重启 Pi，不恢复 shell/open
+  fd/in-flight tool，也不自动判断已 ACK command 的外部副作用。stale/corrupt spool fail closed
+  并保留给 reconciliation；空 manifest 暂时保留，terminal-aware GC 后续实现。
+- 下一步：用五个预先 accepted 的同 session prompt 做 mailbox FIFO 验收。原因是 event replay
+  已跨 supervisor restart 闭环，Phase 2 的下一个用户可见保证是排队输入不能并发或越过前序
+  turn；它也会暴露当前 API 是否真的允许 active session 接收 queued follow-up。

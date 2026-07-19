@@ -70,9 +70,11 @@ already exist. The first Phase 2 slice adds settled Pi JSONL plus bounded
 workspace checkpoint upload/validation, PostgreSQL artifact pointers, cold
 restore into a fresh Docker container, and a Web follow-up on the same session.
 Two-container tests prove that the second model request sees the prior Pi
-conversation and that its tool sees the prior Java edit. MinIO/S3, a crash-safe
-supervisor spool, five-input mailbox acceptance, steer semantics,
-cross-replica notification, lease renewal, and restart reconciliation remain.
+conversation and that its tool sees the prior Java edit. A crash-safe local
+supervisor spool now persists event publications before transport and proves
+exact PostgreSQL redelivery after an ACK-loss restart. MinIO/S3, five-input
+mailbox acceptance, steer semantics, cross-replica notification, lease renewal,
+and restart reconciliation remain.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

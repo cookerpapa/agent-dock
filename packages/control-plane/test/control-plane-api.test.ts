@@ -13,6 +13,7 @@ import type {
 import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
 import {
   DockerSandboxTurnRunner,
+  FileEventSpoolStore,
   LocalSandboxSupervisor,
   PiRpcTurnError,
   PiRpcTurnRunner,
@@ -51,6 +52,8 @@ const IDS = {
   cancellationSandboxBoot: "60000000-0000-4000-8000-000000000002",
   dockerSandbox: "50000000-0000-4000-8000-000000000003",
   dockerSandboxBoot: "60000000-0000-4000-8000-000000000003",
+  spoolSandbox: "50000000-0000-4000-8000-000000000004",
+  spoolSandboxBoot: "60000000-0000-4000-8000-000000000004",
 };
 
 let pglite: PGlite | undefined;
@@ -1975,6 +1978,132 @@ describe.sequential("single-user durable turn intake API", () => {
       .where("id", "=", IDS.sandbox)
       .executeTakeFirstOrThrow();
     expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
+  });
+
+  it("replays an ACK-lost event from a fresh supervisor spool without duplicating PostgreSQL", async () => {
+    const spoolRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-durable-event-spool-"));
+    try {
+      const sessionResponse = await http.inject({
+        method: "POST",
+        url: `/v1/projects/${project.projectId}/sessions`,
+        payload: { workspaceId: project.workspaceId },
+      });
+      expect(sessionResponse.statusCode).toBe(201);
+      const replaySession = sessionResponse.json() as SessionResource;
+      const turnResponse = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${replaySession.sessionId}/turns`,
+        headers: { "idempotency-key": "durable-spool-ack-loss" },
+        payload: { prompt: "Publish one event, then lose its ACK." },
+      });
+      expect(turnResponse.statusCode).toBe(202);
+      const accepted = turnResponse.json() as AcceptedTurnResource;
+      await database
+        .insertInto("sandboxes")
+        .values({
+          id: IDS.spoolSandbox,
+          supervisor_id: "local-durable-spool-test",
+          boot_id: IDS.spoolSandboxBoot,
+          state: "ready",
+          max_concurrent_sessions: 1,
+          active_sessions: 0,
+        })
+        .executeTakeFirstOrThrow();
+
+      const leaseCoordinator = new SessionLeaseCoordinator({
+        database,
+        sandboxId: IDS.spoolSandbox,
+        leaseDurationMs: 120_000,
+      });
+      const firstStore = new FileEventSpoolStore({ rootDirectory: spoolRoot });
+      const supervisor = new LocalSandboxSupervisor({
+        runner: {
+          async run(command, publishEvent) {
+            const event: EventPublishMessage = {
+              protocolVersion: 1,
+              messageId: globalThis.crypto.randomUUID(),
+              sentAt: new Date().toISOString(),
+              type: "event.publish",
+              payload: {
+                commandId: command.payload.commandId,
+                leaseId: command.payload.leaseId,
+                fencingToken: command.payload.fencingToken,
+                event: {
+                  schemaVersion: 1,
+                  eventId: globalThis.crypto.randomUUID(),
+                  sessionId: command.payload.sessionId,
+                  turnId: command.payload.turnId,
+                  agentId: command.payload.agentId,
+                  seq: command.payload.nextEventSeq,
+                  occurredAt: new Date().toISOString(),
+                  type: "turn.started",
+                  payload: { inputKind: command.payload.input.kind },
+                },
+              },
+            };
+            await publishEvent(event);
+            return { stopReason: "stop" };
+          },
+        },
+        eventSpoolFactory: (options) => firstStore.open(options),
+      });
+      const backend = new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        eventIngestor: durableEventStore,
+        onEvent() {
+          throw new Error("simulated ACK connection loss after PostgreSQL commit");
+        },
+      });
+      const dispatcher = new OutboxDispatcher({
+        database,
+        tenantId: IDS.tenant,
+        backend,
+        leaseManager: leaseCoordinator,
+      });
+
+      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+        status: "failed",
+        commandId: accepted.commandId,
+        phase: "after_start",
+        failureCode: "local_supervisor_error",
+      });
+      const persistedBeforeReplay = await database
+        .selectFrom("session_events")
+        .select(["event_id", "seq", "type"])
+        .where("session_id", "=", replaySession.sessionId)
+        .execute();
+      expect(persistedBeforeReplay).toHaveLength(1);
+      expect(persistedBeforeReplay[0]).toMatchObject({ seq: "1", type: "turn.started" });
+
+      const restartedStore = new FileEventSpoolStore({ rootDirectory: spoolRoot });
+      const restartedSupervisor = new LocalSandboxSupervisor({
+        runner: {
+          async run() {
+            throw new Error("Recovery must not start a new runner");
+          },
+        },
+        eventSpoolFactory: (options) => restartedStore.open(options),
+        eventSpoolRecovery: restartedStore,
+      });
+      await expect(
+        restartedSupervisor.recoverPendingEvents((message) => durableEventStore.ingest(message)),
+      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 });
+      expect(
+        await database
+          .selectFrom("session_events")
+          .select((expression) => expression.fn.countAll<string>().as("count"))
+          .where("session_id", "=", replaySession.sessionId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ count: "1" });
+      await expect(
+        new FileEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
+          throw new Error("A drained spool must not publish");
+        }),
+      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 0, replayedEvents: 0 });
+    } finally {
+      await rm(spoolRoot, { recursive: true, force: true });
+    }
   });
 
   it("rolls back the turn and command if the outbox write fails", async () => {
