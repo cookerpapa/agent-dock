@@ -91,16 +91,28 @@ settlement and exact capacity release. Failure after cancellation ACK instead
 fails the turn/session and retains the unconfirmed reservation for later
 reconciliation.
 
-This remains an integration boundary, not the production runner transport. The
-in-process transport and temporary local workspace resolver are deliberately
-not auto-started by the HTTP application. PostgreSQL event persistence,
-cumulative ACK, and the SSE replay endpoint are now executable. The live SSE hub
-is process-local and the supervisor spool is still memory-only; lease
-renewal/reconciliation, acknowledged-cancellation crash recovery, durable
-snapshots, cross-replica event notification, Windows Job Object containment,
-and the real sandbox transport remain later slices. A crash after durable
-command ACK is still treated as ambiguous rather than replaying possible tool
-side effects.
+The fifth Phase 1 slice connects the same `SupervisorTurnRunner` boundary to a
+real Docker activation. A trusted host-side manager starts one ephemeral
+container for an active turn; inactive sessions retain no process or container.
+The worker copies an image-owned Java fixture into workspace tmpfs, creates a
+baseline Git commit, starts pinned Pi with an explicit `bash/edit` tool
+allowlist, and embeds the loopback fake model so the container can remain
+networkless. Host and worker exchange a private, closed, versioned JSONL
+protocol over attached stdin/stdout. Each worker event waits for the existing
+durable control-plane ACK before Pi continues. A successful terminal event may
+include a validated unified diff bounded to 64 KiB. Cancellation propagates to
+Pi first and then requires exact-name outer-container removal confirmation.
+
+This is a real sandbox/workspace transport behind an integration-only local
+control-plane adapter, not yet the production remote supervisor connection. The
+HTTP application deliberately does not auto-start dispatchers. PostgreSQL event
+persistence, cumulative ACK, SSE replay, and Docker execution are executable;
+the live SSE hub is process-local and the supervisor spool is memory-only.
+Generic repository import, policy-approved extensions, a request-scoped model
+gateway, lease renewal/reconciliation, acknowledged-cancellation crash
+recovery, durable snapshots, cross-replica event notification, and Windows Job
+Object containment remain later slices. A crash after durable command ACK is
+still treated as ambiguous rather than replaying possible tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -187,11 +199,15 @@ Minimum controls:
 - restricted network egress;
 - no long-lived model/provider secrets exposed to the agent.
 
-The Phase 0 Compose topology is a zero-token security probe, not the production
-network or workspace design. Its two one-shot runners have no network, ports, or
-host volumes; a real coding session later receives an isolated writable workspace
-and policy-controlled egress rather than weakening the read-only control-plane
-boundary.
+The Phase 0 Compose topology remains a zero-token configuration probe. The
+Phase 1 Java repair path now activates a separate one-shot container with UID/GID
+`1000:1000`, read-only rootfs, the engine's default seccomp policy, dropped
+capabilities, `no-new-privileges`, no network/ports/binds/devices, and bounded
+CPU, memory, PIDs, file descriptors, `/tmp`, and workspace tmpfs. It does not
+mount a host repository or Docker socket. The embedded fake model requires no
+egress or real credential. A later real-provider path must use a trusted
+request-scoped gateway and explicit egress policy rather than exposing
+long-lived provider credentials to Pi or tools.
 
 ## 3. State ownership
 
@@ -265,14 +281,16 @@ implementation.
 
 Steps 1-8 and 10 are executable through the local integration boundary: the
 control plane acquires a real PostgreSQL lease/fence, persists ACK before run,
-starts pinned Pi RPC, and receives public text/terminal events from the loopback
-fake model. Step 8 stores each complete event plus command/lease/fence identity,
-advances the session cursor and next sequence atomically, and returns the
-cumulative ACK only after commit. The same durable log is available through SSE
-and resumes after a browser reconnect with `Last-Event-ID`. Step 9, a durable
-supervisor-side spool, cross-control-plane live notification, and production
-sandbox assignment are not implemented, so this does not yet claim runner
-reconnect recovery or durable Pi/workspace snapshots.
+activates an ephemeral hardened Docker workspace, and receives public text,
+tool, and terminal events from pinned Pi. Step 8 stores each complete event plus
+command/lease/fence identity, advances the session cursor and next sequence
+atomically, and returns the cumulative ACK only after commit. The same durable
+log, including the bounded final patch, is available through SSE and resumes
+after a browser reconnect with `Last-Event-ID`. Step 9, a durable
+supervisor-side spool, cross-control-plane live notification, generic repository
+snapshot import/export, and production remote sandbox assignment are not
+implemented, so this does not yet claim runner reconnect recovery or durable
+Pi/workspace restoration.
 
 ## 5. Delivery and recovery semantics
 
@@ -300,6 +318,9 @@ liveness but cannot make a stale fencing token current.
 - Public events use an AgentDock-owned, versioned, closed TypeBox union rather
   than raw Pi RPC objects. Version 1 carries `eventId`, `sessionId`, `turnId`,
   `agentId`, per-session `seq`, `occurredAt`, `type`, and a typed `payload`.
+- `turn.completed` may carry a unified workspace patch. It is collected inside
+  the sandbox, UTF-8 bounded to 64 KiB, and schema-validated before publication;
+  the control plane never reads the live container filesystem to construct it.
 - Only session-level state events may use a null `turnId`; turn, tool, approval,
   assistant, and notification events require a concrete turn identity.
 - Event validation succeeds before the supervisor spool accepts a sequence.

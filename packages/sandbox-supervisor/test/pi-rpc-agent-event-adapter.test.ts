@@ -114,7 +114,7 @@ describe("PiRpcAgentEventAdapter", () => {
     expect(adapter.adapt({ type: "agent_settled" })).toMatchObject({ kind: "invalid" });
   });
 
-  it("maps tool boundaries and rejects unknown Pi events", () => {
+  it("maps tool boundaries, reviews transient progress, and rejects unknown Pi events", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });
 
@@ -126,6 +126,14 @@ describe("PiRpcAgentEventAdapter", () => {
         args: { path: "README.md" },
       }),
     ).toMatchObject({ kind: "mapped", event: { type: "tool.started" } });
+    expect(
+      adapter.adapt({
+        type: "tool_execution_update",
+        toolCallId: "call-1",
+        toolName: "read",
+        partialResult: { content: "must-not-pass" },
+      }),
+    ).toEqual({ kind: "ignored", sourceType: "tool_execution_update" });
     expect(
       adapter.adapt({
         type: "tool_execution_end",

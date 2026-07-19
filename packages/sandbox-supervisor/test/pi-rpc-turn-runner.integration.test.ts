@@ -78,6 +78,11 @@ describe("PiRpcTurnRunner integration", () => {
           api: "openai-completions",
           apiKey: FAKE_MODEL_API_KEY,
         }),
+        collectWorkspacePatch: () => ({
+          format: "unified_diff",
+          patch: "diff --git a/src/App.java b/src/App.java\n",
+          truncated: false,
+        }),
       });
 
       await expect(
@@ -92,6 +97,16 @@ describe("PiRpcTurnRunner integration", () => {
         "turn.completed",
       ]);
       expect(events.map((message) => message.payload.event.seq)).toEqual([5, 6, 7, 8]);
+      expect(events.at(-1)?.payload.event).toMatchObject({
+        type: "turn.completed",
+        payload: {
+          workspacePatch: {
+            format: "unified_diff",
+            patch: "diff --git a/src/App.java b/src/App.java\n",
+            truncated: false,
+          },
+        },
+      });
       expect(JSON.stringify(events)).not.toContain(FAKE_MODEL_API_KEY);
       expect(JSON.stringify(events)).not.toContain("Return the deterministic fake response.");
       expect(await readdir(workspace)).toEqual([]);

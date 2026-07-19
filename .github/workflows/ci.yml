@@ -38,9 +38,9 @@ jobs:
         run: npm run ci
 
   containers:
-    name: Hardened zero-token container spikes
+    name: Hardened zero-token container and workspace paths
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -54,8 +54,14 @@ jobs:
           node-version: 24.12.0
           package-manager-cache: false
 
+      - name: Install pinned dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
       - name: Verify effective HostConfig and run both containers
         run: npm run container:check
+
+      - name: Verify the fenced Docker Pi workspace path
+        run: npm run sandbox:check
 
   secrets:
     name: Secret history scan

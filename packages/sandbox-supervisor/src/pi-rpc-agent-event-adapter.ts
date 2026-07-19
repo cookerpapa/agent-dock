@@ -23,6 +23,9 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
   "entry_appended",
   "session_info_changed",
   "thinking_level_changed",
+  // The public v1 protocol publishes durable tool boundaries and the final
+  // result. Pi's partial tool output is intentionally not persisted yet.
+  "tool_execution_update",
   "compaction_start",
   "compaction_end",
   "auto_retry_start",

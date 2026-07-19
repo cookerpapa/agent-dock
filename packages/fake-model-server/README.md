@@ -11,6 +11,7 @@ scenario through the `x-agent-dock-scenario` request header:
 | --- | --- |
 | `text` | Two text deltas, a stop chunk, usage, and `[DONE]` |
 | `tool_call` | A fragmented `inspect_workspace({"path":"src"})` tool call; after a tool-result message, a final text response |
+| `java_repair` | Successive `bash`, `edit`, and `bash` calls driven by prior tool-result count, followed by final text |
 | `rate_limit` | OpenAI-style HTTP 429 with `Retry-After` |
 | `timeout` | Withholds HTTP response headers until timeout/abort closes the request |
 | `malformed` | Sends invalid SSE JSON |
@@ -39,5 +40,5 @@ npm test --workspace @agent-dock/fake-model-server
 
 The contract suite sends real HTTP/SSE requests through the pinned Pi `0.80.10`
 OpenAI adapter. It checks text deltas, fragmented tool arguments, the follow-up
-after a tool result, provider error mapping, request timeout, explicit abort,
-malformed SSE, and mid-stream disconnect.
+after a tool result, the complete Java repair loop, provider error mapping,
+request timeout, explicit abort, malformed SSE, and mid-stream disconnect.

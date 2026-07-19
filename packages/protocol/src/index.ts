@@ -1,8 +1,10 @@
 export {
   AgentDockEventSchema,
   AgentDockProtocolError,
+  MAX_WORKSPACE_PATCH_BYTES,
   SessionStateSchema,
   TurnCancellationReasonSchema,
+  WorkspacePatchSchema,
   createAgentDockEventFactory,
   parseAgentDockEvent,
   type AgentDockEvent,
@@ -11,7 +13,30 @@ export {
   type AgentDockEventFactoryOptions,
   type AgentDockEventIdentity,
   type AgentDockEventType,
+  type WorkspacePatch,
 } from "./event-envelope.ts";
+
+export {
+  DockerSandboxCancelMessageSchema,
+  DockerSandboxCancelledMessageSchema,
+  DockerSandboxFailedMessageSchema,
+  DockerSandboxReadyMessageSchema,
+  DockerSandboxResultMessageSchema,
+  DockerSandboxRunMessageSchema,
+  DockerSandboxWorkerInputSchema,
+  DockerSandboxWorkerOutputSchema,
+  DockerSandboxWorkerProtocolError,
+  parseDockerSandboxWorkerInput,
+  parseDockerSandboxWorkerOutput,
+  type DockerSandboxCancelMessage,
+  type DockerSandboxCancelledMessage,
+  type DockerSandboxFailedMessage,
+  type DockerSandboxReadyMessage,
+  type DockerSandboxResultMessage,
+  type DockerSandboxRunMessage,
+  type DockerSandboxWorkerInput,
+  type DockerSandboxWorkerOutput,
+} from "./docker-sandbox-worker.ts";
 
 export {
   NonNegativeSafeIntegerSchema,

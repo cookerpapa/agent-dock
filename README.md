@@ -97,6 +97,7 @@ only after a measured requirement appears.
 - [ADR-0007: supervisor execution handshake and model snapshot](docs/adr/0007-supervisor-execution-handshake-and-model-snapshot.md)
 - [ADR-0008: durable event ACK and resumable SSE replay](docs/adr/0008-durable-event-ack-and-sse-replay.md)
 - [ADR-0009: durable turn cancellation and process-exit confirmation](docs/adr/0009-durable-turn-cancellation.md)
+- [ADR-0010: ephemeral Docker sandbox and bounded final patch](docs/adr/0010-ephemeral-docker-sandbox-and-bounded-patch.md)
 
 ## Current executable spikes
 
@@ -131,7 +132,8 @@ The deterministic model boundary lives in
 [`packages/fake-model-server`](packages/fake-model-server). It serves real
 OpenAI-compatible HTTP/SSE on loopback and the pinned Pi `0.80.10` adapter
 contract-tests text, fragmented tool calls, 429, request timeout, explicit
-abort, malformed SSE, and mid-stream disconnect without provider tokens.
+abort, malformed SSE, mid-stream disconnect, and a three-tool Java repair loop
+without provider tokens.
 
 ## Local verification and CI
 
@@ -143,7 +145,7 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 124 unit/contract tests, the two
+It checks Prettier formatting, TypeScript types, 130 unit/contract tests, the two
 zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -153,6 +155,15 @@ The hardened Phase 0 runner topology, including its effective Docker
 
 ```bash
 npm run container:check
+```
+
+The complete zero-token Java workspace path builds the Phase 1 sandbox image,
+inspects its effective isolation, runs Pi's `bash/edit/bash` repair loop, checks
+outer-container cancellation, and then repeats the run through PostgreSQL and
+SSE:
+
+```bash
+npm run sandbox:check
 ```
 
 ## Current status
@@ -203,13 +214,27 @@ owns final turn/session settlement. Natural completion wins if it commits first;
 a post-ACK cancellation failure fails the session without returning an
 unconfirmed sandbox reservation to the ready pool.
 
-The full database-to-Pi path is covered with the loopback fake model, so it uses
-no subscription token. The in-process supervisor transport and local workspace
-are integration scaffolding and are not started by the production HTTP entry
-point. The event table and SSE API are production entry-point capabilities, but
-live fan-out is currently process-local and the supervisor spool is memory-only.
-Queued-turn withdrawal, a real isolated workspace transport, durable
-Pi/workspace snapshots, acknowledged-cancellation crash recovery, lease
+The fifth Phase 1 slice replaces the local workspace with an ephemeral Docker
+activation. A trusted host-side runner starts a non-root, read-only,
+networkless container with no bind mounts, Docker socket, ports, or inherited
+credentials and with CPU, memory, PID, file-descriptor, `/tmp`, and workspace
+limits. The container copies a sample Java repository into workspace tmpfs,
+creates a baseline Git commit, and starts pinned Pi with only `bash` and `edit`
+enabled. The deterministic model drives a failing test, one source edit, and a
+passing verification test. Every tool boundary is durably ACKed through the
+existing fenced event path, and `turn.completed` carries a validated, 64 KiB
+bounded unified diff. Completion and cancellation both confirm that the outer
+container is gone.
+
+The full database-to-container path is covered with the embedded loopback fake
+model, so it uses no subscription token. The control-plane-to-supervisor
+transport is still in-process integration scaffolding and the production HTTP
+entry point does not start dispatchers. The current image embeds one trusted
+sample fixture and disables extensions and external network access; generic
+repository import, policy-approved extension loading, a request-scoped model
+gateway, and durable Pi/workspace snapshots remain separate work. Live fan-out
+is process-local and the supervisor spool is memory-only. Queued-turn
+withdrawal, acknowledged-cancellation crash recovery, lease
 renewal/reconciliation, Windows Job Object containment, and the React page are
 not connected yet.
 

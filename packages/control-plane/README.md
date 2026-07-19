@@ -82,6 +82,23 @@ This closes the single-process replay/live race; multi-control-plane live fan-ou
 still needs PostgreSQL notification or a broker. PostgreSQL replay itself is
 restart-safe.
 
+## Docker workspace integration
+
+The opt-in Phase 1 runner starts pinned Pi and its `bash`/`edit` tools inside a
+networkless ephemeral Docker container rather than in NestJS. The host manager
+passes a closed command over attached JSONL, forwards each public event through
+the same durable ACK path, and requires the container to disappear after
+completion or cancellation. The sample image initializes a Java fixture in
+workspace tmpfs and attaches its bounded unified diff to `turn.completed`.
+
+This integration is intentionally zero-token: the model simulator runs on
+container loopback and no real credential enters Docker configuration. Run the
+full image, sandbox, PostgreSQL, and SSE proof with:
+
+```bash
+npm run sandbox:check
+```
+
 ## Verification boundary
 
 ```bash
@@ -98,15 +115,17 @@ terminal failure, commit-before-event-ACK, gap/fence/conflict rejection, live
 SSE, and `Last-Event-ID` replay. Cancellation coverage includes queued rejection,
 idempotency, competing requests, natural-completion races, post-ACK failure
 quarantine semantics, native Pi abort, forced POSIX descendant termination, and
-SSE terminal delivery. Its end-to-end path starts pinned Pi against the loopback
-fake model without provider tokens.
+SSE terminal delivery. Its default end-to-end path starts pinned Pi against the
+loopback fake model without provider tokens. The opt-in Docker case additionally
+persists and streams the ten-event Java repair and final patch.
 
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
 remain explicit deployment steps. A continuously running production worker,
 production supervisor transport, durable runner spool, acknowledged-cancellation
-crash recovery, and the React page are not claimed by this slice.
+crash recovery, generic repository restore, a real model gateway, and the React
+page are not claimed by this slice.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

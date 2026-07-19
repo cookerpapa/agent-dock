@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import {
+  DockerSandboxWorkerProtocolError,
+  parseDockerSandboxWorkerInput,
+  parseDockerSandboxWorkerOutput,
+} from "../src/index.ts";
+
+const executeCommand = {
+  protocolVersion: 1,
+  messageId: "10000000-0000-4000-8000-000000000001",
+  sentAt: "2026-07-19T00:00:00.000Z",
+  type: "command.turn.execute",
+  payload: {
+    commandId: "20000000-0000-4000-8000-000000000001",
+    idempotencyKey: "docker-run-1",
+    tenantId: "tenant-1",
+    projectId: "project-1",
+    workspaceId: "workspace-1",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    agentId: "root",
+    leaseId: "30000000-0000-4000-8000-000000000001",
+    fencingToken: 1,
+    nextEventSeq: 1,
+    input: { kind: "prompt", text: "Repair the Java test." },
+    model: {
+      profileId: "profile-1",
+      provider: "agent-dock-fake",
+      modelId: "agent-dock-fake",
+      thinkingLevel: "off",
+      credentialBindingId: "credential-1",
+      credentialBindingVersion: 1,
+    },
+  },
+} as const;
+
+describe("Docker sandbox worker protocol", () => {
+  it("accepts a closed run request and cancellation", () => {
+    expect(
+      parseDockerSandboxWorkerInput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.run",
+        command: executeCommand,
+        runtime: { kind: "embedded_fake", scenario: "java_repair" },
+        workspaceFixture: "java-repair",
+      }),
+    ).toMatchObject({ type: "sandbox.run" });
+    expect(
+      parseDockerSandboxWorkerInput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.cancel",
+        reason: "user_request",
+        gracePeriodMs: 250,
+      }),
+    ).toMatchObject({ type: "sandbox.cancel" });
+  });
+
+  it("accepts worker lifecycle output and rejects extra fields", () => {
+    expect(
+      parseDockerSandboxWorkerOutput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.ready",
+        piVersion: "0.80.10",
+      }),
+    ).toMatchObject({ type: "sandbox.ready" });
+    expect(() =>
+      parseDockerSandboxWorkerInput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.run",
+        command: executeCommand,
+        runtime: { kind: "embedded_fake", scenario: "java_repair" },
+        workspaceFixture: "java-repair",
+        providerToken: "must-not-cross",
+      }),
+    ).toThrow(DockerSandboxWorkerProtocolError);
+  });
+});

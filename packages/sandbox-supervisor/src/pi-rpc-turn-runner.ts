@@ -5,6 +5,7 @@ import {
   type CancelTurnCommandMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
+  type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { stat } from "node:fs/promises";
@@ -48,7 +49,11 @@ export type PiRpcTurnRunnerOptions = {
   clock?: () => Date;
   idGenerator?: () => string;
   piRpcEntryPath?: string;
+  enabledTools?: readonly PiBuiltinToolName[];
+  collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
 };
+
+export type PiBuiltinToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
 
 export type PiRpcTurnResult = {
   stopReason: string;
@@ -70,6 +75,15 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const MAX_STDOUT_BUFFER_BYTES = 8 * 1_024 * 1_024;
 const MAX_STDERR_BYTES = 4_096;
 const RUNTIME_API_KEY_ENV = "AGENT_DOCK_RUNTIME_API_KEY";
+const PI_BUILTIN_TOOL_NAMES = new Set<PiBuiltinToolName>([
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+]);
 
 export class PiRpcTurnError extends Error {
   readonly code: string;
@@ -370,6 +384,7 @@ export class PiRpcTurnRunner {
   readonly #shutdownTimeoutMs: number;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
+  readonly #enabledTools: readonly PiBuiltinToolName[];
 
   constructor(options: PiRpcTurnRunnerOptions) {
     this.#options = options;
@@ -387,6 +402,15 @@ export class PiRpcTurnRunner {
     );
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+    const enabledTools = options.enabledTools ?? [];
+    if (
+      enabledTools.length > PI_BUILTIN_TOOL_NAMES.size ||
+      new Set(enabledTools).size !== enabledTools.length ||
+      enabledTools.some((tool) => !PI_BUILTIN_TOOL_NAMES.has(tool))
+    ) {
+      throw new TypeError("enabledTools must be a unique Pi built-in tool allowlist");
+    }
+    this.#enabledTools = [...enabledTools];
   }
 
   async run(
@@ -445,7 +469,9 @@ export class PiRpcTurnRunner {
         "--no-skills",
         "--no-prompt-templates",
         "--no-context-files",
-        "--no-tools",
+        ...(this.#enabledTools.length === 0
+          ? ["--no-tools"]
+          : ["--tools", this.#enabledTools.join(",")]),
       ],
       {
         cwd: workspaceDirectory,
@@ -558,26 +584,36 @@ export class PiRpcTurnRunner {
       if (outcome.kind === "invalid") {
         throw new PiRpcTurnError("pi_protocol_error", outcome.reason, false);
       }
-      const candidate = eventMessage(outcome.event);
-      if (outcome.event.type === "turn.cancelled") {
+      let publicEvent = outcome.event;
+      if (publicEvent.type === "turn.completed" && this.#options.collectWorkspacePatch) {
+        const workspacePatch = await this.#options.collectWorkspacePatch();
+        if (workspacePatch !== undefined) {
+          publicEvent = {
+            ...publicEvent,
+            payload: { ...publicEvent.payload, workspacePatch },
+          };
+        }
+      }
+      const candidate = eventMessage(publicEvent);
+      if (publicEvent.type === "turn.cancelled") {
         settleCancellation(
-          new PiRpcTurnCancelledError(outcome.event.payload.reason, outcome.event.payload.forced),
+          new PiRpcTurnCancelledError(publicEvent.payload.reason, publicEvent.payload.forced),
           candidate,
         );
         return;
       }
       await publishEvent(candidate);
       if (!outcome.terminal) return;
-      if (outcome.event.type === "turn.completed") {
-        terminal.resolve({ stopReason: outcome.event.payload.stopReason });
+      if (publicEvent.type === "turn.completed") {
+        terminal.resolve({ stopReason: publicEvent.payload.stopReason });
         return;
       }
-      if (outcome.event.type === "turn.failed") {
+      if (publicEvent.type === "turn.failed") {
         terminal.reject(
           new PiRpcTurnError(
-            outcome.event.payload.code,
-            outcome.event.payload.message,
-            outcome.event.payload.retryable,
+            publicEvent.payload.code,
+            publicEvent.payload.message,
+            publicEvent.payload.retryable,
           ),
         );
       }

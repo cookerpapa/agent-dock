@@ -4,6 +4,10 @@
 !package-lock.json
 
 !packages/
+!packages/fake-model-server/
+!packages/fake-model-server/package.json
+!packages/fake-model-server/src/
+!packages/fake-model-server/src/**
 !packages/protocol/
 !packages/protocol/package.json
 !packages/protocol/src/
@@ -12,6 +16,10 @@
 !packages/sandbox-supervisor/package.json
 !packages/sandbox-supervisor/src/
 !packages/sandbox-supervisor/src/**
+!packages/sandbox-supervisor/test/
+!packages/sandbox-supervisor/test/fixtures/
+!packages/sandbox-supervisor/test/fixtures/sample-java-repair/
+!packages/sandbox-supervisor/test/fixtures/sample-java-repair/**
 
 !spikes/
 !spikes/pi-extension-compat/

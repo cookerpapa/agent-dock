@@ -36,6 +36,27 @@ const inspectWorkspaceTool: Tool = {
   }),
 };
 
+const javaRepairTools: Tool[] = [
+  {
+    name: "bash",
+    description: "Run a command",
+    parameters: Type.Object({ command: Type.String() }),
+  },
+  {
+    name: "edit",
+    description: "Edit a file",
+    parameters: Type.Object({
+      path: Type.String(),
+      edits: Type.Array(
+        Type.Object({
+          oldText: Type.String(),
+          newText: Type.String(),
+        }),
+      ),
+    }),
+  },
+];
+
 beforeAll(async () => {
   server = new FakeModelServer();
   await server.start();
@@ -154,6 +175,38 @@ describe("pinned Pi OpenAI adapter contract", () => {
     const second = await completeScenario("tool_call", followUp);
     expect(second.stopReason).toBe("stop");
     expect(second.content).toEqual([{ type: "text", text: "Tool result accepted." }]);
+  });
+
+  it("drives the deterministic Java repair tool sequence", async () => {
+    const messages: Context["messages"] = [...userContext.messages];
+    const expectedTools = ["bash", "edit", "bash"];
+    for (const expectedTool of expectedTools) {
+      const assistant = await completeScenario("java_repair", {
+        messages,
+        tools: javaRepairTools,
+      });
+      expect(assistant.stopReason).toBe("toolUse");
+      const toolCall = assistant.content[0];
+      expect(toolCall).toMatchObject({ type: "toolCall", name: expectedTool });
+      if (toolCall === undefined || toolCall.type !== "toolCall") {
+        throw new Error("Expected the Java repair scenario to emit a tool call");
+      }
+      messages.push(assistant, {
+        role: "toolResult",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        content: [{ type: "text", text: "deterministic tool result" }],
+        isError: false,
+        timestamp: 1_700_000_001_000,
+      });
+    }
+
+    const completion = await completeScenario("java_repair", {
+      messages,
+      tools: javaRepairTools,
+    });
+    expect(completion.stopReason).toBe("stop");
+    expect(completion.content).toEqual([{ type: "text", text: "Java repair verified." }]);
   });
 
   it("surfaces the deterministic 429 without retrying", async () => {

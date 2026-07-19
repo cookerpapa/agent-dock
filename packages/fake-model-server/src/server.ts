@@ -9,6 +9,7 @@ export const FAKE_MODEL_ID = "agent-dock-fake";
 export const fakeModelScenarios = [
   "text",
   "tool_call",
+  "java_repair",
   "rate_limit",
   "timeout",
   "malformed",
@@ -236,6 +237,10 @@ function hasToolResult(messages: readonly unknown[]): boolean {
   return messages.some((message) => isRecord(message) && message.role === "tool");
 }
 
+function toolResultCount(messages: readonly unknown[]): number {
+  return messages.filter((message) => isRecord(message) && message.role === "tool").length;
+}
+
 export class FakeModelServer {
   readonly #host: string;
   readonly #port: number;
@@ -435,7 +440,59 @@ export class FakeModelServer {
       await this.#streamToolCall(response, requestId, sequence, payload.model);
       return;
     }
-    const text = scenario === "tool_call" ? "Tool result accepted." : "AgentDock fake stream OK.";
+    if (scenario === "java_repair") {
+      const completedTools = toolResultCount(payload.messages);
+      if (completedTools === 0) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_java_test_before",
+          "bash",
+          { command: "bash ./test.sh" },
+        );
+        return;
+      }
+      if (completedTools === 1) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_java_edit",
+          "edit",
+          {
+            path: "src/Calculator.java",
+            edits: [
+              {
+                oldText: "return left - right;",
+                newText: "return left + right;",
+              },
+            ],
+          },
+        );
+        return;
+      }
+      if (completedTools === 2) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_java_test_after",
+          "bash",
+          { command: "bash ./test.sh" },
+        );
+        return;
+      }
+    }
+    const text =
+      scenario === "tool_call"
+        ? "Tool result accepted."
+        : scenario === "java_repair"
+          ? "Java repair verified."
+          : "AgentDock fake stream OK.";
     await this.#streamText(response, requestId, sequence, payload.model, text);
   }
 
@@ -475,7 +532,29 @@ export class FakeModelServer {
     sequence: number,
     model: string,
   ): Promise<void> {
+    return this.#streamNamedToolCall(
+      response,
+      requestId,
+      sequence,
+      model,
+      "call_agentdock_001",
+      "inspect_workspace",
+      { path: "src" },
+    );
+  }
+
+  async #streamNamedToolCall(
+    response: ServerResponse,
+    requestId: string,
+    sequence: number,
+    model: string,
+    toolCallId: string,
+    toolName: string,
+    argumentsValue: Record<string, unknown>,
+  ): Promise<void> {
     const created = 1_700_000_000 + sequence;
+    const serializedArguments = JSON.stringify(argumentsValue);
+    const splitAt = Math.max(1, Math.floor(serializedArguments.length / 2));
     openEventStream(response);
     writeEvent(
       response,
@@ -488,9 +567,12 @@ export class FakeModelServer {
         tool_calls: [
           {
             index: 0,
-            id: "call_agentdock_001",
+            id: toolCallId,
             type: "function",
-            function: { name: "inspect_workspace", arguments: '{"path":' },
+            function: {
+              name: toolName,
+              arguments: serializedArguments.slice(0, splitAt),
+            },
           },
         ],
       }),
@@ -502,7 +584,7 @@ export class FakeModelServer {
         tool_calls: [
           {
             index: 0,
-            function: { arguments: '"src"}' },
+            function: { arguments: serializedArguments.slice(splitAt) },
           },
         ],
       }),

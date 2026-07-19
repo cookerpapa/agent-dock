@@ -566,3 +566,45 @@
   Java repo 贯通真实 workspace、工具执行与 final Git diff。原因是 durable intake、
   streaming、fencing 和 cancellation 已闭环；现在最大的“云化”缺口是 agent 仍在本机
   integration workspace 中运行，尚未证明不可信代码与 control plane 隔离。
+
+## 2026-07-19 — Ephemeral Docker workspace and Java repair vertical slice
+
+- 目标：把 Pi、内置工具和 workspace 从 NestJS/本机测试目录移入真正受限的 Docker
+  activation，并让已有的 durable command、lease/fence、event ACK、SSE 和 cancellation
+  链路保持不变。
+- 决策：新增 ADR-0010。trusted host runner 可以调用 Docker CLI，但 container 内没有
+  Docker socket、host bind、端口或真实 credential。每个活跃 turn 使用一个 ephemeral
+  container；冷 session 不保留进程。worker 与 host 使用私有、封闭、版本化的 LF JSONL
+  协议，每条 `event.publish` 仍必须等 PostgreSQL commit 后的 `event.ack`。
+- Sandbox：新增 pinned Node 24/JDK 17/Git image。实际 HostConfig 已验证 non-root
+  `1000:1000`、read-only rootfs、`network=none`、drop all capabilities、
+  `no-new-privileges`、无 bind/volume/device/port，以及 CPU、768 MiB memory、128 PIDs、
+  nofile、64 MiB `/tmp` 和 128 MiB workspace tmpfs 限制。完成或取消后都按精确名称确认
+  container 不存在。
+- Agent loop：sample Java fixture 初始 `Calculator.add()` 错写成减法。container 内复制
+  fixture、建立 baseline Git commit，Pi `0.80.10` 只启用 `bash` 与 `edit`。embedded
+  loopback fake model 固定驱动 `bash ./test.sh` 失败、编辑 Java、再次测试通过，最后返回
+  `Java repair verified.`；整个测试不读取 Pi 登录、不调用真实 provider。
+- Event 与 diff：新增 closed worker protocol 和可选 `turn.completed.workspacePatch`。
+  patch 在 container 内通过 Git 生成，按 UTF-8 截断到 64 KiB 后再过公开 schema；测试
+  断言只出现 `return left - right` 到 `return left + right` 的 unified diff。Pi 的
+  `tool_execution_update` 经源码审核后作为 transient progress 显式忽略，tool start/end
+  仍完整持久化；未知 Pi event 继续 fail closed。
+- 完整证据：Docker runner 测试验证 `bash/edit/bash` 三次工具边界、第一次预期失败、
+  后两次成功、final patch、无 credential 泄漏与外层 container 清理。控制面测试再把
+  同一次 repair 贯通 outbox -> lease/fence -> Docker -> Pi -> 10 条逐条落库后 ACK 的
+  event -> live SSE -> terminal settlement，最终 cursor 为 10、lease 删除、sandbox
+  capacity 归零。阻塞模型的取消测试也确认 `turn.started -> turn.cancelled` 与 container
+  消失。
+- 可复现命令：新增 `npm run sandbox:check`，自动寻找 `docker`/`docker.exe`，构建 image，
+  运行两条 Docker integration tests 和 19 条 control-plane tests。Docker Engine
+  `29.4.2` 实测全部通过；默认 `npm test` 为 130 passed、3 个 Docker opt-in tests
+  skipped。完整 `npm run ci` 也通过 format、全仓 typecheck、130 tests、两个 zero-token
+  Pi spikes 和 0 vulnerabilities；CI container job 会额外执行同一 Docker 命令。
+- 当前边界：这是 sample fixture 与 embedded fake model 的安全 vertical slice，不是
+  任意 Git 仓库导入，也没有恢复 Pi JSONL/workspace snapshot、加载 project extension
+  或连接 request-scoped model gateway。control plane 到 supervisor 仍是 in-process
+  adapter，production `main.ts` 不会自动启动 dispatcher。
+- 下一步：实现 Pi `/export` 风格的最小 React session page。原因是 backend story 已能
+  从 clean checkout 重现真实工具、diff、取消和 SSE；现在最小的 Phase 1 缺口是让用户
+  在 Web 中发起 turn、看到文本/工具状态、取消并检查 final diff，而不是继续只看测试。

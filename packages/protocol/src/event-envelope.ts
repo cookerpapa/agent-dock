@@ -26,6 +26,18 @@ export const TurnCancellationReasonSchema = Type.Union([
   Type.Literal("shutdown"),
 ]);
 
+export const MAX_WORKSPACE_PATCH_BYTES = 64 * 1_024;
+
+export const WorkspacePatchSchema = Type.Object(
+  {
+    format: Type.Literal("unified_diff"),
+    patch: Type.String({ maxLength: 65_536 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type WorkspacePatch = Static<typeof WorkspacePatchSchema>;
+
 const CommonEnvelopeProperties = {
   schemaVersion: Type.Literal(1),
   eventId: UuidSchema,
@@ -220,6 +232,7 @@ const TurnCompletedEventSchema = Type.Object(
     payload: Type.Object(
       {
         stopReason: Type.String({ minLength: 1, maxLength: 256 }),
+        workspacePatch: Type.Optional(WorkspacePatchSchema),
       },
       { additionalProperties: false },
     ),
@@ -304,7 +317,18 @@ export function parseAgentDockEvent(value: unknown): AgentDockEvent {
       `Invalid AgentDock event at ${location}: ${issue?.message ?? "schema validation failed"}`,
     );
   }
-  return value as AgentDockEvent;
+  const event = value as AgentDockEvent;
+  if (
+    event.type === "turn.completed" &&
+    event.payload.workspacePatch !== undefined &&
+    new TextEncoder().encode(event.payload.workspacePatch.patch).byteLength >
+      MAX_WORKSPACE_PATCH_BYTES
+  ) {
+    throw new AgentDockProtocolError(
+      `Invalid AgentDock event at /payload/workspacePatch/patch: UTF-8 content exceeds ${MAX_WORKSPACE_PATCH_BYTES} bytes`,
+    );
+  }
+  return event;
 }
 
 export type AgentDockEventIdentity = {

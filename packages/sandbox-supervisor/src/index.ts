@@ -27,6 +27,7 @@ export {
   PiRpcTurnError,
   PiRpcTurnRunner,
   type PiModelRuntimeConfig,
+  type PiBuiltinToolName,
   type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
   type PiRpcTurnResult,
@@ -42,3 +43,11 @@ export {
   type SupervisorTurnCancellationResult,
   type SupervisorTurnRunner,
 } from "./local-sandbox-supervisor.ts";
+
+export {
+  DockerSandboxTurnRunner,
+  buildDockerSandboxRunArguments,
+  type DockerSandboxContainerIdentity,
+  type DockerSandboxScenario,
+  type DockerSandboxTurnRunnerOptions,
+} from "./docker-sandbox-turn-runner.ts";

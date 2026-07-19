@@ -15,6 +15,7 @@
     "ci": "npm run format:check && npm run check && npm run security:audit",
     "container:config": "docker compose config --quiet",
     "container:check": "node scripts/run-container-check.mjs",
+    "sandbox:check": "node scripts/run-docker-sandbox-check.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",

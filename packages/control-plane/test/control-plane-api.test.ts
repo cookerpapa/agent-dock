@@ -12,6 +12,7 @@ import type {
 } from "@agent-dock/protocol";
 import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
 import {
+  DockerSandboxTurnRunner,
   LocalSandboxSupervisor,
   PiRpcTurnError,
   PiRpcTurnRunner,
@@ -46,6 +47,8 @@ const IDS = {
   sandboxBoot: "60000000-0000-4000-8000-000000000001",
   cancellationSandbox: "50000000-0000-4000-8000-000000000002",
   cancellationSandboxBoot: "60000000-0000-4000-8000-000000000002",
+  dockerSandbox: "50000000-0000-4000-8000-000000000003",
+  dockerSandboxBoot: "60000000-0000-4000-8000-000000000003",
 };
 
 let pglite: PGlite | undefined;
@@ -1347,6 +1350,185 @@ describe.sequential("single-user durable turn intake API", () => {
       await rm(workspaceDirectory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it.skipIf(process.env.AGENT_DOCK_DOCKER_SANDBOX_TEST !== "1")(
+    "persists and streams a fenced Java repair produced inside the Docker Pi sandbox",
+    async () => {
+      const sessionResponse = await http.inject({
+        method: "POST",
+        url: `/v1/projects/${project.projectId}/sessions`,
+        payload: { workspaceId: project.workspaceId },
+      });
+      expect(sessionResponse.statusCode).toBe(201);
+      const dockerSession = sessionResponse.json() as SessionResource;
+      const turnResponse = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${dockerSession.sessionId}/turns`,
+        headers: { "idempotency-key": "docker-java-repair" },
+        payload: { prompt: "Run the tests, repair the Java bug, and verify the result." },
+      });
+      expect(turnResponse.statusCode).toBe(202);
+      const accepted = turnResponse.json() as AcceptedTurnResource;
+
+      await database
+        .insertInto("sandboxes")
+        .values({
+          id: IDS.dockerSandbox,
+          supervisor_id: "local-docker-sandbox-test",
+          boot_id: IDS.dockerSandboxBoot,
+          state: "ready",
+          max_concurrent_sessions: 1,
+          active_sessions: 0,
+        })
+        .executeTakeFirstOrThrow();
+
+      const published: EventPublishMessage[] = [];
+      const persistedBeforeAck: number[] = [];
+      let containerName: string | undefined;
+      const leaseCoordinator = new SessionLeaseCoordinator({
+        database,
+        sandboxId: IDS.dockerSandbox,
+        leaseDurationMs: 120_000,
+      });
+      const runner = new DockerSandboxTurnRunner({
+        image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1",
+        dockerCommand: process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
+        scenario: "java_repair",
+        executionTimeoutMs: 60_000,
+        onContainerReady(identity) {
+          containerName = identity.containerName;
+        },
+      });
+      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+      const backend = new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        eventIngestor: {
+          async ingest(value) {
+            const message = parseSupervisorToControlMessage(value);
+            if (message.type !== "event.publish") throw new Error("Expected event publication");
+            const acknowledgement = await durableEventStore.ingest(message);
+            const persisted = await database
+              .selectFrom("session_events")
+              .select(["event_id", "seq"])
+              .where("session_id", "=", dockerSession.sessionId)
+              .where("seq", "=", String(message.payload.event.seq))
+              .executeTakeFirstOrThrow();
+            expect(persisted.event_id).toBe(message.payload.event.eventId);
+            persistedBeforeAck.push(Number(persisted.seq));
+            return acknowledgement;
+          },
+        },
+        onEvent(message) {
+          published.push(message);
+        },
+      });
+      const dispatcher = new OutboxDispatcher({
+        database,
+        tenantId: IDS.tenant,
+        backend,
+        leaseManager: leaseCoordinator,
+      });
+
+      const liveAbort = new AbortController();
+      const liveResponse = await fetch(`${baseUrl}/v1/sessions/${dockerSession.sessionId}/events`, {
+        signal: liveAbort.signal,
+      });
+      expect(liveResponse.status).toBe(200);
+      const liveEventsPromise = readSseEvents(liveResponse, 10, 60_000);
+      try {
+        const dispatchResult = await dispatcher.dispatchNext();
+        const liveEvents = await liveEventsPromise;
+        expect(dispatchResult).toMatchObject({
+          status: "completed",
+          commandId: accepted.commandId,
+          sessionId: dockerSession.sessionId,
+          turnId: accepted.turnId,
+          attempt: 1,
+        });
+        const expectedTypes = [
+          "turn.started",
+          "tool.started",
+          "tool.completed",
+          "tool.started",
+          "tool.completed",
+          "tool.started",
+          "tool.completed",
+          "assistant.text.delta",
+          "assistant.text.delta",
+          "turn.completed",
+        ];
+        expect(published.map((message) => message.payload.event.type)).toEqual(expectedTypes);
+        expect(published.map((message) => message.payload.event.seq)).toEqual(
+          Array.from({ length: 10 }, (_, index) => index + 1),
+        );
+        expect(persistedBeforeAck).toEqual(Array.from({ length: 10 }, (_, index) => index + 1));
+        expect(liveEvents.map((event) => event.event)).toEqual(expectedTypes);
+        expect(liveEvents.map((event) => event.id)).toEqual(
+          Array.from({ length: 10 }, (_, index) => index + 1),
+        );
+
+        const terminal = published.at(-1)?.payload.event;
+        if (terminal?.type !== "turn.completed") throw new Error("Expected completed Docker turn");
+        expect(terminal.payload.workspacePatch).toMatchObject({
+          format: "unified_diff",
+          truncated: false,
+        });
+        expect(terminal.payload.workspacePatch?.patch).toContain("-        return left - right;");
+        expect(terminal.payload.workspacePatch?.patch).toContain("+        return left + right;");
+        expect(liveEvents.at(-1)?.data).toMatchObject({
+          type: "turn.completed",
+          payload: { workspacePatch: terminal.payload.workspacePatch },
+        });
+
+        const durable = await readTurnExecution(accepted);
+        expect(durable).toMatchObject({
+          commandState: "completed",
+          turnState: "completed",
+          sessionState: "idle",
+          stopReason: "stop",
+          attempts: 1,
+        });
+        const persistedTerminal = await database
+          .selectFrom("session_events")
+          .select(["seq", "type", "payload"])
+          .where("session_id", "=", dockerSession.sessionId)
+          .where("seq", "=", "10")
+          .executeTakeFirstOrThrow();
+        expect(persistedTerminal).toMatchObject({
+          seq: "10",
+          type: "turn.completed",
+          payload: { workspacePatch: terminal.payload.workspacePatch },
+        });
+        const cursor = await database
+          .selectFrom("session_event_cursors")
+          .select(["last_persisted_seq", "acknowledged_through_seq"])
+          .where("session_id", "=", dockerSession.sessionId)
+          .executeTakeFirstOrThrow();
+        expect(cursor).toEqual({ last_persisted_seq: "10", acknowledged_through_seq: "10" });
+        const leaseCount = await database
+          .selectFrom("session_leases")
+          .select((expression) => expression.fn.countAll<string>().as("count"))
+          .where("session_id", "=", dockerSession.sessionId)
+          .executeTakeFirstOrThrow();
+        expect(leaseCount.count).toBe("0");
+        const sandbox = await database
+          .selectFrom("sandboxes")
+          .select(["state", "active_sessions"])
+          .where("id", "=", IDS.dockerSandbox)
+          .executeTakeFirstOrThrow();
+        expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
+        expect(containerName).toBeDefined();
+        const serialized = JSON.stringify(published);
+        expect(serialized).not.toContain(FAKE_MODEL_API_KEY);
+        expect(serialized).not.toContain("broker://owner/openai-codex");
+        expect(serialized).not.toContain("Run the tests, repair the Java bug");
+      } finally {
+        liveAbort.abort();
+      }
+    },
+    90_000,
+  );
 
   it("durably cancels a live Pi turn through an independent fenced dispatcher", async () => {
     const sessionResponse = await http.inject({

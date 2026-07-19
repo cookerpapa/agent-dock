@@ -1,0 +1,326 @@
+import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
+import {
+  MAX_WORKSPACE_PATCH_BYTES,
+  parseDockerSandboxWorkerInput,
+  type DockerSandboxCancelMessage,
+  type DockerSandboxRunMessage,
+  type EventAckMessage,
+  type EventPublishMessage,
+  type WorkspacePatch,
+} from "@agent-dock/protocol";
+import { cp, readdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+import {
+  PINNED_PI_CODING_AGENT_VERSION,
+  PiRpcTurnCancelledError,
+  PiRpcTurnError,
+  PiRpcTurnRunner,
+  type PiRpcCancellationSignal,
+} from "./pi-rpc-turn-runner.ts";
+
+const WORKSPACE_DIRECTORY = "/workspace";
+const JAVA_REPAIR_FIXTURE = "/opt/agent-dock/sample-java-repair";
+const EVENT_ACK_TIMEOUT_MS = 10_000;
+
+type PendingEventAck = {
+  event: EventPublishMessage;
+  resolve: (ack: EventAckMessage) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+function execute(file: string, args: readonly string[], cwd: string): Promise<string> {
+  return new Promise<string>((resolvePromise, rejectPromise) => {
+    execFile(
+      file,
+      [...args],
+      { cwd, encoding: "utf8", maxBuffer: 512 * 1_024 },
+      (error, stdout) => {
+        if (error) {
+          rejectPromise(error);
+        } else {
+          resolvePromise(stdout);
+        }
+      },
+    );
+  });
+}
+
+function writeMessage(value: unknown): Promise<void> {
+  return new Promise<void>((resolvePromise, rejectPromise) => {
+    process.stdout.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error) rejectPromise(error);
+      else resolvePromise();
+    });
+  });
+}
+
+function boundedUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
+  const encoded = Buffer.from(value, "utf8");
+  if (encoded.length <= maxBytes) return { value, truncated: false };
+  let end = maxBytes;
+  while (end > 0) {
+    try {
+      return {
+        value: new TextDecoder("utf-8", { fatal: true }).decode(encoded.subarray(0, end)),
+        truncated: true,
+      };
+    } catch {
+      end -= 1;
+    }
+  }
+  return { value: "", truncated: true };
+}
+
+async function prepareWorkspace(): Promise<void> {
+  const existing = await readdir(WORKSPACE_DIRECTORY);
+  if (existing.length !== 0) {
+    throw new PiRpcTurnError(
+      "workspace_not_empty",
+      "Sandbox workspace was not empty at activation",
+      false,
+    );
+  }
+  for (const entry of await readdir(JAVA_REPAIR_FIXTURE)) {
+    await cp(join(JAVA_REPAIR_FIXTURE, entry), join(WORKSPACE_DIRECTORY, entry), {
+      recursive: true,
+      preserveTimestamps: true,
+    });
+  }
+  await execute("git", ["init", "--quiet"], WORKSPACE_DIRECTORY);
+  await execute("git", ["config", "user.name", "AgentDock Fixture"], WORKSPACE_DIRECTORY);
+  await execute("git", ["config", "user.email", "fixture@agent-dock.invalid"], WORKSPACE_DIRECTORY);
+  await execute("git", ["add", "--all"], WORKSPACE_DIRECTORY);
+  await execute("git", ["commit", "--quiet", "-m", "fixture baseline"], WORKSPACE_DIRECTORY);
+}
+
+async function collectWorkspacePatch(): Promise<WorkspacePatch> {
+  const diff = await execute(
+    "git",
+    ["diff", "--no-ext-diff", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "--"],
+    WORKSPACE_DIRECTORY,
+  );
+  const bounded = boundedUtf8(diff, MAX_WORKSPACE_PATCH_BYTES);
+  return {
+    format: "unified_diff",
+    patch: bounded.value,
+    truncated: bounded.truncated,
+  };
+}
+
+function cancellationSignal(message: DockerSandboxCancelMessage): PiRpcCancellationSignal {
+  return {
+    kind: "agent-dock.turn-cancellation",
+    reason: message.reason,
+    gracePeriodMs: message.gracePeriodMs,
+  };
+}
+
+async function main(): Promise<void> {
+  const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let runMessage: DockerSandboxRunMessage | undefined;
+  let runPromise: Promise<void> | undefined;
+  let abortController: AbortController | undefined;
+  let pendingCancellation: PiRpcCancellationSignal | undefined;
+  let pendingEventAck: PendingEventAck | undefined;
+  let finished = false;
+
+  const finish = async (message: unknown): Promise<void> => {
+    if (finished) return;
+    finished = true;
+    if (pendingEventAck !== undefined) {
+      clearTimeout(pendingEventAck.timer);
+      pendingEventAck.reject(new Error("Sandbox worker stopped before event ACK"));
+      pendingEventAck = undefined;
+    }
+    await writeMessage(message).catch(() => undefined);
+    input.close();
+    process.stdin.pause();
+  };
+
+  const publishEvent = async (event: EventPublishMessage): Promise<void> => {
+    if (pendingEventAck !== undefined) {
+      throw new PiRpcTurnError(
+        "event_ack_overlap",
+        "Sandbox worker attempted concurrent event publication",
+        false,
+      );
+    }
+    const acknowledgement = new Promise<EventAckMessage>((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => {
+        pendingEventAck = undefined;
+        rejectPromise(
+          new PiRpcTurnError("event_ack_timeout", "Control plane event ACK timed out", true),
+        );
+      }, EVENT_ACK_TIMEOUT_MS);
+      timer.unref();
+      pendingEventAck = { event, resolve: resolvePromise, reject: rejectPromise, timer };
+    });
+    await writeMessage(event);
+    await acknowledgement;
+  };
+
+  const acceptEventAck = (ack: EventAckMessage): void => {
+    const pending = pendingEventAck;
+    if (pending === undefined) {
+      throw new PiRpcTurnError(
+        "unexpected_event_ack",
+        "Worker received an unexpected event ACK",
+        false,
+      );
+    }
+    const event = pending.event;
+    if (
+      ack.payload.sessionId !== event.payload.event.sessionId ||
+      ack.payload.leaseId !== event.payload.leaseId ||
+      ack.payload.fencingToken !== event.payload.fencingToken ||
+      ack.payload.acknowledgedThroughSeq !== event.payload.event.seq
+    ) {
+      throw new PiRpcTurnError(
+        "invalid_event_ack",
+        "Worker received a mismatched event ACK",
+        false,
+      );
+    }
+    clearTimeout(pending.timer);
+    pendingEventAck = undefined;
+    pending.resolve(ack);
+  };
+
+  const run = async (message: DockerSandboxRunMessage): Promise<void> => {
+    const fakeModel = new FakeModelServer({ defaultScenario: message.runtime.scenario });
+    abortController = new AbortController();
+    if (pendingCancellation !== undefined) abortController.abort(pendingCancellation);
+    try {
+      await prepareWorkspace();
+      await fakeModel.start();
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => WORKSPACE_DIRECTORY,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        enabledTools: ["bash", "edit"],
+        collectWorkspacePatch,
+        requestTimeoutMs: 10_000,
+        turnTimeoutMs: 60_000,
+      });
+      const result = await runner.run(message.command, publishEvent, abortController.signal);
+      await finish({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.result",
+        stopReason: result.stopReason,
+      });
+    } catch (error: unknown) {
+      if (error instanceof PiRpcTurnCancelledError) {
+        await finish({
+          sandboxProtocolVersion: 1,
+          type: "sandbox.cancelled",
+          reason: error.reason,
+          forced: error.forced,
+        });
+      } else if (error instanceof PiRpcTurnError) {
+        await finish({
+          sandboxProtocolVersion: 1,
+          type: "sandbox.failed",
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        });
+      } else {
+        await finish({
+          sandboxProtocolVersion: 1,
+          type: "sandbox.failed",
+          code: "sandbox_worker_error",
+          message: "Sandbox worker failed",
+          retryable: true,
+        });
+      }
+    } finally {
+      await fakeModel.stop().catch(() => undefined);
+    }
+  };
+
+  input.on("line", (line) => {
+    void (async () => {
+      if (finished || line.trim().length === 0) return;
+      let value: unknown;
+      try {
+        value = JSON.parse(line) as unknown;
+      } catch {
+        throw new PiRpcTurnError("invalid_worker_input", "Worker input was not valid JSONL", false);
+      }
+      const message = parseDockerSandboxWorkerInput(value);
+      if (message.type === "event.ack") {
+        acceptEventAck(message);
+        return;
+      }
+      if (message.type === "sandbox.cancel") {
+        const signal = cancellationSignal(message);
+        pendingCancellation = signal;
+        abortController?.abort(signal);
+        return;
+      }
+      if (runMessage !== undefined || runPromise !== undefined) {
+        throw new PiRpcTurnError("duplicate_run", "Sandbox worker received a duplicate run", false);
+      }
+      runMessage = message;
+      runPromise = run(message);
+      await runPromise;
+    })().catch(async (error: unknown) => {
+      await finish({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.failed",
+        code: error instanceof PiRpcTurnError ? error.code : "invalid_worker_input",
+        message: error instanceof PiRpcTurnError ? error.message : "Sandbox worker input failed",
+        retryable: error instanceof PiRpcTurnError ? error.retryable : false,
+      });
+    });
+  });
+
+  input.once("close", () => {
+    if (finished) return;
+    if (runPromise === undefined) {
+      void finish({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.failed",
+        code: "worker_input_closed",
+        message: "Sandbox worker input closed before execution",
+        retryable: true,
+      });
+      return;
+    }
+    const signal: PiRpcCancellationSignal = {
+      kind: "agent-dock.turn-cancellation",
+      reason: "shutdown",
+      gracePeriodMs: 0,
+    };
+    pendingCancellation = signal;
+    abortController?.abort(signal);
+    const forcedExit = setTimeout(() => process.exit(1), 5_000);
+    void runPromise.finally(() => clearTimeout(forcedExit));
+  });
+
+  process.once("SIGTERM", () => {
+    const signal: PiRpcCancellationSignal = {
+      kind: "agent-dock.turn-cancellation",
+      reason: "shutdown",
+      gracePeriodMs: 0,
+    };
+    pendingCancellation = signal;
+    abortController?.abort(signal);
+  });
+
+  await writeMessage({
+    sandboxProtocolVersion: 1,
+    type: "sandbox.ready",
+    piVersion: PINNED_PI_CODING_AGENT_VERSION,
+  });
+}
+
+await main();
