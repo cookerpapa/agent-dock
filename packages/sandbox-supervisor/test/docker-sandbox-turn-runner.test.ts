@@ -31,12 +31,19 @@ const command: ExecuteTurnCommandMessage = {
   },
 };
 
+const runtimeIdentity = {
+  supervisorId: "docker-supervisor-test",
+  bootId: "40000000-0000-4000-8000-000000000001",
+  sandboxId: "sandbox-docker-test",
+};
+
 describe("DockerSandboxTurnRunner", () => {
   it("builds a hardened, networkless container without host mounts or secret environment", () => {
     const args = buildDockerSandboxRunArguments(
       "agent-dock/pi-workspace:test",
       "agent-dock-test-run",
       command,
+      runtimeIdentity,
     );
     expect(args.slice(0, 3)).toEqual(["run", "--rm", "--interactive"]);
     expect(args.at(-1)).toBe("agent-dock/pi-workspace:test");
@@ -70,11 +77,26 @@ describe("DockerSandboxTurnRunner", () => {
     expect(args).not.toContain("--publish");
     expect(args).not.toContain("--env");
     expect(args).not.toContain("--privileged");
+    expect(args).toEqual(
+      expect.arrayContaining([
+        `agent-dock.supervisor-id=${runtimeIdentity.supervisorId}`,
+        `agent-dock.boot-id=${runtimeIdentity.bootId}`,
+        `agent-dock.sandbox-id=${runtimeIdentity.sandboxId}`,
+        `agent-dock.turn-id=${command.payload.turnId}`,
+        `agent-dock.lease-id=${command.payload.leaseId}`,
+        `agent-dock.fencing-token=${String(command.payload.fencingToken)}`,
+      ]),
+    );
   });
 
   it("rejects invalid container names before invoking Docker", () => {
     expect(() =>
-      buildDockerSandboxRunArguments("agent-dock/pi-workspace:test", "../escape", command),
+      buildDockerSandboxRunArguments(
+        "agent-dock/pi-workspace:test",
+        "../escape",
+        command,
+        runtimeIdentity,
+      ),
     ).toThrow("container name is invalid");
   });
 });

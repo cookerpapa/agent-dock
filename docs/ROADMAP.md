@@ -79,8 +79,12 @@ tied timestamps, proving strict FIFO, no overlap, and idempotent replay without
 a counter gap; the Web page exposes queue positions and labels active-session
 submission as queued follow-up. Steer is
 specified as a separate future operation rather than an implicit prompt mode.
-MinIO/S3, explicit steer implementation, cross-replica notification, lease
-renewal, and restart reconciliation remain.
+Long-turn leases now renew through one shared supervisor heartbeat, while a
+host-side identity-fenced reconciler removes orphan/expired Docker assignments,
+fails acknowledged ambiguous work, safely requeues pre-ACK work, repairs
+capacity, and retires an old sandbox only after runtime absence is confirmed.
+MinIO/S3, explicit steer implementation, cross-replica notification, and
+production remote-supervisor registration/health orchestration remain.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

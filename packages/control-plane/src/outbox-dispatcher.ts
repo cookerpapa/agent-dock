@@ -76,12 +76,14 @@ export interface TurnExecutionLeaseManager {
 export class TurnExecutionBackendError extends Error {
   readonly code: string;
   readonly retryable: boolean;
+  readonly quarantineSession: boolean;
 
-  constructor(code: string, safeMessage: string, retryable: boolean) {
+  constructor(code: string, safeMessage: string, retryable: boolean, quarantineSession = false) {
     super(safeMessage);
     this.name = "TurnExecutionBackendError";
     this.code = code;
     this.retryable = retryable;
+    this.quarantineSession = quarantineSession;
   }
 }
 
@@ -175,6 +177,7 @@ type ExecutionFailure = {
   code: string;
   safeMessage: string;
   retryable: boolean;
+  quarantineSession: boolean;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -208,12 +211,14 @@ function normalizeFailure(error: unknown): ExecutionFailure {
       code: error.code,
       safeMessage: error.message,
       retryable: error.retryable,
+      quarantineSession: error.quarantineSession,
     };
   }
   return {
     code: "execution_backend_error",
     safeMessage: "Execution backend failed",
     retryable: true,
+    quarantineSession: false,
   };
 }
 
@@ -824,10 +829,13 @@ export class OutboxDispatcher {
             "A started execution must own a running session",
           );
         }
+        const nextSessionState = failure.quarantineSession
+          ? transitionSession(rows.sessionState, "failed")
+          : transitionSession(rows.sessionState, "idle");
         const sessionUpdate = await transaction
           .updateTable("sessions")
           .set({
-            state: transitionSession(rows.sessionState, "idle"),
+            state: nextSessionState,
             row_version: sql<string>`${sql.ref("row_version")} + 1`,
             updated_at: now,
             last_active_at: now,

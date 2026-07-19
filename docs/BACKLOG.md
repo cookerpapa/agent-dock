@@ -80,4 +80,4 @@ extension-policy support would overstate the current boundary.
 - [x] Specify active-session prompts as queued follow-ups and reserve explicit steer
 - [x] Expose mailbox positions and queued follow-up submission in the Web page
 - [ ] Implement an explicit steer API/command with runtime capability negotiation
-- [ ] Renew leases during long turns and reconcile expired assignments/orphan containers
+- [x] Renew leases during long turns and reconcile expired assignments/orphan containers

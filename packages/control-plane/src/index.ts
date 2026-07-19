@@ -1,5 +1,12 @@
 export { createControlPlaneApplication } from "./application.ts";
 export {
+  AssignmentReconciler,
+  AssignmentReconcilerError,
+  type AssignmentReconcilerOptions,
+  type AssignmentReconciliationResult,
+  type SandboxRetirementResult,
+} from "./assignment-reconciler.ts";
+export {
   FileCheckpointObjectStore,
   PostgresSandboxCheckpointStore,
   SandboxCheckpointStoreError,
@@ -57,6 +64,7 @@ export {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SessionLeaseCoordinatorOptions,
+  type SupervisorHeartbeatIdentity,
 } from "./session-lease-coordinator.ts";
 export {
   SessionEventHub,

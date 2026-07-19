@@ -7,7 +7,13 @@ import {
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  DOCKER_SANDBOX_LABELS,
+  DockerSandboxAssignmentInventory,
+  validateSandboxRuntimeIdentity,
+  type SandboxRuntimeIdentity,
+} from "./docker-sandbox-assignment-inventory.ts";
 import type { PiRpcEventPublisher, PiRpcTurnResult } from "./pi-rpc-turn-runner.ts";
 import {
   PiRpcTurnCancelledError,
@@ -40,15 +46,18 @@ export type DockerSandboxScenarioResolver = (
   context: DockerSandboxScenarioContext,
 ) => DockerSandboxScenario;
 
-export type DockerSandboxContainerIdentity = {
+export type DockerSandboxContainerIdentity = SandboxRuntimeIdentity & {
   containerName: string;
   commandId: string;
   sessionId: string;
   turnId: string;
+  leaseId: string;
+  fencingToken: number;
 };
 
 export type DockerSandboxTurnRunnerOptions = {
   image: string;
+  runtimeIdentity: SandboxRuntimeIdentity;
   dockerCommand?: string;
   scenario?: DockerSandboxScenario | DockerSandboxScenarioResolver;
   checkpointStore?: SandboxCheckpointStore;
@@ -128,11 +137,13 @@ export function buildDockerSandboxRunArguments(
   image: string,
   name: string,
   command: ExecuteTurnCommandMessage,
+  runtimeIdentity: SandboxRuntimeIdentity,
 ): readonly string[] {
   if (image.trim().length === 0) throw new TypeError("Docker sandbox image must not be empty");
   if (!/^[a-z0-9][a-z0-9_.-]{0,62}$/.test(name)) {
     throw new TypeError("Docker sandbox container name is invalid");
   }
+  const validatedRuntimeIdentity = validateSandboxRuntimeIdentity(runtimeIdentity);
   return [
     "run",
     "--rm",
@@ -140,11 +151,23 @@ export function buildDockerSandboxRunArguments(
     "--name",
     name,
     "--label",
-    "agent-dock.managed=true",
+    `${DOCKER_SANDBOX_LABELS.managed}=true`,
     "--label",
-    `agent-dock.command-id=${command.payload.commandId}`,
+    `${DOCKER_SANDBOX_LABELS.supervisorId}=${validatedRuntimeIdentity.supervisorId}`,
     "--label",
-    `agent-dock.session-id=${command.payload.sessionId}`,
+    `${DOCKER_SANDBOX_LABELS.bootId}=${validatedRuntimeIdentity.bootId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.sandboxId}=${validatedRuntimeIdentity.sandboxId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.commandId}=${command.payload.commandId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.sessionId}=${command.payload.sessionId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.turnId}=${command.payload.turnId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.leaseId}=${command.payload.leaseId}`,
+    "--label",
+    `${DOCKER_SANDBOX_LABELS.fencingToken}=${String(command.payload.fencingToken)}`,
     "--user",
     "1000:1000",
     "--read-only",
@@ -208,31 +231,11 @@ function cancellationSignal(value: unknown): PiRpcCancellationSignal {
   return value as PiRpcCancellationSignal;
 }
 
-function executeDocker(
-  dockerCommand: string,
-  args: readonly string[],
-  timeoutMs: number,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      dockerCommand,
-      [...args],
-      { encoding: "utf8", maxBuffer: 256 * 1_024, timeout: timeoutMs },
-      (error, stdout, stderr) => {
-        if (error) {
-          const code = typeof error.code === "number" ? error.code : 1;
-          resolvePromise({ code, stdout, stderr });
-        } else {
-          resolvePromise({ code: 0, stdout, stderr });
-        }
-      },
-    ).once("error", rejectPromise);
-  });
-}
-
 export class DockerSandboxTurnRunner {
   readonly #image: string;
   readonly #dockerCommand: string;
+  readonly #runtimeIdentity: SandboxRuntimeIdentity;
+  readonly #assignmentInventory: DockerSandboxAssignmentInventory;
   readonly #scenario: DockerSandboxScenario | DockerSandboxScenarioResolver;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #readyTimeoutMs: number;
@@ -247,6 +250,7 @@ export class DockerSandboxTurnRunner {
     if (options.image.trim().length === 0) throw new TypeError("image must not be empty");
     this.#image = options.image;
     this.#dockerCommand = options.dockerCommand ?? "docker";
+    this.#runtimeIdentity = validateSandboxRuntimeIdentity(options.runtimeIdentity);
     this.#scenario = options.scenario ?? "java_repair";
     this.#checkpointStore = options.checkpointStore;
     this.#readyTimeoutMs = positiveInteger(
@@ -261,6 +265,11 @@ export class DockerSandboxTurnRunner {
       options.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
       "cleanupTimeoutMs",
     );
+    this.#assignmentInventory = new DockerSandboxAssignmentInventory({
+      sandboxId: this.#runtimeIdentity.sandboxId,
+      dockerCommand: this.#dockerCommand,
+      timeoutMs: this.#cleanupTimeoutMs,
+    });
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
     this.#onContainerReady = options.onContainerReady;
@@ -293,14 +302,17 @@ export class DockerSandboxTurnRunner {
         : this.#scenario;
     const name = containerName(command, this.#idGenerator());
     const identity: DockerSandboxContainerIdentity = {
+      ...this.#runtimeIdentity,
       containerName: name,
       commandId: command.payload.commandId,
       sessionId: command.payload.sessionId,
       turnId: command.payload.turnId,
+      leaseId: command.payload.leaseId,
+      fencingToken: command.payload.fencingToken,
     };
     const child = spawn(
       this.#dockerCommand,
-      [...buildDockerSandboxRunArguments(this.#image, name, command)],
+      [...buildDockerSandboxRunArguments(this.#image, name, command, this.#runtimeIdentity)],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     const ready = deferred<void>();
@@ -592,7 +604,7 @@ export class DockerSandboxTurnRunner {
       try {
         exit = await withTimeout(exitPromise, this.#cleanupTimeoutMs, "Docker sandbox exit");
       } catch {
-        await this.#forceRemove(name, command.payload.commandId).catch((error: unknown) => {
+        await this.#forceRemove(name, command).catch((error: unknown) => {
           cleanupError = error;
         });
         exit = await withTimeout(
@@ -603,7 +615,7 @@ export class DockerSandboxTurnRunner {
       }
       await messageChain.catch(() => undefined);
       if (cleanupError === undefined) {
-        await this.#forceRemove(name, command.payload.commandId).catch((error: unknown) => {
+        await this.#forceRemove(name, command).catch((error: unknown) => {
           cleanupError = error;
         });
       }
@@ -633,51 +645,28 @@ export class DockerSandboxTurnRunner {
     return result;
   }
 
-  async #forceRemove(name: string, commandId: string): Promise<void> {
-    const identity = await executeDocker(
-      this.#dockerCommand,
-      [
-        "inspect",
-        "--format",
-        '{{.Id}}|{{index .Config.Labels "agent-dock.managed"}}|{{index .Config.Labels "agent-dock.command-id"}}',
-        name,
-      ],
-      this.#cleanupTimeoutMs,
-    );
-    if (identity.code !== 0) {
-      if (/no such (?:object|container)/i.test(identity.stderr)) return;
-      throw new PiRpcTurnError(
-        "docker_cleanup_unverified",
-        "Docker sandbox absence could not be verified",
-        true,
-      );
-    }
-    const [containerId, managed, owningCommandId] = identity.stdout.trim().split("|");
-    if (!containerId || managed !== "true" || owningCommandId !== commandId) {
+  async #forceRemove(name: string, command: ExecuteTurnCommandMessage): Promise<void> {
+    const assignment = await this.#assignmentInventory.inspectAssignment(name);
+    if (assignment === undefined) return;
+    if (
+      assignment.supervisorId !== this.#runtimeIdentity.supervisorId ||
+      assignment.bootId !== this.#runtimeIdentity.bootId ||
+      assignment.sandboxId !== this.#runtimeIdentity.sandboxId ||
+      assignment.commandId !== command.payload.commandId ||
+      assignment.sessionId !== command.payload.sessionId ||
+      assignment.turnId !== command.payload.turnId ||
+      assignment.leaseId !== command.payload.leaseId ||
+      assignment.fencingToken !== command.payload.fencingToken
+    ) {
       throw new PiRpcTurnError(
         "docker_container_identity_mismatch",
         "Docker sandbox cleanup identity did not match",
         false,
       );
     }
-    await executeDocker(
-      this.#dockerCommand,
-      ["rm", "--force", containerId],
-      this.#cleanupTimeoutMs,
-    ).catch(() => undefined);
-    const remaining = await executeDocker(
-      this.#dockerCommand,
-      ["inspect", "--format", "{{.Id}}", containerId],
-      this.#cleanupTimeoutMs,
-    );
-    if (remaining.code === 0 && remaining.stdout.trim().length > 0) {
-      throw new PiRpcTurnError(
-        "docker_container_alive",
-        "Docker sandbox removal could not be confirmed",
-        false,
-      );
-    }
-    if (!/no such (?:object|container)/i.test(remaining.stderr)) {
+    try {
+      await this.#assignmentInventory.terminateAndConfirmAbsent(assignment);
+    } catch {
       throw new PiRpcTurnError(
         "docker_cleanup_unverified",
         "Docker sandbox removal could not be verified",

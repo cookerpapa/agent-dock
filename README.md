@@ -270,10 +270,10 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, full runner/lease restart reconciliation, and cross-replica live
-fan-out remain separate work. Queued-turn withdrawal,
-acknowledged-cancellation crash recovery, lease renewal/reconciliation, and
-Windows Job Object containment are also deferred.
+gateway, production remote-supervisor registration/health wiring, and
+cross-replica live fan-out remain separate work. Queued-turn withdrawal,
+acknowledged-cancellation crash recovery, and Windows Job Object containment
+are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -283,6 +283,19 @@ test proves that an event committed before its ACK connection fails is
 re-ACKed after lease release without creating a duplicate row. This protects
 already-produced events, but does not pretend to resume an in-flight tool or
 settle an acknowledged command with an unknown execution outcome.
+
+Long turns now use the existing closed supervisor heartbeat protocol. One
+shared loop reports every active assignment with its lease/fence and produced/
+ACKed event cursors; PostgreSQL renews only an exact, unexpired lifecycle match.
+An omitted or stale renewal revokes the runtime, and post-ACK lease loss fails
+the session instead of returning it to the ready pool. The trusted host can
+inventory Docker activations by supervisor/boot/sandbox/command/session/turn/
+lease/fence labels, re-inspect the complete identity before removal, and confirm
+absence before settling `assignment_lost` or releasing capacity. An
+unacknowledged command may retain its mailbox position and retry only after that
+absence proof. Reconciliation is an explicit post-owner-exit boundary; it does
+not infer that a supervisor process is dead merely because a lease timestamp
+expired.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
@@ -301,5 +314,6 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses runner/lease reconciliation and cross-replica live
-notification rather than keeping a process per conversation.
+Phase 2 next addresses cross-replica live notification, production supervisor
+transport wiring, and the MinIO/S3 object-store adapter rather than keeping a
+process per conversation.

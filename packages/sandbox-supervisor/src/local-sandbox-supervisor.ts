@@ -6,6 +6,8 @@ import {
   type EventAckMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
+  type SupervisorHeartbeatAckMessage,
+  type SupervisorHeartbeatMessage,
 } from "@agent-dock/protocol";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -35,6 +37,19 @@ export type PreparedTurnExecution = {
   ack: CommandAckMessage;
   run(): Promise<PiRpcTurnResult>;
   releaseBeforeStart(): void;
+  revokeLease(): void;
+};
+
+export type LocalSupervisorHeartbeatIdentity = {
+  supervisorId: string;
+  bootId: string;
+  connectionId: string;
+};
+
+export type AppliedHeartbeatResult = {
+  renewedAssignments: number;
+  revokedAssignments: number;
+  revokedSessionIds: readonly string[];
 };
 
 export type SupervisorTurnCancellationResult = {
@@ -66,6 +81,7 @@ type Assignment = {
   abortController: AbortController;
   state: AssignmentState;
   runPromise?: Promise<PiRpcTurnResult>;
+  leaseValidUntil?: string;
 };
 
 type CancellationState = "prepared" | "running" | "completed" | "failed";
@@ -141,6 +157,96 @@ export class LocalSandboxSupervisor {
 
   get activeSessionCount(): number {
     return this.#currentBySession.size;
+  }
+
+  createHeartbeat(
+    identity: LocalSupervisorHeartbeatIdentity,
+    acceptingAssignments = true,
+  ): SupervisorHeartbeatMessage {
+    const sessions = [...this.#currentBySession.values()]
+      .filter((assignment) => assignment.state === "running" || assignment.state === "cancelling")
+      .map((assignment) => {
+        const baseline = assignment.command.payload.nextEventSeq - 1;
+        return {
+          sessionId: assignment.command.payload.sessionId,
+          turnId: assignment.command.payload.turnId,
+          state: assignment.state === "cancelling" ? ("cancelling" as const) : ("running" as const),
+          leaseId: assignment.command.payload.leaseId,
+          fencingToken: assignment.command.payload.fencingToken,
+          lastProducedSeq: assignment.eventSpool?.highestProducedSeq ?? baseline,
+          lastAcknowledgedSeq: assignment.eventSpool?.acknowledgedThroughSeq ?? baseline,
+        };
+      });
+    const message = parseSupervisorToControlMessage({
+      protocolVersion: 1,
+      messageId: this.#idGenerator(),
+      sentAt: validDate(this.#clock).toISOString(),
+      type: "supervisor.heartbeat",
+      payload: {
+        ...identity,
+        acceptingAssignments,
+        maxConcurrentSessions: this.#maxConcurrentSessions,
+        sessions,
+      },
+    });
+    if (message.type !== "supervisor.heartbeat") {
+      throw new LocalSandboxSupervisorError(
+        "invalid_heartbeat",
+        "Supervisor heartbeat was invalid",
+      );
+    }
+    return message;
+  }
+
+  applyHeartbeatAcknowledgement(
+    heartbeat: SupervisorHeartbeatMessage,
+    value: unknown,
+  ): AppliedHeartbeatResult {
+    const acknowledgement = parseControlToSupervisorMessage(value);
+    if (
+      acknowledgement.type !== "supervisor.heartbeat.ack" ||
+      acknowledgement.payload.acknowledgedMessageId !== heartbeat.messageId ||
+      acknowledgement.payload.connectionId !== heartbeat.payload.connectionId
+    ) {
+      throw new LocalSandboxSupervisorError(
+        "invalid_heartbeat_ack",
+        "Heartbeat acknowledgement identity did not match",
+      );
+    }
+    this.#assertHeartbeatRenewalScope(heartbeat, acknowledgement);
+
+    const renewalBySession = new Map(
+      acknowledgement.payload.leaseRenewals.map((renewal) => [renewal.sessionId, renewal]),
+    );
+    let renewedAssignments = 0;
+    let revokedAssignments = 0;
+    const revokedSessionIds: string[] = [];
+    const now = validDate(this.#clock).valueOf();
+    for (const observation of heartbeat.payload.sessions) {
+      const assignment = this.#currentBySession.get(observation.sessionId);
+      if (
+        assignment === undefined ||
+        assignment.command.payload.leaseId !== observation.leaseId ||
+        assignment.command.payload.fencingToken !== observation.fencingToken
+      ) {
+        continue;
+      }
+      const renewal = renewalBySession.get(observation.sessionId);
+      if (
+        renewal !== undefined &&
+        renewal.leaseId === observation.leaseId &&
+        renewal.fencingToken === observation.fencingToken &&
+        new Date(renewal.validUntil).valueOf() > now
+      ) {
+        assignment.leaseValidUntil = renewal.validUntil;
+        renewedAssignments += 1;
+        continue;
+      }
+      this.#revokeLease(assignment);
+      revokedAssignments += 1;
+      revokedSessionIds.push(observation.sessionId);
+    }
+    return { renewedAssignments, revokedAssignments, revokedSessionIds };
   }
 
   async recoverPendingEvents(
@@ -290,6 +396,7 @@ export class LocalSandboxSupervisor {
       ack: this.#ack(assignment.command, { status }),
       run: () => this.#run(assignment),
       releaseBeforeStart: () => this.#releaseBeforeStart(assignment),
+      revokeLease: () => this.#revokeLease(assignment),
     };
   }
 
@@ -304,6 +411,7 @@ export class LocalSandboxSupervisor {
       run: () =>
         Promise.reject(new LocalSandboxSupervisorError(code, "Rejected command cannot run")),
       releaseBeforeStart: () => undefined,
+      revokeLease: () => undefined,
     };
   }
 
@@ -393,6 +501,12 @@ export class LocalSandboxSupervisor {
     assignment.runPromise = execution
       .then(
         (result) => {
+          if (assignment.state === "cancelling") {
+            throw new LocalSandboxSupervisorError(
+              "lease_revocation_not_confirmed",
+              "Runner completed without confirming its requested termination",
+            );
+          }
           assignment.state = "completed";
           return result;
         },
@@ -472,6 +586,44 @@ export class LocalSandboxSupervisor {
         ? "Supervisor durable event spool could not be opened"
         : "Supervisor event spool initialization failed",
     );
+  }
+
+  #assertHeartbeatRenewalScope(
+    heartbeat: SupervisorHeartbeatMessage,
+    acknowledgement: SupervisorHeartbeatAckMessage,
+  ): void {
+    const observed = new Map(
+      heartbeat.payload.sessions.map((session) => [session.sessionId, session]),
+    );
+    for (const renewal of acknowledgement.payload.leaseRenewals) {
+      const observation = observed.get(renewal.sessionId);
+      if (
+        observation === undefined ||
+        observation.leaseId !== renewal.leaseId ||
+        observation.fencingToken !== renewal.fencingToken
+      ) {
+        throw new LocalSandboxSupervisorError(
+          "invalid_heartbeat_ack",
+          "Heartbeat acknowledgement renewed an unobserved assignment",
+        );
+      }
+    }
+  }
+
+  #revokeLease(assignment: Assignment): void {
+    if (
+      (assignment.state !== "running" && assignment.state !== "cancelling") ||
+      assignment.abortController.signal.aborted
+    ) {
+      return;
+    }
+    const cancellationSignal: PiRpcCancellationSignal = {
+      kind: "agent-dock.turn-cancellation",
+      reason: "lease_revoked",
+      gracePeriodMs: 0,
+    };
+    assignment.state = "cancelling";
+    assignment.abortController.abort(cancellationSignal);
   }
 
   #runCancellation(cancellation: Cancellation): Promise<SupervisorTurnCancellationResult> {

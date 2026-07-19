@@ -53,12 +53,25 @@ export {
 export {
   LocalSandboxSupervisor,
   LocalSandboxSupervisorError,
+  type AppliedHeartbeatResult,
+  type LocalSupervisorHeartbeatIdentity,
   type LocalSandboxSupervisorOptions,
   type PreparedTurnCancellation,
   type PreparedTurnExecution,
   type SupervisorTurnCancellationResult,
   type SupervisorTurnRunner,
 } from "./local-sandbox-supervisor.ts";
+
+export {
+  DOCKER_SANDBOX_LABELS,
+  DockerSandboxAssignmentInventory,
+  SandboxAssignmentInventoryError,
+  validateSandboxRuntimeIdentity,
+  type DockerSandboxAssignmentInventoryOptions,
+  type SandboxAssignmentInventory,
+  type SandboxRuntimeAssignment,
+  type SandboxRuntimeIdentity,
+} from "./docker-sandbox-assignment-inventory.ts";
 
 export {
   DockerSandboxTurnRunner,

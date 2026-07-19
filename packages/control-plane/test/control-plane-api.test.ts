@@ -15,8 +15,11 @@ import {
   DockerSandboxTurnRunner,
   FileEventSpoolStore,
   LocalSandboxSupervisor,
+  PiRpcTurnCancelledError,
   PiRpcTurnError,
   PiRpcTurnRunner,
+  type SandboxAssignmentInventory,
+  type SandboxRuntimeAssignment,
 } from "@agent-dock/sandbox-supervisor";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
@@ -27,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
   CancellationDispatcher,
+  AssignmentReconciler,
   DeterministicExecutionBackend,
   DurableEventStore,
   FileCheckpointObjectStore,
@@ -54,6 +58,16 @@ const IDS = {
   dockerSandboxBoot: "60000000-0000-4000-8000-000000000003",
   spoolSandbox: "50000000-0000-4000-8000-000000000004",
   spoolSandboxBoot: "60000000-0000-4000-8000-000000000004",
+  reconciliationSandbox: "50000000-0000-4000-8000-000000000005",
+  reconciliationSandboxBoot: "60000000-0000-4000-8000-000000000005",
+  requeueSandbox: "50000000-0000-4000-8000-000000000006",
+  requeueSandboxBoot: "60000000-0000-4000-8000-000000000006",
+  failedReconciliationSandbox: "50000000-0000-4000-8000-000000000007",
+  failedReconciliationSandboxBoot: "60000000-0000-4000-8000-000000000007",
+  retirementSandbox: "50000000-0000-4000-8000-000000000008",
+  retirementSandboxBoot: "60000000-0000-4000-8000-000000000008",
+  mismatchedRuntimeSandbox: "50000000-0000-4000-8000-000000000009",
+  mismatchedRuntimeSandboxBoot: "60000000-0000-4000-8000-000000000009",
 };
 
 let pglite: PGlite | undefined;
@@ -227,6 +241,139 @@ async function waitForCondition(
     if (Date.now() >= deadline) throw new Error("Timed out waiting for test condition");
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
   }
+}
+
+class MemoryAssignmentInventory implements SandboxAssignmentInventory {
+  readonly terminated: SandboxRuntimeAssignment[] = [];
+  assignments: SandboxRuntimeAssignment[];
+  failTermination = false;
+
+  constructor(assignments: readonly SandboxRuntimeAssignment[]) {
+    this.assignments = assignments.map((assignment) => ({ ...assignment }));
+  }
+
+  async listAssignments(): Promise<readonly SandboxRuntimeAssignment[]> {
+    return this.assignments.map((assignment) => ({ ...assignment }));
+  }
+
+  async terminateAndConfirmAbsent(assignment: SandboxRuntimeAssignment): Promise<void> {
+    if (this.failTermination) throw new Error("injected runtime termination failure");
+    const current = this.assignments.find(
+      (candidate) => candidate.runtimeId === assignment.runtimeId,
+    );
+    if (current === undefined) return;
+    expect(current).toEqual(assignment);
+    this.assignments = this.assignments.filter(
+      (candidate) => candidate.runtimeId !== assignment.runtimeId,
+    );
+    this.terminated.push({ ...assignment });
+  }
+}
+
+async function createAssignedTurn(options: {
+  sandboxId: string;
+  sandboxBootId: string;
+  supervisorId: string;
+  phase: "dispatched" | "acknowledged";
+  expired: boolean;
+}): Promise<{
+  accepted: AcceptedTurnResource;
+  assignedSession: SessionResource;
+  runtime: SandboxRuntimeAssignment;
+}> {
+  const sessionResponse = await http.inject({
+    method: "POST",
+    url: `/v1/projects/${project.projectId}/sessions`,
+    payload: { workspaceId: project.workspaceId },
+  });
+  expect(sessionResponse.statusCode).toBe(201);
+  const assignedSession = sessionResponse.json() as SessionResource;
+  const turnResponse = await http.inject({
+    method: "POST",
+    url: `/v1/sessions/${assignedSession.sessionId}/turns`,
+    headers: { "idempotency-key": `reconcile-${options.sandboxId}` },
+    payload: { prompt: "Simulate a supervisor disappearing during this turn." },
+  });
+  expect(turnResponse.statusCode).toBe(202);
+  const accepted = turnResponse.json() as AcceptedTurnResource;
+  const now = new Date();
+  const acquiredAt = new Date(now.valueOf() - 10_000);
+  const validUntil = new Date(now.valueOf() + (options.expired ? -5_000 : 60_000));
+  const leaseId = globalThis.crypto.randomUUID();
+  await database.transaction().execute(async (transaction) => {
+    await transaction
+      .insertInto("sandboxes")
+      .values({
+        id: options.sandboxId,
+        supervisor_id: options.supervisorId,
+        boot_id: options.sandboxBootId,
+        state: "leased",
+        max_concurrent_sessions: 1,
+        active_sessions: 1,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("commands")
+      .set({
+        state: options.phase,
+        dispatched_at: now,
+        acknowledged_at: options.phase === "acknowledged" ? now : null,
+      })
+      .where("id", "=", accepted.commandId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("turns")
+      .set({
+        state: options.phase === "acknowledged" ? "running" : "dispatching",
+        started_at: options.phase === "acknowledged" ? now : null,
+      })
+      .where("id", "=", accepted.turnId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("sessions")
+      .set({
+        state: options.phase === "acknowledged" ? "running" : "cold",
+        last_fencing_token: 1,
+      })
+      .where("id", "=", assignedSession.sessionId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("outbox")
+      .set({
+        attempts: 1,
+        published_at: options.phase === "acknowledged" ? now : null,
+      })
+      .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${accepted.commandId}`)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("session_leases")
+      .values({
+        session_id: assignedSession.sessionId,
+        lease_id: leaseId,
+        sandbox_id: options.sandboxId,
+        fencing_token: 1,
+        acquired_at: acquiredAt,
+        renewed_at: acquiredAt,
+        valid_until: validUntil,
+      })
+      .executeTakeFirstOrThrow();
+  });
+  return {
+    accepted,
+    assignedSession,
+    runtime: {
+      runtimeId: `runtime-${options.sandboxId}`,
+      runtimeName: `runtime-${options.sandboxId}`,
+      supervisorId: options.supervisorId,
+      bootId: options.sandboxBootId,
+      sandboxId: options.sandboxId,
+      commandId: accepted.commandId,
+      sessionId: assignedSession.sessionId,
+      turnId: accepted.turnId,
+      leaseId,
+      fencingToken: 1,
+    },
+  };
 }
 
 beforeAll(async () => {
@@ -1578,6 +1725,11 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       const runner = new DockerSandboxTurnRunner({
         image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
+        runtimeIdentity: {
+          supervisorId: "local-docker-sandbox-test",
+          bootId: IDS.dockerSandboxBoot,
+          sandboxId: IDS.dockerSandbox,
+        },
         dockerCommand: process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
         scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
         checkpointStore,
@@ -2154,6 +2306,398 @@ describe.sequential("single-user durable turn intake API", () => {
       .where("id", "=", IDS.sandbox)
       .executeTakeFirstOrThrow();
     expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
+  });
+
+  it("renews a running assignment beyond its initial lease deadline", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const longSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${longSession.sessionId}/turns`,
+      headers: { "idempotency-key": "heartbeat-renews-long-turn" },
+      payload: { prompt: "Remain active across several lease periods." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+    let releaseRunner: (() => void) | undefined;
+    const runnerGate = new Promise<void>((resolvePromise) => {
+      releaseRunner = resolvePromise;
+    });
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.sandbox,
+      leaseDurationMs: 90,
+    });
+    const supervisor = new LocalSandboxSupervisor({
+      runner: {
+        async run() {
+          await runnerGate;
+          return { stopReason: "long_turn_completed" };
+        },
+      },
+    });
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        eventIngestor: durableEventStore,
+        heartbeatIntervalMs: 20,
+      }),
+      leaseManager: leaseCoordinator,
+    });
+
+    const dispatch = dispatcher.dispatchNext();
+    await waitForCondition(async () => {
+      const row = await database
+        .selectFrom("session_leases")
+        .select("session_id")
+        .where("session_id", "=", longSession.sessionId)
+        .executeTakeFirst();
+      return row !== undefined;
+    });
+    const initialLease = await database
+      .selectFrom("session_leases")
+      .select(["acquired_at", "renewed_at", "valid_until"])
+      .where("session_id", "=", longSession.sessionId)
+      .executeTakeFirstOrThrow();
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 180));
+    const renewedLease = await database
+      .selectFrom("session_leases")
+      .select(["renewed_at", "valid_until"])
+      .where("session_id", "=", longSession.sessionId)
+      .executeTakeFirstOrThrow();
+    expect(new Date(renewedLease.renewed_at).valueOf()).toBeGreaterThan(
+      new Date(initialLease.renewed_at).valueOf(),
+    );
+    expect(new Date(renewedLease.valid_until).valueOf()).toBeGreaterThan(
+      new Date(initialLease.valid_until).valueOf(),
+    );
+    expect(new Date(renewedLease.valid_until).valueOf()).toBeGreaterThan(Date.now());
+
+    releaseRunner?.();
+    await expect(dispatch).resolves.toMatchObject({
+      status: "completed",
+      commandId: accepted.commandId,
+      sessionId: longSession.sessionId,
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "completed",
+      turnState: "completed",
+      sessionState: "idle",
+      stopReason: "long_turn_completed",
+    });
+  });
+
+  it("never revives an expired lease and quarantines the stopped session", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const expiredSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${expiredSession.sessionId}/turns`,
+      headers: { "idempotency-key": "heartbeat-rejects-expired-lease" },
+      payload: { prompt: "Let this deliberately short lease expire." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.sandbox,
+      leaseDurationMs: 60,
+    });
+    const supervisor = new LocalSandboxSupervisor({
+      runner: {
+        async run(_command, _publishEvent, signal) {
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                const reason = signal.reason as { reason: "lease_revoked" };
+                reject(new PiRpcTurnCancelledError(reason.reason, false));
+              },
+              { once: true },
+            );
+          });
+        },
+      },
+    });
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new LocalSupervisorExecutionBackend({
+        supervisor,
+        leaseCoordinator,
+        eventIngestor: durableEventStore,
+        heartbeatIntervalMs: 120,
+      }),
+      leaseManager: leaseCoordinator,
+    });
+
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      sessionId: expiredSession.sessionId,
+      turnId: accepted.turnId,
+      phase: "after_start",
+      failureCode: "lease_renewal_failed",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      turnState: "failed",
+      sessionState: "failed",
+      turnFailureCode: "lease_renewal_failed",
+      failureRetryable: false,
+    });
+    expect(supervisor.activeSessionCount).toBe(0);
+    expect(
+      await database
+        .selectFrom("session_leases")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("session_id", "=", expiredSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
+  });
+
+  it("terminates expired and orphan runtimes before settling a lost assignment", async () => {
+    const fixture = await createAssignedTurn({
+      sandboxId: IDS.reconciliationSandbox,
+      sandboxBootId: IDS.reconciliationSandboxBoot,
+      supervisorId: "reconciliation-supervisor",
+      phase: "acknowledged",
+      expired: true,
+    });
+    const orphan: SandboxRuntimeAssignment = {
+      ...fixture.runtime,
+      runtimeId: "orphan-runtime",
+      runtimeName: "orphan-runtime",
+      commandId: globalThis.crypto.randomUUID(),
+      sessionId: globalThis.crypto.randomUUID(),
+      turnId: globalThis.crypto.randomUUID(),
+      leaseId: globalThis.crypto.randomUUID(),
+      fencingToken: 9,
+    };
+    const inventory = new MemoryAssignmentInventory([fixture.runtime, orphan]);
+    const reconciler = new AssignmentReconciler({
+      database,
+      sandboxId: IDS.reconciliationSandbox,
+      inventory,
+    });
+
+    await expect(reconciler.reconcileExpiredAssignments()).resolves.toEqual({
+      inspectedRuntimes: 2,
+      terminatedRuntimes: 2,
+      orphanRuntimes: 1,
+      settledAssignments: 1,
+      requeuedAssignments: 0,
+    });
+    expect(inventory.assignments).toHaveLength(0);
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "assignment_lost",
+      turnState: "failed",
+      turnFailureCode: "assignment_lost",
+      failureRetryable: false,
+      sessionState: "failed",
+    });
+    expect(
+      await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.reconciliationSandbox)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "ready", active_sessions: 0 });
+  });
+
+  it("requeues a confirmed-absent assignment that never reached durable ACK", async () => {
+    const fixture = await createAssignedTurn({
+      sandboxId: IDS.requeueSandbox,
+      sandboxBootId: IDS.requeueSandboxBoot,
+      supervisorId: "requeue-supervisor",
+      phase: "dispatched",
+      expired: true,
+    });
+    const inventory = new MemoryAssignmentInventory([fixture.runtime]);
+    const reconciler = new AssignmentReconciler({
+      database,
+      sandboxId: IDS.requeueSandbox,
+      inventory,
+    });
+
+    await expect(reconciler.reconcileExpiredAssignments()).resolves.toMatchObject({
+      terminatedRuntimes: 1,
+      settledAssignments: 0,
+      requeuedAssignments: 1,
+    });
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "pending",
+      turnState: "queued",
+      sessionState: "cold",
+      publishedAt: null,
+      lastError: "assignment_lost",
+    });
+    expect(
+      await database
+        .selectFrom("session_leases")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("session_id", "=", fixture.assignedSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
+
+    const retryDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new DeterministicExecutionBackend(),
+    });
+    await expect(retryDispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: fixture.accepted.commandId,
+    });
+  });
+
+  it("fails closed when runtime termination is unconfirmed, then converges on retry", async () => {
+    const fixture = await createAssignedTurn({
+      sandboxId: IDS.failedReconciliationSandbox,
+      sandboxBootId: IDS.failedReconciliationSandboxBoot,
+      supervisorId: "failed-reconciliation-supervisor",
+      phase: "acknowledged",
+      expired: true,
+    });
+    const inventory = new MemoryAssignmentInventory([fixture.runtime]);
+    inventory.failTermination = true;
+    const reconciler = new AssignmentReconciler({
+      database,
+      sandboxId: IDS.failedReconciliationSandbox,
+      inventory,
+    });
+
+    await expect(reconciler.reconcileExpiredAssignments()).rejects.toMatchObject({
+      code: "assignment_reconciliation_failed",
+      retryable: true,
+    });
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "acknowledged",
+      turnState: "running",
+      sessionState: "running",
+    });
+    expect(
+      await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.failedReconciliationSandbox)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "failed", active_sessions: 1 });
+
+    inventory.failTermination = false;
+    await expect(reconciler.reconcileExpiredAssignments()).resolves.toMatchObject({
+      terminatedRuntimes: 1,
+      settledAssignments: 1,
+    });
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "failed",
+      turnState: "failed",
+      sessionState: "failed",
+    });
+    expect(
+      await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.failedReconciliationSandbox)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "failed", active_sessions: 0 });
+  });
+
+  it("drains and retires an old supervisor sandbox without adopting its live runtime", async () => {
+    const fixture = await createAssignedTurn({
+      sandboxId: IDS.retirementSandbox,
+      sandboxBootId: IDS.retirementSandboxBoot,
+      supervisorId: "retirement-supervisor",
+      phase: "acknowledged",
+      expired: false,
+    });
+    const inventory = new MemoryAssignmentInventory([fixture.runtime]);
+    const reconciler = new AssignmentReconciler({
+      database,
+      sandboxId: IDS.retirementSandbox,
+      inventory,
+    });
+
+    await expect(reconciler.retireSandbox()).resolves.toMatchObject({
+      sandboxState: "terminated",
+      terminatedRuntimes: 1,
+      settledAssignments: 1,
+    });
+    expect(inventory.assignments).toHaveLength(0);
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "assignment_lost",
+      turnState: "failed",
+      sessionState: "failed",
+    });
+    expect(
+      await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions", "terminated_at"])
+        .where("id", "=", IDS.retirementSandbox)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({ state: "terminated", active_sessions: 0 });
+    await expect(reconciler.retireSandbox()).resolves.toEqual({
+      inspectedRuntimes: 0,
+      terminatedRuntimes: 0,
+      orphanRuntimes: 0,
+      settledAssignments: 0,
+      requeuedAssignments: 0,
+      sandboxState: "terminated",
+    });
+  });
+
+  it("quarantines a conflicting runtime boot without guessing its ownership", async () => {
+    const fixture = await createAssignedTurn({
+      sandboxId: IDS.mismatchedRuntimeSandbox,
+      sandboxBootId: IDS.mismatchedRuntimeSandboxBoot,
+      supervisorId: "mismatched-runtime-supervisor",
+      phase: "acknowledged",
+      expired: true,
+    });
+    const inventory = new MemoryAssignmentInventory([
+      {
+        ...fixture.runtime,
+        bootId: "60000000-0000-4000-8000-000000000099",
+      },
+    ]);
+    const reconciler = new AssignmentReconciler({
+      database,
+      sandboxId: IDS.mismatchedRuntimeSandbox,
+      inventory,
+    });
+
+    await expect(reconciler.reconcileExpiredAssignments()).rejects.toMatchObject({
+      code: "runtime_identity_mismatch",
+      retryable: false,
+    });
+    expect(inventory.terminated).toHaveLength(0);
+    expect(await readTurnExecution(fixture.accepted)).toMatchObject({
+      commandState: "acknowledged",
+      turnState: "running",
+      sessionState: "running",
+    });
+    expect(
+      await database
+        .selectFrom("sandboxes")
+        .select(["state", "active_sessions"])
+        .where("id", "=", IDS.mismatchedRuntimeSandbox)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "failed", active_sessions: 1 });
   });
 
   it("replays an ACK-lost event from a fresh supervisor spool without duplicating PostgreSQL", async () => {

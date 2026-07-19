@@ -22,6 +22,9 @@ const IDS = {
   cancellation: "66666666-6666-4666-8666-666666666666",
   lease: "44444444-4444-4444-8444-444444444444",
   lease2: "55555555-5555-4555-8555-555555555555",
+  boot: "88888888-8888-4888-8888-888888888888",
+  connection: "99999999-9999-4999-8999-999999999999",
+  heartbeatAck: "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
 };
 
 function command(
@@ -366,6 +369,218 @@ describe("LocalSandboxSupervisor", () => {
     });
     await expect(execution).rejects.toBeInstanceOf(PiRpcTurnCancelledError);
     expect(observedSignal?.aborted).toBe(true);
+    expect(supervisor.activeSessionCount).toBe(0);
+  });
+
+  it("reports a running assignment and applies only its exact heartbeat renewal", async () => {
+    const clock = () => new Date("2026-07-18T08:00:00.000Z");
+    const abortingRunner: SupervisorTurnRunner = {
+      async run(_value, _publishEvent, signal) {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const reason = signal.reason as { reason: "lease_revoked" };
+              reject(new PiRpcTurnCancelledError(reason.reason, false));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner, clock });
+    const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
+    const execution = prepared.run();
+    void execution.catch(() => undefined);
+    const heartbeat = supervisor.createHeartbeat({
+      supervisorId: "supervisor-1",
+      bootId: IDS.boot,
+      connectionId: IDS.connection,
+    });
+
+    expect(heartbeat.payload.sessions).toEqual([
+      {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        state: "running",
+        leaseId: IDS.lease,
+        fencingToken: 1,
+        lastProducedSeq: 0,
+        lastAcknowledgedSeq: 0,
+      },
+    ]);
+    expect(
+      supervisor.applyHeartbeatAcknowledgement(heartbeat, {
+        protocolVersion: 1,
+        messageId: IDS.heartbeatAck,
+        sentAt: "2026-07-18T08:00:00.000Z",
+        type: "supervisor.heartbeat.ack",
+        payload: {
+          acknowledgedMessageId: heartbeat.messageId,
+          connectionId: IDS.connection,
+          leaseRenewals: [
+            {
+              sessionId: "session-1",
+              leaseId: IDS.lease,
+              fencingToken: 1,
+              validUntil: "2026-07-18T08:01:00.000Z",
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      renewedAssignments: 1,
+      revokedAssignments: 0,
+      revokedSessionIds: [],
+    });
+
+    prepared.revokeLease();
+    await expect(execution).rejects.toMatchObject({ reason: "lease_revoked" });
+    expect(supervisor.activeSessionCount).toBe(0);
+  });
+
+  it("batches every active session into one supervisor heartbeat", async () => {
+    const abortingRunner: SupervisorTurnRunner = {
+      async run(_value, _publishEvent, signal) {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const reason = signal.reason as { reason: "lease_revoked" };
+              reject(new PiRpcTurnCancelledError(reason.reason, false));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({
+      runner: abortingRunner,
+      maxConcurrentSessions: 2,
+      clock: () => new Date("2026-07-18T08:00:00.000Z"),
+    });
+    const first = supervisor.prepare(command(), rejectUnexpectedEvent);
+    const second = supervisor.prepare(
+      command({
+        commandId: IDS.command2,
+        leaseId: IDS.lease2,
+        fencingToken: 2,
+        sessionId: "session-2",
+      }),
+      rejectUnexpectedEvent,
+    );
+    const executions = [first.run(), second.run()];
+    for (const execution of executions) void execution.catch(() => undefined);
+    const heartbeat = supervisor.createHeartbeat({
+      supervisorId: "supervisor-1",
+      bootId: IDS.boot,
+      connectionId: IDS.connection,
+    });
+
+    expect(heartbeat.payload.sessions.map((value) => value.sessionId).sort()).toEqual([
+      "session-1",
+      "session-2",
+    ]);
+    expect(
+      supervisor.applyHeartbeatAcknowledgement(heartbeat, {
+        protocolVersion: 1,
+        messageId: IDS.heartbeatAck,
+        sentAt: "2026-07-18T08:00:01.000Z",
+        type: "supervisor.heartbeat.ack",
+        payload: {
+          acknowledgedMessageId: heartbeat.messageId,
+          connectionId: IDS.connection,
+          leaseRenewals: heartbeat.payload.sessions.map((value) => ({
+            sessionId: value.sessionId,
+            leaseId: value.leaseId,
+            fencingToken: value.fencingToken,
+            validUntil: "2026-07-18T08:01:00.000Z",
+          })),
+        },
+      }),
+    ).toEqual({
+      renewedAssignments: 2,
+      revokedAssignments: 0,
+      revokedSessionIds: [],
+    });
+
+    first.revokeLease();
+    second.revokeLease();
+    await Promise.all(executions.map((execution) => expect(execution).rejects.toBeDefined()));
+    expect(supervisor.activeSessionCount).toBe(0);
+  });
+
+  it("revokes a running assignment when its heartbeat ACK omits the renewal", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const abortingRunner: SupervisorTurnRunner = {
+      async run(_value, _publishEvent, signal) {
+        observedSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const reason = signal.reason as { reason: "lease_revoked" };
+              reject(new PiRpcTurnCancelledError(reason.reason, false));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner });
+    const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
+    const execution = prepared.run();
+    void execution.catch(() => undefined);
+    const heartbeat = supervisor.createHeartbeat({
+      supervisorId: "supervisor-1",
+      bootId: IDS.boot,
+      connectionId: IDS.connection,
+    });
+
+    expect(
+      supervisor.applyHeartbeatAcknowledgement(heartbeat, {
+        protocolVersion: 1,
+        messageId: IDS.heartbeatAck,
+        sentAt: "2026-07-18T08:00:01.000Z",
+        type: "supervisor.heartbeat.ack",
+        payload: {
+          acknowledgedMessageId: heartbeat.messageId,
+          connectionId: IDS.connection,
+          leaseRenewals: [],
+        },
+      }),
+    ).toEqual({
+      renewedAssignments: 0,
+      revokedAssignments: 1,
+      revokedSessionIds: ["session-1"],
+    });
+    expect(observedSignal?.reason).toMatchObject({ reason: "lease_revoked", gracePeriodMs: 0 });
+    await expect(execution).rejects.toMatchObject({ reason: "lease_revoked" });
+    expect(supervisor.activeSessionCount).toBe(0);
+  });
+
+  it("does not report success when a runner ignores lease revocation", async () => {
+    let releaseRunner: (() => void) | undefined;
+    const gate = new Promise<void>((resolvePromise) => {
+      releaseRunner = resolvePromise;
+    });
+    const supervisor = new LocalSandboxSupervisor({
+      runner: {
+        async run() {
+          await gate;
+          return { stopReason: "ignored_abort" };
+        },
+      },
+    });
+    const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
+    const execution = prepared.run();
+    void execution.catch(() => undefined);
+
+    prepared.revokeLease();
+    releaseRunner?.();
+    await expect(execution).rejects.toMatchObject({
+      code: "lease_revocation_not_confirmed",
+    });
     expect(supervisor.activeSessionCount).toBe(0);
   });
 });

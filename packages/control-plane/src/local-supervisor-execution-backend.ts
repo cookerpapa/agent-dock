@@ -41,7 +41,35 @@ export type LocalSupervisorExecutionBackendOptions = {
   onEvent?: (message: EventPublishMessage) => Promise<void> | void;
   clock?: () => Date;
   idGenerator?: () => string;
+  heartbeatIntervalMs?: number;
 };
+
+type TrackedLeaseExecution = {
+  prepared: ReturnType<LocalSandboxSupervisor["prepare"]>;
+  execution: Promise<TurnExecutionResult>;
+  failure?: TurnExecutionBackendError;
+};
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function wait(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolvePromise) => {
+    const timer = setTimeout(settle, delayMs);
+    const onAbort = (): void => settle();
+    function settle(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolvePromise();
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function validDate(clock: () => Date): Date {
   const value = clock();
@@ -66,6 +94,14 @@ function positiveSafeInteger(value: string, name: string): number {
 function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof TurnExecutionBackendError) return error;
   if (error instanceof PiRpcTurnCancelledError) {
+    if (error.reason === "lease_revoked") {
+      return new TurnExecutionBackendError(
+        "lease_revoked",
+        "Execution lease was revoked and the runtime was stopped",
+        false,
+        true,
+      );
+    }
     return new TurnExecutionCancelledError(error.reason, error.forced);
   }
   if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
@@ -198,6 +234,11 @@ export class LocalSupervisorExecutionBackend
   readonly #onEvent: ((message: EventPublishMessage) => Promise<void> | void) | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
+  readonly #heartbeatIntervalMs: number;
+  readonly #trackedExecutions = new Map<string, TrackedLeaseExecution>();
+  #heartbeatAbort: AbortController | undefined;
+  #heartbeatTask: Promise<void> | undefined;
+  #heartbeatFailure: TurnExecutionBackendError | undefined;
 
   constructor(options: LocalSupervisorExecutionBackendOptions) {
     this.#supervisor = options.supervisor;
@@ -206,6 +247,10 @@ export class LocalSupervisorExecutionBackend
     this.#onEvent = options.onEvent;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+    this.#heartbeatIntervalMs = positiveInteger(
+      options.heartbeatIntervalMs ?? this.#leaseCoordinator.heartbeatIntervalMs,
+      "heartbeatIntervalMs",
+    );
   }
 
   async execute(
@@ -296,7 +341,21 @@ export class LocalSupervisorExecutionBackend
 
       await lifecycle.started(acknowledgement);
       durableStarted = true;
-      return await prepared.run();
+      const execution = prepared.run();
+      const tracked = this.#registerLeaseExecution(request.sessionId, prepared, execution);
+      try {
+        let result: TurnExecutionResult;
+        try {
+          result = await execution;
+        } catch (error: unknown) {
+          if (tracked.failure !== undefined) throw tracked.failure;
+          throw error;
+        }
+        if (tracked.failure !== undefined) throw tracked.failure;
+        return result;
+      } finally {
+        await this.#unregisterLeaseExecution(request.sessionId, tracked);
+      }
     } catch (error: unknown) {
       if (!durableStarted) {
         prepared?.releaseBeforeStart();
@@ -361,5 +420,103 @@ export class LocalSupervisorExecutionBackend
     } catch (error: unknown) {
       throw normalizeCancellationError(error);
     }
+  }
+
+  #registerLeaseExecution(
+    sessionId: string,
+    prepared: ReturnType<LocalSandboxSupervisor["prepare"]>,
+    execution: Promise<TurnExecutionResult>,
+  ): TrackedLeaseExecution {
+    const tracked: TrackedLeaseExecution = { prepared, execution };
+    if (this.#trackedExecutions.has(sessionId)) {
+      tracked.failure = new TurnExecutionBackendError(
+        "lease_monitor_invariant",
+        "Session already had a tracked lease execution",
+        false,
+        true,
+      );
+      prepared.revokeLease();
+      return tracked;
+    }
+    this.#trackedExecutions.set(sessionId, tracked);
+    if (this.#heartbeatFailure !== undefined) {
+      tracked.failure = this.#heartbeatFailure;
+      prepared.revokeLease();
+    } else {
+      this.#startHeartbeatTask();
+    }
+    return tracked;
+  }
+
+  async #unregisterLeaseExecution(
+    sessionId: string,
+    tracked: TrackedLeaseExecution,
+  ): Promise<void> {
+    if (this.#trackedExecutions.get(sessionId) === tracked) {
+      this.#trackedExecutions.delete(sessionId);
+    }
+    if (this.#trackedExecutions.size !== 0) return;
+    this.#heartbeatAbort?.abort();
+    await this.#heartbeatTask;
+  }
+
+  #startHeartbeatTask(): void {
+    if (this.#heartbeatTask !== undefined || this.#heartbeatFailure !== undefined) return;
+    const abort = new AbortController();
+    this.#heartbeatAbort = abort;
+    const task = this.#runHeartbeatTask(abort.signal).finally(() => {
+      if (this.#heartbeatTask === task) {
+        this.#heartbeatTask = undefined;
+        this.#heartbeatAbort = undefined;
+        if (this.#trackedExecutions.size > 0 && this.#heartbeatFailure === undefined) {
+          this.#startHeartbeatTask();
+        }
+      }
+    });
+    this.#heartbeatTask = task;
+  }
+
+  async #runHeartbeatTask(signal: AbortSignal): Promise<void> {
+    try {
+      const identity = await this.#leaseCoordinator.heartbeatIdentity();
+      while (!signal.aborted && this.#trackedExecutions.size > 0) {
+        const heartbeat = this.#supervisor.createHeartbeat(identity);
+        const result = this.#supervisor.applyHeartbeatAcknowledgement(
+          heartbeat,
+          await this.#leaseCoordinator.renewFromHeartbeat(heartbeat),
+        );
+        if (result.revokedAssignments !== result.revokedSessionIds.length) {
+          throw new LocalSandboxSupervisorError(
+            "invalid_heartbeat_result",
+            "Supervisor heartbeat result was internally inconsistent",
+          );
+        }
+        for (const sessionId of result.revokedSessionIds) {
+          const tracked = this.#trackedExecutions.get(sessionId);
+          if (tracked !== undefined) tracked.failure = this.#leaseRenewalFailure();
+        }
+        await wait(this.#heartbeatIntervalMs, signal);
+      }
+    } catch {
+      if (signal.aborted) return;
+      const failure = this.#leaseRenewalFailure();
+      this.#heartbeatFailure = failure;
+      await this.#leaseCoordinator.quarantineSandbox().catch(() => undefined);
+      const trackedExecutions = [...this.#trackedExecutions.values()];
+      for (const tracked of trackedExecutions) {
+        tracked.failure = failure;
+        tracked.prepared.revokeLease();
+      }
+      await Promise.allSettled(trackedExecutions.map((tracked) => tracked.execution));
+    }
+  }
+
+  #leaseRenewalFailure(): TurnExecutionBackendError {
+    return new TurnExecutionBackendError(
+      "lease_renewal_failed",
+      "Execution lease renewal failed and the runtime was revoked",
+      false,
+      true,
+    );
   }
 }

@@ -1,5 +1,10 @@
 import type { Database } from "@agent-dock/database";
 import { transitionSandbox, type SandboxState } from "@agent-dock/domain";
+import {
+  parseControlToSupervisorMessage,
+  parseSupervisorToControlMessage,
+  type SupervisorHeartbeatAckMessage,
+} from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import type {
   TurnExecutionAcknowledgement,
@@ -15,6 +20,13 @@ export type SessionLeaseCoordinatorOptions = {
   clock?: () => Date;
   idGenerator?: () => string;
   leaseDurationMs?: number;
+  heartbeatConnectionId?: string;
+};
+
+export type SupervisorHeartbeatIdentity = {
+  supervisorId: string;
+  bootId: string;
+  connectionId: string;
 };
 
 export class SessionLeaseCoordinatorError extends Error {
@@ -66,12 +78,23 @@ function expectOne(updatedRows: bigint, description: string): void {
   }
 }
 
+function requireUuid(value: string, name: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new TypeError(`${name} must be a UUID`);
+  }
+  return value;
+}
+
+const ACTIVE_SESSION_STATES = new Set(["running", "waiting_approval", "cancelling"]);
+const ACTIVE_TURN_STATES = new Set(["running", "waiting_approval", "cancelling"]);
+
 export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
   readonly #database: Kysely<Database>;
   readonly #sandboxId: string;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
   readonly #leaseDurationMs: number;
+  readonly #heartbeatConnectionId: string;
 
   constructor(options: SessionLeaseCoordinatorOptions) {
     this.#database = options.database;
@@ -82,6 +105,203 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
       options.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS,
       "leaseDurationMs",
     );
+    this.#heartbeatConnectionId = requireUuid(
+      options.heartbeatConnectionId ?? globalThis.crypto.randomUUID(),
+      "heartbeatConnectionId",
+    );
+  }
+
+  get heartbeatIntervalMs(): number {
+    return Math.max(1, Math.floor(this.#leaseDurationMs / 3));
+  }
+
+  async heartbeatIdentity(): Promise<SupervisorHeartbeatIdentity> {
+    const sandbox = await this.#database
+      .selectFrom("sandboxes")
+      .select(["supervisor_id", "boot_id", "state"])
+      .where("id", "=", this.#sandboxId)
+      .executeTakeFirst();
+    if (sandbox === undefined || sandbox.state === "terminated") {
+      throw new SessionLeaseCoordinatorError(
+        "sandbox_unavailable",
+        "Heartbeat sandbox identity is unavailable",
+        false,
+      );
+    }
+    return {
+      supervisorId: sandbox.supervisor_id,
+      bootId: sandbox.boot_id,
+      connectionId: this.#heartbeatConnectionId,
+    };
+  }
+
+  async renewFromHeartbeat(value: unknown): Promise<SupervisorHeartbeatAckMessage> {
+    const heartbeat = parseSupervisorToControlMessage(value);
+    if (heartbeat.type !== "supervisor.heartbeat") {
+      throw new SessionLeaseCoordinatorError(
+        "invalid_heartbeat",
+        "Lease renewal requires a supervisor heartbeat",
+        false,
+      );
+    }
+    if (heartbeat.payload.connectionId !== this.#heartbeatConnectionId) {
+      throw new SessionLeaseCoordinatorError(
+        "stale_connection",
+        "Supervisor heartbeat connection is stale",
+        false,
+      );
+    }
+    const now = validDate(this.#clock);
+    const validUntil = new Date(now.valueOf() + this.#leaseDurationMs);
+    const leaseRenewals = await this.#database.transaction().execute(async (transaction) => {
+      const sandbox = await transaction
+        .selectFrom("sandboxes")
+        .select(["supervisor_id", "boot_id", "state", "max_concurrent_sessions", "active_sessions"])
+        .where("id", "=", this.#sandboxId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (
+        sandbox === undefined ||
+        sandbox.supervisor_id !== heartbeat.payload.supervisorId ||
+        sandbox.boot_id !== heartbeat.payload.bootId ||
+        sandbox.max_concurrent_sessions !== heartbeat.payload.maxConcurrentSessions ||
+        (sandbox.state !== "ready" && sandbox.state !== "leased")
+      ) {
+        throw new SessionLeaseCoordinatorError(
+          "stale_supervisor",
+          "Supervisor heartbeat identity is stale",
+          false,
+        );
+      }
+
+      const renewals: SupervisorHeartbeatAckMessage["payload"]["leaseRenewals"] = [];
+      for (const observation of heartbeat.payload.sessions) {
+        if (observation.turnId === null || !ACTIVE_SESSION_STATES.has(observation.state)) {
+          continue;
+        }
+        const assignment = await transaction
+          .selectFrom("session_leases as lease")
+          .innerJoin("sessions as session_row", "session_row.id", "lease.session_id")
+          .innerJoin("turns as turn", (join) =>
+            join
+              .onRef("turn.session_id", "=", "session_row.id")
+              .on("turn.id", "=", observation.turnId!),
+          )
+          .innerJoin("commands as command", (join) =>
+            join
+              .onRef("command.tenant_id", "=", "turn.tenant_id")
+              .onRef("command.session_id", "=", "turn.session_id")
+              .onRef("command.turn_id", "=", "turn.id")
+              .on("command.kind", "=", "turn.execute"),
+          )
+          .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
+          .select([
+            "lease.lease_id as leaseId",
+            "lease.fencing_token as leaseFencingToken",
+            "lease.valid_until as leaseValidUntil",
+            "session_row.last_fencing_token as sessionFencingToken",
+            "session_row.state as sessionState",
+            "turn.state as turnState",
+            "command.state as commandState",
+            "cursor.last_persisted_seq as persistedSequence",
+          ])
+          .where("lease.session_id", "=", observation.sessionId)
+          .where("lease.sandbox_id", "=", this.#sandboxId)
+          .forUpdate(["lease", "session_row", "turn", "command", "cursor"])
+          .executeTakeFirst();
+        if (assignment === undefined) continue;
+
+        const leaseFence = safeInteger(
+          assignment.leaseFencingToken,
+          "heartbeat lease fencing token",
+        );
+        const sessionFence = safeInteger(
+          assignment.sessionFencingToken,
+          "heartbeat session fencing token",
+        );
+        const persistedSequence = safeInteger(
+          assignment.persistedSequence,
+          "heartbeat persisted sequence",
+        );
+        if (
+          assignment.leaseId !== observation.leaseId ||
+          leaseFence !== observation.fencingToken ||
+          sessionFence !== observation.fencingToken ||
+          new Date(assignment.leaseValidUntil).valueOf() <= now.valueOf() ||
+          !ACTIVE_SESSION_STATES.has(assignment.sessionState) ||
+          !ACTIVE_TURN_STATES.has(assignment.turnState) ||
+          assignment.commandState !== "acknowledged" ||
+          observation.lastAcknowledgedSeq > persistedSequence ||
+          persistedSequence > observation.lastProducedSeq
+        ) {
+          continue;
+        }
+
+        const updated = await transaction
+          .updateTable("session_leases")
+          .set({ valid_until: validUntil, renewed_at: now })
+          .where("session_id", "=", observation.sessionId)
+          .where("lease_id", "=", observation.leaseId)
+          .where("fencing_token", "=", String(observation.fencingToken))
+          .where("valid_until", ">", now)
+          .executeTakeFirst();
+        if (updated.numUpdatedRows !== 1n) continue;
+        renewals.push({
+          sessionId: observation.sessionId,
+          leaseId: observation.leaseId,
+          fencingToken: observation.fencingToken,
+          validUntil: validUntil.toISOString(),
+        });
+      }
+      await transaction
+        .updateTable("sandboxes")
+        .set({ updated_at: now })
+        .where("id", "=", this.#sandboxId)
+        .where("boot_id", "=", heartbeat.payload.bootId)
+        .executeTakeFirstOrThrow();
+      return renewals;
+    });
+
+    const acknowledgement = parseControlToSupervisorMessage({
+      protocolVersion: 1,
+      messageId: this.#idGenerator(),
+      sentAt: now.toISOString(),
+      type: "supervisor.heartbeat.ack",
+      payload: {
+        acknowledgedMessageId: heartbeat.messageId,
+        connectionId: this.#heartbeatConnectionId,
+        leaseRenewals,
+      },
+    });
+    if (acknowledgement.type !== "supervisor.heartbeat.ack") {
+      throw new SessionLeaseCoordinatorError(
+        "invalid_heartbeat_ack",
+        "Lease renewal acknowledgement was invalid",
+        false,
+      );
+    }
+    return acknowledgement;
+  }
+
+  async quarantineSandbox(): Promise<void> {
+    const now = validDate(this.#clock);
+    await this.#database.transaction().execute(async (transaction) => {
+      const sandbox = await transaction
+        .selectFrom("sandboxes")
+        .select(["state"])
+        .where("id", "=", this.#sandboxId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (sandbox === undefined || sandbox.state === "failed" || sandbox.state === "terminated") {
+        return;
+      }
+      await transaction
+        .updateTable("sandboxes")
+        .set({ state: transitionSandbox(sandbox.state, "failed"), updated_at: now })
+        .where("id", "=", this.#sandboxId)
+        .where("state", "=", sandbox.state)
+        .executeTakeFirstOrThrow();
+    });
   }
 
   async acquire(request: TurnExecutionRequest): Promise<TurnExecutionAcknowledgement> {

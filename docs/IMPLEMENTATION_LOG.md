@@ -764,3 +764,41 @@
 - 下一步：实现长 turn lease renewal 与 runner restart reconciliation。原因是 mailbox 已能稳定
   保存等待工作，而当前最大的执行所有权缺口是 supervisor/control-plane 重启或 lease 过期后，
   系统仍不能自动区分可安全重领、必须隔离和结果不明的 assignment。
+
+## 2026-07-19 — 长 turn 租约续期与旧 runtime 对账
+
+- 目标：让健康 turn 可以跨越初始 lease deadline，同时避免把“lease 过期”误当成“旧 Pi、tool
+  或 container 已经消失”。后者会造成同一 session 两个 writer 并存，是比延迟更严重的错误。
+- 决策：新增 ADR-0014。每个 `LocalSandboxSupervisor` 使用一条共享 heartbeat loop，批量报告所有
+  active assignment 的 session/turn/lease/fence/state 与 produced/ACKed event cursor；不为每个
+  turn 各建 timer。control plane 只有在 connection、boot、sandbox、lifecycle、lease/fence、cursor
+  全部精确且 lease 尚未过期时才原子更新 `valid_until/renewed_at`。过期 lease 永不复活。
+- 撤销：ACK 漏掉或错配某个 assignment 时，supervisor 以内部 `lease_revoked`、0 grace 中止该
+  runtime；全局 heartbeat transport/protocol 失败会 quarantine sandbox 并撤销该 boot 的所有
+  tracked executions。runner 即使忽略 abort 并返回 success，也会被改判为未确认撤销，不能提交
+  假 completion。post-ACK lease loss 会让 session failed，而不是回到 idle。
+- Docker 身份：activation 新增 supervisor、boot、sandbox、command、session、turn、lease、fence
+  closed labels。受信任 host inventory 只按 sandbox scope 列举，删除前重新 inspect 完整身份，使用
+  container ID 做 destructive target，检查 `docker rm --force` 结果并再次 inspect 确认 absent；
+  Docker socket 仍不进入 sandbox。
+- 对账：`AssignmentReconciler` 的调用前提是旧 supervisor boot 已被外层 manager fence、不能再创建
+  runtime。它先终止 exact expired boundary 与 orphan，再在 transaction 中重新核对 lease。已 ACK
+  的不明 turn/command/session 以 `assignment_lost` 失败；从未 durable ACK 的 command 只在 absence
+  proof 后回到原 mailbox position。termination/identity/invariant 不能确认时 sandbox 进入 failed，
+  lease/capacity 保留；重复运行会在故障解除后收敛。retirement 同样先 draining、清理 runtime，再
+  终止旧 sandbox，不采用旧进程，也不宣称 exactly-once side effect。
+- 故障注入：测试覆盖多次 lease deadline 续期、过期不复活、漏 renewal 撤销、runner 忽略撤销、
+  exact/orphan container 清理、changed/malformed label 拒绝、pre-ACK requeue、post-ACK ambiguous fail、
+  termination 未确认时保留 reservation，以及修复后幂等重试与旧 sandbox retirement。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、173 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。真实 Docker
+  `sandbox:check` 重新构建 Phase 2 image，3 个 supervisor container tests 与 28 个完整
+  control-plane tests 全部通过，完整 identity labels 被 inspect，结束后 managed container 为 0。
+  同一 control-plane suite 又在一次性 PostgreSQL 15.2 上通过 27 passed/1 Docker-only skipped，
+  覆盖真实 row lock、heartbeat renewal、过期 lease 与 reconciliation transaction；数据库容器已删除。
+- 当前边界：本地 bridge 已执行真实 heartbeat contract，Docker inventory/reconciler 是可调用的 host
+  boundary；生产 remote supervisor 的注册、liveness manager、启动时自动调用与跨 replica transport
+  仍需后续接线。reconciler 不会仅凭 timestamp 自行断言 supervisor 进程已经死亡。
+- 下一步：实现 production supervisor registration/health manager，并把“确认旧 boot 已退出 ->
+  reconcile/retire -> 注册新 sandbox/boot”接成真实远程启动路径。原因是安全的数据与容器算法已经
+  可测，下一层缺口是让独立 supervisor 进程自动驱动它，而不是由集成代码显式调用。

@@ -79,6 +79,28 @@ reviewed Pi-to-AgentDock text/tool/terminal event mapping. Completion and
 post-ACK failure release the matching lease and capacity in the settlement
 transaction; a stale lease or event fence is rejected.
 
+The Phase 2 ownership slice drives the existing heartbeat contract with one
+shared loop per supervisor. A heartbeat batches every active session and its
+turn, lease, fencing token, state, highest produced event sequence, and
+cumulative ACK cursor. The control plane renews only an exact unexpired match
+against the durable sandbox boot, command lifecycle, session/turn state, fence,
+and event cursor. A missing renewal revokes that assignment. A heartbeat
+transport/protocol failure quarantines the sandbox and revokes all assignments;
+the runtime must finish teardown before the dispatcher records the failure.
+Cold and queued sessions have neither a heartbeat timer nor a runtime.
+
+Restart reconciliation is host-side and deliberately separate from lease
+expiry. After the caller has fenced the old supervisor boot so it cannot create
+another runtime, the reconciler lists only Docker containers labelled for that
+sandbox, validates supervisor/boot/command/session/turn/lease/fence identity,
+re-inspects immediately before `docker rm --force`, and confirms absence. Only
+then may PostgreSQL settle an acknowledged ambiguous turn as `assignment_lost`,
+remove its lease, and recompute capacity. A pre-ACK command can return to the
+same mailbox position after absence is proven. Unknown containers, changed
+labels, failed termination, and inconsistent durable identity fail closed and
+leave the sandbox quarantined. A new supervisor boot never adopts the old
+process or claims exactly-once recovery of tool side effects.
+
 The fourth Phase 1 slice makes cancellation an independent durable command
 path. `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` requires its own
 idempotency key and commits a cancellation command plus outbox record before it
@@ -116,10 +138,11 @@ the live SSE hub is process-local. The local supervisor can use a private,
 crash-safe file spool that syncs every event before transport and replays an
 unacknowledged suffix from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, lease renewal/reconciliation, acknowledged-cancellation crash
-recovery, durable snapshots, cross-replica event notification, and Windows Job
-Object containment remain later slices. A crash after durable command ACK is
-still treated as ambiguous rather than replaying possible tool side effects.
+gateway, production remote-supervisor registration/health orchestration,
+acknowledged-cancellation crash recovery, cross-replica event notification, and
+Windows Job Object containment remain later slices. A crash after durable
+command ACK is treated as ambiguous and failed rather than replaying possible
+tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -312,8 +335,11 @@ previous settled pair. The development adapter uses a private host directory;
 MinIO/S3, cross-control-plane live notification, generic repository snapshot
 import/export, and production remote sandbox assignment remain unimplemented.
 The local file spool now protects already-produced events across a supervisor
-process restart, including the PostgreSQL-commit/ACK-loss window. Recreating an
-unknown in-flight execution and reconciling its lease are still not claimed.
+process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
+in-flight execution is never recreated: after the old owner boot is fenced, the
+host reconciler confirms its labelled runtime is absent and records the
+acknowledged turn as ambiguous `assignment_lost`. Automatic invocation from a
+production remote-supervisor health manager is not yet wired.
 
 ## 5. Delivery and recovery semantics
 

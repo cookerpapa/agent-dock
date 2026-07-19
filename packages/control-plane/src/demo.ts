@@ -199,6 +199,11 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
     const runner = new DockerSandboxTurnRunner({
       image:
         options.image ?? process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
+      runtimeIdentity: {
+        supervisorId: "local-docker-demo",
+        bootId: DEMO_IDS.sandboxBoot,
+        sandboxId: DEMO_IDS.sandbox,
+      },
       dockerCommand: options.dockerCommand ?? process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
       scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
       checkpointStore,

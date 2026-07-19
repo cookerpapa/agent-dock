@@ -18,6 +18,11 @@ import {
 const dockerEnabled = process.env.AGENT_DOCK_DOCKER_SANDBOX_TEST === "1";
 const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
 const dockerImage = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2";
+const runtimeIdentity = {
+  supervisorId: "docker-integration-supervisor",
+  bootId: "40000000-0000-4000-8000-000000000001",
+  sandboxId: "sandbox-docker-integration",
+};
 
 type DockerInspection = {
   Config?: {
@@ -98,8 +103,14 @@ function assertHardenedContainer(
   expect(host?.Tmpfs?.["/tmp"]).toMatch(/(?:^|,)size=(?:64m|67108864)(?:,|$)/);
   expect(host?.Tmpfs?.["/workspace"]).toMatch(/(?:^|,)size=(?:128m|134217728)(?:,|$)/);
   expect(config?.Labels?.["agent-dock.managed"]).toBe("true");
+  expect(config?.Labels?.["agent-dock.supervisor-id"]).toBe(identity.supervisorId);
+  expect(config?.Labels?.["agent-dock.boot-id"]).toBe(identity.bootId);
+  expect(config?.Labels?.["agent-dock.sandbox-id"]).toBe(identity.sandboxId);
   expect(config?.Labels?.["agent-dock.command-id"]).toBe(identity.commandId);
   expect(config?.Labels?.["agent-dock.session-id"]).toBe(identity.sessionId);
+  expect(config?.Labels?.["agent-dock.turn-id"]).toBe(identity.turnId);
+  expect(config?.Labels?.["agent-dock.lease-id"]).toBe(identity.leaseId);
+  expect(config?.Labels?.["agent-dock.fencing-token"]).toBe(String(identity.fencingToken));
   expect(config?.Env ?? []).not.toEqual(
     expect.arrayContaining([
       expect.stringMatching(/api[_-]?key|token|secret|password|credential|auth/i),
@@ -182,6 +193,7 @@ describe.skipIf(!dockerEnabled)("DockerSandboxTurnRunner Docker integration", ()
     const firstCommand = command(3);
     const firstRunner = new DockerSandboxTurnRunner({
       image: dockerImage,
+      runtimeIdentity,
       dockerCommand,
       scenario: "java_repair",
       checkpointStore: store,
@@ -220,6 +232,7 @@ describe.skipIf(!dockerEnabled)("DockerSandboxTurnRunner Docker integration", ()
     const secondMessages: EventPublishMessage[] = [];
     const secondRunner = new DockerSandboxTurnRunner({
       image: dockerImage,
+      runtimeIdentity,
       dockerCommand,
       scenario: "java_followup",
       checkpointStore: store,
@@ -267,6 +280,7 @@ describe.skipIf(!dockerEnabled)("DockerSandboxTurnRunner Docker integration", ()
     let identity: DockerSandboxContainerIdentity | undefined;
     const runner = new DockerSandboxTurnRunner({
       image: dockerImage,
+      runtimeIdentity,
       dockerCommand,
       scenario: "java_repair",
       executionTimeoutMs: 60_000,
@@ -323,6 +337,7 @@ describe.skipIf(!dockerEnabled)("DockerSandboxTurnRunner Docker integration", ()
     let identity: DockerSandboxContainerIdentity | undefined;
     const runner = new DockerSandboxTurnRunner({
       image: dockerImage,
+      runtimeIdentity,
       dockerCommand,
       scenario: "timeout",
       executionTimeoutMs: 30_000,
