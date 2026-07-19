@@ -132,6 +132,27 @@ export {
 } from "./supervisor-wire.ts";
 
 export {
+  AgentDockInternalProtocolError,
+  InternalServiceErrorSchema,
+  SupervisorBootProvisionRequestSchema,
+  SupervisorBootProvisionResponseSchema,
+  SupervisorManagementRequestSchema,
+  SupervisorManagementResponseSchema,
+  SupervisorRuntimeAssignmentSchema,
+  parseInternalServiceError,
+  parseSupervisorBootProvisionRequest,
+  parseSupervisorBootProvisionResponse,
+  parseSupervisorManagementRequest,
+  parseSupervisorManagementResponse,
+  type InternalServiceError,
+  type SupervisorBootProvisionRequest,
+  type SupervisorBootProvisionResponse,
+  type SupervisorManagementRequest,
+  type SupervisorManagementResponse,
+  type SupervisorRuntimeAssignment,
+} from "./supervisor-management.ts";
+
+export {
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TurnCancellationOutboxPayloadSchema,
   TurnCancellationOutboxProtocolError,

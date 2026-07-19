@@ -220,6 +220,25 @@ export interface SupervisorConnectionTable {
   closed_at: NullableTimestamp;
 }
 
+export interface SupervisorBootCredentialTable {
+  credential_id: string;
+  credential_sha256: string;
+  provision_request_id: string;
+  sandbox_id: string;
+  supervisor_id: string;
+  boot_id: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  revoked_at: NullableTimestamp;
+}
+
+export interface SupervisorHostTable {
+  supervisor_id: string;
+  maximum_capacity: number;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface SandboxRetirementTable {
   sandbox_id: string;
   supervisor_id: string;
@@ -347,6 +366,8 @@ export interface Database {
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
   supervisor_connections: SupervisorConnectionTable;
+  supervisor_boot_credentials: SupervisorBootCredentialTable;
+  supervisor_hosts: SupervisorHostTable;
   sandbox_retirements: SandboxRetirementTable;
   session_leases: SessionLeaseTable;
   commands: CommandTable;

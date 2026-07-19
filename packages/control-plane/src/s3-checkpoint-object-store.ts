@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
   type S3ClientConfig,
@@ -34,7 +35,7 @@ export type S3CheckpointObjectStoreOptions = {
 
 export type S3CheckpointEnvironment = Readonly<Record<string, string | undefined>>;
 
-type S3Operation = "put" | "get" | "delete";
+type S3Operation = "put" | "get" | "delete" | "head";
 
 type ErrorDetails = {
   name?: string;
@@ -386,6 +387,14 @@ export class S3CheckpointObjectStore implements CheckpointObjectStore {
     } catch (error: unknown) {
       if (isMissing(error)) return;
       throw translateS3Error("delete", error);
+    }
+  }
+
+  async checkHealth(): Promise<void> {
+    try {
+      await this.#client.send(new HeadBucketCommand({ Bucket: this.#bucket }));
+    } catch (error: unknown) {
+      throw translateS3Error("head", error);
     }
   }
 

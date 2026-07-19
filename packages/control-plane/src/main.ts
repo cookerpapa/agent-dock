@@ -1,74 +1,106 @@
-import { pathToFileURL } from "node:url";
 import { createDatabase } from "@agent-dock/database";
-import { parseUuidPathParameter } from "@agent-dock/protocol";
-import { createControlPlaneApplication } from "./application.ts";
+import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { sql } from "kysely";
+import {
+  HttpSandboxAssignmentInventory,
+  HttpSupervisorManagementClient,
+  HttpSupervisorOwnerBoundary,
+} from "./http-supervisor-management.ts";
 import { PostgresSessionEventNotifications } from "./postgres-session-event-notifications.ts";
+import {
+  PostgresSupervisorCredentialAuthorizer,
+  SupervisorBootProvisioner,
+  SupervisorProvisioningGateway,
+} from "./supervisor-boot-provisioner.ts";
+import { loadProductionControlPlaneConfig } from "./production-config.ts";
+import { ProductionHttpGateway } from "./production-http-gateway.ts";
+import {
+  createRemoteControlPlaneRuntime,
+  type RemoteControlPlaneRuntime,
+} from "./remote-control-plane-runtime.ts";
 
-function requiredEnvironment(name: string): string {
-  const value = process.env[name];
-  if (!value || value.trim().length === 0) {
-    throw new Error(`Required environment variable ${name} is missing`);
+async function verifyBootstrap(
+  database: ReturnType<typeof createDatabase>,
+  tenantId: string,
+  modelProfileId: string,
+): Promise<void> {
+  const profile = await database
+    .selectFrom("model_profiles")
+    .select(["tenant_id", "enabled"])
+    .where("id", "=", modelProfileId)
+    .executeTakeFirst();
+  if (profile?.tenant_id !== tenantId || !profile.enabled) {
+    throw new Error("Production database bootstrap is missing or inconsistent");
   }
-  return value;
-}
-
-function listenPort(): number {
-  const value = process.env.PORT ?? "3000";
-  const port = Number(value);
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("PORT must be an integer between 1 and 65535");
-  }
-  return port;
 }
 
 export async function startControlPlane(): Promise<void> {
-  const connectionString = requiredEnvironment("DATABASE_URL");
-  const tenantId = parseUuidPathParameter(
-    requiredEnvironment("AGENT_DOCK_TENANT_ID"),
-    "AGENT_DOCK_TENANT_ID",
-  );
-  const database = createDatabase({
-    connectionString,
-    maxConnections: 10,
+  const config = await loadProductionControlPlaneConfig();
+  const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
+  const notifications = new PostgresSessionEventNotifications({
+    connectionString: config.databaseUrl,
+    tenantId: config.tenantId,
   });
-  const sessionEventNotifications = new PostgresSessionEventNotifications({
-    connectionString,
-    tenantId,
-  });
-  let application: Awaited<ReturnType<typeof createControlPlaneApplication>> | undefined;
+  let runtime: RemoteControlPlaneRuntime | undefined;
   try {
-    const runningApplication = await createControlPlaneApplication({
-      database,
-      tenantId,
-      defaultModelProfileId: parseUuidPathParameter(
-        requiredEnvironment("AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID"),
-        "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID",
-      ),
-      sessionEventNotifications,
+    await verifyBootstrap(database, config.tenantId, config.defaultModelProfileId);
+    const managementClient = new HttpSupervisorManagementClient({
+      baseUrl: config.supervisorManagementBaseUrl,
+      managementToken: config.supervisorManagementToken,
+      allowInsecureHttp: config.allowInsecureInternalHttp,
     });
-    application = runningApplication;
-    const host = process.env.HOST ?? "127.0.0.1";
-    const port = listenPort();
-    await runningApplication.listen(port, host);
-    process.stdout.write(`AgentDock control plane listening on ${host}:${String(port)}\n`);
+    const provisioner = new SupervisorBootProvisioner({
+      database,
+      allowedSupervisorId: config.supervisorId,
+      maximumCapacity: config.supervisorMaximumCapacity,
+      enrollmentToken: config.supervisorEnrollmentToken,
+    });
+    const provisioningGateway = new SupervisorProvisioningGateway({ provisioner });
+    const httpGateway = new ProductionHttpGateway({
+      apiToken: config.apiToken,
+      readiness: async () => {
+        if (runtime?.state !== "running") return false;
+        await sql`select 1`.execute(database);
+        return true;
+      },
+    });
+    runtime = await createRemoteControlPlaneRuntime({
+      database,
+      tenantId: config.tenantId,
+      defaultModelProfileId: config.defaultModelProfileId,
+      controlPlaneInstanceId: randomUUID(),
+      sessionEventNotifications: notifications,
+      supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),
+      supervisorOwnerBoundary: new HttpSupervisorOwnerBoundary(managementClient),
+      assignmentInventoryFactory: (identity) =>
+        new HttpSandboxAssignmentInventory(managementClient, identity.sandboxId),
+      supervisorProvisioningGateway: provisioningGateway,
+      productionHttpGateway: httpGateway,
+      worker: { maxLanesPerConnection: config.maximumLanesPerSupervisor },
+    });
+    await runtime.listen(config.port, config.host);
+    process.stdout.write(
+      `AgentDock production control plane listening on ${config.host}:${String(config.port)}\n`,
+    );
 
     let closing = false;
-    const close = async () => {
+    const close = async (): Promise<void> => {
       if (closing) return;
       closing = true;
-      await runningApplication.close();
+      await runtime?.close();
       await database.destroy();
     };
-    const closeAfterSignal = () => {
+    const closeAfterSignal = (): void => {
       void close().catch(() => {
         process.exitCode = 1;
       });
     };
     process.once("SIGINT", closeAfterSignal);
     process.once("SIGTERM", closeAfterSignal);
-  } catch (error) {
-    await application?.close().catch(() => undefined);
-    await sessionEventNotifications.stop().catch(() => undefined);
+  } catch (error: unknown) {
+    await runtime?.close().catch(() => undefined);
+    await notifications.stop().catch(() => undefined);
     await database.destroy();
     throw error;
   }
@@ -77,7 +109,7 @@ export async function startControlPlane(): Promise<void> {
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   startControlPlane().catch(() => {
-    process.stderr.write("AgentDock control plane failed to start\n");
+    process.stderr.write("AgentDock production control plane failed to start\n");
     process.exitCode = 1;
   });
 }

@@ -41,10 +41,19 @@ async function request(
   fetchImplementation: FetchImplementation,
   path: string,
   init: RequestInit,
+  authorizationToken?: string,
 ): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetchImplementation(path, init);
+    response = await fetchImplementation(path, {
+      ...init,
+      headers: {
+        ...Object.fromEntries(new Headers(init.headers).entries()),
+        ...(authorizationToken === undefined
+          ? {}
+          : { authorization: `Bearer ${authorizationToken}` }),
+      },
+    });
   } catch {
     throw new AgentDockApiError(0, "network_error", "Control plane is unreachable");
   }
@@ -78,13 +87,27 @@ function jsonRequest(body: unknown, idempotencyKey?: string): RequestInit {
 
 export class AgentDockApi {
   readonly #fetch: FetchImplementation;
+  readonly #authorizationToken: string | undefined;
 
-  constructor(fetchImplementation: FetchImplementation = globalThis.fetch.bind(globalThis)) {
+  constructor(
+    fetchImplementation: FetchImplementation = globalThis.fetch.bind(globalThis),
+    authorizationToken?: string,
+  ) {
     this.#fetch = fetchImplementation;
+    if (
+      authorizationToken !== undefined &&
+      (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(authorizationToken) ||
+        /[\r\n]/.test(authorizationToken))
+    ) {
+      throw new TypeError("authorizationToken is invalid");
+    }
+    this.#authorizationToken = authorizationToken;
   }
 
   async createProject(name: string): Promise<ProjectResource> {
-    return parseProjectResource(await request(this.#fetch, "/v1/projects", jsonRequest({ name })));
+    return parseProjectResource(
+      await request(this.#fetch, "/v1/projects", jsonRequest({ name }), this.#authorizationToken),
+    );
   }
 
   async createSession(project: ProjectResource): Promise<SessionResource> {
@@ -93,6 +116,7 @@ export class AgentDockApi {
         this.#fetch,
         `/v1/projects/${encodeURIComponent(project.projectId)}/sessions`,
         jsonRequest({ workspaceId: project.workspaceId }),
+        this.#authorizationToken,
       ),
     );
   }
@@ -114,6 +138,7 @@ export class AgentDockApi {
           },
           idempotencyKey,
         ),
+        this.#authorizationToken,
       ),
     );
   }
@@ -129,6 +154,7 @@ export class AgentDockApi {
         this.#fetch,
         `/v1/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/cancellations`,
         jsonRequest({ gracePeriodMs }, idempotencyKey),
+        this.#authorizationToken,
       ),
     );
   }

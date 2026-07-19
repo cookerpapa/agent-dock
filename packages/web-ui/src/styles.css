@@ -1082,3 +1082,51 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+/* The production token gate deliberately reuses the page's compact Pi-export language. */
+.credential-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--page, #f7f7f5);
+}
+
+.credential-card {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid #d8d8d2;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 8%);
+}
+
+.credential-card h1,
+.credential-card p {
+  margin: 0;
+}
+
+.credential-card label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.credential-card input {
+  min-height: 42px;
+  border: 1px solid #b8b8b2;
+  border-radius: 7px;
+  padding: 0 12px;
+  font: inherit;
+}
+
+.credential-card button {
+  min-height: 42px;
+}
+
+.credential-error {
+  color: #9c2f2f;
+  font-size: 13px;
+}

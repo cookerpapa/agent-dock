@@ -1,0 +1,272 @@
+import {
+  parseInternalServiceError,
+  parseSupervisorManagementResponse,
+  type SupervisorManagementRequest,
+  type SupervisorRuntimeAssignment,
+} from "@agent-dock/protocol";
+import {
+  SandboxAssignmentInventoryError,
+  type SandboxAssignmentInventory,
+  type SandboxRuntimeAssignment,
+} from "@agent-dock/sandbox-supervisor";
+import type {
+  SupervisorBootIdentity,
+  SupervisorOwnerBoundary,
+} from "./supervisor-connection-manager.ts";
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_MANAGEMENT_PATH = "/internal/v1/supervisor/manage";
+
+export type HttpSupervisorManagementClientOptions = {
+  baseUrl: string;
+  managementToken: string;
+  allowInsecureHttp?: boolean;
+  requestTimeoutMs?: number;
+  fetchImplementation?: typeof fetch;
+  idGenerator?: () => string;
+};
+
+export class HttpSupervisorManagementError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(code: string, safeMessage: string, retryable: boolean) {
+    super(safeMessage);
+    this.name = "HttpSupervisorManagementError";
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function baseUrl(value: string, allowInsecure: boolean): string {
+  const parsed = new URL(value);
+  if (
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "/" && parsed.pathname !== "")
+  ) {
+    throw new TypeError("Supervisor management base URL is invalid");
+  }
+  if (parsed.protocol === "http:" && !allowInsecure) {
+    throw new TypeError("Plain HTTP Supervisor management requires explicit opt-in");
+  }
+  return parsed.toString();
+}
+
+function boundedToken(value: string): string {
+  if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(value)) {
+    throw new TypeError("managementToken must contain 32-4096 bounded ASCII bytes");
+  }
+  return value;
+}
+
+function protocolAssignment(value: SandboxRuntimeAssignment): SupervisorRuntimeAssignment {
+  return {
+    containerId: value.runtimeId,
+    containerName: value.runtimeName,
+    supervisorId: value.supervisorId,
+    bootId: value.bootId,
+    sandboxId: value.sandboxId,
+    commandId: value.commandId,
+    sessionId: value.sessionId,
+    turnId: value.turnId,
+    leaseId: value.leaseId,
+    fencingToken: value.fencingToken,
+  };
+}
+
+function runtimeAssignment(value: SupervisorRuntimeAssignment): SandboxRuntimeAssignment {
+  return {
+    runtimeId: value.containerId,
+    runtimeName: value.containerName,
+    supervisorId: value.supervisorId,
+    bootId: value.bootId,
+    sandboxId: value.sandboxId,
+    commandId: value.commandId,
+    sessionId: value.sessionId,
+    turnId: value.turnId,
+    leaseId: value.leaseId,
+    fencingToken: value.fencingToken,
+  };
+}
+
+export class HttpSupervisorManagementClient {
+  readonly #url: string;
+  readonly #authorization: string;
+  readonly #requestTimeoutMs: number;
+  readonly #fetch: typeof fetch;
+  readonly #idGenerator: () => string;
+
+  constructor(options: HttpSupervisorManagementClientOptions) {
+    const root = baseUrl(options.baseUrl, options.allowInsecureHttp === true);
+    this.#url = new URL(DEFAULT_MANAGEMENT_PATH, root).toString();
+    this.#authorization = `Bearer ${boundedToken(options.managementToken)}`;
+    this.#requestTimeoutMs = positiveInteger(
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      "requestTimeoutMs",
+    );
+    this.#fetch = options.fetchImplementation ?? globalThis.fetch.bind(globalThis);
+    this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+  }
+
+  requestId(): string {
+    return this.#idGenerator();
+  }
+
+  async request(message: SupervisorManagementRequest) {
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#url, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(this.#requestTimeoutMs),
+        headers: {
+          authorization: this.#authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(message),
+      });
+    } catch {
+      throw new HttpSupervisorManagementError(
+        "supervisor_management_unavailable",
+        "Supervisor management service is unavailable",
+        true,
+      );
+    }
+    let body: unknown;
+    try {
+      body = (await response.json()) as unknown;
+    } catch {
+      throw new HttpSupervisorManagementError(
+        "supervisor_management_invalid_response",
+        "Supervisor management returned an invalid response",
+        false,
+      );
+    }
+    if (!response.ok) {
+      try {
+        const failure = parseInternalServiceError(body).error;
+        throw new HttpSupervisorManagementError(failure.code, failure.message, failure.retryable);
+      } catch (error: unknown) {
+        if (error instanceof HttpSupervisorManagementError) throw error;
+        throw new HttpSupervisorManagementError(
+          "supervisor_management_rejected",
+          "Supervisor management rejected the request",
+          response.status >= 500,
+        );
+      }
+    }
+    try {
+      return parseSupervisorManagementResponse(body);
+    } catch {
+      throw new HttpSupervisorManagementError(
+        "supervisor_management_invalid_response",
+        "Supervisor management returned an invalid response",
+        false,
+      );
+    }
+  }
+}
+
+export class HttpSupervisorOwnerBoundary implements SupervisorOwnerBoundary {
+  readonly #client: HttpSupervisorManagementClient;
+
+  constructor(client: HttpSupervisorManagementClient) {
+    this.#client = client;
+  }
+
+  async stopAndConfirm(identity: SupervisorBootIdentity): Promise<void> {
+    const requestId = this.#client.requestId();
+    const response = await this.#client.request({
+      protocolVersion: 1,
+      type: "owner.stop_and_confirm",
+      requestId,
+      identity,
+    });
+    if (
+      response.type !== "owner.stopped" ||
+      response.requestId !== requestId ||
+      response.identity.supervisorId !== identity.supervisorId ||
+      response.identity.bootId !== identity.bootId ||
+      response.identity.sandboxId !== identity.sandboxId
+    ) {
+      throw new HttpSupervisorManagementError(
+        "owner_stop_response_mismatch",
+        "Supervisor owner-stop proof did not match",
+        false,
+      );
+    }
+  }
+}
+
+export class HttpSandboxAssignmentInventory implements SandboxAssignmentInventory {
+  readonly #client: HttpSupervisorManagementClient;
+  readonly #sandboxId: string;
+
+  constructor(client: HttpSupervisorManagementClient, sandboxId: string) {
+    this.#client = client;
+    this.#sandboxId = sandboxId;
+  }
+
+  async listAssignments(): Promise<readonly SandboxRuntimeAssignment[]> {
+    const requestId = this.#client.requestId();
+    const response = await this.#client.request({
+      protocolVersion: 1,
+      type: "assignments.list",
+      requestId,
+      sandboxId: this.#sandboxId,
+    });
+    if (
+      response.type !== "assignments.listed" ||
+      response.requestId !== requestId ||
+      response.sandboxId !== this.#sandboxId
+    ) {
+      throw new SandboxAssignmentInventoryError(
+        "remote_inventory_response_mismatch",
+        "Remote assignment inventory response did not match",
+        false,
+      );
+    }
+    return response.assignments.map(runtimeAssignment);
+  }
+
+  async terminateAndConfirmAbsent(assignment: SandboxRuntimeAssignment): Promise<void> {
+    if (assignment.sandboxId !== this.#sandboxId) {
+      throw new SandboxAssignmentInventoryError(
+        "remote_inventory_scope_mismatch",
+        "Remote assignment escaped its inventory scope",
+        false,
+      );
+    }
+    const requestId = this.#client.requestId();
+    const response = await this.#client.request({
+      protocolVersion: 1,
+      type: "assignment.terminate_and_confirm",
+      requestId,
+      sandboxId: this.#sandboxId,
+      assignment: protocolAssignment(assignment),
+    });
+    if (
+      response.type !== "assignment.absent" ||
+      response.requestId !== requestId ||
+      response.sandboxId !== this.#sandboxId ||
+      response.containerId !== assignment.runtimeId
+    ) {
+      throw new SandboxAssignmentInventoryError(
+        "remote_inventory_response_mismatch",
+        "Remote assignment absence proof did not match",
+        false,
+      );
+    }
+  }
+}

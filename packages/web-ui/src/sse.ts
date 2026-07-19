@@ -97,6 +97,7 @@ export type StreamSessionEventsOptions = {
   onStatus(status: SessionStreamStatus): void;
   fetchImplementation?: FetchImplementation;
   retryDelayMs?: number;
+  authorizationToken?: string;
 };
 
 function nonNegativeInteger(value: number, name: string): number {
@@ -207,6 +208,9 @@ export async function streamSessionEvents(options: StreamSessionEventsOptions): 
           headers: {
             accept: "text/event-stream",
             "last-event-id": String(lastSequence),
+            ...(options.authorizationToken === undefined
+              ? {}
+              : { authorization: `Bearer ${options.authorizationToken}` }),
           },
           cache: "no-store",
           signal: options.signal,

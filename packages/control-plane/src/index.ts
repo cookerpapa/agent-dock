@@ -133,6 +133,41 @@ export {
   type SupervisorUpgradeRequest,
   type SupervisorWebSocketGatewayOptions,
 } from "./supervisor-websocket-gateway.ts";
+export {
+  PostgresSupervisorCredentialAuthorizer,
+  SUPERVISOR_BOOT_PROVISION_PATH,
+  SupervisorBootProvisionError,
+  SupervisorBootProvisioner,
+  SupervisorProvisioningGateway,
+  type PostgresSupervisorCredentialAuthorizerOptions,
+  type SupervisorBootProvisionerOptions,
+  type SupervisorProvisioningGatewayOptions,
+} from "./supervisor-boot-provisioner.ts";
+export {
+  HttpSandboxAssignmentInventory,
+  HttpSupervisorManagementClient,
+  HttpSupervisorManagementError,
+  HttpSupervisorOwnerBoundary,
+  type HttpSupervisorManagementClientOptions,
+} from "./http-supervisor-management.ts";
+export {
+  CONTROL_PLANE_LIVE_PATH,
+  CONTROL_PLANE_READY_PATH,
+  ProductionHttpGateway,
+  type ProductionHttpGatewayOptions,
+} from "./production-http-gateway.ts";
+export {
+  loadProductionBootstrapConfig,
+  loadProductionControlPlaneConfig,
+  type ProductionBootstrapConfig,
+  type ProductionControlPlaneConfig,
+  type ProductionControlPlaneEnvironment,
+} from "./production-config.ts";
+export {
+  ProductionBootstrapError,
+  bootstrapProductionDatabase,
+  type ProductionBootstrapResult,
+} from "./production-bootstrap.ts";
 
 export {
   validateSupervisorDispatchAffinity,

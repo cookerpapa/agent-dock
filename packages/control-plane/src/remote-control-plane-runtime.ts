@@ -29,6 +29,8 @@ import {
   type SupervisorUpgradeAuthorizer,
   type SupervisorWebSocketGatewayOptions,
 } from "./supervisor-websocket-gateway.ts";
+import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
+import type { ProductionHttpGateway } from "./production-http-gateway.ts";
 
 type ConnectionManagerConfiguration = Omit<
   SupervisorConnectionManagerOptions,
@@ -56,6 +58,8 @@ export type RemoteControlPlaneRuntimeOptions = Omit<
   supervisorAuthorizer: SupervisorUpgradeAuthorizer;
   supervisorOwnerBoundary: SupervisorOwnerBoundary;
   assignmentInventoryFactory: (identity: SupervisorBootIdentity) => SandboxAssignmentInventory;
+  supervisorProvisioningGateway?: SupervisorProvisioningGateway;
+  productionHttpGateway?: ProductionHttpGateway;
   connectionManager?: ConnectionManagerConfiguration;
   commandRouter?: CommandRouterConfiguration;
   gateway?: GatewayConfiguration;
@@ -187,6 +191,12 @@ export async function createRemoteControlPlaneRuntime(
       tenantId: options.tenantId,
       defaultModelProfileId: options.defaultModelProfileId,
       supervisorWebSocketGateway: gateway,
+      ...(options.supervisorProvisioningGateway === undefined
+        ? {}
+        : { supervisorProvisioningGateway: options.supervisorProvisioningGateway }),
+      ...(options.productionHttpGateway === undefined
+        ? {}
+        : { productionHttpGateway: options.productionHttpGateway }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

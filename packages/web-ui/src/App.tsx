@@ -24,6 +24,8 @@ const DEFAULT_PROMPT = "Run the tests, repair the Java bug, and verify the resul
 const MIN_SIDEBAR_WIDTH = 216;
 const MAX_SIDEBAR_WIDTH = 420;
 const MAX_RENDERED_VALUE_LENGTH = 16_000;
+const AUTH_REQUIRED = import.meta.env.VITE_AGENT_DOCK_AUTH_REQUIRED === "true";
+const SESSION_TOKEN_KEY = "agent-dock.api-token";
 
 function shortId(value: string): string {
   return value.slice(0, 8);
@@ -275,7 +277,15 @@ function apiFailureMessage(error: unknown): string {
 }
 
 export default function App() {
-  const api = useMemo(() => new AgentDockApi(), []);
+  const [apiToken, setApiToken] = useState(() => {
+    if (!AUTH_REQUIRED || typeof window === "undefined") return "";
+    return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+  });
+  const [credentialInput, setCredentialInput] = useState("");
+  const api = useMemo(
+    () => new AgentDockApi(globalThis.fetch.bind(globalThis), apiToken || undefined),
+    [apiToken],
+  );
   const [state, setState] = useState(createInitialSessionView);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [operation, setOperation] = useState<"creating" | "submitting" | "cancelling" | null>(null);
@@ -307,6 +317,7 @@ export default function App() {
       sessionId,
       afterSequence: lastSequenceRef.current,
       signal: controller.signal,
+      ...(apiToken.length === 0 ? {} : { authorizationToken: apiToken }),
       onEvent(event) {
         lastSequenceRef.current = event.seq;
         update({ type: "stream.event", event });
@@ -320,7 +331,24 @@ export default function App() {
       }
     });
     return () => controller.abort();
-  }, [state.session?.sessionId, reconnectGeneration]);
+  }, [state.session?.sessionId, reconnectGeneration, apiToken]);
+
+  function acceptCredential(): void {
+    const token = credentialInput.trim();
+    if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(token)) {
+      update({ type: "api.error", message: "API credential format is invalid." });
+      return;
+    }
+    window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    setApiToken(token);
+    setCredentialInput("");
+    update({ type: "api.error.cleared" });
+  }
+
+  function forgetCredential(): void {
+    window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    setApiToken("");
+  }
 
   async function createSession() {
     setOperation("creating");
@@ -415,6 +443,38 @@ export default function App() {
         MAX_SIDEBAR_WIDTH,
         Math.max(MIN_SIDEBAR_WIDTH, width + (event.key === "ArrowRight" ? 12 : -12)),
       ),
+    );
+  }
+
+  if (AUTH_REQUIRED && apiToken.length === 0) {
+    return (
+      <main className="credential-gate">
+        <form
+          className="credential-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            acceptCredential();
+          }}
+        >
+          <div className="brand-mark" aria-hidden="true">
+            AD
+          </div>
+          <span className="empty-kicker">SELF-HOSTED ACCESS</span>
+          <h1>Connect to AgentDock</h1>
+          <p>Enter the deployment API token. It is kept only in this browser tab session.</p>
+          <label htmlFor="api-credential">API token</label>
+          <input
+            autoComplete="off"
+            id="api-credential"
+            onChange={(event) => setCredentialInput(event.target.value)}
+            spellCheck={false}
+            type="password"
+            value={credentialInput}
+          />
+          {state.apiError ? <div className="credential-error">{state.apiError}</div> : null}
+          <button type="submit">continue</button>
+        </form>
+      </main>
     );
   }
 
@@ -539,6 +599,11 @@ export default function App() {
             >
               reconnect
             </button>
+            {AUTH_REQUIRED ? (
+              <button onClick={forgetCredential} title="Forget API token" type="button">
+                logout
+              </button>
+            ) : null}
           </div>
         </header>
         {state.apiError ? (

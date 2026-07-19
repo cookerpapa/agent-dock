@@ -3,6 +3,7 @@ import * as initialControlPlane from "./001_initial_control_plane.ts";
 import * as durableEventDelivery from "./002_durable_event_delivery.ts";
 import * as explicitSessionMailbox from "./003_explicit_session_mailbox.ts";
 import * as supervisorConnectionHealth from "./004_supervisor_connection_health.ts";
+import * as supervisorBootCredentials from "./005_supervisor_boot_credentials.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -11,6 +12,7 @@ export const migrationProvider: MigrationProvider = {
       "002_durable_event_delivery": durableEventDelivery,
       "003_explicit_session_mailbox": explicitSessionMailbox,
       "004_supervisor_connection_health": supervisorConnectionHealth,
+      "005_supervisor_boot_credentials": supervisorBootCredentials,
     };
   },
 };
@@ -34,3 +36,8 @@ export {
   down as downSupervisorConnectionHealth,
   up as upSupervisorConnectionHealth,
 } from "./004_supervisor_connection_health.ts";
+
+export {
+  down as downSupervisorBootCredentials,
+  up as upSupervisorBootCredentials,
+} from "./005_supervisor_boot_credentials.ts";

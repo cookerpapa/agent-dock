@@ -52,11 +52,13 @@ describe("SSE session client", () => {
     const first = event(1, "first");
     const second = event(2, "second");
     const cursors: string[] = [];
+    const authorizations: string[] = [];
     const delivered: number[] = [];
     const statuses: SessionStreamStatus[] = [];
     let call = 0;
     const fetchImplementation: typeof fetch = async (_input, init) => {
       cursors.push(new Headers(init?.headers).get("last-event-id") ?? "missing");
+      authorizations.push(new Headers(init?.headers).get("authorization") ?? "missing");
       call += 1;
       return call === 1
         ? eventStream(frame(first))
@@ -68,6 +70,7 @@ describe("SSE session client", () => {
       afterSequence: 0,
       signal: controller.signal,
       retryDelayMs: 0,
+      authorizationToken: `api-${"a".repeat(48)}`,
       fetchImplementation,
       onEvent(value) {
         delivered.push(value.seq);
@@ -80,6 +83,10 @@ describe("SSE session client", () => {
 
     expect(lastSequence).toBe(2);
     expect(cursors).toEqual(["0", "1"]);
+    expect(authorizations).toEqual([
+      `Bearer api-${"a".repeat(48)}`,
+      `Bearer api-${"a".repeat(48)}`,
+    ]);
     expect(delivered).toEqual([1, 2]);
     expect(statuses.map((status) => status.phase)).toContain("reconnecting");
   });

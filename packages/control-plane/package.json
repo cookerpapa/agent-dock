@@ -8,6 +8,7 @@
   },
   "scripts": {
     "demo": "tsx src/demo.ts",
+    "bootstrap": "tsx src/bootstrap-main.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run --maxWorkers=4"
