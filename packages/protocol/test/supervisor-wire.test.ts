@@ -17,6 +17,7 @@ const IDS = {
   targetCommand: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   approval: "88888888-8888-4888-8888-888888888888",
   event: "99999999-9999-4999-8999-999999999999",
+  commit: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 };
 
 const SENT_AT = "2026-07-18T08:00:00.000Z";
@@ -52,6 +53,17 @@ function modelSnapshot() {
     thinkingLevel: "off",
     credentialBindingId: "credential-binding-1",
     credentialBindingVersion: 3,
+  } as const;
+}
+
+function commandResultIdentity() {
+  return {
+    commandId: IDS.command,
+    sessionId: "session-1",
+    turnId: "turn-1",
+    leaseId: IDS.lease,
+    fencingToken: 7,
+    commitMessageId: IDS.commit,
   } as const;
 }
 
@@ -221,6 +233,72 @@ describe("supervisor/control-plane wire protocol", () => {
 
     expect(parseSupervisorToControlMessage(accepted)).toEqual(accepted);
     expect(() => parseControlToSupervisorMessage(accepted)).toThrow(AgentDockWireProtocolError);
+  });
+
+  it("requires an exact ACK reference before commit and correlates command results", () => {
+    const commit = {
+      ...envelope(IDS.commit),
+      type: "command.commit",
+      payload: {
+        commandId: IDS.command,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        leaseId: IDS.lease,
+        fencingToken: 7,
+        acknowledgedMessageId: IDS.message,
+      },
+    } as const;
+    const release = {
+      ...commit,
+      type: "command.release",
+    } as const;
+    const completed = {
+      ...envelope(IDS.message2),
+      type: "command.result",
+      payload: {
+        ...commandResultIdentity(),
+        commandKind: "turn.execute",
+        status: "completed",
+        stopReason: "stop",
+      },
+    } as const;
+    const cancelled = {
+      ...completed,
+      payload: {
+        ...commandResultIdentity(),
+        commandKind: "turn.execute",
+        status: "cancelled",
+        reason: "user_request",
+        forced: false,
+      },
+    } as const;
+    const failed = {
+      ...completed,
+      payload: {
+        ...commandResultIdentity(),
+        commandKind: "turn.cancel",
+        status: "failed",
+        code: "pi_process_exit",
+        message: "Pi process exited",
+        retryable: true,
+      },
+    } as const;
+
+    expect(parseControlToSupervisorMessage(commit)).toEqual(commit);
+    expect(parseControlToSupervisorMessage(release)).toEqual(release);
+    expect(
+      [completed, cancelled, failed].map(
+        (message) => parseSupervisorToControlMessage(message).type,
+      ),
+    ).toEqual(["command.result", "command.result", "command.result"]);
+    expect(() => parseSupervisorToControlMessage(commit)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseControlToSupervisorMessage(completed)).toThrow(AgentDockWireProtocolError);
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...completed,
+        payload: { ...completed.payload, apiKey: "must-not-cross-the-wire" },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
   });
 
   it("checks heartbeat capacity, uniqueness, and sequence observations", () => {

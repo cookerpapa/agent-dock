@@ -7,6 +7,7 @@ import { transitionSandbox, type SandboxState } from "@agent-dock/domain";
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
+  type EventPublishMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorRegisterMessage,
   type SupervisorRegisteredMessage,
@@ -166,6 +167,18 @@ function positiveInteger(value: number, name: string): number {
     throw new TypeError(`${name} must be a positive safe integer`);
   }
   return value;
+}
+
+function storedPositiveInteger(value: string | number | bigint, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new SupervisorConnectionManagerError(
+      "connection_invariant",
+      `${name} is outside the supported integer range`,
+      false,
+    );
+  }
+  return parsed;
 }
 
 function validDate(clock: () => Date): Date {
@@ -592,38 +605,54 @@ export class SupervisorConnectionManager {
     }
   }
 
+  async assertCurrentConnection(
+    connectionId: string,
+    authority: SupervisorTransportAuthority,
+  ): Promise<void> {
+    await this.#currentConnection(connectionId, authority);
+  }
+
+  async assertEventAuthority(
+    connectionId: string,
+    authority: SupervisorTransportAuthority,
+    value: EventPublishMessage,
+  ): Promise<void> {
+    const message = parseSupervisorToControlMessage(value);
+    if (message.type !== "event.publish") {
+      throw new SupervisorConnectionManagerError(
+        "invalid_event",
+        "Expected a supervisor event publication",
+        false,
+      );
+    }
+    await this.#currentConnection(connectionId, authority);
+    const now = validDate(this.#clock);
+    const lease = await this.#database
+      .selectFrom("session_leases")
+      .select(["sandbox_id", "lease_id", "fencing_token", "valid_until"])
+      .where("session_id", "=", message.payload.event.sessionId)
+      .executeTakeFirst();
+    if (
+      lease === undefined ||
+      lease.sandbox_id !== authority.sandboxId ||
+      lease.lease_id !== message.payload.leaseId ||
+      storedPositiveInteger(lease.fencing_token, "event authority fencing token") !==
+        message.payload.fencingToken ||
+      new Date(lease.valid_until).valueOf() <= now.valueOf()
+    ) {
+      throw new SupervisorConnectionManagerError(
+        "stale_fence",
+        "Supervisor event lease authority is stale",
+        false,
+      );
+    }
+  }
+
   async leaseCoordinator(
     connectionId: string,
     authority: SupervisorTransportAuthority,
   ): Promise<SessionLeaseCoordinator> {
-    requireUuid(connectionId, "connectionId");
-    this.#validateAuthorityShape(authority);
-    const connection = await this.#database
-      .selectFrom("supervisor_connections")
-      .select([
-        "sandbox_id",
-        "supervisor_id",
-        "boot_id",
-        "transport_id",
-        "control_plane_instance_id",
-        "heartbeat_timeout_ms",
-      ])
-      .where("connection_id", "=", connectionId)
-      .executeTakeFirst();
-    if (
-      connection === undefined ||
-      connection.sandbox_id !== authority.sandboxId ||
-      connection.supervisor_id !== authority.supervisorId ||
-      connection.boot_id !== authority.bootId ||
-      connection.transport_id !== authority.transportId ||
-      connection.control_plane_instance_id !== this.#controlPlaneInstanceId
-    ) {
-      throw new SupervisorConnectionManagerError(
-        "stale_connection",
-        "Supervisor connection authority is stale",
-        false,
-      );
-    }
+    const connection = await this.#currentConnection(connectionId, authority);
     const guard: SupervisorConnectionGuard = {
       controlPlaneInstanceId: this.#controlPlaneInstanceId,
       transportId: authority.transportId,
@@ -638,6 +667,45 @@ export class SupervisorConnectionManager {
       heartbeatConnectionId: connectionId,
       connectionGuard: guard,
     });
+  }
+
+  async #currentConnection(
+    connectionId: string,
+    authority: SupervisorTransportAuthority,
+  ): Promise<{ heartbeat_timeout_ms: number }> {
+    requireUuid(connectionId, "connectionId");
+    this.#validateAuthorityShape(authority);
+    const connection = await this.#database
+      .selectFrom("supervisor_connections")
+      .select([
+        "sandbox_id",
+        "supervisor_id",
+        "boot_id",
+        "transport_id",
+        "control_plane_instance_id",
+        "heartbeat_timeout_ms",
+        "state",
+        "expires_at",
+      ])
+      .where("connection_id", "=", connectionId)
+      .executeTakeFirst();
+    if (
+      connection === undefined ||
+      connection.sandbox_id !== authority.sandboxId ||
+      connection.supervisor_id !== authority.supervisorId ||
+      connection.boot_id !== authority.bootId ||
+      connection.transport_id !== authority.transportId ||
+      connection.control_plane_instance_id !== this.#controlPlaneInstanceId ||
+      connection.state !== "active" ||
+      new Date(connection.expires_at).valueOf() <= validDate(this.#clock).valueOf()
+    ) {
+      throw new SupervisorConnectionManagerError(
+        "stale_connection",
+        "Supervisor connection authority is stale",
+        false,
+      );
+    }
+    return connection;
   }
 
   async expireConnections(limit = DEFAULT_SWEEP_LIMIT): Promise<SupervisorConnectionSweepResult> {

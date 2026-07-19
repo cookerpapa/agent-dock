@@ -84,5 +84,6 @@ extension-policy support would overstate the current boundary.
 - [x] Persist authenticated supervisor registration, connection generations, and health expiry
 - [x] Require owner-stop proof through a retryable cross-replica sandbox-retirement queue
 - [x] Carry authenticated registration and shared heartbeats over a bounded outbound WebSocket
-- [ ] Route execute/cancel, command ACK, and event publish/ACK over the remote supervisor connection
+- [x] Route execute/cancel, two-phase command ACK/commit/result, and event publish/ACK over the remote supervisor connection
+- [ ] Rebuild guarded remote backends on reconnect and add cross-instance command ownership
 - [ ] Replace the development bearer authorizer and owner boundary with production provisioner/mTLS and process adapters

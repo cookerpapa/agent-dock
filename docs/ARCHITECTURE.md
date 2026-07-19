@@ -150,16 +150,17 @@ durable control-plane ACK before Pi continues. A successful terminal event may
 include a validated unified diff bounded to 64 KiB. Cancellation propagates to
 Pi first and then requires exact-name outer-container removal confirmation.
 
-This is a real sandbox/workspace transport whose execution command/event path
-still sits behind an integration-only local control-plane adapter. The HTTP
-application deliberately does not auto-start dispatchers. PostgreSQL event
-persistence, cumulative ACK, SSE replay, and Docker execution are executable;
-the live SSE hub is process-local. The local supervisor can use a private,
-crash-safe file spool that syncs every event before transport and replays an
-unacknowledged suffix from a fresh process instance.
+This is a real sandbox/workspace transport. The Web demo still chooses the local
+control-plane adapter, but the same dispatcher/backend boundary also has an
+executable two-phase remote WebSocket adapter. The HTTP application deliberately
+does not auto-start dispatchers. PostgreSQL event persistence, cumulative ACK,
+SSE replay, and Docker execution are executable; the live SSE hub is
+process-local. The local supervisor can use a private, crash-safe file spool
+that syncs every event before transport and replays an unacknowledged suffix
+from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, remote supervisor command/event routing and production
-authentication/owner adapters,
+gateway, production supervisor authentication/owner/reconnect adapters,
+cross-instance command ownership,
 acknowledged-cancellation crash recovery, cross-replica event notification, and
 Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
@@ -361,9 +362,10 @@ in-flight execution is never recreated: after the old owner boot is fenced, the
 host reconciler confirms its labelled runtime is absent and records the
 acknowledged turn as ambiguous `assignment_lost`. The durable health manager now
 automates timeout fencing, owner-stop confirmation, and retryable retirement;
-registration/heartbeat can cross a real outbound WebSocket, while remote
-command/event routing and the concrete production owner-process adapter are not
-yet wired.
+registration/heartbeat and two-phase command/event delivery can cross a real
+outbound WebSocket, while automatic reconnect/backend reconstruction,
+cross-instance command ownership, and the concrete production owner-process
+adapter are not yet wired.
 
 ## 5. Delivery and recovery semantics
 
@@ -373,11 +375,12 @@ Every internal message carries `protocolVersion`, `messageId`, `sentAt`, a
 discriminator, and a closed typed payload. The contract is transport-neutral
 JSON intended for the supervisor's outbound WebSocket connection.
 
-Supervisor-to-control messages are registration, command ACK, event publication,
-and heartbeat. Control-to-supervisor messages are registration acceptance, turn
-execution/cancellation, approval resolution, cumulative event ACK, and heartbeat
-ACK with lease renewals. Registration advertises the exact Pi/supervisor versions
-and capabilities. Post-registration mutations carry a lease ID and fencing token.
+Supervisor-to-control messages are registration, command ACK/result, event
+publication, and heartbeat. Control-to-supervisor messages are registration
+acceptance, turn execution/cancellation, command commit/release, approval
+resolution, cumulative event ACK, and heartbeat ACK with lease renewals.
+Registration advertises the exact Pi/supervisor versions and capabilities.
+Post-registration mutations carry a lease ID and fencing token.
 The execute command additionally carries the turn's immutable provider, model,
 thinking level, and opaque credential-binding snapshot; it never carries a
 credential value or arbitrary provider endpoint.
@@ -398,9 +401,19 @@ It routes heartbeats through the durable manager and returns exact ACKs. The
 sandbox client applies those ACKs through one server-negotiated heartbeat loop
 covering all active assignments. A same-process reconnect proactively closes
 the old socket; a cross-replica reconnect is rejected through PostgreSQL on the
-old socket's next frame. Close alone does not quarantine a sandbox. The current
-gateway intentionally rejects command ACK and event publication until the
-durable remote command/event router is implemented.
+old socket's next frame. Close alone does not prove process death.
+
+When `command.two_phase.v1` is advertised, the connection also multiplexes
+execute/cancel preparations, command ACK/commit/release/result, and event
+publish/ACK. A preparation is side-effect free. The dispatcher persists its
+acknowledged lifecycle before `command.commit` may invoke `run`; a failed
+transaction best-effort sends `command.release`. Results are independently
+bounded because runtime failures may precede a terminal public event. Event
+authority is checked against both the current connection generation and the
+sandbox holding the session lease before `DurableEventStore` commits it. Only
+then is `event.ack` sent. Socket loss releases uncommitted work and locally
+revokes committed assignments, while durable timeout/owner retirement remains
+the external fence. See ADR-0017.
 
 ### Event and command semantics
 
@@ -416,6 +429,11 @@ durable remote command/event router is implemented.
 - Commands use at-least-once delivery plus durable idempotency. Command ACK says
   that the current fenced supervisor accepted responsibility, not that execution
   completed.
+- Remote delivery is two-phase: ACK only records a side-effect-free preparation;
+  `command.commit` starts work after the control-plane transaction, while
+  `command.release` discards an uncommitted preparation. `command.result`
+  returns bounded completion, cancellation, or safe failure metadata and does
+  not replace the durable public event history.
 - A prompt submitted while an earlier turn is active is accepted as a separate
   queued follow-up with its own mailbox position. It starts only after every
   lower nonterminal position settles and restores the latest committed

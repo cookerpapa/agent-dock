@@ -49,6 +49,10 @@ export {
   type LocalSupervisorExecutionBackendOptions,
 } from "./local-supervisor-execution-backend.ts";
 export {
+  RemoteSupervisorExecutionBackend,
+  type RemoteSupervisorExecutionBackendOptions,
+} from "./remote-supervisor-execution-backend.ts";
+export {
   OutboxDispatcher,
   OutboxDispatcherInvariantError,
   OutboxDispatcherStaleClaimError,
@@ -83,6 +87,15 @@ export {
   type SupervisorRetirementWorkResult,
   type SupervisorTransportAuthority,
 } from "./supervisor-connection-manager.ts";
+export {
+  TWO_PHASE_COMMAND_CAPABILITY,
+  SupervisorCommandRouter,
+  SupervisorCommandTransportError,
+  type RemoteSupervisorCommandTransport,
+  type SupervisorCommandConnection,
+  type SupervisorCommandRouterOptions,
+  type SupervisorRemoteCommand,
+} from "./supervisor-command-router.ts";
 export {
   HashedBearerSupervisorAuthorizer,
   SUPERVISOR_SOCKET_CLOSE,

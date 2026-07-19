@@ -60,6 +60,13 @@ export type SupervisorTurnCancellationResult = {
 export type PreparedTurnCancellation = {
   ack: CommandAckMessage;
   run(): Promise<SupervisorTurnCancellationResult>;
+  releaseBeforeStart(): void;
+};
+
+export type RevokedSupervisorAssignments = {
+  releasedPreparations: number;
+  releasedCancellations: number;
+  revokedExecutions: number;
 };
 
 export type LocalSandboxSupervisorOptions = {
@@ -157,6 +164,29 @@ export class LocalSandboxSupervisor {
 
   get activeSessionCount(): number {
     return this.#currentBySession.size;
+  }
+
+  revokeAllAssignments(): RevokedSupervisorAssignments {
+    let releasedPreparations = 0;
+    let releasedCancellations = 0;
+    let revokedExecutions = 0;
+    for (const cancellation of this.#cancellationsByCommand.values()) {
+      if (cancellation.state !== "prepared") continue;
+      this.#releaseCancellationBeforeStart(cancellation);
+      releasedCancellations += 1;
+    }
+    for (const assignment of [...this.#currentBySession.values()]) {
+      if (assignment.state === "prepared") {
+        this.#releaseBeforeStart(assignment);
+        releasedPreparations += 1;
+        continue;
+      }
+      if (assignment.state === "running" || assignment.state === "cancelling") {
+        this.#revokeLease(assignment);
+        revokedExecutions += 1;
+      }
+    }
+    return { releasedPreparations, releasedCancellations, revokedExecutions };
   }
 
   createHeartbeat(
@@ -422,6 +452,7 @@ export class LocalSandboxSupervisor {
     return {
       ack: this.#ack(cancellation.command, { status }),
       run: () => this.#runCancellation(cancellation),
+      releaseBeforeStart: () => this.#releaseCancellationBeforeStart(cancellation),
     };
   }
 
@@ -435,6 +466,7 @@ export class LocalSandboxSupervisor {
       ack: this.#ack(command, { status: "rejected", code, message, retryable }),
       run: () =>
         Promise.reject(new LocalSandboxSupervisorError(code, "Rejected cancellation cannot run")),
+      releaseBeforeStart: () => undefined,
     };
   }
 
@@ -685,5 +717,11 @@ export class LocalSandboxSupervisor {
     }
     this.#byCommand.delete(assignment.command.payload.commandId);
     assignment.state = "failed";
+  }
+
+  #releaseCancellationBeforeStart(cancellation: Cancellation): void {
+    if (cancellation.state !== "prepared") return;
+    this.#cancellationsByCommand.delete(cancellation.command.payload.commandId);
+    cancellation.state = "failed";
   }
 }

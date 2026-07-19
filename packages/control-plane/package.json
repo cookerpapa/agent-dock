@@ -10,7 +10,7 @@
     "demo": "tsx src/demo.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest --run"
+    "test": "vitest --run --maxWorkers=4"
   },
   "dependencies": {
     "@agent-dock/database": "0.1.0",

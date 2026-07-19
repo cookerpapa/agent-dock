@@ -13,6 +13,8 @@ import {
   UuidSchema,
 } from "./protocol-primitives.ts";
 
+export const TWO_PHASE_COMMAND_CAPABILITY = "command.two_phase.v1";
+
 const WireEnvelopeProperties = {
   protocolVersion: Type.Literal(1),
   messageId: UuidSchema,
@@ -252,6 +254,99 @@ export const CommandAckMessageSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const CommandDispositionPayloadSchema = Type.Object(
+  {
+    ...CommandAckIdentityProperties,
+    acknowledgedMessageId: UuidSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const CommandCommitMessageSchema = Type.Object(
+  {
+    ...WireEnvelopeProperties,
+    type: Type.Literal("command.commit"),
+    payload: CommandDispositionPayloadSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const CommandReleaseMessageSchema = Type.Object(
+  {
+    ...WireEnvelopeProperties,
+    type: Type.Literal("command.release"),
+    payload: CommandDispositionPayloadSchema,
+  },
+  { additionalProperties: false },
+);
+
+const CommandResultIdentityProperties = {
+  ...CommandAckIdentityProperties,
+  commitMessageId: UuidSchema,
+};
+
+const CompletedExecuteCommandResultPayloadSchema = Type.Object(
+  {
+    ...CommandResultIdentityProperties,
+    commandKind: Type.Literal("turn.execute"),
+    status: Type.Literal("completed"),
+    stopReason: Type.String({ minLength: 1, maxLength: 256 }),
+  },
+  { additionalProperties: false },
+);
+
+const CompletedCancellationCommandResultPayloadSchema = Type.Object(
+  {
+    ...CommandResultIdentityProperties,
+    commandKind: Type.Literal("turn.cancel"),
+    status: Type.Literal("completed"),
+    reason: TurnCancellationReasonSchema,
+    forced: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+const CancelledExecuteCommandResultPayloadSchema = Type.Object(
+  {
+    ...CommandResultIdentityProperties,
+    commandKind: Type.Literal("turn.execute"),
+    status: Type.Literal("cancelled"),
+    reason: TurnCancellationReasonSchema,
+    forced: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+const FailedCommandResultPayloadSchema = Type.Object(
+  {
+    ...CommandResultIdentityProperties,
+    commandKind: Type.Union([Type.Literal("turn.execute"), Type.Literal("turn.cancel")]),
+    status: Type.Literal("failed"),
+    code: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+    }),
+    message: Type.String({ minLength: 1, maxLength: 4_096 }),
+    retryable: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const CommandResultMessageSchema = Type.Object(
+  {
+    ...WireEnvelopeProperties,
+    type: Type.Literal("command.result"),
+    payload: Type.Union([
+      CompletedExecuteCommandResultPayloadSchema,
+      CompletedCancellationCommandResultPayloadSchema,
+      CancelledExecuteCommandResultPayloadSchema,
+      FailedCommandResultPayloadSchema,
+    ]),
+  },
+  { additionalProperties: false },
+);
+
 export const EventPublishMessageSchema = Type.Object(
   {
     ...WireEnvelopeProperties,
@@ -343,6 +438,7 @@ export const SupervisorHeartbeatAckMessageSchema = Type.Object(
 export const SupervisorToControlMessageSchema = Type.Union([
   SupervisorRegisterMessageSchema,
   CommandAckMessageSchema,
+  CommandResultMessageSchema,
   EventPublishMessageSchema,
   SupervisorHeartbeatMessageSchema,
 ]);
@@ -352,6 +448,8 @@ export const ControlToSupervisorMessageSchema = Type.Union([
   ExecuteTurnCommandMessageSchema,
   CancelTurnCommandMessageSchema,
   ResolveApprovalCommandMessageSchema,
+  CommandCommitMessageSchema,
+  CommandReleaseMessageSchema,
   EventAckMessageSchema,
   SupervisorHeartbeatAckMessageSchema,
 ]);
@@ -362,19 +460,28 @@ export type ExecuteTurnCommandMessage = Static<typeof ExecuteTurnCommandMessageS
 export type CancelTurnCommandMessage = Static<typeof CancelTurnCommandMessageSchema>;
 export type ResolveApprovalCommandMessage = Static<typeof ResolveApprovalCommandMessageSchema>;
 export type CommandAckMessage = Static<typeof CommandAckMessageSchema>;
+export type CommandCommitMessage = Static<typeof CommandCommitMessageSchema>;
+export type CommandReleaseMessage = Static<typeof CommandReleaseMessageSchema>;
+export type CommandResultMessage = Static<typeof CommandResultMessageSchema>;
 export type EventPublishMessage = Static<typeof EventPublishMessageSchema>;
 export type EventAckMessage = Static<typeof EventAckMessageSchema>;
 export type SupervisorHeartbeatMessage = Static<typeof SupervisorHeartbeatMessageSchema>;
 export type SupervisorHeartbeatAckMessage = Static<typeof SupervisorHeartbeatAckMessageSchema>;
 
 export type SupervisorToControlMessage =
-  SupervisorRegisterMessage | CommandAckMessage | EventPublishMessage | SupervisorHeartbeatMessage;
+  | SupervisorRegisterMessage
+  | CommandAckMessage
+  | CommandResultMessage
+  | EventPublishMessage
+  | SupervisorHeartbeatMessage;
 
 export type ControlToSupervisorMessage =
   | SupervisorRegisteredMessage
   | ExecuteTurnCommandMessage
   | CancelTurnCommandMessage
   | ResolveApprovalCommandMessage
+  | CommandCommitMessage
+  | CommandReleaseMessage
   | EventAckMessage
   | SupervisorHeartbeatAckMessage;
 

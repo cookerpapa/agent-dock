@@ -5,11 +5,17 @@ import type { TLSSocket } from "node:tls";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import {
+  SupervisorCommandTransportError,
+  type SupervisorCommandConnection,
+  type SupervisorCommandRouter,
+} from "./supervisor-command-router.ts";
+import {
   SupervisorConnectionManagerError,
   type SupervisorBootIdentity,
   type SupervisorTransportAuthority,
 } from "./supervisor-connection-manager.ts";
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
+import type { SessionLeaseCoordinator } from "./session-lease-coordinator.ts";
 
 export const SUPERVISOR_WEBSOCKET_PATH = "/internal/v1/supervisor";
 export const SUPERVISOR_SOCKET_CLOSE = {
@@ -42,6 +48,7 @@ export type SupervisorWebSocketGatewayOptions = {
   maxPendingFrames?: number;
   maxBufferedSendBytes?: number;
   registrationTimeoutMs?: number;
+  commandRouter?: SupervisorCommandRouter;
 };
 
 export class SupervisorUpgradeAuthorizationError extends Error {
@@ -162,6 +169,7 @@ type SocketContext = {
   closed: boolean;
   processing: Promise<void>;
   registrationTimer: NodeJS.Timeout | undefined;
+  commandConnection: SupervisorCommandConnection | undefined;
 };
 
 function closeSocket(socket: WebSocket, code: number, reason: string): void {
@@ -181,6 +189,7 @@ export class SupervisorWebSocketGateway {
   readonly #maxPendingFrames: number;
   readonly #maxBufferedSendBytes: number;
   readonly #registrationTimeoutMs: number;
+  readonly #commandRouter: SupervisorCommandRouter | undefined;
   readonly #authorizedRequests = new WeakMap<FastifyRequest, SupervisorBootIdentity>();
   readonly #activeBySandbox = new Map<string, SocketContext>();
   #installed = false;
@@ -206,10 +215,23 @@ export class SupervisorWebSocketGateway {
       options.registrationTimeoutMs ?? DEFAULT_REGISTRATION_TIMEOUT_MS,
       "registrationTimeoutMs",
     );
+    this.#commandRouter = options.commandRouter;
   }
 
   get activeConnectionCount(): number {
     return this.#activeBySandbox.size;
+  }
+
+  async currentLeaseCoordinator(sandboxId: string): Promise<SessionLeaseCoordinator> {
+    const context = this.#activeBySandbox.get(sandboxId);
+    if (context === undefined || context.closed || context.registeredConnectionId === undefined) {
+      throw new SupervisorConnectionManagerError(
+        "supervisor_connection_unavailable",
+        "Supervisor connection is unavailable",
+        true,
+      );
+    }
+    return this.#manager.leaseCoordinator(context.registeredConnectionId, context.authority);
   }
 
   install(fastify: FastifyInstance): void {
@@ -263,6 +285,7 @@ export class SupervisorWebSocketGateway {
       closed: false,
       processing: Promise.resolve(),
       registrationTimer: undefined,
+      commandConnection: undefined,
     };
     context.registrationTimer = setTimeout(() => {
       this.#close(context, 1_008, "registration timeout");
@@ -335,6 +358,24 @@ export class SupervisorWebSocketGateway {
       if (previous !== undefined && previous !== context) {
         this.#close(previous, SUPERVISOR_SOCKET_CLOSE.SUPERSEDED, "connection superseded");
       }
+      if (this.#commandRouter !== undefined && context.commandConnection === undefined) {
+        const connection: SupervisorCommandConnection = {
+          supervisorId: context.authority.supervisorId,
+          bootId: context.authority.bootId,
+          sandboxId: context.authority.sandboxId,
+          connectionId: acknowledgement.payload.connectionId,
+          capabilities: [...message.payload.capabilities],
+          send: (outbound) => this.#send(context, outbound),
+          assertEventAuthority: (event) =>
+            this.#manager.assertEventAuthority(
+              acknowledgement.payload.connectionId,
+              context.authority,
+              event,
+            ),
+        };
+        context.commandConnection = connection;
+        this.#commandRouter.attach(connection);
+      }
       await this.#send(context, acknowledgement);
       return;
     }
@@ -351,6 +392,13 @@ export class SupervisorWebSocketGateway {
       const acknowledgement = await this.#manager.heartbeat(message, context.authority);
       await this.#send(context, acknowledgement);
       return;
+    }
+    if (this.#commandRouter !== undefined && context.commandConnection !== undefined) {
+      await this.#manager.assertCurrentConnection(
+        context.registeredConnectionId,
+        context.authority,
+      );
+      if (await this.#commandRouter.receive(context.commandConnection, message)) return;
     }
     this.#close(context, 1_003, "message type unsupported");
   }
@@ -390,6 +438,14 @@ export class SupervisorWebSocketGateway {
       );
       return;
     }
+    if (error instanceof SupervisorCommandTransportError) {
+      this.#close(
+        context,
+        error.retryable ? 1_011 : 1_008,
+        error.retryable ? "supervisor command service unavailable" : "supervisor command rejected",
+      );
+      return;
+    }
     this.#close(context, 1_011, "supervisor message failed");
   }
 
@@ -407,6 +463,10 @@ export class SupervisorWebSocketGateway {
     }
     if (this.#activeBySandbox.get(context.authority.sandboxId) === context) {
       this.#activeBySandbox.delete(context.authority.sandboxId);
+    }
+    if (context.commandConnection !== undefined) {
+      this.#commandRouter?.detach(context.commandConnection);
+      context.commandConnection = undefined;
     }
   }
 }

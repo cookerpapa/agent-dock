@@ -104,6 +104,7 @@ only after a measured requirement appears.
 - [ADR-0014: lease renewal and assignment reconciliation](docs/adr/0014-lease-renewal-and-assignment-reconciliation.md)
 - [ADR-0015: authenticated supervisor registration and durable health](docs/adr/0015-supervisor-registration-and-health-management.md)
 - [ADR-0016: authenticated outbound supervisor WebSocket transport](docs/adr/0016-supervisor-websocket-transport.md)
+- [ADR-0017: two-phase remote command delivery](docs/adr/0017-two-phase-remote-command-delivery.md)
 
 ## Current executable spikes
 
@@ -261,9 +262,10 @@ not fetched, and no Pi payload, credential reference, or provider token is
 written to the DOM or browser console.
 
 The full database-to-container path and Web demo use the embedded loopback fake
-model, so they consume no subscription token. Execution command/event delivery
-still uses the in-process integration bridge, while registration and heartbeat
-now also have a real optional outbound-WebSocket gateway/client. The production
+model, so they consume no subscription token. The demo deliberately retains the
+in-process integration bridge, while the reusable runtime now also carries
+registration, heartbeat, execute/cancel, command ACK/commit/result, and durable
+event ACK over a real optional outbound-WebSocket gateway/client. The production
 HTTP entry point does not start either dispatchers or a fake supervisor owner.
 The current image embeds one trusted
 sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
@@ -275,10 +277,10 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, remote command/event routing, production supervisor authentication and
-owner adapters, and cross-replica live fan-out remain separate work. Queued-turn withdrawal,
-acknowledged-cancellation crash recovery, and Windows Job Object containment
-are also deferred.
+gateway, production supervisor authentication/owner/reconnect wiring, a
+cross-instance command broker, and cross-replica live fan-out remain separate
+work. Queued-turn withdrawal, acknowledged-cancellation crash recovery, and
+Windows Job Object containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -316,7 +318,7 @@ control-plane instance. The gateway/client is optional library code; production
 `main.ts`, a real provisioner credential, and the concrete Docker/Kubernetes
 owner-process adapter are not yet wired.
 
-The registration/heartbeat network contract is now executable through the
+The supervisor network contract is now executable through the
 official Fastify WebSocket plugin and a sandbox-side `ws` client. Upgrade
 authentication happens before the socket opens; a development authorizer keeps
 only a bearer-token hash, while the interface can be backed by mTLS/SPIFFE or a
@@ -324,8 +326,18 @@ provisioner in production. The first frame must register, frames are processed
 in order with payload/queue bounds, one negotiated heartbeat timer covers all
 active assignments, and PostgreSQL rejects an old socket even when reconnecting
 through another control-plane listener. Socket close still waits for durable
-health expiry. This slice deliberately does not route execute/cancel commands,
-command ACKs, or event publications yet.
+health expiry.
+
+Capability `command.two_phase.v1` additionally enables multiplexed remote
+execute/cancel delivery. The Supervisor prepares without starting Pi and returns
+an exact ACK; only after the dispatcher persists `ACKNOWLEDGED/RUNNING` does the
+control plane send `command.commit`. A failed persistence sends best-effort
+`command.release`. Runtime completion/failure returns `command.result`, while
+each spooled public event still waits for PostgreSQL commit and cumulative
+`event.ack`. Wrong-stage or wrong-fence frames fail closed. Losing the shared
+lease channel releases uncommitted preparations and revokes running assignments.
+This preserves persist-before-side-effect ordering but does not claim
+distributed exactly-once execution.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
@@ -344,6 +356,6 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses the durable command/event WebSocket router, cross-replica
-live notification, and the MinIO/S3 object-store adapter rather than keeping a
-process per conversation.
+Phase 2 next addresses production reconnect/backend reconstruction,
+cross-instance command ownership, cross-replica live notification, and the
+MinIO/S3 object-store adapter rather than keeping a process per conversation.

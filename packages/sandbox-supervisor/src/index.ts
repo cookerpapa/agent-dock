@@ -58,6 +58,7 @@ export {
   type LocalSandboxSupervisorOptions,
   type PreparedTurnCancellation,
   type PreparedTurnExecution,
+  type RevokedSupervisorAssignments,
   type SupervisorTurnCancellationResult,
   type SupervisorTurnRunner,
 } from "./local-sandbox-supervisor.ts";
@@ -106,6 +107,7 @@ export {
 export {
   SupervisorWebSocketClient,
   SupervisorWebSocketClientError,
+  type SupervisorCommandRuntime,
   type SupervisorHeartbeatRuntime,
   type SupervisorWebSocketClientClose,
   type SupervisorWebSocketClientOptions,

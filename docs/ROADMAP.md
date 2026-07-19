@@ -90,8 +90,11 @@ before reconciliation. MinIO/S3, explicit steer implementation, cross-replica
 event notification, and a concrete production owner-process adapter remain.
 Registration and heartbeat now also pass through an authenticated, bounded,
 ordered outbound WebSocket gateway/client, including cross-replica stale-socket
-rejection. Remote execute/cancel delivery, command/event ACK routing, and
-backpressure remain the next transport slice.
+rejection. Capability-gated remote execute/cancel now preserves the local
+prepare-before-run invariant through command ACK, durable lifecycle commit,
+explicit commit/release, bounded results, and durable event ACK backpressure.
+Production reconnect/backend reconstruction and cross-instance command
+ownership remain the next transport slice.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

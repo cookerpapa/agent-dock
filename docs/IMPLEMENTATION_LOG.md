@@ -890,3 +890,51 @@
   跨真实 socket 闭环，接下来应把现有 `prepare -> durable ACK -> run` 与
   `event.publish -> PostgreSQL commit -> event.ack` 顺序原样搬到网络上，而不能写一个无 durable
   correlation 的通用 JSON RPC handler。
+
+## 2026-07-19 — 两阶段远程 command/event WebSocket 路由
+
+- 目标：让已有 outbox/cancellation dispatcher 能驱动独立 Supervisor，而不破坏本地 backend 已证明的
+  `prepare -> durable ACK -> run` 顺序；同时把 crash-safe event spool 的 publication/ACK backpressure
+  原样跨进程传输。
+- 协议决策：新增 ADR-0017 与 capability `command.two_phase.v1`。execute/cancel 帧只做 side-effect-free
+  prepare 并返回 `command.ack`；control plane 把 command/turn/session/outbox 事务提交为
+  acknowledged/running 后才发送引用该 ACK message ID 的 `command.commit`。事务失败则 best-effort
+  `command.release`，只释放未启动 preparation。`command.result` 引用 commit message ID，闭合表达 execute
+  completion、explicit cancellation、cancellation completion 或 bounded safe failure。该协议不声称
+  distributed exactly-once。
+- Control plane：新增 `SupervisorCommandRouter`，每个 sandbox 只绑定当前 socket generation，并以
+  commandId 隔离 bounded ACK/result waiter。错误阶段、identity/lease/fence/ACK/commit correlation 不匹配、
+  unsolicited result、timeout 或 superseded connection 都 fail closed。Router 在 event 进入
+  `DurableEventStore` 前验证 PostgreSQL 中的当前 connection generation，以及该 sandbox 对 session lease
+  的真实持有关系；落库及可选通知成功后才回 cumulative `event.ack`。
+- Remote backend：新增 `RemoteSupervisorExecutionBackend`，复用原 `OutboxDispatcher`、
+  `CancellationDispatcher` 和 guarded `SessionLeaseCoordinator`。pre-ACK 网络失败仍可按 mailbox 策略重试；
+  durable start 后的断线属于 ambiguous execution，session 被隔离且不会盲目 replay 工具。显式 user
+  cancellation 和 lease-revoked failure 保持不同语义。
+- Supervisor client：一个 `ws` connection 同时承载 registration、共享 heartbeat、多 session command、
+  result 与 event ACK，不为 session 新建 thread/process/socket。Inbound frame 串行有界处理，但 commit
+  启动的 runner 独立推进，避免等待 event ACK 时阻塞 socket reader。每个 session 同时最多一个 event
+  ACK waiter，send buffer/payload/timeout 均有上限。连接丢失会 release 所有 uncommitted preparation，并
+  `revokeAllAssignments()` 停止 committed runtime；`LocalSandboxSupervisor` 也新增 cancellation
+  pre-start release。
+- 可执行证据：4 个真实 loopback WebSocket + PostgreSQL tests 覆盖 ACK 到达但尚未 durable 时 runner=0、
+  commit 前数据库已 acknowledged/running、两条 public event 均先落库后 ACK、durable transaction failure
+  release 且从不启动 runner、远程 fenced cancellation 同时收敛 execute/cancel、以及共享 lease channel
+  关闭后 runtime 收到 `lease_revoked` 并使 session failed。3 个 router negative tests 另证实旧 capability
+  不会收到两阶段 command、仅 commandId 相同但 fence 错误的 ACK 被拒绝、伪造 sandbox lease 的 event
+  不会进入 durable ingestor。
+- 测试隔离：新增的真实数据库/socket suite 使默认 worker 数同时启动过多 PGlite socket server，暴露
+  `unnamed prepared statement` 与 90ms lease timing 的跨 server 干扰。control-plane Vitest 因此固定最多
+  4 个 workers；三次完整 control-plane 复跑均为 50 passed/1 Docker-only skipped，同时仍保留文件并行。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、194 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 vulnerabilities。相同 50-test control-plane suite 又在
+  一次性、仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 上通过 50 passed/1 Docker-only skipped；结束后
+  database container 与 managed sandbox containers 均为 0。
+- 当前边界：router 只服务持有本地 socket 的 control-plane instance；PostgreSQL 会拒绝跨 replica stale
+  socket，但尚未提供跨实例 command broker。Client 仍是单连接生命周期，没有 production automatic
+  reconnect/backoff；新 connection generation 需要重建 guarded coordinator/backend。生产 `main.ts` 仍未
+  接入真实 provisioner/mTLS credential、owner-process handle 或 dispatcher ownership。durable ACK 后、
+  commit 前若 control-plane 进程崩溃，会安全失败并交给 reconciliation，不会自动重放。
+- 下一步：实现 production reconnect/backend reconstruction 与 cross-instance dispatch ownership。原因是
+  单连接内的执行安全和 event durability 已闭环，下一项真实可用性风险已变成“socket owner 实例退出后谁
+  接管”，而不是消息 schema 或 Pi loop 本身。
