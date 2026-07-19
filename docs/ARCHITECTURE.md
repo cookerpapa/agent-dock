@@ -154,14 +154,16 @@ This is a real sandbox/workspace transport. The Web demo still chooses the local
 control-plane adapter, but the same dispatcher/backend boundary also has an
 executable two-phase remote WebSocket adapter. The HTTP application deliberately
 does not auto-start dispatchers. PostgreSQL event persistence, cumulative ACK,
-SSE replay, and Docker execution are executable; the live SSE hub is
-process-local. The local supervisor can use a private, crash-safe file spool
-that syncs every event before transport and replays an unacknowledged suffix
-from a fresh process instance.
+SSE replay, cross-replica high-water notification, and Docker execution are
+executable. Each production control-plane replica owns one dedicated PostgreSQL
+listener; notifications wake a process-local hub, while event bodies are always
+read from the durable table. The local supervisor can use a private, crash-safe
+file spool that syncs every event before transport and replays an unacknowledged
+suffix from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
 gateway, production supervisor authentication/owner and dispatch-worker
-adapters, acknowledged-cancellation crash recovery, cross-replica event
-notification, and Windows Job Object containment remain later slices. A crash
+adapters, acknowledged-cancellation crash recovery, and Windows Job Object
+containment remain later slices. A crash
 after durable command ACK is treated as ambiguous and failed rather than
 replaying possible tool side effects.
 
@@ -473,9 +475,13 @@ second command broker. See ADR-0019.
   `data`. It subscribes before reading the durable suffix and deduplicates the
   replay/live overlap. Exact durable redelivery may be re-ACKed after lease
   release when the earlier ACK packet was lost; it cannot add or alter history.
-- The current in-process live hub is bounded and single-replica. PostgreSQL is
-  authoritative for reconnect, while multi-replica live fan-out awaits
-  `LISTEN/NOTIFY` or a measured broker requirement.
+- Event commit transactionally emits a PostgreSQL `NOTIFY` containing only the
+  tenant, session, and durable high-water sequence. Each replica filters its
+  dedicated listener by tenant and uses the local hub to coalesce one high-water
+  wake per SSE subscriber; it never queues event bodies. The stream reads the
+  missing durable suffix on a wake and on an idle heartbeat, so duplicate or
+  missed notifications cannot create a sequence gap. Listener reconnect wakes
+  every local subscription.
 - Read-only tool calls may be retried when safe.
 - Mutating or external side effects require an execution ledger, reconciliation,
   or human confirmation after an ambiguous crash.

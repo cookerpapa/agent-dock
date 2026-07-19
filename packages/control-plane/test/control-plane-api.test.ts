@@ -37,6 +37,7 @@ import {
   LocalSupervisorExecutionBackend,
   OutboxDispatcher,
   OutboxDispatcherStaleClaimError,
+  PostgresSessionEventNotifications,
   PostgresSandboxCheckpointStore,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
@@ -68,11 +69,16 @@ const IDS = {
   retirementSandboxBoot: "60000000-0000-4000-8000-000000000008",
   mismatchedRuntimeSandbox: "50000000-0000-4000-8000-000000000009",
   mismatchedRuntimeSandboxBoot: "60000000-0000-4000-8000-000000000009",
+  notificationFallbackSandbox: "50000000-0000-4000-8000-000000000010",
+  notificationFallbackSandboxBoot: "60000000-0000-4000-8000-000000000010",
+  notificationSandbox: "50000000-0000-4000-8000-000000000011",
+  notificationSandboxBoot: "60000000-0000-4000-8000-000000000011",
 };
 
 let pglite: PGlite | undefined;
 let socketServer: PGLiteSocketServer | undefined;
 let database: Kysely<Database>;
+let databaseConnectionString: string;
 let application: NestFastifyApplication;
 let http: FastifyInstance;
 let baseUrl: string;
@@ -80,6 +86,7 @@ let durableEventStore: DurableEventStore;
 let project: ProjectResource;
 let session: SessionResource;
 let firstAccepted: AcceptedTurnResource;
+let sessionEventNotifications: PostgresSessionEventNotifications | undefined;
 
 const rejectOutboxInsertPlugin: KyselyPlugin = {
   transformQuery({ node }) {
@@ -389,16 +396,27 @@ beforeAll(async () => {
     await socketServer.start();
     connectionString = `postgresql://postgres@${socketServer.getServerConn()}/postgres?sslmode=disable`;
   }
+  databaseConnectionString = connectionString;
   database = createDatabase({
     connectionString,
     maxConnections: 2,
   });
   await runMigrations(database, "up");
   await seedSingleUserProfile();
+  if (pglite === undefined) {
+    sessionEventNotifications = new PostgresSessionEventNotifications({
+      connectionString: databaseConnectionString,
+      tenantId: IDS.tenant,
+      applicationName: `agent-dock-api-test-${process.pid}`,
+      initialReconnectDelayMs: 20,
+      maxReconnectDelayMs: 100,
+    });
+  }
   application = await createControlPlaneApplication({
     database,
     tenantId: IDS.tenant,
     defaultModelProfileId: IDS.profile,
+    ...(sessionEventNotifications === undefined ? {} : { sessionEventNotifications }),
   });
   await application.listen(0, "127.0.0.1");
   http = application.getHttpAdapter().getInstance() as FastifyInstance;
@@ -1678,6 +1696,177 @@ describe.sequential("single-user durable turn intake API", () => {
       await rm(workspaceDirectory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("recovers a cross-replica SSE stream from PostgreSQL on its bounded heartbeat", async () => {
+    const assigned = await createAssignedTurn({
+      sandboxId: IDS.notificationFallbackSandbox,
+      sandboxBootId: IDS.notificationFallbackSandboxBoot,
+      supervisorId: "notification-fallback-supervisor",
+      phase: "acknowledged",
+      expired: false,
+    });
+    const secondApplication = await createControlPlaneApplication({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+      sessionEventStreamOptions: { heartbeatIntervalMs: 25 },
+    });
+    const abort = new AbortController();
+    try {
+      await secondApplication.listen(0, "127.0.0.1");
+      const response = await fetch(
+        `${await secondApplication.getUrl()}/v1/sessions/${assigned.assignedSession.sessionId}/events`,
+        { signal: abort.signal },
+      );
+      expect(response.status).toBe(200);
+      const received = readSseEvents(response, 1, 2_000);
+      const now = new Date().toISOString();
+      const event: EventPublishMessage = {
+        protocolVersion: 1,
+        messageId: globalThis.crypto.randomUUID(),
+        sentAt: now,
+        type: "event.publish",
+        payload: {
+          commandId: assigned.accepted.commandId,
+          leaseId: assigned.runtime.leaseId,
+          fencingToken: assigned.runtime.fencingToken,
+          event: {
+            schemaVersion: 1,
+            eventId: globalThis.crypto.randomUUID(),
+            sessionId: assigned.assignedSession.sessionId,
+            turnId: assigned.accepted.turnId,
+            agentId: "root",
+            seq: 1,
+            occurredAt: now,
+            type: "turn.started",
+            payload: { inputKind: "prompt" },
+          },
+        },
+      };
+      await durableEventStore.ingest(event);
+      await expect(received).resolves.toMatchObject([
+        {
+          id: 1,
+          event: "turn.started",
+          data: { sessionId: assigned.assignedSession.sessionId, seq: 1 },
+        },
+      ]);
+    } finally {
+      abort.abort();
+      await secondApplication.close();
+    }
+  });
+
+  it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(
+    "notifies a second control-plane replica without duplicating its durable SSE sequence",
+    async () => {
+      const assigned = await createAssignedTurn({
+        sandboxId: IDS.notificationSandbox,
+        sandboxBootId: IDS.notificationSandboxBoot,
+        supervisorId: "notification-supervisor",
+        phase: "acknowledged",
+        expired: false,
+      });
+      const secondNotifications = new PostgresSessionEventNotifications({
+        connectionString: databaseConnectionString,
+        tenantId: IDS.tenant,
+        applicationName: `agent-dock-second-api-test-${process.pid}`,
+        initialReconnectDelayMs: 20,
+        maxReconnectDelayMs: 100,
+      });
+      let secondApplication: NestFastifyApplication | undefined;
+      const abort = new AbortController();
+      try {
+        secondApplication = await createControlPlaneApplication({
+          database,
+          tenantId: IDS.tenant,
+          defaultModelProfileId: IDS.profile,
+          sessionEventNotifications: secondNotifications,
+          sessionEventStreamOptions: { heartbeatIntervalMs: 5_000 },
+        });
+        await secondApplication.listen(0, "127.0.0.1");
+        const response = await fetch(
+          `${await secondApplication.getUrl()}/v1/sessions/${assigned.assignedSession.sessionId}/events`,
+          { signal: abort.signal },
+        );
+        expect(response.status).toBe(200);
+        const received = readSseEvents(response, 2, 2_000);
+        const firstAt = new Date().toISOString();
+        const first: EventPublishMessage = {
+          protocolVersion: 1,
+          messageId: globalThis.crypto.randomUUID(),
+          sentAt: firstAt,
+          type: "event.publish",
+          payload: {
+            commandId: assigned.accepted.commandId,
+            leaseId: assigned.runtime.leaseId,
+            fencingToken: assigned.runtime.fencingToken,
+            event: {
+              schemaVersion: 1,
+              eventId: globalThis.crypto.randomUUID(),
+              sessionId: assigned.assignedSession.sessionId,
+              turnId: assigned.accepted.turnId,
+              agentId: "root",
+              seq: 1,
+              occurredAt: firstAt,
+              type: "turn.started",
+              payload: { inputKind: "prompt" },
+            },
+          },
+        };
+        await durableEventStore.ingest(first);
+        await database.transaction().execute((transaction) =>
+          sessionEventNotifications!.publish(transaction, {
+            schemaVersion: 1,
+            tenantId: IDS.tenant,
+            sessionId: assigned.assignedSession.sessionId,
+            throughSequence: 1,
+          }),
+        );
+        const secondAt = new Date().toISOString();
+        const second: EventPublishMessage = {
+          protocolVersion: 1,
+          messageId: globalThis.crypto.randomUUID(),
+          sentAt: secondAt,
+          type: "event.publish",
+          payload: {
+            commandId: assigned.accepted.commandId,
+            leaseId: assigned.runtime.leaseId,
+            fencingToken: assigned.runtime.fencingToken,
+            event: {
+              schemaVersion: 1,
+              eventId: globalThis.crypto.randomUUID(),
+              sessionId: assigned.assignedSession.sessionId,
+              turnId: assigned.accepted.turnId,
+              agentId: "root",
+              seq: 2,
+              occurredAt: secondAt,
+              type: "assistant.text.delta",
+              payload: { text: "cross-replica" },
+            },
+          },
+        };
+        await durableEventStore.ingest(second);
+
+        const events = await received;
+        expect(events.map((event) => event.id)).toEqual([1, 2]);
+        expect(events.map((event) => event.event)).toEqual([
+          "turn.started",
+          "assistant.text.delta",
+        ]);
+        expect(events[1]?.data).toMatchObject({
+          sessionId: assigned.assignedSession.sessionId,
+          seq: 2,
+          payload: { text: "cross-replica" },
+        });
+      } finally {
+        abort.abort();
+        await secondApplication?.close();
+        await secondNotifications.stop();
+      }
+    },
+    10_000,
+  );
 
   it.skipIf(process.env.AGENT_DOCK_DOCKER_SANDBOX_TEST !== "1")(
     "persists and streams a fenced Java repair produced inside the Docker Pi sandbox",

@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-07-18
+- Extended by: [ADR-0020](0020-cross-replica-session-event-notification.md), which replaces the
+  original event-body queue and single-replica live-notification limitation with
+  coalesced durable high-water hints plus PostgreSQL `LISTEN/NOTIFY`.
 
 ## Context
 

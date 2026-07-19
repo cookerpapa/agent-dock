@@ -74,7 +74,7 @@ extension-policy support would overstate the current boundary.
 - [x] Re-enable the Web composer for same-session follow-up turns
 - [ ] Replace the development file object store with a MinIO/S3 adapter
 - [x] Make the supervisor event spool crash-safe and replay it after supervisor restart
-- [ ] Add cross-replica live event notification
+- [x] Add transactional cross-replica live event notification with durable SSE fallback
 - [x] Allocate an immutable positive execute-command mailbox position per session
 - [x] Prove five queued same-session inputs preserve mailbox order with tied timestamps
 - [x] Specify active-session prompts as queued follow-ups and reserve explicit steer

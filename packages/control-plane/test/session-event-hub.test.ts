@@ -14,7 +14,7 @@ function fixture() {
 }
 
 describe("SessionEventHub", () => {
-  it("delivers committed events to all current subscribers", async () => {
+  it("delivers committed high-water hints to all current subscribers", async () => {
     const hub = new SessionEventHub();
     const first = hub.subscribe("session-1");
     const second = hub.subscribe("session-1");
@@ -25,24 +25,27 @@ describe("SessionEventHub", () => {
 
     const pending = first.next();
     hub.publish(event);
-    await expect(pending).resolves.toEqual(event);
-    await expect(second.next()).resolves.toEqual(event);
+    await expect(pending).resolves.toEqual({ throughSequence: 1 });
+    await expect(second.next()).resolves.toEqual({ throughSequence: 1 });
     first.close();
     second.close();
   });
 
-  it("isolates sessions and disconnects a subscriber that exceeds its bounded queue", async () => {
-    const hub = new SessionEventHub({ maxQueuedEvents: 1 });
-    const slow = hub.subscribe("session-1");
+  it("coalesces high-water hints, isolates sessions, and supports reconnect resync", async () => {
+    const hub = new SessionEventHub();
+    const first = hub.subscribe("session-1");
     const other = hub.subscribe("session-2");
     const factory = fixture();
     hub.publish(factory.next({ type: "assistant.text.delta", payload: { text: "one" } }));
     hub.publish(factory.next({ type: "assistant.text.delta", payload: { text: "two" } }));
 
-    expect(slow.closed).toBe(true);
-    await expect(slow.next()).resolves.toBeUndefined();
+    await expect(first.next()).resolves.toEqual({ throughSequence: 2 });
     expect(other.closed).toBe(false);
+    hub.resyncAll();
+    await expect(first.next()).resolves.toEqual({ throughSequence: null });
+    await expect(other.next()).resolves.toEqual({ throughSequence: null });
     hub.onApplicationShutdown();
+    expect(first.closed).toBe(true);
     expect(other.closed).toBe(true);
   });
 });

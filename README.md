@@ -107,6 +107,7 @@ only after a measured requirement appears.
 - [ADR-0017: two-phase remote command delivery](docs/adr/0017-two-phase-remote-command-delivery.md)
 - [ADR-0018: supervisor reconnect and generation recovery](docs/adr/0018-supervisor-reconnect-and-generation-recovery.md)
 - [ADR-0019: cross-instance supervisor command ownership](docs/adr/0019-cross-instance-supervisor-command-ownership.md)
+- [ADR-0020: cross-replica session event notification](docs/adr/0020-cross-replica-session-event-notification.md)
 
 ## Current executable spikes
 
@@ -224,8 +225,12 @@ versioned AgentDock events. Each event is stored with its command/lease/fence,
 the contiguous database cursor advances in the same transaction, and only the
 committed prefix is cumulatively ACKed to the supervisor spool. The session SSE
 endpoint joins live delivery with durable `Last-Event-ID` replay without a
-query/subscribe gap. Completion and post-ACK failure both release lease and
-sandbox capacity transactionally.
+query/subscribe gap. A transactional PostgreSQL high-water notification now
+wakes SSE connections on other control-plane replicas; those replicas always
+read event bodies from the durable table, coalesce duplicate hints, reconnect
+their dedicated listener with bounded jitter, and use the SSE heartbeat as a
+missed-notification recovery poll. Completion and post-ACK failure both release
+lease and sandbox capacity transactionally.
 
 The fourth Phase 1 slice adds durable cancellation as an independent command
 path, so a cancel can reach Pi while the execute dispatcher is blocked awaiting
@@ -282,9 +287,8 @@ The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
 gateway, production supervisor authentication/owner and automatic dispatch-worker
-wiring, and cross-replica live fan-out remain separate work. Queued-turn withdrawal,
-acknowledged-cancellation crash recovery, and Windows Job Object containment are
-also deferred.
+wiring remain separate work. Queued-turn withdrawal, acknowledged-cancellation
+crash recovery, and Windows Job Object containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -351,6 +355,15 @@ while the Supervisor is draining. When the same boot reconnects elsewhere, the
 old replica returns `idle` without consuming an outbox attempt and the new owner
 can claim immediately.
 
+Cross-replica browser delivery also reuses PostgreSQL instead of adding a second
+event broker. Event commit transactionally emits only a versioned
+tenant/session/sequence high-water hint; every control-plane replica keeps one
+dedicated `LISTEN` connection and wakes its process-local subscribers. The hub
+stores one coalesced sequence hint per subscriber, never event bodies, and SSE
+then reads the contiguous durable suffix. Duplicate hints are harmless, listener
+reconnect wakes all local streams, and heartbeat polling bounds recovery if a
+hint is missed. Production `main.ts` wires this transport from `DATABASE_URL`.
+
 Capability `command.two_phase.v1` additionally enables multiplexed remote
 execute/cancel delivery. The Supervisor prepares without starting Pi and returns
 an exact ACK; only after the dispatcher persists `ACKNOWLEDGED/RUNNING` does the
@@ -379,5 +392,5 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses cross-replica live notification and the MinIO/S3
-object-store adapter rather than keeping a process per conversation.
+Phase 2 next addresses the MinIO/S3 object-store adapter and production
+provisioner/dispatch-worker wiring rather than keeping a process per conversation.

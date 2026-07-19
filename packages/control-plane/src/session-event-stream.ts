@@ -1,7 +1,15 @@
 import type { AgentDockEvent } from "@agent-dock/protocol";
 import type { ServerResponse } from "node:http";
-import { DurableEventStore, DurableEventStoreError } from "./durable-event-store.ts";
-import { SessionEventHub, type SessionEventSubscription } from "./session-event-hub.ts";
+import {
+  DurableEventStore,
+  DurableEventStoreError,
+  type EventReplayWindow,
+} from "./durable-event-store.ts";
+import {
+  SessionEventHub,
+  type SessionEventSubscription,
+  type SessionEventWake,
+} from "./session-event-hub.ts";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
@@ -11,7 +19,13 @@ export type SessionEventStreamOptions = {
   replayPageSize?: number;
 };
 
-type StreamItem = { kind: "event"; event: AgentDockEvent | undefined } | { kind: "heartbeat" };
+type StreamItem = { kind: "wake"; wake: SessionEventWake | undefined } | { kind: "heartbeat" };
+
+type ReplayWriteResult = {
+  lastSentSequence: number;
+  eventsWritten: number;
+  writable: boolean;
+};
 
 function positiveInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -44,7 +58,7 @@ async function writeChunk(response: ServerResponse, chunk: string): Promise<bool
 }
 
 async function nextWithHeartbeat(
-  pendingEvent: Promise<AgentDockEvent | undefined>,
+  pendingWake: Promise<SessionEventWake | undefined>,
   heartbeatIntervalMs: number,
 ): Promise<StreamItem> {
   let timer: NodeJS.Timeout | undefined;
@@ -53,10 +67,10 @@ async function nextWithHeartbeat(
     timer.unref();
   });
   const result = await Promise.race<StreamItem>([
-    pendingEvent.then((event) => ({ kind: "event", event })),
+    pendingWake.then((wake) => ({ kind: "wake", wake })),
     heartbeat,
   ]);
-  if (result.kind === "event" && timer !== undefined) clearTimeout(timer);
+  if (result.kind === "wake" && timer !== undefined) clearTimeout(timer);
   return result;
 }
 
@@ -95,45 +109,101 @@ export class OpenSessionEventStream {
     const close = (): void => this.#subscription.close();
     response.once("close", close);
     try {
-      let page = this.#initialEvents;
-      while (lastSentSequence < this.#highWaterMark) {
-        if (page.length === 0) {
-          throw new DurableEventStoreError(
-            "event_store_invariant",
-            "Durable event replay contains a sequence gap",
-          );
-        }
-        for (const event of page) {
-          if (event.seq <= lastSentSequence) continue;
-          if (!(await writeChunk(response, eventFrame(event)))) return;
-          lastSentSequence = event.seq;
-        }
-        if (lastSentSequence >= this.#highWaterMark) break;
-        page = await this.#store.readReplayPage(
-          this.#sessionId,
-          lastSentSequence,
-          this.#highWaterMark,
-          this.#replayPageSize,
-        );
-      }
+      const initial = await this.#writeReplayWindow(response, lastSentSequence, {
+        highWaterMark: this.#highWaterMark,
+        events: this.#initialEvents,
+      });
+      if (!initial.writable) return;
+      lastSentSequence = initial.lastSentSequence;
 
-      let pendingEvent = this.#subscription.next();
+      let pendingWake = this.#subscription.next();
       while (!response.destroyed && !response.writableEnded) {
-        const item = await nextWithHeartbeat(pendingEvent, this.#heartbeatIntervalMs);
+        const item = await nextWithHeartbeat(pendingWake, this.#heartbeatIntervalMs);
         if (item.kind === "heartbeat") {
-          if (!(await writeChunk(response, ": keepalive\n\n"))) return;
+          const recovered = await this.#readAndWriteCurrentSuffix(response, lastSentSequence, null);
+          if (!recovered.writable) return;
+          lastSentSequence = recovered.lastSentSequence;
+          if (recovered.eventsWritten === 0) {
+            if (!(await writeChunk(response, ": keepalive\n\n"))) return;
+          }
           continue;
         }
-        if (item.event === undefined) return;
-        pendingEvent = this.#subscription.next();
-        if (item.event.seq <= lastSentSequence) continue;
-        if (!(await writeChunk(response, eventFrame(item.event)))) return;
-        lastSentSequence = item.event.seq;
+        if (item.wake === undefined) return;
+        pendingWake = this.#subscription.next();
+        if (item.wake.throughSequence !== null && item.wake.throughSequence <= lastSentSequence) {
+          continue;
+        }
+        const delivered = await this.#readAndWriteCurrentSuffix(
+          response,
+          lastSentSequence,
+          item.wake.throughSequence,
+        );
+        if (!delivered.writable) return;
+        lastSentSequence = delivered.lastSentSequence;
       }
     } finally {
       response.off("close", close);
       this.#subscription.close();
     }
+  }
+
+  async #readAndWriteCurrentSuffix(
+    response: ServerResponse,
+    lastSentSequence: number,
+    minimumThroughSequence: number | null,
+  ): Promise<ReplayWriteResult> {
+    const replay = await this.#store.openReplayWindow(
+      this.#sessionId,
+      lastSentSequence,
+      this.#replayPageSize,
+    );
+    if (minimumThroughSequence !== null && replay.highWaterMark < minimumThroughSequence) {
+      throw new DurableEventStoreError(
+        "event_store_invariant",
+        "Session event notification is ahead of the durable event stream",
+      );
+    }
+    return this.#writeReplayWindow(response, lastSentSequence, replay);
+  }
+
+  async #writeReplayWindow(
+    response: ServerResponse,
+    startingSequence: number,
+    replay: EventReplayWindow,
+  ): Promise<ReplayWriteResult> {
+    let lastSentSequence = startingSequence;
+    let eventsWritten = 0;
+    let page = replay.events;
+    while (lastSentSequence < replay.highWaterMark) {
+      if (page.length === 0) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Durable event replay contains a sequence gap",
+        );
+      }
+      for (const event of page) {
+        if (event.seq <= lastSentSequence) continue;
+        if (event.seq !== lastSentSequence + 1) {
+          throw new DurableEventStoreError(
+            "event_store_invariant",
+            "Durable event replay contains a sequence gap",
+          );
+        }
+        if (!(await writeChunk(response, eventFrame(event)))) {
+          return { lastSentSequence, eventsWritten, writable: false };
+        }
+        lastSentSequence = event.seq;
+        eventsWritten += 1;
+      }
+      if (lastSentSequence >= replay.highWaterMark) break;
+      page = await this.#store.readReplayPage(
+        this.#sessionId,
+        lastSentSequence,
+        replay.highWaterMark,
+        this.#replayPageSize,
+      );
+    }
+    return { lastSentSequence, eventsWritten, writable: true };
   }
 }
 

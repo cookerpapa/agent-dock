@@ -1,31 +1,23 @@
 import type { AgentDockEvent } from "@agent-dock/protocol";
 import type { OnApplicationShutdown } from "@nestjs/common";
 
-const DEFAULT_MAX_QUEUED_EVENTS = 256;
-
-export type SessionEventHubOptions = {
-  maxQueuedEvents?: number;
+export type SessionEventWake = {
+  throughSequence: number | null;
 };
 
 type PendingRead = {
-  resolve: (event: AgentDockEvent | undefined) => void;
+  resolve: (wake: SessionEventWake | undefined) => void;
 };
 
 export class SessionEventSubscription {
   readonly #sessionId: string;
-  readonly #maxQueuedEvents: number;
   readonly #onClose: (subscription: SessionEventSubscription) => void;
-  readonly #queue: AgentDockEvent[] = [];
+  #queuedWake: SessionEventWake | undefined;
   #pendingRead: PendingRead | undefined;
   #closed = false;
 
-  constructor(
-    sessionId: string,
-    maxQueuedEvents: number,
-    onClose: (subscription: SessionEventSubscription) => void,
-  ) {
+  constructor(sessionId: string, onClose: (subscription: SessionEventSubscription) => void) {
     this.#sessionId = sessionId;
-    this.#maxQueuedEvents = maxQueuedEvents;
     this.#onClose = onClose;
   }
 
@@ -37,28 +29,50 @@ export class SessionEventSubscription {
     return this.#closed;
   }
 
-  push(event: AgentDockEvent): void {
+  notifyThrough(throughSequence: number): void {
     if (this.#closed) return;
+    if (!Number.isSafeInteger(throughSequence) || throughSequence < 1) {
+      throw new TypeError("throughSequence must be a positive safe integer");
+    }
+    this.#push({ throughSequence });
+  }
+
+  resync(): void {
+    if (this.#closed) return;
+    this.#push({ throughSequence: null });
+  }
+
+  #push(wake: SessionEventWake): void {
     if (this.#pendingRead !== undefined) {
       const pending = this.#pendingRead;
       this.#pendingRead = undefined;
-      pending.resolve(event);
+      pending.resolve(wake);
       return;
     }
-    if (this.#queue.length >= this.#maxQueuedEvents) {
-      this.close();
+    if (this.#queuedWake === undefined) {
+      this.#queuedWake = wake;
       return;
     }
-    this.#queue.push(event);
+    if (this.#queuedWake.throughSequence === null || wake.throughSequence === null) {
+      this.#queuedWake = { throughSequence: null };
+      return;
+    }
+    this.#queuedWake = {
+      throughSequence: Math.max(this.#queuedWake.throughSequence, wake.throughSequence),
+    };
   }
 
-  next(): Promise<AgentDockEvent | undefined> {
-    if (this.#queue.length > 0) return Promise.resolve(this.#queue.shift());
+  next(): Promise<SessionEventWake | undefined> {
+    if (this.#queuedWake !== undefined) {
+      const wake = this.#queuedWake;
+      this.#queuedWake = undefined;
+      return Promise.resolve(wake);
+    }
     if (this.#closed) return Promise.resolve(undefined);
     if (this.#pendingRead !== undefined) {
       throw new Error("Only one pending session-event read is allowed");
     }
-    return new Promise<AgentDockEvent | undefined>((resolve) => {
+    return new Promise<SessionEventWake | undefined>((resolve) => {
       this.#pendingRead = { resolve };
     });
   }
@@ -66,7 +80,7 @@ export class SessionEventSubscription {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#queue.length = 0;
+    this.#queuedWake = undefined;
     const pending = this.#pendingRead;
     this.#pendingRead = undefined;
     pending?.resolve(undefined);
@@ -75,21 +89,10 @@ export class SessionEventSubscription {
 }
 
 export class SessionEventHub implements OnApplicationShutdown {
-  readonly #maxQueuedEvents: number;
   readonly #subscriptions = new Map<string, Set<SessionEventSubscription>>();
 
-  constructor(options: SessionEventHubOptions = {}) {
-    const maxQueuedEvents = options.maxQueuedEvents ?? DEFAULT_MAX_QUEUED_EVENTS;
-    if (!Number.isSafeInteger(maxQueuedEvents) || maxQueuedEvents < 1) {
-      throw new TypeError("maxQueuedEvents must be a positive safe integer");
-    }
-    this.#maxQueuedEvents = maxQueuedEvents;
-  }
-
   subscribe(sessionId: string): SessionEventSubscription {
-    const subscription = new SessionEventSubscription(sessionId, this.#maxQueuedEvents, (closed) =>
-      this.#remove(closed),
-    );
+    const subscription = new SessionEventSubscription(sessionId, (closed) => this.#remove(closed));
     const current = this.#subscriptions.get(sessionId);
     if (current === undefined) {
       this.#subscriptions.set(sessionId, new Set([subscription]));
@@ -100,9 +103,19 @@ export class SessionEventHub implements OnApplicationShutdown {
   }
 
   publish(event: AgentDockEvent): void {
-    const current = this.#subscriptions.get(event.sessionId);
+    this.notifyThrough(event.sessionId, event.seq);
+  }
+
+  notifyThrough(sessionId: string, throughSequence: number): void {
+    const current = this.#subscriptions.get(sessionId);
     if (current === undefined) return;
-    for (const subscription of [...current]) subscription.push(event);
+    for (const subscription of [...current]) subscription.notifyThrough(throughSequence);
+  }
+
+  resyncAll(): void {
+    for (const current of this.#subscriptions.values()) {
+      for (const subscription of [...current]) subscription.resync();
+    }
   }
 
   onApplicationShutdown(): void {

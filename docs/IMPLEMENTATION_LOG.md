@@ -1004,3 +1004,38 @@
 - 下一步：实现 cross-replica live event notification。原因是 command claim 已能跟随 owner，但浏览器 SSE
   目前仍依赖进程内 event hub；写 event 的 replica 与承载浏览器连接的 replica 不同时，实时通知仍会延迟
   到客户端重连/轮询 durable history。
+
+## 2026-07-19 — 跨 control-plane 的实时 SSE event notification
+
+- 目标：让浏览器的 SSE 可以连在任意 control-plane replica，而 Supervisor socket owner 在另一 replica
+  写入事件时仍能立即看到结果；同时不能把 PostgreSQL 外再造一份不可靠的 event log。
+- 决策：新增 ADR-0020。`event.publish` 仍以 `session_events` 与 contiguous cursor 为唯一真相；同一个 ingest
+  transaction 在 cursor 前进后调用 `pg_notify`，payload 只有 version、tenant UUID、session UUID 与 durable
+  high-water sequence，不包含 prompt、模型输出、tool 参数、credential 或 checkpoint bytes。rollback 不会发出
+  notification，commit 与 hint 的可见性由 PostgreSQL 对齐。
+- Replica transport：production `main.ts` 从 `DATABASE_URL` 为每个 control-plane process 创建一条独立于
+  Kysely pool 的 `LISTEN` connection。初次连接失败会阻止应用启动；运行后断线使用 bounded equal-jitter
+  backoff 自动重连。notification 做完整 schema/UUID/sequence 校验并按 configured tenant 过滤；重连成功会
+  唤醒本进程全部 SSE subscription 做 durable rescan。应用关闭会中断 backoff 并关闭 dedicated client。
+- Hub/SSE：process-local hub 不再缓存完整 `AgentDockEvent[]`。每个 subscriber 只保留一个可合并 high-water
+  wake；duplicate/out-of-order hint 取最大 sequence，resync wake 强制查当前 cursor。SSE 仍先 subscribe 再读
+  initial replay window，之后每个 wake 都从 PostgreSQL 分页补连续 suffix，并显式拒绝 durable gap。idle
+  heartbeat 也先检查 durable cursor，所以 listener 暂时离线或丢 hint 最多增加一个 heartbeat interval 的延迟，
+  不会丢 history；browser reconnect 仍以 `Last-Event-ID` 为准。
+- 可执行证据：PGlite socket 当前能接受 `LISTEN/pg_notify` SQL、但不会转发 notification frame，因此默认
+  测试不伪造该能力；它仍证明无 notification 的第二 replica 可在 25ms test heartbeat 中补读事件。真实
+  localhost PostgreSQL `15.2-alpine` 另外证明 transaction rollback 零通知、commit 后通知、foreign tenant
+  丢弃、`pg_terminate_backend` 强制断开后的 listener reconnect，以及 A 持久化/B 持有 SSE 时即使插入一个
+  duplicate hint 仍只收到 durable sequence `1,2`。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、204 passed/6
+  conditional skipped tests、两个 zero-model-call Pi spikes 和 0 vulnerabilities。完整 control-plane suite 又在
+  一次性、仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 上通过 56 passed/1 Docker-only skipped；其中
+  transaction rollback/commit、tenant filter、listener reconnect、cross-replica SSE 与既有 lease/WebSocket/
+  checkpoint 路径共同通过。两条路径都不调用真实模型，不消耗 subscription/API token；临时 database
+  container 在测试后自动删除。
+- 当前边界：每个 control-plane replica 额外占用一条 PostgreSQL connection；每个 idle SSE heartbeat 会做
+  一次 cursor recovery query。当前单租户阶段优先保证简单、可解释的正确性；达到大规模并发后应测量并考虑
+  process-level batch cursor polling 或 broker，而不是现在提前复制 event payload/offset 协议。
+- 下一步：实现 S3-compatible checkpoint object store，并用 localhost MinIO 做跨宿主恢复测试。原因是
+  command owner 与 browser event 已能跨 control-plane replica，但 Pi JSONL/workspace checkpoint 仍写在开发
+  机本地目录；Supervisor 移到另一宿主机时读不到 settled state，这才是下一项阻止真正云化的边界。

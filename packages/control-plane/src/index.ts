@@ -30,7 +30,7 @@ export {
   type TurnCancellationRequest,
   type TurnCancellationResult,
 } from "./cancellation-dispatcher.ts";
-export { ControlPlaneModule } from "./control-plane.module.ts";
+export { ControlPlaneModule, type ControlPlaneModuleOptions } from "./control-plane.module.ts";
 export {
   DurableEventStore,
   DurableEventStoreError,
@@ -116,8 +116,23 @@ export {
 export {
   SessionEventHub,
   SessionEventSubscription,
-  type SessionEventHubOptions,
+  type SessionEventWake,
 } from "./session-event-hub.ts";
+export { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
+export {
+  type SessionEventNotification,
+  type SessionEventNotificationHandlers,
+  type SessionEventNotificationPublisher,
+  type SessionEventNotificationTransport,
+} from "./session-event-notifications.ts";
+export {
+  PostgresSessionEventNotifications,
+  PostgresSessionEventNotificationsError,
+  SESSION_EVENT_NOTIFICATION_CHANNEL,
+  parseSessionEventNotificationPayload,
+  type PostgresSessionEventNotificationsOptions,
+  type PostgresSessionEventNotificationsState,
+} from "./postgres-session-event-notifications.ts";
 export {
   OpenSessionEventStream,
   SessionEventStream,

@@ -10,6 +10,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
+import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -38,6 +39,7 @@ export type DurableEventStoreOptions = {
   database: Kysely<Database>;
   tenantId: string;
   eventHub?: SessionEventHub;
+  eventNotificationPublisher?: SessionEventNotificationPublisher;
   clock?: () => Date;
   idGenerator?: () => string;
 };
@@ -169,6 +171,7 @@ export class DurableEventStore implements DurableEventIngestor {
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
   readonly #eventHub: SessionEventHub | undefined;
+  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
 
@@ -176,6 +179,7 @@ export class DurableEventStore implements DurableEventIngestor {
     this.#database = options.database;
     this.#tenantId = options.tenantId;
     this.#eventHub = options.eventHub;
+    this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
   }
@@ -186,10 +190,17 @@ export class DurableEventStore implements DurableEventIngestor {
       throw new DurableEventStoreError("invalid_event", "Expected an event publication");
     }
     const now = validDate(this.#clock);
-    const result = await this.#database
-      .transaction()
-      .execute(async (transaction) => this.#ingestTransaction(transaction, parsed, now));
-    if (result.persistedEvent !== undefined) this.#eventHub?.publish(result.persistedEvent);
+    const result = await this.#database.transaction().execute(async (transaction) => {
+      const ingested = await this.#ingestTransaction(transaction, parsed, now);
+      await this.#eventNotificationPublisher?.publish(transaction, {
+        schemaVersion: 1,
+        tenantId: this.#tenantId,
+        sessionId: parsed.payload.event.sessionId,
+        throughSequence: ingested.acknowledgedThroughSeq,
+      });
+      return ingested;
+    });
+    this.#eventHub?.notifyThrough(parsed.payload.event.sessionId, result.acknowledgedThroughSeq);
     return this.#acknowledgement(parsed, result.acknowledgedThroughSeq, now);
   }
 
@@ -257,7 +268,7 @@ export class DurableEventStore implements DurableEventIngestor {
     transaction: Transaction<Database>,
     message: EventPublishMessage,
     now: Date,
-  ): Promise<{ acknowledgedThroughSeq: number; persistedEvent?: AgentDockEvent }> {
+  ): Promise<{ acknowledgedThroughSeq: number }> {
     const event = message.payload.event;
     const session = await transaction
       .selectFrom("sessions")
@@ -400,7 +411,7 @@ export class DurableEventStore implements DurableEventIngestor {
       .executeTakeFirst();
     expectOne(sessionUpdate.numUpdatedRows, "advancing the session event sequence");
 
-    return { acknowledgedThroughSeq: event.seq, persistedEvent: event };
+    return { acknowledgedThroughSeq: event.seq };
   }
 
   async #validateEventOwnership(

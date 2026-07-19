@@ -65,8 +65,8 @@ Exit criteria: duplicate requests do not duplicate turns; five inputs to the
 same session remain ordered; browser and runner reconnects do not lose events.
 
 Current status: in progress. Durable intake, idempotency, session/turn state,
-leases/fencing, PostgreSQL event replay, and sequential follow-up acceptance
-already exist. The first Phase 2 slice adds settled Pi JSONL plus bounded
+leases/fencing, PostgreSQL event replay, cross-replica live notification, and
+sequential follow-up acceptance already exist. The first Phase 2 slice adds settled Pi JSONL plus bounded
 workspace checkpoint upload/validation, PostgreSQL artifact pointers, cold
 restore into a fresh Docker container, and a Web follow-up on the same session.
 Two-container tests prove that the second model request sees the prior Pi
@@ -86,8 +86,8 @@ capacity, and retires an old sandbox only after runtime absence is confirmed.
 A durable authenticated registration/health manager now owns connection
 generations, exact same-boot reconnect, new-boot fencing, timeout quarantine,
 and a retryable cross-replica retirement claim that requires owner-stop proof
-before reconciliation. MinIO/S3, explicit steer implementation, cross-replica
-event notification, and a concrete production owner-process adapter remain.
+before reconciliation. MinIO/S3, explicit steer implementation, and a concrete
+production owner-process adapter remain.
 Registration and heartbeat now also pass through an authenticated, bounded,
 ordered outbound WebSocket gateway/client, including cross-replica stale-socket
 rejection. Capability-gated remote execute/cancel now preserves the local
@@ -102,7 +102,11 @@ replica with a healthy local Supervisor and capacity; cancellation claims follow
 the target session lease to that sandbox's current socket owner. PostgreSQL
 owner affinity makes a separate cross-instance command broker unnecessary for
 the current topology. Automatic production worker lifecycle wiring remains with
-the provisioner/owner adapter.
+the provisioner/owner adapter. Event ingestion now emits a transactional
+PostgreSQL high-water hint. Every production replica reconnects one dedicated
+listener, coalesces wakes without copying event bodies, and makes SSE read the
+durable suffix; heartbeat polling and `Last-Event-ID` retain correctness across
+lost notifications and browser reconnects.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

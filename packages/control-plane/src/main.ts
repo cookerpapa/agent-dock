@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import { createDatabase } from "@agent-dock/database";
 import { parseUuidPathParameter } from "@agent-dock/protocol";
 import { createControlPlaneApplication } from "./application.ts";
+import { PostgresSessionEventNotifications } from "./postgres-session-event-notifications.ts";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -21,22 +22,29 @@ function listenPort(): number {
 }
 
 export async function startControlPlane(): Promise<void> {
+  const connectionString = requiredEnvironment("DATABASE_URL");
+  const tenantId = parseUuidPathParameter(
+    requiredEnvironment("AGENT_DOCK_TENANT_ID"),
+    "AGENT_DOCK_TENANT_ID",
+  );
   const database = createDatabase({
-    connectionString: requiredEnvironment("DATABASE_URL"),
+    connectionString,
     maxConnections: 10,
+  });
+  const sessionEventNotifications = new PostgresSessionEventNotifications({
+    connectionString,
+    tenantId,
   });
   let application: Awaited<ReturnType<typeof createControlPlaneApplication>> | undefined;
   try {
     const runningApplication = await createControlPlaneApplication({
       database,
-      tenantId: parseUuidPathParameter(
-        requiredEnvironment("AGENT_DOCK_TENANT_ID"),
-        "AGENT_DOCK_TENANT_ID",
-      ),
+      tenantId,
       defaultModelProfileId: parseUuidPathParameter(
         requiredEnvironment("AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID"),
         "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID",
       ),
+      sessionEventNotifications,
     });
     application = runningApplication;
     const host = process.env.HOST ?? "127.0.0.1";
@@ -60,6 +68,7 @@ export async function startControlPlane(): Promise<void> {
     process.once("SIGTERM", closeAfterSignal);
   } catch (error) {
     await application?.close().catch(() => undefined);
+    await sessionEventNotifications.stop().catch(() => undefined);
     await database.destroy();
     throw error;
   }

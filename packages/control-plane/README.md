@@ -76,16 +76,20 @@ retains the unconfirmed reservation for reconciliation.
 transaction locks the session/cursor, validates turn/command ownership and the
 current unexpired lease/fence, rejects sequence gaps, inserts the complete event
 identity, and advances both cursor and `sessions.next_event_seq`. Only after
-commit does it publish to the live hub and return `event.ack`. Exact redelivery
-is idempotent—even just after lease release when an ACK packet was lost—while a
-changed event at the same sequence is rejected.
+commit does it wake the local hub and return `event.ack`. When the PostgreSQL
+notification transport is configured, the same transaction emits a versioned
+tenant/session/sequence high-water hint. Exact redelivery is idempotent—even
+just after lease release when an ACK packet was lost—while a changed event at
+the same sequence is rejected.
 
 The SSE stream subscribes before querying its durable replay window, sends
-database rows first, then drops duplicates from the queued live overlap. Slow
-subscribers have a bounded queue and reconnect from their last received ID.
-This closes the single-process replay/live race; multi-control-plane live fan-out
-still needs PostgreSQL notification or a broker. PostgreSQL replay itself is
-restart-safe.
+database rows first, then reacts to coalesced high-water wakes. The hub retains
+at most one wake per subscriber and never queues event bodies; slow subscribers
+read their missing contiguous suffix from PostgreSQL. Every production replica
+uses one reconnecting dedicated `LISTEN` connection. Duplicate hints collapse,
+listener reconnect wakes all local streams, and an idle SSE heartbeat polls the
+durable cursor to recover a missed hint. PostgreSQL replay remains the authority
+and browser reconnect still resumes from `Last-Event-ID`.
 
 ## Docker workspace integration
 
