@@ -1,5 +1,7 @@
 import {
   parseControlToSupervisorMessage,
+  type EventAckMessage,
+  type EventPublishMessage,
   type SupervisorRegisteredMessage,
 } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
@@ -62,6 +64,7 @@ function close(
 
 class FakeConnection implements SupervisorWebSocketConnection {
   readonly assignmentStates: boolean[] = [];
+  readonly #recovery = deferred<void>();
   readonly #started = deferred<SupervisorRegisteredMessage>();
   readonly #closed = deferred<SupervisorWebSocketClientClose>();
   #connectionId: string | undefined;
@@ -74,6 +77,11 @@ class FakeConnection implements SupervisorWebSocketConnection {
 
   setAcceptingAssignments(value: boolean): void {
     this.assignmentStates.push(value);
+  }
+
+  async recoverPendingEvents() {
+    await this.#recovery.promise;
+    return { scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 };
   }
 
   start(): Promise<SupervisorRegisteredMessage> {
@@ -112,6 +120,10 @@ class FakeConnection implements SupervisorWebSocketConnection {
     this.#started.resolve(registered(connectionId));
   }
 
+  finishRecovery(): void {
+    this.#recovery.resolve();
+  }
+
   rejectStart(error: SupervisorWebSocketClientError, result: SupervisorWebSocketClientClose): void {
     if (this.#startSettled) throw new Error("Connection start already settled");
     this.#startSettled = true;
@@ -144,6 +156,11 @@ function runtime(
     },
     revokeAllAssignments() {
       return undefined;
+    },
+    async recoverPendingEvents(
+      _publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
+    ) {
+      return { scannedSpools: 0, replayedSpools: 0, replayedEvents: 0 };
     },
     waitUntilAssignmentsSettled,
   };
@@ -197,8 +214,11 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     await waitFor(() => harness.connections.length === 1);
     const firstId = globalThis.crypto.randomUUID();
     harness.connections[0]!.connect(firstId);
-    expect((await started).payload.connectionId).toBe(firstId);
+    await waitFor(() => harness.connections[0]!.assignmentStates.length === 1);
     expect(harness.connections[0]!.assignmentStates).toEqual([false]);
+    harness.connections[0]!.finishRecovery();
+    expect((await started).payload.connectionId).toBe(firstId);
+    expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
 
     harness.connections[0]!.disconnect(close(true));
     await waitFor(() => teardownCalls === 1);
@@ -210,7 +230,9 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     expect(harness.connections[1]!.assignmentStates).toEqual([false]);
     const secondId = globalThis.crypto.randomUUID();
     harness.connections[1]!.connect(secondId);
-    await waitFor(() => harness.client.connectionId === secondId);
+    harness.connections[1]!.finishRecovery();
+    await waitFor(() => harness.client.successfulConnections === 2);
+    expect(harness.client.connectionId).toBe(secondId);
     expect(harness.client.successfulConnections).toBe(2);
 
     await expect(harness.client.stop()).resolves.toMatchObject({
@@ -251,6 +273,7 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     const started = harness.client.start();
     await waitFor(() => harness.connections.length === 1);
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
+    harness.connections[0]!.finishRecovery();
     await started;
     harness.connections[0]!.disconnect(close(true));
     await waitFor(() => harness.client.state === "backing_off");
@@ -270,6 +293,7 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     const started = harness.client.start();
     await waitFor(() => harness.connections.length === 1);
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
+    harness.connections[0]!.finishRecovery();
     await started;
     harness.connections[0]!.disconnect(close(true));
 

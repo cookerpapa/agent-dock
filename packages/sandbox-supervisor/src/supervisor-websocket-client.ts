@@ -20,6 +20,7 @@ import type {
   PreparedTurnExecution,
 } from "./local-sandbox-supervisor.ts";
 import { LocalSandboxSupervisorError } from "./local-sandbox-supervisor.ts";
+import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import {
   PINNED_PI_CODING_AGENT_VERSION,
   PiRpcTurnCancelledError,
@@ -50,6 +51,9 @@ export interface SupervisorCommandRuntime extends SupervisorHeartbeatRuntime {
   ): PreparedTurnExecution;
   prepareCancellation(value: unknown): PreparedTurnCancellation;
   revokeAllAssignments(): unknown;
+  recoverPendingEvents?(
+    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
+  ): Promise<SupervisorEventSpoolRecoveryResult>;
 }
 
 export type SupervisorWebSocketRegistration = {
@@ -268,6 +272,7 @@ export class SupervisorWebSocketClient {
   #connectTimer: NodeJS.Timeout | undefined;
   #heartbeatTimer: NodeJS.Timeout | undefined;
   #pendingHeartbeat: PendingHeartbeat | undefined;
+  #heartbeatRefreshRequested = false;
   #frameProcessing: Promise<void> = Promise.resolve();
   #pendingFrames = 0;
   #acceptingAssignments = true;
@@ -359,7 +364,52 @@ export class SupervisorWebSocketClient {
   }
 
   setAcceptingAssignments(value: boolean): void {
+    if (this.#acceptingAssignments === value) return;
     this.#acceptingAssignments = value;
+    if (this.#state !== "registered") return;
+    if (this.#pendingHeartbeat !== undefined) {
+      this.#heartbeatRefreshRequested = true;
+      return;
+    }
+    if (this.#heartbeatTimer !== undefined) {
+      clearTimeout(this.#heartbeatTimer);
+      this.#heartbeatTimer = undefined;
+    }
+    this.#scheduleHeartbeat(0);
+  }
+
+  async recoverPendingEvents(): Promise<SupervisorEventSpoolRecoveryResult> {
+    if (this.#state !== "registered" || this.#registered === undefined) {
+      throw new SupervisorWebSocketClientError(
+        "invalid_client_state",
+        "Pending event recovery requires a registered Supervisor connection",
+        false,
+      );
+    }
+    if (this.#acceptingAssignments) {
+      throw new SupervisorWebSocketClientError(
+        "invalid_client_state",
+        "Pending event recovery requires assignment drain",
+        false,
+      );
+    }
+    if (this.#runtime.recoverPendingEvents === undefined) {
+      return { scannedSpools: 0, replayedSpools: 0, replayedEvents: 0 };
+    }
+    try {
+      return await this.#runtime.recoverPendingEvents((message) => this.#publishEvent(message));
+    } catch (error: unknown) {
+      const failure =
+        error instanceof SupervisorWebSocketClientError
+          ? error
+          : new SupervisorWebSocketClientError(
+              "event_spool_recovery_failed",
+              "Pending Supervisor events could not be recovered",
+              false,
+            );
+      this.#fail(failure.code, failure.message, failure.retryable);
+      throw failure;
+    }
   }
 
   waitUntilClosed(): Promise<SupervisorWebSocketClientClose> {
@@ -625,7 +675,9 @@ export class SupervisorWebSocketClient {
         false,
       );
     }
-    this.#scheduleHeartbeat(this.#registered!.payload.heartbeatIntervalMs);
+    const refreshImmediately = this.#heartbeatRefreshRequested;
+    this.#heartbeatRefreshRequested = false;
+    this.#scheduleHeartbeat(refreshImmediately ? 0 : this.#registered!.payload.heartbeatIntervalMs);
   }
 
   async #prepareCommand(
@@ -1074,6 +1126,7 @@ export class SupervisorWebSocketClient {
     this.#connectTimer = undefined;
     this.#heartbeatTimer = undefined;
     this.#pendingHeartbeat = undefined;
+    this.#heartbeatRefreshRequested = false;
   }
 
   #settleClosed(value: SupervisorWebSocketClientClose): void {

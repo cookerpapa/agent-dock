@@ -1,4 +1,5 @@
 import type { SupervisorRegisteredMessage } from "@agent-dock/protocol";
+import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import {
   SupervisorWebSocketClient,
   SupervisorWebSocketClientError,
@@ -15,11 +16,15 @@ const DEFAULT_ASSIGNMENT_TEARDOWN_TIMEOUT_MS = 30_000;
 
 export interface ReconnectingSupervisorCommandRuntime extends SupervisorCommandRuntime {
   waitUntilAssignmentsSettled(): Promise<void>;
+  recoverPendingEvents(
+    publishEvent: Parameters<NonNullable<SupervisorCommandRuntime["recoverPendingEvents"]>>[0],
+  ): Promise<SupervisorEventSpoolRecoveryResult>;
 }
 
 export interface SupervisorWebSocketConnection {
   readonly connectionId: string | undefined;
   setAcceptingAssignments(value: boolean): void;
+  recoverPendingEvents(): Promise<SupervisorEventSpoolRecoveryResult>;
   start(): Promise<SupervisorRegisteredMessage>;
   stop(): Promise<SupervisorWebSocketClientClose>;
   waitUntilClosed(): Promise<SupervisorWebSocketClientClose>;
@@ -246,7 +251,7 @@ export class ReconnectingSupervisorWebSocketClient {
     while (!this.#stopRequested) {
       this.#state = "connecting";
       const connection = this.#connectionFactory(this.#clientOptions);
-      connection.setAcceptingAssignments(this.#acceptingAssignments);
+      connection.setAcceptingAssignments(false);
       this.#current = connection;
       this.#connectionAttempts += 1;
       let connectedAt: number | undefined;
@@ -254,6 +259,8 @@ export class ReconnectingSupervisorWebSocketClient {
       let startFailure: { code: string; message: string; retryable: boolean } | undefined;
       try {
         registration = await connection.start();
+        await connection.recoverPendingEvents();
+        connection.setAcceptingAssignments(this.#acceptingAssignments);
         connectedAt = Date.now();
         this.#successfulConnections += 1;
         this.#state = "connected";
