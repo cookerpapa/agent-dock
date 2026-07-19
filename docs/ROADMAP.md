@@ -87,8 +87,11 @@ A durable authenticated registration/health manager now owns connection
 generations, exact same-boot reconnect, new-boot fencing, timeout quarantine,
 and a retryable cross-replica retirement claim that requires owner-stop proof
 before reconciliation. MinIO/S3, explicit steer implementation, cross-replica
-event notification, the outbound supervisor WebSocket, and a concrete
-production owner-process adapter remain.
+event notification, and a concrete production owner-process adapter remain.
+Registration and heartbeat now also pass through an authenticated, bounded,
+ordered outbound WebSocket gateway/client, including cross-replica stale-socket
+rejection. Remote execute/cancel delivery, command/event ACK routing, and
+backpressure remain the next transport slice.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

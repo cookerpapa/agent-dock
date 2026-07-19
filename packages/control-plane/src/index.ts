@@ -1,4 +1,7 @@
-export { createControlPlaneApplication } from "./application.ts";
+export {
+  createControlPlaneApplication,
+  type ControlPlaneApplicationOptions,
+} from "./application.ts";
 export {
   AssignmentReconciler,
   AssignmentReconcilerError,
@@ -80,6 +83,17 @@ export {
   type SupervisorRetirementWorkResult,
   type SupervisorTransportAuthority,
 } from "./supervisor-connection-manager.ts";
+export {
+  HashedBearerSupervisorAuthorizer,
+  SUPERVISOR_SOCKET_CLOSE,
+  SUPERVISOR_WEBSOCKET_PATH,
+  SupervisorUpgradeAuthorizationError,
+  SupervisorWebSocketGateway,
+  type HashedBearerSupervisorAuthorizerOptions,
+  type SupervisorUpgradeAuthorizer,
+  type SupervisorUpgradeRequest,
+  type SupervisorWebSocketGatewayOptions,
+} from "./supervisor-websocket-gateway.ts";
 export {
   SessionEventHub,
   SessionEventSubscription,

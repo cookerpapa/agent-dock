@@ -83,4 +83,6 @@ extension-policy support would overstate the current boundary.
 - [x] Renew leases during long turns and reconcile expired assignments/orphan containers
 - [x] Persist authenticated supervisor registration, connection generations, and health expiry
 - [x] Require owner-stop proof through a retryable cross-replica sandbox-retirement queue
-- [ ] Wire the manager to an authenticated outbound supervisor WebSocket and production owner adapter
+- [x] Carry authenticated registration and shared heartbeats over a bounded outbound WebSocket
+- [ ] Route execute/cancel, command ACK, and event publish/ACK over the remote supervisor connection
+- [ ] Replace the development bearer authorizer and owner boundary with production provisioner/mTLS and process adapters

@@ -17,6 +17,7 @@
     "@agent-dock/domain": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
+    "@fastify/websocket": "11.3.0",
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-fastify": "11.1.28",
@@ -29,6 +30,8 @@
   "devDependencies": {
     "@agent-dock/fake-model-server": "0.1.0",
     "@electric-sql/pglite": "0.5.4",
-    "@electric-sql/pglite-socket": "0.2.7"
+    "@electric-sql/pglite-socket": "0.2.7",
+    "@types/ws": "8.18.1",
+    "ws": "8.21.1"
   }
 }

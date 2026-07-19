@@ -17,6 +17,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import type { SandboxRetirementResult } from "./assignment-reconciler.ts";
 import {
   SessionLeaseCoordinator,
+  SessionLeaseCoordinatorError,
   type SupervisorConnectionGuard,
 } from "./session-lease-coordinator.ts";
 
@@ -577,7 +578,18 @@ export class SupervisorConnectionManager {
     }
     this.#validateAuthority(authority, parsed.payload);
     const coordinator = await this.leaseCoordinator(parsed.payload.connectionId, authority);
-    return coordinator.renewFromHeartbeat(parsed);
+    try {
+      return await coordinator.renewFromHeartbeat(parsed);
+    } catch (error: unknown) {
+      if (error instanceof SessionLeaseCoordinatorError) {
+        throw new SupervisorConnectionManagerError(
+          error.code,
+          "Supervisor heartbeat was rejected",
+          error.retryable,
+        );
+      }
+      throw error;
+    }
   }
 
   async leaseCoordinator(

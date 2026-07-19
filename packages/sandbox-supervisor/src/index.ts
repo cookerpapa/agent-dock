@@ -102,3 +102,12 @@ export {
   restoreWorkspaceSnapshot,
   validateWorkspaceSnapshot,
 } from "./workspace-snapshot.ts";
+
+export {
+  SupervisorWebSocketClient,
+  SupervisorWebSocketClientError,
+  type SupervisorHeartbeatRuntime,
+  type SupervisorWebSocketClientClose,
+  type SupervisorWebSocketClientOptions,
+  type SupervisorWebSocketRegistration,
+} from "./supervisor-websocket-client.ts";

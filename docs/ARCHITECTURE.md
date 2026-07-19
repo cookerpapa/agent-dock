@@ -150,15 +150,16 @@ durable control-plane ACK before Pi continues. A successful terminal event may
 include a validated unified diff bounded to 64 KiB. Cancellation propagates to
 Pi first and then requires exact-name outer-container removal confirmation.
 
-This is a real sandbox/workspace transport behind an integration-only local
-control-plane adapter, not yet the production remote supervisor connection. The
-HTTP application deliberately does not auto-start dispatchers. PostgreSQL event
+This is a real sandbox/workspace transport whose execution command/event path
+still sits behind an integration-only local control-plane adapter. The HTTP
+application deliberately does not auto-start dispatchers. PostgreSQL event
 persistence, cumulative ACK, SSE replay, and Docker execution are executable;
 the live SSE hub is process-local. The local supervisor can use a private,
 crash-safe file spool that syncs every event before transport and replays an
 unacknowledged suffix from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, the authenticated outbound-WebSocket supervisor transport,
+gateway, remote supervisor command/event routing and production
+authentication/owner adapters,
 acknowledged-cancellation crash recovery, cross-replica event notification, and
 Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
@@ -360,8 +361,9 @@ in-flight execution is never recreated: after the old owner boot is fenced, the
 host reconciler confirms its labelled runtime is absent and records the
 acknowledged turn as ambiguous `assignment_lost`. The durable health manager now
 automates timeout fencing, owner-stop confirmation, and retryable retirement;
-the outbound WebSocket and concrete production owner-process adapter are not yet
-wired.
+registration/heartbeat can cross a real outbound WebSocket, while remote
+command/event routing and the concrete production owner-process adapter are not
+yet wired.
 
 ## 5. Delivery and recovery semantics
 
@@ -388,6 +390,17 @@ The implemented registration boundary requires an authenticated authority with
 the exact supervisor, boot, sandbox, and fresh transport IDs. Exact same-channel
 registration retransmission returns the original ACK; a cross-transport replay,
 changed payload, superseded generation, or expired generation is rejected.
+
+The optional gateway authenticates the HTTP Upgrade before opening the socket,
+generates the fresh transport ID, requires registration as the first bounded
+text frame, and serializes a bounded number of pending frames per connection.
+It routes heartbeats through the durable manager and returns exact ACKs. The
+sandbox client applies those ACKs through one server-negotiated heartbeat loop
+covering all active assignments. A same-process reconnect proactively closes
+the old socket; a cross-replica reconnect is rejected through PostgreSQL on the
+old socket's next frame. Close alone does not quarantine a sandbox. The current
+gateway intentionally rejects command ACK and event publication until the
+durable remote command/event router is implemented.
 
 ### Event and command semantics
 

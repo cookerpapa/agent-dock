@@ -849,3 +849,44 @@
   register/registered/heartbeat 帧驱动本 manager。原因是数据库代际和 failure semantics 已经可证明，
   下一层应该验证网络断线、same-boot reconnect、stale socket 关闭和消息路由，而不是再增加本地假
   backend 功能。
+
+## 2026-07-19 — 真实 outbound WebSocket 注册与共享心跳
+
+- 目标：让独立 supervisor 通过真实网络帧驱动 ADR-0015 的 connection generation/heartbeat manager，
+  并证明跨 control-plane listener 重连时不能依赖某个进程内 socket map 来 fence 旧连接。
+- 决策：新增 ADR-0016。control plane 使用精确锁定的 `@fastify/websocket 11.3.0`，sandbox client 使用
+  `ws 8.21.1`。gateway 必须在其他 Fastify routes 前安装，也可以通过可选
+  `ControlPlaneApplicationOptions.supervisorWebSocketGateway` 挂到 Nest/Fastify application；生产
+  `main.ts` 不会在缺少真实 owner/auth 配置时静默启用它。
+- Upgrade 认证：新增 closed `SupervisorUpgradeAuthorizer`，只返回可信 supervisor/boot/sandbox identity，
+  gateway 为每条 socket 生成 fresh transport ID 后才调用 manager。测试/开发用的 hashed-bearer
+  authorizer 在构造后只保留 SHA-256 digest，并用 constant-time compare；token/header 不进入 wire、DB、
+  error 或日志。生产可以替换为 mTLS/SPIFFE/provisioner，而不用修改 frame handler。
+- 帧边界：第一条 bounded text frame 必须是 `supervisor.register`；binary、invalid JSON/schema、提前
+  heartbeat、unsupported type、registration timeout 和超大 payload 都 fail closed。每 socket 只有一条
+  promise chain，pending frame 数和 send buffer 均有上限，send callback 完成才处理下一帧，避免 frame
+  reorder 与无界内存增长。断线只清理进程内 routing，不直接 quarantine/reconcile。
+- Supervisor client：真实 `ws/wss` client 禁止 URL credential/query/fragment，authorization 只放 Upgrade
+  header；严格验证 `supervisor.registered` identity。server 协商的 interval/timeout 驱动一条 heartbeat
+  timer，任一时刻最多一个 heartbeat in flight；ACK 必须匹配 message/connection，并交给
+  `LocalSandboxSupervisor.applyHeartbeatAcknowledgement()` 处理 renewal/revocation。一个 heartbeat 仍覆盖
+  全部 active assignments，不为 session 创建 socket/thread。
+- 重连证据：同 gateway 会在新 generation commit 后主动以 private close code 关闭旧 socket；若新旧
+  socket 分别连接两个 control-plane listener，旧 listener 的内存 map 完全看不到新连接，但下一次
+  heartbeat 会被 PostgreSQL 中的 superseded generation 拒绝并关闭，新的 socket 继续 registered。
+- 网络测试：4 个真实 `127.0.0.1` WebSocket integration tests 覆盖 Upgrade 前 401、错误 credential 不
+  泄露、register/registered、周期 heartbeat、`acceptingAssignments=false` 落库、clean close 不提前释放、
+  durable timeout quarantine、跨 replica stale socket，以及 registration-first、binary、timeout、1 KiB
+  payload limit。测试不调用模型、不消耗订阅 token。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、186 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 vulnerabilities。相同 control-plane suite 在一次性
+  PostgreSQL `15.2-alpine` 上通过 43 passed/1 Docker-only skipped；结束后测试数据库与 managed
+  sandbox containers 均为 0。
+- 当前边界：网络 slice 只开放 register 与 heartbeat。gateway 会明确拒绝 `command.ack` 和
+  `event.publish`，client 也不会假装能执行远程 command；execute/cancel delivery、durable command ACK、
+  event publish/cumulative ACK backpressure，以及真实 provisioner credential/owner-process adapter 仍未
+  接入 production。
+- 下一步：实现 remote supervisor command/event router。原因是连接认证、代际、重连和 liveness 已经
+  跨真实 socket 闭环，接下来应把现有 `prepare -> durable ACK -> run` 与
+  `event.publish -> PostgreSQL commit -> event.ack` 顺序原样搬到网络上，而不能写一个无 durable
+  correlation 的通用 JSON RPC handler。

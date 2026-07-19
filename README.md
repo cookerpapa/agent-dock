@@ -103,6 +103,7 @@ only after a measured requirement appears.
 - [ADR-0013: explicit session mailbox order and queued follow-ups](docs/adr/0013-explicit-session-mailbox-order.md)
 - [ADR-0014: lease renewal and assignment reconciliation](docs/adr/0014-lease-renewal-and-assignment-reconciliation.md)
 - [ADR-0015: authenticated supervisor registration and durable health](docs/adr/0015-supervisor-registration-and-health-management.md)
+- [ADR-0016: authenticated outbound supervisor WebSocket transport](docs/adr/0016-supervisor-websocket-transport.md)
 
 ## Current executable spikes
 
@@ -260,9 +261,11 @@ not fetched, and no Pi payload, credential reference, or provider token is
 written to the DOM or browser console.
 
 The full database-to-container path and Web demo use the embedded loopback fake
-model, so they consume no subscription token. The control-plane-to-supervisor
-transport is still in-process integration scaffolding and the production HTTP
-entry point does not start dispatchers. The current image embeds one trusted
+model, so they consume no subscription token. Execution command/event delivery
+still uses the in-process integration bridge, while registration and heartbeat
+now also have a real optional outbound-WebSocket gateway/client. The production
+HTTP entry point does not start either dispatchers or a fake supervisor owner.
+The current image embeds one trusted
 sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
 hashed regular-file workspace manifest cross the private worker channel and are
 stored by the trusted host before `turn.completed`; the next turn restores both
@@ -272,8 +275,8 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, an authenticated outbound-WebSocket supervisor transport, and
-cross-replica live fan-out remain separate work. Queued-turn withdrawal,
+gateway, remote command/event routing, production supervisor authentication and
+owner adapters, and cross-replica live fan-out remain separate work. Queued-turn withdrawal,
 acknowledged-cancellation crash recovery, and Windows Job Object containment
 are also deferred.
 
@@ -309,8 +312,20 @@ the old sandbox. Timeout only enqueues a claimed/retryable retirement job: a
 trusted host must first confirm that the exact boot can no longer create a
 runtime, after which the existing reconciler may settle ambiguous work and
 release capacity. A crashed retirement claimant can be replaced by another
-control-plane instance. The actual WebSocket listener and concrete
-Docker/Kubernetes owner-process adapter are not yet wired.
+control-plane instance. The gateway/client is optional library code; production
+`main.ts`, a real provisioner credential, and the concrete Docker/Kubernetes
+owner-process adapter are not yet wired.
+
+The registration/heartbeat network contract is now executable through the
+official Fastify WebSocket plugin and a sandbox-side `ws` client. Upgrade
+authentication happens before the socket opens; a development authorizer keeps
+only a bearer-token hash, while the interface can be backed by mTLS/SPIFFE or a
+provisioner in production. The first frame must register, frames are processed
+in order with payload/queue bounds, one negotiated heartbeat timer covers all
+active assignments, and PostgreSQL rejects an old socket even when reconnecting
+through another control-plane listener. Socket close still waits for durable
+health expiry. This slice deliberately does not route execute/cancel commands,
+command ACKs, or event publications yet.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
@@ -329,6 +344,6 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses cross-replica live notification, the authenticated
-outbound supervisor WebSocket, and the MinIO/S3 object-store adapter rather than
-keeping a process per conversation.
+Phase 2 next addresses the durable command/event WebSocket router, cross-replica
+live notification, and the MinIO/S3 object-store adapter rather than keeping a
+process per conversation.
