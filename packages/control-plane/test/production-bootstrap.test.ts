@@ -130,6 +130,11 @@ describe.sequential("production bootstrap and configuration", () => {
         "management",
         `manage-${"m".repeat(48)}`,
       ),
+      AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
+        root,
+        "model-master-key",
+        Buffer.alloc(32, 5).toString("base64url"),
+      ),
       AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: "http://supervisor-host:4100",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",

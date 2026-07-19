@@ -201,10 +201,13 @@ is registered.
 
 The host alone receives the Docker socket and S3 credential. It composes the
 Docker runner, local Supervisor, PostgreSQL checkpoint metadata adapter,
-S3-compatible byte store, active/quarantine spool roots, reconnect client, and
-an authenticated private management endpoint. The control plane receives
-neither Docker authority nor S3 credentials; Pi workers receive neither of
-those, database/API/owner credentials, nor a network.
+S3-compatible byte store, tenant model-credential resolver/gateway,
+active/quarantine spool roots, reconnect client, and an authenticated private
+management endpoint. The control plane receives neither Docker authority nor S3
+credentials; Pi workers receive neither of those, database/API/owner credentials,
+nor any long-lived provider credential. Fake workers have no network. Real-model
+workers have only a Compose-internal route to the Supervisor gateway; only that
+trusted host also has fixed provider egress.
 Every assignment inventory request is constrained again to a sandbox generation
 known by this host's ledger, and a terminate/absence request must match that
 generation's stable Supervisor and exact boot before Docker is inspected.
@@ -217,30 +220,35 @@ The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted host, static Web
 ingress, isolated networks, private secret-file mounts, health checks, bounded
 resources/logs, and four declared volumes. Only Web publishes a loopback port.
-This topology is complete for the deterministic private multi-tenant fixture;
-it does not imply generic repository/provider/extension support, public SaaS,
+This topology is complete for the bounded private multi-tenant fixture with
+either a deterministic model or owner-configured DeepSeek; it does not imply
+generic repository/arbitrary-provider/extension support, public SaaS,
 Kubernetes, or direct Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
-See ADR-0023, ADR-0025, ADR-0026, and the production runbook.
+See ADR-0023, ADR-0025, ADR-0026, ADR-0027, and the production runbook.
 
 ### Model profiles and credentials
 
 The control plane exposes tenant-owned allowlisted model profiles rather than
 accepting raw provider endpoints from clients. Every tenant runtime policy owns
-one operator-configured default profile and no frontend model picker is required.
-A session references the resolved profile; every
+one default profile. New tenants use the deterministic fake; an owner-only Web/API
+configuration may select an allowlisted DeepSeek model and replace its encrypted
+API key. A session references the resolved profile; every
 turn snapshots the resolved provider, model, thinking level, and opaque
 credential-binding version so later policy changes do not rewrite history.
 
-Credential material is not conversation state. Refresh tokens never enter Pi
-JSONL, workspace snapshots, browser events, logs, or the untrusted tool
-environment. The target execution path obtains request-scoped authorization
-from a trusted credential broker or model gateway. A local, explicitly enabled
-ChatGPT-subscription probe may reuse the owner's Pi login only as a Phase 0 SDK
-integration test; it is not the production credential boundary. See ADR-0006.
+Credential material is not conversation state. Tenant provider keys are sealed
+with AES-256-GCM and binding-specific associated data; only the control plane and
+trusted Supervisor receive the deployment master-key file. The Supervisor
+resolves the exact snapshotted version and substitutes a random, expiring,
+request-limited per-turn gateway capability. Long-lived keys never enter Pi
+JSONL, workspace snapshots, Docker arguments/environment/labels, browser events,
+logs, or the untrusted tool environment. Provider-reported token counts are
+persisted per tenant/turn; mutable monetary prices are not inferred. See
+ADR-0006 and ADR-0027.
 
 ### Deterministic model test boundary
 
@@ -303,12 +311,12 @@ Minimum controls:
 The Phase 0 Compose topology remains a zero-token configuration probe. The
 Phase 1 Java repair path now activates a separate one-shot container with UID/GID
 `1000:1000`, read-only rootfs, the engine's default seccomp policy, dropped
-capabilities, `no-new-privileges`, no network/ports/binds/devices, and bounded
-CPU, memory, PIDs, file descriptors, `/tmp`, and workspace tmpfs. It does not
-mount a host repository or Docker socket. The embedded fake model requires no
-egress or real credential. A later real-provider path must use a trusted
-request-scoped gateway and explicit egress policy rather than exposing
-long-lived provider credentials to Pi or tools.
+capabilities, `no-new-privileges`, no ports/binds/devices, and bounded CPU,
+memory, PIDs, file descriptors, `/tmp`, and workspace tmpfs. It does not mount a
+host repository or Docker socket. The embedded fake model requires no network or
+real credential. The real-provider path joins only the validated internal model
+network and uses the trusted request-scoped gateway; the Supervisor alone joins
+provider egress, so Pi/tools never receive a long-lived provider credential.
 
 ## 3. State ownership
 

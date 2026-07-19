@@ -13,10 +13,11 @@ The word _production_ here means that this bounded slice has explicit
 configuration, durable storage, health checks, restart behavior, security
 boundaries, and a destructive disposable acceptance test. It does not turn the
 sample into a general coding-agent SaaS. The worker currently supports only the
-image-owned Java repair/follow-up fixture and deterministic embedded model. It
-does not yet support arbitrary repository import, real-provider credentials,
-policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
-direct Internet exposure. The optional registration route is not verified
+image-owned Java repair/follow-up fixture. A tenant owner may keep the default
+deterministic model or configure an allowlisted DeepSeek model and encrypted API
+key. It does not yet support arbitrary repository import, arbitrary provider
+URLs, policy-approved third-party extensions, public Internet SaaS, Kubernetes,
+or direct Internet exposure. The optional registration route is not verified
 human identity, billing, OIDC, recovery, abuse prevention, or a mutually
 hostile Docker-host boundary. Those limits are part of the product contract,
 not hidden deployment TODOs.
@@ -28,6 +29,9 @@ tenant identity, quotas, isolation, and fair dispatch are recorded in
 [ADR-0025](adr/0025-private-multi-tenant-identity-and-fair-scheduling.md).
 Opt-in registration and conversation discovery are recorded in
 [ADR-0026](adr/0026-opt-in-self-service-registration-and-conversation-discovery.md).
+Encrypted tenant model credentials, brokered egress, and real Pi execution are
+recorded in
+[ADR-0027](adr/0027-tenant-model-credentials-and-brokered-pi-execution.md).
 
 ## Prerequisites
 
@@ -83,7 +87,11 @@ npm run production:token
 ```
 
 Open the ingress URL, paste the token into the login card, and submit the
-supported Java-repair prompt. The browser first resolves `/v1/identity`, shows
+supported Java-repair prompt. New tenants start on the deterministic zero-token
+profile. To use a real model, an owner opens `model`, selects an allowlisted
+DeepSeek model, pastes that tenant's API key, and saves it before creating the
+turn. Future turns for that tenant then spend its provider quota until the model
+configuration is replaced. The browser first resolves `/v1/identity`, shows
 the tenant, user, and role, and keeps the token only in JavaScript memory—not in
 Web Storage, a URL, or a durable server-side session. Reloading or logging out
 therefore requires the token again. The token command intentionally
@@ -109,6 +117,11 @@ mounted application secret files, avoiding an assumption that every Docker host
 uses UID `1000`. Initialization performed as root assigns those files to the
 image's unprivileged `1000:1000` identity. Mixed owners or a root-owned
 application secret fail before Compose starts.
+The generated `model-credential-master-key` encrypts tenant provider keys with
+AES-256-GCM and must be backed up with PostgreSQL. It is mounted only into the
+control plane and trusted Supervisor host. Losing it makes configured provider
+credentials unrecoverable; exposing it together with the database exposes
+those credentials.
 The MinIO root credential stays in the MinIO/bootstrap boundary. The Supervisor
 uses a separate generated application identity whose policy permits bucket
 location/list plus object read/write only for the checkpoint bucket; it has no
@@ -127,8 +140,12 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                       |              +-> outbound Supervisor WebSocket
                                       v
                               trusted Supervisor host -> MinIO checkpoints
+                                      |         |
+                                      |         +-> fixed provider API (egress only here)
                                       |
-                                      +-> Docker socket -> ephemeral networkless Pi worker
+                                      +-> Docker socket -> ephemeral Pi worker
+                                                           | fake: no network
+                                                           + real: internal gateway only
 ```
 
 The database, object store, Supervisor management endpoint, boot-provisioning
@@ -140,15 +157,19 @@ contains no dependency detail.
 The trusted `supervisor-host` container is deliberately root-equivalent because
 it owns `/var/run/docker.sock`. Neither the control plane nor any Pi worker gets
 that socket. Workers are created per active turn, not per conversation: they run
-as UID/GID `1000:1000`, with no host bind mount, inherited deployment secret,
-network, published port, or writable root filesystem, and are removed after
-completion or cancellation. Cold sessions consume no process, worker container,
+as UID/GID `1000:1000`, with no host bind mount, inherited long-lived deployment
+secret, published port, or writable root filesystem, and are removed after
+completion or cancellation. A fake worker has `--network none`. A real worker
+joins only the internal `model-runtime` network and receives an expiring,
+turn-bound gateway capability; only the Supervisor also joins provider egress
+and decrypts the real key. Cold sessions consume no process, worker container,
 socket, timer, or dedicated thread.
 
 Persistent state is split into four declared volumes:
 
-- `postgres-data`: tenants, sessions, commands, leases, events, checkpoint
-  metadata, Supervisor generations, and retirement work;
+- `postgres-data`: tenants, encrypted model credentials, token usage, sessions,
+  commands, leases, events, checkpoint metadata, Supervisor generations, and
+  retirement work;
 - `minio-data`: immutable Pi JSONL and workspace checkpoint bytes;
 - `supervisor-boot`: fsynced current/recent boot ownership ledger;
 - `supervisor-spool`: active unacknowledged event publications and permanently
@@ -273,6 +294,31 @@ for the other tenant. There is no client-supplied tenant selector. The running
 control plane does not mount the bootstrap/API-token file and has no configured
 default tenant; it derives every public request scope from the verified token.
 
+## Tenant model configuration
+
+Every new tenant starts with the deterministic profile, so normal setup and
+acceptance do not call a paid provider. After authenticating, any role may read
+the safe `GET /v1/model-configuration` resource; only `owner` may replace it via
+the Web model panel or `PUT /v1/model-configuration`. The replacement accepts
+only `deepseek` plus the server allowlist shown by the UI. It does not accept a
+provider URL or expose the key, ciphertext, digest, or gateway capability.
+
+Saving a new key creates an immutable credential-binding version and switches
+the tenant's default profile in one transaction. Repeating the same key/model is
+content-idempotent. Already accepted turns keep their snapshotted version;
+future turns use the replacement. The database stores AES-256-GCM ciphertext
+whose associated data includes tenant, binding, version, provider, and master
+key version. Provider-reported input, output, cache-read, and cache-write tokens
+are written to `usage_ledger` for each model call. Monetary cost remains zero
+until versioned provider pricing is modeled.
+
+The Web clears the key field after submit and does not place it in Web Storage.
+The trusted Supervisor decrypts the exact snapshotted version, gives the Pi
+worker only a short-lived, request-limited turn capability, and revokes it when
+the activation settles. The worker has no direct provider egress. Treat the
+Supervisor, PostgreSQL, private runtime directory, and Docker authority as the
+trusted computing base; this is not a mutually hostile public-SaaS sandbox.
+
 ## TLS and network exposure
 
 The bundled Caddy configuration intentionally serves plain HTTP on loopback. It
@@ -384,6 +430,14 @@ window, with a coordinated backup and no active turns:
   `secrets/api-token` remains bootstrap identity material and is not mounted by
   the running control plane; revoking its database credential does not make a
   later idempotent deployment recreate or re-enable it.
+- Tenant provider API keys: the tenant owner saves the replacement through the
+  model panel. This creates a new immutable binding version; accepted turns keep
+  their old snapshot. Retained old versions are deliberate recovery state and
+  need a future reference-aware retention job before deletion.
+- Model-credential master key: do not replace this file independently. Current
+  ciphertext is bound to key version 1 and no online re-encryption procedure is
+  implemented. Rotate only through a separately tested decrypt/re-encrypt
+  migration, or restore the original key with its matching database.
 - Enrollment and management tokens: replace the matching files atomically in
   both consumers and recreate the control plane and Supervisor host together.
   The host restart creates a fresh boot credential and revokes the old one.
@@ -436,5 +490,11 @@ npm run ci
 ```
 
 Together these commands are the executable boundary for the supported private
-multi-tenant deterministic production slice. Any claim beyond that boundary
-requires its own ADR, threat model, and acceptance evidence.
+multi-tenant production slice. They deliberately stay on the deterministic
+profile and spend no provider quota. A release that changes the real-provider
+path also needs an explicit opt-in live check: configure one test tenant, submit
+the Java repair through the normal Web/API path, verify bash/edit/passing-test
+events and a non-empty final diff, confirm positive `usage_ledger` rows for the
+exact turn, inspect the worker's sole `model-runtime` network, and rotate or
+revoke the test key afterward. Any broader claim requires its own ADR, threat
+model, and acceptance evidence.

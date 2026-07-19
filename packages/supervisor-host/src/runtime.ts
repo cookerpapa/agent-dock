@@ -2,6 +2,10 @@ import {
   type CheckpointObjectStore,
   PostgresSandboxCheckpointStore,
 } from "@agent-dock/control-plane/checkpoint-runtime";
+import {
+  PostgresTenantModelCredentialResolver,
+  TenantModelCredentialVault,
+} from "@agent-dock/control-plane/model-credential-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import {
@@ -20,6 +24,7 @@ import { sql, type Kysely } from "kysely";
 import { SupervisorBootLedger, type SupervisorHostBootIdentity } from "./boot-ledger.ts";
 import type { SupervisorHostConfig } from "./config.ts";
 import { SupervisorManagementServer } from "./management-server.ts";
+import { TenantModelGateway } from "./model-gateway.ts";
 import { SupervisorProvisioningClient } from "./provisioning-client.ts";
 
 export type SupervisorHostRuntimeState =
@@ -115,6 +120,7 @@ export class SupervisorHostRuntime {
   #localSupervisor: LocalSandboxSupervisor | undefined;
   #client: ReconnectingSupervisorWebSocketClient | undefined;
   #managementServer: SupervisorManagementServer | undefined;
+  #modelGateway: TenantModelGateway | undefined;
   #closing: Promise<void> | undefined;
   #ownerStopSettled = false;
   #terminalSettled = false;
@@ -237,12 +243,32 @@ export class SupervisorHostRuntime {
         database: this.#database,
         objectStore: this.#objectStore,
       });
+      const modelGateway = new TenantModelGateway({
+        database: this.#database,
+        credentialResolver: new PostgresTenantModelCredentialResolver({
+          database: this.#database,
+          vault: new TenantModelCredentialVault(this.#config.modelCredentialMasterKey),
+        }),
+        host: this.#config.modelGatewayHost,
+        port: this.#config.modelGatewayPort,
+        advertisedBaseUrl: this.#config.modelGatewayAdvertisedBaseUrl,
+        sandboxNetwork: this.#config.sandboxModelNetwork,
+        capabilityTtlMs: this.#config.modelGatewayCapabilityTtlMs,
+        maximumRequestsPerTurn: this.#config.modelGatewayMaximumRequestsPerTurn,
+        upstreamRequestTimeoutMs: this.#config.modelGatewayUpstreamRequestTimeoutMs,
+        piRequestTimeoutMs: this.#config.piModelRequestTimeoutMs,
+        piTurnTimeoutMs: this.#config.piTurnTimeoutMs,
+      });
+      await modelGateway.start();
+      this.#modelGateway = modelGateway;
       const runner = new DockerSandboxTurnRunner({
         image: this.#config.sandboxImage,
         dockerCommand: this.#config.dockerCommand,
         runtimeIdentity: identity,
         checkpointStore,
         scenario: resolveProductionSandboxScenario,
+        modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
+        executionTimeoutMs: this.#config.piTurnTimeoutMs + 30_000,
       });
       const spoolStore = new FileEventSpoolStore({
         rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),
@@ -296,6 +322,7 @@ export class SupervisorHostRuntime {
     this.#localSupervisor?.revokeAllAssignments();
     await this.#localSupervisor?.waitUntilAssignmentsSettled().catch(() => undefined);
     await this.#managementServer?.close().catch(() => undefined);
+    await this.#modelGateway?.close().catch(() => undefined);
     this.#objectStore.destroy();
     if (this.#ownsDatabase) await this.#database.destroy();
     if (this.#state !== "failed") this.#state = "stopped";

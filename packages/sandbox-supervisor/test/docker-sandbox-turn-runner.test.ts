@@ -99,4 +99,27 @@ describe("DockerSandboxTurnRunner", () => {
       ),
     ).toThrow("container name is invalid");
   });
+
+  it("allows only a validated internal model network without placing a capability in arguments", () => {
+    const args = buildDockerSandboxRunArguments(
+      "agent-dock/pi-workspace:test",
+      "agent-dock-real-model-run",
+      command,
+      runtimeIdentity,
+      "agent-dock-production_model-runtime",
+    );
+    expect(args).toEqual(
+      expect.arrayContaining(["--network", "agent-dock-production_model-runtime"]),
+    );
+    expect(args.join(" ")).not.toContain("admg_");
+    expect(() =>
+      buildDockerSandboxRunArguments(
+        "agent-dock/pi-workspace:test",
+        "agent-dock-real-model-run",
+        command,
+        runtimeIdentity,
+        "../host",
+      ),
+    ).toThrow("network name is invalid");
+  });
 });

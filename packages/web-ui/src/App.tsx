@@ -9,7 +9,12 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ConversationSummaryResource, TenantIdentityResource } from "@agent-dock/protocol";
+import type {
+  ConversationSummaryResource,
+  DeepSeekModelId,
+  ModelConfigurationResource,
+  TenantIdentityResource,
+} from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import {
   activeTurn,
@@ -243,10 +248,12 @@ function TurnTranscript({ turn }: { turn: TurnView }) {
   );
 }
 
-function EmptyTranscript() {
+function EmptyTranscript({ realModel }: { realModel: boolean }) {
   return (
     <section className="empty-transcript">
-      <div className="empty-kicker">PHASE 1 · ZERO TOKEN DEMO</div>
+      <div className="empty-kicker">
+        {realModel ? "REAL MODEL · BROKERED EGRESS" : "PHASE 1 · ZERO TOKEN DEMO"}
+      </div>
       <h1>A cloud control plane around Pi, not a chat-page wrapper.</h1>
       <p>
         Submit the prepared task to create a durable session. AgentDock will claim the turn, acquire
@@ -256,7 +263,7 @@ function EmptyTranscript() {
       <div className="boundary-grid">
         <span>PostgreSQL outbox</span>
         <span>resumable SSE</span>
-        <span>networkless sandbox</span>
+        <span>{realModel ? "capability-only model egress" : "networkless sandbox"}</span>
         <span>bounded Git diff</span>
       </div>
     </section>
@@ -280,6 +287,13 @@ export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [apiToken, setApiToken] = useState("");
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
+  const [modelConfiguration, setModelConfiguration] = useState<ModelConfigurationResource | null>(
+    null,
+  );
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
+  const [modelCredentialInput, setModelCredentialInput] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState<DeepSeekModelId>("deepseek-v4-flash");
+  const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
   const [credentialInput, setCredentialInput] = useState("");
   const [credentialChecking, setCredentialChecking] = useState(false);
   const [registrationSlug, setRegistrationSlug] = useState("");
@@ -301,6 +315,8 @@ export default function App() {
   const lastSequenceRef = useRef(0);
   const currentTurn = activeTurn(state);
   const canMutate = identity?.role !== "viewer";
+  const canConfigureModel = identity?.role === "owner";
+  const usesRealModel = modelConfiguration?.mode === "real";
   const sessionCanQueueTurn =
     state.session === null ||
     state.sessionState === "cold" ||
@@ -324,6 +340,10 @@ export default function App() {
     setConversationLoading(null);
     setOperation(null);
     setReconnectGeneration(0);
+    setModelConfiguration(null);
+    setModelPanelOpen(false);
+    setModelCredentialInput("");
+    setModelConfigurationSaving(false);
   }
 
   async function refreshConversations(candidateApi: AgentDockApi = api): Promise<void> {
@@ -345,6 +365,28 @@ export default function App() {
         if (cancelled) return;
         setConversations(listed.conversations);
         setConversationListTruncated(listed.truncated);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        update({ type: "api.error", message: apiFailureMessage(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, apiToken, identity?.tenantId]);
+
+  useEffect(() => {
+    if (identity === null || (AUTH_REQUIRED && apiToken.length === 0)) {
+      setModelConfiguration(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getModelConfiguration()
+      .then((configuration) => {
+        if (cancelled) return;
+        setModelConfiguration(configuration);
+        if (configuration.mode === "real") setSelectedModelId(configuration.modelId);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -446,6 +488,27 @@ export default function App() {
     setApiToken("");
     setNewlyIssuedToken(null);
     setAuthMode("login");
+  }
+
+  async function replaceModelConfiguration(): Promise<void> {
+    if (!canConfigureModel || modelConfigurationSaving) return;
+    const providerKey = modelCredentialInput.trim();
+    if (!/^[A-Za-z0-9._-]{16,512}$/.test(providerKey)) {
+      update({ type: "api.error", message: "DeepSeek API key format is invalid." });
+      return;
+    }
+    setModelConfigurationSaving(true);
+    update({ type: "api.error.cleared" });
+    try {
+      const configured = await api.replaceModelConfiguration(selectedModelId, providerKey);
+      setModelConfiguration(configured);
+      setModelCredentialInput("");
+      setModelPanelOpen(false);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setModelConfigurationSaving(false);
+    }
   }
 
   async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
@@ -777,7 +840,11 @@ export default function App() {
           ) : null}
           <div>
             <span>model</span>
-            <strong>embedded fake · fixed</strong>
+            <strong>
+              {modelConfiguration?.mode === "real"
+                ? `${modelConfiguration.provider} · ${modelConfiguration.modelId}`
+                : "embedded fake · fixed"}
+            </strong>
           </div>
           <div>
             <span>runtime</span>
@@ -785,7 +852,9 @@ export default function App() {
           </div>
           <div>
             <span>sandbox</span>
-            <strong>ephemeral · network none</strong>
+            <strong>
+              {usesRealModel ? "ephemeral · broker-only network" : "ephemeral · network none"}
+            </strong>
           </div>
         </footer>
       </aside>
@@ -829,6 +898,15 @@ export default function App() {
             >
               reconnect
             </button>
+            {canConfigureModel ? (
+              <button
+                onClick={() => setModelPanelOpen((open) => !open)}
+                title="Configure tenant model credential"
+                type="button"
+              >
+                model
+              </button>
+            ) : null}
             {AUTH_REQUIRED ? (
               <button onClick={forgetCredential} title="Forget API token" type="button">
                 logout
@@ -854,6 +932,61 @@ export default function App() {
             </button>
           </section>
         ) : null}
+        {modelPanelOpen && canConfigureModel ? (
+          <form
+            className="model-configuration-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void replaceModelConfiguration();
+            }}
+          >
+            <div>
+              <strong>Tenant model runtime</strong>
+              <span>
+                The key is encrypted at rest. Pi receives only a short-lived, turn-bound gateway
+                capability.
+              </span>
+            </div>
+            <label htmlFor="model-id">model</label>
+            <select
+              disabled={modelConfigurationSaving}
+              id="model-id"
+              onChange={(event) => setSelectedModelId(event.target.value as DeepSeekModelId)}
+              value={selectedModelId}
+            >
+              <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+              <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+            </select>
+            <label htmlFor="model-api-key">API key</label>
+            <input
+              autoComplete="off"
+              disabled={modelConfigurationSaving}
+              id="model-api-key"
+              onChange={(event) => setModelCredentialInput(event.target.value)}
+              placeholder={usesRealModel ? "enter key to rotate" : "sk-…"}
+              spellCheck={false}
+              type="password"
+              value={modelCredentialInput}
+            />
+            <button disabled={modelConfigurationSaving || modelCredentialInput.trim() === ""}>
+              {modelConfigurationSaving
+                ? "encrypting…"
+                : usesRealModel
+                  ? "rotate / update"
+                  : "enable real Pi"}
+            </button>
+            <button
+              disabled={modelConfigurationSaving}
+              onClick={() => {
+                setModelCredentialInput("");
+                setModelPanelOpen(false);
+              }}
+              type="button"
+            >
+              cancel
+            </button>
+          </form>
+        ) : null}
         {state.historyTruncated ? (
           <div className="history-notice">
             This conversation is showing its newest 200 prompt turns and matching durable event
@@ -872,7 +1005,7 @@ export default function App() {
         <div className="transcript-scroll">
           <div className="transcript">
             {state.turns.length === 0 ? (
-              <EmptyTranscript />
+              <EmptyTranscript realModel={usesRealModel} />
             ) : (
               state.turns.map((turn) => <TurnTranscript key={turn.turnId} turn={turn} />)
             )}
@@ -945,7 +1078,7 @@ export default function App() {
             <span>session: {state.sessionState}</span>
             <span>turn: {currentTurn?.status ?? "settled"}</span>
             <span>durable through: #{String(state.lastSequence)}</span>
-            <span>browser never receives provider credentials</span>
+            <span>Pi receives only a turn-bound gateway capability</span>
           </div>
         </footer>
       </main>

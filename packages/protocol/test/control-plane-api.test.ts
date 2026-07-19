@@ -13,7 +13,9 @@ import {
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
+  parseModelConfigurationResource,
   parseProjectResource,
+  parseReplaceModelConfigurationRequest,
   parseSessionResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
@@ -186,6 +188,45 @@ describe("control-plane public API schemas", () => {
         displayName: "  Alpha Owner  ",
       }),
     ).toEqual({ tenantSlug: "team-alpha", displayName: "Alpha Owner" });
+  });
+
+  it("keeps tenant model configuration closed and secret-free on reads", () => {
+    expect(
+      parseReplaceModelConfigurationRequest({
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: `sk-${"a".repeat(48)}`,
+      }),
+    ).toMatchObject({ provider: "deepseek", modelId: "deepseek-v4-flash" });
+    expect(
+      parseModelConfigurationResource({
+        mode: "real",
+        provider: "deepseek",
+        modelId: "deepseek-v4-pro",
+        configured: true,
+        credentialVersion: 2,
+        updatedAt: "2026-07-19T00:00:00.000Z",
+      }),
+    ).toMatchObject({ mode: "real", credentialVersion: 2 });
+    expect(() =>
+      parseReplaceModelConfigurationRequest({
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: `sk-${"a".repeat(48)}`,
+        baseUrl: "https://attacker.invalid",
+      }),
+    ).toThrow(ControlPlaneApiValidationError);
+    expect(() =>
+      parseModelConfigurationResource({
+        mode: "real",
+        provider: "deepseek",
+        modelId: "deepseek-v4-pro",
+        configured: true,
+        credentialVersion: 2,
+        updatedAt: "2026-07-19T00:00:00.000Z",
+        apiKey: "must-not-cross",
+      }),
+    ).toThrow(ControlPlaneApiValidationError);
   });
 
   it("validates workspace and path identities as UUIDs", () => {

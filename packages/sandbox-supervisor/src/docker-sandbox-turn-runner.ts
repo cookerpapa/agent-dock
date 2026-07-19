@@ -3,6 +3,7 @@ import {
   parseDockerSandboxWorkerInput,
   parseDockerSandboxWorkerOutput,
   type DockerSandboxCheckpointPublishMessage,
+  type DockerSandboxModelRuntime,
   type DockerSandboxWorkerOutput,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
@@ -46,6 +47,16 @@ export type DockerSandboxScenarioResolver = (
   context: DockerSandboxScenarioContext,
 ) => DockerSandboxScenario;
 
+export type DockerSandboxModelRuntimeLease = Readonly<{
+  runtime: Extract<DockerSandboxModelRuntime, { kind: "openai_compatible_gateway" }>;
+  network: string;
+  release: () => Promise<void> | void;
+}>;
+
+export type DockerSandboxModelRuntimeLeaseResolver = (
+  command: ExecuteTurnCommandMessage,
+) => Promise<DockerSandboxModelRuntimeLease> | DockerSandboxModelRuntimeLease;
+
 export type DockerSandboxContainerIdentity = SandboxRuntimeIdentity & {
   containerName: string;
   commandId: string;
@@ -60,6 +71,7 @@ export type DockerSandboxTurnRunnerOptions = {
   runtimeIdentity: SandboxRuntimeIdentity;
   dockerCommand?: string;
   scenario?: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  modelRuntimeLeaseResolver?: DockerSandboxModelRuntimeLeaseResolver;
   checkpointStore?: SandboxCheckpointStore;
   readyTimeoutMs?: number;
   executionTimeoutMs?: number;
@@ -138,12 +150,16 @@ export function buildDockerSandboxRunArguments(
   name: string,
   command: ExecuteTurnCommandMessage,
   runtimeIdentity: SandboxRuntimeIdentity,
+  network = "none",
 ): readonly string[] {
   if (image.trim().length === 0) throw new TypeError("Docker sandbox image must not be empty");
   if (!/^[a-z0-9][a-z0-9_.-]{0,62}$/.test(name)) {
     throw new TypeError("Docker sandbox container name is invalid");
   }
   const validatedRuntimeIdentity = validateSandboxRuntimeIdentity(runtimeIdentity);
+  if (network !== "none" && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(network)) {
+    throw new TypeError("Docker sandbox network name is invalid");
+  }
   return [
     "run",
     "--rm",
@@ -172,7 +188,7 @@ export function buildDockerSandboxRunArguments(
     "1000:1000",
     "--read-only",
     "--network",
-    "none",
+    network,
     "--init",
     "--cap-drop",
     "ALL",
@@ -231,12 +247,19 @@ function cancellationSignal(value: unknown): PiRpcCancellationSignal {
   return value as PiRpcCancellationSignal;
 }
 
+async function releaseModelRuntimeLease(
+  lease: DockerSandboxModelRuntimeLease | undefined,
+): Promise<void> {
+  if (lease !== undefined) await lease.release();
+}
+
 export class DockerSandboxTurnRunner {
   readonly #image: string;
   readonly #dockerCommand: string;
   readonly #runtimeIdentity: SandboxRuntimeIdentity;
   readonly #assignmentInventory: DockerSandboxAssignmentInventory;
   readonly #scenario: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  readonly #modelRuntimeLeaseResolver: DockerSandboxModelRuntimeLeaseResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #readyTimeoutMs: number;
   readonly #executionTimeoutMs: number;
@@ -252,6 +275,7 @@ export class DockerSandboxTurnRunner {
     this.#dockerCommand = options.dockerCommand ?? "docker";
     this.#runtimeIdentity = validateSandboxRuntimeIdentity(options.runtimeIdentity);
     this.#scenario = options.scenario ?? "java_repair";
+    this.#modelRuntimeLeaseResolver = options.modelRuntimeLeaseResolver;
     this.#checkpointStore = options.checkpointStore;
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
@@ -296,6 +320,31 @@ export class DockerSandboxTurnRunner {
         );
       }
     }
+    const usesEmbeddedFake =
+      command.payload.model.provider === "agent-dock-fake" &&
+      command.payload.model.modelId === "agent-dock-fake";
+    let modelRuntimeLease: DockerSandboxModelRuntimeLease | undefined;
+    if (!usesEmbeddedFake) {
+      if (this.#modelRuntimeLeaseResolver === undefined) {
+        throw new PiRpcTurnError(
+          "credential_unavailable",
+          "A real model runtime is not configured for this Supervisor",
+          true,
+        );
+      }
+      modelRuntimeLease = await this.#modelRuntimeLeaseResolver(command);
+      if (
+        modelRuntimeLease.runtime.provider !== command.payload.model.provider ||
+        modelRuntimeLease.runtime.modelId !== command.payload.model.modelId
+      ) {
+        await releaseModelRuntimeLease(modelRuntimeLease).catch(() => undefined);
+        throw new PiRpcTurnError(
+          "model_binding_mismatch",
+          "Resolved model runtime does not match the accepted turn",
+          false,
+        );
+      }
+    }
     const scenario =
       typeof this.#scenario === "function"
         ? this.#scenario({ command, restoring: loadedCheckpoint !== undefined })
@@ -310,11 +359,25 @@ export class DockerSandboxTurnRunner {
       leaseId: command.payload.leaseId,
       fencingToken: command.payload.fencingToken,
     };
-    const child = spawn(
-      this.#dockerCommand,
-      [...buildDockerSandboxRunArguments(this.#image, name, command, this.#runtimeIdentity)],
-      { stdio: ["pipe", "pipe", "pipe"] },
-    );
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(
+        this.#dockerCommand,
+        [
+          ...buildDockerSandboxRunArguments(
+            this.#image,
+            name,
+            command,
+            this.#runtimeIdentity,
+            modelRuntimeLease?.network ?? "none",
+          ),
+        ],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+    } catch (error: unknown) {
+      await releaseModelRuntimeLease(modelRuntimeLease).catch(() => undefined);
+      throw error;
+    }
     const ready = deferred<void>();
     const terminal = deferred<PiRpcTurnResult>();
     void ready.promise.catch(() => undefined);
@@ -567,7 +630,7 @@ export class DockerSandboxTurnRunner {
         sandboxProtocolVersion: 1,
         type: "sandbox.run",
         command,
-        runtime: { kind: "embedded_fake", scenario },
+        runtime: modelRuntimeLease?.runtime ?? { kind: "embedded_fake", scenario },
         workspaceFixture: "java-repair",
         checkpoint:
           this.#checkpointStore === undefined
@@ -631,6 +694,13 @@ export class DockerSandboxTurnRunner {
           true,
         );
       }
+      await releaseModelRuntimeLease(modelRuntimeLease).catch(() => {
+        cleanupError ??= new PiRpcTurnError(
+          "model_gateway_release_failed",
+          "Model gateway capability could not be revoked",
+          true,
+        );
+      });
     }
     if (cleanupError !== undefined) throw cleanupError;
     if (protocolError !== undefined) throw protocolError;

@@ -34,6 +34,11 @@ describe("Supervisor host production configuration", () => {
         "management",
         `manage-${"m".repeat(48)}`,
       ),
+      AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
+        root,
+        "model-master-key",
+        Buffer.alloc(32, 9).toString("base64url"),
+      ),
       DATABASE_URL_FILE: await secret(
         root,
         "database",
@@ -43,6 +48,8 @@ describe("Supervisor host production configuration", () => {
       AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
       AGENT_DOCK_SUPERVISOR_CAPACITY: "3",
+      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://supervisor-host:4200",
+      AGENT_DOCK_SANDBOX_MODEL_NETWORK: "agent-dock-production_model-runtime",
     });
     expect(config).toMatchObject({
       supervisorId: "supervisor-production-1",

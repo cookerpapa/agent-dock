@@ -116,6 +116,7 @@ only after a measured requirement appears.
 - [ADR-0024: permanent event rejection and spool quarantine](docs/adr/0024-permanent-event-rejection-and-spool-quarantine.md)
 - [ADR-0025: private multi-tenant identity and fair scheduling](docs/adr/0025-private-multi-tenant-identity-and-fair-scheduling.md)
 - [ADR-0026: opt-in self-service registration and conversation discovery](docs/adr/0026-opt-in-self-service-registration-and-conversation-discovery.md)
+- [ADR-0027: tenant model credentials and brokered Pi execution](docs/adr/0027-tenant-model-credentials-and-brokered-pi-execution.md)
 
 ## Current executable spikes
 
@@ -236,16 +237,21 @@ npm run production:deploy
 
 It starts persistent PostgreSQL and MinIO, an authenticated remote control
 plane, one trusted Docker-owning Supervisor host, the Web ingress, and ephemeral
-networkless Pi workers. Only the Web ingress publishes a loopback port. See the
+Pi workers. Fake-model workers remain networkless; a real-model worker joins
+only an internal model-runtime network and reaches DeepSeek through a
+turn-scoped Supervisor gateway capability. Only the Web ingress publishes a
+loopback port. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
 
-This is production-complete for the deterministic private multi-tenant Java
-fixture. Request identity, roles, resource/event/checkpoint isolation, quotas,
-fair global dispatch, opt-in loopback self-registration, and tenant-scoped
-conversation discovery share one bounded Supervisor pool. It is not yet a
-generic repository service, real-provider deployment, arbitrary extension host,
-public Internet SaaS, Kubernetes release, or direct Internet ingress.
+This is production-complete for the bounded private multi-tenant Java fixture,
+with either the deterministic fake or an owner-configured DeepSeek model.
+Request identity, roles, encrypted per-tenant provider credentials,
+resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,
+opt-in loopback self-registration, and tenant-scoped conversation discovery
+share one bounded Supervisor pool. It is not yet a generic repository service,
+arbitrary extension host, public Internet SaaS, Kubernetes release, or direct
+Internet ingress.
 
 ## Current status
 
@@ -260,9 +266,10 @@ schema with executable ownership, idempotency, ordering, connection generation,
 fencing, ACK, and usage constraints. A hardened two-service Docker Compose topology, pinned runner
 images, and executable container-configuration contracts are implemented. The
 two images and probes pass on Docker Engine `29.4.2` with Compose `5.1.3`. Runtime
-inspection confirms UID/GID `1000:1000`, a read-only root filesystem, no network,
-no host mounts or published ports, dropped capabilities, `no-new-privileges`,
-and enforced CPU, memory, PID, and `/tmp` limits. The deterministic fake model
+inspection confirms UID/GID `1000:1000`, a read-only root filesystem, no host
+mounts or published ports, dropped capabilities, `no-new-privileges`, and
+enforced CPU, memory, PID, and `/tmp` limits. Fake activations have no network;
+real activations have only the internal model-gateway network. The deterministic fake model
 server makes streaming and provider failures executable without tokens.
 Formatting, tests, zero-token spikes, dependency audit, effective container
 checks, and full-history secret scanning are defined in GitHub Actions. Their
@@ -300,10 +307,11 @@ a post-ACK cancellation failure fails the session without returning an
 unconfirmed sandbox reservation to the ready pool.
 
 The fifth Phase 1 slice replaces the local workspace with an ephemeral Docker
-activation. A trusted host-side runner starts a non-root, read-only,
-networkless container with no bind mounts, Docker socket, ports, or inherited
-credentials and with CPU, memory, PID, file-descriptor, `/tmp`, and workspace
-limits. The container copies a sample Java repository into workspace tmpfs,
+activation. A trusted host-side runner starts a non-root, read-only container
+with no bind mounts, Docker socket, ports, or inherited long-lived credentials
+and with CPU, memory, PID, file-descriptor, `/tmp`, and workspace limits. Fake
+activations are networkless; a real activation has only broker access through
+an expiring, turn-bound capability. The container copies a sample Java repository into workspace tmpfs,
 creates a baseline Git commit, and starts pinned Pi with only `bash` and `edit`
 enabled. The deterministic model drives a failing test, one source edit, and a
 passing verification test. Every tool boundary is durably ACKed through the
@@ -323,10 +331,13 @@ the final diff have explicit non-color-only states. Remote Markdown images are
 not fetched, and no Pi payload, credential reference, or provider token is
 written to the DOM or browser console.
 
-The full database-to-container path, Web demo, and supported production
-topology use the embedded deterministic model, so they consume no subscription
-token. The demo deliberately retains the in-process integration bridge. The
-production entry point instead composes authenticated provisioning, the
+The Web demo and routine CI/production acceptance use the embedded deterministic
+model, so they consume no provider token. Production additionally supports an
+explicit owner-configured DeepSeek profile: AES-256-GCM ciphertext stays in
+PostgreSQL, the master key stays at the trusted control-plane/Supervisor boundary,
+Pi receives only a short-lived gateway capability, and provider-reported token
+usage is written per tenant/turn. The demo deliberately retains the in-process
+integration bridge. The production entry point composes authenticated provisioning, the
 outbound Supervisor WebSocket, registration/heartbeat, execute/cancel,
 command ACK/commit/result, durable event ACK, bounded dispatch workers,
 retirement maintenance, and graceful drain. The client performs bounded

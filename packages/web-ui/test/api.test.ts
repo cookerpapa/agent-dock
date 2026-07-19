@@ -3,6 +3,52 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDockApi } from "../src/api.ts";
 
 describe("tenant-aware browser API", () => {
+  it("reads safe model metadata and submits a write-only provider credential", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const providerKey = `sk-${"p".repeat(48)}`;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      if (init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            mode: "deterministic",
+            provider: "agent-dock-fake",
+            modelId: "agent-dock-fake",
+            configured: false,
+            credentialVersion: 1,
+            updatedAt: "2026-07-19T00:00:00.000Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      expect(String(input)).toBe("/v1/model-configuration");
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: providerKey,
+      });
+      return new Response(
+        JSON.stringify({
+          mode: "real",
+          provider: "deepseek",
+          modelId: "deepseek-v4-flash",
+          configured: true,
+          credentialVersion: 2,
+          updatedAt: "2026-07-19T00:01:00.000Z",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(api.getModelConfiguration()).resolves.toMatchObject({
+      mode: "deterministic",
+    });
+    await expect(
+      api.replaceModelConfiguration("deepseek-v4-flash", providerKey),
+    ).resolves.toMatchObject({ mode: "real", credentialVersion: 2 });
+  });
+
   it("authenticates identity before exposing tenant metadata", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {

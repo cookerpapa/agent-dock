@@ -13,6 +13,7 @@ export type SupervisorHostConfig = {
   allowInsecureInternalHttp: boolean;
   enrollmentToken: string;
   managementToken: string;
+  modelCredentialMasterKey: string;
   databaseUrl: string;
   managementHost: string;
   managementPort: number;
@@ -22,6 +23,15 @@ export type SupervisorHostConfig = {
   bootStateDirectory: string;
   eventSpoolDirectory: string;
   dockerProbeTimeoutMs: number;
+  modelGatewayHost: string;
+  modelGatewayPort: number;
+  modelGatewayAdvertisedBaseUrl: string;
+  sandboxModelNetwork: string;
+  modelGatewayCapabilityTtlMs: number;
+  modelGatewayMaximumRequestsPerTurn: number;
+  modelGatewayUpstreamRequestTimeoutMs: number;
+  piModelRequestTimeoutMs: number;
+  piTurnTimeoutMs: number;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -96,6 +106,28 @@ function websocketUrl(controlPlaneBaseUrl: string, explicit: string | undefined)
     throw new TypeError("AGENT_DOCK_SUPERVISOR_WEBSOCKET_URL is invalid");
   }
   return parsed.toString();
+}
+
+function modelGatewayBaseUrl(value: string): string {
+  const parsed = new URL(value);
+  if (
+    parsed.protocol !== "http:" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "/" && parsed.pathname !== "")
+  ) {
+    throw new TypeError("AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL is invalid");
+  }
+  return parsed.toString();
+}
+
+function dockerNetwork(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value === "none") {
+    throw new TypeError("AGENT_DOCK_SANDBOX_MODEL_NETWORK is invalid");
+  }
+  return value;
 }
 
 async function readSecretFile(path: string, name: string): Promise<string> {
@@ -173,6 +205,11 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
       allowInlineSecrets,
     ),
+    modelCredentialMasterKey: await secret(
+      environment,
+      "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+      allowInlineSecrets,
+    ),
     databaseUrl: await secret(environment, "DATABASE_URL", allowInlineSecrets),
     managementHost: bounded(
       environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
@@ -205,6 +242,51 @@ export async function loadSupervisorHostConfig(
       10_000,
       100,
       60_000,
+    ),
+    modelGatewayHost: bounded(
+      environment.AGENT_DOCK_MODEL_GATEWAY_HOST ?? "127.0.0.1",
+      "AGENT_DOCK_MODEL_GATEWAY_HOST",
+      256,
+    ),
+    modelGatewayPort: integerValue(environment, "AGENT_DOCK_MODEL_GATEWAY_PORT", 4_200, 1, 65_535),
+    modelGatewayAdvertisedBaseUrl: modelGatewayBaseUrl(
+      required(environment, "AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL"),
+    ),
+    sandboxModelNetwork: dockerNetwork(required(environment, "AGENT_DOCK_SANDBOX_MODEL_NETWORK")),
+    modelGatewayCapabilityTtlMs: integerValue(
+      environment,
+      "AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS",
+      10 * 60_000,
+      1_000,
+      60 * 60_000,
+    ),
+    modelGatewayMaximumRequestsPerTurn: integerValue(
+      environment,
+      "AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN",
+      32,
+      1,
+      256,
+    ),
+    modelGatewayUpstreamRequestTimeoutMs: integerValue(
+      environment,
+      "AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS",
+      120_000,
+      1_000,
+      300_000,
+    ),
+    piModelRequestTimeoutMs: integerValue(
+      environment,
+      "AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS",
+      150_000,
+      1_000,
+      300_000,
+    ),
+    piTurnTimeoutMs: integerValue(
+      environment,
+      "AGENT_DOCK_PI_TURN_TIMEOUT_MS",
+      10 * 60_000,
+      1_000,
+      15 * 60_000,
     ),
   };
 }

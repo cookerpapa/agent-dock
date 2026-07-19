@@ -16,6 +16,7 @@ import {
 import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
 import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
+import { TenantModelCredentialVault } from "./model-credential-runtime.ts";
 import {
   createRemoteControlPlaneRuntime,
   type RemoteControlPlaneRuntime,
@@ -79,6 +80,7 @@ export async function startControlPlane(): Promise<void> {
       supervisorProvisioningGateway: provisioningGateway,
       productionHttpGateway: httpGateway,
       publicRegistration: config.publicRegistration,
+      modelCredentialVault: new TenantModelCredentialVault(config.modelCredentialMasterKey),
       worker: { maxLanesPerConnection: config.maximumLanesPerSupervisor },
     });
     await runtime.listen(config.port, config.host);

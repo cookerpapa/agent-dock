@@ -4,6 +4,7 @@ import {
   parseConversationDetailResource,
   parseConversationListResource,
   parseControlPlaneApiError,
+  parseModelConfigurationResource,
   parseProjectResource,
   parseSessionResource,
   parseTenantIdentityResource,
@@ -13,6 +14,8 @@ import {
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ProjectResource,
+  type DeepSeekModelId,
+  type ModelConfigurationResource,
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
@@ -82,9 +85,13 @@ async function request(
   return body;
 }
 
-function jsonRequest(body: unknown, idempotencyKey?: string): RequestInit {
+function jsonRequest(
+  body: unknown,
+  idempotencyKey?: string,
+  method: "POST" | "PUT" = "POST",
+): RequestInit {
   return {
-    method: "POST",
+    method,
     headers: {
       "content-type": "application/json",
       ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
@@ -115,6 +122,31 @@ export class AgentDockApi {
   async getIdentity(): Promise<TenantIdentityResource> {
     return parseTenantIdentityResource(
       await request(this.#fetch, "/v1/identity", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async getModelConfiguration(): Promise<ModelConfigurationResource> {
+    return parseModelConfigurationResource(
+      await request(
+        this.#fetch,
+        "/v1/model-configuration",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async replaceModelConfiguration(
+    modelId: DeepSeekModelId,
+    apiKey: string,
+  ): Promise<ModelConfigurationResource> {
+    return parseModelConfigurationResource(
+      await request(
+        this.#fetch,
+        "/v1/model-configuration",
+        jsonRequest({ provider: "deepseek", modelId, apiKey }, undefined, "PUT"),
+        this.#authorizationToken,
+      ),
     );
   }
 

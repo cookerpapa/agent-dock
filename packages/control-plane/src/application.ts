@@ -10,6 +10,7 @@ import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
 import type { PublicTenantRegistrationConfiguration } from "./public-tenant-registration.ts";
+import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
   ControlPlaneStoreOptions,
@@ -24,6 +25,7 @@ export type ControlPlaneApplicationOptions = Omit<
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
   publicRegistration?: PublicTenantRegistrationConfiguration;
+  modelCredentialVault?: TenantModelCredentialVault;
 };
 
 export async function createControlPlaneApplication(

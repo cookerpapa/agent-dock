@@ -21,6 +21,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
   AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
+  AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
@@ -57,6 +58,10 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
     target: /run/agent-dock-secrets/supervisor-management-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
+    target: /run/agent-dock-secrets/model-credential-master-key
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
@@ -290,6 +295,7 @@ services:
       AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
+      AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
@@ -297,6 +303,15 @@ services:
       AGENT_DOCK_DOCKER_COMMAND: docker
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state
+      AGENT_DOCK_MODEL_GATEWAY_HOST: 0.0.0.0
+      AGENT_DOCK_MODEL_GATEWAY_PORT: "4200"
+      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: http://supervisor-host:4200
+      AGENT_DOCK_SANDBOX_MODEL_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_model-runtime
+      AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "600000"
+      AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN: "32"
+      AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
+      AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
+      AGENT_DOCK_PI_TURN_TIMEOUT_MS: "600000"
       AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
       AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
       AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
@@ -321,6 +336,10 @@ services:
         target: /run/agent-dock-secrets/supervisor-management-token
         read_only: true
       - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
+        target: /run/agent-dock-secrets/model-credential-master-key
+        read_only: true
+      - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
         target: /run/agent-dock-secrets/aws-credentials
         read_only: true
@@ -328,6 +347,8 @@ services:
       - management
       - database
       - object-storage
+      - model-runtime
+      - provider-egress
     healthcheck:
       test:
         [
@@ -404,6 +425,10 @@ networks:
     internal: true
   object-storage:
     internal: true
+  model-runtime:
+    name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_model-runtime
+    internal: true
+  provider-egress: {}
 
 volumes:
   postgres-data: {}

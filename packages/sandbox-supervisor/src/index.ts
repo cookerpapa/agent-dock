@@ -79,6 +79,8 @@ export {
   DockerSandboxTurnRunner,
   buildDockerSandboxRunArguments,
   type DockerSandboxContainerIdentity,
+  type DockerSandboxModelRuntimeLease,
+  type DockerSandboxModelRuntimeLeaseResolver,
   type DockerSandboxScenario,
   type DockerSandboxScenarioContext,
   type DockerSandboxScenarioResolver,

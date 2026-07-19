@@ -200,6 +200,9 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.publicRegistration === undefined
         ? {}
         : { publicRegistration: options.publicRegistration }),
+      ...(options.modelCredentialVault === undefined
+        ? {}
+        : { modelCredentialVault: options.modelCredentialVault }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

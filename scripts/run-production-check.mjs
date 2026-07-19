@@ -544,6 +544,7 @@ async function readSecretValues() {
     "database-url",
     "minio-root-password",
     "minio-root-user",
+    "model-credential-master-key",
     "postgres-password",
     "supervisor-enrollment-token",
     "supervisor-management-token",
@@ -602,6 +603,7 @@ async function assertPrivateRuntimeFiles() {
       "database-url",
       "minio-root-password",
       "minio-root-user",
+      "model-credential-master-key",
       "postgres-password",
       "supervisor-enrollment-token",
       "supervisor-management-token",
@@ -634,6 +636,10 @@ async function main() {
     resolve(runtimeDirectory, "secrets/api-token"),
     "utf8",
   );
+  const initializedModelCredentialMasterKey = await readFile(
+    resolve(runtimeDirectory, "secrets/model-credential-master-key"),
+    "utf8",
+  );
   const legacyRootUser = await readFile(
     resolve(runtimeDirectory, "secrets/minio-root-user"),
     "utf8",
@@ -653,6 +659,10 @@ async function main() {
   assert.equal(
     await readFile(resolve(runtimeDirectory, "secrets/api-token"), "utf8"),
     initializedApiToken,
+  );
+  assert.equal(
+    await readFile(resolve(runtimeDirectory, "secrets/model-credential-master-key"), "utf8"),
+    initializedModelCredentialMasterKey,
   );
   assert.equal(
     (await readFile(resolve(runtimeDirectory, "secrets/aws-credentials"), "utf8")).includes(

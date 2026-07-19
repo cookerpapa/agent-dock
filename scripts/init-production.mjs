@@ -120,6 +120,23 @@ async function ensureDedicatedObjectStoreCredential(runtimeDirectory) {
   return true;
 }
 
+async function ensureModelCredentialMasterKey(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/model-credential-master-key");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(existing) || Buffer.from(existing, "base64url").length !== 32) {
+      throw new Error("Production model credential master key is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomBytes(32).toString("base64url")}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
 async function validateExisting(runtimeDirectory) {
   const manifestPath = resolve(runtimeDirectory, "deployment.json");
   let manifestBytes;
@@ -228,12 +245,14 @@ await chmod(runtimeDirectory, 0o700);
 await assertPrivateDirectory(runtimeDirectory);
 
 if (await validateExisting(runtimeDirectory)) {
+  const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
   process.stdout.write(
     `${JSON.stringify({
       initialized: true,
       reused: true,
+      modelCredentialMasterKeyCreated,
       objectStoreCredentialMigrated,
       runtimeDirectory,
     })}\n`,
@@ -331,6 +350,10 @@ await writePrivateFile(
 await writePrivateFile(resolve(secretsDirectory, "minio-root-user"), `${minioRootUser}\n`);
 await writePrivateFile(resolve(secretsDirectory, "minio-root-password"), `${minioRootPassword}\n`);
 await writePrivateFile(resolve(secretsDirectory, "api-token"), `${apiToken}\n`);
+await writePrivateFile(
+  resolve(secretsDirectory, "model-credential-master-key"),
+  `${randomBytes(32).toString("base64url")}\n`,
+);
 await writePrivateFile(
   resolve(secretsDirectory, "supervisor-enrollment-token"),
   `${randomSecret()}\n`,

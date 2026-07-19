@@ -32,3 +32,8 @@ export {
   type SupervisorHostRuntimeState,
   type SupervisorHostTerminalReason,
 } from "./runtime.ts";
+export {
+  TenantModelGateway,
+  TenantModelGatewayError,
+  type TenantModelGatewayOptions,
+} from "./model-gateway.ts";

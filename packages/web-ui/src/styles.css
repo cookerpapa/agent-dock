@@ -45,6 +45,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   color: inherit;
   font: inherit;
@@ -64,12 +65,63 @@ button:hover:not(:disabled) {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 summary:focus-visible,
 [role="separator"]:focus-visible {
   outline: 1px solid var(--green);
   outline-offset: 2px;
+}
+
+.model-configuration-panel {
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(210px, 1.6fr) auto auto;
+  align-items: end;
+  gap: 7px 9px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #46523f;
+  background: #1b2119;
+}
+
+.model-configuration-panel > div {
+  display: grid;
+  align-self: center;
+  gap: 2px;
+}
+
+.model-configuration-panel > div strong {
+  color: var(--green-strong);
+}
+
+.model-configuration-panel > div span,
+.model-configuration-panel label {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.model-configuration-panel label {
+  display: none;
+}
+
+.model-configuration-panel input,
+.model-configuration-panel select,
+.model-configuration-panel button {
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+}
+
+.model-configuration-panel input,
+.model-configuration-panel select {
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.model-configuration-panel button {
+  padding: 5px 9px;
 }
 
 button:disabled,
@@ -1177,6 +1229,16 @@ a {
 
   .credential-notice > div,
   .credential-notice input {
+    grid-column: 1 / -1;
+  }
+
+  .model-configuration-panel {
+    grid-template-columns: 1fr auto;
+  }
+
+  .model-configuration-panel > div,
+  .model-configuration-panel input,
+  .model-configuration-panel select {
     grid-column: 1 / -1;
   }
 

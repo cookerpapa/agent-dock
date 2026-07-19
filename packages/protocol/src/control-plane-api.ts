@@ -30,6 +30,49 @@ export const TenantApiRoleSchema = Type.Union([
   Type.Literal("viewer"),
 ]);
 
+export const DeepSeekModelIdSchema = Type.Union([
+  Type.Literal("deepseek-v4-flash"),
+  Type.Literal("deepseek-v4-pro"),
+]);
+
+export const ReplaceModelConfigurationRequestSchema = Type.Object(
+  {
+    provider: Type.Literal("deepseek"),
+    modelId: DeepSeekModelIdSchema,
+    apiKey: Type.String({
+      minLength: 16,
+      maxLength: 512,
+      pattern: "^[A-Za-z0-9._-]+$",
+    }),
+  },
+  { additionalProperties: false },
+);
+
+export const ModelConfigurationResourceSchema = Type.Union([
+  Type.Object(
+    {
+      mode: Type.Literal("deterministic"),
+      provider: Type.Literal("agent-dock-fake"),
+      modelId: Type.Literal("agent-dock-fake"),
+      configured: Type.Literal(false),
+      credentialVersion: PositiveSafeIntegerSchema,
+      updatedAt: UtcTimestampSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      mode: Type.Literal("real"),
+      provider: Type.Literal("deepseek"),
+      modelId: DeepSeekModelIdSchema,
+      configured: Type.Literal(true),
+      credentialVersion: PositiveSafeIntegerSchema,
+      updatedAt: UtcTimestampSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+
 export const TenantIdentityResourceSchema = Type.Object(
   {
     tenantId: UuidSchema,
@@ -230,6 +273,11 @@ export const ControlPlaneApiErrorSchema = Type.Object(
 export type TurnThinkingLevel = Static<typeof TurnThinkingLevelSchema>;
 export type TenantApiRole = Static<typeof TenantApiRoleSchema>;
 export type TenantIdentityResource = Static<typeof TenantIdentityResourceSchema>;
+export type DeepSeekModelId = Static<typeof DeepSeekModelIdSchema>;
+export type ReplaceModelConfigurationRequest = Static<
+  typeof ReplaceModelConfigurationRequestSchema
+>;
+export type ModelConfigurationResource = Static<typeof ModelConfigurationResourceSchema>;
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
 export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
@@ -285,6 +333,20 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
 
 export function parseTenantIdentityResource(value: unknown): TenantIdentityResource {
   return parseSchema(TenantIdentityResourceSchema, value, "tenant identity resource");
+}
+
+export function parseReplaceModelConfigurationRequest(
+  value: unknown,
+): ReplaceModelConfigurationRequest {
+  return parseSchema(
+    ReplaceModelConfigurationRequestSchema,
+    value,
+    "replace-model-configuration request",
+  );
+}
+
+export function parseModelConfigurationResource(value: unknown): ModelConfigurationResource {
+  return parseSchema(ModelConfigurationResourceSchema, value, "model configuration resource");
 }
 
 export function parseCreateTenantRegistrationRequest(

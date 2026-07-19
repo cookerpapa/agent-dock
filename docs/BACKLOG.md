@@ -110,5 +110,8 @@ extension-policy support would overstate the current boundary.
 - [x] Prove two-tenant HTTP isolation, role denial, fair lanes, quota isolation, restart/scale, SSE, and S3 prefixes
 - [x] Add opt-in anonymous tenant registration with bounded public admission
 - [x] Add tenant-scoped conversation list/detail APIs and Web history switching
+- [x] Add owner-only allowlisted model configuration and AES-GCM tenant credential versions
+- [x] Add a Supervisor-only DeepSeek gateway with turn-scoped capabilities and internal-only worker networking
+- [x] Run pinned Pi against a real provider, preserve checkpoints/diffs, and persist per-call tenant token usage
 - [ ] Add public identity federation, billing, abuse controls, and a separate mutually hostile SaaS threat model
-- [ ] Add measured warm-pool eviction and tenant token/cost accounting
+- [ ] Add measured warm-pool eviction, priced cost accounting, budgets, and quota enforcement

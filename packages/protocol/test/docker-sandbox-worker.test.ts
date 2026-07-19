@@ -49,6 +49,38 @@ describe("Docker sandbox worker protocol", () => {
     expect(
       parseDockerSandboxWorkerInput({
         sandboxProtocolVersion: 1,
+        type: "sandbox.run",
+        command: {
+          ...executeCommand,
+          payload: {
+            ...executeCommand.payload,
+            model: {
+              ...executeCommand.payload.model,
+              provider: "deepseek",
+              modelId: "deepseek-v4-flash",
+              credentialBindingVersion: 2,
+            },
+          },
+        },
+        runtime: {
+          kind: "openai_compatible_gateway",
+          provider: "deepseek",
+          modelId: "deepseek-v4-flash",
+          baseUrl: "http://supervisor-host:4200/v1",
+          capability: `admg_${"a".repeat(43)}`,
+          reasoning: false,
+          contextWindow: 128000,
+          maxTokens: 8192,
+          requestTimeoutMs: 150000,
+          turnTimeoutMs: 600000,
+        },
+        workspaceFixture: "java-repair",
+        checkpoint: { mode: "disabled" },
+      }),
+    ).toMatchObject({ runtime: { kind: "openai_compatible_gateway" } });
+    expect(
+      parseDockerSandboxWorkerInput({
+        sandboxProtocolVersion: 1,
         type: "sandbox.cancel",
         reason: "user_request",
         gracePeriodMs: 250,

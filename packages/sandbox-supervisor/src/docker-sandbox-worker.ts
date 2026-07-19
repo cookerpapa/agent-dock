@@ -297,7 +297,10 @@ async function main(): Promise<void> {
   };
 
   const run = async (message: DockerSandboxRunMessage): Promise<void> => {
-    const fakeModel = new FakeModelServer({ defaultScenario: message.runtime.scenario });
+    const fakeModel =
+      message.runtime.kind === "embedded_fake"
+        ? new FakeModelServer({ defaultScenario: message.runtime.scenario })
+        : undefined;
     abortController = new AbortController();
     if (pendingCancellation !== undefined) abortController.abort(pendingCancellation);
     try {
@@ -316,16 +319,39 @@ async function main(): Promise<void> {
           ? decodeSettledCheckpoint(message.checkpoint.restore)
           : undefined;
       await prepareWorkspace(restored?.workspace);
-      await fakeModel.start();
+      await fakeModel?.start();
+      if (
+        message.runtime.kind === "openai_compatible_gateway" &&
+        (message.runtime.provider !== message.command.payload.model.provider ||
+          message.runtime.modelId !== message.command.payload.model.modelId)
+      ) {
+        throw new PiRpcTurnError(
+          "model_binding_mismatch",
+          "Gateway runtime does not match the accepted turn",
+          false,
+        );
+      }
       const runner = new PiRpcTurnRunner({
         resolveWorkspaceDirectory: () => WORKSPACE_DIRECTORY,
-        resolveModelRuntime: (model) => ({
-          provider: model.provider,
-          modelId: model.modelId,
-          baseUrl: fakeModel.baseUrl,
-          api: "openai-completions",
-          apiKey: FAKE_MODEL_API_KEY,
-        }),
+        resolveModelRuntime: (model) =>
+          message.runtime.kind === "embedded_fake"
+            ? {
+                provider: model.provider,
+                modelId: model.modelId,
+                baseUrl: fakeModel!.baseUrl,
+                api: "openai-completions",
+                apiKey: FAKE_MODEL_API_KEY,
+              }
+            : {
+                provider: message.runtime.provider,
+                modelId: message.runtime.modelId,
+                baseUrl: message.runtime.baseUrl,
+                api: "openai-completions",
+                apiKey: message.runtime.capability,
+                reasoning: message.runtime.reasoning,
+                contextWindow: message.runtime.contextWindow,
+                maxTokens: message.runtime.maxTokens,
+              },
         enabledTools: ["bash", "edit"],
         collectWorkspacePatch,
         ...(restored === undefined ? {} : { restorePiSession: restored.piSession }),
@@ -339,8 +365,10 @@ async function main(): Promise<void> {
               },
             }
           : {}),
-        requestTimeoutMs: 10_000,
-        turnTimeoutMs: 60_000,
+        requestTimeoutMs:
+          message.runtime.kind === "embedded_fake" ? 10_000 : message.runtime.requestTimeoutMs,
+        turnTimeoutMs:
+          message.runtime.kind === "embedded_fake" ? 60_000 : message.runtime.turnTimeoutMs,
       });
       const result = await runner.run(message.command, publishEvent, abortController.signal);
       await finish({
@@ -374,7 +402,7 @@ async function main(): Promise<void> {
         });
       }
     } finally {
-      await fakeModel.stop().catch(() => undefined);
+      await fakeModel?.stop().catch(() => undefined);
     }
   };
 

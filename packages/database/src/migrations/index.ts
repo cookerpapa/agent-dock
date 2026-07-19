@@ -5,6 +5,7 @@ import * as explicitSessionMailbox from "./003_explicit_session_mailbox.ts";
 import * as supervisorConnectionHealth from "./004_supervisor_connection_health.ts";
 import * as supervisorBootCredentials from "./005_supervisor_boot_credentials.ts";
 import * as privateMultiTenantIdentity from "./006_private_multi_tenant_identity.ts";
+import * as encryptedTenantModelCredentials from "./007_encrypted_tenant_model_credentials.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -15,6 +16,7 @@ export const migrationProvider: MigrationProvider = {
       "004_supervisor_connection_health": supervisorConnectionHealth,
       "005_supervisor_boot_credentials": supervisorBootCredentials,
       "006_private_multi_tenant_identity": privateMultiTenantIdentity,
+      "007_encrypted_tenant_model_credentials": encryptedTenantModelCredentials,
     };
   },
 };
@@ -48,3 +50,8 @@ export {
   down as downPrivateMultiTenantIdentity,
   up as upPrivateMultiTenantIdentity,
 } from "./006_private_multi_tenant_identity.ts";
+
+export {
+  down as downEncryptedTenantModelCredentials,
+  up as upEncryptedTenantModelCredentials,
+} from "./007_encrypted_tenant_model_credentials.ts";

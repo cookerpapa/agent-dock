@@ -5,6 +5,7 @@ import { ControlPlaneStoreError } from "./control-plane-store.ts";
 import { DurableEventStoreError } from "./durable-event-store.ts";
 import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
+import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";
 
 type ErrorResponse = {
   status: number;
@@ -21,6 +22,12 @@ function mappedError(error: unknown): ErrorResponse {
   if (error instanceof TenantRequestContextError) {
     return {
       status: error.code === "authentication_required" ? 401 : 403,
+      body: { error: { code: error.code, message: error.message } },
+    };
+  }
+  if (error instanceof TenantModelConfigurationError) {
+    return {
+      status: error.code === "authorization_denied" ? 403 : 503,
       body: { error: { code: error.code, message: error.message } },
     };
   }

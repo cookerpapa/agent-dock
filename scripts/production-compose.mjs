@@ -17,6 +17,7 @@ await access(environmentFile);
 const applicationSecretNames = [
   "api-token",
   "database-url",
+  "model-credential-master-key",
   "supervisor-enrollment-token",
   "supervisor-management-token",
 ];

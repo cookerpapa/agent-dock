@@ -23,6 +23,21 @@ export {
 export { TenantRequestContext, TenantRequestContextError } from "./tenant-request-context.ts";
 
 export {
+  PostgresTenantModelCredentialResolver,
+  TenantModelCredentialError,
+  TenantModelCredentialVault,
+  tenantModelCredentialDigest,
+  type ResolvedTenantModelCredential,
+  type SealedTenantModelCredential,
+  type TenantModelCredentialIdentity,
+} from "./model-credential-runtime.ts";
+export {
+  TenantModelConfigurationError,
+  TenantModelConfigurationService,
+  type TenantModelConfigurationServiceOptions,
+} from "./tenant-model-configuration.ts";
+
+export {
   TenantAdministrationError,
   createPrivateTenant,
   issuePrivateTenantCredential,

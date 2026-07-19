@@ -7,6 +7,7 @@ import {
   Inject,
   Param,
   Post,
+  Put,
   Req,
   Res,
 } from "@nestjs/common";
@@ -18,12 +19,14 @@ import {
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
+  parseReplaceModelConfigurationRequest,
   parseUuidPathParameter,
   type AcceptedTurnResource,
   type AcceptedTurnCancellationResource,
   type ConversationDetailResource,
   type ConversationListResource,
   type ProjectResource,
+  type ModelConfigurationResource,
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
@@ -33,6 +36,7 @@ import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 import { PublicTenantRegistrationService } from "./public-tenant-registration.ts";
 import { SessionEventStream } from "./session-event-stream.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
+import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -42,6 +46,8 @@ export class ControlPlaneController {
     private readonly publicTenantRegistration: PublicTenantRegistrationService,
     @Inject(TenantRequestContext) private readonly tenantRequestContext: TenantRequestContext,
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
+    @Inject(TenantModelConfigurationService)
+    private readonly tenantModelConfiguration: TenantModelConfigurationService,
   ) {}
 
   @Post("registrations")
@@ -59,6 +65,22 @@ export class ControlPlaneController {
       displayName: identity.displayName,
       role: identity.role,
     };
+  }
+
+  @Get("model-configuration")
+  async getModelConfiguration(@Req() request: FastifyRequest): Promise<ModelConfigurationResource> {
+    return this.tenantModelConfiguration.get(this.tenantRequestContext.resolve(request));
+  }
+
+  @Put("model-configuration")
+  async replaceModelConfiguration(
+    @Req() request: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<ModelConfigurationResource> {
+    return this.tenantModelConfiguration.replace(
+      this.tenantRequestContext.resolve(request),
+      parseReplaceModelConfigurationRequest(body),
+    );
   }
 
   @Post("projects")

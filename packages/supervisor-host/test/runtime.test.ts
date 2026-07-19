@@ -165,6 +165,7 @@ describe("SupervisorHostRuntime", () => {
       allowInsecureInternalHttp: true,
       enrollmentToken: ENROLLMENT_TOKEN,
       managementToken: MANAGEMENT_TOKEN,
+      modelCredentialMasterKey: Buffer.alloc(32, 7).toString("base64url"),
       databaseUrl: connectionString,
       managementHost: "127.0.0.1",
       managementPort: 0,
@@ -174,6 +175,15 @@ describe("SupervisorHostRuntime", () => {
       bootStateDirectory: join(root, "boot"),
       eventSpoolDirectory: join(root, "spool"),
       dockerProbeTimeoutMs: 1_000,
+      modelGatewayHost: "127.0.0.1",
+      modelGatewayPort: 0,
+      modelGatewayAdvertisedBaseUrl: "http://model-gateway.test:4200",
+      sandboxModelNetwork: "agent-dock-test-model-runtime",
+      modelGatewayCapabilityTtlMs: 60_000,
+      modelGatewayMaximumRequestsPerTurn: 8,
+      modelGatewayUpstreamRequestTimeoutMs: 10_000,
+      piModelRequestTimeoutMs: 15_000,
+      piTurnTimeoutMs: 60_000,
     };
     let first: SupervisorHostRuntime | undefined;
     let second: SupervisorHostRuntime | undefined;

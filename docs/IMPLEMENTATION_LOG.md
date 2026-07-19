@@ -1264,3 +1264,35 @@
 - 当前边界：用户现在可以用两个无痕/独立浏览器 context 自助创建 tenant 并验证互不可见，但丢失一次性 token 仍需
   operator offline 发新 credential。真正面向公网前仍需独立的人类 identity/recovery、edge TLS、rate limiting、
   abuse/billing、审计与 hostile-tenant sandbox threat model。
+
+## 2026-07-19 — 租户级真实模型凭据与 brokered Pi coding-agent
+
+- 目标与原因：完成“每个租户安全配置真实模型”和“用真正的 Pi coding agent 替代 deterministic worker”两项能力，
+  但不把可复用 provider key 交给 Pi/bash，也不让真实模型测试污染日常 zero-token CI。
+- 决策：新增 ADR-0027。Web/API 只接受固定的 DeepSeek provider 和 allowlisted model；任意角色可读安全元数据，只有
+  owner 可替换。凭据用 AES-256-GCM 加密，AAD 绑定 tenant/binding/version/provider/key-version；相同 key/model
+  重试不增版本，轮换创建 immutable version，已经接受的 turn 仍使用它自己的精确 snapshot。
+- 执行边界：Supervisor 按 snapshot 解密 key，生成随机、限时、限请求次数且绑定 turn/model 的 capability。真实
+  worker 只加入 Compose internal `model-runtime` network，Pi 把 capability 当临时 API key 调 Supervisor gateway；
+  只有 Supervisor 加入 provider-egress。真实 key 不进入 Docker args/env/labels、stdin runtime message、Pi JSONL、
+  workspace/checkpoint、event、Web 或日志。fake activation 继续使用 embedded server 和 `--network none`。
+- Pi 行为：两条路径都运行 pinned Pi `0.80.10`、`bash`/`edit`、durable event ACK、settled Pi/workspace checkpoint、
+  cancellation 和 bounded Git diff；差别只在 model runtime lease。gateway 固定 upstream、重写 auth、强制 streaming、
+  限制 body/response/timeout，并把 provider usage 写入既有的 tenant/session/turn `usage_ledger`。当前只记 token，因没有
+  versioned price table，`cost_amount` 保持 0。
+- Web 与生产：owner 登录后可打开 model panel，选择 `deepseek-v4-flash` 或 `deepseek-v4-pro` 并提交 key；输入随后
+  清空且不进 browser storage。生产初始化新增私有 `model-credential-master-key`，只挂载给 control plane/Supervisor；
+  Compose 增加 internal model network 和 Supervisor-only provider egress。默认/新注册 tenant 仍是 zero-token fake。
+- 自动证据：新增加密 tamper/wrong-key/AAD、双 tenant 隔离、role denial、内容幂等/轮换/旧 snapshot、HTTP 安全响应、
+  capability revoke/wrong-model、usage SSE ledger、fake/real Docker network 和参数泄漏测试。完整 `npm run ci` 通过所有
+  workspace build/typecheck/tests、两个 zero-model-call Pi spikes 与 high-level audit（0 vulnerabilities）。
+- 真实消耗验收：保留现有生产 volumes/identity/token 重新构建并健康部署到 `127.0.0.1:8080`，把 bootstrap tenant
+  配为 `deepseek-v4-flash` credential version 2。通过正常 REST durable intake 创建 turn，状态依次为
+  `queued -> running -> completed`。Pi 实际调用 11 次工具（包含失败 `test.sh`、一次 `edit`、通过的复测），把
+  `Calculator.add` 从减法改为加法，提交 407-byte non-truncated unified diff 和 settled checkpoint。gateway 收到 7 次
+  provider model call，ledger 记录 input 2,274、output 909、cache-read 11,136、cache-write 0；这次测试确实消耗真实
+  provider quota。运行中 Docker inspection 证明 worker 唯一 network 是 `agent-dock-production_model-runtime`，容器
+  env 没有 provider key/capability，完成后临时容器被删除。
+- 当前边界与下一步：现有 Web 已能向 cloud Pi 发真实请求，但 workspace 仍是 image-owned Java fixture，不是任意仓库。
+  下一项产品瓶颈应是受控 repository import/workspace provisioning；原因是模型调用、agent loop、工具、持久化和
+  多租户凭据边界已有端到端证据，而用户代码尚不能安全进入系统。

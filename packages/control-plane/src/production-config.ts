@@ -12,6 +12,7 @@ export type ProductionControlPlaneConfig = {
   databaseUrl: string;
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
+  modelCredentialMasterKey: string;
   supervisorId: string;
   supervisorMaximumCapacity: number;
   supervisorManagementBaseUrl: string;
@@ -174,6 +175,11 @@ export async function loadProductionControlPlaneConfig(
     supervisorManagementToken: await secret(
       environment,
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
+      allowInlineSecrets,
+    ),
+    modelCredentialMasterKey: await secret(
+      environment,
+      "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
       allowInlineSecrets,
     ),
     supervisorId: bounded(

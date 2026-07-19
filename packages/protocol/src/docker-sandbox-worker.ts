@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { TurnCancellationReasonSchema } from "./event-envelope.ts";
+import { DeepSeekModelIdSchema } from "./control-plane-api.ts";
 import {
   EventAckMessageSchema,
   EventPublishMessageSchema,
@@ -19,6 +20,35 @@ const SandboxWorkerEnvelopeProperties = {
 
 const Sha256Schema = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const CheckpointRevisionSchema = Type.String({ minLength: 1, maxLength: 256 });
+
+export const DockerSandboxModelRuntimeSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("embedded_fake"),
+      scenario: Type.Union([
+        Type.Literal("java_repair"),
+        Type.Literal("java_followup"),
+        Type.Literal("timeout"),
+      ]),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("openai_compatible_gateway"),
+      provider: Type.Literal("deepseek"),
+      modelId: DeepSeekModelIdSchema,
+      baseUrl: Type.String({ minLength: 12, maxLength: 2_048 }),
+      capability: Type.String({ pattern: "^admg_[A-Za-z0-9_-]{43}$" }),
+      reasoning: Type.Boolean(),
+      contextWindow: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+      maxTokens: Type.Integer({ minimum: 128, maximum: 65_536 }),
+      requestTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 300_000 }),
+      turnTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 900_000 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 export const SandboxCheckpointBlobSchema = Type.Object(
   {
@@ -52,17 +82,7 @@ export const DockerSandboxRunMessageSchema = Type.Object(
     ...SandboxWorkerEnvelopeProperties,
     type: Type.Literal("sandbox.run"),
     command: ExecuteTurnCommandMessageSchema,
-    runtime: Type.Object(
-      {
-        kind: Type.Literal("embedded_fake"),
-        scenario: Type.Union([
-          Type.Literal("java_repair"),
-          Type.Literal("java_followup"),
-          Type.Literal("timeout"),
-        ]),
-      },
-      { additionalProperties: false },
-    ),
+    runtime: DockerSandboxModelRuntimeSchema,
     workspaceFixture: Type.Literal("java-repair"),
     checkpoint: Type.Union([
       Type.Object({ mode: Type.Literal("disabled") }, { additionalProperties: false }),
@@ -166,6 +186,7 @@ export const DockerSandboxWorkerOutputSchema = Type.Union([
 ]);
 
 export type DockerSandboxRunMessage = Static<typeof DockerSandboxRunMessageSchema>;
+export type DockerSandboxModelRuntime = Static<typeof DockerSandboxModelRuntimeSchema>;
 export type DockerSandboxCancelMessage = Static<typeof DockerSandboxCancelMessageSchema>;
 export type DockerSandboxCheckpointAckMessage = Static<
   typeof DockerSandboxCheckpointAckMessageSchema

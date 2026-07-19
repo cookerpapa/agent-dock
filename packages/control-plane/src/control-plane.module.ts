@@ -13,6 +13,8 @@ import type { SessionEventNotificationTransport } from "./session-event-notifica
 import { SessionEventStream, type SessionEventStreamOptions } from "./session-event-stream.ts";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
+import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -23,6 +25,7 @@ export type ControlPlaneModuleOptions = Omit<
   eventRuntime?: ControlPlaneEventRuntime;
   staticRequestIdentity?: TenantRequestIdentity;
   publicRegistration?: PublicTenantRegistrationConfiguration;
+  modelCredentialVault?: TenantModelCredentialVault;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -77,6 +80,15 @@ export class ControlPlaneModule {
         {
           provide: TenantRequestContext,
           useValue: new TenantRequestContext(options.staticRequestIdentity),
+        },
+        {
+          provide: TenantModelConfigurationService,
+          useValue: new TenantModelConfigurationService({
+            database: options.database,
+            ...(options.modelCredentialVault === undefined
+              ? {}
+              : { vault: options.modelCredentialVault }),
+          }),
         },
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
