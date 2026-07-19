@@ -655,3 +655,48 @@
   snapshot 的写入/校验/恢复边界写 ADR 和失败测试，再让同一 session 的第二个 turn 在
   新 container 中恢复。原因是“真正多轮且冷 session 不占进程”是 Phase 2 的核心；若先
   放开 composer 而没有可验证恢复，只会制造一个看起来多轮、实际丢上下文的假功能。
+
+## 2026-07-19 — Settled checkpoint 与跨容器多轮恢复
+
+- 目标：让 AgentDock session 的 durable identity 真正独立于 Pi 进程/container。第一轮
+  结束后不保留任何 runtime，第二轮仍必须同时看到旧 `messages[]` 和旧 workspace。
+- 决策：新增 ADR-0011。成功顺序固定为 Pi settled -> worker capture -> trusted host
+  持久化并 ACK checkpoint -> worker 发布 `turn.completed` -> PostgreSQL durable event ACK。
+  checkpoint 失败时禁止先发 completed。反向崩溃窗口由 durable `turn.completed` 作为
+  commit marker 解决：若新 pointer 已 staged 但 terminal 尚未落库，cold load 自动回退
+  上一组 completed artifacts，失败轮不会成为恢复 authority。
+- Pi：checkpoint mode 不再传 `--no-session`，而是在 runner 私有临时目录使用显式
+  `--session`。`agent_end` 时先读取 JSONL、执行 checkpoint hook，再允许公开 terminal；
+  fresh runner 可写回同一份 JSONL 后启动，实际测试确认第二次 model request 的 message
+  数量增加。
+- Workspace：新增 `agent-dock.workspace-manifest.v1`。只允许 canonical relative POSIX
+  regular files，拒绝 symlink/special file、`.git`、重复/穿越/冲突路径、非法 UTF-8、非
+  canonical base64、长度/哈希不符；限制 512 files、512 KiB/file、512-byte path、2 MiB
+  manifest。恢复保留 image fixture 的 baseline Git commit，替换其余 working tree，因此
+  第二轮 final diff 仍相对原始 fixture 累积。
+- 存储：新增受信任 host `SandboxCheckpointStore` 边界、atomic no-overwrite file object
+  adapter，以及 PostgreSQL implementation。对象 byte、artifact metadata、session 两个
+  snapshot pointer、lease/fence、row-version CAS 和 opaque revision 全部校验；DB 失败的
+  未引用对象会 best-effort 清理。开发 adapter 只服务本地 demo，不冒充 MinIO/S3 或
+  host-loss durability。
+- 私有协议：worker stdin/stdout 新增 closed `sandbox.checkpoint.publish/ack`，Pi JSONL 与
+  workspace bytes 只走私有 channel，不进入 public event/SSE、Docker args/env 或日志。
+  `turn.completed` 在 checkpoint ACK 之前会被 host 拒绝。
+- 多轮证据：fake model 新增 `java_followup`，只有看到上一轮 `Java repair verified.` 才会
+  调用 bash 检查 `return left + right;` 并重跑测试。Docker 实测第一轮 repair 后 container
+  消失，第二轮由不同 container restore，只有一次成功 bash，返回
+  `Prior conversation and Java repair restored after cold activation.`；event seq 从 1..10
+  连续到 11..16，artifact 从 2 增至 4，最后 container 同样消失。
+- Web：settled 后 composer 不再要求 new session，显示 `cold restore ready`，下一次提交
+  为 `send follow-up`。仍保留 active-turn serialization，browser 不接触 checkpoint bytes。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、150
+  passed/4 skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。
+  重新构建 `agent-dock/pi-workspace:phase2` 的 `npm run sandbox:check` 又通过 3 个 Docker
+  supervisor tests 与 19 个完整 control-plane tests；结束后没有 managed container 遗留。
+- 当前边界：这是 bounded sample workspace 的 semantic settled restore，不恢复进程内存、
+  shell/open fd/in-flight tool，也还没有 MinIO/S3、generic repo archive、durable supervisor
+  spool、runner restart reconciliation、lease renewal 或 cross-replica notification。
+- 下一步：先实现 crash-safe supervisor event spool 与 restart redelivery。原因是 Pi/workspace
+  已能在 cold activation 中恢复，Phase 2 现在最大的 durability 缺口是 supervisor 在收到
+  command ACK 或发出尚未 ACK 的 event 后崩溃；若不先补这层，仍不能诚实满足 runner
+  reconnect 不丢事件的退出标准。

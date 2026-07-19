@@ -279,18 +279,25 @@ implementation.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
 
-Steps 1-8 and 10 are executable through the local integration boundary: the
-control plane acquires a real PostgreSQL lease/fence, persists ACK before run,
+Steps 1-10 are executable for the bounded sample-workspace path through the
+local integration boundary: the control plane acquires a real PostgreSQL
+lease/fence, persists ACK before run,
 activates an ephemeral hardened Docker workspace, and receives public text,
 tool, and terminal events from pinned Pi. Step 8 stores each complete event plus
 command/lease/fence identity, advances the session cursor and next sequence
 atomically, and returns the cumulative ACK only after commit. The same durable
 log, including the bounded final patch, is available through SSE and resumes
-after a browser reconnect with `Last-Event-ID`. Step 9, a durable
-supervisor-side spool, cross-control-plane live notification, generic repository
-snapshot import/export, and production remote sandbox assignment are not
-implemented, so this does not yet claim runner reconnect recovery or durable
-Pi/workspace restoration.
+after a browser reconnect with `Last-Event-ID`. Step 9 uses a private
+checkpoint-before-terminal ACK: Pi JSONL and a safe regular-file workspace
+manifest are content-hashed, stored outside the container, recorded as artifact
+metadata under the current fence, and restored into the next fresh container.
+The latest durable `turn.completed` event is the snapshot commit marker, so a
+worker crash after upload but before terminal publication falls back to the
+previous settled pair. The development adapter uses a private host directory;
+MinIO/S3, a durable supervisor-side spool, cross-control-plane live
+notification, generic repository snapshot import/export, and production remote
+sandbox assignment remain unimplemented. Runner reconnect recovery is therefore
+not yet claimed.
 
 ## 5. Delivery and recovery semantics
 

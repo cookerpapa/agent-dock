@@ -10,6 +10,7 @@ export const fakeModelScenarios = [
   "text",
   "tool_call",
   "java_repair",
+  "java_followup",
   "rate_limit",
   "timeout",
   "malformed",
@@ -239,6 +240,30 @@ function hasToolResult(messages: readonly unknown[]): boolean {
 
 function toolResultCount(messages: readonly unknown[]): number {
   return messages.filter((message) => isRecord(message) && message.role === "tool").length;
+}
+
+function latestUserMessageIndex(messages: readonly unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isRecord(message) && message.role === "user") return index;
+  }
+  return -1;
+}
+
+function currentTurnToolResultCount(messages: readonly unknown[]): number {
+  const latestUser = latestUserMessageIndex(messages);
+  return messages
+    .slice(latestUser + 1)
+    .filter((message) => isRecord(message) && message.role === "tool").length;
+}
+
+function hasPriorJavaRepair(messages: readonly unknown[]): boolean {
+  const latestUser = latestUserMessageIndex(messages);
+  return messages.slice(0, latestUser).some((message) => {
+    if (!isRecord(message) || message.role !== "assistant") return false;
+    const content = JSON.stringify(message.content);
+    return typeof content === "string" && content.includes("Java repair verified.");
+  });
 }
 
 export class FakeModelServer {
@@ -486,6 +511,35 @@ export class FakeModelServer {
         );
         return;
       }
+    }
+    if (scenario === "java_followup") {
+      const restoredConversation = hasPriorJavaRepair(payload.messages);
+      if (currentTurnToolResultCount(payload.messages) === 0) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_java_followup",
+          "bash",
+          {
+            command: restoredConversation
+              ? "grep -F 'return left + right;' src/Calculator.java && bash ./test.sh"
+              : "printf 'prior Pi conversation was not restored\\n' >&2; exit 1",
+          },
+        );
+        return;
+      }
+      await this.#streamText(
+        response,
+        requestId,
+        sequence,
+        payload.model,
+        restoredConversation
+          ? "Prior conversation and Java repair restored after cold activation."
+          : "Prior conversation was missing after cold activation.",
+      );
+      return;
     }
     const text =
       scenario === "tool_call"

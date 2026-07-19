@@ -209,6 +209,63 @@ describe("pinned Pi OpenAI adapter contract", () => {
     expect(completion.content).toEqual([{ type: "text", text: "Java repair verified." }]);
   });
 
+  it("uses prior conversation context before verifying a cold-restored Java workspace", async () => {
+    const messages: Context["messages"] = [...userContext.messages];
+    for (let index = 0; index < 3; index += 1) {
+      const assistant = await completeScenario("java_repair", {
+        messages,
+        tools: javaRepairTools,
+      });
+      const toolCall = assistant.content[0];
+      if (toolCall === undefined || toolCall.type !== "toolCall") {
+        throw new Error("Expected the Java repair scenario to emit a tool call");
+      }
+      messages.push(assistant, {
+        role: "toolResult",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        content: [{ type: "text", text: "deterministic tool result" }],
+        isError: false,
+        timestamp: 1_700_000_001_000 + index,
+      });
+    }
+    messages.push(await completeScenario("java_repair", { messages, tools: javaRepairTools }), {
+      role: "user",
+      content: "Verify the previous repair after cold activation.",
+      timestamp: 1_700_000_010_000,
+    });
+
+    const verification = await completeScenario("java_followup", {
+      messages,
+      tools: javaRepairTools,
+    });
+    expect(verification.stopReason).toBe("toolUse");
+    expect(verification.content[0]).toMatchObject({
+      type: "toolCall",
+      name: "bash",
+      arguments: { command: expect.stringContaining("return left + right;") },
+    });
+    const toolCall = verification.content[0];
+    if (toolCall === undefined || toolCall.type !== "toolCall") {
+      throw new Error("Expected the follow-up scenario to emit a tool call");
+    }
+    messages.push(verification, {
+      role: "toolResult",
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: [{ type: "text", text: "Calculator tests passed" }],
+      isError: false,
+      timestamp: 1_700_000_011_000,
+    });
+    const completion = await completeScenario("java_followup", {
+      messages,
+      tools: javaRepairTools,
+    });
+    expect(completion.content).toEqual([
+      { type: "text", text: "Prior conversation and Java repair restored after cold activation." },
+    ]);
+  });
+
   it("surfaces the deterministic 429 without retrying", async () => {
     const requestCountBefore = server.observations.length;
     const result = await completeScenario("rate_limit");

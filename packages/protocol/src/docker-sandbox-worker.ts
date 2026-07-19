@@ -7,8 +7,44 @@ import {
   ExecuteTurnCommandMessageSchema,
 } from "./supervisor-wire.ts";
 
+export const MAX_PI_SESSION_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
+export const MAX_WORKSPACE_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
+
+const MAX_BASE64_SNAPSHOT_LENGTH =
+  Math.ceil(Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES) / 3) * 4;
+
 const SandboxWorkerEnvelopeProperties = {
   sandboxProtocolVersion: Type.Literal(1),
+};
+
+const Sha256Schema = Type.String({ pattern: "^[0-9a-f]{64}$" });
+const CheckpointRevisionSchema = Type.String({ minLength: 1, maxLength: 256 });
+
+export const SandboxCheckpointBlobSchema = Type.Object(
+  {
+    encoding: Type.Literal("base64"),
+    sha256: Sha256Schema,
+    sizeBytes: Type.Integer({ minimum: 1, maximum: MAX_PI_SESSION_SNAPSHOT_BYTES }),
+    data: Type.String({ minLength: 4, maxLength: MAX_BASE64_SNAPSHOT_LENGTH }),
+  },
+  { additionalProperties: false },
+);
+
+export const SandboxSettledCheckpointSchema = Type.Object(
+  {
+    format: Type.Literal("agent-dock.settled-checkpoint.v1"),
+    piSession: SandboxCheckpointBlobSchema,
+    workspace: SandboxCheckpointBlobSchema,
+  },
+  { additionalProperties: false },
+);
+
+const SandboxCheckpointIdentityProperties = {
+  commandId: Type.String({ minLength: 1, maxLength: 256 }),
+  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+  turnId: Type.String({ minLength: 1, maxLength: 256 }),
+  leaseId: Type.String({ minLength: 1, maxLength: 256 }),
+  fencingToken: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
 };
 
 export const DockerSandboxRunMessageSchema = Type.Object(
@@ -19,11 +55,36 @@ export const DockerSandboxRunMessageSchema = Type.Object(
     runtime: Type.Object(
       {
         kind: Type.Literal("embedded_fake"),
-        scenario: Type.Union([Type.Literal("java_repair"), Type.Literal("timeout")]),
+        scenario: Type.Union([
+          Type.Literal("java_repair"),
+          Type.Literal("java_followup"),
+          Type.Literal("timeout"),
+        ]),
       },
       { additionalProperties: false },
     ),
     workspaceFixture: Type.Literal("java-repair"),
+    checkpoint: Type.Union([
+      Type.Object({ mode: Type.Literal("disabled") }, { additionalProperties: false }),
+      Type.Object(
+        {
+          mode: Type.Literal("settled"),
+          baseRevision: Type.Union([Type.Null(), CheckpointRevisionSchema]),
+          restore: Type.Optional(SandboxSettledCheckpointSchema),
+        },
+        { additionalProperties: false },
+      ),
+    ]),
+  },
+  { additionalProperties: false },
+);
+
+export const DockerSandboxCheckpointAckMessageSchema = Type.Object(
+  {
+    ...SandboxWorkerEnvelopeProperties,
+    type: Type.Literal("sandbox.checkpoint.ack"),
+    ...SandboxCheckpointIdentityProperties,
+    revision: CheckpointRevisionSchema,
   },
   { additionalProperties: false },
 );
@@ -41,6 +102,7 @@ export const DockerSandboxCancelMessageSchema = Type.Object(
 export const DockerSandboxWorkerInputSchema = Type.Union([
   DockerSandboxRunMessageSchema,
   DockerSandboxCancelMessageSchema,
+  DockerSandboxCheckpointAckMessageSchema,
   EventAckMessageSchema,
 ]);
 
@@ -58,6 +120,17 @@ export const DockerSandboxResultMessageSchema = Type.Object(
     ...SandboxWorkerEnvelopeProperties,
     type: Type.Literal("sandbox.result"),
     stopReason: Type.String({ minLength: 1, maxLength: 256 }),
+  },
+  { additionalProperties: false },
+);
+
+export const DockerSandboxCheckpointPublishMessageSchema = Type.Object(
+  {
+    ...SandboxWorkerEnvelopeProperties,
+    type: Type.Literal("sandbox.checkpoint.publish"),
+    ...SandboxCheckpointIdentityProperties,
+    baseRevision: Type.Union([Type.Null(), CheckpointRevisionSchema]),
+    checkpoint: SandboxSettledCheckpointSchema,
   },
   { additionalProperties: false },
 );
@@ -86,6 +159,7 @@ export const DockerSandboxFailedMessageSchema = Type.Object(
 export const DockerSandboxWorkerOutputSchema = Type.Union([
   DockerSandboxReadyMessageSchema,
   EventPublishMessageSchema,
+  DockerSandboxCheckpointPublishMessageSchema,
   DockerSandboxResultMessageSchema,
   DockerSandboxCancelledMessageSchema,
   DockerSandboxFailedMessageSchema,
@@ -93,12 +167,20 @@ export const DockerSandboxWorkerOutputSchema = Type.Union([
 
 export type DockerSandboxRunMessage = Static<typeof DockerSandboxRunMessageSchema>;
 export type DockerSandboxCancelMessage = Static<typeof DockerSandboxCancelMessageSchema>;
+export type DockerSandboxCheckpointAckMessage = Static<
+  typeof DockerSandboxCheckpointAckMessageSchema
+>;
 export type DockerSandboxWorkerInput = Static<typeof DockerSandboxWorkerInputSchema>;
 export type DockerSandboxReadyMessage = Static<typeof DockerSandboxReadyMessageSchema>;
+export type DockerSandboxCheckpointPublishMessage = Static<
+  typeof DockerSandboxCheckpointPublishMessageSchema
+>;
 export type DockerSandboxResultMessage = Static<typeof DockerSandboxResultMessageSchema>;
 export type DockerSandboxCancelledMessage = Static<typeof DockerSandboxCancelledMessageSchema>;
 export type DockerSandboxFailedMessage = Static<typeof DockerSandboxFailedMessageSchema>;
 export type DockerSandboxWorkerOutput = Static<typeof DockerSandboxWorkerOutputSchema>;
+export type SandboxCheckpointBlob = Static<typeof SandboxCheckpointBlobSchema>;
+export type SandboxSettledCheckpoint = Static<typeof SandboxSettledCheckpointSchema>;
 
 export class DockerSandboxWorkerProtocolError extends Error {
   constructor(message: string) {

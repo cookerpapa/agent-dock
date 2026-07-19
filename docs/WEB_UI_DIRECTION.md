@@ -79,8 +79,9 @@ validated before they enter React state. No raw Pi object, credential reference,
 provider token, or API body is logged.
 
 The one-command local demo uses a deterministic model and image-owned Java
-fixture. It permits one turn per session because the current Docker activation
-does not restore Pi JSONL or a prior workspace; the UI requires a new demo
-session after settlement instead of pretending that repeated turns share
-conversation state. Browser reload/session discovery, approval responses, real
-repository import, and durable multi-turn restoration remain Phase 2/3 work.
+fixture. After each successful turn, the trusted host stores Pi JSONL and a
+bounded workspace manifest before completion is published. A follow-up on the
+same session restores both into a new disposable container, so the composer can
+honestly remain available after settlement. Browser reload/session discovery,
+approval responses, real repository import, MinIO/S3 storage, and runner
+restart recovery remain Phase 2/3 work.

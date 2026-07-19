@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const image = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1";
+const image = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2";
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function capture(command, args) {

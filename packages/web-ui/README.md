@@ -6,7 +6,7 @@ JSONL, launches a process, talks to Docker, or receives a provider credential.
 
 ## Behavior
 
-- creates the sample project/session and durably submits one Java repair turn;
+- creates the sample project/session and durably submits Java repair turns;
 - streams ordered assistant/tool/approval/terminal events;
 - reconnects with explicit `Last-Event-ID` and suppresses replay duplicates;
 - exposes cancellation only after the execution start event;
@@ -42,8 +42,8 @@ npm run typecheck --workspace @agent-dock/web-ui
 npm run test --workspace @agent-dock/web-ui
 ```
 
-The Phase 1 demo intentionally permits one turn per session. A second turn
-would currently receive a fresh image-owned workspace and fresh Pi context, so
-the UI asks for a new demo session instead of presenting that as a multi-turn
-conversation. Session discovery after page reload, durable Pi/workspace restore,
-approval responses, and arbitrary repository import are deferred.
+The Phase 2 checkpoint slice permits a second turn on the same session. It
+rehydrates Pi JSONL and the bounded sample workspace into a new disposable
+container before the follow-up runs. Session discovery after page reload,
+approval responses, arbitrary repository import, and a production S3/MinIO
+adapter remain deferred.

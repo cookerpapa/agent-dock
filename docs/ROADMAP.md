@@ -46,9 +46,8 @@ sample Java repository and observe the complete event flow.
 Current status: complete. `npm run sandbox:check` proves the backend path, and
 `npm run demo` exposes the same zero-token Java repair through the minimal React
 session page. The page can submit, stream, reconnect without duplicate events,
-cancel, and inspect the final diff. The sample activation is intentionally one
-turn per ephemeral session; durable conversation/workspace rehydration belongs
-to Phase 2.
+cancel, and inspect the final diff. The one-turn limitation was removed by the
+first Phase 2 settled-checkpoint slice described below.
 
 ## Phase 2: durable sessions and mailbox (2 weeks)
 
@@ -64,6 +63,16 @@ Deliverables:
 
 Exit criteria: duplicate requests do not duplicate turns; five inputs to the
 same session remain ordered; browser and runner reconnects do not lose events.
+
+Current status: in progress. Durable intake, idempotency, session/turn state,
+leases/fencing, PostgreSQL event replay, and sequential follow-up acceptance
+already exist. The first Phase 2 slice adds settled Pi JSONL plus bounded
+workspace checkpoint upload/validation, PostgreSQL artifact pointers, cold
+restore into a fresh Docker container, and a Web follow-up on the same session.
+Two-container tests prove that the second model request sees the prior Pi
+conversation and that its tool sees the prior Java edit. MinIO/S3, a crash-safe
+supervisor spool, five-input mailbox acceptance, steer semantics,
+cross-replica notification, lease renewal, and restart reconciliation remain.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

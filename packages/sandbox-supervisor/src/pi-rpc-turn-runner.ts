@@ -8,8 +8,7 @@ import {
   type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -51,6 +50,12 @@ export type PiRpcTurnRunnerOptions = {
   piRpcEntryPath?: string;
   enabledTools?: readonly PiBuiltinToolName[];
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
+  restorePiSession?: Uint8Array;
+  onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
+};
+
+export type PiRpcSettledCheckpoint = {
+  piSession: Uint8Array;
 };
 
 export type PiBuiltinToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
@@ -439,12 +444,22 @@ export class PiRpcTurnRunner {
     const rpcEntry = this.#options.piRpcEntryPath ?? resolvePinnedPiRpcEntry(import.meta.url);
     const temporaryRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-rpc-"));
     const agentDirectory = resolve(temporaryRoot, "agent");
+    const sessionDirectory = resolve(temporaryRoot, "sessions");
+    const sessionFile = resolve(sessionDirectory, "session.jsonl");
+    const persistSession =
+      this.#options.restorePiSession !== undefined || this.#options.onSettled !== undefined;
     try {
-      await mkdir(agentDirectory, { recursive: true, mode: 0o700 });
+      await Promise.all([
+        mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
+        ...(persistSession ? [mkdir(sessionDirectory, { recursive: true, mode: 0o700 })] : []),
+      ]);
       await writeFile(resolve(agentDirectory, "models.json"), modelConfigJson(runtimeConfig), {
         encoding: "utf8",
         mode: 0o600,
       });
+      if (this.#options.restorePiSession !== undefined) {
+        await writeFile(sessionFile, this.#options.restorePiSession, { mode: 0o600 });
+      }
     } catch {
       await rm(temporaryRoot, { recursive: true, force: true });
       throw new PiRpcTurnError(
@@ -463,7 +478,9 @@ export class PiRpcTurnRunner {
         command.payload.model.modelId,
         "--thinking",
         command.payload.model.thinkingLevel,
-        "--no-session",
+        ...(persistSession
+          ? ["--session", sessionFile, "--session-dir", sessionDirectory]
+          : ["--no-session"]),
         "--offline",
         "--no-extensions",
         "--no-skills",
@@ -585,13 +602,28 @@ export class PiRpcTurnRunner {
         throw new PiRpcTurnError("pi_protocol_error", outcome.reason, false);
       }
       let publicEvent = outcome.event;
-      if (publicEvent.type === "turn.completed" && this.#options.collectWorkspacePatch) {
-        const workspacePatch = await this.#options.collectWorkspacePatch();
-        if (workspacePatch !== undefined) {
-          publicEvent = {
-            ...publicEvent,
-            payload: { ...publicEvent.payload, workspacePatch },
-          };
+      if (publicEvent.type === "turn.completed") {
+        if (this.#options.collectWorkspacePatch) {
+          const workspacePatch = await this.#options.collectWorkspacePatch();
+          if (workspacePatch !== undefined) {
+            publicEvent = {
+              ...publicEvent,
+              payload: { ...publicEvent.payload, workspacePatch },
+            };
+          }
+        }
+        if (this.#options.onSettled) {
+          let piSession: Uint8Array;
+          try {
+            piSession = await readFile(sessionFile);
+          } catch {
+            throw new PiRpcTurnError(
+              "checkpoint_capture_failed",
+              "Pi did not produce a readable settled session snapshot",
+              true,
+            );
+          }
+          await this.#options.onSettled({ piSession });
         }
       }
       const candidate = eventMessage(publicEvent);

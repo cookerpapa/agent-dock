@@ -2,6 +2,7 @@ import {
   parseControlToSupervisorMessage,
   parseDockerSandboxWorkerInput,
   parseDockerSandboxWorkerOutput,
+  type DockerSandboxCheckpointPublishMessage,
   type DockerSandboxWorkerOutput,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
@@ -13,6 +14,14 @@ import {
   PiRpcTurnError,
   type PiRpcCancellationSignal,
 } from "./pi-rpc-turn-runner.ts";
+import {
+  decodeSettledCheckpoint,
+  encodeSettledCheckpoint,
+  validateLoadedCheckpoint,
+  type LoadedSandboxCheckpoint,
+  type SandboxCheckpointStore,
+} from "./sandbox-checkpoint.ts";
+import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 const DEFAULT_READY_TIMEOUT_MS = 15_000;
 const DEFAULT_EXECUTION_TIMEOUT_MS = 90_000;
@@ -20,7 +29,16 @@ const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
 const MAX_STDOUT_BUFFER_BYTES = 8 * 1_024 * 1_024;
 const MAX_STDERR_BYTES = 4_096;
 
-export type DockerSandboxScenario = "java_repair" | "timeout";
+export type DockerSandboxScenario = "java_repair" | "java_followup" | "timeout";
+
+export type DockerSandboxScenarioContext = {
+  command: ExecuteTurnCommandMessage;
+  restoring: boolean;
+};
+
+export type DockerSandboxScenarioResolver = (
+  context: DockerSandboxScenarioContext,
+) => DockerSandboxScenario;
 
 export type DockerSandboxContainerIdentity = {
   containerName: string;
@@ -32,7 +50,8 @@ export type DockerSandboxContainerIdentity = {
 export type DockerSandboxTurnRunnerOptions = {
   image: string;
   dockerCommand?: string;
-  scenario?: DockerSandboxScenario;
+  scenario?: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  checkpointStore?: SandboxCheckpointStore;
   readyTimeoutMs?: number;
   executionTimeoutMs?: number;
   cleanupTimeoutMs?: number;
@@ -214,7 +233,8 @@ function executeDocker(
 export class DockerSandboxTurnRunner {
   readonly #image: string;
   readonly #dockerCommand: string;
-  readonly #scenario: DockerSandboxScenario;
+  readonly #scenario: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #readyTimeoutMs: number;
   readonly #executionTimeoutMs: number;
   readonly #cleanupTimeoutMs: number;
@@ -228,6 +248,7 @@ export class DockerSandboxTurnRunner {
     this.#image = options.image;
     this.#dockerCommand = options.dockerCommand ?? "docker";
     this.#scenario = options.scenario ?? "java_repair";
+    this.#checkpointStore = options.checkpointStore;
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       "readyTimeoutMs",
@@ -250,6 +271,26 @@ export class DockerSandboxTurnRunner {
     publishEvent: PiRpcEventPublisher,
     signal: AbortSignal,
   ): Promise<PiRpcTurnResult> {
+    let loadedCheckpoint: LoadedSandboxCheckpoint | undefined;
+    if (this.#checkpointStore !== undefined) {
+      try {
+        loadedCheckpoint = validateLoadedCheckpoint(await this.#checkpointStore.load(command));
+        if (loadedCheckpoint !== undefined) {
+          validateWorkspaceSnapshot(loadedCheckpoint.workspace);
+        }
+      } catch (error: unknown) {
+        if (error instanceof PiRpcTurnError) throw error;
+        throw new PiRpcTurnError(
+          "checkpoint_load_failed",
+          "The settled checkpoint could not be loaded",
+          true,
+        );
+      }
+    }
+    const scenario =
+      typeof this.#scenario === "function"
+        ? this.#scenario({ command, restoring: loadedCheckpoint !== undefined })
+        : this.#scenario;
     const name = containerName(command, this.#idGenerator());
     const identity: DockerSandboxContainerIdentity = {
       containerName: name,
@@ -273,6 +314,7 @@ export class DockerSandboxTurnRunner {
     let protocolError: Error | undefined;
     let cancellationSent = false;
     let runSent = false;
+    let checkpointPublished = false;
     let removeAbortListener: (() => void) | undefined;
 
     const fail = (error: Error): void => {
@@ -285,6 +327,17 @@ export class DockerSandboxTurnRunner {
     };
 
     const acknowledgeEvent = async (message: EventPublishMessage): Promise<void> => {
+      if (
+        this.#checkpointStore !== undefined &&
+        message.payload.event.type === "turn.completed" &&
+        !checkpointPublished
+      ) {
+        throw new PiRpcTurnError(
+          "docker_protocol_error",
+          "Docker worker completed before its checkpoint was committed",
+          false,
+        );
+      }
       await publishEvent(message);
       const acknowledgement = parseControlToSupervisorMessage({
         protocolVersion: 1,
@@ -308,7 +361,75 @@ export class DockerSandboxTurnRunner {
       sendLine(child, acknowledgement);
     };
 
+    const commitCheckpoint = async (
+      message: DockerSandboxCheckpointPublishMessage,
+    ): Promise<void> => {
+      if (this.#checkpointStore === undefined) {
+        throw new PiRpcTurnError(
+          "docker_protocol_error",
+          "Docker worker published a checkpoint while checkpointing was disabled",
+          false,
+        );
+      }
+      if (
+        checkpointPublished ||
+        message.commandId !== command.payload.commandId ||
+        message.sessionId !== command.payload.sessionId ||
+        message.turnId !== command.payload.turnId ||
+        message.leaseId !== command.payload.leaseId ||
+        message.fencingToken !== command.payload.fencingToken ||
+        message.baseRevision !== (loadedCheckpoint?.revision ?? null)
+      ) {
+        throw new PiRpcTurnError(
+          "docker_protocol_error",
+          "Docker checkpoint identity or base revision did not match its activation",
+          false,
+        );
+      }
+      const checkpoint = decodeSettledCheckpoint(message.checkpoint);
+      validateWorkspaceSnapshot(checkpoint.workspace);
+      let saved: { revision: string };
+      try {
+        saved = await this.#checkpointStore.save(command, message.baseRevision, checkpoint);
+      } catch (error: unknown) {
+        if (error instanceof PiRpcTurnError) throw error;
+        throw new PiRpcTurnError(
+          "checkpoint_save_failed",
+          "The settled checkpoint could not be committed",
+          true,
+        );
+      }
+      if (saved.revision.length < 1 || saved.revision.length > 256) {
+        throw new PiRpcTurnError(
+          "checkpoint_save_failed",
+          "The checkpoint store returned an invalid revision",
+          false,
+        );
+      }
+      checkpointPublished = true;
+      sendLine(
+        child,
+        parseDockerSandboxWorkerInput({
+          sandboxProtocolVersion: 1,
+          type: "sandbox.checkpoint.ack",
+          commandId: message.commandId,
+          sessionId: message.sessionId,
+          turnId: message.turnId,
+          leaseId: message.leaseId,
+          fencingToken: message.fencingToken,
+          revision: saved.revision,
+        }),
+      );
+    };
+
     const handleMessage = async (message: DockerSandboxWorkerOutput): Promise<void> => {
+      if (terminalSettled) {
+        throw new PiRpcTurnError(
+          "docker_protocol_error",
+          "Docker worker emitted output after its terminal result",
+          false,
+        );
+      }
       if (message.type === "sandbox.ready") {
         ready.resolve();
         return;
@@ -317,10 +438,18 @@ export class DockerSandboxTurnRunner {
         await acknowledgeEvent(message);
         return;
       }
-      if (terminalSettled) {
+      if (message.type === "sandbox.checkpoint.publish") {
+        await commitCheckpoint(message);
+        return;
+      }
+      if (
+        message.type === "sandbox.result" &&
+        this.#checkpointStore !== undefined &&
+        !checkpointPublished
+      ) {
         throw new PiRpcTurnError(
           "docker_protocol_error",
-          "Docker worker emitted multiple terminal results",
+          "Docker worker returned success without a committed checkpoint",
           false,
         );
       }
@@ -426,8 +555,23 @@ export class DockerSandboxTurnRunner {
         sandboxProtocolVersion: 1,
         type: "sandbox.run",
         command,
-        runtime: { kind: "embedded_fake", scenario: this.#scenario },
+        runtime: { kind: "embedded_fake", scenario },
         workspaceFixture: "java-repair",
+        checkpoint:
+          this.#checkpointStore === undefined
+            ? { mode: "disabled" }
+            : {
+                mode: "settled",
+                baseRevision: loadedCheckpoint?.revision ?? null,
+                ...(loadedCheckpoint === undefined
+                  ? {}
+                  : {
+                      restore: encodeSettledCheckpoint({
+                        piSession: loadedCheckpoint.piSession,
+                        workspace: loadedCheckpoint.workspace,
+                      }),
+                    }),
+              },
       });
       sendLine(child, runMessage);
       runSent = true;

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PiRpcTurnCancelledError, PiRpcTurnRunner } from "../src/index.ts";
+import { PiRpcTurnCancelledError, PiRpcTurnError, PiRpcTurnRunner } from "../src/index.ts";
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -61,6 +61,110 @@ function processExists(pid: number): boolean {
 }
 
 describe("PiRpcTurnRunner integration", () => {
+  it("does not publish completion when settled checkpoint commit fails", async () => {
+    const fakeModel = new FakeModelServer();
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-checkpoint-fail-test-"));
+    const events: EventPublishMessage[] = [];
+    try {
+      await fakeModel.start();
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        onSettled: () => {
+          throw new PiRpcTurnError(
+            "checkpoint_save_failed",
+            "Settled checkpoint could not be committed",
+            true,
+          );
+        },
+      });
+      await expect(
+        runner.run(command, (message) => {
+          events.push(message);
+        }),
+      ).rejects.toMatchObject({ code: "checkpoint_save_failed", retryable: true });
+      expect(events.some((message) => message.payload.event.type === "turn.completed")).toBe(false);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("captures Pi JSONL before completion and rehydrates it in a fresh runner", async () => {
+    const fakeModel = new FakeModelServer();
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-rehydrate-test-"));
+    let checkpoint: Uint8Array | undefined;
+    let checkpointCommitted = false;
+    try {
+      await fakeModel.start();
+      const runnerOptions = {
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model: ExecuteTurnCommandMessage["payload"]["model"]) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions" as const,
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+      };
+      const first = new PiRpcTurnRunner({
+        ...runnerOptions,
+        onSettled: ({ piSession }) => {
+          checkpoint = piSession;
+          checkpointCommitted = true;
+        },
+      });
+      await first.run(command, (message) => {
+        if (message.payload.event.type === "turn.completed") {
+          expect(checkpointCommitted).toBe(true);
+        }
+      });
+      expect(checkpoint).toBeDefined();
+      expect(Buffer.from(checkpoint!).toString("utf8")).toContain('"role":"assistant"');
+
+      checkpointCommitted = false;
+      const secondCommand: ExecuteTurnCommandMessage = {
+        ...command,
+        messageId: "11111111-1111-4111-8111-111111111112",
+        payload: {
+          ...command.payload,
+          commandId: "22222222-2222-4222-8222-222222222223",
+          idempotencyKey: "runner-integration-followup",
+          turnId: "turn-2",
+          fencingToken: 8,
+          nextEventSeq: 9,
+          input: { kind: "prompt", text: "Continue from the prior turn." },
+        },
+      };
+      const second = new PiRpcTurnRunner({
+        ...runnerOptions,
+        restorePiSession: checkpoint!,
+        onSettled: ({ piSession }) => {
+          checkpoint = piSession;
+          checkpointCommitted = true;
+        },
+      });
+      await second.run(secondCommand, (message) => {
+        if (message.payload.event.type === "turn.completed") {
+          expect(checkpointCommitted).toBe(true);
+        }
+      });
+      expect(fakeModel.observations).toHaveLength(2);
+      expect(fakeModel.observations[1]!.messageCount).toBeGreaterThan(
+        fakeModel.observations[0]!.messageCount,
+      );
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("runs pinned Pi against the loopback fake model and emits only public events", async () => {
     const fakeModel = new FakeModelServer();
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-test-"));

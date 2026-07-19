@@ -3,6 +3,8 @@ import {
   MAX_WORKSPACE_PATCH_BYTES,
   parseDockerSandboxWorkerInput,
   type DockerSandboxCancelMessage,
+  type DockerSandboxCheckpointAckMessage,
+  type DockerSandboxCheckpointPublishMessage,
   type DockerSandboxRunMessage,
   type EventAckMessage,
   type EventPublishMessage,
@@ -19,14 +21,28 @@ import {
   PiRpcTurnRunner,
   type PiRpcCancellationSignal,
 } from "./pi-rpc-turn-runner.ts";
+import {
+  decodeSettledCheckpoint,
+  encodeSettledCheckpoint,
+  type CapturedSandboxCheckpoint,
+} from "./sandbox-checkpoint.ts";
+import { captureWorkspaceSnapshot, restoreWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 const WORKSPACE_DIRECTORY = "/workspace";
 const JAVA_REPAIR_FIXTURE = "/opt/agent-dock/sample-java-repair";
 const EVENT_ACK_TIMEOUT_MS = 10_000;
+const CHECKPOINT_ACK_TIMEOUT_MS = 15_000;
 
 type PendingEventAck = {
   event: EventPublishMessage;
   resolve: (ack: EventAckMessage) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+type PendingCheckpointAck = {
+  checkpoint: DockerSandboxCheckpointPublishMessage;
+  resolve: (ack: DockerSandboxCheckpointAckMessage) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
@@ -74,7 +90,7 @@ function boundedUtf8(value: string, maxBytes: number): { value: string; truncate
   return { value: "", truncated: true };
 }
 
-async function prepareWorkspace(): Promise<void> {
+async function prepareWorkspace(workspaceSnapshot?: Uint8Array): Promise<void> {
   const existing = await readdir(WORKSPACE_DIRECTORY);
   if (existing.length !== 0) {
     throw new PiRpcTurnError(
@@ -94,6 +110,9 @@ async function prepareWorkspace(): Promise<void> {
   await execute("git", ["config", "user.email", "fixture@agent-dock.invalid"], WORKSPACE_DIRECTORY);
   await execute("git", ["add", "--all"], WORKSPACE_DIRECTORY);
   await execute("git", ["commit", "--quiet", "-m", "fixture baseline"], WORKSPACE_DIRECTORY);
+  if (workspaceSnapshot !== undefined) {
+    await restoreWorkspaceSnapshot(WORKSPACE_DIRECTORY, workspaceSnapshot);
+  }
 }
 
 async function collectWorkspacePatch(): Promise<WorkspacePatch> {
@@ -125,6 +144,7 @@ async function main(): Promise<void> {
   let abortController: AbortController | undefined;
   let pendingCancellation: PiRpcCancellationSignal | undefined;
   let pendingEventAck: PendingEventAck | undefined;
+  let pendingCheckpointAck: PendingCheckpointAck | undefined;
   let finished = false;
 
   const finish = async (message: unknown): Promise<void> => {
@@ -134,6 +154,11 @@ async function main(): Promise<void> {
       clearTimeout(pendingEventAck.timer);
       pendingEventAck.reject(new Error("Sandbox worker stopped before event ACK"));
       pendingEventAck = undefined;
+    }
+    if (pendingCheckpointAck !== undefined) {
+      clearTimeout(pendingCheckpointAck.timer);
+      pendingCheckpointAck.reject(new Error("Sandbox worker stopped before checkpoint ACK"));
+      pendingCheckpointAck = undefined;
     }
     await writeMessage(message).catch(() => undefined);
     input.close();
@@ -189,12 +214,108 @@ async function main(): Promise<void> {
     pending.resolve(ack);
   };
 
+  const publishCheckpoint = async (
+    message: DockerSandboxRunMessage,
+    checkpoint: CapturedSandboxCheckpoint,
+  ): Promise<void> => {
+    if (pendingCheckpointAck !== undefined || pendingEventAck !== undefined) {
+      throw new PiRpcTurnError(
+        "checkpoint_ack_overlap",
+        "Sandbox worker attempted overlapping checkpoint publication",
+        false,
+      );
+    }
+    if (message.checkpoint.mode !== "settled") {
+      throw new PiRpcTurnError(
+        "checkpoint_protocol_error",
+        "Sandbox worker attempted checkpoint publication while disabled",
+        false,
+      );
+    }
+    const publication: DockerSandboxCheckpointPublishMessage = {
+      sandboxProtocolVersion: 1,
+      type: "sandbox.checkpoint.publish",
+      commandId: message.command.payload.commandId,
+      sessionId: message.command.payload.sessionId,
+      turnId: message.command.payload.turnId,
+      leaseId: message.command.payload.leaseId,
+      fencingToken: message.command.payload.fencingToken,
+      baseRevision: message.checkpoint.baseRevision,
+      checkpoint: encodeSettledCheckpoint(checkpoint),
+    };
+    const acknowledgement = new Promise<DockerSandboxCheckpointAckMessage>(
+      (resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+          pendingCheckpointAck = undefined;
+          rejectPromise(
+            new PiRpcTurnError(
+              "checkpoint_ack_timeout",
+              "Trusted host checkpoint ACK timed out",
+              true,
+            ),
+          );
+        }, CHECKPOINT_ACK_TIMEOUT_MS);
+        timer.unref();
+        pendingCheckpointAck = {
+          checkpoint: publication,
+          resolve: resolvePromise,
+          reject: rejectPromise,
+          timer,
+        };
+      },
+    );
+    await writeMessage(publication);
+    await acknowledgement;
+  };
+
+  const acceptCheckpointAck = (ack: DockerSandboxCheckpointAckMessage): void => {
+    const pending = pendingCheckpointAck;
+    if (pending === undefined) {
+      throw new PiRpcTurnError(
+        "unexpected_checkpoint_ack",
+        "Worker received an unexpected checkpoint ACK",
+        false,
+      );
+    }
+    const checkpoint = pending.checkpoint;
+    if (
+      ack.commandId !== checkpoint.commandId ||
+      ack.sessionId !== checkpoint.sessionId ||
+      ack.turnId !== checkpoint.turnId ||
+      ack.leaseId !== checkpoint.leaseId ||
+      ack.fencingToken !== checkpoint.fencingToken
+    ) {
+      throw new PiRpcTurnError(
+        "invalid_checkpoint_ack",
+        "Worker received a mismatched checkpoint ACK",
+        false,
+      );
+    }
+    clearTimeout(pending.timer);
+    pendingCheckpointAck = undefined;
+    pending.resolve(ack);
+  };
+
   const run = async (message: DockerSandboxRunMessage): Promise<void> => {
     const fakeModel = new FakeModelServer({ defaultScenario: message.runtime.scenario });
     abortController = new AbortController();
     if (pendingCancellation !== undefined) abortController.abort(pendingCancellation);
     try {
-      await prepareWorkspace();
+      if (
+        message.checkpoint.mode === "settled" &&
+        (message.checkpoint.baseRevision === null) !== (message.checkpoint.restore === undefined)
+      ) {
+        throw new PiRpcTurnError(
+          "checkpoint_protocol_error",
+          "Checkpoint revision and restore payload do not form a valid pair",
+          false,
+        );
+      }
+      const restored =
+        message.checkpoint.mode === "settled" && message.checkpoint.restore !== undefined
+          ? decodeSettledCheckpoint(message.checkpoint.restore)
+          : undefined;
+      await prepareWorkspace(restored?.workspace);
       await fakeModel.start();
       const runner = new PiRpcTurnRunner({
         resolveWorkspaceDirectory: () => WORKSPACE_DIRECTORY,
@@ -207,6 +328,17 @@ async function main(): Promise<void> {
         }),
         enabledTools: ["bash", "edit"],
         collectWorkspacePatch,
+        ...(restored === undefined ? {} : { restorePiSession: restored.piSession }),
+        ...(message.checkpoint.mode === "settled"
+          ? {
+              onSettled: async ({ piSession }: { piSession: Uint8Array }) => {
+                await publishCheckpoint(message, {
+                  piSession,
+                  workspace: await captureWorkspaceSnapshot(WORKSPACE_DIRECTORY),
+                });
+              },
+            }
+          : {}),
         requestTimeoutMs: 10_000,
         turnTimeoutMs: 60_000,
       });
@@ -258,6 +390,10 @@ async function main(): Promise<void> {
       const message = parseDockerSandboxWorkerInput(value);
       if (message.type === "event.ack") {
         acceptEventAck(message);
+        return;
+      }
+      if (message.type === "sandbox.checkpoint.ack") {
+        acceptCheckpointAck(message);
         return;
       }
       if (message.type === "sandbox.cancel") {

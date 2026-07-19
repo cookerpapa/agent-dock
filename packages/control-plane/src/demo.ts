@@ -2,9 +2,13 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations } from "@agent-dock/database";
 import { DockerSandboxTurnRunner, LocalSandboxSupervisor } from "@agent-dock/sandbox-supervisor";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createControlPlaneApplication } from "./application.ts";
 import { CancellationDispatcher } from "./cancellation-dispatcher.ts";
+import { FileCheckpointObjectStore, PostgresSandboxCheckpointStore } from "./checkpoint-store.ts";
 import { DurableEventStore } from "./durable-event-store.ts";
 import { LocalSupervisorExecutionBackend } from "./local-supervisor-execution-backend.ts";
 import { OutboxDispatcher } from "./outbox-dispatcher.ts";
@@ -33,6 +37,7 @@ export type DemoRuntimeOptions = {
   port?: number;
   image?: string;
   dockerCommand?: string;
+  checkpointDirectory?: string;
 };
 
 function demoPort(): number {
@@ -137,6 +142,12 @@ async function seedDemoRuntime(database: ReturnType<typeof createDatabase>): Pro
 }
 
 export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promise<DemoRuntime> {
+  const configuredCheckpointDirectory =
+    options.checkpointDirectory ?? process.env.AGENT_DOCK_DEMO_CHECKPOINT_DIR;
+  const checkpointDirectory = configuredCheckpointDirectory
+    ? resolve(configuredCheckpointDirectory)
+    : await mkdtemp(resolve(tmpdir(), "agent-dock-demo-checkpoints-"));
+  const removeCheckpointDirectory = configuredCheckpointDirectory === undefined;
   const pglite = await PGlite.create();
   const socketServer = new PGLiteSocketServer({
     db: pglite,
@@ -169,11 +180,16 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
       sandboxId: DEMO_IDS.sandbox,
       leaseDurationMs: 120_000,
     });
+    const checkpointStore = new PostgresSandboxCheckpointStore({
+      database,
+      objectStore: new FileCheckpointObjectStore({ rootDirectory: checkpointDirectory }),
+    });
     const runner = new DockerSandboxTurnRunner({
       image:
-        options.image ?? process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1",
+        options.image ?? process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
       dockerCommand: options.dockerCommand ?? process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
-      scenario: "java_repair",
+      scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
+      checkpointStore,
       executionTimeoutMs: 60_000,
     });
     const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
@@ -216,6 +232,9 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
           await database?.destroy();
           await socketServer.stop();
           await pglite.close();
+          if (removeCheckpointDirectory) {
+            await rm(checkpointDirectory, { recursive: true, force: true });
+          }
         })();
         return closing;
       },
@@ -227,6 +246,9 @@ export async function startDemoRuntime(options: DemoRuntimeOptions = {}): Promis
     await database?.destroy().catch(() => undefined);
     await socketServer.stop().catch(() => undefined);
     await pglite.close().catch(() => undefined);
+    if (removeCheckpointDirectory) {
+      await rm(checkpointDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
     throw error;
   }
 }

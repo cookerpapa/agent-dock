@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const image = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1";
+const image = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2";
 const apiPort = process.env.AGENT_DOCK_DEMO_API_PORT ?? "3100";
 const webPort = process.env.AGENT_DOCK_DEMO_WEB_PORT ?? "4173";
 const managed = [];

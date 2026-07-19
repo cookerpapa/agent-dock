@@ -18,6 +18,8 @@ export {
 } from "./event-envelope.ts";
 
 export {
+  DockerSandboxCheckpointAckMessageSchema,
+  DockerSandboxCheckpointPublishMessageSchema,
   DockerSandboxCancelMessageSchema,
   DockerSandboxCancelledMessageSchema,
   DockerSandboxFailedMessageSchema,
@@ -27,8 +29,14 @@ export {
   DockerSandboxWorkerInputSchema,
   DockerSandboxWorkerOutputSchema,
   DockerSandboxWorkerProtocolError,
+  MAX_PI_SESSION_SNAPSHOT_BYTES,
+  MAX_WORKSPACE_SNAPSHOT_BYTES,
+  SandboxCheckpointBlobSchema,
+  SandboxSettledCheckpointSchema,
   parseDockerSandboxWorkerInput,
   parseDockerSandboxWorkerOutput,
+  type DockerSandboxCheckpointAckMessage,
+  type DockerSandboxCheckpointPublishMessage,
   type DockerSandboxCancelMessage,
   type DockerSandboxCancelledMessage,
   type DockerSandboxFailedMessage,
@@ -37,6 +45,8 @@ export {
   type DockerSandboxRunMessage,
   type DockerSandboxWorkerInput,
   type DockerSandboxWorkerOutput,
+  type SandboxCheckpointBlob,
+  type SandboxSettledCheckpoint,
 } from "./docker-sandbox-worker.ts";
 
 export {

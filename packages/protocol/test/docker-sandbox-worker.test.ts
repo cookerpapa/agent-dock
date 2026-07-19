@@ -43,6 +43,7 @@ describe("Docker sandbox worker protocol", () => {
         command: executeCommand,
         runtime: { kind: "embedded_fake", scenario: "java_repair" },
         workspaceFixture: "java-repair",
+        checkpoint: { mode: "disabled" },
       }),
     ).toMatchObject({ type: "sandbox.run" });
     expect(
@@ -70,8 +71,47 @@ describe("Docker sandbox worker protocol", () => {
         command: executeCommand,
         runtime: { kind: "embedded_fake", scenario: "java_repair" },
         workspaceFixture: "java-repair",
+        checkpoint: { mode: "disabled" },
         providerToken: "must-not-cross",
       }),
     ).toThrow(DockerSandboxWorkerProtocolError);
+  });
+
+  it("accepts a closed settled-checkpoint publish and acknowledgement", () => {
+    const blob = {
+      encoding: "base64",
+      sha256: "a".repeat(64),
+      sizeBytes: 3,
+      data: "YWJj",
+    } as const;
+    expect(
+      parseDockerSandboxWorkerOutput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.checkpoint.publish",
+        commandId: executeCommand.payload.commandId,
+        sessionId: executeCommand.payload.sessionId,
+        turnId: executeCommand.payload.turnId,
+        leaseId: executeCommand.payload.leaseId,
+        fencingToken: executeCommand.payload.fencingToken,
+        baseRevision: null,
+        checkpoint: {
+          format: "agent-dock.settled-checkpoint.v1",
+          piSession: blob,
+          workspace: blob,
+        },
+      }),
+    ).toMatchObject({ type: "sandbox.checkpoint.publish", baseRevision: null });
+    expect(
+      parseDockerSandboxWorkerInput({
+        sandboxProtocolVersion: 1,
+        type: "sandbox.checkpoint.ack",
+        commandId: executeCommand.payload.commandId,
+        sessionId: executeCommand.payload.sessionId,
+        turnId: executeCommand.payload.turnId,
+        leaseId: executeCommand.payload.leaseId,
+        fencingToken: executeCommand.payload.fencingToken,
+        revision: "b".repeat(64),
+      }),
+    ).toMatchObject({ type: "sandbox.checkpoint.ack" });
   });
 });

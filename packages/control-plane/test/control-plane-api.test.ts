@@ -28,9 +28,11 @@ import {
   CancellationDispatcher,
   DeterministicExecutionBackend,
   DurableEventStore,
+  FileCheckpointObjectStore,
   LocalSupervisorExecutionBackend,
   OutboxDispatcher,
   OutboxDispatcherStaleClaimError,
+  PostgresSandboxCheckpointStore,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
   type TurnCancellationBackend,
@@ -1354,6 +1356,7 @@ describe.sequential("single-user durable turn intake API", () => {
   it.skipIf(process.env.AGENT_DOCK_DOCKER_SANDBOX_TEST !== "1")(
     "persists and streams a fenced Java repair produced inside the Docker Pi sandbox",
     async () => {
+      const checkpointRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-docker-checkpoints-"));
       const sessionResponse = await http.inject({
         method: "POST",
         url: `/v1/projects/${project.projectId}/sessions`,
@@ -1390,10 +1393,15 @@ describe.sequential("single-user durable turn intake API", () => {
         sandboxId: IDS.dockerSandbox,
         leaseDurationMs: 120_000,
       });
+      const checkpointStore = new PostgresSandboxCheckpointStore({
+        database,
+        objectStore: new FileCheckpointObjectStore({ rootDirectory: checkpointRoot }),
+      });
       const runner = new DockerSandboxTurnRunner({
-        image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1",
+        image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
         dockerCommand: process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
-        scenario: "java_repair",
+        scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
+        checkpointStore,
         executionTimeoutMs: 60_000,
         onContainerReady(identity) {
           containerName = identity.containerName;
@@ -1523,8 +1531,75 @@ describe.sequential("single-user durable turn intake API", () => {
         expect(serialized).not.toContain(FAKE_MODEL_API_KEY);
         expect(serialized).not.toContain("broker://owner/openai-codex");
         expect(serialized).not.toContain("Run the tests, repair the Java bug");
+
+        const checkpointRows = await database
+          .selectFrom("artifacts")
+          .select(["kind", "object_key", "sha256", "size_bytes"])
+          .where("session_id", "=", dockerSession.sessionId)
+          .orderBy("kind")
+          .execute();
+        expect(checkpointRows.map((row) => row.kind)).toEqual([
+          "pi_session_snapshot",
+          "workspace_snapshot",
+        ]);
+        expect(checkpointRows.every((row) => /^[0-9a-f]{64}$/.test(row.sha256))).toBe(true);
+
+        const followUpResponse = await http.inject({
+          method: "POST",
+          url: `/v1/sessions/${dockerSession.sessionId}/turns`,
+          headers: { "idempotency-key": "docker-java-repair-followup" },
+          payload: { prompt: "Verify the previous repair after a cold activation." },
+        });
+        expect(followUpResponse.statusCode).toBe(202);
+        const followUp = followUpResponse.json() as AcceptedTurnResource;
+        const followUpDispatch = await dispatcher.dispatchNext();
+        expect(followUpDispatch).toMatchObject({
+          status: "completed",
+          commandId: followUp.commandId,
+          sessionId: dockerSession.sessionId,
+          turnId: followUp.turnId,
+        });
+        const followUpEvents = published.slice(10).map((message) => message.payload.event);
+        expect(followUpEvents.map((event) => event.seq)).toEqual([11, 12, 13, 14, 15, 16]);
+        expect(
+          followUpEvents
+            .filter((event) => event.type === "tool.started")
+            .map((event) => event.payload.toolName),
+        ).toEqual(["bash"]);
+        expect(followUpEvents.find((event) => event.type === "tool.completed")).toMatchObject({
+          payload: { isError: false },
+        });
+        expect(
+          followUpEvents
+            .filter((event) => event.type === "assistant.text.delta")
+            .map((event) => event.payload.text)
+            .join(""),
+        ).toContain("Prior conversation and Java repair restored");
+        const followUpTerminal = followUpEvents.at(-1);
+        expect(followUpTerminal?.type).toBe("turn.completed");
+        if (followUpTerminal?.type !== "turn.completed") {
+          throw new Error("Expected completed Docker follow-up turn");
+        }
+        expect(followUpTerminal.payload.workspacePatch?.patch).toContain(
+          "+        return left + right;",
+        );
+        expect(
+          await database
+            .selectFrom("artifacts")
+            .select((expression) => expression.fn.countAll<string>().as("count"))
+            .where("session_id", "=", dockerSession.sessionId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ count: "4" });
+        expect(
+          await database
+            .selectFrom("session_event_cursors")
+            .select(["last_persisted_seq", "acknowledged_through_seq"])
+            .where("session_id", "=", dockerSession.sessionId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ last_persisted_seq: "16", acknowledged_through_seq: "16" });
       } finally {
         liveAbort.abort();
+        await rm(checkpointRoot, { recursive: true, force: true });
       }
     },
     90_000,

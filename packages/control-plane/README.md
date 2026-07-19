@@ -109,10 +109,11 @@ and runs execution and cancellation dispatch loops independently. Vite preview
 serves the page and proxies only `/v1` to this API.
 
 This is explicit demonstration wiring, not hidden production behavior. The
-database disappears on shutdown, the sample workspace and Pi context reset per
-activation, and the page permits one turn per demo session. `src/main.ts` still
-requires operator-owned PostgreSQL/profile bootstrap and does not start a local
-Docker supervisor.
+database and development checkpoint directory disappear on shutdown. Within
+that runtime, successful turns persist Pi JSONL and a bounded workspace manifest
+before `turn.completed`, so the same session can continue in a fresh container.
+`src/main.ts` still requires operator-owned PostgreSQL/profile bootstrap and
+does not start a local Docker supervisor or configure production object storage.
 
 ## Verification boundary
 

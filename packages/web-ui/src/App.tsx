@@ -281,7 +281,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const lastSequenceRef = useRef(0);
   const currentTurn = activeTurn(state);
-  const demoSessionSettled = state.turns.length > 0 && currentTurn === undefined;
+  const sessionCanAcceptTurn =
+    state.session === null || state.sessionState === "cold" || state.sessionState === "idle";
+  const hasSettledTurn = state.turns.length > 0 && currentTurn === undefined;
+  const sessionNeedsReset =
+    state.session !== null && currentTurn === undefined && !sessionCanAcceptTurn;
 
   const update = (action: Parameters<typeof sessionViewReducer>[1]): void => {
     setState((current) => sessionViewReducer(current, action));
@@ -333,7 +337,7 @@ export default function App() {
     if (
       normalizedPrompt.length === 0 ||
       currentTurn !== undefined ||
-      demoSessionSettled ||
+      !sessionCanAcceptTurn ||
       operation !== null
     ) {
       return;
@@ -556,7 +560,7 @@ export default function App() {
           <div className="composer">
             <textarea
               aria-label="Turn prompt"
-              disabled={currentTurn !== undefined || demoSessionSettled || operation !== null}
+              disabled={currentTurn !== undefined || !sessionCanAcceptTurn || operation !== null}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -570,7 +574,13 @@ export default function App() {
             <div className="composer-controls">
               <div className="composer-hints">
                 <span>sample/java-repair</span>
-                <span>{demoSessionSettled ? "new session required" : "thinking off"}</span>
+                <span>
+                  {sessionNeedsReset
+                    ? "new session required"
+                    : hasSettledTurn
+                      ? "cold restore ready"
+                      : "thinking off"}
+                </span>
                 <span>⌘/Ctrl + Enter</span>
               </div>
               {currentTurn?.status === "running" ? (
@@ -587,7 +597,7 @@ export default function App() {
                   className="send-button"
                   disabled={
                     currentTurn !== undefined ||
-                    demoSessionSettled ||
+                    !sessionCanAcceptTurn ||
                     operation !== null ||
                     prompt.trim() === ""
                   }
@@ -596,11 +606,13 @@ export default function App() {
                 >
                   {operation === "submitting" || operation === "creating"
                     ? "accepting…"
-                    : demoSessionSettled
-                      ? "new session required"
-                      : currentTurn?.status === "cancelling"
-                        ? "cancelling…"
-                        : "run repair"}
+                    : currentTurn?.status === "cancelling"
+                      ? "cancelling…"
+                      : sessionNeedsReset
+                        ? "new session required"
+                        : hasSettledTurn
+                          ? "send follow-up"
+                          : "run repair"}
                 </button>
               )}
             </div>

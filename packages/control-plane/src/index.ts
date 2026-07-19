@@ -1,5 +1,13 @@
 export { createControlPlaneApplication } from "./application.ts";
 export {
+  FileCheckpointObjectStore,
+  PostgresSandboxCheckpointStore,
+  SandboxCheckpointStoreError,
+  type CheckpointObjectStore,
+  type FileCheckpointObjectStoreOptions,
+  type PostgresSandboxCheckpointStoreOptions,
+} from "./checkpoint-store.ts";
+export {
   CancellationDispatcher,
   CancellationDispatcherInvariantError,
   CancellationDispatcherStaleClaimError,

@@ -61,3 +61,20 @@ Policy-approved project extension loading was removed from the Phase 1 exit
 criteria and remains a Phase 3 sandbox/approval deliverable. The Phase 1 image
 loads only its trusted fixture and disables project extensions; treating that as
 extension-policy support would overstate the current boundary.
+
+## Phase 2: durable sessions and mailbox
+
+- [x] ADR-0011: checkpoint-before-terminal boundary and semantic cold restore
+- [x] Persist explicit Pi session JSONL instead of using `--no-session` when checkpointing
+- [x] Define a closed, bounded, hashed private checkpoint publish/ACK protocol
+- [x] Snapshot and safely restore the sample workspace without host bind mounts
+- [x] Store artifact metadata and snapshot pointers under current lease/fence and revision CAS
+- [x] Ignore a staged pointer unless its turn has a durable `turn.completed` commit marker
+- [x] Prove a second same-session turn in a different container sees prior messages and files
+- [x] Re-enable the Web composer for same-session follow-up turns
+- [ ] Replace the development file object store with a MinIO/S3 adapter
+- [ ] Make the supervisor event spool crash-safe and replay it after runner restart
+- [ ] Add cross-replica live event notification
+- [ ] Prove five queued same-session inputs preserve mailbox order
+- [ ] Specify and implement steer versus queued follow-up semantics
+- [ ] Renew leases during long turns and reconcile expired assignments/orphan containers

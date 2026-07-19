@@ -98,6 +98,7 @@ only after a measured requirement appears.
 - [ADR-0008: durable event ACK and resumable SSE replay](docs/adr/0008-durable-event-ack-and-sse-replay.md)
 - [ADR-0009: durable turn cancellation and process-exit confirmation](docs/adr/0009-durable-turn-cancellation.md)
 - [ADR-0010: ephemeral Docker sandbox and bounded final patch](docs/adr/0010-ephemeral-docker-sandbox-and-bounded-patch.md)
+- [ADR-0011: settled checkpoint commit and cold restore](docs/adr/0011-settled-checkpoint-commit-and-cold-restore.md)
 
 ## Current executable spikes
 
@@ -258,13 +259,19 @@ The full database-to-container path and Web demo use the embedded loopback fake
 model, so they consume no subscription token. The control-plane-to-supervisor
 transport is still in-process integration scaffolding and the production HTTP
 entry point does not start dispatchers. The current image embeds one trusted
-sample fixture and resets the workspace/Pi context for each activation, so the
-demo deliberately permits one turn per session. Generic repository import,
-real multi-turn Pi/workspace restoration, policy-approved extension loading, a
-request-scoped model gateway, and durable snapshots remain separate work. Live
-fan-out is process-local and the supervisor spool is memory-only. Queued-turn
-withdrawal, acknowledged-cancellation crash recovery, lease
-renewal/reconciliation, and Windows Job Object containment are also deferred.
+sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
+hashed regular-file workspace manifest cross the private worker channel and are
+stored by the trusted host before `turn.completed`; the next turn restores both
+into a different ephemeral container. The demo therefore supports a genuine
+same-session follow-up without keeping an idle Pi process alive.
+
+The development object-store adapter is a private host directory coupled to the
+ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
+repository import, policy-approved extension loading, a request-scoped model
+gateway, crash-safe supervisor spool, restart reconciliation, and cross-replica
+live fan-out remain separate work. Queued-turn withdrawal,
+acknowledged-cancellation crash recovery, lease renewal/reconciliation, and
+Windows Job Object containment are also deferred.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
@@ -274,6 +281,8 @@ flows are deliberately deferred.
 Phase 1 is complete: from a clean checkout, `npm run demo` lets a user submit the
 Java repair, watch all ten durable events and three tool calls, inspect the
 bounded Git patch, or cancel a second run and observe confirmed sandbox teardown.
-The next phase makes the transcript, Pi JSONL, workspace, and runner event spool
-durable across cold activation and process restart instead of extending the
-one-turn fixture.
+The first Phase 2 slice now adds cold Pi/workspace rehydration: a follow-up runs
+in another container, sees the previous assistant message, verifies the
+previous Java edit, continues event sequence numbers, and replaces the settled
+checkpoint. Phase 2 next addresses crash-safe command/event delivery and
+restart reconciliation rather than keeping a process per conversation.

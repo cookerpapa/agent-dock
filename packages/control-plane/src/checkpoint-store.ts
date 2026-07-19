@@ -1,0 +1,533 @@
+import type { Database } from "@agent-dock/database";
+import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import { MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES } from "@agent-dock/protocol";
+import {
+  PiRpcTurnError,
+  validatePiSessionSnapshot,
+  validateWorkspaceSnapshot,
+  type CapturedSandboxCheckpoint,
+  type LoadedSandboxCheckpoint,
+  type SandboxCheckpointStore,
+  type SavedSandboxCheckpoint,
+} from "@agent-dock/sandbox-supervisor";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
+import { sql, type Kysely, type Transaction } from "kysely";
+
+export interface CheckpointObjectStore {
+  put(objectKey: string, bytes: Uint8Array): Promise<void>;
+  get(objectKey: string): Promise<Uint8Array>;
+  delete(objectKey: string): Promise<void>;
+}
+
+export type FileCheckpointObjectStoreOptions = {
+  rootDirectory: string;
+  idGenerator?: () => string;
+};
+
+export type PostgresSandboxCheckpointStoreOptions = {
+  database: Kysely<Database>;
+  objectStore: CheckpointObjectStore;
+  clock?: () => Date;
+  idGenerator?: () => string;
+};
+
+type ArtifactReference = {
+  objectKey: string;
+  sha256: string;
+  sizeBytes: number;
+};
+
+type CheckpointMetadata = {
+  piSession: ArtifactReference;
+  workspace: ArtifactReference;
+  revision: string;
+};
+
+export class SandboxCheckpointStoreError extends PiRpcTurnError {
+  constructor(code: string, safeMessage: string, retryable: boolean) {
+    super(code, safeMessage, retryable);
+    this.name = "SandboxCheckpointStoreError";
+  }
+}
+
+function validDate(clock: () => Date): Date {
+  const value = clock();
+  if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
+    throw new TypeError("checkpoint store clock must return a valid Date");
+  }
+  return value;
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function safeSize(value: string | number | bigint, maximum: number, description: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
+    throw new SandboxCheckpointStoreError(
+      "checkpoint_metadata_invalid",
+      `${description} metadata is invalid`,
+      false,
+    );
+  }
+  return parsed;
+}
+
+function revisionFor(piSessionKey: string, workspaceKey: string): string {
+  return createHash("sha256")
+    .update("agent-dock.checkpoint-revision.v1\0")
+    .update(piSessionKey)
+    .update("\0")
+    .update(workspaceKey)
+    .digest("hex");
+}
+
+function validateObjectKey(value: string): string {
+  if (
+    value.length < 1 ||
+    value.length > 2_048 ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    value.includes("\0")
+  ) {
+    throw new SandboxCheckpointStoreError(
+      "checkpoint_object_key_invalid",
+      "Checkpoint object key is invalid",
+      false,
+    );
+  }
+  const segments = value.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        segment.length === 0 ||
+        segment === "." ||
+        segment === ".." ||
+        !/^[A-Za-z0-9._-]+$/.test(segment),
+    )
+  ) {
+    throw new SandboxCheckpointStoreError(
+      "checkpoint_object_key_invalid",
+      "Checkpoint object key is invalid",
+      false,
+    );
+  }
+  return value;
+}
+
+export class FileCheckpointObjectStore implements CheckpointObjectStore {
+  readonly #rootDirectory: string;
+  readonly #idGenerator: () => string;
+
+  constructor(options: FileCheckpointObjectStoreOptions) {
+    this.#rootDirectory = resolve(options.rootDirectory);
+    this.#idGenerator = options.idGenerator ?? randomUUID;
+  }
+
+  async put(objectKey: string, bytes: Uint8Array): Promise<void> {
+    const target = this.#target(objectKey);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    const temporary = `${target}.tmp-${this.#idGenerator()}`;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(temporary, "wx", 0o600);
+      await handle.writeFile(bytes);
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await link(temporary, target);
+      await rm(temporary, { force: true });
+    } catch (error: unknown) {
+      await handle?.close().catch(() => undefined);
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async get(objectKey: string): Promise<Uint8Array> {
+    const target = this.#target(objectKey);
+    const metadata = await lstat(target);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_object_invalid",
+        "Checkpoint object is not a regular file",
+        false,
+      );
+    }
+    if (
+      metadata.size < 1 ||
+      metadata.size > Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES)
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_object_invalid",
+        "Checkpoint object is outside its byte limit",
+        false,
+      );
+    }
+    return readFile(target);
+  }
+
+  async delete(objectKey: string): Promise<void> {
+    await rm(this.#target(objectKey), { force: true });
+  }
+
+  #target(objectKey: string): string {
+    const target = resolve(this.#rootDirectory, validateObjectKey(objectKey));
+    if (target !== this.#rootDirectory && !target.startsWith(`${this.#rootDirectory}${sep}`)) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_object_key_invalid",
+        "Checkpoint object key escaped its store",
+        false,
+      );
+    }
+    return target;
+  }
+}
+
+export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
+  readonly #database: Kysely<Database>;
+  readonly #objectStore: CheckpointObjectStore;
+  readonly #clock: () => Date;
+  readonly #idGenerator: () => string;
+
+  constructor(options: PostgresSandboxCheckpointStoreOptions) {
+    this.#database = options.database;
+    this.#objectStore = options.objectStore;
+    this.#clock = options.clock ?? (() => new Date());
+    this.#idGenerator = options.idGenerator ?? randomUUID;
+  }
+
+  async load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined> {
+    const metadata = await this.#database.transaction().execute(async (transaction) => {
+      return this.#loadMetadata(transaction, command, validDate(this.#clock));
+    });
+    if (metadata === undefined) return undefined;
+
+    const [piSession, workspace] = await Promise.all([
+      this.#objectStore.get(metadata.piSession.objectKey),
+      this.#objectStore.get(metadata.workspace.objectKey),
+    ]);
+    this.#verifyObject(piSession, metadata.piSession, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session");
+    this.#verifyObject(workspace, metadata.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "workspace");
+    validatePiSessionSnapshot(piSession);
+    validateWorkspaceSnapshot(workspace);
+
+    await this.#database.transaction().execute(async (transaction) => {
+      const current = await this.#loadMetadata(transaction, command, validDate(this.#clock));
+      if (current?.revision !== metadata.revision) {
+        throw new SandboxCheckpointStoreError(
+          "checkpoint_changed",
+          "Settled checkpoint changed while it was loading",
+          true,
+        );
+      }
+    });
+    return { revision: metadata.revision, piSession, workspace };
+  }
+
+  async save(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    checkpoint: CapturedSandboxCheckpoint,
+  ): Promise<SavedSandboxCheckpoint> {
+    validatePiSessionSnapshot(checkpoint.piSession);
+    validateWorkspaceSnapshot(checkpoint.workspace);
+    const piArtifactId = this.#idGenerator();
+    const workspaceArtifactId = this.#idGenerator();
+    const prefix = [
+      "checkpoints",
+      command.payload.tenantId,
+      command.payload.sessionId,
+      command.payload.turnId,
+    ].map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "-"));
+    const piReference: ArtifactReference = {
+      objectKey: `${prefix.join("/")}/${piArtifactId}-pi-${sha256(checkpoint.piSession)}.jsonl`,
+      sha256: sha256(checkpoint.piSession),
+      sizeBytes: checkpoint.piSession.byteLength,
+    };
+    const workspaceReference: ArtifactReference = {
+      objectKey: `${prefix.join("/")}/${workspaceArtifactId}-workspace-${sha256(checkpoint.workspace)}.json`,
+      sha256: sha256(checkpoint.workspace),
+      sizeBytes: checkpoint.workspace.byteLength,
+    };
+    validateObjectKey(piReference.objectKey);
+    validateObjectKey(workspaceReference.objectKey);
+
+    await this.#objectStore.put(piReference.objectKey, checkpoint.piSession);
+    try {
+      await this.#objectStore.put(workspaceReference.objectKey, checkpoint.workspace);
+    } catch (error: unknown) {
+      await this.#objectStore.delete(piReference.objectKey).catch(() => undefined);
+      throw error;
+    }
+
+    try {
+      await this.#database.transaction().execute(async (transaction) => {
+        const now = validDate(this.#clock);
+        const current = await this.#lockSession(transaction, command, now);
+        const settled = await this.#settledMetadata(transaction, command, current);
+        const currentRevision = settled?.revision ?? null;
+        if (currentRevision !== baseRevision) {
+          throw new SandboxCheckpointStoreError(
+            "checkpoint_conflict",
+            "Settled checkpoint base revision is stale",
+            false,
+          );
+        }
+        await transaction
+          .insertInto("artifacts")
+          .values([
+            {
+              id: piArtifactId,
+              tenant_id: command.payload.tenantId,
+              session_id: command.payload.sessionId,
+              turn_id: command.payload.turnId,
+              kind: "pi_session_snapshot",
+              object_key: piReference.objectKey,
+              sha256: piReference.sha256,
+              size_bytes: piReference.sizeBytes,
+            },
+            {
+              id: workspaceArtifactId,
+              tenant_id: command.payload.tenantId,
+              session_id: command.payload.sessionId,
+              turn_id: command.payload.turnId,
+              kind: "workspace_snapshot",
+              object_key: workspaceReference.objectKey,
+              sha256: workspaceReference.sha256,
+              size_bytes: workspaceReference.sizeBytes,
+            },
+          ])
+          .execute();
+        const updated = await transaction
+          .updateTable("sessions")
+          .set({
+            pi_session_snapshot_key: piReference.objectKey,
+            workspace_snapshot_key: workspaceReference.objectKey,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+            last_active_at: now,
+          })
+          .where("id", "=", command.payload.sessionId)
+          .where("tenant_id", "=", command.payload.tenantId)
+          .where("row_version", "=", current.rowVersion)
+          .executeTakeFirst();
+        if (updated.numUpdatedRows !== 1n) {
+          throw new SandboxCheckpointStoreError(
+            "checkpoint_conflict",
+            "Session changed before its checkpoint commit",
+            true,
+          );
+        }
+      });
+    } catch (error: unknown) {
+      await Promise.allSettled([
+        this.#objectStore.delete(piReference.objectKey),
+        this.#objectStore.delete(workspaceReference.objectKey),
+      ]);
+      throw error;
+    }
+
+    return {
+      revision: revisionFor(piReference.objectKey, workspaceReference.objectKey),
+    };
+  }
+
+  async #loadMetadata(
+    transaction: Transaction<Database>,
+    command: ExecuteTurnCommandMessage,
+    now: Date,
+  ): Promise<CheckpointMetadata | undefined> {
+    const session = await this.#assertCurrentSession(transaction, command, now, false);
+    return this.#settledMetadata(transaction, command, session);
+  }
+
+  async #settledMetadata(
+    transaction: Transaction<Database>,
+    command: ExecuteTurnCommandMessage,
+    session: {
+      piSessionKey: string | null;
+      workspaceKey: string | null;
+      rowVersion: string;
+    },
+  ): Promise<CheckpointMetadata | undefined> {
+    if (session.piSessionKey === null && session.workspaceKey === null) return undefined;
+    if (session.piSessionKey === null || session.workspaceKey === null) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_metadata_invalid",
+        "Session has an incomplete settled checkpoint",
+        false,
+      );
+    }
+    const settledEvent = await transaction
+      .selectFrom("session_events")
+      .select("turn_id")
+      .where("tenant_id", "=", command.payload.tenantId)
+      .where("session_id", "=", command.payload.sessionId)
+      .where("type", "=", "turn.completed")
+      .where("turn_id", "is not", null)
+      .orderBy("seq", "desc")
+      .executeTakeFirst();
+    if (settledEvent?.turn_id === null || settledEvent === undefined) return undefined;
+
+    let artifacts = await transaction
+      .selectFrom("artifacts")
+      .select(["kind", "object_key", "sha256", "size_bytes", "turn_id"])
+      .where("tenant_id", "=", command.payload.tenantId)
+      .where("session_id", "=", command.payload.sessionId)
+      .where("object_key", "in", [session.piSessionKey, session.workspaceKey])
+      .execute();
+    const pointersAreSettled = artifacts.every(
+      (artifact) => artifact.turn_id === settledEvent.turn_id,
+    );
+    if (!pointersAreSettled || artifacts.length !== 2) {
+      artifacts = await transaction
+        .selectFrom("artifacts")
+        .select(["kind", "object_key", "sha256", "size_bytes", "turn_id"])
+        .where("tenant_id", "=", command.payload.tenantId)
+        .where("session_id", "=", command.payload.sessionId)
+        .where("turn_id", "=", settledEvent.turn_id)
+        .where("kind", "in", ["pi_session_snapshot", "workspace_snapshot"])
+        .execute();
+    }
+    const pi = artifacts.find(
+      (artifact) =>
+        artifact.kind === "pi_session_snapshot" && artifact.turn_id === settledEvent.turn_id,
+    );
+    const workspace = artifacts.find(
+      (artifact) =>
+        artifact.kind === "workspace_snapshot" && artifact.turn_id === settledEvent.turn_id,
+    );
+    if (
+      pi === undefined ||
+      workspace === undefined ||
+      artifacts.filter((artifact) => artifact.kind === "pi_session_snapshot").length !== 1 ||
+      artifacts.filter((artifact) => artifact.kind === "workspace_snapshot").length !== 1
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_metadata_invalid",
+        "Session checkpoint metadata is missing",
+        false,
+      );
+    }
+    return {
+      piSession: {
+        objectKey: pi.object_key,
+        sha256: pi.sha256,
+        sizeBytes: safeSize(pi.size_bytes, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session checkpoint"),
+      },
+      workspace: {
+        objectKey: workspace.object_key,
+        sha256: workspace.sha256,
+        sizeBytes: safeSize(
+          workspace.size_bytes,
+          MAX_WORKSPACE_SNAPSHOT_BYTES,
+          "Workspace checkpoint",
+        ),
+      },
+      revision: revisionFor(pi.object_key, workspace.object_key),
+    };
+  }
+
+  async #lockSession(
+    transaction: Transaction<Database>,
+    command: ExecuteTurnCommandMessage,
+    now: Date,
+  ) {
+    return this.#assertCurrentSession(transaction, command, now, true);
+  }
+
+  async #assertCurrentSession(
+    transaction: Transaction<Database>,
+    command: ExecuteTurnCommandMessage,
+    now: Date,
+    lock: boolean,
+  ): Promise<{
+    piSessionKey: string | null;
+    workspaceKey: string | null;
+    rowVersion: string;
+  }> {
+    let query = transaction
+      .selectFrom("sessions as session_row")
+      .innerJoin("session_leases as lease", "lease.session_id", "session_row.id")
+      .innerJoin("turns as turn_row", (join) =>
+        join
+          .onRef("turn_row.tenant_id", "=", "session_row.tenant_id")
+          .onRef("turn_row.session_id", "=", "session_row.id"),
+      )
+      .innerJoin("commands as command_row", (join) =>
+        join
+          .onRef("command_row.tenant_id", "=", "turn_row.tenant_id")
+          .onRef("command_row.session_id", "=", "turn_row.session_id")
+          .onRef("command_row.turn_id", "=", "turn_row.id"),
+      )
+      .select([
+        "session_row.tenant_id as tenantId",
+        "session_row.project_id as projectId",
+        "session_row.workspace_id as workspaceId",
+        "session_row.pi_session_snapshot_key as piSessionKey",
+        "session_row.workspace_snapshot_key as workspaceKey",
+        "session_row.row_version as rowVersion",
+        "session_row.last_fencing_token as sessionFencingToken",
+        "session_row.state as sessionState",
+        "turn_row.state as turnState",
+        "command_row.kind as commandKind",
+        "command_row.state as commandState",
+        "lease.lease_id as leaseId",
+        "lease.fencing_token as fencingToken",
+        "lease.valid_until as validUntil",
+      ])
+      .where("session_row.id", "=", command.payload.sessionId)
+      .where("turn_row.id", "=", command.payload.turnId)
+      .where("command_row.id", "=", command.payload.commandId);
+    if (lock) query = query.forUpdate("session_row");
+    const row = await query.executeTakeFirst();
+    if (
+      row === undefined ||
+      row.tenantId !== command.payload.tenantId ||
+      row.projectId !== command.payload.projectId ||
+      row.workspaceId !== command.payload.workspaceId ||
+      row.leaseId !== command.payload.leaseId ||
+      Number(row.fencingToken) !== command.payload.fencingToken ||
+      Number(row.sessionFencingToken) !== command.payload.fencingToken ||
+      row.sessionState !== "running" ||
+      row.turnState !== "running" ||
+      row.commandKind !== "turn.execute" ||
+      row.commandState !== "acknowledged" ||
+      new Date(row.validUntil).valueOf() <= now.valueOf()
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "stale_checkpoint_fence",
+        "Checkpoint operation does not own the current session lease",
+        false,
+      );
+    }
+    return {
+      piSessionKey: row.piSessionKey,
+      workspaceKey: row.workspaceKey,
+      rowVersion: row.rowVersion,
+    };
+  }
+
+  #verifyObject(
+    bytes: Uint8Array,
+    reference: ArtifactReference,
+    maxBytes: number,
+    description: string,
+  ): void {
+    if (
+      bytes.byteLength !== reference.sizeBytes ||
+      bytes.byteLength > maxBytes ||
+      sha256(bytes) !== reference.sha256
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_corrupt",
+        `${description} checkpoint failed integrity validation`,
+        false,
+      );
+    }
+  }
+}

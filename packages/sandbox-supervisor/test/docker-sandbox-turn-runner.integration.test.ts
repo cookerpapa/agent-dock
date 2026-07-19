@@ -8,13 +8,16 @@ import { describe, expect, it } from "vitest";
 import {
   DockerSandboxTurnRunner,
   PiRpcTurnCancelledError,
+  type CapturedSandboxCheckpoint,
   type DockerSandboxContainerIdentity,
+  type LoadedSandboxCheckpoint,
   type PiRpcCancellationSignal,
+  type SandboxCheckpointStore,
 } from "../src/index.ts";
 
 const dockerEnabled = process.env.AGENT_DOCK_DOCKER_SANDBOX_TEST === "1";
 const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
-const dockerImage = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase1";
+const dockerImage = process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2";
 
 type DockerInspection = {
   Config?: {
@@ -140,7 +143,125 @@ function eventsFrom(messages: readonly EventPublishMessage[]): AgentDockEvent[] 
   return messages.map((message) => message.payload.event);
 }
 
+class MemoryCheckpointStore implements SandboxCheckpointStore {
+  checkpoint: LoadedSandboxCheckpoint | undefined;
+  saves = 0;
+
+  async load(): Promise<LoadedSandboxCheckpoint | undefined> {
+    return this.checkpoint === undefined
+      ? undefined
+      : {
+          revision: this.checkpoint.revision,
+          piSession: this.checkpoint.piSession.slice(),
+          workspace: this.checkpoint.workspace.slice(),
+        };
+  }
+
+  async save(
+    _command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    checkpoint: CapturedSandboxCheckpoint,
+  ): Promise<{ revision: string }> {
+    expect(baseRevision).toBe(this.checkpoint?.revision ?? null);
+    this.saves += 1;
+    const revision = `memory-checkpoint-${String(this.saves)}`;
+    this.checkpoint = {
+      revision,
+      piSession: checkpoint.piSession.slice(),
+      workspace: checkpoint.workspace.slice(),
+    };
+    return { revision };
+  }
+}
+
 describe.skipIf(!dockerEnabled)("DockerSandboxTurnRunner Docker integration", () => {
+  it("rehydrates Pi conversation and workspace into a fresh follow-up container", async () => {
+    const store = new MemoryCheckpointStore();
+    const firstMessages: EventPublishMessage[] = [];
+    const containerNames: string[] = [];
+    const firstCommand = command(3);
+    const firstRunner = new DockerSandboxTurnRunner({
+      image: dockerImage,
+      dockerCommand,
+      scenario: "java_repair",
+      checkpointStore: store,
+      executionTimeoutMs: 60_000,
+      onContainerReady: ({ containerName }) => {
+        containerNames.push(containerName);
+      },
+    });
+    await firstRunner.run(
+      firstCommand,
+      (message) => {
+        firstMessages.push(message);
+      },
+      new AbortController().signal,
+    );
+    const firstEvents = eventsFrom(firstMessages);
+    expect(store.saves).toBe(1);
+    expect(store.checkpoint).toBeDefined();
+    expect(firstEvents.at(-1)?.type).toBe("turn.completed");
+
+    const nextSequence = (firstEvents.at(-1)?.seq ?? 0) + 1;
+    const secondCommand: ExecuteTurnCommandMessage = {
+      ...firstCommand,
+      messageId: "10000000-0000-4000-8000-000000000030",
+      payload: {
+        ...firstCommand.payload,
+        commandId: "20000000-0000-4000-8000-000000000030",
+        idempotencyKey: "docker-integration-followup",
+        turnId: "turn-docker-integration-followup",
+        leaseId: "30000000-0000-4000-8000-000000000030",
+        fencingToken: firstCommand.payload.fencingToken + 1,
+        nextEventSeq: nextSequence,
+        input: { kind: "prompt", text: "Verify the previous repair after a cold activation." },
+      },
+    };
+    const secondMessages: EventPublishMessage[] = [];
+    const secondRunner = new DockerSandboxTurnRunner({
+      image: dockerImage,
+      dockerCommand,
+      scenario: "java_followup",
+      checkpointStore: store,
+      executionTimeoutMs: 60_000,
+      onContainerReady: ({ containerName }) => {
+        containerNames.push(containerName);
+      },
+    });
+    await secondRunner.run(
+      secondCommand,
+      (message) => {
+        secondMessages.push(message);
+      },
+      new AbortController().signal,
+    );
+
+    expect(store.saves).toBe(2);
+    expect(containerNames).toHaveLength(2);
+    expect(new Set(containerNames).size).toBe(2);
+    const secondEvents = eventsFrom(secondMessages);
+    expect(secondEvents[0]?.seq).toBe(nextSequence);
+    expect(
+      secondEvents
+        .filter((event) => event.type === "tool.started")
+        .map((event) => event.payload.toolName),
+    ).toEqual(["bash"]);
+    expect(secondEvents.find((event) => event.type === "tool.completed")).toMatchObject({
+      payload: { isError: false },
+    });
+    expect(
+      secondEvents
+        .filter((event) => event.type === "assistant.text.delta")
+        .map((event) => event.payload.text)
+        .join(""),
+    ).toContain("Prior conversation and Java repair restored");
+    const terminal = secondEvents.at(-1);
+    expect(terminal?.type).toBe("turn.completed");
+    if (terminal?.type !== "turn.completed") throw new Error("Expected a completed follow-up");
+    expect(terminal.payload.workspacePatch?.patch).toContain("+        return left + right;");
+    await Promise.all(containerNames.map((name) => expectContainerAbsent(name)));
+  }, 120_000);
+
   it("repairs and verifies Java inside a hardened ephemeral Pi container", async () => {
     const messages: EventPublishMessage[] = [];
     let identity: DockerSandboxContainerIdentity | undefined;

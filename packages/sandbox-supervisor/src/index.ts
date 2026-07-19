@@ -30,6 +30,7 @@ export {
   type PiBuiltinToolName,
   type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
+  type PiRpcSettledCheckpoint,
   type PiRpcTurnResult,
   type PiRpcTurnRunnerOptions,
 } from "./pi-rpc-turn-runner.ts";
@@ -49,5 +50,27 @@ export {
   buildDockerSandboxRunArguments,
   type DockerSandboxContainerIdentity,
   type DockerSandboxScenario,
+  type DockerSandboxScenarioContext,
+  type DockerSandboxScenarioResolver,
   type DockerSandboxTurnRunnerOptions,
 } from "./docker-sandbox-turn-runner.ts";
+
+export {
+  decodeSettledCheckpoint,
+  encodeSettledCheckpoint,
+  validateLoadedCheckpoint,
+  validatePiSessionSnapshot,
+  type CapturedSandboxCheckpoint,
+  type LoadedSandboxCheckpoint,
+  type SandboxCheckpointStore,
+  type SavedSandboxCheckpoint,
+} from "./sandbox-checkpoint.ts";
+
+export {
+  MAX_WORKSPACE_SNAPSHOT_FILES,
+  MAX_WORKSPACE_SNAPSHOT_FILE_BYTES,
+  MAX_WORKSPACE_SNAPSHOT_PATH_BYTES,
+  captureWorkspaceSnapshot,
+  restoreWorkspaceSnapshot,
+  validateWorkspaceSnapshot,
+} from "./workspace-snapshot.ts";
