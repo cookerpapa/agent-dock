@@ -103,10 +103,16 @@ export {
   SupervisorUpgradeAuthorizationError,
   SupervisorWebSocketGateway,
   type HashedBearerSupervisorAuthorizerOptions,
+  type RemoteSupervisorDispatchBinding,
   type SupervisorUpgradeAuthorizer,
   type SupervisorUpgradeRequest,
   type SupervisorWebSocketGatewayOptions,
 } from "./supervisor-websocket-gateway.ts";
+
+export {
+  validateSupervisorDispatchAffinity,
+  type SupervisorDispatchAffinity,
+} from "./supervisor-dispatch-affinity.ts";
 export {
   SessionEventHub,
   SessionEventSubscription,

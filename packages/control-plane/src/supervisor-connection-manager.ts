@@ -268,6 +268,10 @@ export class SupervisorConnectionManager {
   readonly #retirementRetryDelayMs: number;
   readonly #retirementClaimDurationMs: number;
 
+  get controlPlaneInstanceId(): string {
+    return this.#controlPlaneInstanceId;
+  }
+
   constructor(options: SupervisorConnectionManagerOptions) {
     this.#database = options.database;
     this.#controlPlaneInstanceId = requireUuid(

@@ -18,6 +18,10 @@ import type {
   TurnExecutionLeaseManager,
   TurnExecutionRequest,
 } from "./outbox-dispatcher.ts";
+import {
+  validateSupervisorDispatchAffinity,
+  type SupervisorDispatchAffinity,
+} from "./supervisor-dispatch-affinity.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -115,6 +119,7 @@ export type CancellationDispatcherOptions = {
   claimLeaseMs?: number;
   retryDelayMs?: number;
   maxAttempts?: number;
+  supervisorAffinity?: SupervisorDispatchAffinity;
 };
 
 type ClaimedCancellation = {
@@ -214,6 +219,7 @@ export class CancellationDispatcher {
   readonly #claimLeaseMs: number;
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
+  readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
 
   constructor(options: CancellationDispatcherOptions) {
     this.#database = options.database;
@@ -230,6 +236,10 @@ export class CancellationDispatcher {
       "retryDelayMs",
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
+    this.#supervisorAffinity =
+      options.supervisorAffinity === undefined
+        ? undefined
+        : validateSupervisorDispatchAffinity(options.supervisorAffinity);
   }
 
   async dispatchNext(): Promise<CancellationDispatchNextResult> {
@@ -378,6 +388,22 @@ export class CancellationDispatcher {
         .where("cancellation.kind", "=", "turn.cancel")
         .where("cancellation.state", "in", ["pending", "dispatched"])
         .where("target.kind", "=", "turn.execute")
+        .where(
+          this.#supervisorAffinity === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`exists (
+                select 1
+                from session_leases as affinity_lease
+                inner join supervisor_connections as affinity_connection
+                  on affinity_connection.sandbox_id = affinity_lease.sandbox_id
+                where affinity_lease.session_id = ${sql.ref("session_row.id")}
+                  and affinity_lease.sandbox_id = ${this.#supervisorAffinity.sandboxId}
+                  and affinity_lease.valid_until > ${now}
+                  and affinity_connection.control_plane_instance_id = ${this.#supervisorAffinity.controlPlaneInstanceId}
+                  and affinity_connection.state = 'active'
+                  and affinity_connection.expires_at > ${now}
+              )`,
+        )
         .orderBy("outbox.available_at", "asc")
         .orderBy("outbox.created_at", "asc")
         .orderBy("outbox.id", "asc")

@@ -66,8 +66,8 @@ between registration and its first heartbeat.
    resolves the new generation.
 10. The process-local command router still owns exchanges for its socket. This
     ADR does not move a pending pre-ACK or post-commit exchange between control
-    plane instances. Cross-instance dispatch ownership remains a separate
-    durable routing decision.
+    plane instances. ADR-0019 subsequently binds new outbox claims to the
+    current database connection owner.
 
 ## Failure boundaries
 
@@ -89,8 +89,9 @@ between registration and its first heartbeat.
   stale lease authority into a new command.
 - The design deliberately favors fail-closed termination over seamless
   continuation of an ambiguous tool execution.
-- Cross-instance command forwarding, durable live-event notification, and
-  production provisioner/mTLS ownership remain later work.
+- ADR-0019 makes cross-instance forwarding unnecessary for the current
+  topology. Durable live-event notification and production provisioner/mTLS
+  ownership remain later work.
 
 ## Rejected alternatives
 

@@ -4,6 +4,7 @@ import { createDatabase, runMigrations, type Database } from "@agent-dock/databa
 import {
   createAgentDockEventFactory,
   parseSupervisorToControlMessage,
+  TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
   type EventPublishMessage,
   type CancelTurnCommandMessage,
@@ -17,7 +18,7 @@ import {
   type SupervisorTurnRunner,
 } from "@agent-dock/sandbox-supervisor";
 import Fastify from "fastify";
-import { type Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   AssignmentReconciler,
@@ -37,6 +38,7 @@ import {
 } from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000001";
+const SECOND_CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000002";
 const TOKEN = `agent-dock-${"r".repeat(48)}`;
 
 let pglite: PGlite;
@@ -284,6 +286,16 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 
   }
 }
 
+async function outboxAttempts(commandId: string, topic: string): Promise<number> {
+  const row = await database
+    .selectFrom("outbox")
+    .select("attempts")
+    .where("topic", "=", topic)
+    .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${commandId}`)
+    .executeTakeFirstOrThrow();
+  return row.attempts;
+}
+
 beforeAll(async () => {
   pglite = await PGlite.create();
   socketServer = new PGLiteSocketServer({
@@ -307,6 +319,273 @@ afterAll(async () => {
 });
 
 describe.sequential("remote two-phase supervisor execution", () => {
+  it("moves execute and cancellation claim ownership to the current socket replica", async () => {
+    const seeded = await seedTurn();
+    const eventStore = new DurableEventStore({ database, tenantId: seeded.tenantId });
+    const eventMessages: EventPublishMessage[] = [];
+    const routerOptions = {
+      eventIngestor: eventStore,
+      onEvent(message: EventPublishMessage) {
+        eventMessages.push(message);
+      },
+      commandAckTimeoutMs: 1_000,
+      commandResultTimeoutMs: 5_000,
+      maxPendingCommands: 8,
+    };
+    const firstRouter = new SupervisorCommandRouter(routerOptions);
+    const secondRouter = new SupervisorCommandRouter(routerOptions);
+    const manager = (controlPlaneInstanceId: string) =>
+      new SupervisorConnectionManager({
+        database,
+        controlPlaneInstanceId,
+        ownerBoundary: {
+          async stopAndConfirm() {
+            return undefined;
+          },
+        },
+        assignmentRetirerFactory: (identity) =>
+          new AssignmentReconciler({
+            database,
+            sandboxId: identity.sandboxId,
+            inventory: emptyInventory(),
+          }),
+        heartbeatIntervalMs: 100,
+        heartbeatTimeoutMs: 2_000,
+        leaseDurationMs: 5_000,
+      });
+    const firstGateway = new SupervisorWebSocketGateway({
+      manager: manager(CONTROL_PLANE_ID),
+      commandRouter: firstRouter,
+      authorizer: new HashedBearerSupervisorAuthorizer({ token: TOKEN, identity: seeded.identity }),
+      registrationTimeoutMs: 1_000,
+    });
+    const secondGateway = new SupervisorWebSocketGateway({
+      manager: manager(SECOND_CONTROL_PLANE_ID),
+      commandRouter: secondRouter,
+      authorizer: new HashedBearerSupervisorAuthorizer({ token: TOKEN, identity: seeded.identity }),
+      registrationTimeoutMs: 1_000,
+    });
+    const firstServer = Fastify({ logger: false });
+    const secondServer = Fastify({ logger: false });
+    firstGateway.install(firstServer);
+    secondGateway.install(secondServer);
+    const [firstAddress, secondAddress] = await Promise.all([
+      firstServer.listen({ host: "127.0.0.1", port: 0 }),
+      secondServer.listen({ host: "127.0.0.1", port: 0 }),
+    ]);
+    let runnerCalls = 0;
+    let cancellableRunnerStarted = false;
+    const supervisor = new LocalSandboxSupervisor({
+      maxConcurrentSessions: 1,
+      runner: {
+        async run(command, publishEvent, signal) {
+          runnerCalls += 1;
+          const factory = createAgentDockEventFactory(
+            {
+              sessionId: command.payload.sessionId,
+              turnId: command.payload.turnId,
+              agentId: command.payload.agentId,
+            },
+            { initialSequence: command.payload.nextEventSeq - 1 },
+          );
+          await publishEvent(
+            eventMessage(
+              command,
+              factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
+            ),
+          );
+          if (runnerCalls === 1) {
+            await publishEvent(
+              eventMessage(
+                command,
+                factory.next({ type: "turn.completed", payload: { stopReason: "first-owner" } }),
+              ),
+            );
+            return { stopReason: "first-owner" };
+          }
+          cancellableRunnerStarted = true;
+          if (!signal.aborted) {
+            await new Promise<void>((resolvePromise) =>
+              signal.addEventListener("abort", () => resolvePromise(), { once: true }),
+            );
+          }
+          const cancellation = signal.reason as {
+            reason: CancelTurnCommandMessage["payload"]["reason"];
+          };
+          await publishEvent(
+            eventMessage(
+              command,
+              factory.next({
+                type: "turn.cancelled",
+                payload: { reason: cancellation.reason, forced: false },
+              }),
+            ),
+          );
+          throw new PiRpcTurnCancelledError(cancellation.reason, false);
+        },
+      },
+    });
+    const client = (url: string) =>
+      new SupervisorWebSocketClient({
+        url: `${url.replace(/^http/, "ws")}/internal/v1/supervisor`,
+        authorizationHeader: `Bearer ${TOKEN}`,
+        registration: { ...seeded.identity, maxConcurrentSessions: 1 },
+        runtime: supervisor,
+        connectTimeoutMs: 1_000,
+        closeTimeoutMs: 200,
+        eventAckTimeoutMs: 2_000,
+      });
+    const firstClient = client(firstAddress);
+    let secondClient: SupervisorWebSocketClient | undefined;
+
+    try {
+      await firstClient.start();
+      const firstBinding = await firstGateway.createRemoteDispatchBinding(
+        seeded.identity.sandboxId,
+      );
+      const wrongSecondDispatcher = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: secondGateway.createRemoteExecutionBackend(seeded.identity.sandboxId),
+        leaseManager: firstBinding.leaseCoordinator,
+        supervisorAffinity: {
+          sandboxId: seeded.identity.sandboxId,
+          controlPlaneInstanceId: SECOND_CONTROL_PLANE_ID,
+        },
+      });
+      await expect(wrongSecondDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+      expect(await outboxAttempts(seeded.accepted.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
+
+      const firstDispatcher = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: firstBinding.backend,
+        leaseManager: firstBinding.leaseCoordinator,
+        supervisorAffinity: firstBinding.supervisorAffinity,
+      });
+      await expect(firstDispatcher.dispatchNext()).resolves.toMatchObject({ status: "completed" });
+
+      const followUp = await seeded.store.acceptTurn(
+        seeded.session.sessionId,
+        `owner-follow-up-${uuid()}`,
+        { prompt: "wait until cancellation" },
+      );
+      secondClient = client(secondAddress);
+      await secondClient.start();
+      await firstClient.waitUntilClosed();
+      const secondBinding = await secondGateway.createRemoteDispatchBinding(
+        seeded.identity.sandboxId,
+      );
+      secondClient.setAcceptingAssignments(false);
+      await waitFor(async () => {
+        const connection = await database
+          .selectFrom("supervisor_connections")
+          .select("accepting_assignments")
+          .where("connection_id", "=", secondBinding.connectionId)
+          .executeTakeFirst();
+        return connection?.accepting_assignments === false;
+      });
+
+      const staleFirstDispatcher = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: firstBinding.backend,
+        leaseManager: firstBinding.leaseCoordinator,
+        supervisorAffinity: firstBinding.supervisorAffinity,
+      });
+      await expect(staleFirstDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+      expect(await outboxAttempts(followUp.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
+
+      const secondDispatcher = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: secondBinding.backend,
+        leaseManager: secondBinding.leaseCoordinator,
+        supervisorAffinity: secondBinding.supervisorAffinity,
+      });
+      await expect(secondDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+      expect(await outboxAttempts(followUp.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
+      secondClient.setAcceptingAssignments(true);
+      await waitFor(async () => {
+        const connection = await database
+          .selectFrom("supervisor_connections")
+          .select("accepting_assignments")
+          .where("connection_id", "=", secondBinding.connectionId)
+          .executeTakeFirst();
+        return connection?.accepting_assignments === true;
+      });
+      const execution = secondDispatcher.dispatchNext();
+      await waitFor(() => cancellableRunnerStarted);
+      const capacitySession = await seeded.store.createSession(
+        seeded.project.projectId,
+        seeded.project.workspaceId,
+      );
+      const capacityTurn = await seeded.store.acceptTurn(
+        capacitySession.sessionId,
+        `capacity-${uuid()}`,
+        { prompt: "wait for sandbox capacity" },
+      );
+      const capacityProbe = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: secondBinding.backend,
+        leaseManager: secondBinding.leaseCoordinator,
+        supervisorAffinity: secondBinding.supervisorAffinity,
+      });
+      await expect(capacityProbe.dispatchNext()).resolves.toEqual({ status: "idle" });
+      expect(await outboxAttempts(capacityTurn.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
+      secondClient.setAcceptingAssignments(false);
+      await waitFor(async () => {
+        const connection = await database
+          .selectFrom("supervisor_connections")
+          .select("accepting_assignments")
+          .where("connection_id", "=", secondBinding.connectionId)
+          .executeTakeFirst();
+        return connection?.accepting_assignments === false;
+      });
+
+      const cancellation = await seeded.store.acceptTurnCancellation(
+        seeded.session.sessionId,
+        followUp.turnId,
+        `owner-cancel-${uuid()}`,
+        { gracePeriodMs: 100 },
+      );
+      const wrongFirstCancellation = new CancellationDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: firstBinding.backend,
+        leaseManager: firstBinding.leaseCoordinator,
+        supervisorAffinity: firstBinding.supervisorAffinity,
+      });
+      await expect(wrongFirstCancellation.dispatchNext()).resolves.toEqual({ status: "idle" });
+      expect(await outboxAttempts(cancellation.commandId, TURN_CANCELLATION_OUTBOX_TOPIC)).toBe(0);
+
+      const secondCancellation = new CancellationDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend: secondBinding.backend,
+        leaseManager: secondBinding.leaseCoordinator,
+        supervisorAffinity: secondBinding.supervisorAffinity,
+      });
+      await expect(secondCancellation.dispatchNext()).resolves.toMatchObject({
+        status: "cancelled",
+        commandId: cancellation.commandId,
+      });
+      expect(["cancellation_pending", "cancelled"]).toContain((await execution).status);
+      expect(runnerCalls).toBe(2);
+      expect(eventMessages.map((message) => message.payload.event.type)).toEqual([
+        "turn.started",
+        "turn.completed",
+        "turn.started",
+        "turn.cancelled",
+      ]);
+    } finally {
+      await secondClient?.stop();
+      await firstClient.stop();
+      await Promise.all([firstServer.close(), secondServer.close()]);
+    }
+  });
+
   it("reconnects with a new generation and resolves backend authority per command", async () => {
     const seeded = await seedTurn();
     const eventMessages: EventPublishMessage[] = [];

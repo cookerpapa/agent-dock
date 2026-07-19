@@ -86,5 +86,5 @@ extension-policy support would overstate the current boundary.
 - [x] Carry authenticated registration and shared heartbeats over a bounded outbound WebSocket
 - [x] Route execute/cancel, two-phase command ACK/commit/result, and event publish/ACK over the remote supervisor connection
 - [x] Automatically reconnect the same boot, drain old assignments, and resolve guarded remote backends per connection generation
-- [ ] Add cross-instance command ownership and forwarding
+- [x] Fence cross-instance execute/cancel claims to the current local socket owner without a second broker
 - [ ] Replace the development bearer authorizer and owner boundary with production provisioner/mTLS and process adapters

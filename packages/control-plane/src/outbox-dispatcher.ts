@@ -10,6 +10,10 @@ import {
 import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
 import type { CancelTurnCommandMessage } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
+import {
+  validateSupervisorDispatchAffinity,
+  type SupervisorDispatchAffinity,
+} from "./supervisor-dispatch-affinity.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -156,6 +160,7 @@ export type OutboxDispatcherOptions = {
   retryDelayMs?: number;
   maxAttempts?: number;
   leaseManager?: TurnExecutionLeaseManager;
+  supervisorAffinity?: SupervisorDispatchAffinity;
 };
 
 type ClaimedTurn = {
@@ -237,6 +242,7 @@ export class OutboxDispatcher {
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
+  readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
 
   constructor(options: OutboxDispatcherOptions) {
     this.#database = options.database;
@@ -253,6 +259,10 @@ export class OutboxDispatcher {
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
     this.#leaseManager = options.leaseManager;
+    this.#supervisorAffinity =
+      options.supervisorAffinity === undefined
+        ? undefined
+        : validateSupervisorDispatchAffinity(options.supervisorAffinity);
   }
 
   async dispatchNext(): Promise<DispatchNextResult> {
@@ -453,6 +463,25 @@ export class OutboxDispatcher {
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
         .where("command.kind", "=", "turn.execute")
+        .where(
+          this.#supervisorAffinity === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`exists (
+                select 1
+                from sandboxes as affinity_sandbox
+                inner join supervisor_connections as affinity_connection
+                  on affinity_connection.sandbox_id = affinity_sandbox.id
+                  and affinity_connection.supervisor_id = affinity_sandbox.supervisor_id
+                  and affinity_connection.boot_id = affinity_sandbox.boot_id
+                where affinity_sandbox.id = ${this.#supervisorAffinity.sandboxId}
+                  and affinity_sandbox.state in ('ready', 'leased')
+                  and affinity_sandbox.active_sessions < affinity_sandbox.max_concurrent_sessions
+                  and affinity_connection.control_plane_instance_id = ${this.#supervisorAffinity.controlPlaneInstanceId}
+                  and affinity_connection.state = 'active'
+                  and affinity_connection.accepting_assignments = true
+                  and affinity_connection.expires_at > ${now}
+              )`,
+        )
         .where(
           sql<boolean>`(
             (

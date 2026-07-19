@@ -971,3 +971,36 @@
   持有 socket 的单个 control-plane process；另一个 replica 尚不能把 outbox claim 转发给该 owner。
 - 下一步：实现 cross-instance command ownership/forwarding。原因是 Supervisor 自身已经能跨网络抖动
   恢复，剩余的高可用缺口是“dispatcher 和 socket 位于不同 control-plane replica 时如何安全会合”。
+
+## 2026-07-19 — 跨 control-plane command claim ownership
+
+- 目标：避免 dispatcher 从共享 PostgreSQL outbox 领取一条只能由另一 control-plane 进程内 WebSocket
+  发送的 command，同时判断是否真的需要再引入 Redis/Kafka 或第二套 durable command relay。
+- 决策：新增 ADR-0019，选择 database claim affinity。execute 在 acquire lease 前尚未绑定 sandbox，任何
+  拥有健康本地 Supervisor 的 replica 都可以领取；cancellation 已绑定目标 session lease，必须跟随该
+  lease 到 exact sandbox 的当前 socket owner。现有 outbox、connection generation 和 `SKIP LOCKED` 已能
+  提供排他性，因此当前拓扑不新增 broker 或 payload 中转表。
+- Execute guard：`OutboxDispatcher` 可配置 exact sandbox/control-plane affinity。claim transaction 只有在
+  sandbox 为 ready/leased、低于 capacity，且存在属于本实例的 active、unexpired、accepting connection 时
+  才锁定 command。`SessionLeaseCoordinator.acquire()` 随后仍重复权威检查，覆盖 claim 与发送之间的 owner
+  变化。wrong owner、drain 或 full capacity 只返回 idle，不增加 attempt/retry deadline。
+- Cancellation guard：`CancellationDispatcher` 使用 target session lease、sandbox、active connection 与
+  `control_plane_instance_id` 做关联。它要求 lease/connection 未过期，但故意忽略
+  `accepting_assignments=false`，因为 drain 必须禁止新 execute、不能禁止终止已有 runtime。
+- Gateway binding：`createRemoteDispatchBinding()` 一次返回 dynamic remote backend、该 generation 的
+  lifecycle lease coordinator、connection ID 与经过验证的 affinity，减少调用方把 backend 和错误 owner
+  组合在一起的机会。生产 attach/detach worker lifecycle 仍必须由真实 provisioner/owner adapter 接线。
+- 可执行证据：一个真实双 Fastify listener、双 `control_plane_instance_id`、共享 PostgreSQL、同 boot
+  Supervisor 测试先证明非 owner 对 execute 返回 idle/attempt=0，再由 A 完成第一轮；Supervisor 重连 B 后，
+  A 对 follow-up 立即失去 claim 权，B 在 drain 时也不领取 execute，恢复 accepting 后开始第二轮。容量占满
+  时另一 session 保持 attempt=0；随后再次 drain，A 不能领取 cancellation，而 B 仍能完成 fenced cancel。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、202 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 vulnerabilities。相同 control-plane suite 又在一次性、
+  仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 上通过 52 passed/1 Docker-only skipped，双 owner affinity
+  的 correlated `EXISTS`、row locks 与 owner handoff 均通过；结束后 database 与 managed sandbox containers
+  均为 0。
+- 当前边界：这里解决的是正确性归属，不是全局公平调度。当前单用户 v0 可为每个本地连接启动 bounded
+  async polling lanes；多 tenant quota/fairness、跨 region scheduler 与生产自动 worker 生命周期仍是后续层。
+- 下一步：实现 cross-replica live event notification。原因是 command claim 已能跟随 owner，但浏览器 SSE
+  目前仍依赖进程内 event hub；写 event 的 replica 与承载浏览器连接的 replica 不同时，实时通知仍会延迟
+  到客户端重连/轮询 durable history。

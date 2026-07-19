@@ -159,12 +159,11 @@ process-local. The local supervisor can use a private, crash-safe file spool
 that syncs every event before transport and replays an unacknowledged suffix
 from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, production supervisor authentication/owner adapters, cross-instance
-command ownership,
-acknowledged-cancellation crash recovery, cross-replica event notification, and
-Windows Job Object containment remain later slices. A crash after durable
-command ACK is treated as ambiguous and failed rather than replaying possible
-tool side effects.
+gateway, production supervisor authentication/owner and dispatch-worker
+adapters, acknowledged-cancellation crash recovery, cross-replica event
+notification, and Windows Job Object containment remain later slices. A crash
+after durable command ACK is treated as ambiguous and failed rather than
+replaying possible tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -365,8 +364,9 @@ automates timeout fencing, owner-stop confirmation, and retryable retirement;
 registration/heartbeat and two-phase command/event delivery can cross a real
 outbound WebSocket. The client now performs bounded same-boot reconnect only
 after revoked assignments settle, and remote backends resolve the guarded
-connection generation per command. Cross-instance command ownership and the
-concrete production owner-process adapter are not yet wired.
+connection generation per command. Cross-instance claims follow the durable
+socket owner as described below; the concrete production owner-process and
+automatic dispatch-worker adapters are not yet wired.
 
 ## 5. Delivery and recovery semantics
 
@@ -428,6 +428,16 @@ sandbox holding the session lease before `DurableEventStore` commits it. Only
 then is `event.ack` sent. Socket loss releases uncommitted work and locally
 revokes committed assignments, while durable timeout/owner retirement remains
 the external fence. See ADR-0017.
+
+Remote dispatcher claims can carry an exact sandbox/control-plane affinity.
+Execute eligibility requires a local active, unexpired, assignment-accepting
+connection plus sandbox capacity; guarded lease acquisition repeats those
+checks after the outbox lock. Cancellation eligibility instead joins the target
+session lease to its sandbox's current connection owner and intentionally
+ignores the drain flag. A wrong or stale owner returns `idle` without consuming
+an outbox attempt. Same-boot reconnect changes this ownership through the
+existing connection-generation transaction, so the current topology needs no
+second command broker. See ADR-0019.
 
 ### Event and command semantics
 

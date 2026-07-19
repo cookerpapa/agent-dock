@@ -17,6 +17,7 @@ import {
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
 import type { SessionLeaseCoordinator } from "./session-lease-coordinator.ts";
 import { RemoteSupervisorExecutionBackend } from "./remote-supervisor-execution-backend.ts";
+import type { SupervisorDispatchAffinity } from "./supervisor-dispatch-affinity.ts";
 
 export const SUPERVISOR_WEBSOCKET_PATH = "/internal/v1/supervisor";
 export const SUPERVISOR_SOCKET_CLOSE = {
@@ -50,6 +51,14 @@ export type SupervisorWebSocketGatewayOptions = {
   maxBufferedSendBytes?: number;
   registrationTimeoutMs?: number;
   commandRouter?: SupervisorCommandRouter;
+};
+
+export type RemoteSupervisorDispatchBinding = {
+  sandboxId: string;
+  connectionId: string;
+  supervisorAffinity: SupervisorDispatchAffinity;
+  backend: RemoteSupervisorExecutionBackend;
+  leaseCoordinator: SessionLeaseCoordinator;
 };
 
 export class SupervisorUpgradeAuthorizationError extends Error {
@@ -248,6 +257,30 @@ export class SupervisorWebSocketGateway {
       transport: this.#commandRouter,
       leaseCoordinatorProvider: () => this.currentLeaseCoordinator(sandboxId),
     });
+  }
+
+  async createRemoteDispatchBinding(sandboxId: string): Promise<RemoteSupervisorDispatchBinding> {
+    const context = this.#activeBySandbox.get(sandboxId);
+    if (context === undefined || context.closed || context.registeredConnectionId === undefined) {
+      throw new SupervisorConnectionManagerError(
+        "supervisor_connection_unavailable",
+        "Supervisor connection is unavailable",
+        true,
+      );
+    }
+    return {
+      sandboxId,
+      connectionId: context.registeredConnectionId,
+      supervisorAffinity: {
+        sandboxId,
+        controlPlaneInstanceId: this.#manager.controlPlaneInstanceId,
+      },
+      backend: this.createRemoteExecutionBackend(sandboxId),
+      leaseCoordinator: await this.#manager.leaseCoordinator(
+        context.registeredConnectionId,
+        context.authority,
+      ),
+    };
   }
 
   install(fastify: FastifyInstance): void {

@@ -106,6 +106,7 @@ only after a measured requirement appears.
 - [ADR-0016: authenticated outbound supervisor WebSocket transport](docs/adr/0016-supervisor-websocket-transport.md)
 - [ADR-0017: two-phase remote command delivery](docs/adr/0017-two-phase-remote-command-delivery.md)
 - [ADR-0018: supervisor reconnect and generation recovery](docs/adr/0018-supervisor-reconnect-and-generation-recovery.md)
+- [ADR-0019: cross-instance supervisor command ownership](docs/adr/0019-cross-instance-supervisor-command-ownership.md)
 
 ## Current executable spikes
 
@@ -280,10 +281,10 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, production supervisor authentication/owner wiring, a cross-instance
-command broker, and cross-replica live fan-out remain separate work. Queued-turn
-withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
-containment are also deferred.
+gateway, production supervisor authentication/owner and automatic dispatch-worker
+wiring, and cross-replica live fan-out remain separate work. Queued-turn withdrawal,
+acknowledged-cancellation crash recovery, and Windows Job Object containment are
+also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -341,6 +342,15 @@ resolves its guarded lease coordinator at the start of each new command. A
 committed command interrupted by disconnect is still failed as ambiguous rather
 than replayed on the new connection.
 
+Cross-instance command ownership uses the existing PostgreSQL claim transaction
+instead of adding another broker. An execute dispatcher is eligible only when
+its fixed sandbox has capacity and an unexpired, assignment-accepting connection
+owned by the local control-plane instance. Cancellation follows the target
+session lease to that sandbox's current connection owner and remains eligible
+while the Supervisor is draining. When the same boot reconnects elsewhere, the
+old replica returns `idle` without consuming an outbox attempt and the new owner
+can claim immediately.
+
 Capability `command.two_phase.v1` additionally enables multiplexed remote
 execute/cancel delivery. The Supervisor prepares without starting Pi and returns
 an exact ACK; only after the dispatcher persists `ACKNOWLEDGED/RUNNING` does the
@@ -369,6 +379,5 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses cross-instance command ownership, cross-replica live
-notification, and the MinIO/S3 object-store adapter rather than keeping a
-process per conversation.
+Phase 2 next addresses cross-replica live notification and the MinIO/S3
+object-store adapter rather than keeping a process per conversation.

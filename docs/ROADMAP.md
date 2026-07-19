@@ -97,8 +97,12 @@ The sandbox client now reconnects transient same-boot failures with bounded
 backoff, waits for revoked assignments to settle before opening a new
 generation, preserves its drain state in registration, and resolves guarded
 remote lease authority per command. It deliberately does not resume an
-ambiguous committed tool execution. Cross-instance command ownership remains
-the next transport slice.
+ambiguous committed tool execution. Execute claims are now eligible only on a
+replica with a healthy local Supervisor and capacity; cancellation claims follow
+the target session lease to that sandbox's current socket owner. PostgreSQL
+owner affinity makes a separate cross-instance command broker unnecessary for
+the current topology. Automatic production worker lifecycle wiring remains with
+the provisioner/owner adapter.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 
