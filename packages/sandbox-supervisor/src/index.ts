@@ -76,6 +76,14 @@ export {
 } from "./docker-sandbox-assignment-inventory.ts";
 
 export {
+  buildDockerGitHubWorkspaceImportArguments,
+  DockerGitHubWorkspaceImporter,
+  GitHubWorkspaceImporterError,
+  isMissingDockerObjectDiagnostic,
+  type DockerGitHubWorkspaceImporterOptions,
+} from "./docker-github-workspace-importer.ts";
+
+export {
   DockerSandboxTurnRunner,
   buildDockerSandboxRunArguments,
   type DockerSandboxContainerIdentity,
@@ -85,11 +93,16 @@ export {
   type DockerSandboxScenarioContext,
   type DockerSandboxScenarioResolver,
   type DockerSandboxTurnRunnerOptions,
+  type DockerSandboxWorkspaceSeedResolver,
 } from "./docker-sandbox-turn-runner.ts";
+
+export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
 
 export {
   decodeSettledCheckpoint,
+  decodeWorkspaceSnapshot,
   encodeSettledCheckpoint,
+  encodeWorkspaceSnapshot,
   validateLoadedCheckpoint,
   validatePiSessionSnapshot,
   type CapturedSandboxCheckpoint,

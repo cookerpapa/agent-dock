@@ -152,8 +152,9 @@ reconciliation.
 The fifth Phase 1 slice connects the same `SupervisorTurnRunner` boundary to a
 real Docker activation. A trusted host-side manager starts one ephemeral
 container for an active turn; inactive sessions retain no process or container.
-The worker copies an image-owned Java fixture into workspace tmpfs, creates a
-baseline Git commit, starts pinned Pi with an explicit `bash/edit` tool
+The worker receives either the image-owned Java fixture or a trusted-host-
+resolved, bounded workspace seed through its typed private protocol, restores it
+into workspace tmpfs, creates a baseline Git commit, and starts pinned Pi with an explicit `bash/edit` tool
 allowlist, and embeds the loopback fake model so the container can remain
 networkless. Host and worker exchange a private, closed, versioned JSONL
 protocol over attached stdin/stdout. Each worker event waits for the existing
@@ -170,11 +171,13 @@ and Docker execution are executable. Each production control-plane replica owns
 one dedicated PostgreSQL listener; notifications wake a process-local hub, while
 event bodies are always read from the durable table. The trusted Supervisor host
 uses a private, crash-safe file spool that syncs every event before transport and
-replays an unacknowledged suffix after reconnect.
-Generic repository import, policy-approved extensions, a request-scoped model
-gateway, acknowledged-cancellation crash recovery, and Windows Job Object
-containment remain later slices. A crash after durable command ACK is treated as
-ambiguous and failed rather than replaying possible tool side effects.
+replays an unacknowledged suffix after reconnect. Controlled small public GitHub
+repositories are accepted only as a normalized coordinate plus exact commit and
+are provisioned as immutable seeds before Pi starts. Arbitrary/private Git
+sources, policy-approved extensions, acknowledged-cancellation crash recovery,
+and Windows Job Object containment remain later slices. A crash after durable
+command ACK is treated as ambiguous and failed rather than replaying possible
+tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -200,14 +203,20 @@ event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
 
 The host alone receives the Docker socket and S3 credential. It composes the
-Docker runner, local Supervisor, PostgreSQL checkpoint metadata adapter,
+Docker runner, disposable public-GitHub importer, PostgreSQL workspace-import
+lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
 S3-compatible byte store, tenant model-credential resolver/gateway,
 active/quarantine spool roots, reconnect client, and an authenticated private
 management endpoint. The control plane receives neither Docker authority nor S3
 credentials; Pi workers receive neither of those, database/API/owner credentials,
 nor any long-lived provider credential. Fake workers have no network. Real-model
 workers have only a Compose-internal route to the Supervisor gateway; only that
-trusted host also has fixed provider egress.
+trusted host also has fixed provider egress. A one-shot importer joins only the
+repository-egress bridge, receives no prompt or secret, and cannot join the
+database, object-storage, management, model-runtime, or provider-egress
+networks. The trusted Supervisor anchors that bridge in the bundled Compose
+topology, so its reachable HTTP surfaces still require credentials or a turn
+capability that the importer does not possess.
 Every assignment inventory request is constrained again to a sandbox generation
 known by this host's ledger, and a terminate/absence request must match that
 generation's stable Supervisor and exact boot before Docker is inspected.
@@ -220,15 +229,17 @@ The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted host, static Web
 ingress, isolated networks, private secret-file mounts, health checks, bounded
 resources/logs, and four declared volumes. Only Web publishes a loopback port.
-This topology is complete for the bounded private multi-tenant fixture with
-either a deterministic model or owner-configured DeepSeek; it does not imply
-generic repository/arbitrary-provider/extension support, public SaaS,
+This topology is complete for the bounded private multi-tenant fixture and
+controlled public GitHub commits with either a deterministic model or owner-
+configured DeepSeek; it does not imply arbitrary/private repository,
+arbitrary-provider/extension support, public SaaS,
 Kubernetes, or direct Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
-See ADR-0023, ADR-0025, ADR-0026, ADR-0027, and the production runbook.
+See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, and the production
+runbook.
 
 ### Model profiles and credentials
 
@@ -396,15 +407,16 @@ recovery. See ADR-0024.
 3. The API returns `202 Accepted`.
 4. The session coordinator acquires the session execution lease.
 5. The scheduler assigns or creates a sandbox runner.
-6. The supervisor validates the fencing token and loads session/workspace state.
+6. The supervisor validates the fencing token, resolves and reverifies the
+   immutable workspace seed, and loads settled session/workspace state.
 7. The selected execution backend activates Pi, loads policy-approved
    extensions, and executes the agent loop.
 8. The supervisor translates and emits sequenced events; the control plane persists and ACKs them.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
 
-Steps 1-10 are executable for the bounded sample-workspace path through the
-local integration boundary: the control plane acquires a real PostgreSQL
+Steps 1-10 are executable for the bounded sample or controlled-GitHub workspace
+path through the local integration boundary: the control plane acquires a real PostgreSQL
 lease/fence, persists ACK before run,
 activates an ephemeral hardened Docker workspace, and receives public text,
 tool, and terminal events from pinned Pi. Step 8 stores each complete event plus
@@ -423,8 +435,16 @@ and conditionally stores bounded bytes in a configured S3-compatible
 bucket/prefix. A digest-pinned localhost MinIO proof discards the writer and
 restores through a fresh client; declared and streamed size limits, S3 checksum,
 and the independent database hash fail closed on corruption. The supported
-production topology composes this S3 path with the trusted remote Supervisor;
-generic repository snapshot import/export remains unimplemented.
+production topology composes this S3 path with the trusted remote Supervisor.
+For a public GitHub source, PostgreSQL grants one expiring lease for the first
+activation. A separate hardened Docker importer fetches the exact 40-hex commit,
+removes `.git`, captures the existing safe manifest, and conditionally writes a
+content-addressed seed below a tenant/workspace prefix. Publishing ready state
+and the workspace pointer is one fenced transaction. Concurrent activations
+wait; expired leases are reclaimable; stale owners cannot publish. Every turn
+revalidates object key, size, digest, and manifest before the worker receives
+the seed. A settled session checkpoint overlays that baseline, so a follow-up
+neither reclones nor depends on GitHub availability. See ADR-0028.
 The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
 in-flight execution is never recreated: after the old owner boot is fenced, the
@@ -533,6 +553,9 @@ second command broker. See ADR-0019.
 - `turn.completed` may carry a unified workspace patch. It is collected inside
   the sandbox, UTF-8 bounded to 64 KiB, and schema-validated before publication;
   the control plane never reads the live container filesystem to construct it.
+  The collector marks only currently untracked paths as intent-to-add before a
+  working-tree diff, so new files, tracked edits, and deletions remain visible
+  together relative to the immutable imported baseline.
 - Only session-level state events may use a null `turnId`; turn, tool, approval,
   assistant, and notification events require a concrete turn identity.
 - Event validation succeeds before the supervisor spool accepts a sequence.

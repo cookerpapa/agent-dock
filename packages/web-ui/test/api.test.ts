@@ -3,6 +3,46 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDockApi } from "../src/api.ts";
 
 describe("tenant-aware browser API", () => {
+  it("creates a project from a normalized exact-commit GitHub source", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const commitSha = "b".repeat(40);
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("/v1/projects");
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      expect(JSON.parse(String(init?.body))).toEqual({
+        name: "Pinned repository",
+        source: {
+          kind: "github_public",
+          repository: "octocat/hello-world",
+          commitSha,
+        },
+      });
+      return new Response(
+        JSON.stringify({
+          projectId: "20000000-0000-4000-8000-000000000001",
+          workspaceId: "30000000-0000-4000-8000-000000000001",
+          name: "Pinned repository",
+          createdAt: "2026-07-19T00:00:00.000Z",
+          source: {
+            kind: "github_public",
+            repository: "octocat/hello-world",
+            commitSha,
+            status: "pending",
+          },
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(
+      api.createProject("Pinned repository", {
+        kind: "github_public",
+        repository: "octocat/hello-world",
+        commitSha,
+      }),
+    ).resolves.toMatchObject({ source: { kind: "github_public", status: "pending" } });
+  });
+
   it("reads safe model metadata and submits a write-only provider credential", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const providerKey = `sk-${"p".repeat(48)}`;
@@ -143,6 +183,7 @@ describe("tenant-aware browser API", () => {
                   workspaceId: "40000000-0000-4000-8000-000000000001",
                   name: "Alpha repair",
                   createdAt,
+                  source: { kind: "sample_java", status: "ready" },
                 },
                 session: {
                   sessionId: "20000000-0000-4000-8000-000000000001",

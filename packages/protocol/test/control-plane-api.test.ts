@@ -33,6 +33,7 @@ describe("control-plane public API schemas", () => {
         workspaceId: "20000000-0000-4000-8000-000000000001",
         name: "Java repair demo",
         createdAt,
+        source: { kind: "sample_java", status: "ready" },
       }),
     ).toMatchObject({ name: "Java repair demo" });
     expect(
@@ -116,6 +117,7 @@ describe("control-plane public API schemas", () => {
           workspaceId: "20000000-0000-4000-8000-000000000001",
           name: "Java repair demo",
           createdAt,
+          source: { kind: "sample_java", status: "ready" },
         },
         session: {
           sessionId: "30000000-0000-4000-8000-000000000001",
@@ -177,7 +179,27 @@ describe("control-plane public API schemas", () => {
   });
 
   it("normalizes project names and preserves prompt text", () => {
-    expect(parseCreateProjectRequest({ name: "  AgentDock  " })).toEqual({ name: "AgentDock" });
+    expect(parseCreateProjectRequest({ name: "  AgentDock  " })).toEqual({
+      name: "AgentDock",
+      source: { kind: "sample_java" },
+    });
+    expect(
+      parseCreateProjectRequest({
+        name: "Imported repository",
+        source: {
+          kind: "github_public",
+          repository: "octocat/hello-world",
+          commitSha: "a".repeat(40),
+        },
+      }),
+    ).toEqual({
+      name: "Imported repository",
+      source: {
+        kind: "github_public",
+        repository: "octocat/hello-world",
+        commitSha: "a".repeat(40),
+      },
+    });
     expect(parseAcceptTurnRequest({ prompt: "  fix the test  ", thinkingLevel: "low" })).toEqual({
       prompt: "  fix the test  ",
       thinkingLevel: "low",
@@ -235,6 +257,32 @@ describe("control-plane public API schemas", () => {
     expect(() => parseUuidPathParameter("session-1", "sessionId")).toThrow(
       ControlPlaneApiValidationError,
     );
+  });
+
+  it("accepts only normalized public GitHub coordinates pinned to an exact commit", () => {
+    const invalidSources = [
+      {
+        kind: "github_public",
+        repository: "https://github.com/octocat/hello-world",
+        commitSha: "a".repeat(40),
+      },
+      { kind: "github_public", repository: "Octocat/hello-world", commitSha: "a".repeat(40) },
+      { kind: "github_public", repository: "octocat/../secret", commitSha: "a".repeat(40) },
+      { kind: "github_public", repository: "octocat/hello-world.git", commitSha: "a".repeat(40) },
+      { kind: "github_public", repository: "octocat/hello-world", commitSha: "main" },
+      { kind: "github_public", repository: "octocat/hello-world", commitSha: "A".repeat(40) },
+      {
+        kind: "github_public",
+        repository: "octocat/hello-world",
+        commitSha: "a".repeat(40),
+        token: "must-not-cross",
+      },
+    ];
+    for (const source of invalidSources) {
+      expect(() => parseCreateProjectRequest({ name: "invalid", source })).toThrow(
+        ControlPlaneApiValidationError,
+      );
+    }
   });
 
   it("rejects whitespace-only values, extra fields, and unsupported thinking levels", () => {

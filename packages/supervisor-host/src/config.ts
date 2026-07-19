@@ -32,6 +32,10 @@ export type SupervisorHostConfig = {
   modelGatewayUpstreamRequestTimeoutMs: number;
   piModelRequestTimeoutMs: number;
   piTurnTimeoutMs: number;
+  repositoryImportNetwork: string;
+  repositoryImportTimeoutMs: number;
+  repositoryImportLeaseMs: number;
+  repositoryImportWaitMs: number;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -123,9 +127,9 @@ function modelGatewayBaseUrl(value: string): string {
   return parsed.toString();
 }
 
-function dockerNetwork(value: string): string {
+function dockerNetwork(value: string, name: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value === "none") {
-    throw new TypeError("AGENT_DOCK_SANDBOX_MODEL_NETWORK is invalid");
+    throw new TypeError(`${name} is invalid`);
   }
   return value;
 }
@@ -252,7 +256,10 @@ export async function loadSupervisorHostConfig(
     modelGatewayAdvertisedBaseUrl: modelGatewayBaseUrl(
       required(environment, "AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL"),
     ),
-    sandboxModelNetwork: dockerNetwork(required(environment, "AGENT_DOCK_SANDBOX_MODEL_NETWORK")),
+    sandboxModelNetwork: dockerNetwork(
+      required(environment, "AGENT_DOCK_SANDBOX_MODEL_NETWORK"),
+      "AGENT_DOCK_SANDBOX_MODEL_NETWORK",
+    ),
     modelGatewayCapabilityTtlMs: integerValue(
       environment,
       "AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS",
@@ -285,6 +292,31 @@ export async function loadSupervisorHostConfig(
       environment,
       "AGENT_DOCK_PI_TURN_TIMEOUT_MS",
       10 * 60_000,
+      1_000,
+      15 * 60_000,
+    ),
+    repositoryImportNetwork: dockerNetwork(
+      required(environment, "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK"),
+      "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK",
+    ),
+    repositoryImportTimeoutMs: integerValue(
+      environment,
+      "AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS",
+      180_000,
+      1_000,
+      300_000,
+    ),
+    repositoryImportLeaseMs: integerValue(
+      environment,
+      "AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS",
+      240_000,
+      1_000,
+      10 * 60_000,
+    ),
+    repositoryImportWaitMs: integerValue(
+      environment,
+      "AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS",
+      300_000,
       1_000,
       15 * 60_000,
     ),

@@ -146,6 +146,17 @@ export function encodeSettledCheckpoint(
   };
 }
 
+export function encodeWorkspaceSnapshot(snapshot: Uint8Array): SandboxCheckpointBlob {
+  validateWorkspaceSnapshot(snapshot);
+  return encodeBlob(snapshot, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot");
+}
+
+export function decodeWorkspaceSnapshot(blob: SandboxCheckpointBlob): Uint8Array {
+  const snapshot = decodeBlob(blob, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot");
+  validateWorkspaceSnapshot(snapshot);
+  return snapshot;
+}
+
 export function decodeSettledCheckpoint(
   checkpoint: SandboxSettledCheckpoint,
 ): CapturedSandboxCheckpoint {

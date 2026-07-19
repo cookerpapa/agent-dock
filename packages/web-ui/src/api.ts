@@ -20,6 +20,7 @@ import {
   type TenantIdentityResource,
   type TenantRegistrationResource,
   type TurnThinkingLevel,
+  type WorkspaceSourceRequest,
 } from "@agent-dock/protocol";
 
 export class AgentDockApiError extends Error {
@@ -176,9 +177,17 @@ export class AgentDockApi {
     );
   }
 
-  async createProject(name: string): Promise<ProjectResource> {
+  async createProject(
+    name: string,
+    source: WorkspaceSourceRequest = { kind: "sample_java" },
+  ): Promise<ProjectResource> {
     return parseProjectResource(
-      await request(this.#fetch, "/v1/projects", jsonRequest({ name }), this.#authorizationToken),
+      await request(
+        this.#fetch,
+        "/v1/projects",
+        jsonRequest({ name, source }),
+        this.#authorizationToken,
+      ),
     );
   }
 

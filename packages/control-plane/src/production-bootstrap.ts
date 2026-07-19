@@ -133,19 +133,53 @@ export async function bootstrapProductionDatabase(
       ])
       .where("id", "=", config.modelProfileId)
       .executeTakeFirstOrThrow();
+    const credentialVersion = Number(profile.credential_binding_version);
+    const deterministicProfile =
+      profile.provider === "agent-dock-fake" &&
+      profile.model_id === "agent-dock-fake" &&
+      credentialVersion === 1;
+    const ownerConfiguredDeepSeekProfile =
+      profile.provider === "deepseek" &&
+      (profile.model_id === "deepseek-v4-flash" || profile.model_id === "deepseek-v4-pro") &&
+      Number.isSafeInteger(credentialVersion) &&
+      credentialVersion >= 2;
     exact(
       profile.tenant_id === config.tenantId &&
         profile.name === config.modelProfileName &&
-        profile.provider === "agent-dock-fake" &&
-        profile.model_id === "agent-dock-fake" &&
+        (deterministicProfile || ownerConfiguredDeepSeekProfile) &&
         profile.default_thinking_level === "off" &&
         profile.allowed_thinking_levels.length === 1 &&
         profile.allowed_thinking_levels[0] === "off" &&
         profile.credential_binding_id === config.credentialBindingId &&
-        Number(profile.credential_binding_version) === 1 &&
         profile.enabled,
       "model profile",
     );
+    if (ownerConfiguredDeepSeekProfile) {
+      const activeBinding = await transaction
+        .selectFrom("credential_bindings")
+        .select(["provider", "kind", "secret_ref", "status"])
+        .where("tenant_id", "=", config.tenantId)
+        .where("id", "=", config.credentialBindingId)
+        .where("version", "=", String(credentialVersion))
+        .executeTakeFirst();
+      exact(
+        activeBinding !== undefined &&
+          activeBinding.provider === "deepseek" &&
+          activeBinding.kind === "api_key" &&
+          activeBinding.secret_ref ===
+            `sealed://tenant-model-credentials/${config.tenantId}/${config.credentialBindingId}/${String(credentialVersion)}` &&
+          activeBinding.status === "active",
+        "active model credential binding",
+      );
+      const sealedCredential = await transaction
+        .selectFrom("tenant_model_credentials")
+        .select("key_version")
+        .where("tenant_id", "=", config.tenantId)
+        .where("credential_binding_id", "=", config.credentialBindingId)
+        .where("credential_binding_version", "=", String(credentialVersion))
+        .executeTakeFirst();
+      exact(sealedCredential !== undefined, "active model credential ciphertext");
+    }
 
     await transaction
       .insertInto("tenant_runtime_policies")

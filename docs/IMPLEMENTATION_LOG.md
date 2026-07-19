@@ -1296,3 +1296,67 @@
 - 当前边界与下一步：现有 Web 已能向 cloud Pi 发真实请求，但 workspace 仍是 image-owned Java fixture，不是任意仓库。
   下一项产品瓶颈应是受控 repository import/workspace provisioning；原因是模型调用、agent loop、工具、持久化和
   多租户凭据边界已有端到端证据，而用户代码尚不能安全进入系统。
+
+## 2026-07-19 — 受控 public GitHub workspace 与真实双轮 coding 验收
+
+- 目标与原因：把上一里程碑的 image-owned Java fixture 扩展成真实用户代码入口，同时不让 Pi/bash 获得 GitHub
+  网络、不让 control plane 接触 Docker/S3，也不把任意 URL 变成 SSRF 接口。这里选择“公开 GitHub + 精确 commit”
+  的窄边界，而不是假装已经支持通用 Git hosting。
+- 决策：新增 ADR-0028。公开 API 的 source 只有 `sample_java` 或 `github_public`；后者只接受规范化小写
+  `owner/repository` 与小写 40-hex commit SHA，拒绝 URL、branch/tag/refspec、端口、查询串、认证、SSH、本地路径和
+  多余字段。project、初始 workspace 与 `workspace_sources` 在同一个 tenant-scoped transaction 中创建；migration
+  008 将旧 workspace 安全回填为 ready sample，schema 现在共 21 张表。
+- Provisioning 数据流：第一个 turn 到达 trusted Supervisor 后查询 source；PostgreSQL 用 expiring lease 让一个
+  importer 获胜，其余 activation 轮询 ready。过期 lease 可回收，旧 owner 在 lease 被替换后不能发布。一次性 Docker
+  importer 使用非 root、read-only rootfs、无 bind mount/Docker socket/secret/port、bounded CPU/memory/PID/tmpfs，只
+  加入 repository-egress；Git URL 由 worker 固定构造，redirect、hook、credential helper、interactive auth、file/ext
+  protocol、submodule 与 LFS 全部关闭。clone 后验证 HEAD、删除 `.git`，再复用已有 canonical regular-file manifest。
+- 网络事实边界：importer 不加入 database/object-storage/management/model-runtime/provider-egress。当前单宿主 Compose
+  由 trusted Supervisor 锚定 repository-egress，因此 importer 在该 bridge 上能连到 Supervisor 容器的 HTTP surface；
+  这些 privileged route 仍要求 importer 不具备的 management credential 或 turn capability。固定 GitHub URL 不是 DNS
+  firewall；若未来宣称 hostile public tenants，仍需 DNS-aware egress proxy/独立网络 threat model。
+- Immutable seed：manifest bytes 以 SHA-256 content address 写入 tenant/workspace-prefixed MinIO key；对象已存在时只在
+  bytes 完全相同时复用。source ready metadata 与 `workspaces.object_snapshot_key` 在一个 lease-fenced transaction 发布。
+  每次 activation 重新验证 object key、size、digest 和 manifest；Pi worker 通过 typed stdin 收到 seed，先建立 imported
+  baseline commit，再 overlay 当前 session 的 settled checkpoint。因此第二轮不重新 clone，GitHub 暂时不可用也不影响
+  已导入会话，cold session 仍不占常驻 Pi 进程。
+- Pi/diff：worker 的 sample/GitHub 两条路径共用 pinned Pi、bash/edit、事件 ACK、取消和 checkpoint 流程。验收首次发现
+  原 collector 的普通 `git diff` 会漏掉 agent 新建的 production source 与 `test.sh`；改为只对 `git ls-files
+  --others --exclude-standard` 返回的 path 执行 intent-to-add，再生成 working-tree diff。回归测试同时覆盖 tracked edit、
+  tracked delete、untracked new file 和空 cached diff，避免用 `git add -N --all` 意外吞掉删除。
+- Web：Pi `/export` 风格页面新增 `new workspace` panel，可选择 sample 或 public GitHub exact commit；conversation detail
+  只暴露 safe source kind/repository/commit/status。模型选择仍属于 tenant model panel，不与 workspace source 混在一起。
+- 生产升级修正：既有 production tenant 已从 bootstrap fake profile 切换到 owner-configured DeepSeek。部署时旧 bootstrap
+  校验错误地把这种合法状态当 drift；现在同时接受 immutable bootstrap identity 下的 allowlisted DeepSeek v2+ binding，
+  仍拒绝 tenant/profile identity、thinking、disabled 或非 allowlist 模型变化。migration 008 与五个常驻 service 随后健康。
+- 真实消耗验收：对 `mathewjonas/java-calculator-junit` 的 commit
+  `0b7314b2f25b83794bf0d52f13f4f750eb0f4bdb` 创建 workspace，并用现有 `deepseek-v4-flash` 连续执行两个 Pi turn。第一轮
+  产生 434 events、22 次 tool start、4,302-byte cumulative patch；第二轮在同一 conversation 加入 `divideExact` 与除零
+  防护，产生 320 events、7 次 tool start、5,660-byte cumulative patch。两轮都实际运行 portable JDK `test.sh`，patch
+  同时包含新 `src/main/java/junit_project/Calculator.java` 和 `test.sh`。
+- 真实模型账本：两轮共 18 次 provider call，持久化 input 6,032、output 5,829、cache-read 93,568、cache-write 0。第二轮
+  source 的 status/object key/hash/size/updated_at 与第一轮逐字相同，证明没有重新导入；conversation 恢复到 ready source
+  和两个 turns；运行中 Pi worker 只有 `agent-dock-production_model-runtime`，完成后没有 importer container 残留。
+- 可重复 live gate：新增显式 opt-in 的
+  `AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check`。它默认使用上述 pinned tiny repo，也允许同时覆盖 repo/SHA；
+  脚本会创建真实 project/session、消费 provider quota、断言两轮工具/patch/ledger/seed reuse/cleanup，因此故意不进入常规
+  zero-token CI。
+- 故障路径补强：最终 review 将 importer cleanup 从“任何 inspect error 都视为 absent”改为只接受 Docker 明确返回的
+  `No such object/container`；daemon/permission/timeout 错误现在以 `repository_import_cleanup_unverified` fail closed。生产
+  bootstrap 在允许 owner-configured DeepSeek profile 的同时，也验证其当前 v2+ binding 的 provider/kind/exact sealed
+  ref/status 与对应密文行存在，避免“profile 看似合法、实际 secret 缺失”的不健康部署。Docker 29 实际使用小写
+  `error: no such object`，matcher 改为大小写不敏感后，以 `octocat/hello-world` exact commit 做了一次 217-byte、zero-model
+  smoke import，canonical manifest 验证通过且 importer cleanup 确认无残留；其他 Docker 错误仍不会降级为 absent。
+- 最终仓库门禁：`npm run ci` 从 production Web build 开始完整通过所有 workspace typecheck、288 passed/7 conditional
+  skipped tests、两个 zero-model-call Pi spikes 和 `npm audit --audit-level=high`（0 vulnerabilities）。首次全量 run 中一个旧
+  remote-control-plane runtime test 在并发 PGlite 负载下超过 20 秒等待阈值；该文件隔离通过、control-plane 整包 91/91
+  通过，第二次完整 CI 也原断言通过，因此没有放宽测试或修改生产调度逻辑。
+- Disposable production gate：默认 full-build `npm run production:check` 以随机项目
+  `agent-dock-check-dba675c049` 从当前源码重建四个镜像、应用 migration 008，随后证明 bootstrap 重跑、3-tenant admission
+  与隔离、control-plane restart、`1 -> 2 -> 1`、fresh Supervisor boot、S3 follow-up restore、active worker cancel、22 条
+  durable events、worker hardening/secret absence 和 exact cleanup，最终输出 `production_check_passed`。该 deterministic
+  gate 没有调用真实 provider；GitHub/真实模型组合由前述 opt-in live gate 单独证明。
+- 当前边界与下一步：现已支持小型 public GitHub exact commit，不支持 private repo、任意 host/URL、submodule、LFS、
+  branch refresh、monorepo 超限、extension、PR/write-back。若继续增强简历项目，下一步优先做 extension policy + approval
+  boundary，而不是立刻扩大 Git 来源；原因是“用户代码能导入并执行”已有端到端证据，接下来最能体现工程判断的是让
+  project extension 的权限、secret、网络和人工审批变成可验证策略。

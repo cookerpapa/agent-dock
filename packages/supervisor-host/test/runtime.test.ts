@@ -184,6 +184,10 @@ describe("SupervisorHostRuntime", () => {
       modelGatewayUpstreamRequestTimeoutMs: 10_000,
       piModelRequestTimeoutMs: 15_000,
       piTurnTimeoutMs: 60_000,
+      repositoryImportNetwork: "agent-dock-test-repository-egress",
+      repositoryImportTimeoutMs: 180_000,
+      repositoryImportLeaseMs: 240_000,
+      repositoryImportWaitMs: 300_000,
     };
     let first: SupervisorHostRuntime | undefined;
     let second: SupervisorHostRuntime | undefined;

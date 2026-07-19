@@ -13,9 +13,11 @@ import type {
   AcceptedTurnResource,
   ConversationDetailResource,
   ConversationListResource,
+  CreateProjectRequest,
   CreateTurnCancellationRequest,
   ProjectResource,
   SessionResource,
+  WorkspaceSourceResource,
 } from "@agent-dock/protocol";
 import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -81,6 +83,43 @@ type TenantRuntimePolicy = {
   maximumSessions: number;
   maximumUnsettledTurns: number;
 };
+
+type WorkspaceSourceRow = {
+  sourceKind: string;
+  sourceRepository: string | null;
+  sourceCommitSha: string | null;
+  sourceStatus: string;
+  sourceFailureCode: string | null;
+};
+
+function workspaceSourceResource(row: WorkspaceSourceRow): WorkspaceSourceResource {
+  if (row.sourceKind === "sample_java" && row.sourceStatus === "ready") {
+    return { kind: "sample_java", status: "ready" };
+  }
+  if (
+    row.sourceKind === "github_public" &&
+    row.sourceRepository !== null &&
+    row.sourceCommitSha !== null &&
+    (row.sourceStatus === "pending" ||
+      row.sourceStatus === "importing" ||
+      row.sourceStatus === "ready" ||
+      row.sourceStatus === "failed")
+  ) {
+    return {
+      kind: "github_public",
+      repository: row.sourceRepository,
+      commitSha: row.sourceCommitSha,
+      status: row.sourceStatus,
+      ...(row.sourceStatus === "failed" && row.sourceFailureCode !== null
+        ? { failureCode: row.sourceFailureCode }
+        : {}),
+    };
+  }
+  throw new ControlPlaneStoreError(
+    "control_plane_misconfigured",
+    "Workspace source metadata is invalid",
+  );
+}
 
 function isoTimestamp(value: Date | string): string {
   const timestamp = value instanceof Date ? value : new Date(value);
@@ -246,7 +285,10 @@ export class ControlPlaneStore {
     this.#idGenerator = options.idGenerator ?? randomUUID;
   }
 
-  async createProject(name: string): Promise<ProjectResource> {
+  async createProject(input: string | CreateProjectRequest): Promise<ProjectResource> {
+    const request: CreateProjectRequest =
+      typeof input === "string" ? { name: input, source: { kind: "sample_java" } } : input;
+    const source = request.source ?? { kind: "sample_java" as const };
     const projectId = this.#idGenerator();
     const workspaceId = this.#idGenerator();
     try {
@@ -268,7 +310,7 @@ export class ControlPlaneStore {
         }
         const project = await transaction
           .insertInto("projects")
-          .values({ id: projectId, tenant_id: this.#tenantId, name })
+          .values({ id: projectId, tenant_id: this.#tenantId, name: request.name })
           .returning(["id", "name", "created_at"])
           .executeTakeFirstOrThrow();
         await transaction
@@ -280,11 +322,37 @@ export class ControlPlaneStore {
             object_snapshot_key: null,
           })
           .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("workspace_sources")
+          .values({
+            tenant_id: this.#tenantId,
+            workspace_id: workspaceId,
+            kind: source.kind,
+            repository: source.kind === "github_public" ? source.repository : null,
+            commit_sha: source.kind === "github_public" ? source.commitSha : null,
+            status: source.kind === "github_public" ? "pending" : "ready",
+            object_key: null,
+            sha256: null,
+            size_bytes: null,
+            import_lease_id: null,
+            lease_expires_at: null,
+            failure_code: null,
+          })
+          .executeTakeFirstOrThrow();
         return {
           projectId: project.id,
           workspaceId,
           name: project.name,
           createdAt: isoTimestamp(project.created_at),
+          source:
+            source.kind === "github_public"
+              ? {
+                  kind: "github_public",
+                  repository: source.repository,
+                  commitSha: source.commitSha,
+                  status: "pending",
+                }
+              : { kind: "sample_java", status: "ready" },
         };
       });
     } catch (error) {
@@ -417,6 +485,11 @@ export class ControlPlaneStore {
           .onRef("project.id", "=", "session_row.project_id"),
       )
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
+      .innerJoin("workspace_sources as source", (join) =>
+        join
+          .onRef("source.tenant_id", "=", "session_row.tenant_id")
+          .onRef("source.workspace_id", "=", "session_row.workspace_id"),
+      )
       .select([
         "session_row.id as sessionId",
         "session_row.project_id as projectId",
@@ -428,6 +501,11 @@ export class ControlPlaneStore {
         "session_row.last_active_at as lastActiveAt",
         "project.name as projectName",
         "project.created_at as projectCreatedAt",
+        "source.kind as sourceKind",
+        "source.repository as sourceRepository",
+        "source.commit_sha as sourceCommitSha",
+        "source.status as sourceStatus",
+        "source.failure_code as sourceFailureCode",
         "cursor.last_persisted_seq as lastPersistedSequence",
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
@@ -511,6 +589,7 @@ export class ControlPlaneStore {
         workspaceId: conversation.workspaceId,
         name: conversation.projectName,
         createdAt: isoTimestamp(conversation.projectCreatedAt),
+        source: workspaceSourceResource(conversation),
       },
       session: {
         sessionId: conversation.sessionId,

@@ -85,6 +85,64 @@ summary:focus-visible,
   background: #1b2119;
 }
 
+.workspace-configuration-panel {
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(190px, 1fr);
+  align-items: end;
+  gap: 7px 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #46523f;
+  background: #181d17;
+}
+
+.workspace-panel-heading {
+  display: grid;
+  grid-row: span 2;
+  align-self: center;
+  gap: 3px;
+}
+
+.workspace-panel-heading strong {
+  color: var(--green-strong);
+}
+
+.workspace-panel-heading span,
+.workspace-configuration-panel label {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-configuration-panel label {
+  display: none;
+}
+
+.workspace-configuration-panel input,
+.workspace-configuration-panel select,
+.workspace-configuration-panel button {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+}
+
+.workspace-configuration-panel input,
+.workspace-configuration-panel select {
+  padding: 5px 8px;
+}
+
+.workspace-panel-actions {
+  display: flex;
+  grid-column: 2 / -1;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.workspace-panel-actions button {
+  padding: 5px 9px;
+}
+
 .model-configuration-panel > div {
   display: grid;
   align-self: center;
@@ -1240,6 +1298,19 @@ a {
   .model-configuration-panel input,
   .model-configuration-panel select {
     grid-column: 1 / -1;
+  }
+
+  .workspace-configuration-panel {
+    grid-template-columns: 1fr;
+    max-height: 52vh;
+    overflow: auto;
+  }
+
+  .workspace-panel-heading,
+  .workspace-configuration-panel input,
+  .workspace-configuration-panel select,
+  .workspace-panel-actions {
+    grid-column: 1;
   }
 
   .error-banner > span {

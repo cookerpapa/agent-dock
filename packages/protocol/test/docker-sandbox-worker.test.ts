@@ -42,7 +42,7 @@ describe("Docker sandbox worker protocol", () => {
         type: "sandbox.run",
         command: executeCommand,
         runtime: { kind: "embedded_fake", scenario: "java_repair" },
-        workspaceFixture: "java-repair",
+        workspaceSeed: { kind: "sample_java" },
         checkpoint: { mode: "disabled" },
       }),
     ).toMatchObject({ type: "sandbox.run" });
@@ -74,7 +74,7 @@ describe("Docker sandbox worker protocol", () => {
           requestTimeoutMs: 150000,
           turnTimeoutMs: 600000,
         },
-        workspaceFixture: "java-repair",
+        workspaceSeed: { kind: "sample_java" },
         checkpoint: { mode: "disabled" },
       }),
     ).toMatchObject({ runtime: { kind: "openai_compatible_gateway" } });
@@ -102,7 +102,7 @@ describe("Docker sandbox worker protocol", () => {
         type: "sandbox.run",
         command: executeCommand,
         runtime: { kind: "embedded_fake", scenario: "java_repair" },
-        workspaceFixture: "java-repair",
+        workspaceSeed: { kind: "sample_java" },
         checkpoint: { mode: "disabled" },
         providerToken: "must-not-cross",
       }),

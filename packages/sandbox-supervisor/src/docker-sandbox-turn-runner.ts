@@ -24,6 +24,7 @@ import {
 import {
   decodeSettledCheckpoint,
   encodeSettledCheckpoint,
+  encodeWorkspaceSnapshot,
   validateLoadedCheckpoint,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -57,6 +58,11 @@ export type DockerSandboxModelRuntimeLeaseResolver = (
   command: ExecuteTurnCommandMessage,
 ) => Promise<DockerSandboxModelRuntimeLease> | DockerSandboxModelRuntimeLease;
 
+export type DockerSandboxWorkspaceSeedResolver = (
+  command: ExecuteTurnCommandMessage,
+  signal: AbortSignal,
+) => Promise<Uint8Array | undefined> | Uint8Array | undefined;
+
 export type DockerSandboxContainerIdentity = SandboxRuntimeIdentity & {
   containerName: string;
   commandId: string;
@@ -72,6 +78,7 @@ export type DockerSandboxTurnRunnerOptions = {
   dockerCommand?: string;
   scenario?: DockerSandboxScenario | DockerSandboxScenarioResolver;
   modelRuntimeLeaseResolver?: DockerSandboxModelRuntimeLeaseResolver;
+  workspaceSeedResolver?: DockerSandboxWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
   readyTimeoutMs?: number;
   executionTimeoutMs?: number;
@@ -260,6 +267,7 @@ export class DockerSandboxTurnRunner {
   readonly #assignmentInventory: DockerSandboxAssignmentInventory;
   readonly #scenario: DockerSandboxScenario | DockerSandboxScenarioResolver;
   readonly #modelRuntimeLeaseResolver: DockerSandboxModelRuntimeLeaseResolver | undefined;
+  readonly #workspaceSeedResolver: DockerSandboxWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #readyTimeoutMs: number;
   readonly #executionTimeoutMs: number;
@@ -276,6 +284,7 @@ export class DockerSandboxTurnRunner {
     this.#runtimeIdentity = validateSandboxRuntimeIdentity(options.runtimeIdentity);
     this.#scenario = options.scenario ?? "java_repair";
     this.#modelRuntimeLeaseResolver = options.modelRuntimeLeaseResolver;
+    this.#workspaceSeedResolver = options.workspaceSeedResolver;
     this.#checkpointStore = options.checkpointStore;
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
@@ -316,6 +325,20 @@ export class DockerSandboxTurnRunner {
         throw new PiRpcTurnError(
           "checkpoint_load_failed",
           "The settled checkpoint could not be loaded",
+          true,
+        );
+      }
+    }
+    let workspaceSeed: Uint8Array | undefined;
+    if (this.#workspaceSeedResolver !== undefined) {
+      try {
+        workspaceSeed = await this.#workspaceSeedResolver(command, signal);
+        if (workspaceSeed !== undefined) validateWorkspaceSnapshot(workspaceSeed);
+      } catch (error: unknown) {
+        if (error instanceof PiRpcTurnError) throw error;
+        throw new PiRpcTurnError(
+          "workspace_seed_unavailable",
+          "Workspace source could not be provisioned",
           true,
         );
       }
@@ -631,7 +654,10 @@ export class DockerSandboxTurnRunner {
         type: "sandbox.run",
         command,
         runtime: modelRuntimeLease?.runtime ?? { kind: "embedded_fake", scenario },
-        workspaceFixture: "java-repair",
+        workspaceSeed:
+          workspaceSeed === undefined
+            ? { kind: "sample_java" }
+            : { kind: "snapshot", snapshot: encodeWorkspaceSnapshot(workspaceSeed) },
         checkpoint:
           this.#checkpointStore === undefined
             ? { mode: "disabled" }

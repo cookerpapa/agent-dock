@@ -15,12 +15,15 @@ export {
   type SupervisorConnectionState,
   type TenantApiCredentialRole,
   type TurnInputKind,
+  type WorkspaceImportStatus,
+  type WorkspaceSourceKind,
 } from "./database-types.ts";
 
 export {
   downDurableEventDelivery,
   downExplicitSessionMailbox,
   downEncryptedTenantModelCredentials,
+  downControlledWorkspaceSources,
   downInitialControlPlane,
   downPrivateMultiTenantIdentity,
   downSupervisorConnectionHealth,
@@ -28,6 +31,7 @@ export {
   upDurableEventDelivery,
   upExplicitSessionMailbox,
   upEncryptedTenantModelCredentials,
+  upControlledWorkspaceSources,
   upInitialControlPlane,
   upPrivateMultiTenantIdentity,
   upSupervisorConnectionHealth,

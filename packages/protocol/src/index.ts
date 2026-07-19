@@ -29,6 +29,7 @@ export {
   DockerSandboxRunMessageSchema,
   DockerSandboxWorkerInputSchema,
   DockerSandboxWorkerOutputSchema,
+  DockerSandboxWorkspaceSeedSchema,
   DockerSandboxWorkerProtocolError,
   MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
@@ -47,9 +48,24 @@ export {
   type DockerSandboxRunMessage,
   type DockerSandboxWorkerInput,
   type DockerSandboxWorkerOutput,
+  type DockerSandboxWorkspaceSeed,
   type SandboxCheckpointBlob,
   type SandboxSettledCheckpoint,
 } from "./docker-sandbox-worker.ts";
+
+export {
+  GitHubWorkspaceImportFailureSchema,
+  GitHubWorkspaceImportOutputSchema,
+  GitHubWorkspaceImportProtocolError,
+  GitHubWorkspaceImportRequestSchema,
+  GitHubWorkspaceImportResultSchema,
+  parseGitHubWorkspaceImportOutput,
+  parseGitHubWorkspaceImportRequest,
+  type GitHubWorkspaceImportFailure,
+  type GitHubWorkspaceImportOutput,
+  type GitHubWorkspaceImportRequest,
+  type GitHubWorkspaceImportResult,
+} from "./github-workspace-import.ts";
 
 export {
   NonNegativeSafeIntegerSchema,
@@ -76,6 +92,7 @@ export {
   CreateTenantRegistrationRequestSchema,
   CreateTurnCancellationRequestSchema,
   DeepSeekModelIdSchema,
+  GitHubRepositorySourceSchema,
   IdempotencyKeySchema,
   ProjectResourceSchema,
   ModelConfigurationResourceSchema,
@@ -85,6 +102,9 @@ export {
   TenantIdentityResourceSchema,
   TenantRegistrationResourceSchema,
   TurnThinkingLevelSchema,
+  WorkspaceImportStatusSchema,
+  WorkspaceSourceRequestSchema,
+  WorkspaceSourceResourceSchema,
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
@@ -119,6 +139,7 @@ export {
   type CreateTenantRegistrationRequest,
   type CreateTurnCancellationRequest,
   type DeepSeekModelId,
+  type GitHubRepositorySource,
   type ModelConfigurationResource,
   type ProjectResource,
   type ReplaceModelConfigurationRequest,
@@ -127,6 +148,9 @@ export {
   type TenantIdentityResource,
   type TenantRegistrationResource,
   type TurnThinkingLevel,
+  type WorkspaceImportStatus,
+  type WorkspaceSourceRequest,
+  type WorkspaceSourceResource,
 } from "./control-plane-api.ts";
 
 export {

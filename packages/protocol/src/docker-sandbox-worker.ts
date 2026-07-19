@@ -69,6 +69,14 @@ export const SandboxSettledCheckpointSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const DockerSandboxWorkspaceSeedSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("sample_java") }, { additionalProperties: false }),
+  Type.Object(
+    { kind: Type.Literal("snapshot"), snapshot: SandboxCheckpointBlobSchema },
+    { additionalProperties: false },
+  ),
+]);
+
 const SandboxCheckpointIdentityProperties = {
   commandId: Type.String({ minLength: 1, maxLength: 256 }),
   sessionId: Type.String({ minLength: 1, maxLength: 256 }),
@@ -83,7 +91,7 @@ export const DockerSandboxRunMessageSchema = Type.Object(
     type: Type.Literal("sandbox.run"),
     command: ExecuteTurnCommandMessageSchema,
     runtime: DockerSandboxModelRuntimeSchema,
-    workspaceFixture: Type.Literal("java-repair"),
+    workspaceSeed: DockerSandboxWorkspaceSeedSchema,
     checkpoint: Type.Union([
       Type.Object({ mode: Type.Literal("disabled") }, { additionalProperties: false }),
       Type.Object(
@@ -187,6 +195,7 @@ export const DockerSandboxWorkerOutputSchema = Type.Union([
 
 export type DockerSandboxRunMessage = Static<typeof DockerSandboxRunMessageSchema>;
 export type DockerSandboxModelRuntime = Static<typeof DockerSandboxModelRuntimeSchema>;
+export type DockerSandboxWorkspaceSeed = Static<typeof DockerSandboxWorkspaceSeedSchema>;
 export type DockerSandboxCancelMessage = Static<typeof DockerSandboxCancelMessageSchema>;
 export type DockerSandboxCheckpointAckMessage = Static<
   typeof DockerSandboxCheckpointAckMessageSchema

@@ -1,6 +1,5 @@
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import {
-  MAX_WORKSPACE_PATCH_BYTES,
   parseDockerSandboxWorkerInput,
   type DockerSandboxCancelMessage,
   type DockerSandboxCheckpointAckMessage,
@@ -8,7 +7,6 @@ import {
   type DockerSandboxRunMessage,
   type EventAckMessage,
   type EventPublishMessage,
-  type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { cp, readdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -23,9 +21,11 @@ import {
 } from "./pi-rpc-turn-runner.ts";
 import {
   decodeSettledCheckpoint,
+  decodeWorkspaceSnapshot,
   encodeSettledCheckpoint,
   type CapturedSandboxCheckpoint,
 } from "./sandbox-checkpoint.ts";
+import { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
 import { captureWorkspaceSnapshot, restoreWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 const WORKSPACE_DIRECTORY = "/workspace";
@@ -73,24 +73,10 @@ function writeMessage(value: unknown): Promise<void> {
   });
 }
 
-function boundedUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
-  const encoded = Buffer.from(value, "utf8");
-  if (encoded.length <= maxBytes) return { value, truncated: false };
-  let end = maxBytes;
-  while (end > 0) {
-    try {
-      return {
-        value: new TextDecoder("utf-8", { fatal: true }).decode(encoded.subarray(0, end)),
-        truncated: true,
-      };
-    } catch {
-      end -= 1;
-    }
-  }
-  return { value: "", truncated: true };
-}
-
-async function prepareWorkspace(workspaceSnapshot?: Uint8Array): Promise<void> {
+async function prepareWorkspace(
+  workspaceSeed: Uint8Array | undefined,
+  workspaceSnapshot?: Uint8Array,
+): Promise<void> {
   const existing = await readdir(WORKSPACE_DIRECTORY);
   if (existing.length !== 0) {
     throw new PiRpcTurnError(
@@ -99,11 +85,15 @@ async function prepareWorkspace(workspaceSnapshot?: Uint8Array): Promise<void> {
       false,
     );
   }
-  for (const entry of await readdir(JAVA_REPAIR_FIXTURE)) {
-    await cp(join(JAVA_REPAIR_FIXTURE, entry), join(WORKSPACE_DIRECTORY, entry), {
-      recursive: true,
-      preserveTimestamps: true,
-    });
+  if (workspaceSeed === undefined) {
+    for (const entry of await readdir(JAVA_REPAIR_FIXTURE)) {
+      await cp(join(JAVA_REPAIR_FIXTURE, entry), join(WORKSPACE_DIRECTORY, entry), {
+        recursive: true,
+        preserveTimestamps: true,
+      });
+    }
+  } else {
+    await restoreWorkspaceSnapshot(WORKSPACE_DIRECTORY, workspaceSeed);
   }
   await execute("git", ["init", "--quiet"], WORKSPACE_DIRECTORY);
   await execute("git", ["config", "user.name", "AgentDock Fixture"], WORKSPACE_DIRECTORY);
@@ -113,20 +103,6 @@ async function prepareWorkspace(workspaceSnapshot?: Uint8Array): Promise<void> {
   if (workspaceSnapshot !== undefined) {
     await restoreWorkspaceSnapshot(WORKSPACE_DIRECTORY, workspaceSnapshot);
   }
-}
-
-async function collectWorkspacePatch(): Promise<WorkspacePatch> {
-  const diff = await execute(
-    "git",
-    ["diff", "--no-ext-diff", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "--"],
-    WORKSPACE_DIRECTORY,
-  );
-  const bounded = boundedUtf8(diff, MAX_WORKSPACE_PATCH_BYTES);
-  return {
-    format: "unified_diff",
-    patch: bounded.value,
-    truncated: bounded.truncated,
-  };
 }
 
 function cancellationSignal(message: DockerSandboxCancelMessage): PiRpcCancellationSignal {
@@ -318,7 +294,11 @@ async function main(): Promise<void> {
         message.checkpoint.mode === "settled" && message.checkpoint.restore !== undefined
           ? decodeSettledCheckpoint(message.checkpoint.restore)
           : undefined;
-      await prepareWorkspace(restored?.workspace);
+      const workspaceSeed =
+        message.workspaceSeed.kind === "snapshot"
+          ? decodeWorkspaceSnapshot(message.workspaceSeed.snapshot)
+          : undefined;
+      await prepareWorkspace(workspaceSeed, restored?.workspace);
       await fakeModel?.start();
       if (
         message.runtime.kind === "openai_compatible_gateway" &&
@@ -353,7 +333,7 @@ async function main(): Promise<void> {
                 maxTokens: message.runtime.maxTokens,
               },
         enabledTools: ["bash", "edit"],
-        collectWorkspacePatch,
+        collectWorkspacePatch: () => collectGitWorkspacePatch(WORKSPACE_DIRECTORY),
         ...(restored === undefined ? {} : { restorePiSession: restored.piSession }),
         ...(message.checkpoint.mode === "settled"
           ? {

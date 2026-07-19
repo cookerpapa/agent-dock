@@ -67,7 +67,7 @@ async function secret(root: string, name: string, value: string): Promise<string
 }
 
 describe.sequential("production bootstrap and configuration", () => {
-  it("idempotently creates the exact single-user deterministic profile", async () => {
+  it("idempotently preserves the bootstrap profile and owner-configured model mode", async () => {
     await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toEqual({
       tenantId: CONFIG.tenantId,
       userId: CONFIG.userId,
@@ -103,6 +103,65 @@ describe.sequential("production bootstrap and configuration", () => {
       .where("credential_id", "=", CONFIG.apiCredentialId)
       .execute();
     await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toBeDefined();
+
+    await database
+      .insertInto("credential_bindings")
+      .values({
+        id: CONFIG.credentialBindingId,
+        tenant_id: CONFIG.tenantId,
+        provider: "deepseek",
+        kind: "api_key",
+        secret_ref: `sealed://tenant-model-credentials/${CONFIG.tenantId}/${CONFIG.credentialBindingId}/2`,
+        version: 2,
+        status: "active",
+      })
+      .execute();
+    await database
+      .insertInto("tenant_model_credentials")
+      .values({
+        tenant_id: CONFIG.tenantId,
+        credential_binding_id: CONFIG.credentialBindingId,
+        credential_binding_version: 2,
+        key_version: 1,
+        nonce: "n".repeat(16),
+        ciphertext: "c".repeat(16),
+        auth_tag: "t".repeat(22),
+        secret_sha256: "a".repeat(64),
+      })
+      .execute();
+    await database
+      .updateTable("model_profiles")
+      .set({
+        provider: "deepseek",
+        model_id: "deepseek-v4-flash",
+        credential_binding_version: 2,
+      })
+      .where("id", "=", CONFIG.modelProfileId)
+      .execute();
+    await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toBeDefined();
+
+    await database
+      .deleteFrom("tenant_model_credentials")
+      .where("tenant_id", "=", CONFIG.tenantId)
+      .where("credential_binding_id", "=", CONFIG.credentialBindingId)
+      .where("credential_binding_version", "=", "2")
+      .execute();
+    await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).rejects.toThrow(
+      "Existing active model credential ciphertext does not match production bootstrap configuration",
+    );
+    await database
+      .insertInto("tenant_model_credentials")
+      .values({
+        tenant_id: CONFIG.tenantId,
+        credential_binding_id: CONFIG.credentialBindingId,
+        credential_binding_version: 2,
+        key_version: 1,
+        nonce: "n".repeat(16),
+        ciphertext: "c".repeat(16),
+        auth_tag: "t".repeat(22),
+        secret_sha256: "a".repeat(64),
+      })
+      .execute();
 
     await database
       .updateTable("model_profiles")

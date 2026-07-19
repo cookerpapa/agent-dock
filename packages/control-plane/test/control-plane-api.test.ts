@@ -450,7 +450,10 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     expect(projectResponse.statusCode).toBe(201);
     project = projectResponse.json() as ProjectResource;
-    expect(project).toMatchObject({ name: "Sample Java Repair" });
+    expect(project).toMatchObject({
+      name: "Sample Java Repair",
+      source: { kind: "sample_java", status: "ready" },
+    });
 
     const persistedProject = await database
       .selectFrom("projects as project")
@@ -483,6 +486,58 @@ describe.sequential("single-user durable turn intake API", () => {
       .where("session_id", "=", session.sessionId)
       .executeTakeFirstOrThrow();
     expect(cursor).toEqual({ last_persisted_seq: "0", acknowledged_through_seq: "0" });
+  });
+
+  it("persists a public GitHub exact commit as pending source metadata", async () => {
+    const commitSha = "a".repeat(40);
+    const response = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {
+        name: "Pinned public source",
+        source: {
+          kind: "github_public",
+          repository: "octocat/hello-world",
+          commitSha,
+        },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const imported = response.json<ProjectResource>();
+    expect(imported.source).toEqual({
+      kind: "github_public",
+      repository: "octocat/hello-world",
+      commitSha,
+      status: "pending",
+    });
+    const persisted = await database
+      .selectFrom("workspace_sources")
+      .select(["kind", "repository", "commit_sha", "status", "object_key"])
+      .where("tenant_id", "=", IDS.tenant)
+      .where("workspace_id", "=", imported.workspaceId)
+      .executeTakeFirstOrThrow();
+    expect(persisted).toEqual({
+      kind: "github_public",
+      repository: "octocat/hello-world",
+      commit_sha: commitSha,
+      status: "pending",
+      object_key: null,
+    });
+
+    const rejectedUrl = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {
+        name: "Rejected source",
+        source: {
+          kind: "github_public",
+          repository: "https://github.com/octocat/hello-world",
+          commitSha,
+        },
+      },
+    });
+    expect(rejectedUrl.statusCode).toBe(400);
+    expect(rejectedUrl.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
 
   it("rejects malformed bodies and a missing Idempotency-Key before writing", async () => {

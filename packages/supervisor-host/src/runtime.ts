@@ -10,6 +10,7 @@ import { createDatabase, type Database } from "@agent-dock/database";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import {
   DockerSandboxTurnRunner,
+  DockerGitHubWorkspaceImporter,
   FileEventSpoolStore,
   LocalSandboxSupervisor,
   ReconnectingSupervisorWebSocketClient,
@@ -26,6 +27,7 @@ import type { SupervisorHostConfig } from "./config.ts";
 import { SupervisorManagementServer } from "./management-server.ts";
 import { TenantModelGateway } from "./model-gateway.ts";
 import { SupervisorProvisioningClient } from "./provisioning-client.ts";
+import { PostgresWorkspaceSeedResolver } from "./workspace-seed.ts";
 
 export type SupervisorHostRuntimeState =
   "idle" | "starting" | "ready" | "draining" | "stopped" | "failed";
@@ -243,6 +245,18 @@ export class SupervisorHostRuntime {
         database: this.#database,
         objectStore: this.#objectStore,
       });
+      const workspaceSeedResolver = new PostgresWorkspaceSeedResolver({
+        database: this.#database,
+        objectStore: this.#objectStore,
+        importer: new DockerGitHubWorkspaceImporter({
+          image: this.#config.sandboxImage,
+          dockerCommand: this.#config.dockerCommand,
+          network: this.#config.repositoryImportNetwork,
+          timeoutMs: this.#config.repositoryImportTimeoutMs,
+        }),
+        importLeaseMs: this.#config.repositoryImportLeaseMs,
+        maximumWaitMs: this.#config.repositoryImportWaitMs,
+      });
       const modelGateway = new TenantModelGateway({
         database: this.#database,
         credentialResolver: new PostgresTenantModelCredentialResolver({
@@ -268,6 +282,7 @@ export class SupervisorHostRuntime {
         checkpointStore,
         scenario: resolveProductionSandboxScenario,
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
+        workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),
         executionTimeoutMs: this.#config.piTurnTimeoutMs + 30_000,
       });
       const spoolStore = new FileEventSpoolStore({

@@ -90,7 +90,7 @@ export class ControlPlaneController {
   ): Promise<ProjectResource> {
     const request = parseCreateProjectRequest(body);
     const identity = this.tenantRequestContext.requireMutation(httpRequest);
-    return this.controlPlaneStores.forIdentity(identity).createProject(request.name);
+    return this.controlPlaneStores.forIdentity(identity).createProject(request);
   }
 
   @Get("conversations")

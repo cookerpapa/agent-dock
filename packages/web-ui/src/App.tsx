@@ -14,6 +14,7 @@ import type {
   DeepSeekModelId,
   ModelConfigurationResource,
   TenantIdentityResource,
+  WorkspaceSourceRequest,
 } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import {
@@ -34,6 +35,11 @@ const AUTH_REQUIRED = import.meta.env.VITE_AGENT_DOCK_AUTH_REQUIRED === "true";
 
 function shortId(value: string): string {
   return value.slice(0, 8);
+}
+
+function workspaceSourceLabel(source: WorkspaceSourceRequest | undefined): string {
+  if (source === undefined || source.kind === "sample_java") return "sample/java-repair";
+  return `${source.repository}@${source.commitSha.slice(0, 8)}`;
 }
 
 function timeLabel(value: string | null): string {
@@ -294,6 +300,12 @@ export default function App() {
   const [modelCredentialInput, setModelCredentialInput] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<DeepSeekModelId>("deepseek-v4-flash");
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceSourceKind, setWorkspaceSourceKind] =
+    useState<WorkspaceSourceRequest["kind"]>("sample_java");
+  const [workspaceRepository, setWorkspaceRepository] = useState("");
+  const [workspaceCommitSha, setWorkspaceCommitSha] = useState("");
   const [credentialInput, setCredentialInput] = useState("");
   const [credentialChecking, setCredentialChecking] = useState(false);
   const [registrationSlug, setRegistrationSlug] = useState("");
@@ -344,6 +356,11 @@ export default function App() {
     setModelPanelOpen(false);
     setModelCredentialInput("");
     setModelConfigurationSaving(false);
+    setWorkspacePanelOpen(false);
+    setWorkspaceName("");
+    setWorkspaceSourceKind("sample_java");
+    setWorkspaceRepository("");
+    setWorkspaceCommitSha("");
   }
 
   async function refreshConversations(candidateApi: AgentDockApi = api): Promise<void> {
@@ -527,12 +544,12 @@ export default function App() {
     }
   }
 
-  async function createSession() {
+  async function provisionSession(name: string, source: WorkspaceSourceRequest) {
     if (!canMutate) return undefined;
     setOperation("creating");
     update({ type: "api.error.cleared" });
     try {
-      const project = await api.createProject(`Java repair demo ${new Date().toISOString()}`);
+      const project = await api.createProject(name, source);
       const session = await api.createSession(project);
       lastSequenceRef.current = 0;
       update({ type: "session.created", project, session });
@@ -547,6 +564,29 @@ export default function App() {
     }
   }
 
+  async function createWorkspaceSession(): Promise<void> {
+    const name = workspaceName.trim();
+    if (name.length === 0) {
+      update({ type: "api.error", message: "Workspace name is required." });
+      return;
+    }
+    const source: WorkspaceSourceRequest =
+      workspaceSourceKind === "sample_java"
+        ? { kind: "sample_java" }
+        : {
+            kind: "github_public",
+            repository: workspaceRepository.trim(),
+            commitSha: workspaceCommitSha.trim(),
+          };
+    const session = await provisionSession(name, source);
+    if (session !== undefined) {
+      setWorkspacePanelOpen(false);
+      setWorkspaceName("");
+      setWorkspaceRepository("");
+      setWorkspaceCommitSha("");
+    }
+  }
+
   async function submitTurn(): Promise<void> {
     const normalizedPrompt = prompt.trim();
     if (normalizedPrompt.length === 0 || !canMutate || !sessionCanQueueTurn || operation !== null) {
@@ -557,7 +597,9 @@ export default function App() {
     try {
       let session = state.session;
       if (session === null) {
-        const project = await api.createProject(`Java repair demo ${new Date().toISOString()}`);
+        const project = await api.createProject(`Java repair demo ${new Date().toISOString()}`, {
+          kind: "sample_java",
+        });
         session = await api.createSession(project);
         lastSequenceRef.current = 0;
         update({ type: "session.created", project, session });
@@ -752,10 +794,14 @@ export default function App() {
         <div className="sidebar-actions">
           <button
             disabled={!canMutate || currentTurn !== undefined || operation !== null}
-            onClick={() => void createSession()}
+            onClick={() => {
+              setWorkspaceName(`Workspace ${new Date().toISOString()}`);
+              setWorkspacePanelOpen(true);
+              setSidebarOpen(false);
+            }}
             type="button"
           >
-            <span aria-hidden="true">＋</span> new demo session
+            <span aria-hidden="true">＋</span> new workspace
           </button>
         </div>
         <div className="sidebar-scroll">
@@ -987,6 +1033,91 @@ export default function App() {
             </button>
           </form>
         ) : null}
+        {workspacePanelOpen && canMutate ? (
+          <form
+            className="workspace-configuration-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createWorkspaceSession();
+            }}
+          >
+            <div className="workspace-panel-heading">
+              <strong>Create an isolated workspace</strong>
+              <span>
+                Public GitHub imports accept only owner/repository plus an exact 40-character commit
+                SHA. The repository is fetched once by a credential-free importer.
+              </span>
+            </div>
+            <label htmlFor="workspace-name">name</label>
+            <input
+              disabled={operation !== null}
+              id="workspace-name"
+              maxLength={256}
+              onChange={(event) => setWorkspaceName(event.target.value)}
+              placeholder="Repository task"
+              value={workspaceName}
+            />
+            <label htmlFor="workspace-source">source</label>
+            <select
+              disabled={operation !== null}
+              id="workspace-source"
+              onChange={(event) =>
+                setWorkspaceSourceKind(event.target.value as WorkspaceSourceRequest["kind"])
+              }
+              value={workspaceSourceKind}
+            >
+              <option value="sample_java">Built-in Java repair sample</option>
+              <option value="github_public">Public GitHub exact commit</option>
+            </select>
+            {workspaceSourceKind === "github_public" ? (
+              <>
+                <label htmlFor="workspace-repository">repository</label>
+                <input
+                  autoComplete="off"
+                  disabled={operation !== null}
+                  id="workspace-repository"
+                  onChange={(event) => setWorkspaceRepository(event.target.value)}
+                  placeholder="owner/repository"
+                  spellCheck={false}
+                  value={workspaceRepository}
+                />
+                <label htmlFor="workspace-commit">commit SHA</label>
+                <input
+                  autoComplete="off"
+                  disabled={operation !== null}
+                  id="workspace-commit"
+                  maxLength={40}
+                  minLength={40}
+                  onChange={(event) => setWorkspaceCommitSha(event.target.value)}
+                  pattern="[0-9a-f]{40}"
+                  placeholder="40 lowercase hexadecimal characters"
+                  spellCheck={false}
+                  value={workspaceCommitSha}
+                />
+              </>
+            ) : null}
+            <div className="workspace-panel-actions">
+              <button
+                disabled={
+                  operation !== null ||
+                  workspaceName.trim() === "" ||
+                  (workspaceSourceKind === "github_public" &&
+                    (workspaceRepository.trim() === "" || workspaceCommitSha.trim() === ""))
+                }
+                type="submit"
+              >
+                {operation === "creating" ? "creating…" : "create session"}
+              </button>
+              <button
+                disabled={operation !== null}
+                onClick={() => setWorkspacePanelOpen(false)}
+                type="button"
+              >
+                cancel
+              </button>
+            </div>
+          </form>
+        ) : null}
         {state.historyTruncated ? (
           <div className="history-notice">
             This conversation is showing its newest 200 prompt turns and matching durable event
@@ -1028,7 +1159,7 @@ export default function App() {
             />
             <div className="composer-controls">
               <div className="composer-hints">
-                <span>sample/java-repair</span>
+                <span>source: {workspaceSourceLabel(state.project?.source)}</span>
                 <span>
                   {sessionNeedsReset
                     ? "new session required"

@@ -94,6 +94,24 @@ extension-policy support would overstate the current boundary.
 - [x] Prove the production topology across control-plane reconnect/scale, Supervisor fresh boot/retirement, S3 restore, cancellation, secret audit, and cleanup
 - [ ] Design mTLS/SPIFFE credentials for a multi-host or Kubernetes topology after that deployment target exists
 
+## Controlled public GitHub workspace slice
+
+- [x] ADR-0028: exact-commit public GitHub source and immutable seed boundary
+- [x] Persist project, workspace, and tenant-scoped source metadata atomically
+- [x] Restrict input to normalized `owner/repository` plus lowercase 40-hex commit SHA
+- [x] Serialize concurrent first activations with an expiring PostgreSQL import lease
+- [x] Reclaim expired leases and reject stale importer publication
+- [x] Run Git in a one-shot credential-free, non-root, read-only Docker importer
+- [x] Disable redirects, hooks, credential helpers, submodules, LFS, external/file protocols, and interactive auth
+- [x] Reuse the bounded regular-file workspace manifest and fail closed on unsupported repositories
+- [x] Store a content-addressed immutable seed in S3 and verify key/hash/size/manifest on every activation
+- [x] Establish the imported commit as the Pi worker's Git baseline before overlaying a settled session checkpoint
+- [x] Include tracked edits, deletions, and newly created files in the cumulative final patch
+- [x] Add the Pi-export-inspired Web new-workspace panel and safe source status to conversation discovery
+- [x] Prove two real Pi/DeepSeek turns reuse one seed, persist tool events/token usage, restore state, and leave no importer
+- [ ] Add a DNS-aware repository egress proxy before claiming a mutually hostile public-tenant boundary
+- [ ] Design private-repository credentials, extension policy, and pull-request write-back as separate threat-modeled slices
+
 ## Phase 4 private multi-tenant slice
 
 - [x] ADR-0025: private identity, roles, quotas, fair scheduling, and threat boundary

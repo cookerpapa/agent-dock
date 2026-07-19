@@ -109,9 +109,54 @@ export const TenantRegistrationResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const GitHubRepositorySourceSchema = Type.Object(
+  {
+    kind: Type.Literal("github_public"),
+    repository: Type.String({
+      minLength: 3,
+      maxLength: 140,
+      pattern: "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$",
+    }),
+    commitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceSourceRequestSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("sample_java") }, { additionalProperties: false }),
+  GitHubRepositorySourceSchema,
+]);
+
+export const WorkspaceImportStatusSchema = Type.Union([
+  Type.Literal("pending"),
+  Type.Literal("importing"),
+  Type.Literal("ready"),
+  Type.Literal("failed"),
+]);
+
+export const WorkspaceSourceResourceSchema = Type.Union([
+  Type.Object(
+    { kind: Type.Literal("sample_java"), status: Type.Literal("ready") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("github_public"),
+      repository: Type.String({ minLength: 3, maxLength: 140 }),
+      commitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+      status: WorkspaceImportStatusSchema,
+      failureCode: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z][a-z0-9_]*$" }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
 export const CreateProjectRequestSchema = Type.Object(
   {
     name: Type.String({ minLength: 1, maxLength: 256 }),
+    source: Type.Optional(WorkspaceSourceRequestSchema),
   },
   { additionalProperties: false },
 );
@@ -122,6 +167,7 @@ export const ProjectResourceSchema = Type.Object(
     workspaceId: UuidSchema,
     name: Type.String({ minLength: 1, maxLength: 256 }),
     createdAt: UtcTimestampSchema,
+    source: WorkspaceSourceResourceSchema,
   },
   { additionalProperties: false },
 );
@@ -280,6 +326,10 @@ export type ReplaceModelConfigurationRequest = Static<
 export type ModelConfigurationResource = Static<typeof ModelConfigurationResourceSchema>;
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
 export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
+export type GitHubRepositorySource = Static<typeof GitHubRepositorySourceSchema>;
+export type WorkspaceSourceRequest = Static<typeof WorkspaceSourceRequestSchema>;
+export type WorkspaceImportStatus = Static<typeof WorkspaceImportStatusSchema>;
+export type WorkspaceSourceResource = Static<typeof WorkspaceSourceResourceSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
@@ -328,7 +378,26 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
       "Project name must contain a non-whitespace character",
     );
   }
-  return { name };
+  if (request.source === undefined || request.source.kind === "sample_java") {
+    return { name, source: { kind: "sample_java" } };
+  }
+  const repository = request.source.repository.trim().toLowerCase();
+  const commitSha = request.source.commitSha.toLowerCase();
+  if (
+    !/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\/[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/.test(
+      repository,
+    ) ||
+    repository.includes("..") ||
+    repository.endsWith(".git")
+  ) {
+    throw new ControlPlaneApiValidationError(
+      "GitHub repository must be a normalized public owner/repository coordinate",
+    );
+  }
+  return {
+    name,
+    source: { kind: "github_public", repository, commitSha },
+  };
 }
 
 export function parseTenantIdentityResource(value: unknown): TenantIdentityResource {

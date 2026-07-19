@@ -12,12 +12,13 @@ make that isolation easy to test from two browser contexts.
 The word _production_ here means that this bounded slice has explicit
 configuration, durable storage, health checks, restart behavior, security
 boundaries, and a destructive disposable acceptance test. It does not turn the
-sample into a general coding-agent SaaS. The worker currently supports only the
-image-owned Java repair/follow-up fixture. A tenant owner may keep the default
-deterministic model or configure an allowlisted DeepSeek model and encrypted API
-key. It does not yet support arbitrary repository import, arbitrary provider
-URLs, policy-approved third-party extensions, public Internet SaaS, Kubernetes,
-or direct Internet exposure. The optional registration route is not verified
+service into a general coding-agent SaaS. A workspace may use the image-owned
+Java repair fixture or a small public GitHub repository pinned to an exact
+commit. A tenant owner may keep the default deterministic model or configure an
+allowlisted DeepSeek model and encrypted API key. It does not support arbitrary
+Git URLs, private repositories, arbitrary provider URLs, policy-approved third-
+party extensions, public Internet SaaS, Kubernetes, or direct Internet exposure.
+The optional registration route is not verified
 human identity, billing, OIDC, recovery, abuse prevention, or a mutually
 hostile Docker-host boundary. Those limits are part of the product contract,
 not hidden deployment TODOs.
@@ -32,6 +33,8 @@ Opt-in registration and conversation discovery are recorded in
 Encrypted tenant model credentials, brokered egress, and real Pi execution are
 recorded in
 [ADR-0027](adr/0027-tenant-model-credentials-and-brokered-pi-execution.md).
+Controlled public GitHub import and immutable workspace seeds are recorded in
+[ADR-0028](adr/0028-controlled-github-workspace-import.md).
 
 ## Prerequisites
 
@@ -319,6 +322,39 @@ the activation settles. The worker has no direct provider egress. Treat the
 Supervisor, PostgreSQL, private runtime directory, and Docker authority as the
 trusted computing base; this is not a mutually hostile public-SaaS sandbox.
 
+## Controlled public GitHub workspaces
+
+After login, open the `new workspace` panel. Keep `sample Java` for the bundled
+fixture, or choose `public GitHub` and provide only:
+
+- a lowercase `owner/repository` coordinate such as
+  `mathewjonas/java-calculator-junit`; and
+- the exact lowercase 40-hex commit SHA to preserve as the workspace baseline.
+
+The API intentionally accepts no URL, branch, tag, credential, SSH form, Git
+configuration, or arbitrary host. Project, workspace, and pending source state
+commit in one tenant-scoped transaction. The first turn may take longer because
+the Supervisor must win an expiring PostgreSQL import lease, start a hardened
+one-shot importer, and publish the verified content-addressed seed to MinIO.
+Concurrent first turns wait for that seed. Every later activation rechecks its
+object key, byte count, SHA-256, and manifest, then overlays the last settled
+session checkpoint; it does not clone again.
+
+The importer has no bind mount, Docker socket, prompt, provider/deployment
+credential, published port, or membership in the database, object-storage,
+management, model-runtime, or provider-egress networks. It joins only the
+repository-egress bridge. The trusted Supervisor also anchors that bridge in
+this single-host topology, but all of its reachable privileged endpoints require
+a credential or turn capability that the importer never receives. A fixed
+GitHub URL is an application restriction, not a DNS firewall; do not claim this
+as a mutually hostile public-tenant boundary.
+
+Current repository limits are at most 512 regular files, 512 KiB per file, and
+2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
+files, redirects, submodules, LFS filters, oversized content, and commit mismatch
+fail closed. Private repositories, arbitrary Git hosts, branch refresh, sparse
+checkout, pull requests, and write-back are not supported.
+
 ## TLS and network exposure
 
 The bundled Caddy configuration intentionally serves plain HTTP on loopback. It
@@ -492,9 +528,22 @@ npm run ci
 Together these commands are the executable boundary for the supported private
 multi-tenant production slice. They deliberately stay on the deterministic
 profile and spend no provider quota. A release that changes the real-provider
-path also needs an explicit opt-in live check: configure one test tenant, submit
-the Java repair through the normal Web/API path, verify bash/edit/passing-test
-events and a non-empty final diff, confirm positive `usage_ledger` rows for the
-exact turn, inspect the worker's sole `model-runtime` network, and rotate or
-revoke the test key afterward. Any broader claim requires its own ADR, threat
+or GitHub-import path also needs the explicit opt-in live check below against an
+already deployed test tenant whose active profile is real:
+
+```bash
+AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
+```
+
+By default it imports the pinned tiny public repository recorded in the script,
+creates a session, runs two real Pi turns, requires completed tool calls and
+cumulative patches containing new files, confirms positive per-turn token
+usage, proves the source object's key/hash/size/update timestamp did not change
+between turns, and confirms no importer container survived. Override the source
+only with both `AGENT_DOCK_LIVE_GITHUB_REPOSITORY=owner/repository` and
+`AGENT_DOCK_LIVE_GITHUB_COMMIT_SHA=<40-hex-sha>`. The check can consume provider
+quota and modify the configured tenant by adding a project/session; it is
+therefore guarded and excluded from routine CI. Inspect the real worker's sole
+`model-runtime` network during release validation, and rotate or revoke a
+temporary test key afterward. Any broader claim requires its own ADR, threat
 model, and acceptance evidence.

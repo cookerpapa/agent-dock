@@ -37,3 +37,9 @@ export {
   TenantModelGatewayError,
   type TenantModelGatewayOptions,
 } from "./model-gateway.ts";
+
+export {
+  PostgresWorkspaceSeedResolver,
+  WorkspaceSeedError,
+  type PostgresWorkspaceSeedResolverOptions,
+} from "./workspace-seed.ts";

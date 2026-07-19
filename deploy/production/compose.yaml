@@ -312,6 +312,10 @@ services:
       AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
       AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
       AGENT_DOCK_PI_TURN_TIMEOUT_MS: "600000"
+      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
+      AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
+      AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS: "240000"
+      AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "300000"
       AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
       AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
       AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
@@ -349,6 +353,7 @@ services:
       - object-storage
       - model-runtime
       - provider-egress
+      - repository-egress
     healthcheck:
       test:
         [
@@ -429,6 +434,8 @@ networks:
     name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_model-runtime
     internal: true
   provider-egress: {}
+  repository-egress:
+    name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
 
 volumes:
   postgres-data: {}

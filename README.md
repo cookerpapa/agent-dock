@@ -117,6 +117,7 @@ only after a measured requirement appears.
 - [ADR-0025: private multi-tenant identity and fair scheduling](docs/adr/0025-private-multi-tenant-identity-and-fair-scheduling.md)
 - [ADR-0026: opt-in self-service registration and conversation discovery](docs/adr/0026-opt-in-self-service-registration-and-conversation-discovery.md)
 - [ADR-0027: tenant model credentials and brokered Pi execution](docs/adr/0027-tenant-model-credentials-and-brokered-pi-execution.md)
+- [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
 
 ## Current executable spikes
 
@@ -244,13 +245,14 @@ loopback port. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
 
-This is production-complete for the bounded private multi-tenant Java fixture,
+This is production-complete for the bounded private multi-tenant Java fixture
+and controlled small public GitHub repositories pinned to an exact commit,
 with either the deterministic fake or an owner-configured DeepSeek model.
 Request identity, roles, encrypted per-tenant provider credentials,
 resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,
 opt-in loopback self-registration, and tenant-scoped conversation discovery
-share one bounded Supervisor pool. It is not yet a generic repository service,
-arbitrary extension host, public Internet SaaS, Kubernetes release, or direct
+share one bounded Supervisor pool. It is not an arbitrary Git host/private-repo
+service, extension host, public Internet SaaS, Kubernetes release, or direct
 Internet ingress.
 
 ## Current status
@@ -261,7 +263,7 @@ implemented. The local Pi RPC extension compatibility spike passes end to end,
 and the embedded rehydration spike proves that cold logical sessions do not need
 dedicated Pi processes. The domain package now enforces explicit session, turn,
 sandbox, approval, and agent-node transitions plus allowlisted model-profile
-resolution. The database package now supplies a 20-table Kysely/PostgreSQL
+resolution. The database package now supplies a 21-table Kysely/PostgreSQL
 schema with executable ownership, idempotency, ordering, connection generation,
 fencing, ACK, and usage constraints. A hardened two-service Docker Compose topology, pinned runner
 images, and executable container-configuration contracts are implemented. The
@@ -341,8 +343,10 @@ integration bridge. The production entry point composes authenticated provisioni
 outbound Supervisor WebSocket, registration/heartbeat, execute/cancel,
 command ACK/commit/result, durable event ACK, bounded dispatch workers,
 retirement maintenance, and graceful drain. The client performs bounded
-same-boot reconnect after transient transport loss. The current image embeds one trusted
-sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
+same-boot reconnect after transient transport loss. The default project source
+is one trusted sample fixture; a project may instead name a normalized public
+GitHub `owner/repository` plus an exact 40-hex commit. At each successful settled
+boundary, Pi JSONL and a bounded,
 hashed regular-file workspace manifest cross the private worker channel and are
 stored by the trusted host before `turn.completed`; the next turn restores both
 into a different ephemeral container. The demo therefore supports a genuine
@@ -355,8 +359,15 @@ bucket retains immutable Pi/workspace bytes. A test discards the writer and
 restores through a fresh client against disposable MinIO, so this path no longer
 depends on one Supervisor host directory. The production Compose topology now
 uses that adapter against persistent MinIO and keeps credentials only in the
-trusted Supervisor host. Generic repository import, policy-approved extension
-loading, and a request-scoped model gateway remain separate work. Queued-turn
+trusted Supervisor host. For a GitHub source, one expiring PostgreSQL lease
+elects a disposable, credential-free importer. It fetches only the pinned commit
+on a dedicated egress bridge, rejects unsupported files, removes Git metadata,
+and publishes a content-addressed immutable seed to MinIO. Every activation
+reverifies that seed; the first Pi turn creates its Git baseline from it, and
+follow-ups overlay the settled checkpoint without cloning again. Private
+repositories, arbitrary URLs, submodules, LFS, branch refresh, pull-request
+write-back, and repositories above the current manifest limits remain outside
+the supported boundary. Policy-approved extension loading, queued-turn
 withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
 containment are also deferred.
 
@@ -491,3 +502,18 @@ private networks, persistent volumes, pinned images, Web ingress, and executable
 restart/scale/recovery acceptance. Permanently stale post-disconnect spool events
 are explicitly rejected and checksummed in quarantine; an ambiguous committed
 command is failed and never replayed.
+
+The controlled GitHub workspace slice is also executable in production. The Web
+new-workspace panel accepts either the sample or a normalized public GitHub
+repository pinned to an exact commit SHA. An opt-in live command imports a tiny
+repository, runs two real Pi/DeepSeek turns with tools, verifies a cumulative
+patch and token ledger, proves the immutable seed is reused, and confirms that
+no importer survives:
+
+```bash
+AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
+```
+
+Routine CI and `npm run production:check` remain deterministic and consume no
+provider quota. See ADR-0028 and the production runbook for the source limits
+and trust boundary.

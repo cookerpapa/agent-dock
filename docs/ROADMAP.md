@@ -77,8 +77,8 @@ allocates a durable per-session mailbox position, including while another turn
 is running. A five-input test concurrently accepts four followers and forces
 tied timestamps, proving strict FIFO, no overlap, and idempotent replay without
 a counter gap; the Web page exposes queue positions and labels active-session
-submission as queued follow-up. Steer is
-specified as a separate future operation rather than an implicit prompt mode.
+submission as queued follow-up. Steer is specified as a separate future
+operation rather than an implicit prompt mode.
 Long-turn leases now renew through one shared supervisor heartbeat, while a
 host-side identity-fenced reconciler removes orphan/expired Docker assignments,
 fails acknowledged ambiguous work, safely requeues pre-ACK work, repairs
@@ -89,8 +89,11 @@ and a retryable cross-replica retirement claim that requires owner-stop proof
 before reconciliation. Settled checkpoint bytes can now use an immutable
 S3-compatible adapter without changing the PostgreSQL pointer/CAS protocol. A
 disposable MinIO test discards the writer, restores with a fresh client, and
-detects collision, corruption, and oversize failures. Explicit steer and a
-generic repository snapshot path remain.
+detects collision, corruption, and oversize failures. A controlled public GitHub
+path now imports an exact commit through a disposable network-limited container,
+publishes one immutable S3 seed under an expiring PostgreSQL lease, and
+reverifies it before each activation. Explicit steer and arbitrary/private Git
+sources remain.
 Registration and heartbeat now also pass through an authenticated, bounded,
 ordered outbound WebSocket gateway/client, including cross-replica stale-socket
 rejection. Capability-gated remote execute/cancel now preserves the local
@@ -124,7 +127,8 @@ after an ambiguous control-plane interruption is now rejected without killing
 the healthy Supervisor boot and is retained in checksummed quarantine. The
 interrupted committed command remains failed and is never replayed. Phase 2
 remains open for the explicit steer operation and broader product surfaces; the
-production claim remains limited to the deterministic Java fixture.
+production claim remains limited to the deterministic Java fixture and bounded
+public GitHub repositories pinned to exact commits.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

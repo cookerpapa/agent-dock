@@ -54,6 +54,8 @@ export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout
 export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementState = "pending" | "claimed" | "blocked" | "completed";
 export type TenantApiCredentialRole = "owner" | "member" | "viewer";
+export type WorkspaceSourceKind = "sample_java" | "github_public";
+export type WorkspaceImportStatus = "pending" | "importing" | "ready" | "failed";
 
 export interface TenantTable {
   id: string;
@@ -107,6 +109,23 @@ export interface WorkspaceTable {
   tenant_id: string;
   project_id: string;
   object_snapshot_key: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface WorkspaceSourceTable {
+  tenant_id: string;
+  workspace_id: string;
+  kind: WorkspaceSourceKind;
+  repository: string | null;
+  commit_sha: string | null;
+  status: WorkspaceImportStatus;
+  object_key: string | null;
+  sha256: string | null;
+  size_bytes: NullableInt8;
+  import_lease_id: string | null;
+  lease_expires_at: NullableTimestamp;
+  failure_code: string | null;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -400,6 +419,7 @@ export interface Database {
   tenant_api_credentials: TenantApiCredentialTable;
   projects: ProjectTable;
   workspaces: WorkspaceTable;
+  workspace_sources: WorkspaceSourceTable;
   credential_bindings: CredentialBindingTable;
   model_profiles: ModelProfileTable;
   tenant_model_credentials: TenantModelCredentialTable;

@@ -254,7 +254,10 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
     });
     expect(alphaDetailResponse.statusCode).toBe(200);
     expect(alphaDetailResponse.json<ConversationDetailResource>()).toMatchObject({
-      project: { projectId: alphaProject.projectId },
+      project: {
+        projectId: alphaProject.projectId,
+        source: { kind: "sample_java", status: "ready" },
+      },
       session: { sessionId: alphaSession.sessionId, state: "cold" },
       turns: [
         {

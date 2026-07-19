@@ -22,6 +22,7 @@ const project: ProjectResource = {
   workspaceId: "40000000-0000-4000-8000-000000000001",
   name: "Java repair demo",
   createdAt: CREATED_AT,
+  source: { kind: "sample_java", status: "ready" },
 };
 
 const session: SessionResource = {

@@ -50,12 +50,14 @@ describe("Supervisor host production configuration", () => {
       AGENT_DOCK_SUPERVISOR_CAPACITY: "3",
       AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://supervisor-host:4200",
       AGENT_DOCK_SANDBOX_MODEL_NETWORK: "agent-dock-production_model-runtime",
+      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "agent-dock-production_repository-egress",
     });
     expect(config).toMatchObject({
       supervisorId: "supervisor-production-1",
       supervisorWebSocketUrl: "ws://control-plane:3000/internal/v1/supervisor",
       maxConcurrentSessions: 3,
       managementPort: 4100,
+      repositoryImportNetwork: "agent-dock-production_repository-egress",
     });
   });
 

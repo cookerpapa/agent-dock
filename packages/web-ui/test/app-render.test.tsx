@@ -11,5 +11,6 @@ describe("Pi-export-inspired session page", () => {
     expect(markup).toContain("networkless sandbox");
     expect(markup).toContain("durable through: #0");
     expect(markup).toContain("Run the tests, repair the Java bug");
+    expect(markup).toContain("new workspace");
   });
 });
