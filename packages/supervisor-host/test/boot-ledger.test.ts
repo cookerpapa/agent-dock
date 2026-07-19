@@ -71,6 +71,18 @@ describe("SupervisorBootLedger", () => {
     await expect(ledger.beginBoot(current)).rejects.toMatchObject({
       code: "boot_generation_reused",
     });
+
+    const next = identity();
+    await ledger.beginBoot(next);
+    await expect(ledger.generationForSandbox(current.sandboxId)).resolves.toMatchObject({
+      bootId: current.bootId,
+      status: "stopped",
+    });
+    await expect(ledger.generationForSandbox(next.sandboxId)).resolves.toMatchObject({
+      bootId: next.bootId,
+      status: "active",
+    });
+    await expect(ledger.generationForSandbox(globalThis.crypto.randomUUID())).resolves.toBeNull();
   });
 
   it("fails closed for a world-readable or corrupted ledger", async () => {

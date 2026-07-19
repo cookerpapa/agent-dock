@@ -1113,3 +1113,64 @@
 - 下一步：实现可信 Supervisor host composition 与 production owner/provisioner adapter。原因是 control plane 已经
   能自动调度并正确停机，下一项阻止“打开 Web 就能安全使用 Pi”的边界是：谁创建/停止 exact Supervisor boot、
   谁提供 assignment inventory，以及 checkpoint S3 credential 如何只留在可信 host。
+
+## 2026-07-19 — 可完整部署的单机生产拓扑
+
+- 目标：把已经分别通过测试的 remote control-plane、Supervisor WebSocket、Docker runner、PostgreSQL 和
+  S3 checkpoint 组合成一套别人可以从 clean checkout 部署、重启、扩缩容、恢复和排障的真实拓扑，同时严格
+  限定产品声明：当前只支持 single-user、deterministic Java repair/follow-up fixture，不冒充通用 coding-agent
+  SaaS、任意仓库/extension 或 real-provider 平台。
+- 架构决策：新增 ADR-0023，固定可信 `@agent-dock/supervisor-host`、每进程 fresh boot/sandbox/connection
+  credential、fsynced boot ledger、authenticated provisioning/owner/inventory、S3 checkpoint、显式 readiness 与
+  单宿主 Docker Compose 边界。Docker socket 只进入 root-equivalent trusted host；control plane 和 Pi worker 都
+  不接触它。每个 active turn 才创建一次性 worker，cold session 仍没有专属进程、thread、socket 或 timer。
+- 生产 control plane：`main.ts` 现在只在完整 fail-fast 配置下启动 remote runtime。public `/v1` 使用独立
+  file-backed bearer；Supervisor enrollment、management 与 per-boot WebSocket credential 完全分离。per-boot
+  secret 只在 host 内存中出现，PostgreSQL 只保存 digest；provision request 不能扩大 supervisor identity 或
+  capacity。owner/inventory URL 固定，拒绝 redirect/动态 URL，assignment 操作还会再次验证 sandbox 必须存在于
+  本机 ledger，且 supervisor/boot 必须精确匹配后才允许检查 Docker。
+- 可信 host：新增独立 executable，把 Docker runner、LocalSandboxSupervisor、PostgreSQL checkpoint metadata、
+  S3 object store、per-boot active/quarantine spool、reconnect client、boot ledger 和 private management endpoint
+  组合起来。网络 reconnect 保持同一 boot，进程 restart 必须产生新 boot；readiness 只有在 Docker/DB/S3、
+  provisioning、spool recovery 和当前 WebSocket 全部就绪时才为 true。
+- 部署物：新增 digest-pinned control-plane/Supervisor/Web images、non-root read-only Caddy ingress 和
+  `deploy/production/compose.yaml`。拓扑包含持久 PostgreSQL/MinIO/boot/spool 四个 volume、幂等 migration/bootstrap
+  jobs、五个隔离 network、read-only roots、cap drop、`no-new-privileges`、bounded tmpfs/CPU/memory/PID/logs 与
+  health checks；只有 Web 默认发布 `127.0.0.1:8080`。脚本提供 `production:init/config/build/up/deploy/ps/logs/
+  down/token/check`，partial runtime 拒绝覆盖，现有完整 runtime 保持 idempotent。
+- 宿主 UID 与 object-store 最小权限：application containers 不再假设宿主 operator 一定是 UID 1000，而是使用
+  四个 mounted application secret 的共同非 root owner；root 初始化会安全分配给 `1000:1000`，混合/root owner
+  在 Compose 前失败。MinIO root 只留在 storage/bootstrap boundary；Supervisor 使用单独随机 application
+  identity，policy 只允许 checkpoint bucket location/list 与 object get/put，不允许 delete。旧 runtime 若仍把
+  root 写进 `aws-credentials`，`production:init` 会原子迁移并保持 public API token/稳定 IDs 不变。
+- reconnect 验收发现的真实协议缺口：control-plane 在 committed command 中断后按 ADR-0018 正确记录
+  `connection_closed` ambiguous failure 并释放 lease，但 Supervisor 随后产生的本地撤销终态 event 仍在旧 fence
+  下。旧协议只能 close socket 表示拒绝，导致同一健康 host 无限恢复并最终退出。先新增 ADR-0024，再加入精确、
+  non-retryable `event.rejected(stale_fence)`；current socket 保持连接，client 只接受与 pending publication 完全
+  匹配的 rejection，file spool 原子移动整个剩余 assignment 到独立 per-boot quarantine，并 fsync checksummed
+  `rejection.json`，不伪造 ACK、不删除原 event。partial replay 后的 quarantine count 也按真实剩余文件计算。
+- 可执行生产验收：`npm run production:check` 每次创建随机 project/port/runtime/secrets/volumes，构建四个镜像并
+  启动真实 PostgreSQL、MinIO、control plane、Supervisor host、Caddy 和 networkless Pi worker。它验证 auth/
+  internal route/host port、secret permission 与非 root UID、bootstrap 二次执行、MinIO no-delete policy、Java repair、
+  control-plane restart 后 same-process/same-boot reconnect、旧 command durable ambiguous failure、exact spool
+  quarantine、新 session 恢复执行、control plane `1 -> 2 -> 1`、follow-up 从 S3 恢复、Supervisor restart 后 fresh
+  boot/old credential revocation/retirement、再次 S3 restore、active worker cancellation/absence、worker 无 bind/network/
+  deployment secret、22 条连续 durable SSE replay，以及最终零 managed worker。结束只删除自己的 exact 随机资源。
+- 失败驱动修正：第一次完整构建发现 pinned MinIO 镜像没有 `sed`，bootstrap 改用纯 POSIX shell built-in `read`，
+  没有向镜像增加包；第二次发现验收器用 running-only `compose ps` 检查已成功退出的 bootstrap container，改为
+  `--all`。随后 cached iteration 和默认 full-build 两条路径均输出 `production_check_passed`；最终 full-build run
+  使用 `projectName=agent-dock-check-3eab0b077e`，完成 22 events 后自动删除全部临时 container/network/volume/runtime。
+- 文档与 CI：新增 `docs/PRODUCTION_DEPLOYMENT.md`，记录 first deploy、拓扑、信任边界、TLS/remote exposure、
+  routine ops、health/alerts、备份恢复、升级回滚、credential rotation、故障语义和验收命令；README、architecture、
+  roadmap、backlog 与 ADR-0023 同步当前事实。GitHub Actions 新增独立 45 分钟 disposable production topology job。
+- 最终验证：`npm run ci` 完整通过 production Web build、所有 workspace typecheck、235 passed/7 conditional skipped
+  tests、两个 zero-model-call Pi spikes 与 `npm audit --audit-level=high`（0 vulnerabilities）。默认
+  `npm run production:check` 随后再次从 image build 开始全程通过。所有测试不调用真实 provider，不消耗 API/
+  subscription token。
+- 当前边界：这已经是当前 deterministic slice 的完整 self-hosted production deployment，不是 Internet-ready 或
+  multi-tenant release。直接远程访问仍必须在外层加入 TLS、firewall/identity-aware access，并保持 SSE 代理语义；
+  Kubernetes、generic repository import、policy-approved extension、request-scoped real-model gateway、steer、metrics/
+  alerting backend 与自动 quarantine/checkpoint GC 仍属于后续独立里程碑。
+- 下一步（不属于本里程碑）：优先实现 generic repository import + request-scoped model gateway，而不是继续给
+  deterministic fixture 堆功能。原因是部署与 runtime correctness 已有可执行证据，下一项决定它能否成为真正可用
+  coding agent 产品的瓶颈已经变成“用户代码和模型凭据如何安全进入”，不是 agent loop 或进程数量。

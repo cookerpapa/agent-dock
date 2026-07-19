@@ -1,0 +1,395 @@
+name: agent-dock-production
+
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-file: "3"
+    max-size: 10m
+
+x-application-security: &application-security
+  read_only: true
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+x-control-plane-environment: &control-plane-environment
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: "3000"
+  DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+  AGENT_DOCK_API_TOKEN_FILE: /run/agent-dock-secrets/api-token
+  AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
+  AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
+  AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
+  AGENT_DOCK_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
+  AGENT_DOCK_TENANT_SLUG: ${AGENT_DOCK_TENANT_SLUG:-agent-dock}
+  AGENT_DOCK_USER_ID: ${AGENT_DOCK_USER_ID:?run npm run production:init first}
+  AGENT_DOCK_CREDENTIAL_BINDING_ID: ${AGENT_DOCK_CREDENTIAL_BINDING_ID:?run npm run production:init first}
+  AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID: ${AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
+  AGENT_DOCK_MODEL_PROFILE_NAME: deterministic-java-repair
+  AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
+  AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
+  AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR: ${AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR:-8}
+  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: http://supervisor-host:4100
+
+x-control-plane-secrets: &control-plane-secrets
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+    target: /run/agent-dock-secrets/database-url
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/api-token
+    target: /run/agent-dock-secrets/api-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
+    target: /run/agent-dock-secrets/supervisor-enrollment-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
+    target: /run/agent-dock-secrets/supervisor-management-token
+    read_only: true
+
+services:
+  postgres:
+    image: postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agent_dock
+      POSTGRES_USER: agent_dock
+      POSTGRES_PASSWORD_FILE: /run/agent-dock-secrets/postgres-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/postgres-password
+        target: /run/agent-dock-secrets/postgres-password
+        read_only: true
+    networks:
+      - database
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U agent_dock -d agent_dock"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    shm_size: 128m
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.5
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging: *bounded-logging
+
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    entrypoint: [/bin/sh, -eu, -c]
+    command:
+      - |
+        export MINIO_ROOT_USER="$$(cat /run/agent-dock-secrets/minio-root-user)"
+        export MINIO_ROOT_PASSWORD="$$(cat /run/agent-dock-secrets/minio-root-password)"
+        exec minio server /data --address :9000 --console-address :9001
+    volumes:
+      - minio-data:/data
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-user
+        target: /run/agent-dock-secrets/minio-root-user
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-password
+        target: /run/agent-dock-secrets/minio-root-password
+        read_only: true
+    networks:
+      - object-storage
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:9000/minio/health/live]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /root/.minio:rw,noexec,nosuid,nodev,size=16m,mode=0700
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.5
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  minio-bootstrap:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: [/bin/sh, -eu, -c]
+    command:
+      - |
+        export MC_HOST_agentdock="http://$$(cat /run/agent-dock-secrets/minio-root-user):$$(cat /run/agent-dock-secrets/minio-root-password)@minio:9000"
+        bucket=${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
+        {
+          IFS= read -r credential_profile
+          IFS=' ' read -r access_label access_equals application_access_key
+          IFS=' ' read -r secret_label secret_equals application_secret_key
+        } < /run/agent-dock-secrets/aws-credentials
+        test "$${credential_profile}" = '[default]'
+        test "$${access_label}" = 'aws_access_key_id'
+        test "$${access_equals}" = '='
+        test -n "$${application_access_key}"
+        test "$${secret_label}" = 'aws_secret_access_key'
+        test "$${secret_equals}" = '='
+        test -n "$${application_secret_key}"
+        mc mb --ignore-existing "agentdock/$${bucket}"
+        mc anonymous set none "agentdock/$${bucket}"
+        printf '%s\n' \
+          '{"Version":"2012-10-17","Statement":[' \
+          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::$${bucket}\"]}," \
+          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$${bucket}/*\"]}" \
+          ']}' > /tmp/agent-dock-checkpoint-policy.json
+        mc admin policy create agentdock agent-dock-checkpoint-read-write /tmp/agent-dock-checkpoint-policy.json >/dev/null
+        printf '%s\n%s\n' "$${application_access_key}" "$${application_secret_key}" | mc admin user add agentdock >/dev/null
+        mc admin policy attach agentdock agent-dock-checkpoint-read-write --user "$${application_access_key}" >/dev/null
+        mc stat "agentdock/$${bucket}" >/dev/null
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-user
+        target: /run/agent-dock-secrets/minio-root-user
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-password
+        target: /run/agent-dock-secrets/minio-root-password
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
+        target: /run/agent-dock-secrets/aws-credentials
+        read_only: true
+    networks:
+      - object-storage
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /root/.mc:rw,noexec,nosuid,nodev,size=16m,mode=0700
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *bounded-logging
+
+  database-bootstrap:
+    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/control-plane/Dockerfile
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: [/app/packages/control-plane/src/bootstrap-main.ts]
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    environment: *control-plane-environment
+    volumes: *control-plane-secrets
+    networks:
+      - database
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 1.0
+    logging: *bounded-logging
+
+  control-plane:
+    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/control-plane/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      minio-bootstrap:
+        condition: service_completed_successfully
+    environment: *control-plane-environment
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    volumes: *control-plane-secrets
+    networks:
+      - api
+      - database
+      - management
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.5
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  supervisor-host:
+    image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/supervisor-host/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      minio-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+      AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
+      AWS_EC2_METADATA_DISABLED: "true"
+      AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
+      AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
+      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
+      AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
+      AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
+      AGENT_DOCK_SANDBOX_IMAGE: agent-dock/pi-workspace:${AGENT_DOCK_IMAGE_VERSION:-production}
+      AGENT_DOCK_DOCKER_COMMAND: docker
+      AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
+      AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state
+      AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
+      AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
+      AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
+      AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX: production/v1
+      AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
+      AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
+      AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - supervisor-boot:/var/lib/agent-dock/boot-volume
+      - supervisor-spool:/var/lib/agent-dock/spool-volume
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/agent-dock-secrets/database-url
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
+        target: /run/agent-dock-secrets/supervisor-enrollment-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
+        target: /run/agent-dock-secrets/supervisor-management-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
+        target: /run/agent-dock-secrets/aws-credentials
+        read_only: true
+    networks:
+      - management
+      - database
+      - object-storage
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4100/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    <<: *application-security
+    cap_add:
+      - DAC_OVERRIDE
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2.0
+    stop_grace_period: 45s
+    logging: *bounded-logging
+
+  web:
+    image: agent-dock/web-ui:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/web-ui/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    environment:
+      XDG_CONFIG_HOME: /config
+      XDG_DATA_HOME: /data
+    ports:
+      - ${AGENT_DOCK_HTTP_BIND_ADDRESS:-127.0.0.1}:${AGENT_DOCK_HTTP_PORT:-8080}:8080
+    networks:
+      - edge
+      - api
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, http://127.0.0.1:8080/healthz]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=1000,gid=1000
+      - /config:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=1000,gid=1000
+      - /data:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=1000,gid=1000
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.5
+    stop_grace_period: 15s
+    logging: *bounded-logging
+
+  sandbox-image:
+    profiles: [image-only]
+    image: agent-dock/pi-workspace:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/sandbox-supervisor/Dockerfile
+    network_mode: none
+    restart: "no"
+
+networks:
+  edge: {}
+  api:
+    internal: true
+  database:
+    internal: true
+  management:
+    internal: true
+  object-storage:
+    internal: true
+
+volumes:
+  postgres-data: {}
+  minio-data: {}
+  supervisor-boot: {}
+  supervisor-spool: {}

@@ -2,17 +2,32 @@
 
 !package.json
 !package-lock.json
+!tsconfig.base.json
 
 !packages/
 !packages/fake-model-server/
 !packages/fake-model-server/package.json
 !packages/fake-model-server/src/
 !packages/fake-model-server/src/**
+!packages/control-plane/
+!packages/control-plane/package.json
+!packages/control-plane/tsconfig.json
+!packages/control-plane/src/
+!packages/control-plane/src/**
+!packages/database/
+!packages/database/package.json
+!packages/database/src/
+!packages/database/src/**
+!packages/domain/
+!packages/domain/package.json
+!packages/domain/src/
+!packages/domain/src/**
 !packages/protocol/
 !packages/protocol/package.json
 !packages/protocol/src/
 !packages/protocol/src/**
 !packages/sandbox-supervisor/
+!packages/sandbox-supervisor/Dockerfile
 !packages/sandbox-supervisor/package.json
 !packages/sandbox-supervisor/src/
 !packages/sandbox-supervisor/src/**
@@ -20,6 +35,21 @@
 !packages/sandbox-supervisor/test/fixtures/
 !packages/sandbox-supervisor/test/fixtures/sample-java-repair/
 !packages/sandbox-supervisor/test/fixtures/sample-java-repair/**
+!packages/supervisor-host/
+!packages/supervisor-host/Dockerfile
+!packages/supervisor-host/package.json
+!packages/supervisor-host/tsconfig.json
+!packages/supervisor-host/src/
+!packages/supervisor-host/src/**
+!packages/web-ui/
+!packages/web-ui/Dockerfile
+!packages/web-ui/Caddyfile
+!packages/web-ui/index.html
+!packages/web-ui/package.json
+!packages/web-ui/src/
+!packages/web-ui/src/**
+!packages/web-ui/tsconfig.json
+!packages/web-ui/vite.config.ts
 
 !spikes/
 !spikes/pi-extension-compat/

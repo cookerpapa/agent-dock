@@ -107,9 +107,14 @@ such.
 13. The Supervisor host composes `DockerSandboxTurnRunner`,
     `LocalSandboxSupervisor`, `FileSupervisorEventSpool`,
     `PostgresSandboxCheckpointStore`, and `S3CheckpointObjectStore`. The spool
-    and boot ledger use separate private persistent-volume roots. PostgreSQL
-    remains checkpoint metadata authority and S3-compatible storage remains byte
-    authority.
+    and boot ledger use separate private persistent-volume roots. Within the
+    spool volume, each boot has separate active and permanent-quarantine roots as
+    specified by ADR-0024. PostgreSQL remains checkpoint metadata authority and
+    S3-compatible storage remains byte authority. The bundled MinIO bootstrap
+    creates a distinct checkpoint application identity limited to bucket
+    location/list and object get/put for the configured bucket; MinIO root
+    credentials stay out of the Supervisor and the application policy has no
+    delete action.
 14. Liveness means the process event loop and management server are alive.
     Control-plane readiness requires a successful database probe, initialized
     schema/bootstrap rows, and a running remote worker runtime. Supervisor-host
@@ -153,8 +158,8 @@ The production slice is complete only when one clean-checkout command can:
    workspace state;
 5. cancel an active turn and prove its exact one-shot container is absent;
 6. interrupt the Supervisor connection and prove same-process reconnect drains,
-   replays pending events, and resumes future capacity without replaying an
-   ambiguous committed command;
+   permanently quarantines the exact stale event suffix, and resumes future
+   capacity without replaying an ambiguous committed command;
 7. restart the Supervisor host and prove a different boot/sandbox identity is
    provisioned, the old boot is fenced, exact-labelled old assignments are
    reconciled, and a later turn restores from S3;
@@ -181,6 +186,10 @@ The production slice is complete only when one clean-checkout command can:
 - Docker Compose demonstrates the supported single-host topology. Kubernetes
   requires a different exclusive-host identity/owner implementation and is not
   implied by this ADR.
+- ADR-0024 refines reconnect recovery: a current socket can receive one exact
+  permanent `stale_fence` delivery rejection and quarantine that immutable copy
+  without restarting the healthy process. It does not weaken any owner, lease,
+  fencing, or persist-before-ACK rule in this ADR.
 - “Production deployable” describes operational completeness of the currently
   supported deterministic slice. It does not imply generic repositories, real
   provider credentials, arbitrary Pi extensions, multi-tenancy, or internet-

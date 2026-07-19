@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./checkpoint-runtime": "./src/checkpoint-runtime.ts"
   },
   "scripts": {
     "demo": "tsx src/demo.ts",

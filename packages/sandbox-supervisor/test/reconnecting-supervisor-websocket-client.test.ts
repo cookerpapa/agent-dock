@@ -81,7 +81,13 @@ class FakeConnection implements SupervisorWebSocketConnection {
 
   async recoverPendingEvents() {
     await this.#recovery.promise;
-    return { scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 };
+    return {
+      scannedSpools: 1,
+      replayedSpools: 1,
+      replayedEvents: 1,
+      quarantinedSpools: 0,
+      quarantinedEvents: 0,
+    };
   }
 
   start(): Promise<SupervisorRegisteredMessage> {
@@ -160,7 +166,13 @@ function runtime(
     async recoverPendingEvents(
       _publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
     ) {
-      return { scannedSpools: 0, replayedSpools: 0, replayedEvents: 0 };
+      return {
+        scannedSpools: 0,
+        replayedSpools: 0,
+        replayedEvents: 0,
+        quarantinedSpools: 0,
+        quarantinedEvents: 0,
+      };
     },
     waitUntilAssignmentsSettled,
   };

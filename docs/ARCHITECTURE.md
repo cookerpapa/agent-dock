@@ -151,21 +151,19 @@ include a validated unified diff bounded to 64 KiB. Cancellation propagates to
 Pi first and then requires exact-name outer-container removal confirmation.
 
 This is a real sandbox/workspace transport. The Web demo still chooses the local
-control-plane adapter, but the same dispatcher/backend boundary also has an
-executable two-phase remote WebSocket adapter. The HTTP application deliberately
-does not auto-start dispatchers. PostgreSQL event persistence, cumulative ACK,
-SSE replay, cross-replica high-water notification, and Docker execution are
-executable. Each production control-plane replica owns one dedicated PostgreSQL
-listener; notifications wake a process-local hub, while event bodies are always
-read from the durable table. The local supervisor can use a private, crash-safe
-file spool that syncs every event before transport and replays an unacknowledged
-suffix from a fresh process instance.
+control-plane adapter; the production entry point composes the same boundary
+through a two-phase outbound WebSocket, authenticated boot provisioning, bounded
+remote dispatch lanes, and exact owner/inventory management. PostgreSQL event
+persistence, cumulative ACK, SSE replay, cross-replica high-water notification,
+and Docker execution are executable. Each production control-plane replica owns
+one dedicated PostgreSQL listener; notifications wake a process-local hub, while
+event bodies are always read from the durable table. The trusted Supervisor host
+uses a private, crash-safe file spool that syncs every event before transport and
+replays an unacknowledged suffix after reconnect.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, production supervisor authentication/owner and dispatch-worker
-adapters, acknowledged-cancellation crash recovery, and Windows Job Object
-containment remain later slices. A crash
-after durable command ACK is treated as ambiguous and failed rather than
-replaying possible tool side effects.
+gateway, acknowledged-cancellation crash recovery, and Windows Job Object
+containment remain later slices. A crash after durable command ACK is treated as
+ambiguous and failed rather than replaying possible tool side effects.
 
 ### TypeScript sandbox supervisor
 
@@ -178,6 +176,39 @@ Responsibilities:
 - propagate cancellation and shutdown to the complete Pi/tool process tree;
 - manage Git worktrees and workspace snapshots;
 - report heartbeat, resource usage, and health.
+
+### Trusted Supervisor host and production topology
+
+`@agent-dock/supervisor-host` is the exclusive process owner for one stable
+Supervisor identity. Every process start generates a fresh boot, sandbox, and
+memory-only connection secret; network reconnects retain that boot. A private
+fsynced ledger preserves bounded current/recent generations so owner-stop proof
+cannot be invented after a restart. The host probes Docker, PostgreSQL, and S3,
+provisions the boot through a file-backed enrollment credential, recovers its
+event spool while drained, then becomes ready only after the outbound WebSocket
+is registered.
+
+The host alone receives the Docker socket and S3 credential. It composes the
+Docker runner, local Supervisor, PostgreSQL checkpoint metadata adapter,
+S3-compatible byte store, active/quarantine spool roots, reconnect client, and
+an authenticated private management endpoint. The control plane receives
+neither Docker authority nor S3 credentials; Pi workers receive neither of
+those, database/API/owner credentials, nor a network.
+Every assignment inventory request is constrained again to a sandbox generation
+known by this host's ledger, and a terminate/absence request must match that
+generation's stable Supervisor and exact boot before Docker is inspected.
+In the bundled object store, MinIO root authority is restricted to the storage
+and idempotent bootstrap services. The host receives a distinct checkpoint
+identity limited to bucket location/list and object get/put for one bucket; its
+policy does not grant object deletion.
+
+The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
+migration/bootstrap jobs, one control-plane replica, one trusted host, static Web
+ingress, isolated networks, private secret-file mounts, health checks, bounded
+resources/logs, and four declared volumes. Only Web publishes a loopback port.
+This topology is complete for the deterministic single-user fixture; it does not
+imply generic repository/provider/extension support, multi-tenancy, Kubernetes,
+or direct Internet hardening. See ADR-0023 and the production runbook.
 
 ### Model profiles and credentials
 
@@ -321,9 +352,15 @@ implementation remains a fast protocol reference. The file implementation
 stores a hashed closed manifest per assignment and one hashed, canonical event
 file per sequence. It atomically publishes and syncs an event before transport,
 atomically advances the cumulative cursor before compaction, rejects corrupt or
-gapped state, and redelivers pending files from a fresh store instance. It
-assumes one trusted supervisor owns its private persistent-volume root; it is
-not shared-filesystem coordination or process-memory recovery.
+gapped state, and redelivers pending files from a fresh store instance. Active
+state is scoped by boot. When the current control plane permanently rejects an
+exact publication as `stale_fence`, the store atomically moves the complete
+assignment to a separate per-boot quarantine root and fsyncs a checksummed safe
+rejection record; it neither fabricates an ACK nor deletes the original event.
+Corruption, mismatch, unsupported rejection, or quarantine I/O failure remains
+terminal. The spool assumes one trusted supervisor owns its private persistent-
+volume root; it is not shared-filesystem coordination or process-memory
+recovery. See ADR-0024.
 
 ## 4. Execution flow
 
@@ -359,9 +396,9 @@ production adapter keeps the same provider-neutral logical keys in PostgreSQL
 and conditionally stores bounded bytes in a configured S3-compatible
 bucket/prefix. A digest-pinned localhost MinIO proof discards the writer and
 restores through a fresh client; declared and streamed size limits, S3 checksum,
-and the independent database hash fail closed on corruption. Generic repository
-snapshot import/export and production remote sandbox assignment remain
-unimplemented.
+and the independent database hash fail closed on corruption. The supported
+production topology composes this S3 path with the trusted remote Supervisor;
+generic repository snapshot import/export remains unimplemented.
 The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
 in-flight execution is never recreated: after the old owner boot is fenced, the
@@ -376,9 +413,11 @@ socket owner as described below. `RemoteControlPlaneRuntime` now wires the share
 event store/hub, gateway, one connection-discovery loop, bounded per-capacity
 execute/cancel lanes, and an independent maintenance loop. Shutdown prevents a
 late discovery result from starting new lanes, detaches remote command waiters,
-drains the lanes, and closes Nest in order. The concrete production provisioner
-authorizer, owner-process/assignment-inventory adapters, Supervisor host entry
-point, and default `main.ts` opt-in are not yet wired.
+drains the lanes, and closes Nest in order. Production `main.ts` wires the
+PostgreSQL credential authorizer, allowlisted boot provisioner, fixed authenticated
+HTTP owner/inventory adapters, and explicit remote runtime. The separate
+Supervisor host entry point supplies fresh boot identity, exact Docker inventory,
+S3 checkpoint composition, and durable boot/spool volumes.
 
 ## 5. Delivery and recovery semantics
 
@@ -391,7 +430,8 @@ JSON intended for the supervisor's outbound WebSocket connection.
 Supervisor-to-control messages are registration, command ACK/result, event
 publication, and heartbeat. Control-to-supervisor messages are registration
 acceptance, turn execution/cancellation, command commit/release, approval
-resolution, cumulative event ACK, and heartbeat ACK with lease renewals.
+resolution, cumulative event ACK, permanent event rejection, and heartbeat ACK
+with lease renewals.
 Registration advertises the exact Pi/supervisor versions and capabilities. It
 also declares the initial `acceptingAssignments` drain state so registration
 cannot briefly reopen a drained supervisor. Post-registration mutations carry
@@ -428,6 +468,14 @@ reconciliation. Operator drain state is applied before every registration.
 Remote execution resolves a current connection-guarded lease coordinator once
 per new command and retains it for that exchange. A reconnect restores future
 command capacity, never an ambiguous committed tool execution. See ADR-0018.
+
+If a current socket publishes an event under a lease/fence that has already been
+permanently released by the control plane's ambiguous-failure decision, the
+gateway sends an exact non-retryable `event.rejected(stale_fence)` without
+closing that current socket. The client correlates it only to its pending
+publication and the file spool quarantines the immutable delivery copy. All
+other authentication, generation, schema, sequence, conflict, and service
+failures retain fail-closed socket/error behavior. See ADR-0024.
 
 When `command.two_phase.v1` is advertised, the connection also multiplexes
 execute/cancel preparations, command ACK/commit/release/result, and event
@@ -480,6 +528,10 @@ second command broker. See ADR-0019.
   safely cause replay.
 - Duplicate current ACKs are idempotent. Regressing ACKs, ACKs beyond the highest
   publication, sequence gaps, and stale lease/fencing metadata are rejected.
+- A permanent `stale_fence` event rejection is not an ACK. It preserves the
+  rejected delivery copy in Supervisor quarantine and permits the same healthy
+  boot to serve a distinct future command; it never changes the failed old turn
+  or authoritative PostgreSQL event stream.
 - `GET /v1/sessions/:sessionId/events` emits the session sequence as SSE `id`,
   the AgentDock event type as `event`, and the complete versioned event as JSON
   `data`. It subscribes before reading the durable suffix and deduplicates the
@@ -606,5 +658,7 @@ It validates the shared event schema plus SSE `id`/`event` identity before
 updating a pure transcript reducer; replayed sequences are idempotent and gaps
 fail visibly. Vite proxies only `/v1` to the loopback demo control plane, keeping
 browser requests same-origin without enabling permissive CORS. The local demo
-starts ephemeral PGlite and independent execution/cancellation polling loops,
-but does not change production `main.ts` or claim a production worker topology.
+starts ephemeral PGlite and independent execution/cancellation polling loops.
+The production Web build requires the public bearer login, is served by a
+non-root read-only Caddy container, proxies only `/v1`, rejects private internal
+and health paths, and publishes the deployment's only loopback host port.

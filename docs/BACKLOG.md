@@ -88,4 +88,8 @@ extension-policy support would overstate the current boundary.
 - [x] Automatically reconnect the same boot, drain old assignments, and resolve guarded remote backends per connection generation
 - [x] Fence cross-instance execute/cancel claims to the current local socket owner without a second broker
 - [x] Compose the shared event runtime, Supervisor gateway, bounded execute/cancel lanes, maintenance, and graceful drain
-- [ ] Replace the development bearer authorizer and owner boundary with production provisioner/mTLS and process adapters
+- [x] Replace the development bearer authorizer and owner boundary in the supported Docker topology with provisioned per-boot credentials and exact HTTP owner/inventory adapters
+- [x] Compose a trusted Supervisor host with fresh boot identity, Docker ownership, S3 checkpoints, durable boot ledger, and active/quarantine event spool
+- [x] Add pinned production images, persistent PostgreSQL/MinIO, private networks/secrets, Web ingress, health checks, and one-command deployment
+- [x] Prove the production topology across control-plane reconnect/scale, Supervisor fresh boot/retirement, S3 restore, cancellation, secret audit, and cleanup
+- [ ] Design mTLS/SPIFFE credentials for a multi-host or Kubernetes topology after that deployment target exists

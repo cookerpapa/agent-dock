@@ -1,0 +1,317 @@
+# Production deployment runbook
+
+This runbook deploys AgentDock's currently supported production slice on one
+Linux Docker host. The result is a durable, authenticated, single-user service
+with PostgreSQL metadata, MinIO checkpoint bytes, a remote control plane, one
+trusted Supervisor host, isolated one-shot Pi workers, and a static Web UI.
+
+The word _production_ here means that this bounded slice has explicit
+configuration, durable storage, health checks, restart behavior, security
+boundaries, and a destructive disposable acceptance test. It does not turn the
+sample into a general coding-agent SaaS. The worker currently supports only the
+image-owned Java repair/follow-up fixture and deterministic embedded model. It
+does not yet support arbitrary repository import, real-provider credentials,
+policy-approved third-party extensions, multi-tenancy, Kubernetes, or direct
+Internet exposure. Those limits are part of the product contract, not hidden
+deployment TODOs.
+
+The architecture and safety rationale are recorded in
+[ADR-0023](adr/0023-production-supervisor-host-and-self-hosted-topology.md) and
+[ADR-0024](adr/0024-permanent-event-rejection-and-spool-quarantine.md).
+
+## Prerequisites
+
+- A Linux Docker host. The trusted Supervisor uses the Linux Docker socket and
+  the worker's POSIX process-group cancellation semantics.
+- Docker Engine with the Compose plugin. The acceptance topology is currently
+  exercised on Docker Engine `29.4.2` and Compose `5.1.3`.
+- Node.js `24.12.0` and npm `11.6.2` for the repository scripts. The built
+  application images pin their own Node and service image digests.
+- Enough local CPU, memory, and storage for PostgreSQL, MinIO, four application
+  images, and up to two concurrent workers. The Compose file declares explicit
+  per-service limits; capacity should be measured against the intended host.
+- A private checkout and a trusted operator account. Anyone who can read the
+  generated runtime directory or access the Docker socket is inside the trusted
+  computing base.
+
+Do not use a shared untrusted Docker socket or an unreviewed rootless/remote
+Docker context without separately validating its socket ownership, mount, and
+process-containment behavior.
+
+## First deployment
+
+Install the exact lockfile without running package lifecycle scripts, then run
+the idempotent deployment entry point:
+
+```bash
+npm ci --ignore-scripts
+npm run production:deploy
+```
+
+The first invocation creates `deploy/production/runtime/`, generates private
+random credentials and stable logical IDs, builds all four pinned application
+images, migrates and bootstraps PostgreSQL, creates a private checkpoint bucket,
+and waits for every long-running service to become healthy. A completed runtime
+directory is reused on later invocations. A non-empty partial directory is
+rejected rather than silently replacing credentials.
+
+The default ingress is `http://127.0.0.1:8080`. Obtain the single-user API token
+only on the trusted host:
+
+```bash
+npm run production:token
+```
+
+Open the ingress URL, paste the token into the login card, and submit the
+supported Java-repair prompt. The browser keeps the token in `sessionStorage`,
+not in a URL or durable server-side session. The token command intentionally
+writes a secret to stdout, so do not run it in CI logs, shell tracing, a screen
+recording, or an untrusted terminal multiplexer.
+
+To choose a different loopback port or an external runtime directory, set these
+values only before the first initialization:
+
+```bash
+AGENT_DOCK_HTTP_PORT=18080 \
+AGENT_DOCK_RUNTIME_DIRECTORY=/absolute/private/agent-dock-runtime \
+npm run production:deploy
+```
+
+The generated `.env`, `deployment.json`, and every file under `secrets/` are
+mode `0600`; their two parent directories are mode `0700`. Keep the runtime
+directory outside unencrypted/general-purpose backups, artifact uploads, and
+source-control staging. The coordinated encrypted recovery backup described
+below must include it. The repository's default runtime path is ignored by Git.
+The control-plane containers run under the non-root numeric owner of their four
+mounted application secret files, avoiding an assumption that every Docker host
+uses UID `1000`. Initialization performed as root assigns those files to the
+image's unprivileged `1000:1000` identity. Mixed owners or a root-owned
+application secret fail before Compose starts.
+The MinIO root credential stays in the MinIO/bootstrap boundary. The Supervisor
+uses a separate generated application identity whose policy permits bucket
+location/list plus object read/write only for the checkpoint bucket; it has no
+object-delete action. Reusing an older runtime that gave the Supervisor the root
+credential atomically migrates `aws-credentials` during `production:init` before
+the topology is updated.
+
+## Deployment topology
+
+Only the Web service publishes a host port, bound to loopback by default:
+
+```text
+browser -> web/Caddy -> authenticated /v1 API -> control-plane
+                                      |              |
+                                      |              +-> PostgreSQL
+                                      |              +-> outbound Supervisor WebSocket
+                                      v
+                              trusted Supervisor host -> MinIO checkpoints
+                                      |
+                                      +-> Docker socket -> ephemeral networkless Pi worker
+```
+
+The database, object store, Supervisor management endpoint, boot-provisioning
+route, readiness endpoints, and outbound Supervisor transport stay on isolated
+Compose networks. Caddy returns `404` for `/internal/*` and `/health/*`; it only
+proxies `/v1/*` and serves static assets. Liveness is exposed as `/healthz` and
+contains no dependency detail.
+
+The trusted `supervisor-host` container is deliberately root-equivalent because
+it owns `/var/run/docker.sock`. Neither the control plane nor any Pi worker gets
+that socket. Workers are created per active turn, not per conversation: they run
+as UID/GID `1000:1000`, with no host bind mount, inherited deployment secret,
+network, published port, or writable root filesystem, and are removed after
+completion or cancellation. Cold sessions consume no process, worker container,
+socket, timer, or dedicated thread.
+
+Persistent state is split into four declared volumes:
+
+- `postgres-data`: tenants, sessions, commands, leases, events, checkpoint
+  metadata, Supervisor generations, and retirement work;
+- `minio-data`: immutable Pi JSONL and workspace checkpoint bytes;
+- `supervisor-boot`: fsynced current/recent boot ownership ledger;
+- `supervisor-spool`: active unacknowledged event publications and permanently
+  stale quarantine evidence.
+
+PostgreSQL metadata and MinIO objects form one logical checkpoint. The boot and
+spool volumes are also required for honest owner-stop proof and event recovery;
+do not treat any one of these volumes as a complete backup by itself.
+
+## Routine commands
+
+```bash
+npm run production:config   # validate interpolation without printing secrets
+npm run production:build    # rebuild all application and worker images
+npm run production:up       # start already-built images and wait for health
+npm run production:ps       # show service state and health
+npm run production:logs     # follow bounded container logs
+npm run production:down     # stop the topology and preserve all four volumes
+```
+
+`production:down` is non-destructive. Do not append `--volumes` during normal
+operation. Removing the Compose volumes permanently deletes the database,
+checkpoint bytes, owner ledger, and spool evidence; take and verify a coordinated
+backup first and resolve the exact Compose project/volume names with
+`docker compose ls` and `docker volume ls` rather than using globs.
+
+Container logs use Docker's bounded `json-file` policy: three files of at most
+10 MiB per service. Logs contain safe component/state/error codes and opaque
+identifiers, but operators should still grant log access as privileged
+operational access.
+
+## TLS and network exposure
+
+The bundled Caddy configuration intentionally serves plain HTTP on loopback. It
+is safe for local-host access and for the disposable acceptance topology; it is
+not an Internet ingress.
+
+For remote access, keep AgentDock bound to loopback or a private network and put
+a separately managed TLS reverse proxy or authenticated tunnel in front of it.
+Preserve the `Authorization` header, disable proxy buffering for
+`text/event-stream`, allow long-lived SSE reads, and keep `/internal/*`,
+`/health/*`, PostgreSQL, MinIO, Supervisor management, and the Docker daemon
+unreachable. Add host firewall rules and an identity-aware access layer if more
+than the trusted operator can reach the endpoint. Binding
+`AGENT_DOCK_HTTP_BIND_ADDRESS=0.0.0.0` without those controls is unsupported.
+
+The included public bearer token is a single-user boundary, not account login,
+RBAC, CSRF-resistant cookie authentication, tenant isolation, rate limiting, or
+abuse protection.
+
+## Health and operations
+
+Use `npm run production:ps` for the first health view. Expected steady state:
+
+- `postgres`, `minio`, `control-plane`, `supervisor-host`, and `web` are healthy;
+- `database-bootstrap` and `minio-bootstrap` exited successfully;
+- no `sandbox-image` service is running;
+- no container with `agent-dock.managed=true` remains after a turn settles;
+- one current Supervisor boot is ready for the configured stable Supervisor ID.
+
+The Supervisor is ready only after Docker, PostgreSQL, MinIO, provisioning,
+spool recovery, and its current outbound WebSocket are ready. A transient
+control-plane restart may make a committed command's outcome ambiguous. The
+system then fails that command/session as `connection_closed`, never replays its
+possible side effects, quarantines a permanently stale final spool event with a
+checksummed rejection record, reconnects the same Supervisor boot, and accepts
+future work in a new session. This is intentional at-least-once delivery safety,
+not a transparent exactly-once claim.
+
+One Supervisor process advertises a default capacity of two. Do not scale the
+`supervisor-host` service while it uses one stable `AGENT_DOCK_SUPERVISOR_ID` and
+shared boot volume. Control-plane replicas can be tested with Compose scaling,
+but the bundled ingress and database sizing remain a single-host deployment;
+load-test before treating extra replicas as an availability SLA.
+
+Alert operationally on prolonged unhealthy/restarting services, a growing
+retirement queue, repeated `connection_closed` failures, non-empty active spool
+after recovery, quarantine growth, PostgreSQL/MinIO capacity, and managed worker
+containers that outlive their command deadline. Quarantine is retained as audit
+evidence and has no automatic garbage collection in this slice.
+
+## Backup and restore
+
+Back up all durable authorities as one recovery point:
+
+1. Stop new ingress traffic and wait for active turns to settle or cancel them.
+2. Run `npm run production:down`. This preserves the named volumes and gives a
+   simple crash-consistent single-host boundary.
+3. Snapshot or archive `postgres-data`, `minio-data`, `supervisor-boot`, and
+   `supervisor-spool` together with the private runtime directory. Use the
+   Docker/storage platform's documented named-volume backup mechanism; never
+   copy PostgreSQL's live data directory while it is running.
+4. Encrypt the backup, restrict it like production credentials, record the
+   image version and Git commit, and test restoration on an isolated host.
+5. Restart with `npm run production:up` and verify health.
+
+For larger installations, use `pg_dump` plus an S3-native versioned/replicated
+bucket and a coordinated ledger/spool snapshot instead of raw volumes. A logical
+database dump without the matching object namespace is incomplete, because
+PostgreSQL stores independent hashes and pointers while MinIO stores bytes.
+
+Restore onto an isolated host in this order: restore the private runtime
+directory and all four volumes, install the recorded checkout/image version,
+run `npm run production:config`, then run `npm run production:up`. Verify boot
+retirement, checkpoint restore, event cursor continuity, and absence of orphan
+workers before admitting traffic. If the ledger/spool cannot be restored, do
+not fabricate owner proof or delete leases manually; preserve the database and
+perform an explicit incident reconciliation.
+
+## Upgrade and rollback
+
+Before an upgrade, read the new ADRs/migrations, take the coordinated backup
+above, and preserve the old images. Then:
+
+```bash
+npm ci --ignore-scripts
+npm run production:deploy
+npm run production:ps
+```
+
+`production:deploy` rebuilds pinned images and runs the idempotent migration and
+bootstrap jobs before the long-running services become ready. Recreating the
+Supervisor host intentionally creates a fresh boot/sandbox generation; the old
+boot is fenced and retired, and settled sessions restore from PostgreSQL/MinIO.
+
+Database migrations are forward-moving. A container-image rollback is not a
+safe schema rollback by itself. Restore the coordinated pre-upgrade recovery
+point when a migration is incompatible, or use a migration-specific rollback
+procedure that has been separately tested. Never point an older binary at an
+unknown newer schema merely because its container starts.
+
+## Credential rotation
+
+Processes read mounted secrets only at startup. Rotate during a maintenance
+window, with a coordinated backup and no active turns:
+
+- Public API token: replace `secrets/api-token` atomically with a new private
+  regular file, recreate the control plane, and distribute the new token over a
+  separate secure channel. Existing browser tabs must log in again.
+- Enrollment and management tokens: replace the matching files atomically in
+  both consumers and recreate the control plane and Supervisor host together.
+  The host restart creates a fresh boot credential and revokes the old one.
+- PostgreSQL or MinIO credentials: change the backing service credential and
+  every matching client secret as one operation. MinIO has separate root and
+  checkpoint-application credentials; preserve that split and reattach the
+  bucket-scoped no-delete policy. Because database and application credentials
+  are embedded in `database-url` and `aws-credentials`, partial rotation will
+  make services unready. Test this procedure on a restored copy first.
+
+Every replacement must remain a bounded, non-symlink regular file with mode
+`0600`; its parent directory must remain `0700`. Do not place secret values in
+Compose environment variables, command arguments, Git, issue trackers, or logs.
+
+## Reproducible production acceptance
+
+Run the destructive acceptance topology separately from a real deployment:
+
+```bash
+npm run production:check
+```
+
+The command creates a random project name, private temporary runtime, random
+loopback port, fresh volumes, and fresh credentials. It builds images, starts
+real PostgreSQL and MinIO, proves public/internal authentication and port
+isolation, reruns both bootstrap jobs to prove idempotency and the bucket-scoped
+no-delete credential, repairs Java, interrupts and reconnects the control plane, verifies
+ambiguous-command failure and spool quarantine, scales the control plane from
+one to two and back, restores a follow-up from S3, restarts the Supervisor into
+a fresh boot, reconciles the old boot, cancels a live worker, audits worker
+hardening, non-root host-UID portability, and secret absence, and replays 22
+durable ordered events. It then removes only its exact random containers,
+networks, volumes, and runtime path.
+
+Never set `AGENT_DOCK_PRODUCTION_CHECK_KEEP=1` in shared CI. That diagnostic
+option intentionally leaves the isolated topology and its secret directory for
+manual inspection. `AGENT_DOCK_PRODUCTION_CHECK_SKIP_BUILD=1` is only for local
+iteration after the exact images have already been built; release evidence must
+use the default full-build path.
+
+After the deployment acceptance passes, run the complete repository gate:
+
+```bash
+npm run ci
+```
+
+Together these commands are the executable boundary for the supported
+single-user deterministic production slice. Any claim beyond that boundary
+requires its own ADR, threat model, and acceptance evidence.

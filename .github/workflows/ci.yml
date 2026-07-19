@@ -66,6 +66,29 @@ jobs:
       - name: Verify S3-compatible checkpoint portability
         run: npm run object-store:check
 
+  production:
+    name: Disposable production topology
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js for the production verifier
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.12.0
+          package-manager-cache: false
+
+      - name: Install pinned dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build and verify the complete disposable production topology
+        run: npm run production:check
+
   secrets:
     name: Secret history scan
     runs-on: ubuntu-latest

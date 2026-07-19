@@ -90,7 +90,7 @@ before reconciliation. Settled checkpoint bytes can now use an immutable
 S3-compatible adapter without changing the PostgreSQL pointer/CAS protocol. A
 disposable MinIO test discards the writer, restores with a fresh client, and
 detects collision, corruption, and oversize failures. Explicit steer and a
-concrete production owner-process adapter remain.
+generic repository snapshot path remain.
 Registration and heartbeat now also pass through an authenticated, bounded,
 ordered outbound WebSocket gateway/client, including cross-replica stale-socket
 rejection. Capability-gated remote execute/cancel now preserves the local
@@ -107,14 +107,24 @@ owner affinity makes a separate cross-instance command broker unnecessary for
 the current topology. An explicit remote control-plane composition now discovers
 locally owned live connections, caps asynchronous execute/cancel lanes by
 provisioned capacity, runs maintenance independently, shares one event authority
-with REST/SSE, and drains sockets and in-flight dispatchers in order. It remains
-library composition rather than the default `main.ts` topology because production
-provisioner authentication, owner-stop proof, and assignment inventory cannot be
-replaced by no-op adapters. Event ingestion now emits a transactional
+with REST/SSE, and drains sockets and in-flight dispatchers in order. The
+production entry point now uses provisioned per-boot credentials, exact
+owner-stop and Docker assignment inventory, a trusted Supervisor host, and
+S3-backed checkpoints rather than no-op adapters. Event ingestion emits a transactional
 PostgreSQL high-water hint. Every production replica reconnects one dedicated
 listener, coalesces wakes without copying event bodies, and makes SSE read the
 durable suffix; heartbeat polling and `Last-Event-ID` retain correctness across
 lost notifications and browser reconnects.
+
+The bounded single-user production slice is deployable with pinned images,
+private secret files/networks, persistent PostgreSQL/MinIO/boot/spool volumes,
+explicit migration/bootstrap jobs, authenticated Web ingress, and a full
+disposable restart/scale/recovery acceptance command. A permanently stale event
+after an ambiguous control-plane interruption is now rejected without killing
+the healthy Supervisor boot and is retained in checksummed quarantine. The
+interrupted committed command remains failed and is never replayed. Phase 2
+remains open for the explicit steer operation and broader product surfaces; the
+production claim remains limited to the deterministic Java fixture.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

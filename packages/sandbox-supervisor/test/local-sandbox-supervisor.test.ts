@@ -330,7 +330,13 @@ describe("LocalSandboxSupervisor", () => {
             },
           };
         }),
-      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 });
+      ).resolves.toEqual({
+        scannedSpools: 1,
+        replayedSpools: 1,
+        replayedEvents: 1,
+        quarantinedSpools: 0,
+        quarantinedEvents: 0,
+      });
       expect(replayed).toEqual([event]);
     } finally {
       await rm(root, { recursive: true, force: true });

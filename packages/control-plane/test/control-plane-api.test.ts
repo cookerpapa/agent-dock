@@ -2997,7 +2997,13 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       await expect(
         restartedSupervisor.recoverPendingEvents((message) => durableEventStore.ingest(message)),
-      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 });
+      ).resolves.toEqual({
+        scannedSpools: 1,
+        replayedSpools: 1,
+        replayedEvents: 1,
+        quarantinedSpools: 0,
+        quarantinedEvents: 0,
+      });
       expect(
         await database
           .selectFrom("session_events")
@@ -3009,7 +3015,13 @@ describe.sequential("single-user durable turn intake API", () => {
         new FileEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
           throw new Error("A drained spool must not publish");
         }),
-      ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 0, replayedEvents: 0 });
+      ).resolves.toEqual({
+        scannedSpools: 1,
+        replayedSpools: 0,
+        replayedEvents: 0,
+        quarantinedSpools: 0,
+        quarantinedEvents: 0,
+      });
     } finally {
       await rm(spoolRoot, { recursive: true, force: true });
     }

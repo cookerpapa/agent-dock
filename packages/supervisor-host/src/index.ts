@@ -24,6 +24,8 @@ export {
   type SupervisorHostEnvironment,
 } from "./config.ts";
 export {
+  PRODUCTION_CANCELLATION_PROBE_PROMPT,
+  resolveProductionSandboxScenario,
   SupervisorHostRuntime,
   SupervisorHostRuntimeError,
   type SupervisorHostRuntimeOptions,

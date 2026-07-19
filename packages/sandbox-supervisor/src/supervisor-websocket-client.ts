@@ -9,6 +9,7 @@ import {
   type CommandResultMessage,
   type EventAckMessage,
   type EventPublishMessage,
+  type EventRejectedMessage,
   type ExecuteTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
@@ -21,6 +22,7 @@ import type {
 } from "./local-sandbox-supervisor.ts";
 import { LocalSandboxSupervisorError } from "./local-sandbox-supervisor.ts";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
+import { EventDeliveryRejectedError } from "./in-memory-event-spool.ts";
 import {
   PINNED_PI_CODING_AGENT_VERSION,
   PiRpcTurnCancelledError,
@@ -113,7 +115,7 @@ type PendingHeartbeat = {
 type PendingEventAcknowledgement = {
   message: EventPublishMessage;
   resolve: (acknowledgement: EventAckMessage) => void;
-  reject: (error: SupervisorWebSocketClientError) => void;
+  reject: (error: SupervisorWebSocketClientError | EventDeliveryRejectedError) => void;
   timeout: NodeJS.Timeout;
 };
 
@@ -394,7 +396,13 @@ export class SupervisorWebSocketClient {
       );
     }
     if (this.#runtime.recoverPendingEvents === undefined) {
-      return { scannedSpools: 0, replayedSpools: 0, replayedEvents: 0 };
+      return {
+        scannedSpools: 0,
+        replayedSpools: 0,
+        replayedEvents: 0,
+        quarantinedSpools: 0,
+        quarantinedEvents: 0,
+      };
     }
     try {
       return await this.#runtime.recoverPendingEvents((message) => this.#publishEvent(message));
@@ -631,6 +639,10 @@ export class SupervisorWebSocketClient {
     }
     if (message.type === "event.ack") {
       this.#acceptEventAcknowledgement(message);
+      return;
+    }
+    if (message.type === "event.rejected") {
+      this.#acceptEventRejection(message);
       return;
     }
     if (message.type === "command.turn.execute" || message.type === "command.turn.cancel") {
@@ -961,6 +973,25 @@ export class SupervisorWebSocketClient {
     clearTimeout(pending.timeout);
     this.#pendingEventAcknowledgements.delete(message.payload.sessionId);
     pending.resolve(message);
+  }
+
+  #acceptEventRejection(message: EventRejectedMessage): void {
+    const pending = this.#pendingEventAcknowledgements.get(message.payload.sessionId);
+    if (
+      pending === undefined ||
+      message.payload.leaseId !== pending.message.payload.leaseId ||
+      message.payload.fencingToken !== pending.message.payload.fencingToken ||
+      message.payload.rejectedSeq !== pending.message.payload.event.seq
+    ) {
+      throw new SupervisorWebSocketClientError(
+        "event_rejection_mismatch",
+        "Supervisor event rejection identity did not match",
+        false,
+      );
+    }
+    clearTimeout(pending.timeout);
+    this.#pendingEventAcknowledgements.delete(message.payload.sessionId);
+    pending.reject(new EventDeliveryRejectedError(message));
   }
 
   #scheduleHeartbeat(delayMs: number): void {

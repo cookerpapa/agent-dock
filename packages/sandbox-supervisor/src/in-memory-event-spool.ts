@@ -3,6 +3,7 @@ import {
   parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
+  type EventRejectedMessage,
 } from "@agent-dock/protocol";
 import { isDeepStrictEqual } from "node:util";
 
@@ -32,6 +33,8 @@ export type SupervisorEventSpoolRecoveryResult = {
   scannedSpools: number;
   replayedSpools: number;
   replayedEvents: number;
+  quarantinedSpools: number;
+  quarantinedEvents: number;
 };
 
 export interface SupervisorEventSpoolRecovery {
@@ -52,6 +55,25 @@ export class EventSpoolError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "EventSpoolError";
+  }
+}
+
+export class EventDeliveryRejectedError extends Error {
+  readonly code: EventRejectedMessage["payload"]["code"];
+  readonly retryable = false;
+  readonly sessionId: string;
+  readonly leaseId: string;
+  readonly fencingToken: number;
+  readonly rejectedSeq: number;
+
+  constructor(message: EventRejectedMessage) {
+    super("Control plane permanently rejected a stale event delivery");
+    this.name = "EventDeliveryRejectedError";
+    this.code = message.payload.code;
+    this.sessionId = message.payload.sessionId;
+    this.leaseId = message.payload.leaseId;
+    this.fencingToken = message.payload.fencingToken;
+    this.rejectedSeq = message.payload.rejectedSeq;
   }
 }
 

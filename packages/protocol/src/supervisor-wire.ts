@@ -380,6 +380,24 @@ export const EventAckMessageSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const EventRejectedMessageSchema = Type.Object(
+  {
+    ...WireEnvelopeProperties,
+    type: Type.Literal("event.rejected"),
+    payload: Type.Object(
+      {
+        sessionId: OpaqueIdSchema,
+        ...LeaseProperties,
+        rejectedSeq: PositiveSafeIntegerSchema,
+        code: Type.Literal("stale_fence"),
+        retryable: Type.Literal(false),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const HeartbeatSessionSchema = Type.Object(
   {
     sessionId: OpaqueIdSchema,
@@ -452,6 +470,7 @@ export const ControlToSupervisorMessageSchema = Type.Union([
   CommandCommitMessageSchema,
   CommandReleaseMessageSchema,
   EventAckMessageSchema,
+  EventRejectedMessageSchema,
   SupervisorHeartbeatAckMessageSchema,
 ]);
 
@@ -466,6 +485,7 @@ export type CommandReleaseMessage = Static<typeof CommandReleaseMessageSchema>;
 export type CommandResultMessage = Static<typeof CommandResultMessageSchema>;
 export type EventPublishMessage = Static<typeof EventPublishMessageSchema>;
 export type EventAckMessage = Static<typeof EventAckMessageSchema>;
+export type EventRejectedMessage = Static<typeof EventRejectedMessageSchema>;
 export type SupervisorHeartbeatMessage = Static<typeof SupervisorHeartbeatMessageSchema>;
 export type SupervisorHeartbeatAckMessage = Static<typeof SupervisorHeartbeatAckMessageSchema>;
 
@@ -484,6 +504,7 @@ export type ControlToSupervisorMessage =
   | CommandCommitMessage
   | CommandReleaseMessage
   | EventAckMessage
+  | EventRejectedMessage
   | SupervisorHeartbeatAckMessage;
 
 export class AgentDockWireProtocolError extends Error {

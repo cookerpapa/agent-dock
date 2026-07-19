@@ -185,6 +185,22 @@ describe("trusted Supervisor management boundary", () => {
       );
       await expect(inventory.terminateAndConfirmAbsent(ASSIGNMENT)).resolves.toBeUndefined();
       expect(execFileMock).toHaveBeenCalledTimes(5);
+
+      const unknownInventory = new HttpSandboxAssignmentInventory(
+        value.client,
+        globalThis.crypto.randomUUID(),
+      );
+      await expect(unknownInventory.listAssignments()).rejects.toMatchObject({
+        code: "boot_generation_unknown",
+        retryable: false,
+      });
+      await expect(
+        inventory.terminateAndConfirmAbsent({
+          ...ASSIGNMENT,
+          bootId: globalThis.crypto.randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "assignment_scope_mismatch", retryable: false });
+      expect(execFileMock).toHaveBeenCalledTimes(5);
     } finally {
       await value.server.close();
     }

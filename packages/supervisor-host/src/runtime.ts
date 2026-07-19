@@ -1,7 +1,7 @@
 import {
   type CheckpointObjectStore,
   PostgresSandboxCheckpointStore,
-} from "@agent-dock/control-plane";
+} from "@agent-dock/control-plane/checkpoint-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import {
@@ -9,6 +9,8 @@ import {
   FileEventSpoolStore,
   LocalSandboxSupervisor,
   ReconnectingSupervisorWebSocketClient,
+  type DockerSandboxScenario,
+  type DockerSandboxScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -33,6 +35,22 @@ export type SupervisorHostRuntimeOptions = {
 };
 
 export type SupervisorHostTerminalReason = "owner_stopped" | "connection_failed";
+
+export const PRODUCTION_CANCELLATION_PROBE_PROMPT = "agent-dock://acceptance/cancellation-hold";
+
+export function resolveProductionSandboxScenario({
+  command,
+  restoring,
+}: DockerSandboxScenarioContext): DockerSandboxScenario {
+  if (restoring) return "java_followup";
+  if (
+    command.payload.input.kind === "prompt" &&
+    command.payload.input.text === PRODUCTION_CANCELLATION_PROBE_PROMPT
+  ) {
+    return "timeout";
+  }
+  return "java_repair";
+}
 
 export class SupervisorHostRuntimeError extends Error {
   readonly code: string;
@@ -100,6 +118,7 @@ export class SupervisorHostRuntime {
   #closing: Promise<void> | undefined;
   #ownerStopSettled = false;
   #terminalSettled = false;
+  #terminalFailureCode: string | undefined;
 
   constructor(options: SupervisorHostRuntimeOptions) {
     this.#config = options.config;
@@ -138,6 +157,10 @@ export class SupervisorHostRuntime {
     return this.#identity === undefined ? undefined : { ...this.#identity };
   }
 
+  get terminalFailureCode(): string | undefined {
+    return this.#terminalFailureCode;
+  }
+
   waitUntilOwnerStopped(): Promise<void> {
     return this.#ownerStoppedPromise;
   }
@@ -170,7 +193,7 @@ export class SupervisorHostRuntime {
       managementToken: this.#config.managementToken,
       identity,
       bootLedger: ledger,
-      readiness: () => this.#state === "ready",
+      readiness: () => this.#state === "ready" && client?.state === "connected",
       stopCurrentBoot: async () => {
         if (this.#state === "draining" || this.#state === "stopped") return;
         this.#state = "draining";
@@ -219,10 +242,15 @@ export class SupervisorHostRuntime {
         dockerCommand: this.#config.dockerCommand,
         runtimeIdentity: identity,
         checkpointStore,
-        scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
+        scenario: resolveProductionSandboxScenario,
       });
       const spoolStore = new FileEventSpoolStore({
-        rootDirectory: resolve(this.#config.eventSpoolDirectory, identity.bootId),
+        rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),
+        quarantineDirectory: resolve(
+          this.#config.eventSpoolDirectory,
+          "quarantine",
+          identity.bootId,
+        ),
       });
       const localSupervisor = new LocalSandboxSupervisor({
         runner,
@@ -276,6 +304,7 @@ export class SupervisorHostRuntime {
   #observeClientStop(result: ReconnectingSupervisorWebSocketClientStop): void {
     if (this.#state === "draining" || this.#state === "stopped") return;
     if (result.reason === "terminal_failure") {
+      this.#terminalFailureCode = result.failureCode ?? "supervisor_connection_failed";
       this.#state = "failed";
       this.#settleTerminal("connection_failed");
     }

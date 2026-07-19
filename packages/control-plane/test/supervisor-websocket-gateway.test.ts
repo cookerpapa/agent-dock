@@ -109,6 +109,7 @@ async function startGateway(options: {
       token: options.token ?? TOKEN,
       identity: options.identity,
     }),
+    clock,
     maxPayloadBytes: options.maxPayloadBytes ?? 1024 * 1024,
     maxPendingFrames: 4,
     registrationTimeoutMs: options.registrationTimeoutMs ?? 500,

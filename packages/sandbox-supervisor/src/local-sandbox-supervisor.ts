@@ -311,6 +311,8 @@ export class LocalSandboxSupervisor {
           scannedSpools: 0,
           replayedSpools: 0,
           replayedEvents: 0,
+          quarantinedSpools: 0,
+          quarantinedEvents: 0,
         }
       );
     } finally {

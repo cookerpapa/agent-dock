@@ -229,6 +229,30 @@ describe("supervisor/control-plane wire protocol", () => {
     ).toThrow(AgentDockWireProtocolError);
   });
 
+  it("returns a closed permanent rejection without pretending the event was acknowledged", () => {
+    const rejected = {
+      ...envelope(),
+      type: "event.rejected",
+      payload: {
+        sessionId: "session-1",
+        leaseId: IDS.lease,
+        fencingToken: 7,
+        rejectedSeq: 11,
+        code: "stale_fence",
+        retryable: false,
+      },
+    } as const;
+
+    expect(parseControlToSupervisorMessage(rejected)).toEqual(rejected);
+    expect(() => parseSupervisorToControlMessage(rejected)).toThrow(AgentDockWireProtocolError);
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...rejected,
+        payload: { ...rejected.payload, retryable: true },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
+  });
+
   it("validates command acknowledgements in the return direction", () => {
     const accepted = {
       ...envelope(),

@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import type { DockerSandboxScenarioContext } from "@agent-dock/sandbox-supervisor";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -25,7 +26,12 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { SupervisorHostRuntime, type SupervisorHostConfig } from "../src/index.ts";
+import {
+  PRODUCTION_CANCELLATION_PROBE_PROMPT,
+  resolveProductionSandboxScenario,
+  SupervisorHostRuntime,
+  type SupervisorHostConfig,
+} from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "90000000-0000-4000-8000-000000000001";
 const SUPERVISOR_ID = "supervisor-host-runtime-test";
@@ -99,6 +105,24 @@ function emptyInventory() {
 }
 
 describe("SupervisorHostRuntime", () => {
+  it("keeps the production fixture closed while providing a deterministic cancellation probe", () => {
+    const context = (text: string, restoring = false) =>
+      ({
+        restoring,
+        command: { payload: { input: { kind: "prompt", text } } },
+      }) as DockerSandboxScenarioContext;
+
+    expect(resolveProductionSandboxScenario(context("repair the Java fixture"))).toBe(
+      "java_repair",
+    );
+    expect(resolveProductionSandboxScenario(context(PRODUCTION_CANCELLATION_PROBE_PROMPT))).toBe(
+      "timeout",
+    );
+    expect(
+      resolveProductionSandboxScenario(context(PRODUCTION_CANCELLATION_PROBE_PROMPT, true)),
+    ).toBe("java_followup");
+  });
+
   it("provisions a fresh generation, registers after recovery, and never reuses boot identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "agent-dock-host-runtime-"));
     const server = Fastify({ logger: false });

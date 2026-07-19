@@ -82,6 +82,7 @@ only after a measured requirement appears.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Initial backlog](docs/BACKLOG.md)
 - [Vibe coding playbook](docs/VIBE_CODING_PLAYBOOK.md)
@@ -111,6 +112,8 @@ only after a measured requirement appears.
 - [ADR-0020: cross-replica session event notification](docs/adr/0020-cross-replica-session-event-notification.md)
 - [ADR-0021: S3-compatible settled checkpoint storage](docs/adr/0021-s3-compatible-settled-checkpoint-storage.md)
 - [ADR-0022: remote control-plane worker lifecycle](docs/adr/0022-remote-control-plane-worker-lifecycle.md)
+- [ADR-0023: production Supervisor host and self-hosted topology](docs/adr/0023-production-supervisor-host-and-self-hosted-topology.md)
+- [ADR-0024: permanent event rejection and spool quarantine](docs/adr/0024-permanent-event-rejection-and-spool-quarantine.md)
 
 ## Current executable spikes
 
@@ -208,6 +211,28 @@ ephemeral; press `Ctrl+C` to stop both loopback servers. The production
 `src/main.ts` remains separately configured and does not silently start local
 Docker workers.
 
+## Self-hosted production deployment
+
+The supported single-host production topology is reproducible from a clean
+checkout:
+
+```bash
+npm ci --ignore-scripts
+npm run production:deploy
+npm run production:token
+```
+
+It starts persistent PostgreSQL and MinIO, an authenticated remote control
+plane, one trusted Docker-owning Supervisor host, the Web ingress, and ephemeral
+networkless Pi workers. Only the Web ingress publishes a loopback port. See the
+[production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
+backup, upgrade, recovery, and the disposable full-topology acceptance command.
+
+This is production-complete for the deterministic single-user Java fixture. It
+is not yet a generic repository service, real-provider deployment, arbitrary
+extension host, multi-tenant SaaS, Kubernetes release, or direct Internet
+ingress.
+
 ## Current status
 
 Phase 0: the public event envelope, Pi UI adapter, bidirectional
@@ -284,15 +309,14 @@ the final diff have explicit non-color-only states. Remote Markdown images are
 not fetched, and no Pi payload, credential reference, or provider token is
 written to the DOM or browser console.
 
-The full database-to-container path and Web demo use the embedded loopback fake
-model, so they consume no subscription token. The demo deliberately retains the
-in-process integration bridge, while the reusable runtime now also carries
-registration, heartbeat, execute/cancel, command ACK/commit/result, and durable
-event ACK over a real optional outbound-WebSocket gateway/client. The client
-also performs bounded same-boot reconnect after transient transport loss. The
-production HTTP entry point does not start either dispatchers or a fake
-supervisor owner.
-The current image embeds one trusted
+The full database-to-container path, Web demo, and supported production
+topology use the embedded deterministic model, so they consume no subscription
+token. The demo deliberately retains the in-process integration bridge. The
+production entry point instead composes authenticated provisioning, the
+outbound Supervisor WebSocket, registration/heartbeat, execute/cancel,
+command ACK/commit/result, durable event ACK, bounded dispatch workers,
+retirement maintenance, and graceful drain. The client performs bounded
+same-boot reconnect after transient transport loss. The current image embeds one trusted
 sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
 hashed regular-file workspace manifest cross the private worker channel and are
 stored by the trusted host before `turn.completed`; the next turn restores both
@@ -304,11 +328,12 @@ database. The production storage boundary now also has an S3-compatible adapter:
 PostgreSQL retains the fenced logical pointers and independent hashes, while the
 bucket retains immutable Pi/workspace bytes. A test discards the writer and
 restores through a fresh client against disposable MinIO, so this path no longer
-depends on one Supervisor host directory. Generic repository import,
-policy-approved extension loading, a request-scoped model gateway, production
-supervisor authentication/owner, and a deployable Supervisor host entry point
-remain separate work. Queued-turn withdrawal, acknowledged-cancellation crash
-recovery, and Windows Job Object containment are also deferred.
+depends on one Supervisor host directory. The production Compose topology now
+uses that adapter against persistent MinIO and keeps credentials only in the
+trusted Supervisor host. Generic repository import, policy-approved extension
+loading, and a request-scoped model gateway remain separate work. Queued-turn
+withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
+containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -342,15 +367,15 @@ the old sandbox. Timeout only enqueues a claimed/retryable retirement job: a
 trusted host must first confirm that the exact boot can no longer create a
 runtime, after which the existing reconciler may settle ambiguous work and
 release capacity. A crashed retirement claimant can be replaced by another
-control-plane instance. The gateway/client is optional library code; production
-`main.ts`, a real provisioner credential, and the concrete Docker/Kubernetes
-owner-process adapter are not yet wired.
+control-plane instance. The production entry point now wires a file-backed
+single-host provisioner, per-boot hashed WebSocket credentials, and a fixed
+authenticated HTTP owner/inventory adapter to the trusted Supervisor host.
 
 The supervisor network contract is now executable through the
 official Fastify WebSocket plugin and a sandbox-side `ws` client. Upgrade
-authentication happens before the socket opens; a development authorizer keeps
-only a bearer-token hash, while the interface can be backed by mTLS/SPIFFE or a
-provisioner in production. The first frame must register, frames are processed
+authentication happens before the socket opens; tests retain a development
+authorizer, while production validates an expiring provisioned credential ID
+and constant-time secret digest from PostgreSQL. The first frame must register, frames are processed
 in order with payload/queue bounds, one negotiated heartbeat timer covers all
 active assignments, and PostgreSQL rejects an old socket even when reconnecting
 through another control-plane listener. Socket close still waits for durable
@@ -384,9 +409,10 @@ connections and advances retirement work. Lane count scales with live capacity,
 not stored sessions, and no session receives a process, thread, socket, or timer.
 Shutdown first stops new claims, rejects Supervisor upgrades, detaches transports,
 waits for ambiguous exchanges to settle through the existing failure policy, and
-then closes Nest. The production `main.ts` deliberately does not enable this
-topology until a real provisioner authorizer, owner-stop proof, and assignment
-inventory adapter are configured.
+then closes Nest. Production `main.ts` enables this topology only after all
+file-backed secrets, bootstrap rows, the fixed Supervisor management endpoint,
+provisioner, owner-stop proof, and assignment inventory have passed fail-fast
+configuration and readiness checks.
 
 Cross-replica browser delivery also reuses PostgreSQL instead of adding a second
 event broker. Event commit transactionally emits only a versioned
@@ -428,8 +454,10 @@ idempotent replay without position gaps.
 The S3-compatible checkpoint adapter is now complete and MinIO-tested. Phase 2
 now also has an explicit remote control-plane composition whose bounded workers
 automatically execute and cancel real WebSocket Supervisor work while maintenance
-continues independently. The next deployment slice must supply the production
-provisioner/mTLS authorizer, exact owner-stop and assignment-inventory adapters,
-then compose the Supervisor host with the S3 checkpoint store. Until those trusted
-boundaries exist, production `main.ts` remains HTTP/SSE-only instead of silently
-pretending that socket loss proves process death.
+continues independently. The production slice supplies the concrete trusted
+Supervisor process, fresh boot identity, exact owner-stop/inventory proof,
+file-backed public/enrollment/management credentials, S3 checkpoint composition,
+private networks, persistent volumes, pinned images, Web ingress, and executable
+restart/scale/recovery acceptance. Permanently stale post-disconnect spool events
+are explicitly rejected and checksummed in quarantine; an ambiguous committed
+command is failed and never replayed.

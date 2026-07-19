@@ -1,4 +1,5 @@
 export {
+  EventDeliveryRejectedError,
   EventSpoolError,
   InMemoryEventSpool,
   type EventSpoolAckResult,

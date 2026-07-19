@@ -1,9 +1,13 @@
-import { createAgentDockEventFactory, type EventPublishMessage } from "@agent-dock/protocol";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  createAgentDockEventFactory,
+  parseControlToSupervisorMessage,
+  type EventPublishMessage,
+} from "@agent-dock/protocol";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { EventSpoolError, FileEventSpoolStore } from "../src/index.ts";
+import { EventDeliveryRejectedError, EventSpoolError, FileEventSpoolStore } from "../src/index.ts";
 
 const LEASE_ID = "11111111-1111-4111-8111-111111111111";
 const COMMAND_ID = "22222222-2222-4222-8222-222222222222";
@@ -97,7 +101,13 @@ describe("FileEventSpoolStore", () => {
         replayed.push(message);
         return messages.ack(message.payload.event.seq);
       }),
-    ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 1, replayedEvents: 1 });
+    ).resolves.toEqual({
+      scannedSpools: 1,
+      replayedSpools: 1,
+      replayedEvents: 1,
+      quarantinedSpools: 0,
+      quarantinedEvents: 0,
+    });
     expect(replayed).toEqual([second]);
 
     const reopened = await new FileEventSpoolStore({ rootDirectory: root }).open(openOptions(2));
@@ -107,7 +117,13 @@ describe("FileEventSpoolStore", () => {
       new FileEventSpoolStore({ rootDirectory: root }).redeliverPending(() => {
         throw new Error("An empty spool must not publish");
       }),
-    ).resolves.toEqual({ scannedSpools: 1, replayedSpools: 0, replayedEvents: 0 });
+    ).resolves.toEqual({
+      scannedSpools: 1,
+      replayedSpools: 0,
+      replayedEvents: 0,
+      quarantinedSpools: 0,
+      quarantinedEvents: 0,
+    });
   });
 
   it("replays the exact event after a simulated commit-with-lost-ACK window", async () => {
@@ -128,6 +144,76 @@ describe("FileEventSpoolStore", () => {
       }),
     ).resolves.toMatchObject({ replayedEvents: 1 });
     expect(simulatedDurableRows.size).toBe(1);
+  });
+
+  it("atomically quarantines an exact permanently stale assignment without fabricating an ACK", async () => {
+    const parent = await temporaryRoot();
+    const active = resolve(parent, "active");
+    const quarantine = resolve(parent, "quarantine");
+    const messages = fixture();
+    const first = messages.publish("one");
+    const second = messages.publish("two");
+    const store = new FileEventSpoolStore({
+      rootDirectory: active,
+      quarantineDirectory: quarantine,
+      clock: () => new Date(SENT_AT),
+    });
+    const spool = await store.open(openOptions());
+    await spool.append(first);
+    await spool.append(second);
+
+    await expect(
+      store.redeliverPending((message) => {
+        if (message.payload.event.seq === 1) return messages.ack(1);
+        const rejected = parseControlToSupervisorMessage({
+          protocolVersion: 1,
+          messageId: "99999999-9999-4999-8999-999999999999",
+          sentAt: SENT_AT,
+          type: "event.rejected",
+          payload: {
+            sessionId: message.payload.event.sessionId,
+            leaseId: message.payload.leaseId,
+            fencingToken: message.payload.fencingToken,
+            rejectedSeq: message.payload.event.seq,
+            code: "stale_fence",
+            retryable: false,
+          },
+        });
+        if (rejected.type !== "event.rejected") throw new Error("Expected event rejection");
+        throw new EventDeliveryRejectedError(rejected);
+      }),
+    ).resolves.toEqual({
+      scannedSpools: 1,
+      replayedSpools: 1,
+      replayedEvents: 1,
+      quarantinedSpools: 1,
+      quarantinedEvents: 1,
+    });
+    expect(await readdir(active)).toEqual([]);
+    const quarantined = await readdir(quarantine);
+    expect(quarantined).toHaveLength(1);
+    const record = JSON.parse(
+      await readFile(resolve(quarantine, quarantined[0]!, "rejection.json"), "utf8"),
+    ) as { format: string; rejection: Record<string, unknown> };
+    expect(record).toMatchObject({
+      format: "agent-dock.event-spool-rejection.v1",
+      rejection: {
+        sessionId: "session-1",
+        leaseId: LEASE_ID,
+        fencingToken: 7,
+        rejectedSeq: 2,
+        code: "stale_fence",
+        rejectedAt: SENT_AT,
+      },
+    });
+    await expect(
+      new FileEventSpoolStore({
+        rootDirectory: active,
+        quarantineDirectory: quarantine,
+      }).redeliverPending(() => {
+        throw new Error("Quarantined spools must not replay");
+      }),
+    ).resolves.toMatchObject({ scannedSpools: 0, quarantinedSpools: 0 });
   });
 
   it("rejects conflicting duplicates, capacity overflow, and assignment-mismatched ACKs", async () => {

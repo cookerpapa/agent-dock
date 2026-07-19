@@ -7,9 +7,10 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  EventDeliveryRejectedError,
   EventSpoolError,
   type EventSpoolAckResult,
   type EventSpoolAppendResult,
@@ -25,6 +26,7 @@ export const MAX_FILE_EVENT_SPOOL_DIRECTORIES = 10_000;
 
 const MANIFEST_FILE = "manifest.json";
 const EVENTS_DIRECTORY = "events";
+const REJECTION_FILE = "rejection.json";
 const MAX_MANIFEST_BYTES = 64 * 1_024;
 const MAX_EVENT_FILE_BYTES = MAX_FILE_EVENT_SPOOL_MESSAGE_BYTES + 1_024;
 const MAX_PENDING_EVENTS_HARD_LIMIT = 100_000;
@@ -59,13 +61,30 @@ type PendingEvent = {
   sizeBytes: number;
 };
 
+type EventSpoolRejectionState = {
+  sessionId: string;
+  leaseId: string;
+  fencingToken: number;
+  rejectedSeq: number;
+  code: "stale_fence";
+  rejectedAt: string;
+};
+
+type EventSpoolRejectionEnvelope = {
+  format: "agent-dock.event-spool-rejection.v1";
+  sha256: string;
+  rejection: EventSpoolRejectionState;
+};
+
 export type FileEventSpoolOpenOptions = InMemoryEventSpoolOptions & {
   maxPendingBytes?: number;
 };
 
 export type FileEventSpoolStoreOptions = {
   rootDirectory: string;
+  quarantineDirectory?: string;
   maxSpoolDirectories?: number;
+  clock?: () => Date;
 };
 
 export type FileEventSpoolReplayResult = SupervisorEventSpoolRecoveryResult;
@@ -141,6 +160,29 @@ function eventBytes(message: EventPublishMessage): Buffer {
     message,
   };
   return Buffer.from(`${JSON.stringify(envelope)}\n`, "utf8");
+}
+
+function rejectionBytes(rejection: EventSpoolRejectionState): Buffer {
+  const rejectionJson = JSON.stringify(rejection);
+  const envelope: EventSpoolRejectionEnvelope = {
+    format: "agent-dock.event-spool-rejection.v1",
+    sha256: sha256(rejectionJson),
+    rejection,
+  };
+  return Buffer.from(`${JSON.stringify(envelope)}\n`, "utf8");
+}
+
+function validDate(clock: () => Date): Date {
+  const value = clock();
+  if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
+    throw new TypeError("event spool clock must return a valid Date");
+  }
+  return value;
+}
+
+function isInside(parent: string, candidate: string): boolean {
+  const path = relative(parent, candidate);
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
 function parseManifest(bytes: Buffer): EventSpoolManifestState {
@@ -680,7 +722,9 @@ export class FileEventSpool implements SupervisorEventSpool {
 
 export class FileEventSpoolStore implements SupervisorEventSpoolRecovery {
   readonly #rootDirectory: string;
+  readonly #quarantineDirectory: string;
   readonly #maxSpoolDirectories: number;
+  readonly #clock: () => Date;
   readonly #opened = new Map<string, Promise<FileEventSpool>>();
 
   constructor(options: FileEventSpoolStoreOptions) {
@@ -688,11 +732,21 @@ export class FileEventSpoolStore implements SupervisorEventSpoolRecovery {
       throw new TypeError("rootDirectory must not be empty");
     }
     this.#rootDirectory = resolve(options.rootDirectory);
+    this.#quarantineDirectory = resolve(
+      options.quarantineDirectory ?? `${this.#rootDirectory}.quarantine`,
+    );
+    if (
+      isInside(this.#rootDirectory, this.#quarantineDirectory) ||
+      isInside(this.#quarantineDirectory, this.#rootDirectory)
+    ) {
+      throw new TypeError("event spool active and quarantine directories must be separate");
+    }
     this.#maxSpoolDirectories = positiveSafeInteger(
       options.maxSpoolDirectories ?? MAX_FILE_EVENT_SPOOL_DIRECTORIES,
       MAX_FILE_EVENT_SPOOL_DIRECTORIES,
       "Spool directory capacity",
     );
+    this.#clock = options.clock ?? (() => new Date());
   }
 
   async open(options: FileEventSpoolOpenOptions): Promise<FileEventSpool> {
@@ -709,7 +763,7 @@ export class FileEventSpoolStore implements SupervisorEventSpoolRecovery {
     if (entries.length > this.#maxSpoolDirectories) {
       throw new EventSpoolError("Durable event spool root exceeds its directory capacity");
     }
-    const spools: FileEventSpool[] = [];
+    const spools: Array<{ name: string; spool: FileEventSpool }> = [];
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       if (
         !SPOOL_DIRECTORY_PATTERN.test(entry.name) ||
@@ -718,29 +772,109 @@ export class FileEventSpoolStore implements SupervisorEventSpoolRecovery {
       ) {
         throw new EventSpoolError("Durable event spool root contains an unsupported entry");
       }
-      spools.push(await this.#openExisting(entry.name));
+      spools.push({ name: entry.name, spool: await this.#openExisting(entry.name) });
     }
     spools.sort(
       (left, right) =>
-        left.sessionId.localeCompare(right.sessionId) ||
-        left.fencingToken - right.fencingToken ||
-        left.leaseId.localeCompare(right.leaseId),
+        left.spool.sessionId.localeCompare(right.spool.sessionId) ||
+        left.spool.fencingToken - right.spool.fencingToken ||
+        left.spool.leaseId.localeCompare(right.spool.leaseId),
     );
 
     let replayedSpools = 0;
     let replayedEvents = 0;
-    for (const spool of spools) {
+    let quarantinedSpools = 0;
+    let quarantinedEvents = 0;
+    for (const { name, spool } of spools) {
       const pending = spool.replayAfter(spool.acknowledgedThroughSeq);
       if (pending.length === 0) continue;
       replayedSpools += 1;
       for (const message of pending) {
         if (message.payload.event.seq <= spool.acknowledgedThroughSeq) continue;
-        const acknowledgement = await publishEvent(message);
+        let acknowledgement: EventAckMessage;
+        try {
+          acknowledgement = await publishEvent(message);
+        } catch (error: unknown) {
+          if (
+            !(error instanceof EventDeliveryRejectedError) ||
+            error.sessionId !== message.payload.event.sessionId ||
+            error.leaseId !== message.payload.leaseId ||
+            error.fencingToken !== message.payload.fencingToken ||
+            error.rejectedSeq !== message.payload.event.seq
+          ) {
+            throw error;
+          }
+          const remainingEvents = spool.replayAfter(spool.acknowledgedThroughSeq).length;
+          await this.#quarantine(name, spool, error);
+          quarantinedSpools += 1;
+          quarantinedEvents += remainingEvents;
+          break;
+        }
         await spool.acknowledge(acknowledgement);
         replayedEvents += 1;
       }
     }
-    return { scannedSpools: spools.length, replayedSpools, replayedEvents };
+    return {
+      scannedSpools: spools.length,
+      replayedSpools,
+      replayedEvents,
+      quarantinedSpools,
+      quarantinedEvents,
+    };
+  }
+
+  async #quarantine(
+    name: string,
+    spool: FileEventSpool,
+    rejection: EventDeliveryRejectedError,
+  ): Promise<void> {
+    if (
+      rejection.code !== "stale_fence" ||
+      rejection.sessionId !== spool.sessionId ||
+      rejection.leaseId !== spool.leaseId ||
+      rejection.fencingToken !== spool.fencingToken ||
+      rejection.rejectedSeq <= spool.acknowledgedThroughSeq ||
+      rejection.rejectedSeq > spool.highestProducedSeq
+    ) {
+      throw new EventSpoolError("Event rejection does not match its durable spool assignment");
+    }
+    await ensurePrivateDirectory(this.#quarantineDirectory);
+    const source = resolve(this.#rootDirectory, name);
+    const target = resolve(this.#quarantineDirectory, name);
+    try {
+      await lstat(target);
+      throw new EventSpoolError("Durable event spool quarantine target already exists");
+    } catch (error: unknown) {
+      if (error instanceof EventSpoolError) throw error;
+      if (errorCode(error) !== "ENOENT") {
+        throw new EventSpoolError("Durable event spool quarantine target could not be inspected");
+      }
+    }
+    const recorded = await publishNoOverwrite(
+      resolve(source, REJECTION_FILE),
+      rejectionBytes({
+        sessionId: rejection.sessionId,
+        leaseId: rejection.leaseId,
+        fencingToken: rejection.fencingToken,
+        rejectedSeq: rejection.rejectedSeq,
+        code: rejection.code,
+        rejectedAt: validDate(this.#clock).toISOString(),
+      }),
+    );
+    if (!recorded) {
+      throw new EventSpoolError("Durable event spool rejection record already exists");
+    }
+    await syncDirectory(source);
+    try {
+      await rename(source, target);
+      await Promise.all([
+        syncDirectory(this.#rootDirectory),
+        syncDirectory(this.#quarantineDirectory),
+      ]);
+    } catch {
+      throw new EventSpoolError("Durable event spool could not be quarantined safely");
+    }
+    this.#opened.delete(name);
   }
 
   async #openExisting(name: string): Promise<FileEventSpool> {

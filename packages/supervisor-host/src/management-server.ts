@@ -229,6 +229,15 @@ export class SupervisorManagementServer {
       };
     }
 
+    const generation = await this.#bootLedger.generationForSandbox(message.sandboxId);
+    if (generation === null) {
+      throw new SupervisorManagementServerError(
+        "boot_generation_unknown",
+        "Sandbox generation is not known to this host",
+        false,
+      );
+    }
+
     const inventory = new DockerSandboxAssignmentInventory({
       sandboxId: message.sandboxId,
       dockerCommand: this.#dockerCommand,
@@ -247,6 +256,16 @@ export class SupervisorManagementServer {
       throw new SupervisorManagementServerError(
         "assignment_scope_mismatch",
         "Assignment escaped its management scope",
+        false,
+      );
+    }
+    if (
+      message.assignment.supervisorId !== this.#identity.supervisorId ||
+      message.assignment.bootId !== generation.bootId
+    ) {
+      throw new SupervisorManagementServerError(
+        "assignment_scope_mismatch",
+        "Assignment escaped its boot ownership scope",
         false,
       );
     }

@@ -244,7 +244,11 @@ export class SupervisorBootLedger {
       }
       const history = [...state.history];
       if (state.current !== null) {
-        history.push({ ...state.current, status: "exited", endedAt: now });
+        history.push(
+          state.current.status === "active"
+            ? { ...state.current, status: "exited", endedAt: now }
+            : state.current,
+        );
       }
       const current: SupervisorBootLedgerGeneration = {
         bootId: identity.bootId,
@@ -293,6 +297,17 @@ export class SupervisorBootLedger {
     await this.#operations;
     const state = await this.#load();
     return state.current === null ? null : { ...state.current };
+  }
+
+  async generationForSandbox(sandboxId: string): Promise<SupervisorBootLedgerGeneration | null> {
+    uuid(sandboxId, "Sandbox ID");
+    await this.#operations;
+    const state = await this.#load();
+    const value = [state.current, ...state.history].find(
+      (item): item is SupervisorBootLedgerGeneration =>
+        item !== null && item.sandboxId === sandboxId,
+    );
+    return value === undefined ? null : { ...value };
   }
 
   async #load(): Promise<LedgerState> {
