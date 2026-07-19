@@ -1,9 +1,10 @@
 # AgentDock control plane
 
-This package contains the Phase 1 NestJS/Fastify durable-intake boundary, an
+This package contains AgentDock's NestJS/Fastify durable-intake boundary, an
 explicit execution dispatcher, an independent durable cancellation dispatcher,
-fenced event ingestion, and the resumable browser event surface. It is not yet
-the production Pi executor.
+fenced event ingestion, the resumable browser event surface, and an explicit
+remote Supervisor worker composition. It is not yet a complete production Pi
+deployment because the trusted provisioner/owner adapters remain external.
 
 ## Implemented endpoints
 
@@ -69,6 +70,30 @@ rather than overwrites cancellation settlement. A matching durable
 commands complete, the session returns to `idle`, and the exact lease is
 released. Failure after cancellation ACK instead fails the turn/session and
 retains the unconfirmed reservation for reconciliation.
+
+## Remote control-plane composition
+
+`createRemoteControlPlaneRuntime()` wires one shared `DurableEventStore` and
+`SessionEventHub` into Nest/SSE and the WebSocket command router, then constructs
+the authenticated Supervisor gateway, durable connection manager, bounded
+worker runtime, and assignment reconciler factory. It requires the caller to
+provide a real `SupervisorUpgradeAuthorizer`, `SupervisorOwnerBoundary`, and
+assignment-inventory factory; it does not invent a no-op process owner.
+
+The worker has one sequential discovery loop and one independent maintenance
+loop per control-plane process. Each current local Supervisor connection gets
+at most `min(maxConcurrentSessions, maxLanesPerConnection)` promise-based
+execute lanes and the same number of independent cancellation lanes. A lane
+awaits one dispatcher call at a time, so concurrency is explicit and bounded by
+live capacity rather than session count. A cold session owns no process, OS
+thread, socket, polling loop, or Pi runtime.
+
+`RemoteControlPlaneRuntime.close()` is idempotent. It stops discovery from
+starting new claims, rejects new Supervisor upgrades, closes and detaches active
+command transports, waits for dispatchers to apply their existing pre-ACK retry
+or post-ACK ambiguous-failure policy, then closes Nest and notification
+listeners. This composition never executes Pi or untrusted extensions inside
+the control-plane process; those remain behind the outbound Supervisor socket.
 
 ## Durable event boundary
 
@@ -166,9 +191,10 @@ database and development checkpoint directory disappear on shutdown. Within
 that runtime, successful turns persist Pi JSONL and a bounded workspace manifest
 before `turn.completed`, so the same session can continue in a fresh container.
 `src/main.ts` still requires operator-owned PostgreSQL/profile bootstrap and
-does not start a local Docker supervisor or the production dispatch worker. The
-S3 factory is exported for that worker rather than silently changing the
-HTTP-only entry point.
+does not start a local Docker supervisor or opt into the remote worker
+composition. The explicit factory is available to a deployment that can supply
+the required trusted adapters. The S3 factory is exported for the Supervisor
+host rather than silently changing the HTTP-only entry point.
 
 ## Verification boundary
 
@@ -193,6 +219,13 @@ SSE terminal delivery. Its default end-to-end path starts pinned Pi against the
 loopback fake model without provider tokens. The opt-in Docker case additionally
 persists and streams the ten-event Java repair and final patch.
 
+The remote composition test starts a real Nest/Fastify listener and outbound
+WebSocket Supervisor without manually invoking a dispatcher. It proves
+capacity-capped lane creation, automatic execute, cancellation while execute is
+waiting, maintenance progress, safe retry observations, no overlapping timer
+callbacks, rejection of a late discovery result during drain, idempotent
+shutdown, active-socket close, and refusal of new upgrades.
+
 The local supervisor also has a crash-safe file event spool. A PostgreSQL
 integration test commits an event, drops the returning ACK path, releases the
 lease during terminal failure handling, constructs a fresh spool store, and
@@ -203,11 +236,14 @@ its PGlite database and spool directory are deliberately temporary.
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
-remain explicit deployment steps. A continuously running production worker,
-production supervisor transport, in-flight runner/lease reconciliation,
-acknowledged-cancellation crash recovery, generic repository restore, and a real
-model gateway are not claimed by this slice. The React page is connected only
-through the explicit ephemeral demo described above.
+remain explicit deployment steps. The continuously running remote worker,
+authenticated Supervisor transport, and in-flight lease/assignment
+reconciliation are available as explicit library components and composition.
+The concrete provisioner/mTLS authorizer, exact owner-process adapter,
+Supervisor host entry point, acknowledged-cancellation crash recovery, generic
+repository restore, and a real model gateway are not claimed by this slice. The
+React page is connected only through the explicit ephemeral demo described
+above.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

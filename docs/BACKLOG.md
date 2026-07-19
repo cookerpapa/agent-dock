@@ -87,4 +87,5 @@ extension-policy support would overstate the current boundary.
 - [x] Route execute/cancel, two-phase command ACK/commit/result, and event publish/ACK over the remote supervisor connection
 - [x] Automatically reconnect the same boot, drain old assignments, and resolve guarded remote backends per connection generation
 - [x] Fence cross-instance execute/cancel claims to the current local socket owner without a second broker
+- [x] Compose the shared event runtime, Supervisor gateway, bounded execute/cancel lanes, maintenance, and graceful drain
 - [ ] Replace the development bearer authorizer and owner boundary with production provisioner/mTLS and process adapters

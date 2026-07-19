@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { ApiExceptionFilter } from "./api-exception.filter.ts";
-import { ControlPlaneModule } from "./control-plane.module.ts";
+import { ControlPlaneModule, type ControlPlaneEventRuntime } from "./control-plane.module.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
 import type { SessionEventStreamOptions } from "./session-event-stream.ts";
@@ -12,6 +12,7 @@ export type ControlPlaneApplicationOptions = ControlPlaneStoreOptions & {
   supervisorWebSocketGateway?: SupervisorWebSocketGateway;
   sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
+  eventRuntime?: ControlPlaneEventRuntime;
 };
 
 export async function createControlPlaneApplication(

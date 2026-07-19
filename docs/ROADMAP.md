@@ -104,8 +104,13 @@ ambiguous committed tool execution. Execute claims are now eligible only on a
 replica with a healthy local Supervisor and capacity; cancellation claims follow
 the target session lease to that sandbox's current socket owner. PostgreSQL
 owner affinity makes a separate cross-instance command broker unnecessary for
-the current topology. Automatic production worker lifecycle wiring remains with
-the provisioner/owner adapter. Event ingestion now emits a transactional
+the current topology. An explicit remote control-plane composition now discovers
+locally owned live connections, caps asynchronous execute/cancel lanes by
+provisioned capacity, runs maintenance independently, shares one event authority
+with REST/SSE, and drains sockets and in-flight dispatchers in order. It remains
+library composition rather than the default `main.ts` topology because production
+provisioner authentication, owner-stop proof, and assignment inventory cannot be
+replaced by no-op adapters. Event ingestion now emits a transactional
 PostgreSQL high-water hint. Every production replica reconnects one dedicated
 listener, coalesces wakes without copying event bodies, and makes SSE read the
 durable suffix; heartbeat polling and `Last-Event-ID` retain correctness across

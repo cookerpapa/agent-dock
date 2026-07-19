@@ -10,20 +10,28 @@ import { SessionEventStream, type SessionEventStreamOptions } from "./session-ev
 export type ControlPlaneModuleOptions = ControlPlaneStoreOptions & {
   sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
+  eventRuntime?: ControlPlaneEventRuntime;
+};
+
+export type ControlPlaneEventRuntime = {
+  eventHub: SessionEventHub;
+  eventStore: DurableEventStore;
 };
 
 @Module({})
 export class ControlPlaneModule {
   static register(options: ControlPlaneModuleOptions): DynamicModule {
-    const eventHub = new SessionEventHub();
-    const eventStore = new DurableEventStore({
-      database: options.database,
-      tenantId: options.tenantId,
-      eventHub,
-      ...(options.sessionEventNotifications === undefined
-        ? {}
-        : { eventNotificationPublisher: options.sessionEventNotifications }),
-    });
+    const eventHub = options.eventRuntime?.eventHub ?? new SessionEventHub();
+    const eventStore =
+      options.eventRuntime?.eventStore ??
+      new DurableEventStore({
+        database: options.database,
+        tenantId: options.tenantId,
+        eventHub,
+        ...(options.sessionEventNotifications === undefined
+          ? {}
+          : { eventNotificationPublisher: options.sessionEventNotifications }),
+      });
     const notificationBridge =
       options.sessionEventNotifications === undefined
         ? undefined

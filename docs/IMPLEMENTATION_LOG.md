@@ -1072,3 +1072,44 @@
   execute/cancel dispatcher 和 S3 checkpoint factory 组合成一个显式 runtime process。原因是各个 durability
   算法已分别跨 socket、replica、container 和 object store 通过，但当前部署 `main.ts` 仍只会接受请求，不会
   自动消费 outbox；先完成真实 composition，才能做端到端重启/扩缩容验收，而不是继续增加孤立组件。
+
+## 2026-07-19 — Remote control-plane 自动 worker composition
+
+- 目标：消除“HTTP 已接受并持久化 command，但生产形态没有任何组件自动消费 outbox”的断层；同时不能为每个
+  session 创建进程、线程、socket 或 timer，也不能用 socket close 冒充 Supervisor 进程已经消失。
+- 决策：新增 ADR-0022 与 `RemoteControlPlaneRuntime`。组合根只创建一份 `SessionEventHub` 和
+  `DurableEventStore`，同时注入 REST/SSE 与 `SupervisorCommandRouter`；因此 remote event 的 PostgreSQL commit、
+  cumulative ACK、进程内 wake 和跨 replica notification 不会出现两套 event authority。
+- Worker：`RemoteSupervisorWorkerRuntime` 每个 control-plane process 只有一个 connection-discovery loop 和一个
+  maintenance loop。每条当前本地 Supervisor binding 按
+  `min(maxConcurrentSessions, configuredLaneCap)` 创建 promise-based execute lane，并创建同数目的独立 cancel
+  lane；每条 lane 串行等待一次 `dispatchNext()`，不会用重叠 `setInterval` 放大并发。冷 session 数量为一百万
+  也不会增加 lane。
+- Generation 与停机：binding 保留 sandbox、connection generation、PostgreSQL owner affinity 和 guarded lease
+  coordinator。disconnect/capacity generation 变化会排空旧 lane；shutdown 先 abort discovery，且明确丢弃 abort
+  后才返回的 discovery snapshot，再拒绝新 upgrade、detach command transport、等待 dispatcher 按既有 ambiguous
+  failure 规则收敛，最后关闭 Nest。重复 `close()` 返回同一 teardown promise。
+- 安全观察：worker observation 只允许 component、safe code/retryable、sandbox/connection ID、lane/count/status，
+  observer 自身抛错不会破坏 correctness loop；原始异常、prompt、模型输出、tool 参数、token、URL、object key 和
+  credential 都不会进入该边界。
+- 可执行证据：真实 Fastify/Nest + WebSocket Supervisor + PostgreSQL composition test 在无需手写 dispatcher 的
+  情况下自动完成第一轮；第二轮 execute 持续运行时，独立 cancellation lane 仍完成 fenced cancel，maintenance
+  计数继续增长；容量 3 被配置 cap 限制为 2 execute + 2 cancel lanes；第三轮运行中调用两次 `close()` 会关闭
+  socket、撤销 runtime、把 ambiguous turn 收敛为 failed，并停止全部 binding。另有 failure test 证明 discovery/
+  maintenance 不重叠、raw secret 不泄漏、observer failure 被隔离，以及 drain 后晚到的 discovery 结果不会再起 lane。
+- 测试说明：该 composition test 将 Kysely pool 固定为 1，因为 PGlite socket adapter 在同一 embedded engine 上的
+  多连接 extended-query 并发会偶发破坏 unnamed prepared statement；异步 lane 仍真实并发，数据库请求由 test
+  adapter 串行化。设置 `AGENT_DOCK_TEST_DATABASE_URL` 时，同一文件改用真实连接池，不采用这个限制。
+- 真实数据库复核：同一套 3 个 runtime tests 在一次性、仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 和
+  8-connection pool 上全部通过；自动 execute/cancel/maintenance/drain 用例约 0.6 秒。测试 container 随后删除，
+  Docker container 数回到 0。
+- 自动验证：完整 `npm run ci` 通过 formatting、production Web build、全仓 typecheck、213 passed/7
+  conditional skipped tests、两个 zero-model-call Pi spikes 和 high-level security audit（0 vulnerabilities）。
+  control-plane 的 63 passed/4 skipped 同时覆盖新 runtime 与既有 mailbox、lease/fence、WebSocket generation、
+  checkpoint、SSE 和 cancellation 语义。
+- 当前边界：这是可复用且端到端可执行的 control-plane library composition，不是完整生产部署。
+  `main.ts` 仍保持 HTTP/SSE-only，直到真实 provisioner/mTLS authorizer、exact boot owner-stop、assignment inventory
+  和 Supervisor host/S3 factory 到位；这里没有添加危险的 no-op owner，也没有让 S3 credential 进入 HTTP 进程。
+- 下一步：实现可信 Supervisor host composition 与 production owner/provisioner adapter。原因是 control plane 已经
+  能自动调度并正确停机，下一项阻止“打开 Web 就能安全使用 Pi”的边界是：谁创建/停止 exact Supervisor boot、
+  谁提供 assignment inventory，以及 checkpoint S3 credential 如何只留在可信 host。

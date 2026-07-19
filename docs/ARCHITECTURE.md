@@ -372,8 +372,13 @@ registration/heartbeat and two-phase command/event delivery can cross a real
 outbound WebSocket. The client now performs bounded same-boot reconnect only
 after revoked assignments settle, and remote backends resolve the guarded
 connection generation per command. Cross-instance claims follow the durable
-socket owner as described below; the concrete production owner-process and
-automatic dispatch-worker adapters are not yet wired.
+socket owner as described below. `RemoteControlPlaneRuntime` now wires the shared
+event store/hub, gateway, one connection-discovery loop, bounded per-capacity
+execute/cancel lanes, and an independent maintenance loop. Shutdown prevents a
+late discovery result from starting new lanes, detaches remote command waiters,
+drains the lanes, and closes Nest in order. The concrete production provisioner
+authorizer, owner-process/assignment-inventory adapters, Supervisor host entry
+point, and default `main.ts` opt-in are not yet wired.
 
 ## 5. Delivery and recovery semantics
 

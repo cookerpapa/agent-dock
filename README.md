@@ -110,6 +110,7 @@ only after a measured requirement appears.
 - [ADR-0019: cross-instance supervisor command ownership](docs/adr/0019-cross-instance-supervisor-command-ownership.md)
 - [ADR-0020: cross-replica session event notification](docs/adr/0020-cross-replica-session-event-notification.md)
 - [ADR-0021: S3-compatible settled checkpoint storage](docs/adr/0021-s3-compatible-settled-checkpoint-storage.md)
+- [ADR-0022: remote control-plane worker lifecycle](docs/adr/0022-remote-control-plane-worker-lifecycle.md)
 
 ## Current executable spikes
 
@@ -305,9 +306,9 @@ bucket retains immutable Pi/workspace bytes. A test discards the writer and
 restores through a fresh client against disposable MinIO, so this path no longer
 depends on one Supervisor host directory. Generic repository import,
 policy-approved extension loading, a request-scoped model gateway, production
-supervisor authentication/owner, and automatic dispatch-worker wiring remain
-separate work. Queued-turn withdrawal, acknowledged-cancellation crash recovery,
-and Windows Job Object containment are also deferred.
+supervisor authentication/owner, and a deployable Supervisor host entry point
+remain separate work. Queued-turn withdrawal, acknowledged-cancellation crash
+recovery, and Windows Job Object containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -374,6 +375,19 @@ while the Supervisor is draining. When the same boot reconnects elsewhere, the
 old replica returns `idle` without consuming an outbox attempt and the new owner
 can claim immediately.
 
+`RemoteControlPlaneRuntime` now composes those mechanisms into one explicit
+process lifecycle. REST, SSE, remote event ingestion, and PostgreSQL notification
+share the same durable event store and process-local wake hub. One discovery loop
+creates bounded execute and independent cancellation lanes from each live
+Supervisor's provisioned capacity; one separate maintenance loop expires
+connections and advances retirement work. Lane count scales with live capacity,
+not stored sessions, and no session receives a process, thread, socket, or timer.
+Shutdown first stops new claims, rejects Supervisor upgrades, detaches transports,
+waits for ambiguous exchanges to settle through the existing failure policy, and
+then closes Nest. The production `main.ts` deliberately does not enable this
+topology until a real provisioner authorizer, owner-stop proof, and assignment
+inventory adapter are configured.
+
 Cross-replica browser delivery also reuses PostgreSQL instead of adding a second
 event broker. Event commit transactionally emits only a versioned
 tenant/session/sequence high-water hint; every control-plane replica keeps one
@@ -412,7 +426,10 @@ their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
 The S3-compatible checkpoint adapter is now complete and MinIO-tested. Phase 2
-next composes the production provisioner/owner, Supervisor gateway, maintenance
-loops, and execute/cancel dispatch workers into an explicit runtime process.
-The reason is that the individual durable mechanisms are executable, but the
-production HTTP entry point still accepts work without starting its executor.
+now also has an explicit remote control-plane composition whose bounded workers
+automatically execute and cancel real WebSocket Supervisor work while maintenance
+continues independently. The next deployment slice must supply the production
+provisioner/mTLS authorizer, exact owner-stop and assignment-inventory adapters,
+then compose the Supervisor host with the S3 checkpoint store. Until those trusted
+boundaries exist, production `main.ts` remains HTTP/SSE-only instead of silently
+pretending that socket loss proves process death.

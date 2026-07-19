@@ -394,6 +394,37 @@ describe.sequential("authenticated supervisor WebSocket transport", () => {
     }
   });
 
+  it("closes active sockets and rejects new upgrades during idempotent shutdown", async () => {
+    const supervisorIdentity = identity();
+    await provision(supervisorIdentity);
+    const hosted = await startGateway({ identity: supervisorIdentity });
+    const connected = client(hosted.url, TOKEN, supervisorIdentity);
+    const blocked = client(hosted.url, TOKEN, supervisorIdentity);
+    try {
+      await connected.start();
+      expect(hosted.gateway.activeConnectionCount).toBe(1);
+
+      hosted.gateway.shutdown();
+      hosted.gateway.shutdown();
+      expect(hosted.gateway.shuttingDown).toBe(true);
+      expect(await connected.waitUntilClosed()).toMatchObject({
+        initiatedByClient: false,
+        code: 1_012,
+        reason: "control plane shutting down",
+        retryable: true,
+      });
+      expect(hosted.gateway.activeConnectionCount).toBe(0);
+      await expect(blocked.start()).rejects.toMatchObject({
+        code: "websocket_handshake_rejected",
+        retryable: true,
+      });
+    } finally {
+      await connected.stop();
+      await blocked.stop();
+      await hosted.server.close();
+    }
+  });
+
   it("enforces registration-first, text-only, timeout, and frame-size boundaries", async () => {
     const supervisorIdentity = identity();
     await provision(supervisorIdentity);

@@ -37,7 +37,11 @@ export {
   type TurnCancellationRequest,
   type TurnCancellationResult,
 } from "./cancellation-dispatcher.ts";
-export { ControlPlaneModule, type ControlPlaneModuleOptions } from "./control-plane.module.ts";
+export {
+  ControlPlaneModule,
+  type ControlPlaneEventRuntime,
+  type ControlPlaneModuleOptions,
+} from "./control-plane.module.ts";
 export {
   DurableEventStore,
   DurableEventStoreError,
@@ -59,6 +63,20 @@ export {
   RemoteSupervisorExecutionBackend,
   type RemoteSupervisorExecutionBackendOptions,
 } from "./remote-supervisor-execution-backend.ts";
+export {
+  createRemoteControlPlaneRuntime,
+  RemoteControlPlaneRuntime,
+  type RemoteControlPlaneRuntimeOptions,
+  type RemoteControlPlaneRuntimeState,
+} from "./remote-control-plane-runtime.ts";
+export {
+  RemoteSupervisorWorkerRuntime,
+  type RemoteSupervisorDispatchBindingSource,
+  type RemoteSupervisorWorkerActivity,
+  type RemoteSupervisorWorkerRuntimeOptions,
+  type RemoteSupervisorWorkerRuntimeState,
+  type SupervisorMaintenanceRunner,
+} from "./remote-supervisor-worker-runtime.ts";
 export {
   OutboxDispatcher,
   OutboxDispatcherInvariantError,
