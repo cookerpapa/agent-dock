@@ -364,6 +364,7 @@ describe.sequential("single-user durable turn intake API", () => {
     firstAccepted = response.json() as AcceptedTurnResource;
     expect(firstAccepted).toMatchObject({
       sessionId: session.sessionId,
+      mailboxPosition: 1,
       state: "queued",
       replayed: false,
     });
@@ -443,6 +444,7 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(response.json()).toMatchObject({
       commandId: original.id,
       turnId: original.turn_id,
+      mailboxPosition: firstAccepted.mailboxPosition,
       replayed: true,
     });
 
@@ -576,6 +578,180 @@ describe.sequential("single-user durable turn intake API", () => {
       commandId: accepted.commandId,
     });
     expect((await readTurnExecution(accepted)).attempts).toBe(1);
+  });
+
+  it("runs five concurrently queued inputs in durable mailbox order without overlap", async () => {
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      payload: { workspaceId: project.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const mailboxSession = sessionResponse.json() as SessionResource;
+
+    type MailboxAcceptance = {
+      resource: AcceptedTurnResource;
+      idempotencyKey: string;
+      prompt: string;
+    };
+    const acceptMailboxTurn = async (
+      inputNumber: number,
+      expectedPosition?: number,
+    ): Promise<MailboxAcceptance> => {
+      const idempotencyKey = `mailbox-input-${String(inputNumber)}`;
+      const prompt = `mailbox prompt ${String(inputNumber)}`;
+      const response = await http.inject({
+        method: "POST",
+        url: `/v1/sessions/${mailboxSession.sessionId}/turns`,
+        headers: { "idempotency-key": idempotencyKey },
+        payload: { prompt },
+      });
+      expect(response.statusCode).toBe(202);
+      const resource = response.json() as AcceptedTurnResource;
+      expect(resource).toMatchObject({
+        sessionId: mailboxSession.sessionId,
+        replayed: false,
+      });
+      if (expectedPosition !== undefined) {
+        expect(resource.mailboxPosition).toBe(expectedPosition);
+      }
+      return { resource, idempotencyKey, prompt };
+    };
+
+    let reportFirstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolvePromise) => {
+      reportFirstStarted = resolvePromise;
+    });
+    const firstRelease = new Promise<void>((resolvePromise) => {
+      releaseFirst = resolvePromise;
+    });
+    const executionOrder: string[] = [];
+    let activeExecutions = 0;
+    let maximumActiveExecutions = 0;
+    const backend: TurnExecutionBackend = {
+      async execute(request, lifecycle) {
+        activeExecutions += 1;
+        maximumActiveExecutions = Math.max(maximumActiveExecutions, activeExecutions);
+        executionOrder.push(request.commandId);
+        try {
+          await lifecycle.started();
+          if (executionOrder.length === 1) {
+            reportFirstStarted();
+            await firstRelease;
+          }
+          return { stopReason: `mailbox-${String(executionOrder.length)}` };
+        } finally {
+          activeExecutions -= 1;
+        }
+      },
+    };
+    const dispatcher = new OutboxDispatcher({ database, tenantId: IDS.tenant, backend });
+    const competingDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+    });
+
+    const firstAccepted = await acceptMailboxTurn(1, 1);
+    const firstExecution = dispatcher.dispatchNext();
+    await firstStarted;
+    const concurrentAcceptances = await Promise.all(
+      [2, 3, 4, 5].map((inputNumber) => acceptMailboxTurn(inputNumber)),
+    );
+    const accepted = [firstAccepted, ...concurrentAcceptances].sort(
+      (left, right) => left.resource.mailboxPosition - right.resource.mailboxPosition,
+    );
+    expect(accepted.map((item) => item.resource.mailboxPosition)).toEqual([1, 2, 3, 4, 5]);
+
+    const replayTarget = accepted.find((item) => item.resource.mailboxPosition === 3);
+    if (replayTarget === undefined) throw new Error("Mailbox position 3 was not allocated");
+
+    const replay = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${mailboxSession.sessionId}/turns`,
+      headers: { "idempotency-key": replayTarget.idempotencyKey },
+      payload: { prompt: replayTarget.prompt },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toMatchObject({
+      commandId: replayTarget.resource.commandId,
+      mailboxPosition: 3,
+      replayed: true,
+    });
+
+    const tiedTimestamp = new Date("2026-07-19T00:00:00.000Z");
+    await database
+      .updateTable("commands")
+      .set({ created_at: tiedTimestamp })
+      .where(
+        "id",
+        "in",
+        accepted.slice(1).map((item) => item.resource.commandId),
+      )
+      .execute();
+    await expect(competingDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+
+    releaseFirst();
+    await expect(firstExecution).resolves.toMatchObject({
+      status: "completed",
+      commandId: firstAccepted.resource.commandId,
+    });
+    for (const expected of accepted.slice(1)) {
+      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+        status: "completed",
+        commandId: expected.resource.commandId,
+      });
+    }
+
+    expect(executionOrder).toEqual(accepted.map((item) => item.resource.commandId));
+    expect(maximumActiveExecutions).toBe(1);
+    const durableCommands = await database
+      .selectFrom("commands")
+      .select(["id", "mailbox_position", "state"])
+      .where("session_id", "=", mailboxSession.sessionId)
+      .where("kind", "=", "turn.execute")
+      .orderBy("mailbox_position", "asc")
+      .execute();
+    expect(durableCommands).toEqual(
+      accepted.map((item) => ({
+        id: item.resource.commandId,
+        mailbox_position: String(item.resource.mailboxPosition),
+        state: "completed",
+      })),
+    );
+    const mailboxCounter = await database
+      .selectFrom("sessions")
+      .select("next_mailbox_position")
+      .where("id", "=", mailboxSession.sessionId)
+      .executeTakeFirstOrThrow();
+    expect(mailboxCounter.next_mailbox_position).toBe("6");
+
+    await database
+      .updateTable("sessions")
+      .set({ state: "recovering" })
+      .where("id", "=", mailboxSession.sessionId)
+      .executeTakeFirstOrThrow();
+    const rejectedDuringRecovery = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${mailboxSession.sessionId}/turns`,
+      headers: { "idempotency-key": "mailbox-recovery-rejection" },
+      payload: { prompt: "must wait for recovery" },
+    });
+    expect(rejectedDuringRecovery.statusCode).toBe(409);
+    expect(rejectedDuringRecovery.json()).toEqual({
+      error: {
+        code: "conflict",
+        message: "Session cannot accept a queued follow-up while it is recovering",
+      },
+    });
+    expect(
+      await database
+        .selectFrom("sessions")
+        .select("next_mailbox_position")
+        .where("id", "=", mailboxSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ next_mailbox_position: "6" });
   });
 
   it("fences a dispatcher whose pre-ACK claim lease was superseded", async () => {
@@ -2107,6 +2283,11 @@ describe.sequential("single-user durable turn intake API", () => {
   });
 
   it("rolls back the turn and command if the outbox write fails", async () => {
+    const mailboxBeforeFailure = await database
+      .selectFrom("sessions")
+      .select("next_mailbox_position")
+      .where("id", "=", session.sessionId)
+      .executeTakeFirstOrThrow();
     const failingApplication = await createControlPlaneApplication({
       database: database.withPlugin(rejectOutboxInsertPlugin),
       tenantId: IDS.tenant,
@@ -2143,7 +2324,13 @@ describe.sequential("single-user durable turn intake API", () => {
       .select((expression) => expression.fn.countAll<string>().as("count"))
       .where("idempotency_key", "=", "forced-outbox-failure")
       .executeTakeFirstOrThrow();
+    const mailboxAfterFailure = await database
+      .selectFrom("sessions")
+      .select("next_mailbox_position")
+      .where("id", "=", session.sessionId)
+      .executeTakeFirstOrThrow();
     expect(turnCount.count).toBe("0");
     expect(commandCount.count).toBe("0");
+    expect(mailboxAfterFailure).toEqual(mailboxBeforeFailure);
   });
 });

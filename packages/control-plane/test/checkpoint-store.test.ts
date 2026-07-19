@@ -155,6 +155,7 @@ async function seed(): Promise<void> {
       pi_session_snapshot_key: null,
       workspace_snapshot_key: null,
       next_event_seq: 1,
+      next_mailbox_position: 3,
       last_fencing_token: 1,
       row_version: 1,
     })
@@ -202,6 +203,7 @@ async function seed(): Promise<void> {
         turn_id: IDS.turn1,
         idempotency_key: "checkpoint-turn-1",
         kind: "turn.execute",
+        mailbox_position: 1,
         state: "acknowledged",
         payload: { schemaVersion: 1 },
         acknowledged_at: new Date(),
@@ -214,6 +216,7 @@ async function seed(): Promise<void> {
         turn_id: IDS.turn2,
         idempotency_key: "checkpoint-turn-2",
         kind: "turn.execute",
+        mailbox_position: 2,
         state: "pending",
         payload: { schemaVersion: 1 },
         failure_code: null,

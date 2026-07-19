@@ -43,6 +43,7 @@ describe("control-plane public API schemas", () => {
         turnId: "50000000-0000-4000-8000-000000000001",
         sessionId: "30000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",
+        mailboxPosition: 1,
         state: "queued",
         acceptedAt: createdAt,
         replayed: false,
@@ -71,6 +72,17 @@ describe("control-plane public API schemas", () => {
       parseAcceptedTurnResource({
         turnId: "not-a-uuid",
         state: "running",
+      }),
+    ).toThrow(/accepted-turn resource/);
+    expect(() =>
+      parseAcceptedTurnResource({
+        turnId: "50000000-0000-4000-8000-000000000001",
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        commandId: "60000000-0000-4000-8000-000000000001",
+        mailboxPosition: 0,
+        state: "queued",
+        acceptedAt: "2026-07-19T00:00:00.000Z",
+        replayed: false,
       }),
     ).toThrow(/accepted-turn resource/);
     expect(() => parseControlPlaneApiError({ error: { message: "missing code" } })).toThrow(

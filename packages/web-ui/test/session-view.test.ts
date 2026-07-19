@@ -6,6 +6,7 @@ import type {
 } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  activeTurn,
   createInitialSessionView,
   sessionViewReducer,
   type SessionViewState,
@@ -35,6 +36,7 @@ const accepted: AcceptedTurnResource = {
   turnId: TURN_ID,
   sessionId: SESSION_ID,
   commandId: "60000000-0000-4000-8000-000000000001",
+  mailboxPosition: 1,
   state: "queued",
   acceptedAt: CREATED_AT,
   replayed: false,
@@ -76,6 +78,25 @@ function preparedState(): SessionViewState {
 }
 
 describe("session transcript reducer", () => {
+  it("keeps durable mailbox positions for queued follow-ups", () => {
+    const state = sessionViewReducer(preparedState(), {
+      type: "turn.accepted",
+      accepted: {
+        ...accepted,
+        turnId: "20000000-0000-4000-8000-000000000002",
+        commandId: "60000000-0000-4000-8000-000000000002",
+        mailboxPosition: 2,
+      },
+      prompt: "Run the follow-up checks",
+    });
+
+    expect(state.turns.map((turn) => [turn.mailboxPosition, turn.prompt, turn.status])).toEqual([
+      [1, "Repair the test", "queued"],
+      [2, "Run the follow-up checks", "queued"],
+    ]);
+    expect(activeTurn(state)?.mailboxPosition).toBe(1);
+  });
+
   it("keeps ordered text/tool lifecycle and the final bounded patch", () => {
     const events: AgentDockEvent[] = [
       envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),

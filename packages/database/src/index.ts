@@ -14,9 +14,11 @@ export {
 
 export {
   downDurableEventDelivery,
+  downExplicitSessionMailbox,
   downInitialControlPlane,
   migrationProvider,
   upDurableEventDelivery,
+  upExplicitSessionMailbox,
   upInitialControlPlane,
 } from "./migrations/index.ts";
 

@@ -936,6 +936,12 @@ a {
   border-left: 1px solid var(--border);
 }
 
+.composer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .send-button,
 .cancel-button {
   flex: 0 0 auto;

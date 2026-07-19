@@ -1,6 +1,10 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { UtcTimestampSchema, UuidSchema } from "./protocol-primitives.ts";
+import {
+  PositiveSafeIntegerSchema,
+  UtcTimestampSchema,
+  UuidSchema,
+} from "./protocol-primitives.ts";
 
 export const TurnThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -67,6 +71,7 @@ export const AcceptedTurnResourceSchema = Type.Object(
     turnId: UuidSchema,
     sessionId: UuidSchema,
     commandId: UuidSchema,
+    mailboxPosition: PositiveSafeIntegerSchema,
     state: Type.Literal("queued"),
     acceptedAt: UtcTimestampSchema,
     replayed: Type.Boolean(),

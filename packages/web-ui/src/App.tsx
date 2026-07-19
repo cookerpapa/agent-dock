@@ -191,6 +191,9 @@ function TurnTranscript({ turn }: { turn: TurnView }) {
     <article className="turn" id={`turn-${turn.turnId}`}>
       <header className="turn-meta">
         <span>turn {shortId(turn.turnId)}</span>
+        <span>
+          mailbox {turn.mailboxPosition === null ? "pending" : `#${String(turn.mailboxPosition)}`}
+        </span>
         <span>{timeLabel(turn.acceptedAt)}</span>
         <StatusMark status={turn.status} />
       </header>
@@ -281,11 +284,16 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const lastSequenceRef = useRef(0);
   const currentTurn = activeTurn(state);
-  const sessionCanAcceptTurn =
-    state.session === null || state.sessionState === "cold" || state.sessionState === "idle";
+  const sessionCanQueueTurn =
+    state.session === null ||
+    state.sessionState === "cold" ||
+    state.sessionState === "idle" ||
+    state.sessionState === "running" ||
+    state.sessionState === "waiting_approval" ||
+    state.sessionState === "cancelling";
   const hasSettledTurn = state.turns.length > 0 && currentTurn === undefined;
   const sessionNeedsReset =
-    state.session !== null && currentTurn === undefined && !sessionCanAcceptTurn;
+    state.session !== null && currentTurn === undefined && !sessionCanQueueTurn;
 
   const update = (action: Parameters<typeof sessionViewReducer>[1]): void => {
     setState((current) => sessionViewReducer(current, action));
@@ -334,12 +342,7 @@ export default function App() {
 
   async function submitTurn(): Promise<void> {
     const normalizedPrompt = prompt.trim();
-    if (
-      normalizedPrompt.length === 0 ||
-      currentTurn !== undefined ||
-      !sessionCanAcceptTurn ||
-      operation !== null
-    ) {
+    if (normalizedPrompt.length === 0 || !sessionCanQueueTurn || operation !== null) {
       return;
     }
     setOperation("submitting");
@@ -560,7 +563,7 @@ export default function App() {
           <div className="composer">
             <textarea
               aria-label="Turn prompt"
-              disabled={currentTurn !== undefined || !sessionCanAcceptTurn || operation !== null}
+              disabled={!sessionCanQueueTurn || operation !== null}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -577,44 +580,42 @@ export default function App() {
                 <span>
                   {sessionNeedsReset
                     ? "new session required"
-                    : hasSettledTurn
-                      ? "cold restore ready"
-                      : "thinking off"}
+                    : currentTurn !== undefined
+                      ? "follow-up queues · never steers"
+                      : hasSettledTurn
+                        ? "cold restore ready"
+                        : "thinking off"}
                 </span>
                 <span>⌘/Ctrl + Enter</span>
               </div>
-              {currentTurn?.status === "running" ? (
-                <button
-                  className="cancel-button"
-                  disabled={operation !== null}
-                  onClick={() => void cancelActiveTurn()}
-                  type="button"
-                >
-                  {operation === "cancelling" ? "accepting cancel…" : "cancel turn"}
-                </button>
-              ) : (
+              <div className="composer-actions">
+                {currentTurn?.status === "running" ? (
+                  <button
+                    className="cancel-button"
+                    disabled={operation !== null}
+                    onClick={() => void cancelActiveTurn()}
+                    type="button"
+                  >
+                    {operation === "cancelling" ? "accepting cancel…" : "cancel turn"}
+                  </button>
+                ) : null}
                 <button
                   className="send-button"
-                  disabled={
-                    currentTurn !== undefined ||
-                    !sessionCanAcceptTurn ||
-                    operation !== null ||
-                    prompt.trim() === ""
-                  }
+                  disabled={!sessionCanQueueTurn || operation !== null || prompt.trim() === ""}
                   onClick={() => void submitTurn()}
                   type="button"
                 >
                   {operation === "submitting" || operation === "creating"
                     ? "accepting…"
-                    : currentTurn?.status === "cancelling"
-                      ? "cancelling…"
-                      : sessionNeedsReset
-                        ? "new session required"
+                    : sessionNeedsReset
+                      ? "new session required"
+                      : currentTurn !== undefined
+                        ? "queue follow-up"
                         : hasSettledTurn
                           ? "send follow-up"
                           : "run repair"}
                 </button>
-              )}
+              </div>
             </div>
           </div>
           <div className="runtime-strip">

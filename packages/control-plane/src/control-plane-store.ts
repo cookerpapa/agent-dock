@@ -5,6 +5,7 @@ import {
   resolveTurnModel,
   type ModelProfile,
   type ModelThinkingLevel,
+  type SessionState,
 } from "@agent-dock/domain";
 import type {
   AcceptTurnRequest,
@@ -15,7 +16,7 @@ import type {
   SessionResource,
 } from "@agent-dock/protocol";
 import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
-import type { Kysely, Transaction } from "kysely";
+import { sql, type Kysely, type Transaction } from "kysely";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -43,6 +44,7 @@ export class ControlPlaneStoreError extends Error {
 
 type AcceptedTurnRow = {
   commandId: string;
+  mailboxPosition: string;
   turnId: string;
   sessionId: string;
   commandCreatedAt: Date | string;
@@ -104,6 +106,13 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
 }
 
 const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
+const TURN_ACCEPTING_SESSION_STATES = new Set<SessionState>([
+  "cold",
+  "idle",
+  "running",
+  "waiting_approval",
+  "cancelling",
+]);
 
 function turnRequestFingerprint(request: AcceptTurnRequest): string {
   return createHash("sha256")
@@ -157,6 +166,7 @@ function acceptedTurnResource(
     turnId: row.turnId,
     sessionId: row.sessionId,
     commandId: row.commandId,
+    mailboxPosition: positiveSafeInteger(row.mailboxPosition, "Mailbox position"),
     state: "queued",
     acceptedAt: isoTimestamp(row.commandCreatedAt),
     replayed,
@@ -371,9 +381,10 @@ export class ControlPlaneStore {
     return this.#database.transaction().execute(async (transaction) => {
       const session = await transaction
         .selectFrom("sessions")
-        .select(["id", "desired_model_profile_id"])
+        .select(["id", "desired_model_profile_id", "state", "next_mailbox_position"])
         .where("tenant_id", "=", this.#tenantId)
         .where("id", "=", sessionId)
+        .forUpdate()
         .executeTakeFirst();
       if (!session) {
         throw new ControlPlaneStoreError("not_found", "Session was not found");
@@ -384,6 +395,16 @@ export class ControlPlaneStore {
           "Session model profile does not match the configured v0 profile",
         );
       }
+      if (!TURN_ACCEPTING_SESSION_STATES.has(session.state)) {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          `Session cannot accept a queued follow-up while it is ${session.state}`,
+        );
+      }
+      const mailboxPosition = positiveSafeInteger(
+        session.next_mailbox_position,
+        "Next mailbox position",
+      );
       const model = await this.#resolveModelSnapshot(transaction, request.thinkingLevel);
 
       await transaction
@@ -418,6 +439,7 @@ export class ControlPlaneStore {
           idempotency_key: idempotencyKey,
           kind: "turn.execute",
           state: "pending",
+          mailbox_position: mailboxPosition,
           payload: { schemaVersion: 1, requestHash: fingerprint },
           dispatched_at: null,
           acknowledged_at: null,
@@ -447,9 +469,28 @@ export class ControlPlaneStore {
         })
         .executeTakeFirstOrThrow();
 
+      const sessionUpdate = await transaction
+        .updateTable("sessions")
+        .set({
+          next_mailbox_position: sql<string>`${sql.ref("next_mailbox_position")} + 1`,
+          row_version: sql<string>`${sql.ref("row_version")} + 1`,
+          updated_at: sql<Date>`now()`,
+        })
+        .where("tenant_id", "=", this.#tenantId)
+        .where("id", "=", session.id)
+        .where("next_mailbox_position", "=", String(mailboxPosition))
+        .executeTakeFirst();
+      if (sessionUpdate.numUpdatedRows !== 1n) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Session mailbox position could not be advanced",
+        );
+      }
+
       return acceptedTurnResource(
         {
           commandId: command.id,
+          mailboxPosition: String(mailboxPosition),
           turnId,
           sessionId: session.id,
           commandCreatedAt: command.created_at,
@@ -470,6 +511,7 @@ export class ControlPlaneStore {
       .innerJoin("turns as turn", "turn.id", "command.turn_id")
       .select([
         "command.id as commandId",
+        "command.mailbox_position as mailboxPosition",
         "command.created_at as commandCreatedAt",
         "command.payload as commandPayload",
         "turn.id as turnId",
@@ -479,8 +521,16 @@ export class ControlPlaneStore {
       .where("command.session_id", "=", sessionId)
       .where("command.idempotency_key", "=", idempotencyKey)
       .where("command.kind", "=", "turn.execute")
+      .where("command.mailbox_position", "is not", null)
       .executeTakeFirst();
-    return row;
+    if (row === undefined) return undefined;
+    if (row.mailboxPosition === null) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Stored turn command has no mailbox position",
+      );
+    }
+    return { ...row, mailboxPosition: row.mailboxPosition };
   }
 
   async #acceptNewTurnCancellation(

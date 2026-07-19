@@ -2,8 +2,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   downDurableEventDelivery,
+  downExplicitSessionMailbox,
   downInitialControlPlane,
   upDurableEventDelivery,
+  upExplicitSessionMailbox,
   upInitialControlPlane,
 } from "../src/index.ts";
 import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.ts";
@@ -23,6 +25,8 @@ const IDS = {
   lease: "90000000-0000-4000-8000-000000000001",
   command1: "a0000000-0000-4000-8000-000000000001",
   command2: "a0000000-0000-4000-8000-000000000002",
+  command3: "a0000000-0000-4000-8000-000000000003",
+  command4: "a0000000-0000-4000-8000-000000000004",
   approval: "b0000000-0000-4000-8000-000000000001",
   event1: "c0000000-0000-4000-8000-000000000001",
   event2: "c0000000-0000-4000-8000-000000000002",
@@ -301,6 +305,74 @@ describe("initial PostgreSQL migration", () => {
     ).rejects.toThrow();
   });
 
+  it("backfills and enforces an explicit per-session execute mailbox", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(upExplicitSessionMailbox));
+
+    const columns = await postgres.query<{
+      table_name: string;
+      column_name: string;
+      is_nullable: string;
+    }>(
+      `select table_name, column_name, is_nullable
+         from information_schema.columns
+        where table_schema = 'public'
+          and (table_name, column_name) in (
+            ('sessions', 'next_mailbox_position'),
+            ('commands', 'mailbox_position')
+          )
+        order by table_name, column_name`,
+    );
+    expect(columns.rows).toEqual([
+      { table_name: "commands", column_name: "mailbox_position", is_nullable: "YES" },
+      { table_name: "sessions", column_name: "next_mailbox_position", is_nullable: "NO" },
+    ]);
+
+    const commands = await postgres.query<{ id: string; mailbox_position: string }>(
+      `select id, mailbox_position::text as mailbox_position
+         from commands
+        where session_id = $1 and kind = 'turn.execute'
+        order by mailbox_position`,
+      [IDS.session],
+    );
+    expect(commands.rows).toEqual([
+      { id: IDS.command1, mailbox_position: "1" },
+      { id: IDS.command2, mailbox_position: "2" },
+    ]);
+    const session = await postgres.query<{ next_mailbox_position: string }>(
+      `select next_mailbox_position::text as next_mailbox_position
+         from sessions where id = $1`,
+      [IDS.session],
+    );
+    expect(session.rows[0]?.next_mailbox_position).toBe("3");
+
+    await postgres.query(
+      `insert into commands
+         (id, tenant_id, session_id, turn_id, idempotency_key, kind, payload)
+       values ($1, $2, $3, $4, 'cancel-1', 'turn.cancel', '{}'::jsonb)`,
+      [IDS.command3, IDS.tenant, IDS.session, IDS.turn1],
+    );
+    await expect(
+      postgres.query(`update commands set mailbox_position = 3 where id = $1`, [IDS.command3]),
+    ).rejects.toThrow();
+    await expect(
+      postgres.query(
+        `insert into commands
+           (id, tenant_id, session_id, turn_id, idempotency_key, kind, payload)
+         values ($1, $2, $3, $4, 'request-3', 'turn.execute', '{}'::jsonb)`,
+        [IDS.command4, IDS.tenant, IDS.session, IDS.turn1],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      postgres.query(
+        `insert into commands
+           (id, tenant_id, session_id, turn_id, idempotency_key, kind,
+            mailbox_position, payload)
+         values ($1, $2, $3, $4, 'request-3', 'turn.execute', 2, '{}'::jsonb)`,
+        [IDS.command4, IDS.tenant, IDS.session, IDS.turn1],
+      ),
+    ).rejects.toThrow();
+  });
+
   it("requires approval outcome and resolution time to match state", async () => {
     await expect(
       postgres.query(
@@ -357,6 +429,7 @@ describe("initial PostgreSQL migration", () => {
   });
 
   it("drops every application table in reverse dependency order", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(downExplicitSessionMailbox));
     await applyCompiledQueries(postgres, await compileMigration(downDurableEventDelivery));
     await applyCompiledQueries(postgres, await compileMigration(upDurableEventDelivery));
     await applyCompiledQueries(postgres, await compileMigration(downInitialControlPlane));

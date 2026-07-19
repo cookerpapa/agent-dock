@@ -100,6 +100,7 @@ only after a measured requirement appears.
 - [ADR-0010: ephemeral Docker sandbox and bounded final patch](docs/adr/0010-ephemeral-docker-sandbox-and-bounded-patch.md)
 - [ADR-0011: settled checkpoint commit and cold restore](docs/adr/0011-settled-checkpoint-commit-and-cold-restore.md)
 - [ADR-0012: crash-safe supervisor event spool and restart replay](docs/adr/0012-crash-safe-supervisor-event-spool.md)
+- [ADR-0013: explicit session mailbox order and queued follow-ups](docs/adr/0013-explicit-session-mailbox-order.md)
 
 ## Current executable spikes
 
@@ -148,7 +149,7 @@ npm run ci
 ```
 
 It checks Prettier formatting, the production frontend build, TypeScript types,
-156 unit/contract tests, the two zero-token Pi spikes, and high-severity
+159 passing unit/contract tests, the two zero-token Pi spikes, and high-severity
 dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
@@ -294,5 +295,11 @@ bounded Git patch, or cancel a second run and observe confirmed sandbox teardown
 The first Phase 2 slice now adds cold Pi/workspace rehydration: a follow-up runs
 in another container, sees the previous assistant message, verifies the
 previous Java edit, continues event sequence numbers, and replaces the settled
-checkpoint. Phase 2 next addresses runner/lease reconciliation and ordered
-mailbox pressure rather than keeping a process per conversation.
+checkpoint. Each accepted prompt now receives an immutable per-session mailbox
+position allocated under a PostgreSQL row lock. Prompts submitted while a turn
+is active are explicit queued follow-ups—not steer—and the Web page displays
+their durable positions. A five-input integration test concurrently accepts the
+four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
+idempotent replay without position gaps.
+Phase 2 next addresses runner/lease reconciliation and cross-replica live
+notification rather than keeping a process per conversation.

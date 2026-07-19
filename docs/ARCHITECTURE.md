@@ -46,11 +46,16 @@ command, and outbox rows commit in one PostgreSQL transaction before the API
 returns `202 Accepted`. A same-key/same-body retry returns the original turn,
 while same-key/different-body reuse returns `409`. The command retains a SHA-256
 request fingerprint and the outbox carries only identifiers; neither duplicates
-the prompt or credential material.
+the prompt or credential material. Acceptance locks the session row and
+allocates a positive, immutable `mailbox_position` from its durable
+`next_mailbox_position` counter in the same transaction. The accepted public
+resource exposes that position. A duplicate idempotent request returns the
+original position and consumes no new one.
 
 The second Phase 1 slice adds an explicit transactional-outbox dispatcher. It
 claims one due command using `FOR UPDATE SKIP LOCKED`, locks the owning session,
-and enforces oldest-nonterminal-command mailbox order. The claim transaction
+and enforces lowest-nonterminal-`mailbox_position` order. Timestamp and UUID
+order are not correctness inputs. The claim transaction
 moves `pending/queued` to `dispatched/dispatching` and gives the outbox record a
 bounded reclaim time. The incremented attempt acts as a local fencing token, so
 a superseded pre-ACK claimant cannot later start. An execution backend must
@@ -231,14 +236,17 @@ It also stores model-profile policy, opaque credential bindings, the desired
 session profile, and each turn's immutable resolved model snapshot. It never
 stores provider tokens in ordinary session or turn rows.
 
-Important uniqueness constraints include `(session_id, idempotency_key)` and
+Important uniqueness constraints include `(session_id, idempotency_key)`, one
+positive execute-command `mailbox_position` per session, and
 `(session_id, seq)`.
 
 The initial Kysely migration also enforces tenant-consistent composite foreign
 keys, one non-queued active turn per session, positive fencing tokens, bounded
 sandbox capacity, approval outcome/state consistency, ACK cursors that cannot
 advance beyond durable events, and non-negative usage. Multiple queued turns
-remain legal and are consumed in mailbox order. Database checks constrain
+remain legal and are consumed in explicit mailbox order. Non-execute control
+commands have no mailbox position and therefore cannot be confused with the
+prompt FIFO. Database checks constrain
 persisted values; `@agent-dock/domain` remains the single authority for legal
 transition order.
 
@@ -273,8 +281,9 @@ not shared-filesystem coordination or process-memory recovery.
 
 ## 4. Execution flow
 
-1. Client submits a command with an idempotency key.
-2. The control plane stores the command and outbox record transactionally.
+1. Client submits a prompt with an idempotency key.
+2. The control plane locks the session and stores the turn, positioned execute
+   command, outbox record, and advanced mailbox counter transactionally.
 3. The API returns `202 Accepted`.
 4. The session coordinator acquires the session execution lease.
 5. The scheduler assigns or creates a sandbox runner.
@@ -341,6 +350,11 @@ liveness but cannot make a stale fencing token current.
 - Commands use at-least-once delivery plus durable idempotency. Command ACK says
   that the current fenced supervisor accepted responsibility, not that execution
   completed.
+- A prompt submitted while an earlier turn is active is accepted as a separate
+  queued follow-up with its own mailbox position. It starts only after every
+  lower nonterminal position settles and restores the latest committed
+  Pi/workspace checkpoint. It never injects text into the active model loop.
+  Steer requires a future explicit command/API and capability check.
 - Events use contiguous per-session sequence numbers and at-least-once delivery.
   ACK is cumulative and means durably persisted, so an ACK lost in transit can
   safely cause replay.

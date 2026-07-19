@@ -52,6 +52,7 @@ export type TranscriptItem =
 export type TurnView = {
   turnId: string;
   commandId: string | null;
+  mailboxPosition: number | null;
   prompt: string;
   acceptedAt: string | null;
   status: TurnViewStatus;
@@ -110,6 +111,7 @@ function unknownTurn(turnId: string): TurnView {
   return {
     turnId,
     commandId: null,
+    mailboxPosition: null,
     prompt: "Input was accepted before this browser connected.",
     acceptedAt: null,
     status: "running",
@@ -339,6 +341,7 @@ export function sessionViewReducer(
     const turns = updateTurn(state.turns, action.accepted.turnId, (turn) => ({
       ...turn,
       commandId: action.accepted.commandId,
+      mailboxPosition: action.accepted.mailboxPosition,
       prompt: action.prompt,
       acceptedAt: action.accepted.acceptedAt,
       status: turn.startedSequence === null ? "queued" : turn.status,

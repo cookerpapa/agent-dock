@@ -22,6 +22,11 @@ type GeneratedInt8 = ColumnType<
   bigint | number | string | undefined,
   bigint | number | string
 >;
+type NullableInt8 = ColumnType<
+  string | null,
+  bigint | number | string | null | undefined,
+  bigint | number | string | null
+>;
 type GeneratedBoolean = ColumnType<boolean, boolean | undefined, boolean>;
 type GeneratedInteger = ColumnType<number, number | undefined, number>;
 type JsonObject = JSONColumnType<
@@ -112,6 +117,7 @@ export interface SessionTable {
   pi_session_snapshot_key: string | null;
   workspace_snapshot_key: string | null;
   next_event_seq: GeneratedInt8;
+  next_mailbox_position: GeneratedInt8;
   last_fencing_token: GeneratedInt8;
   row_version: GeneratedInt8;
   created_at: GeneratedTimestamp;
@@ -191,6 +197,7 @@ export interface CommandTable {
   idempotency_key: string;
   kind: CommandKind;
   state: CommandState;
+  mailbox_position: NullableInt8;
   payload: JsonObject;
   created_at: GeneratedTimestamp;
   dispatched_at: NullableTimestamp;

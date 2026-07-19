@@ -72,9 +72,15 @@ restore into a fresh Docker container, and a Web follow-up on the same session.
 Two-container tests prove that the second model request sees the prior Pi
 conversation and that its tool sees the prior Java edit. A crash-safe local
 supervisor spool now persists event publications before transport and proves
-exact PostgreSQL redelivery after an ACK-loss restart. MinIO/S3, five-input
-mailbox acceptance, steer semantics, cross-replica notification, lease renewal,
-and restart reconciliation remain.
+exact PostgreSQL redelivery after an ACK-loss restart. Prompt acceptance now
+allocates a durable per-session mailbox position, including while another turn
+is running. A five-input test concurrently accepts four followers and forces
+tied timestamps, proving strict FIFO, no overlap, and idempotent replay without
+a counter gap; the Web page exposes queue positions and labels active-session
+submission as queued follow-up. Steer is
+specified as a separate future operation rather than an implicit prompt mode.
+MinIO/S3, explicit steer implementation, cross-replica notification, lease
+renewal, and restart reconciliation remain.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

@@ -729,3 +729,38 @@
 - 下一步：用五个预先 accepted 的同 session prompt 做 mailbox FIFO 验收。原因是 event replay
   已跨 supervisor restart 闭环，Phase 2 的下一个用户可见保证是排队输入不能并发或越过前序
   turn；它也会暴露当前 API 是否真的允许 active session 接收 queued follow-up。
+
+## 2026-07-19 — 显式 session mailbox 与运行中排队输入
+
+- 目标：把“同一 session 一次只运行一轮”从近似的 `(created_at, UUID)` 排序升级成数据库可证明
+  的接收顺序，并明确用户在当前 turn 运行时再次提交 prompt 的含义。
+- 决策：新增 ADR-0013。每个 `turn.execute` command 获得 session 内正数且不可变的
+  `mailbox_position`；session 持有 `next_mailbox_position`。prompt acceptance 锁 session row，
+  在同一 transaction 中写 turn/command/outbox、推进 counter 并把 position 返回给客户端。
+- 迁移：003 为旧 execute command 按既有确定性顺序 backfill position，推进各 session counter，
+  增加正数、kind/null 对应关系和 session 内唯一约束。cancel/approval 等 targeted control command
+  不占 execute mailbox position，避免取消被未来 prompt 阻塞。
+- 调度：dispatcher 只允许最低 nonterminal position 进入执行；retry 保留原位置并阻塞后续轮。
+  timestamp 和随机 UUID 不再参与同 session 正确性。幂等重放返回原 position，不产生 counter gap。
+- 产品语义：active session 的普通 prompt 是新的 **queued follow-up**，不是对正在运行的模型做
+  steer。它只在前序轮 settle 后，从最新成功 checkpoint 开始。真正的 steer 保留为未来独立
+  API/command，并需要 runtime capability negotiation。
+- Web：每轮显示 `mailbox #N`；running、waiting approval 或 cancelling 时 composer 仍可提交，按钮
+  明确写 `queue follow-up`，提示 `follow-up queues · never steers`。运行中的 turn 仍保留独立 cancel。
+- 证据：PostgreSQL integration test 在第 1 条已 ACK/running 时并发接受第 2–5 条，把后四条
+  `created_at` 强制设成同一时间，再证明执行严格按 position 1..5、最大并发始终为 1。position 3
+  的同 key/body 重放仍返回 3，五条完成后 session counter 恰为 6。migration test 同时证明旧数据
+  backfill、execute 非空/唯一约束和 control-command null 约束。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、159
+  passed/4 skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。
+- Docker 验收：重新构建 `agent-dock/pi-workspace:phase2` 后，3 个 supervisor Docker tests
+  通过跨容器 restore、Java repair 和 confirmed cancellation；21 个 control-plane tests 全部
+  通过，结束后 `io.agent-dock.managed=true` 容器为 0。
+- PostgreSQL 验收：同一套 control-plane suite 通过只绑定 `127.0.0.1` 的一次性 PostgreSQL
+  `15.2-alpine` 复跑（20 passed/1 Docker-only skipped），覆盖真实 row lock、partial unique index、
+  `SKIP LOCKED` 和五输入 FIFO；数据库容器随后自动删除。
+- 当前边界：这不是 active-loop steer，也没有 queue-depth quota、tenant fairness 或 queued-turn
+  withdrawal。queued rows 只占 PostgreSQL 存储，不会预留 Pi process、thread、container 或 lease。
+- 下一步：实现长 turn lease renewal 与 runner restart reconciliation。原因是 mailbox 已能稳定
+  保存等待工作，而当前最大的执行所有权缺口是 supervisor/control-plane 重启或 lease 过期后，
+  系统仍不能自动区分可安全重领、必须隔离和结果不明的 assignment。

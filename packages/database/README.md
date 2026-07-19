@@ -22,6 +22,10 @@ The first migration creates 18 application tables covering:
 Important database-enforced invariants include:
 
 - unique `(session_id, idempotency_key)` commands;
+- a positive, immutable-in-practice execute-command mailbox position, unique per
+  session, with non-execute control commands required to keep it null;
+- a positive per-session next-position counter used as the transactional
+  allocation point;
 - unique `(session_id, seq)` events and globally unique event IDs;
 - versioned credential-binding rows that preserve historical turn snapshots
   across credential rotation;

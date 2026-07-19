@@ -82,6 +82,9 @@ The one-command local demo uses a deterministic model and image-owned Java
 fixture. After each successful turn, the trusted host stores Pi JSONL and a
 bounded workspace manifest before completion is published. A follow-up on the
 same session restores both into a new disposable container, so the composer can
-honestly remain available after settlement. Browser reload/session discovery,
+honestly remain available after settlement. The composer now also remains
+available during an active turn: another prompt is visibly queued as a separate
+follow-up, receives and displays its durable mailbox position, and never implies
+that it steered the running model loop. Browser reload/session discovery,
 approval responses, real repository import, MinIO/S3 storage, and runner
 restart recovery remain Phase 2/3 work.

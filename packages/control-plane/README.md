@@ -12,7 +12,8 @@ the production Pi executor.
   operator-configured default model profile.
 - `POST /v1/sessions/:sessionId/turns` requires `Idempotency-Key` and returns
   `202 Accepted` only after the queued turn, pending command, and transactional
-  outbox record commit together.
+  outbox record commit together. It also returns the immutable per-session
+  mailbox position allocated in that transaction.
 - `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` requires a distinct
   `Idempotency-Key` and returns `202 Accepted` only after cancellation intent is
   durable. It does not imply that Pi has already stopped.
@@ -24,14 +25,18 @@ command stores only a request fingerprint, and the outbox carries IDs rather
 than copying the prompt or any credential material. Repeating the same key and
 request returns the original acceptance; reusing the key for different content
 returns `409`. Cancellation has the same semantic replay check, including its
-grace period, and targets only an acknowledged active turn in v0.
+grace period, and targets only an acknowledged active turn in v0. A normal
+prompt submitted while a turn is active is another queued follow-up, not steer;
+it consumes no process, container, or lease until it reaches the head.
 
 ## Dispatcher boundary
 
 `OutboxDispatcher.dispatchNext()` is an explicit worker primitive; the HTTP
 handler never invokes it. A claim transaction selects one due outbox row with
 `FOR UPDATE SKIP LOCKED`, locks the owning session, preserves per-session mailbox
-order, and advances `pending/queued` to `dispatched/dispatching`. The injected
+order by the lowest nonterminal execute-command `mailbox_position`, and advances
+`pending/queued` to `dispatched/dispatching`. Timestamp and UUID order are not
+correctness inputs. The injected
 backend must await `lifecycle.started()` before doing execution work. That ACK
 transaction advances the command to `acknowledged`, the turn to `running`, and
 the session to `running`, and marks command delivery published in the outbox.
@@ -128,7 +133,10 @@ durable acceptance, idempotent replay, conflicting reuse, model-policy
 rejection, generic error redaction, rollback when the outbox step fails,
 successful ACK/completion, concurrent claim exclusion, pre-ACK retry, post-ACK
 terminal failure, commit-before-event-ACK, gap/fence/conflict rejection, live
-SSE, and `Last-Event-ID` replay. Cancellation coverage includes queued rejection,
+SSE, and `Last-Event-ID` replay. It also concurrently accepts four same-session
+followers while the first input is running, forces tied timestamps, and proves
+FIFO/no-overlap plus idempotent replay without a mailbox gap. Cancellation
+coverage includes queued rejection,
 idempotency, competing requests, natural-completion races, post-ACK failure
 quarantine semantics, native Pi abort, forced POSIX descendant termination, and
 SSE terminal delivery. Its default end-to-end path starts pinned Pi against the

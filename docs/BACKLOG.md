@@ -75,6 +75,9 @@ extension-policy support would overstate the current boundary.
 - [ ] Replace the development file object store with a MinIO/S3 adapter
 - [x] Make the supervisor event spool crash-safe and replay it after supervisor restart
 - [ ] Add cross-replica live event notification
-- [ ] Prove five queued same-session inputs preserve mailbox order
-- [ ] Specify and implement steer versus queued follow-up semantics
+- [x] Allocate an immutable positive execute-command mailbox position per session
+- [x] Prove five queued same-session inputs preserve mailbox order with tied timestamps
+- [x] Specify active-session prompts as queued follow-ups and reserve explicit steer
+- [x] Expose mailbox positions and queued follow-up submission in the Web page
+- [ ] Implement an explicit steer API/command with runtime capability negotiation
 - [ ] Renew leases during long turns and reconcile expired assignments/orphan containers

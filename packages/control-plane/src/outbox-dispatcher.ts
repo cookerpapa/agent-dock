@@ -184,6 +184,16 @@ function positiveInteger(value: number, name: string): number {
   return value;
 }
 
+function safeMailboxPosition(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new OutboxDispatcherInvariantError(
+      "The v1 turn dispatcher requires a positive mailbox position",
+    );
+  }
+  return parsed;
+}
+
 function safeDate(clock: () => Date): Date {
   const value = clock();
   if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
@@ -415,6 +425,7 @@ export class OutboxDispatcher {
           "outbox.attempts as attempts",
           "command.id as commandId",
           "command.idempotency_key as idempotencyKey",
+          "command.mailbox_position as mailboxPosition",
           "command.state as commandState",
           "turn.id as turnId",
           "turn.state as turnState",
@@ -464,13 +475,7 @@ export class OutboxDispatcher {
               and earlier_command.session_id = ${sql.ref("command.session_id")}
               and earlier_command.kind = 'turn.execute'
               and earlier_command.state in ('pending', 'dispatched', 'acknowledged')
-              and (
-                earlier_command.created_at < ${sql.ref("command.created_at")}
-                or (
-                  earlier_command.created_at = ${sql.ref("command.created_at")}
-                  and earlier_command.id < ${sql.ref("command.id")}
-                )
-              )
+              and earlier_command.mailbox_position < ${sql.ref("command.mailbox_position")}
           )`,
         )
         .where("session_row.state", "in", ["cold", "idle"])
@@ -499,6 +504,12 @@ export class OutboxDispatcher {
           "The v1 turn dispatcher only accepts durable prompt turns",
         );
       }
+      if (row.mailboxPosition === null) {
+        throw new OutboxDispatcherInvariantError(
+          "The v1 turn dispatcher requires a positive mailbox position",
+        );
+      }
+      safeMailboxPosition(row.mailboxPosition);
 
       if (row.commandState === "pending" && row.turnState === "queued") {
         const commandUpdate = await transaction
