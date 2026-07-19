@@ -49,11 +49,15 @@ Acceptance criteria:
 - [x] The supervisor uses a pinned Pi RPC process through an AgentDock adapter
 - [x] Fenced events commit to PostgreSQL before cumulative supervisor ACK
 - [x] Pi, built-in tools, and the sample workspace run outside the NestJS control-plane process
-- [ ] Policy-approved project extensions load only inside the sandbox
 - [x] Text and tool events carry session, turn, agent, and sequence identifiers
 - [x] SSE reconnect resumes from the last acknowledged event
 - [x] Cancellation stops the model request and complete tool process tree on POSIX
 - [x] The zero-token demo supplies no provider credential and exposes no fake key in container
   configuration, public events, or the final patch
 - [x] A clean-checkout command reproduces the zero-token backend demo
-- [ ] A Pi-export-inspired React page renders the live flow
+- [x] A Pi-export-inspired React page renders the live flow
+
+Policy-approved project extension loading was removed from the Phase 1 exit
+criteria and remains a Phase 3 sandbox/approval deliverable. The Phase 1 image
+loads only its trusted fixture and disables project extensions; treating that as
+extension-policy support would overstate the current boundary.

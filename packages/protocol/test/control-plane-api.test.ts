@@ -2,17 +2,82 @@ import { describe, expect, it } from "vitest";
 import {
   ControlPlaneApiValidationError,
   parseAcceptTurnRequest,
+  parseAcceptedTurnCancellationResource,
+  parseAcceptedTurnResource,
+  parseControlPlaneApiError,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
+  parseProjectResource,
+  parseSessionResource,
   parseUuidPathParameter,
 } from "../src/index.ts";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 
 describe("control-plane public API schemas", () => {
+  it("validates public resources before a browser consumes them", () => {
+    const createdAt = "2026-07-19T00:00:00.000Z";
+    expect(
+      parseProjectResource({
+        projectId: "10000000-0000-4000-8000-000000000001",
+        workspaceId: "20000000-0000-4000-8000-000000000001",
+        name: "Java repair demo",
+        createdAt,
+      }),
+    ).toMatchObject({ name: "Java repair demo" });
+    expect(
+      parseSessionResource({
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        projectId: "10000000-0000-4000-8000-000000000001",
+        workspaceId: "20000000-0000-4000-8000-000000000001",
+        state: "cold",
+        modelProfileId: "40000000-0000-4000-8000-000000000001",
+        createdAt,
+      }),
+    ).toMatchObject({ state: "cold" });
+    expect(
+      parseAcceptedTurnResource({
+        turnId: "50000000-0000-4000-8000-000000000001",
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        commandId: "60000000-0000-4000-8000-000000000001",
+        state: "queued",
+        acceptedAt: createdAt,
+        replayed: false,
+      }),
+    ).toMatchObject({ state: "queued" });
+    expect(
+      parseAcceptedTurnCancellationResource({
+        commandId: "70000000-0000-4000-8000-000000000001",
+        targetCommandId: "60000000-0000-4000-8000-000000000001",
+        turnId: "50000000-0000-4000-8000-000000000001",
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        state: "pending",
+        acceptedAt: createdAt,
+        replayed: false,
+      }),
+    ).toMatchObject({ state: "pending" });
+    expect(
+      parseControlPlaneApiError({
+        error: { code: "conflict", message: "Session already has an active turn" },
+      }),
+    ).toMatchObject({ error: { code: "conflict" } });
+  });
+
+  it("rejects malformed public resources", () => {
+    expect(() =>
+      parseAcceptedTurnResource({
+        turnId: "not-a-uuid",
+        state: "running",
+      }),
+    ).toThrow(/accepted-turn resource/);
+    expect(() => parseControlPlaneApiError({ error: { message: "missing code" } })).toThrow(
+      /control-plane API error/,
+    );
+  });
+
   it("normalizes project names and preserves prompt text", () => {
     expect(parseCreateProjectRequest({ name: "  AgentDock  " })).toEqual({ name: "AgentDock" });
     expect(parseAcceptTurnRequest({ prompt: "  fix the test  ", thinkingLevel: "low" })).toEqual({

@@ -12,7 +12,8 @@
     "spikes/*"
   ],
   "scripts": {
-    "ci": "npm run format:check && npm run check && npm run security:audit",
+    "ci": "npm run format:check && npm run build && npm run check && npm run security:audit",
+    "build": "npm run build --workspaces --if-present",
     "container:config": "docker compose config --quiet",
     "container:check": "node scripts/run-container-check.mjs",
     "sandbox:check": "node scripts/run-docker-sandbox-check.mjs",
@@ -27,6 +28,7 @@
     "fake-model:start": "npm run start --workspace @agent-dock/fake-model-server",
     "db:migrate": "npm run migrate --workspace @agent-dock/database",
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
+    "demo": "node scripts/run-local-demo.mjs",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
     "security:audit": "npm audit --audit-level=high"
   },

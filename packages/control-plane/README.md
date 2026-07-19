@@ -99,6 +99,21 @@ full image, sandbox, PostgreSQL, and SSE proof with:
 npm run sandbox:check
 ```
 
+## Local browser demo
+
+The repository-level `npm run demo` command builds the same sandbox image and
+the `@agent-dock/web-ui` production bundle, then starts `src/demo.ts` on
+loopback. That entry point creates an ephemeral PGlite database, applies the real
+migrations, seeds one fixed zero-token model profile and sandbox capacity row,
+and runs execution and cancellation dispatch loops independently. Vite preview
+serves the page and proxies only `/v1` to this API.
+
+This is explicit demonstration wiring, not hidden production behavior. The
+database disappears on shutdown, the sample workspace and Pi context reset per
+activation, and the page permits one turn per demo session. `src/main.ts` still
+requires operator-owned PostgreSQL/profile bootstrap and does not start a local
+Docker supervisor.
+
 ## Verification boundary
 
 ```bash
@@ -124,8 +139,9 @@ requires `DATABASE_URL`, `AGENT_DOCK_TENANT_ID`, and
 `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID`. Database migration and operator bootstrap
 remain explicit deployment steps. A continuously running production worker,
 production supervisor transport, durable runner spool, acknowledged-cancellation
-crash recovery, generic repository restore, a real model gateway, and the React
-page are not claimed by this slice.
+crash recovery, generic repository restore, and a real model gateway are not
+claimed by this slice. The React page is connected only through the explicit
+ephemeral demo described above.
 
 To run the identical HTTP suite against an empty real PostgreSQL database, set
 `AGENT_DOCK_TEST_DATABASE_URL`. The value is consumed as configuration and is

@@ -608,3 +608,50 @@
 - 下一步：实现 Pi `/export` 风格的最小 React session page。原因是 backend story 已能
   从 clean checkout 重现真实工具、diff、取消和 SSE；现在最小的 Phase 1 缺口是让用户
   在 Web 中发起 turn、看到文本/工具状态、取消并检查 final diff，而不是继续只看测试。
+
+## 2026-07-19 — Pi-export React session page and one-command demo
+
+- 目标：补齐 Phase 1 最后一个用户可见切片，让页面真实驱动已经存在的 durable
+  control-plane/sandbox 链路，而不是展示静态 mock 或让 browser 直接管理 Pi/Docker。
+- Web：新增独立 `@agent-dock/web-ui` React/Vite workspace。页面沿用 Pi `/export` 的
+  紧凑等宽语言、约 800 px transcript、克制 user card、非气泡 assistant prose、可折叠
+  tool/diff、桌面可拖动且可键盘调整的 tree sidebar，以及移动端 overlay。turn/session/
+  reconnect/cancel/failure 都同时使用文字和符号，不只依赖颜色；固定 fake model、Pi
+  版本、sandbox 边界和 durable sequence 作为只读 metadata 展示。
+- REST 边界：shared protocol 新增 success/error resource parser；project、session、turn
+  和 cancellation response 在进入 React state 前都经过 closed TypeBox schema。浏览器
+  不记录 request/event，不接收 credential ref、provider token 或 raw Pi RPC。Markdown
+  不允许 raw HTML，也不会自动请求模型给出的远程图片；tool value 预览有 16,000 字符
+  上限。
+- SSE：没有使用无法为手动新连接设置 cursor 的 `EventSource`，而是实现 bounded
+  fetch-stream parser。它处理任意 chunk/CRLF/comment/multiline data，显式发送
+  `Last-Event-ID`，校验 AgentDock schema、session、frame id/type 和连续 seq；duplicate
+  replay 幂等忽略，gap 重连，协议错误 fail visible，网络错误 bounded backoff。纯 reducer
+  保留 text/tool/approval/terminal 时序，并拒绝旧 session 回调污染新 session。
+- Demo runtime：新增根目录 `npm run demo`。命令确认 Docker、默认构建 pinned sandbox
+  image 和 production Web bundle，然后启动 loopback-only Vite preview 与显式
+  `src/demo.ts`。后者在内存 PGlite 上执行真实 migration，seed 一个零 token profile 和
+  sandbox，分别轮询 execution/cancellation outbox；production `main.ts` 没有被偷偷改成
+  本机 worker。`Ctrl+C` 会一起停止两个进程。
+- 真实验收：通过 `127.0.0.1:4173` 的页面同源代理创建 project/session/turn，HTTP 先返回
+  `queued`；随后 Docker/Pi 路径按 `1..10` 收到 start、三组 tool start/end、两段 text 和
+  completed，final unified diff 为 336 bytes 且包含 `return left + right`。第二个真实
+  session 在 `turn.started #1` 后提交 durable cancellation，得到 `turn.cancelled #2`、
+  `forced=false`；新 SSE 使用 `Last-Event-ID: 1` 只重放 #2。两条路径结束后均确认没有
+  `agent-dock.managed=true` container 遗留。
+- 自动验证：Web 有 8 个测试覆盖 fragmented SSE、断线重连 cursor、duplicate 去重、
+  frame identity fail-closed、ordered transcript、cancel state、sequence gap 和 server
+  rendering/旧 session 隔离；protocol resource parser 另增 2 个测试。production bundle
+  build 已纳入 CI，gzip JS/CSS 分别约 131/4 KiB；demo runtime 另有 1 个默认 smoke test
+  验证 migration、seed、public API 和 shutdown。完整 `npm run ci` 通过 format、build、
+  全仓 typecheck、141 passed/3 Docker opt-in skipped、两个 zero-token Pi spike 和 0
+  high-severity vulnerabilities；重新构建 image 的 `npm run sandbox:check` 又通过 2 个
+  Docker tests 和 19 个完整 control-plane tests，结束后无 managed container。
+- 诚实边界：当前 image 每次 activation 都从 fixture baseline 开始，Pi JSONL 也没有
+  restore；因此 UI 在首个 turn settled 后要求创建新 demo session，不把“相同 sessionId
+  但全新 context/workspace”包装成多轮会话。page reload discovery、任意 repo、approval
+  response、真实 model gateway、durable runner spool 与跨 replica live fan-out仍未完成。
+- 里程碑：Phase 1 已完成。下一步先为 settled checkpoint manifest、Pi JSONL 与 workspace
+  snapshot 的写入/校验/恢复边界写 ADR 和失败测试，再让同一 session 的第二个 turn 在
+  新 container 中恢复。原因是“真正多轮且冷 session 不占进程”是 Phase 2 的核心；若先
+  放开 composer 而没有可验证恢复，只会制造一个看起来多轮、实际丢上下文的假功能。

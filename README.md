@@ -145,8 +145,9 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-It checks Prettier formatting, TypeScript types, 130 unit/contract tests, the two
-zero-token Pi spikes, and high-severity dependency advisories. The separate
+It checks Prettier formatting, the production frontend build, TypeScript types,
+141 unit/contract tests, the two zero-token Pi spikes, and high-severity
+dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
 
@@ -165,6 +166,21 @@ SSE:
 ```bash
 npm run sandbox:check
 ```
+
+The complete Phase 1 user flow is available as a one-command local demo. It
+builds the sandbox image and production frontend bundle, starts an ephemeral
+PGlite-backed control plane plus independent execution/cancellation dispatchers,
+and serves the Pi-export-inspired page at `http://127.0.0.1:4173`:
+
+```bash
+npm run demo
+```
+
+The demo uses the embedded deterministic model and sample Java fixture, so it
+consumes no provider tokens or local Pi login. Its database is intentionally
+ephemeral; press `Ctrl+C` to stop both loopback servers. The production
+`src/main.ts` remains separately configured and does not silently start local
+Docker workers.
 
 ## Current status
 
@@ -226,24 +242,38 @@ existing fenced event path, and `turn.completed` carries a validated, 64 KiB
 bounded unified diff. Completion and cancellation both confirm that the outer
 container is gone.
 
-The full database-to-container path is covered with the embedded loopback fake
-model, so it uses no subscription token. The control-plane-to-supervisor
+The sixth Phase 1 slice adds the React session surface. It retains Pi `/export`'s
+compact monospace language, independently scrolling and keyboard-resizable tree
+sidebar, narrow transcript, restrained user cards, unboxed Markdown assistant
+text, and collapsible tool details. It creates project/session/turn resources
+through REST, validates all public responses, and consumes SSE with a streaming
+parser that sends `Last-Event-ID`, rejects identity/sequence violations,
+deduplicates replay, and visibly reconnects. Tool lifecycle, cancellation,
+terminal failure, approvals, the durable sequence cursor, sandbox status, and
+the final diff have explicit non-color-only states. Remote Markdown images are
+not fetched, and no Pi payload, credential reference, or provider token is
+written to the DOM or browser console.
+
+The full database-to-container path and Web demo use the embedded loopback fake
+model, so they consume no subscription token. The control-plane-to-supervisor
 transport is still in-process integration scaffolding and the production HTTP
 entry point does not start dispatchers. The current image embeds one trusted
-sample fixture and disables extensions and external network access; generic
-repository import, policy-approved extension loading, a request-scoped model
-gateway, and durable Pi/workspace snapshots remain separate work. Live fan-out
-is process-local and the supervisor spool is memory-only. Queued-turn
+sample fixture and resets the workspace/Pi context for each activation, so the
+demo deliberately permits one turn per session. Generic repository import,
+real multi-turn Pi/workspace restoration, policy-approved extension loading, a
+request-scoped model gateway, and durable snapshots remain separate work. Live
+fan-out is process-local and the supervisor spool is memory-only. Queued-turn
 withdrawal, acknowledged-cancellation crash recovery, lease
-renewal/reconciliation, Windows Job Object containment, and the React page are
-not connected yet.
+renewal/reconciliation, and Windows Job Object containment are also deferred.
 
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
 selection-ready, while a frontend model picker and multi-tenant credential
 flows are deliberately deferred.
 
-The future React session page follows the compact Pi `/export` HTML visual
-language—resizable tree sidebar, narrow transcript, monospace theme, and
-collapsible tool/thinking blocks—while using AgentDock REST/SSE rather than
-letting the browser manage Pi processes or JSONL directly.
+Phase 1 is complete: from a clean checkout, `npm run demo` lets a user submit the
+Java repair, watch all ten durable events and three tool calls, inspect the
+bounded Git patch, or cancel a second run and observe confirmed sandbox teardown.
+The next phase makes the transcript, Pi JSONL, workspace, and runner event spool
+durable across cold activation and process restart instead of extending the
+one-turn fixture.

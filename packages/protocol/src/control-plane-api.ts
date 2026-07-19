@@ -173,6 +173,32 @@ export function parseCreateTurnCancellationRequest(value: unknown): CreateTurnCa
   );
 }
 
+export function parseProjectResource(value: unknown): ProjectResource {
+  return parseSchema(ProjectResourceSchema, value, "project resource");
+}
+
+export function parseSessionResource(value: unknown): SessionResource {
+  return parseSchema(SessionResourceSchema, value, "session resource");
+}
+
+export function parseAcceptedTurnResource(value: unknown): AcceptedTurnResource {
+  return parseSchema(AcceptedTurnResourceSchema, value, "accepted-turn resource");
+}
+
+export function parseAcceptedTurnCancellationResource(
+  value: unknown,
+): AcceptedTurnCancellationResource {
+  return parseSchema(
+    AcceptedTurnCancellationResourceSchema,
+    value,
+    "accepted-turn-cancellation resource",
+  );
+}
+
+export function parseControlPlaneApiError(value: unknown): ControlPlaneApiError {
+  return parseSchema(ControlPlaneApiErrorSchema, value, "control-plane API error");
+}
+
 export function parseIdempotencyKey(value: unknown): string {
   return parseSchema(IdempotencyKeySchema, value, "Idempotency-Key header");
 }

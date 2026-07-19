@@ -43,9 +43,12 @@ Deliverables:
 Exit criteria: from a clean checkout, a user can ask Pi to fix a test in a
 sample Java repository and observe the complete event flow.
 
-Current status: the clean-checkout Docker/PostgreSQL/SSE backend flow is
-executable through `npm run sandbox:check`; the minimal React session page is
-the remaining Phase 1 deliverable.
+Current status: complete. `npm run sandbox:check` proves the backend path, and
+`npm run demo` exposes the same zero-token Java repair through the minimal React
+session page. The page can submit, stream, reconnect without duplicate events,
+cancel, and inspect the final diff. The sample activation is intentionally one
+turn per ephemeral session; durable conversation/workspace rehydration belongs
+to Phase 2.
 
 ## Phase 2: durable sessions and mailbox (2 weeks)
 

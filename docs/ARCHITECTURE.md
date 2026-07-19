@@ -447,3 +447,12 @@ replay status, turn cancellation, approval cards, and sandbox health. The Web
 client consumes only AgentDock-owned REST/event schemas; it never reads Pi JSONL
 directly or starts/manages Pi runtimes. Detailed direction is recorded in
 `docs/WEB_UI_DIRECTION.md`.
+
+The implemented client uses fetch-based SSE rather than native `EventSource` so
+an explicit reconnect can send the last rendered sequence in `Last-Event-ID`.
+It validates the shared event schema plus SSE `id`/`event` identity before
+updating a pure transcript reducer; replayed sequences are idempotent and gaps
+fail visibly. Vite proxies only `/v1` to the loopback demo control plane, keeping
+browser requests same-origin without enabling permissive CORS. The local demo
+starts ephemeral PGlite and independent execution/cancellation polling loops,
+but does not change production `main.ts` or claim a production worker topology.

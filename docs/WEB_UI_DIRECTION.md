@@ -61,3 +61,26 @@ turn submission, SSE streaming, cancellation, and recovery.
   rendered events.
 - Session, turn, approval, and failure states are distinguishable without
   relying on color alone.
+
+## Implemented Phase 1 surface
+
+`packages/web-ui` now implements this direction as a small React/Vite workspace.
+The transcript preserves event order, merges adjacent text deltas, renders
+Markdown without raw HTML or remote-image fetches, collapses tool input/output,
+shows approval and terminal cards, and displays the durable sequence cursor.
+The desktop sidebar is pointer- and keyboard-resizable; the narrow layout uses
+an overlay with an explicit backdrop.
+
+The browser uses only relative REST/SSE routes. Its fetch-based SSE client can
+set `Last-Event-ID` explicitly, parses fragmented frames, validates the shared
+`AgentDockEvent` contract and frame identity, refuses sequence gaps, ignores
+duplicates, and reconnects with bounded backoff. Public REST resources are also
+validated before they enter React state. No raw Pi object, credential reference,
+provider token, or API body is logged.
+
+The one-command local demo uses a deterministic model and image-owned Java
+fixture. It permits one turn per session because the current Docker activation
+does not restore Pi JSONL or a prior workspace; the UI requires a new demo
+session after settlement instead of pretending that repeated turns share
+conversation state. Browser reload/session discovery, approval responses, real
+repository import, and durable multi-turn restoration remain Phase 2/3 work.

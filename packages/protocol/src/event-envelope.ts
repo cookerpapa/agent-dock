@@ -18,6 +18,7 @@ export const SessionStateSchema = Type.Union([
   Type.Literal("recovering"),
   Type.Literal("evicting"),
 ]);
+export type SessionState = Static<typeof SessionStateSchema>;
 
 export const TurnCancellationReasonSchema = Type.Union([
   Type.Literal("user_request"),
