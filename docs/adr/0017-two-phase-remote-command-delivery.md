@@ -92,9 +92,9 @@ exactly-once execution.
   event publications; no thread or process is created per cold session.
 - Result and ACK timeout limits are bounded and configurable, while long-running
   progress is kept alive by the shared heartbeat and lease path.
-- A later production slice still needs automatic reconnect, guarded backend
-  reconstruction, cross-instance dispatch ownership, and durable recovery of the
-  narrow acknowledged-before-commit crash window.
+- ADR-0018 adds automatic same-boot reconnect and per-command guarded backend
+  resolution. Cross-instance dispatch ownership and durable recovery of the
+  narrow acknowledged-before-commit crash window remain separate work.
 
 ## Rejected alternatives
 

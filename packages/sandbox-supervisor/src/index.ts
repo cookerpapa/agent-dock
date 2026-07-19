@@ -113,3 +113,13 @@ export {
   type SupervisorWebSocketClientOptions,
   type SupervisorWebSocketRegistration,
 } from "./supervisor-websocket-client.ts";
+
+export {
+  ReconnectingSupervisorWebSocketClient,
+  type ReconnectingSupervisorCommandRuntime,
+  type ReconnectingSupervisorWebSocketClientOptions,
+  type ReconnectingSupervisorWebSocketClientState,
+  type ReconnectingSupervisorWebSocketClientStop,
+  type SupervisorWebSocketConnection,
+  type SupervisorWebSocketConnectionFactory,
+} from "./reconnecting-supervisor-websocket-client.ts";

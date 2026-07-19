@@ -938,3 +938,36 @@
 - 下一步：实现 production reconnect/backend reconstruction 与 cross-instance dispatch ownership。原因是
   单连接内的执行安全和 event durability 已闭环，下一项真实可用性风险已变成“socket owner 实例退出后谁
   接管”，而不是消息 schema 或 Pi loop 本身。
+
+## 2026-07-19 — Supervisor 自动重连与 connection generation 恢复
+
+- 目标：让短暂网络故障不再要求人工重启 Supervisor，同时不把“连接恢复”错误地实现成“重放可能已经
+  产生副作用的 command”。后者会破坏两阶段协议的安全边界。
+- 决策：新增 ADR-0018。原 `SupervisorWebSocketClient` 保持一次性、单 generation；新的
+  `ReconnectingSupervisorWebSocketClient` 为每次尝试创建全新 client，使用有上限、equal-jitter 的指数
+  backoff。网络/heartbeat/overload/server failure 可重试；鉴权、协议、normal close 与 superseded identity
+  为 terminal，防止两个相同 identity 的进程互相抢占连接。
+- 旧 runtime 排空：任何断线仍先 `revokeAllAssignments()`。重连 loop 随后必须等待
+  `LocalSandboxSupervisor.waitUntilAssignmentsSettled()`，且等待有 deadline；旧 Pi/tool 未确认退出时不会
+  打开下一条 socket。超时 fail closed，交给 owner-stop/reconciliation，而不是仅依赖更高 fencing token
+  就并发启动新 writer。
+- drain 原子性：`supervisor.register` 新增 required `acceptingAssignments`，manager 在创建 generation 的
+  同一个 transaction 中持久化它。Supervisor 在每次注册前继承 operator 当前设置，避免原本“注册默认
+  true、第一次 heartbeat 再改 false”的短暂误接单窗口。
+- generation-aware backend：`RemoteSupervisorExecutionBackend` 可接收 coordinator provider，每条
+  execute/cancel 开始时解析一次当前 connection guard，并在该 exchange 内固定使用。Gateway 暴露
+  `createRemoteExecutionBackend()` 组装该边界；旧 generation 的 coordinator 明确失败，而断线前创建的
+  backend 可以为断线后的新 command 使用新 generation。正在执行的 committed command 仍按 ambiguous
+  failure 处理，绝不迁移或 replay。
+- 可执行证据：4 个 reconnect 单元测试覆盖 assignment 排空门、drain state 跨 generation、鉴权失败不
+  重试、stop 中断 backoff 与 teardown timeout fail-closed。真实 loopback WebSocket + PostgreSQL 测试会
+  强制 terminate socket，验证旧 connection 变成 `superseded/reconnected`、新 connection ID 生效、旧
+  coordinator 被拒绝，并由断线前创建的 dynamic backend 完成一条含 durable events 的两阶段 command。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、201 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 vulnerabilities。相同 control-plane suite 又在一次性、
+  仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 上通过 51 passed/1 Docker-only skipped；结束后 database
+  container 与 managed sandbox containers 均为 0。
+- 当前边界：自动重连只恢复未来 command capacity，不恢复 in-flight Pi/tool execution。Router 仍属于
+  持有 socket 的单个 control-plane process；另一个 replica 尚不能把 outbox claim 转发给该 owner。
+- 下一步：实现 cross-instance command ownership/forwarding。原因是 Supervisor 自身已经能跨网络抖动
+  恢复，剩余的高可用缺口是“dispatcher 和 socket 位于不同 control-plane replica 时如何安全会合”。

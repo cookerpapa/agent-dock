@@ -82,6 +82,7 @@ function registration() {
       },
       supportedProtocolVersions: [1],
       capabilities: ["pi.rpc", "event.replay", "extension_ui.confirm"],
+      acceptingAssignments: true,
       maxConcurrentSessions: 4,
     },
   } as const;
@@ -128,6 +129,17 @@ describe("supervisor/control-plane wire protocol", () => {
         payload: { ...message.payload, supportedProtocolVersions: [2] },
       }),
     ).toThrow("must include its envelope protocolVersion");
+  });
+
+  it("requires registration to declare its initial assignment drain state", () => {
+    const message = registration();
+    const { acceptingAssignments: _acceptingAssignments, ...payload } = message.payload;
+    expect(() =>
+      parseSupervisorToControlMessage({
+        ...message,
+        payload,
+      }),
+    ).toThrow(AgentDockWireProtocolError);
   });
 
   it("parses each control-plane command and rejects unreviewed fields", () => {

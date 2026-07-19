@@ -12,6 +12,7 @@ import {
 import {
   LocalSandboxSupervisor,
   PiRpcTurnCancelledError,
+  ReconnectingSupervisorWebSocketClient,
   SupervisorWebSocketClient,
   type SupervisorTurnRunner,
 } from "@agent-dock/sandbox-supervisor";
@@ -306,6 +307,166 @@ afterAll(async () => {
 });
 
 describe.sequential("remote two-phase supervisor execution", () => {
+  it("reconnects with a new generation and resolves backend authority per command", async () => {
+    const seeded = await seedTurn();
+    const eventMessages: EventPublishMessage[] = [];
+    const router = new SupervisorCommandRouter({
+      eventIngestor: new DurableEventStore({ database, tenantId: seeded.tenantId }),
+      onEvent(message) {
+        eventMessages.push(message);
+      },
+      commandAckTimeoutMs: 1_000,
+      commandResultTimeoutMs: 5_000,
+      maxPendingCommands: 8,
+    });
+    const manager = new SupervisorConnectionManager({
+      database,
+      controlPlaneInstanceId: CONTROL_PLANE_ID,
+      ownerBoundary: {
+        async stopAndConfirm() {
+          return undefined;
+        },
+      },
+      assignmentRetirerFactory: (identity) =>
+        new AssignmentReconciler({
+          database,
+          sandboxId: identity.sandboxId,
+          inventory: emptyInventory(),
+        }),
+      heartbeatIntervalMs: 100,
+      heartbeatTimeoutMs: 2_000,
+      leaseDurationMs: 5_000,
+    });
+    const gateway = new SupervisorWebSocketGateway({
+      manager,
+      commandRouter: router,
+      authorizer: new HashedBearerSupervisorAuthorizer({ token: TOKEN, identity: seeded.identity }),
+      registrationTimeoutMs: 1_000,
+    });
+    const server = Fastify({ logger: false });
+    gateway.install(server);
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    let runCalls = 0;
+    const supervisor = new LocalSandboxSupervisor({
+      maxConcurrentSessions: 1,
+      runner: {
+        async run(command, publishEvent) {
+          runCalls += 1;
+          const factory = createAgentDockEventFactory(
+            {
+              sessionId: command.payload.sessionId,
+              turnId: command.payload.turnId,
+              agentId: command.payload.agentId,
+            },
+            { initialSequence: command.payload.nextEventSeq - 1 },
+          );
+          await publishEvent(
+            eventMessage(
+              command,
+              factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
+            ),
+          );
+          await publishEvent(
+            eventMessage(
+              command,
+              factory.next({ type: "turn.completed", payload: { stopReason: "reconnected" } }),
+            ),
+          );
+          return { stopReason: "reconnected" };
+        },
+      },
+    });
+    const client = new ReconnectingSupervisorWebSocketClient({
+      url: `${address.replace(/^http/, "ws")}/internal/v1/supervisor`,
+      authorizationHeader: `Bearer ${TOKEN}`,
+      registration: { ...seeded.identity, maxConcurrentSessions: 1 },
+      runtime: supervisor,
+      connectTimeoutMs: 1_000,
+      closeTimeoutMs: 200,
+      eventAckTimeoutMs: 2_000,
+      initialReconnectDelayMs: 10,
+      maxReconnectDelayMs: 50,
+      stableConnectionMs: 5_000,
+      assignmentTeardownTimeoutMs: 1_000,
+      random: () => 0,
+    });
+    client.setAcceptingAssignments(false);
+
+    try {
+      const firstRegistration = await client.start();
+      const firstConnectionId = firstRegistration.payload.connectionId;
+      expect(
+        await database
+          .selectFrom("supervisor_connections")
+          .select("accepting_assignments")
+          .where("connection_id", "=", firstConnectionId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ accepting_assignments: false });
+
+      client.setAcceptingAssignments(true);
+      await waitFor(async () => {
+        const connection = await database
+          .selectFrom("supervisor_connections")
+          .select("accepting_assignments")
+          .where("connection_id", "=", firstConnectionId)
+          .executeTakeFirst();
+        return connection?.accepting_assignments === true;
+      });
+
+      const staleLeaseCoordinator = await gateway.currentLeaseCoordinator(
+        seeded.identity.sandboxId,
+      );
+      const backend = gateway.createRemoteExecutionBackend(seeded.identity.sandboxId);
+      for (const socket of server.websocketServer.clients) socket.terminate();
+      await waitFor(() => client.successfulConnections === 2 && client.connectionId !== undefined);
+      const secondConnectionId = client.connectionId!;
+      expect(secondConnectionId).not.toBe(firstConnectionId);
+      expect(
+        await database
+          .selectFrom("supervisor_connections")
+          .select(["connection_id", "state", "close_reason"])
+          .where("sandbox_id", "=", seeded.identity.sandboxId)
+          .execute(),
+      ).toEqual(
+        expect.arrayContaining([
+          {
+            connection_id: firstConnectionId,
+            state: "superseded",
+            close_reason: "reconnected",
+          },
+          { connection_id: secondConnectionId, state: "active", close_reason: null },
+        ]),
+      );
+      await expect(staleLeaseCoordinator.acquire(executionRequest(seeded))).rejects.toMatchObject({
+        code: "stale_connection",
+      });
+
+      const dispatcher = new OutboxDispatcher({
+        database,
+        tenantId: seeded.tenantId,
+        backend,
+        leaseManager: staleLeaseCoordinator,
+      });
+      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+        status: "completed",
+        commandId: seeded.accepted.commandId,
+      });
+      expect(runCalls).toBe(1);
+      expect(eventMessages.map((message) => message.payload.event.type)).toEqual([
+        "turn.started",
+        "turn.completed",
+      ]);
+      expect(await lifecycle(seeded)).toMatchObject({
+        commandState: "completed",
+        turnState: "completed",
+        sessionState: "idle",
+      });
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
   it("persists the command ACK before run and durably ACKs events over one socket", async () => {
     const seeded = await seedTurn();
     let runCalls = 0;

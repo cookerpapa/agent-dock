@@ -166,6 +166,22 @@ export class LocalSandboxSupervisor {
     return this.#currentBySession.size;
   }
 
+  async waitUntilAssignmentsSettled(): Promise<void> {
+    while (this.#currentBySession.size !== 0) {
+      const active = [...this.#currentBySession.values()];
+      const pending = active.flatMap((assignment) =>
+        assignment.runPromise === undefined ? [] : [assignment.runPromise],
+      );
+      if (pending.length !== active.length) {
+        throw new LocalSandboxSupervisorError(
+          "assignment_not_started",
+          "Prepared assignments must be released before waiting for settlement",
+        );
+      }
+      await Promise.allSettled(pending);
+    }
+  }
+
   revokeAllAssignments(): RevokedSupervisorAssignments {
     let releasedPreparations = 0;
     let releasedCancellations = 0;

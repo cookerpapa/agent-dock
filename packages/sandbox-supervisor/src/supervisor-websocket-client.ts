@@ -83,6 +83,7 @@ export type SupervisorWebSocketClientClose = {
   initiatedByClient: boolean;
   code: number;
   reason: string;
+  retryable: boolean;
   failureCode?: string;
 };
 
@@ -180,6 +181,17 @@ function textFrame(data: RawData): string {
   return data.toString("utf8");
 }
 
+function retryableWebSocketClose(code: number): boolean {
+  return (
+    code === 1_001 ||
+    code === 1_006 ||
+    code === 1_011 ||
+    code === 1_012 ||
+    code === 1_013 ||
+    code === 4_002
+  );
+}
+
 function sameCommandIdentity(
   command: ExecuteTurnCommandMessage | CancelTurnCommandMessage,
   value: {
@@ -261,6 +273,7 @@ export class SupervisorWebSocketClient {
   #acceptingAssignments = true;
   #initiatedClose = false;
   #failureCode: string | undefined;
+  #failureRetryable: boolean | undefined;
   #closedSettled = false;
   #runtimeRevoked = false;
 
@@ -389,6 +402,23 @@ export class SupervisorWebSocketClient {
     socket.once("error", () => {
       this.#fail("websocket_transport_failed", "Supervisor WebSocket transport failed", true);
     });
+    socket.once("unexpected-response", (_request, response) => {
+      const statusCode = response.statusCode ?? 0;
+      response.resume();
+      if (statusCode === 401 || statusCode === 403) {
+        this.#fail(
+          "supervisor_authentication_rejected",
+          "Supervisor WebSocket authentication was rejected",
+          false,
+        );
+        return;
+      }
+      this.#fail(
+        "websocket_handshake_rejected",
+        "Supervisor WebSocket handshake was rejected",
+        statusCode === 429 || statusCode >= 500,
+      );
+    });
     socket.once("close", (code, reason) => {
       this.#finishClose(code, reason.toString("utf8"));
     });
@@ -400,11 +430,25 @@ export class SupervisorWebSocketClient {
       this.#initiatedClose = true;
       this.#revokeRuntime("Supervisor client stopped");
       this.#state = "closed";
-      this.#settleClosed({ initiatedByClient: true, code: 1_000, reason: "not started" });
+      this.#settleClosed({
+        initiatedByClient: true,
+        code: 1_000,
+        reason: "not started",
+        retryable: false,
+      });
       return this.#closedPromise;
     }
     if (this.#state === "closed" || this.#state === "failing") return this.#closedPromise;
     this.#initiatedClose = true;
+    this.#startReject?.(
+      new SupervisorWebSocketClientError(
+        "supervisor_client_stopped",
+        "Supervisor WebSocket client was stopped",
+        false,
+      ),
+    );
+    this.#startResolve = undefined;
+    this.#startReject = undefined;
     this.#state = "stopping";
     this.#clearTimers();
     this.#revokeRuntime("Supervisor client stopped");
@@ -440,6 +484,7 @@ export class SupervisorWebSocketClient {
         },
         supportedProtocolVersions: this.#registration.supportedProtocolVersions,
         capabilities: this.#registration.capabilities,
+        acceptingAssignments: this.#acceptingAssignments,
         maxConcurrentSessions: this.#registration.maxConcurrentSessions,
       },
     });
@@ -960,6 +1005,7 @@ export class SupervisorWebSocketClient {
   #fail(code: string, safeMessage: string, retryable: boolean): void {
     if (this.#state === "closed" || this.#state === "failing" || this.#state === "stopping") return;
     this.#failureCode = code;
+    this.#failureRetryable = retryable;
     const error = new SupervisorWebSocketClientError(code, safeMessage, retryable);
     this.#startReject?.(error);
     this.#startResolve = undefined;
@@ -979,12 +1025,14 @@ export class SupervisorWebSocketClient {
 
   #finishClose(code: number, reason: string): void {
     if (this.#state === "closed") return;
+    const retryable =
+      !this.#initiatedClose && (this.#failureRetryable ?? retryableWebSocketClose(code));
     if (this.#state === "connecting" && this.#startReject !== undefined) {
       this.#startReject(
         new SupervisorWebSocketClientError(
           this.#failureCode ?? "registration_connection_closed",
           "Supervisor connection closed before registration",
-          true,
+          retryable,
         ),
       );
       this.#startResolve = undefined;
@@ -997,6 +1045,7 @@ export class SupervisorWebSocketClient {
       initiatedByClient: this.#initiatedClose,
       code,
       reason: reason.slice(0, 123),
+      retryable,
       ...(this.#failureCode === undefined ? {} : { failureCode: this.#failureCode }),
     });
   }

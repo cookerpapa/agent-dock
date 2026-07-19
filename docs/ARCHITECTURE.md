@@ -159,8 +159,8 @@ process-local. The local supervisor can use a private, crash-safe file spool
 that syncs every event before transport and replays an unacknowledged suffix
 from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, production supervisor authentication/owner/reconnect adapters,
-cross-instance command ownership,
+gateway, production supervisor authentication/owner adapters, cross-instance
+command ownership,
 acknowledged-cancellation crash recovery, cross-replica event notification, and
 Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
@@ -363,9 +363,10 @@ host reconciler confirms its labelled runtime is absent and records the
 acknowledged turn as ambiguous `assignment_lost`. The durable health manager now
 automates timeout fencing, owner-stop confirmation, and retryable retirement;
 registration/heartbeat and two-phase command/event delivery can cross a real
-outbound WebSocket, while automatic reconnect/backend reconstruction,
-cross-instance command ownership, and the concrete production owner-process
-adapter are not yet wired.
+outbound WebSocket. The client now performs bounded same-boot reconnect only
+after revoked assignments settle, and remote backends resolve the guarded
+connection generation per command. Cross-instance command ownership and the
+concrete production owner-process adapter are not yet wired.
 
 ## 5. Delivery and recovery semantics
 
@@ -379,8 +380,10 @@ Supervisor-to-control messages are registration, command ACK/result, event
 publication, and heartbeat. Control-to-supervisor messages are registration
 acceptance, turn execution/cancellation, command commit/release, approval
 resolution, cumulative event ACK, and heartbeat ACK with lease renewals.
-Registration advertises the exact Pi/supervisor versions and capabilities.
-Post-registration mutations carry a lease ID and fencing token.
+Registration advertises the exact Pi/supervisor versions and capabilities. It
+also declares the initial `acceptingAssignments` drain state so registration
+cannot briefly reopen a drained supervisor. Post-registration mutations carry
+a lease ID and fencing token.
 The execute command additionally carries the turn's immutable provider, model,
 thinking level, and opaque credential-binding snapshot; it never carries a
 credential value or arbitrary provider endpoint.
@@ -402,6 +405,17 @@ sandbox client applies those ACKs through one server-negotiated heartbeat loop
 covering all active assignments. A same-process reconnect proactively closes
 the old socket; a cross-replica reconnect is rejected through PostgreSQL on the
 old socket's next frame. Close alone does not prove process death.
+
+The process-lifetime reconnect wrapper creates a new single-generation client
+after retryable network, heartbeat, overload, or server failures. It uses
+bounded exponential backoff with jitter and does not retry authentication,
+protocol, normal-close, or superseded-identity outcomes. Before another socket
+opens, the local supervisor must confirm that all assignments revoked by the
+old lease channel have settled; timeout is terminal and requires owner
+reconciliation. Operator drain state is applied before every registration.
+Remote execution resolves a current connection-guarded lease coordinator once
+per new command and retains it for that exchange. A reconnect restores future
+command capacity, never an ambiguous committed tool execution. See ADR-0018.
 
 When `command.two_phase.v1` is advertised, the connection also multiplexes
 execute/cancel preparations, command ACK/commit/release/result, and event

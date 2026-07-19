@@ -76,6 +76,7 @@ function registration(
     messageId?: string;
     piVersion?: string;
     capabilities?: readonly string[];
+    acceptingAssignments?: boolean;
     maxConcurrentSessions?: number;
   } = {},
 ) {
@@ -95,6 +96,7 @@ function registration(
       },
       supportedProtocolVersions: [1],
       capabilities: [...(options.capabilities ?? ["event.replay", "pi.rpc"])],
+      acceptingAssignments: options.acceptingAssignments ?? true,
       maxConcurrentSessions: options.maxConcurrentSessions ?? 1,
     },
   } as const;
@@ -326,7 +328,7 @@ describe.sequential("durable supervisor registration and health management", () 
     const connectionManager = manager({ clock: () => new Date(now) });
     const transportAuthority = authority();
     await provisionSandbox(transportAuthority);
-    const message = registration(transportAuthority);
+    const message = registration(transportAuthority, { acceptingAssignments: false });
 
     const wrongAuthority = { ...transportAuthority, sandboxId: uuid() };
     await expect(connectionManager.register(message, wrongAuthority)).rejects.toMatchObject({
@@ -370,10 +372,16 @@ describe.sequential("durable supervisor registration and health management", () 
     });
     const persisted = await database
       .selectFrom("supervisor_connections")
-      .select(["state", "transport_id"])
+      .select(["state", "transport_id", "accepting_assignments"])
       .where("sandbox_id", "=", transportAuthority.sandboxId)
       .execute();
-    expect(persisted).toEqual([{ state: "active", transport_id: transportAuthority.transportId }]);
+    expect(persisted).toEqual([
+      {
+        state: "active",
+        transport_id: transportAuthority.transportId,
+        accepting_assignments: false,
+      },
+    ]);
   });
 
   it("supersedes a same-boot reconnect and rejects the old connection generation", async () => {

@@ -135,6 +135,7 @@ export const SupervisorRegisterMessageSchema = Type.Object(
           maxItems: 256,
           uniqueItems: true,
         }),
+        acceptingAssignments: Type.Boolean(),
         maxConcurrentSessions: PositiveSafeIntegerSchema,
       },
       { additionalProperties: false },

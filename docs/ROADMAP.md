@@ -93,8 +93,12 @@ ordered outbound WebSocket gateway/client, including cross-replica stale-socket
 rejection. Capability-gated remote execute/cancel now preserves the local
 prepare-before-run invariant through command ACK, durable lifecycle commit,
 explicit commit/release, bounded results, and durable event ACK backpressure.
-Production reconnect/backend reconstruction and cross-instance command
-ownership remain the next transport slice.
+The sandbox client now reconnects transient same-boot failures with bounded
+backoff, waits for revoked assignments to settle before opening a new
+generation, preserves its drain state in registration, and resolves guarded
+remote lease authority per command. It deliberately does not resume an
+ambiguous committed tool execution. Cross-instance command ownership remains
+the next transport slice.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

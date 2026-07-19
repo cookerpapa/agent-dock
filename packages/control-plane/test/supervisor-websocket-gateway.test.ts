@@ -255,10 +255,13 @@ describe.sequential("authenticated supervisor WebSocket transport", () => {
     const unauthorized = client(gateway.url, wrongToken, supervisorIdentity);
     try {
       await expect(unauthorized.start()).rejects.toMatchObject({
-        code: "websocket_transport_failed",
+        code: "supervisor_authentication_rejected",
       });
       const result = await unauthorized.waitUntilClosed();
-      expect(result.failureCode).toBe("websocket_transport_failed");
+      expect(result).toMatchObject({
+        failureCode: "supervisor_authentication_rejected",
+        retryable: false,
+      });
       expect(JSON.stringify(result)).not.toContain(wrongToken);
       expect(gateway.gateway.activeConnectionCount).toBe(0);
       expect(

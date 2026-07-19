@@ -543,7 +543,7 @@ export class SupervisorConnectionManager {
             selected_protocol_version: 1,
             heartbeat_interval_ms: this.#heartbeatIntervalMs,
             heartbeat_timeout_ms: this.#heartbeatTimeoutMs,
-            accepting_assignments: true,
+            accepting_assignments: message.payload.acceptingAssignments,
             registered_at: now,
             last_heartbeat_at: now,
             expires_at: expiresAt,

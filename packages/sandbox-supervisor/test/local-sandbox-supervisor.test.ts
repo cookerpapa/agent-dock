@@ -583,4 +583,47 @@ describe("LocalSandboxSupervisor", () => {
     });
     expect(supervisor.activeSessionCount).toBe(0);
   });
+
+  it("does not report assignment settlement until revoked runner teardown finishes", async () => {
+    let finishTeardown: (() => void) | undefined;
+    const teardownGate = new Promise<void>((resolvePromise) => {
+      finishTeardown = resolvePromise;
+    });
+    let abortObserved = false;
+    const supervisor = new LocalSandboxSupervisor({
+      runner: {
+        async run(_command, _publishEvent, signal) {
+          if (!signal.aborted) {
+            await new Promise<void>((resolvePromise) =>
+              signal.addEventListener("abort", () => resolvePromise(), { once: true }),
+            );
+          }
+          abortObserved = true;
+          await teardownGate;
+          throw new PiRpcTurnCancelledError("lease_revoked", false);
+        },
+      },
+    });
+    const execution = supervisor.prepare(command(), rejectUnexpectedEvent).run();
+    void execution.catch(() => undefined);
+    let settled = false;
+    const settlement = supervisor.waitUntilAssignmentsSettled().then(() => {
+      settled = true;
+    });
+
+    expect(supervisor.revokeAllAssignments()).toEqual({
+      releasedPreparations: 0,
+      releasedCancellations: 0,
+      revokedExecutions: 1,
+    });
+    await Promise.resolve();
+    expect(abortObserved).toBe(true);
+    expect(settled).toBe(false);
+
+    finishTeardown?.();
+    await settlement;
+    await expect(execution).rejects.toMatchObject({ reason: "lease_revoked" });
+    expect(settled).toBe(true);
+    expect(supervisor.activeSessionCount).toBe(0);
+  });
 });

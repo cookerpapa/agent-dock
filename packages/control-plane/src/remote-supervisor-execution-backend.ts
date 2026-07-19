@@ -35,14 +35,27 @@ import {
 
 type SupervisorCommand = ExecuteTurnCommandMessage | CancelTurnCommandMessage;
 
-export type RemoteSupervisorExecutionBackendOptions = {
+type RemoteSupervisorExecutionBackendCommonOptions = {
   sandboxId: string;
   transport: RemoteSupervisorCommandTransport;
-  leaseCoordinator: SessionLeaseCoordinator;
   agentId?: string;
   clock?: () => Date;
   idGenerator?: () => string;
 };
+
+export type RemoteSupervisorExecutionBackendOptions =
+  RemoteSupervisorExecutionBackendCommonOptions &
+    (
+      | {
+          leaseCoordinator: SessionLeaseCoordinator;
+          leaseCoordinatorProvider?: never;
+        }
+      | {
+          leaseCoordinator?: never;
+          leaseCoordinatorProvider: () =>
+            SessionLeaseCoordinator | Promise<SessionLeaseCoordinator>;
+        }
+    );
 
 function nonEmpty(value: string, name: string): string {
   if (value.trim().length === 0) throw new TypeError(`${name} must not be empty`);
@@ -196,7 +209,8 @@ export class RemoteSupervisorExecutionBackend
 {
   readonly #sandboxId: string;
   readonly #transport: RemoteSupervisorCommandTransport;
-  readonly #leaseCoordinator: SessionLeaseCoordinator;
+  readonly #leaseCoordinatorProvider: () =>
+    SessionLeaseCoordinator | Promise<SessionLeaseCoordinator>;
   readonly #agentId: string;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
@@ -204,7 +218,16 @@ export class RemoteSupervisorExecutionBackend
   constructor(options: RemoteSupervisorExecutionBackendOptions) {
     this.#sandboxId = nonEmpty(options.sandboxId, "sandboxId");
     this.#transport = options.transport;
-    this.#leaseCoordinator = options.leaseCoordinator;
+    if (
+      (options.leaseCoordinator === undefined) ===
+      (options.leaseCoordinatorProvider === undefined)
+    ) {
+      throw new TypeError(
+        "exactly one of leaseCoordinator or leaseCoordinatorProvider must be configured",
+      );
+    }
+    this.#leaseCoordinatorProvider =
+      options.leaseCoordinatorProvider ?? (() => options.leaseCoordinator);
     this.#agentId = nonEmpty(options.agentId ?? "root", "agentId");
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
@@ -214,12 +237,14 @@ export class RemoteSupervisorExecutionBackend
     request: TurnExecutionRequest,
     lifecycle: TurnExecutionLifecycle,
   ): Promise<TurnExecutionResult> {
+    let leaseCoordinator: SessionLeaseCoordinator | undefined;
     let lease: { leaseId: string; fencingToken: number } | undefined;
     let command: ExecuteTurnCommandMessage | undefined;
     let acknowledgement: CommandAckMessage | undefined;
     let durableStarted = false;
     try {
-      lease = await this.#leaseCoordinator.acquire(request);
+      leaseCoordinator = await this.#leaseCoordinatorProvider();
+      lease = await leaseCoordinator.acquire(request);
       command = this.#executeCommand(request, lease);
       acknowledgement = acceptedAcknowledgement(
         command,
@@ -276,8 +301,8 @@ export class RemoteSupervisorExecutionBackend
               .catch(() => undefined);
           }
         }
-        if (lease !== undefined) {
-          await this.#leaseCoordinator.releaseAcquired(request, lease).catch(() => undefined);
+        if (lease !== undefined && leaseCoordinator !== undefined) {
+          await leaseCoordinator.releaseAcquired(request, lease).catch(() => undefined);
         }
       }
       throw normalizeExecutionError(error, durableStarted);
@@ -288,11 +313,13 @@ export class RemoteSupervisorExecutionBackend
     request: TurnCancellationRequest,
     lifecycle: TurnCancellationLifecycle,
   ): Promise<TurnCancellationResult> {
+    let leaseCoordinator: SessionLeaseCoordinator | undefined;
     let command: CancelTurnCommandMessage | undefined;
     let acknowledgement: CommandAckMessage | undefined;
     let durableStarted = false;
     try {
-      const lease = await this.#leaseCoordinator.currentAssignment(request.target);
+      leaseCoordinator = await this.#leaseCoordinatorProvider();
+      const lease = await leaseCoordinator.currentAssignment(request.target);
       command = this.#cancellationCommand(request, lease);
       acknowledgement = acceptedAcknowledgement(
         command,
@@ -349,8 +376,13 @@ export class RemoteSupervisorExecutionBackend
             .catch(() => undefined);
         }
       }
-      if (durableStarted && error instanceof SupervisorCommandTransportError && error.ambiguous) {
-        await this.#leaseCoordinator.quarantineSandbox().catch(() => undefined);
+      if (
+        durableStarted &&
+        leaseCoordinator !== undefined &&
+        error instanceof SupervisorCommandTransportError &&
+        error.ambiguous
+      ) {
+        await leaseCoordinator.quarantineSandbox().catch(() => undefined);
       }
       throw normalizeCancellationError(error, durableStarted);
     }

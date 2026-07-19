@@ -16,6 +16,7 @@ import {
 } from "./supervisor-connection-manager.ts";
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
 import type { SessionLeaseCoordinator } from "./session-lease-coordinator.ts";
+import { RemoteSupervisorExecutionBackend } from "./remote-supervisor-execution-backend.ts";
 
 export const SUPERVISOR_WEBSOCKET_PATH = "/internal/v1/supervisor";
 export const SUPERVISOR_SOCKET_CLOSE = {
@@ -232,6 +233,21 @@ export class SupervisorWebSocketGateway {
       );
     }
     return this.#manager.leaseCoordinator(context.registeredConnectionId, context.authority);
+  }
+
+  createRemoteExecutionBackend(sandboxId: string): RemoteSupervisorExecutionBackend {
+    if (this.#commandRouter === undefined) {
+      throw new SupervisorConnectionManagerError(
+        "supervisor_command_router_unavailable",
+        "Supervisor command router is unavailable",
+        false,
+      );
+    }
+    return new RemoteSupervisorExecutionBackend({
+      sandboxId,
+      transport: this.#commandRouter,
+      leaseCoordinatorProvider: () => this.currentLeaseCoordinator(sandboxId),
+    });
   }
 
   install(fastify: FastifyInstance): void {

@@ -105,6 +105,7 @@ only after a measured requirement appears.
 - [ADR-0015: authenticated supervisor registration and durable health](docs/adr/0015-supervisor-registration-and-health-management.md)
 - [ADR-0016: authenticated outbound supervisor WebSocket transport](docs/adr/0016-supervisor-websocket-transport.md)
 - [ADR-0017: two-phase remote command delivery](docs/adr/0017-two-phase-remote-command-delivery.md)
+- [ADR-0018: supervisor reconnect and generation recovery](docs/adr/0018-supervisor-reconnect-and-generation-recovery.md)
 
 ## Current executable spikes
 
@@ -265,8 +266,10 @@ The full database-to-container path and Web demo use the embedded loopback fake
 model, so they consume no subscription token. The demo deliberately retains the
 in-process integration bridge, while the reusable runtime now also carries
 registration, heartbeat, execute/cancel, command ACK/commit/result, and durable
-event ACK over a real optional outbound-WebSocket gateway/client. The production
-HTTP entry point does not start either dispatchers or a fake supervisor owner.
+event ACK over a real optional outbound-WebSocket gateway/client. The client
+also performs bounded same-boot reconnect after transient transport loss. The
+production HTTP entry point does not start either dispatchers or a fake
+supervisor owner.
 The current image embeds one trusted
 sample fixture. At each successful settled boundary, Pi JSONL and a bounded,
 hashed regular-file workspace manifest cross the private worker channel and are
@@ -277,10 +280,10 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, production supervisor authentication/owner/reconnect wiring, a
-cross-instance command broker, and cross-replica live fan-out remain separate
-work. Queued-turn withdrawal, acknowledged-cancellation crash recovery, and
-Windows Job Object containment are also deferred.
+gateway, production supervisor authentication/owner wiring, a cross-instance
+command broker, and cross-replica live fan-out remain separate work. Queued-turn
+withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
+containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -328,6 +331,16 @@ active assignments, and PostgreSQL rejects an old socket even when reconnecting
 through another control-plane listener. Socket close still waits for durable
 health expiry.
 
+The process-lifetime reconnect client creates a fresh single-generation socket
+after retryable failures, using bounded exponential backoff with jitter. It
+first revokes and waits for every old assignment to settle, so reconnect cannot
+overlap two Pi/tool processes for one session. Authentication, protocol, and
+superseded-identity failures are terminal. The registration transaction now
+persists the current `acceptingAssignments` drain state, and the remote backend
+resolves its guarded lease coordinator at the start of each new command. A
+committed command interrupted by disconnect is still failed as ambiguous rather
+than replayed on the new connection.
+
 Capability `command.two_phase.v1` additionally enables multiplexed remote
 execute/cancel delivery. The Supervisor prepares without starting Pi and returns
 an exact ACK; only after the dispatcher persists `ACKNOWLEDGED/RUNNING` does the
@@ -356,6 +369,6 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses production reconnect/backend reconstruction,
-cross-instance command ownership, cross-replica live notification, and the
-MinIO/S3 object-store adapter rather than keeping a process per conversation.
+Phase 2 next addresses cross-instance command ownership, cross-replica live
+notification, and the MinIO/S3 object-store adapter rather than keeping a
+process per conversation.
