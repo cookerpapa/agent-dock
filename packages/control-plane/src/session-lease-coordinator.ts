@@ -21,6 +21,13 @@ export type SessionLeaseCoordinatorOptions = {
   idGenerator?: () => string;
   leaseDurationMs?: number;
   heartbeatConnectionId?: string;
+  connectionGuard?: SupervisorConnectionGuard;
+};
+
+export type SupervisorConnectionGuard = {
+  controlPlaneInstanceId: string;
+  transportId: string;
+  heartbeatTimeoutMs: number;
 };
 
 export type SupervisorHeartbeatIdentity = {
@@ -95,6 +102,7 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
   readonly #idGenerator: () => string;
   readonly #leaseDurationMs: number;
   readonly #heartbeatConnectionId: string;
+  readonly #connectionGuard: SupervisorConnectionGuard | undefined;
 
   constructor(options: SessionLeaseCoordinatorOptions) {
     this.#database = options.database;
@@ -109,6 +117,23 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
       options.heartbeatConnectionId ?? globalThis.crypto.randomUUID(),
       "heartbeatConnectionId",
     );
+    this.#connectionGuard =
+      options.connectionGuard === undefined
+        ? undefined
+        : {
+            controlPlaneInstanceId: requireUuid(
+              options.connectionGuard.controlPlaneInstanceId,
+              "connectionGuard.controlPlaneInstanceId",
+            ),
+            transportId: requireUuid(
+              options.connectionGuard.transportId,
+              "connectionGuard.transportId",
+            ),
+            heartbeatTimeoutMs: positiveInteger(
+              options.connectionGuard.heartbeatTimeoutMs,
+              "connectionGuard.heartbeatTimeoutMs",
+            ),
+          };
   }
 
   get heartbeatIntervalMs(): number {
@@ -172,6 +197,27 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           "Supervisor heartbeat identity is stale",
           false,
         );
+      }
+      const connection = await this.#currentRegisteredConnection(
+        transaction,
+        {
+          supervisorId: heartbeat.payload.supervisorId,
+          bootId: heartbeat.payload.bootId,
+        },
+        now,
+        false,
+      );
+      if (connection !== undefined) {
+        await transaction
+          .updateTable("supervisor_connections")
+          .set({
+            accepting_assignments: heartbeat.payload.acceptingAssignments,
+            last_heartbeat_at: now,
+            expires_at: new Date(now.valueOf() + this.#connectionGuard!.heartbeatTimeoutMs),
+          })
+          .where("connection_id", "=", this.#heartbeatConnectionId)
+          .where("state", "=", "active")
+          .executeTakeFirstOrThrow();
       }
 
       const renewals: SupervisorHeartbeatAckMessage["payload"]["leaseRenewals"] = [];
@@ -359,7 +405,14 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
 
       const sandbox = await transaction
         .selectFrom("sandboxes")
-        .select(["id", "state", "active_sessions", "max_concurrent_sessions"])
+        .select([
+          "id",
+          "supervisor_id",
+          "boot_id",
+          "state",
+          "active_sessions",
+          "max_concurrent_sessions",
+        ])
         .where("id", "=", this.#sandboxId)
         .forUpdate()
         .executeTakeFirst();
@@ -377,6 +430,12 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           true,
         );
       }
+      await this.#currentRegisteredConnection(
+        transaction,
+        { supervisorId: sandbox.supervisor_id, bootId: sandbox.boot_id },
+        now,
+        true,
+      );
 
       const previousFence = safeInteger(session.last_fencing_token, "session fencing token");
       const fencingToken = previousFence + 1;
@@ -603,5 +662,53 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
       .where("active_sessions", "=", sandbox.active_sessions)
       .executeTakeFirst();
     expectOne(sandboxUpdate.numUpdatedRows, "releasing sandbox capacity");
+  }
+
+  async #currentRegisteredConnection(
+    transaction: Transaction<Database>,
+    identity: { supervisorId: string; bootId: string },
+    now: Date,
+    requireAcceptingAssignments: boolean,
+  ): Promise<{ acceptingAssignments: boolean } | undefined> {
+    if (this.#connectionGuard === undefined) return undefined;
+    const connection = await transaction
+      .selectFrom("supervisor_connections")
+      .select([
+        "sandbox_id",
+        "supervisor_id",
+        "boot_id",
+        "control_plane_instance_id",
+        "transport_id",
+        "state",
+        "accepting_assignments",
+        "expires_at",
+      ])
+      .where("connection_id", "=", this.#heartbeatConnectionId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (
+      connection === undefined ||
+      connection.sandbox_id !== this.#sandboxId ||
+      connection.supervisor_id !== identity.supervisorId ||
+      connection.boot_id !== identity.bootId ||
+      connection.control_plane_instance_id !== this.#connectionGuard.controlPlaneInstanceId ||
+      connection.transport_id !== this.#connectionGuard.transportId ||
+      connection.state !== "active" ||
+      new Date(connection.expires_at).valueOf() <= now.valueOf()
+    ) {
+      throw new SessionLeaseCoordinatorError(
+        "stale_connection",
+        "Supervisor connection is stale",
+        false,
+      );
+    }
+    if (requireAcceptingAssignments && !connection.accepting_assignments) {
+      throw new SessionLeaseCoordinatorError(
+        "connection_not_accepting",
+        "Supervisor connection is not accepting assignments",
+        true,
+      );
+    }
+    return { acceptingAssignments: connection.accepting_assignments };
   }
 }

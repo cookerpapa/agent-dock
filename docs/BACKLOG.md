@@ -81,3 +81,6 @@ extension-policy support would overstate the current boundary.
 - [x] Expose mailbox positions and queued follow-up submission in the Web page
 - [ ] Implement an explicit steer API/command with runtime capability negotiation
 - [x] Renew leases during long turns and reconcile expired assignments/orphan containers
+- [x] Persist authenticated supervisor registration, connection generations, and health expiry
+- [x] Require owner-stop proof through a retryable cross-replica sandbox-retirement queue
+- [ ] Wire the manager to an authenticated outbound supervisor WebSocket and production owner adapter

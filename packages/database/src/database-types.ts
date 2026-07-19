@@ -49,6 +49,10 @@ export type ArtifactKind =
   | "patch"
   | "report"
   | "crash_bundle";
+export type SupervisorConnectionState = "active" | "superseded" | "fenced";
+export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout" | "new_boot";
+export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
+export type SandboxRetirementState = "pending" | "claimed" | "blocked" | "completed";
 
 export interface TenantTable {
   id: string;
@@ -189,6 +193,50 @@ export interface SessionLeaseTable {
   renewed_at: GeneratedTimestamp;
 }
 
+export interface SupervisorConnectionTable {
+  connection_id: string;
+  transport_id: string;
+  registration_message_id: string;
+  registered_message_id: string;
+  sandbox_id: string;
+  supervisor_id: string;
+  boot_id: string;
+  control_plane_instance_id: string;
+  state: SupervisorConnectionState;
+  close_reason: SupervisorConnectionCloseReason | null;
+  registration_fingerprint: string;
+  supervisor_version: string;
+  pi_package_name: string;
+  pi_version: string;
+  supported_protocol_versions: number[];
+  capabilities: string[];
+  selected_protocol_version: number;
+  heartbeat_interval_ms: number;
+  heartbeat_timeout_ms: number;
+  accepting_assignments: GeneratedBoolean;
+  registered_at: Timestamp;
+  last_heartbeat_at: Timestamp;
+  expires_at: Timestamp;
+  closed_at: NullableTimestamp;
+}
+
+export interface SandboxRetirementTable {
+  sandbox_id: string;
+  supervisor_id: string;
+  boot_id: string;
+  reason: SandboxRetirementReason;
+  state: SandboxRetirementState;
+  attempts: GeneratedInteger;
+  available_at: GeneratedTimestamp;
+  claim_id: string | null;
+  claim_owner_id: string | null;
+  claim_until: NullableTimestamp;
+  last_error: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+  completed_at: NullableTimestamp;
+}
+
 export interface CommandTable {
   id: string;
   tenant_id: string;
@@ -298,6 +346,8 @@ export interface Database {
   turns: TurnTable;
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
+  supervisor_connections: SupervisorConnectionTable;
+  sandbox_retirements: SandboxRetirementTable;
   session_leases: SessionLeaseTable;
   commands: CommandTable;
   approvals: ApprovalTable;

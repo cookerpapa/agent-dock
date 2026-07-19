@@ -101,6 +101,8 @@ only after a measured requirement appears.
 - [ADR-0011: settled checkpoint commit and cold restore](docs/adr/0011-settled-checkpoint-commit-and-cold-restore.md)
 - [ADR-0012: crash-safe supervisor event spool and restart replay](docs/adr/0012-crash-safe-supervisor-event-spool.md)
 - [ADR-0013: explicit session mailbox order and queued follow-ups](docs/adr/0013-explicit-session-mailbox-order.md)
+- [ADR-0014: lease renewal and assignment reconciliation](docs/adr/0014-lease-renewal-and-assignment-reconciliation.md)
+- [ADR-0015: authenticated supervisor registration and durable health](docs/adr/0015-supervisor-registration-and-health-management.md)
 
 ## Current executable spikes
 
@@ -149,8 +151,8 @@ npm run ci
 ```
 
 It checks Prettier formatting, the production frontend build, TypeScript types,
-159 passing unit/contract tests, the two zero-token Pi spikes, and high-severity
-dependency advisories. The separate
+the complete unit/contract suite, the two zero-token Pi spikes, and
+high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
 The opt-in live subscription probe is deliberately excluded from both commands.
 
@@ -193,9 +195,9 @@ implemented. The local Pi RPC extension compatibility spike passes end to end,
 and the embedded rehydration spike proves that cold logical sessions do not need
 dedicated Pi processes. The domain package now enforces explicit session, turn,
 sandbox, approval, and agent-node transitions plus allowlisted model-profile
-resolution. The database package now supplies an 18-table Kysely/PostgreSQL
-migration with executable ownership, idempotency, ordering, fencing, ACK, and
-usage constraints. A hardened two-service Docker Compose topology, pinned runner
+resolution. The database package now supplies a 20-table Kysely/PostgreSQL
+schema with executable ownership, idempotency, ordering, connection generation,
+fencing, ACK, and usage constraints. A hardened two-service Docker Compose topology, pinned runner
 images, and executable container-configuration contracts are implemented. The
 two images and probes pass on Docker Engine `29.4.2` with Compose `5.1.3`. Runtime
 inspection confirms UID/GID `1000:1000`, a read-only root filesystem, no network,
@@ -270,7 +272,7 @@ same-session follow-up without keeping an idle Pi process alive.
 The development object-store adapter is a private host directory coupled to the
 ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
 repository import, policy-approved extension loading, a request-scoped model
-gateway, production remote-supervisor registration/health wiring, and
+gateway, an authenticated outbound-WebSocket supervisor transport, and
 cross-replica live fan-out remain separate work. Queued-turn withdrawal,
 acknowledged-cancellation crash recovery, and Windows Job Object containment
 are also deferred.
@@ -297,6 +299,19 @@ absence proof. Reconciliation is an explicit post-owner-exit boundary; it does
 not infer that a supervisor process is dead merely because a lease timestamp
 expired.
 
+Supervisor registration and liveness now have a durable, transport-neutral
+control-plane manager. A trusted provisioner must pre-create the exact
+supervisor/boot/sandbox identity; untrusted registration JSON cannot invent it.
+PostgreSQL records one current connection generation, transport ownership,
+pinned runtime versions, capabilities, heartbeat policy, and expiry. Same-boot
+reconnect supersedes the old connection, while a new boot fences and quarantines
+the old sandbox. Timeout only enqueues a claimed/retryable retirement job: a
+trusted host must first confirm that the exact boot can no longer create a
+runtime, after which the existing reconciler may settle ambiguous work and
+release capacity. A crashed retirement claimant can be replaced by another
+control-plane instance. The actual WebSocket listener and concrete
+Docker/Kubernetes owner-process adapter are not yet wired.
+
 ADR-0006 fixes the first product slice as single-user and self-hosted with one
 operator-configured default model profile. The durable model schema remains
 selection-ready, while a frontend model picker and multi-tenant credential
@@ -314,6 +329,6 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses cross-replica live notification, production supervisor
-transport wiring, and the MinIO/S3 object-store adapter rather than keeping a
-process per conversation.
+Phase 2 next addresses cross-replica live notification, the authenticated
+outbound supervisor WebSocket, and the MinIO/S3 object-store adapter rather than
+keeping a process per conversation.

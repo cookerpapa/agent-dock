@@ -64,8 +64,22 @@ export {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SessionLeaseCoordinatorOptions,
+  type SupervisorConnectionGuard,
   type SupervisorHeartbeatIdentity,
 } from "./session-lease-coordinator.ts";
+export {
+  SupervisorConnectionManager,
+  SupervisorConnectionManagerError,
+  SupervisorOwnerBoundaryError,
+  type SupervisorAssignmentRetirer,
+  type SupervisorBootIdentity,
+  type SupervisorConnectionManagerOptions,
+  type SupervisorConnectionSweepResult,
+  type SupervisorMaintenanceCycleResult,
+  type SupervisorOwnerBoundary,
+  type SupervisorRetirementWorkResult,
+  type SupervisorTransportAuthority,
+} from "./supervisor-connection-manager.ts";
 export {
   SessionEventHub,
   SessionEventSubscription,

@@ -101,6 +101,26 @@ labels, failed termination, and inconsistent durable identity fail closed and
 leave the sandbox quarantined. A new supervisor boot never adopts the old
 process or claims exactly-once recovery of tool side effects.
 
+The transport-neutral production registration/health manager now makes that
+caller boundary durable. A trusted provisioner pre-creates a
+supervisor/boot/sandbox identity and supplies an authenticated transport ID;
+registration JSON cannot create or claim a sandbox. PostgreSQL stores one
+active connection generation per sandbox, its control-plane owner, pinned
+runtime versions/capabilities, heartbeat policy, last observation, and expiry.
+Same-boot reconnect atomically supersedes the old generation. An expired
+connection cannot be revived, and a new boot uses a separate sandbox while the
+old one is quarantined.
+
+Timeout and new-boot fencing enqueue a separate durable retirement row rather
+than deleting leases. A bounded claim first invokes a trusted owner boundary
+whose success means the exact boot can no longer create runtimes; only then does
+it call the assignment reconciler. Retryable failures are delayed, invariant or
+identity failures are blocked, and an expired claim can be taken by another
+control-plane replica. Heartbeat connection validation, liveness extension, and
+lease renewal use one transaction, so registration supersession and an old
+heartbeat have a database-defined order. `acceptingAssignments=false` blocks
+new registered acquisitions without terminating current assignments.
+
 The fourth Phase 1 slice makes cancellation an independent durable command
 path. `POST /v1/sessions/:sessionId/turns/:turnId/cancellations` requires its own
 idempotency key and commits a cancellation command plus outbox record before it
@@ -138,7 +158,7 @@ the live SSE hub is process-local. The local supervisor can use a private,
 crash-safe file spool that syncs every event before transport and replays an
 unacknowledged suffix from a fresh process instance.
 Generic repository import, policy-approved extensions, a request-scoped model
-gateway, production remote-supervisor registration/health orchestration,
+gateway, the authenticated outbound-WebSocket supervisor transport,
 acknowledged-cancellation crash recovery, cross-replica event notification, and
 Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
@@ -338,8 +358,10 @@ The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
 in-flight execution is never recreated: after the old owner boot is fenced, the
 host reconciler confirms its labelled runtime is absent and records the
-acknowledged turn as ambiguous `assignment_lost`. Automatic invocation from a
-production remote-supervisor health manager is not yet wired.
+acknowledged turn as ambiguous `assignment_lost`. The durable health manager now
+automates timeout fencing, owner-stop confirmation, and retryable retirement;
+the outbound WebSocket and concrete production owner-process adapter are not yet
+wired.
 
 ## 5. Delivery and recovery semantics
 
@@ -361,6 +383,11 @@ credential value or arbitrary provider endpoint.
 Authentication is established by the transport/sandbox assignment rather than
 by trusting tenant identity supplied by the sandbox. A heartbeat demonstrates
 liveness but cannot make a stale fencing token current.
+
+The implemented registration boundary requires an authenticated authority with
+the exact supervisor, boot, sandbox, and fresh transport IDs. Exact same-channel
+registration retransmission returns the original ACK; a cross-transport replay,
+changed payload, superseded generation, or expired generation is rejected.
 
 ### Event and command semantics
 

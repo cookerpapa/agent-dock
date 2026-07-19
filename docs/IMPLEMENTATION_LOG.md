@@ -802,3 +802,50 @@
 - 下一步：实现 production supervisor registration/health manager，并把“确认旧 boot 已退出 ->
   reconcile/retire -> 注册新 sandbox/boot”接成真实远程启动路径。原因是安全的数据与容器算法已经
   可测，下一层缺口是让独立 supervisor 进程自动驱动它，而不是由集成代码显式调用。
+
+## 2026-07-19 — Supervisor 注册代际与 durable health manager
+
+- 目标：把上一阶段只能由集成代码显式调用的 heartbeat/reconciler 接成可跨 control-plane 重启的
+  状态机，同时严格区分“连接失效”和“旧 Pi/tool/container 已停止”。后者若判断错误，会提前释放
+  lease/capacity 并产生并发 writer。
+- 决策：新增 ADR-0015。可信 provisioner 必须先写入精确的 supervisor/boot/sandbox row，并把
+  supervisor、boot、sandbox、fresh transport ID 作为认证后的 channel authority 交给 manager；
+  `supervisor.register` JSON 本身不授予身份或创建任意 sandbox。注册固定 protocol v1、AgentDock
+  supervisor `0.1.0`、Pi package/version、required capabilities 和预配容量。
+- 数据库：migration 004 新增 `supervisor_connections` 与 `sandbox_retirements`，当前 schema 共 20 张
+  application tables。连接表持久化 transport/registration/response/connection ID、payload fingerprint、
+  control-plane owner、runtime version/capability、heartbeat policy、accepting flag、last-seen/expiry 和
+  close reason；partial unique index 保证每个 sandbox 最多一个 active generation，复合 FK 保证
+  sandbox/supervisor/boot 不会错绑。retirement 表实现 pending/claimed/blocked/completed、claim lease、
+  attempt、delay 和 safe error code 的闭合约束。
+- 重连：同 transport 的 exact registration retry 返回原 ACK；改 payload、跨 transport replay、过期或
+  superseded generation 均拒绝。相同 boot 在 timeout 前换 transport 会原子 supersede 旧 connection，
+  保留同一个 supervisor runtime/event spool；不同 boot 必须使用另一个预配 sandbox，旧 connection
+  立即 fenced、旧 sandbox failed 并写 retirement job，绝不接管旧进程。
+- 心跳：registered `SessionLeaseCoordinator` 在同一个 transaction、同一 lock order 中核对 sandbox、
+  connection、transport、control-plane owner、boot、capacity、expiry，再同时推进 connection expiry/
+  `accepting_assignments` 与 exact session lease renewal。因此 registration fence 和旧 heartbeat 有明确
+  的数据库先后序，expired connection 不可复活；`acceptingAssignments=false` 会拒绝新 acquire，但不
+  粗暴终止已存在 assignment。
+- 回收：health sweep 只 fence/quarantine 并写 durable retirement，不删除 lease 或归还容量。worker
+  claim 后必须先调用 `SupervisorOwnerBoundary.stopAndConfirm(exact boot)`；只有该调用证明旧 boot 不能
+  再创建 runtime，才运行 `AssignmentReconciler.retireSandbox()`。retryable failure 延时重试，identity/
+  invariant failure 进入 blocked；claimant 崩溃超过 claim deadline 后，另一 control-plane instance 可
+  重领。最终还会回查 sandbox 确实为 `terminated` 才把 job 标记 completed。
+- 故障证据：8 个新 control-plane integration tests 覆盖认证/版本拒绝、same-channel idempotency、
+  changed/cross-channel replay、same-boot reconnect 与旧 connection 拒绝、new-boot quarantine、atomic
+  lease+liveness renewal、停止接单、timeout 后 ambiguous lease/capacity 保留、owner-stop-before-inventory、
+  `assignment_lost` settlement、retry/blocked retirement，以及另一 control-plane 重领 abandoned claim。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、182 passed/4
+  skipped tests、两个 zero-token Pi spikes 和 0 vulnerabilities。相同 control-plane suite 又在一次性、
+  仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 上通过 39 passed/1 Docker-only skipped，覆盖真实
+  row lock、partial unique index、`SKIP LOCKED` 与 claim handoff；数据库 container 已删除，managed
+  sandbox container 为 0。
+- 当前边界：manager 是 production-shaped、transport-neutral control-plane 核心，但还没有实际的
+  outbound WebSocket listener/client，也没有把 mTLS/provisioner identity 或 Docker/Kubernetes
+  supervisor-owner process handle 接入 production `main.ts`。现有 HTTP entry point 不会伪造 owner
+  confirmation 或静默启动本地 Docker worker。
+- 下一步：实现 authenticated outbound supervisor WebSocket，并让独立 supervisor client 用真实
+  register/registered/heartbeat 帧驱动本 manager。原因是数据库代际和 failure semantics 已经可证明，
+  下一层应该验证网络断线、same-boot reconnect、stale socket 关闭和消息路由，而不是再增加本地假
+  backend 功能。

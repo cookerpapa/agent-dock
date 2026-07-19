@@ -83,8 +83,12 @@ Long-turn leases now renew through one shared supervisor heartbeat, while a
 host-side identity-fenced reconciler removes orphan/expired Docker assignments,
 fails acknowledged ambiguous work, safely requeues pre-ACK work, repairs
 capacity, and retires an old sandbox only after runtime absence is confirmed.
-MinIO/S3, explicit steer implementation, cross-replica notification, and
-production remote-supervisor registration/health orchestration remain.
+A durable authenticated registration/health manager now owns connection
+generations, exact same-boot reconnect, new-boot fencing, timeout quarantine,
+and a retryable cross-replica retirement claim that requires owner-stop proof
+before reconciliation. MinIO/S3, explicit steer implementation, cross-replica
+event notification, the outbound supervisor WebSocket, and a concrete
+production owner-process adapter remain.
 
 ## Phase 3: sandbox and approval boundary (2-3 weeks)
 

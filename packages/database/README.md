@@ -19,6 +19,9 @@ The first migration creates 18 application tables covering:
 - object-storage artifact metadata;
 - token and cost usage ledger rows.
 
+Later forward migrations add durable supervisor connections and sandbox
+retirement work, bringing the current application schema to 20 tables.
+
 Important database-enforced invariants include:
 
 - unique `(session_id, idempotency_key)` commands;
@@ -33,6 +36,12 @@ Important database-enforced invariants include:
   per session;
 - tenant-consistent composite foreign keys;
 - positive fencing tokens and bounded sandbox capacity;
+- one active connection generation per sandbox, with exact sandbox/boot
+  composite ownership and closed-state consistency;
+- heartbeat interval/timeout/expiry consistency and unique transport,
+  registration, response, and connection IDs;
+- a constrained pending/claimed/blocked/completed retirement queue whose claim
+  metadata matches its state;
 - cumulative event ACK not beyond the last persisted sequence;
 - approval outcome/timestamp consistency;
 - closed state, model-thinking, artifact-kind, and command-kind values;

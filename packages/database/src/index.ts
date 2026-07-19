@@ -9,6 +9,10 @@ export {
   type CredentialBindingStatus,
   type CredentialKind,
   type Database,
+  type SandboxRetirementReason,
+  type SandboxRetirementState,
+  type SupervisorConnectionCloseReason,
+  type SupervisorConnectionState,
   type TurnInputKind,
 } from "./database-types.ts";
 
@@ -16,10 +20,12 @@ export {
   downDurableEventDelivery,
   downExplicitSessionMailbox,
   downInitialControlPlane,
+  downSupervisorConnectionHealth,
   migrationProvider,
   upDurableEventDelivery,
   upExplicitSessionMailbox,
   upInitialControlPlane,
+  upSupervisorConnectionHealth,
 } from "./migrations/index.ts";
 
 export {

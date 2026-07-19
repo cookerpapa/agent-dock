@@ -4,9 +4,11 @@ import {
   downDurableEventDelivery,
   downExplicitSessionMailbox,
   downInitialControlPlane,
+  downSupervisorConnectionHealth,
   upDurableEventDelivery,
   upExplicitSessionMailbox,
   upInitialControlPlane,
+  upSupervisorConnectionHealth,
 } from "../src/index.ts";
 import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.ts";
 
@@ -22,6 +24,17 @@ const IDS = {
   turn2: "60000000-0000-4000-8000-000000000002",
   agent: "70000000-0000-4000-8000-000000000001",
   sandbox: "80000000-0000-4000-8000-000000000001",
+  connectionSandbox: "80000000-0000-4000-8000-000000000010",
+  connectionBoot: "80000000-0000-4000-8000-000000000011",
+  connection1: "80000000-0000-4000-8000-000000000012",
+  connection2: "80000000-0000-4000-8000-000000000013",
+  transport1: "80000000-0000-4000-8000-000000000014",
+  transport2: "80000000-0000-4000-8000-000000000015",
+  registration1: "80000000-0000-4000-8000-000000000016",
+  registration2: "80000000-0000-4000-8000-000000000017",
+  registered1: "80000000-0000-4000-8000-000000000018",
+  registered2: "80000000-0000-4000-8000-000000000019",
+  controlPlane: "80000000-0000-4000-8000-000000000020",
   lease: "90000000-0000-4000-8000-000000000001",
   command1: "a0000000-0000-4000-8000-000000000001",
   command2: "a0000000-0000-4000-8000-000000000002",
@@ -373,6 +386,86 @@ describe("initial PostgreSQL migration", () => {
     ).rejects.toThrow();
   });
 
+  it("persists one current supervisor connection and a fenced retirement queue", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(upSupervisorConnectionHealth));
+    await postgres.query(
+      `insert into sandboxes
+         (id, supervisor_id, boot_id, state, max_concurrent_sessions)
+       values ($1, 'supervisor-health', $2, 'ready', 2)`,
+      [IDS.connectionSandbox, IDS.connectionBoot],
+    );
+    const insertConnection = async (ids: {
+      connection: string;
+      transport: string;
+      registration: string;
+      registered: string;
+    }) =>
+      postgres.query(
+        `insert into supervisor_connections
+           (connection_id, transport_id, registration_message_id, registered_message_id,
+            sandbox_id, supervisor_id, boot_id, control_plane_instance_id,
+            registration_fingerprint, supervisor_version, pi_package_name, pi_version,
+            supported_protocol_versions, capabilities, selected_protocol_version,
+            heartbeat_interval_ms, heartbeat_timeout_ms,
+            registered_at, last_heartbeat_at, expires_at)
+         values ($1, $2, $3, $4, $5, 'supervisor-health', $6, $7,
+                 repeat('a', 64), '0.1.0', '@earendil-works/pi-coding-agent', '0.80.10',
+                 array[1], array['pi.rpc'], 1, 10000, 30000,
+                 now(), now(), now() + interval '30 seconds')`,
+        [
+          ids.connection,
+          ids.transport,
+          ids.registration,
+          ids.registered,
+          IDS.connectionSandbox,
+          IDS.connectionBoot,
+          IDS.controlPlane,
+        ],
+      );
+
+    await insertConnection({
+      connection: IDS.connection1,
+      transport: IDS.transport1,
+      registration: IDS.registration1,
+      registered: IDS.registered1,
+    });
+    await expect(
+      insertConnection({
+        connection: IDS.connection2,
+        transport: IDS.transport2,
+        registration: IDS.registration2,
+        registered: IDS.registered2,
+      }),
+    ).rejects.toThrow();
+    await postgres.query(
+      `update supervisor_connections
+          set state = 'superseded', close_reason = 'reconnected', closed_at = now()
+        where connection_id = $1`,
+      [IDS.connection1],
+    );
+    await insertConnection({
+      connection: IDS.connection2,
+      transport: IDS.transport2,
+      registration: IDS.registration2,
+      registered: IDS.registered2,
+    });
+
+    await postgres.query(
+      `insert into sandbox_retirements
+         (sandbox_id, supervisor_id, boot_id, reason)
+       values ($1, 'supervisor-health', $2, 'heartbeat_timeout')`,
+      [IDS.connectionSandbox, IDS.connectionBoot],
+    );
+    await expect(
+      postgres.query(
+        `update sandbox_retirements
+            set state = 'claimed'
+          where sandbox_id = $1`,
+        [IDS.connectionSandbox],
+      ),
+    ).rejects.toThrow();
+  });
+
   it("requires approval outcome and resolution time to match state", async () => {
     await expect(
       postgres.query(
@@ -429,6 +522,7 @@ describe("initial PostgreSQL migration", () => {
   });
 
   it("drops every application table in reverse dependency order", async () => {
+    await applyCompiledQueries(postgres, await compileMigration(downSupervisorConnectionHealth));
     await applyCompiledQueries(postgres, await compileMigration(downExplicitSessionMailbox));
     await applyCompiledQueries(postgres, await compileMigration(downDurableEventDelivery));
     await applyCompiledQueries(postgres, await compileMigration(upDurableEventDelivery));
