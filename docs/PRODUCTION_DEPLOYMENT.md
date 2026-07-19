@@ -1,11 +1,13 @@
 # Production deployment runbook
 
 This runbook deploys AgentDock's currently supported production slice on one
-Linux Docker host. The result is a durable, authenticated, private multi-tenant service
-with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral remote control
-plane, one shared trusted Supervisor host, isolated one-shot Pi workers, and a
-static Web UI. Multiple private tenants can share this runtime without sharing
-their API resources, event streams, quotas, or checkpoint namespaces.
+Linux Docker host. The result is a durable, authenticated, private multi-tenant
+service with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral
+remote control plane, one shared trusted Supervisor host, isolated one-shot Pi
+workers, and a static Web UI. Multiple tenants can share this runtime without
+sharing their API resources, event streams, quotas, or checkpoint namespaces.
+An operator may explicitly enable capacity-bounded anonymous registration to
+make that isolation easy to test from two browser contexts.
 
 The word _production_ here means that this bounded slice has explicit
 configuration, durable storage, health checks, restart behavior, security
@@ -13,17 +15,19 @@ boundaries, and a destructive disposable acceptance test. It does not turn the
 sample into a general coding-agent SaaS. The worker currently supports only the
 image-owned Java repair/follow-up fixture and deterministic embedded model. It
 does not yet support arbitrary repository import, real-provider credentials,
-policy-approved third-party extensions, public multi-tenant SaaS, Kubernetes, or direct
-Internet exposure. Multi-tenancy here is an application boundary for a trusted
-private operator; it is not public signup, billing, OIDC, or a mutually hostile
-Docker-host boundary. Those limits are part of the product contract, not hidden
-deployment TODOs.
+policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
+direct Internet exposure. The optional registration route is not verified
+human identity, billing, OIDC, recovery, abuse prevention, or a mutually
+hostile Docker-host boundary. Those limits are part of the product contract,
+not hidden deployment TODOs.
 
 The architecture and safety rationale are recorded in
 [ADR-0023](adr/0023-production-supervisor-host-and-self-hosted-topology.md) and
 [ADR-0024](adr/0024-permanent-event-rejection-and-spool-quarantine.md). Private
 tenant identity, quotas, isolation, and fair dispatch are recorded in
 [ADR-0025](adr/0025-private-multi-tenant-identity-and-fair-scheduling.md).
+Opt-in registration and conversation discovery are recorded in
+[ADR-0026](adr/0026-opt-in-self-service-registration-and-conversation-discovery.md).
 
 ## Prerequisites
 
@@ -51,6 +55,16 @@ the idempotent deployment entry point:
 
 ```bash
 npm ci --ignore-scripts
+npm run production:deploy
+```
+
+Registration is disabled by default. For a new loopback deployment that should
+allow browser-created tenants, set the bounded values before the first command;
+initialization validates and persists them in the private runtime `.env`:
+
+```bash
+AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true \
+AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32 \
 npm run production:deploy
 ```
 
@@ -166,11 +180,58 @@ Container logs use Docker's bounded `json-file` policy: three files of at most
 identifiers, but operators should still grant log access as privileged
 operational access.
 
-## Private tenant administration
+## Opt-in self-service tenant registration
 
-Tenant lifecycle is an offline operator action. It is deliberately not exposed
-through `/v1`, so a leaked tenant bearer token cannot create tenants or grant
-itself a stronger role. Create a tenant from the trusted host:
+The only unauthenticated API exception is exact
+`POST /v1/registrations`, and it exists only when
+`AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true`. The Web login card's
+`create tenant` tab submits a bounded slug and owner display name. A successful
+transaction creates the tenant-local owner, deterministic model profile,
+runtime policy, and indexed owner credential together, then shows the plaintext
+token once. Save it immediately: PostgreSQL stores only its SHA-256 digest, and
+there is no self-service password, email, or token-recovery flow.
+
+The defaults written for a new runtime are:
+
+```text
+AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=false
+AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32
+AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS=10
+AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS=100
+AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS=10
+AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=1
+```
+
+The total-tenant cap includes the bootstrap tenant and any offline-created
+tenants. Concurrent registrations serialize inside PostgreSQL, so successful
+requests cannot race beyond it. A duplicate slug returns `409`; a full runtime
+returns `429`; disabled registration returns `404`. Failed registration does
+not retain a partial tenant or reveal a generated token.
+
+For an existing deployment, edit
+`deploy/production/runtime/.env` (or the selected external runtime's `.env`),
+change only these bounded non-secret settings, then run
+`npm run production:deploy`. Disabling it later prevents new self-service
+tenants but does not delete or disable existing tenants. The registration form
+may still be visible and will report the server's disabled response.
+
+After login, `GET /v1/conversations` lists at most the newest 100 sessions for
+the verified tenant, and `GET /v1/conversations/:sessionId` loads at most the
+newest 200 prompt turns before the Web resumes that session's durable SSE
+suffix. There is no tenant selector. A token from another tenant receives the
+same `404` for that exact session UUID as it would for a nonexistent UUID.
+
+This option is suitable for loopback/private functional validation. It has no
+distributed rate limiter, CAPTCHA, verified identity, recovery, billing, or
+hostile-public-customer sandbox claim. Do not treat enabling it as authorization
+to publish the bundled HTTP endpoint on the Internet.
+
+## Privileged tenant administration
+
+Credential issue/list/revoke, custom quotas, and unrestricted tenant creation
+remain offline operator actions. Self-registration cannot grant a role other
+than owner for its new tenant, choose another tenant, or access this privileged
+administration boundary. Create a manually managed tenant from the trusted host:
 
 ```bash
 npm run production:tenant -- create \
@@ -228,9 +289,9 @@ than the trusted operator can reach the endpoint. Binding
 `AGENT_DOCK_HTTP_BIND_ADDRESS=0.0.0.0` without those controls is unsupported.
 
 The included bearer credentials provide private tenant identity and three
-coarse roles. They are not public account login, OIDC, CSRF-resistant cookie
-authentication, per-route enterprise RBAC, rate limiting, billing, or abuse
-protection.
+coarse roles. The optional anonymous admission route does not turn them into
+public account login, OIDC, CSRF-resistant cookie authentication, per-route
+enterprise RBAC, rate limiting, billing, or abuse protection.
 
 ## Health and operations
 
@@ -347,11 +408,13 @@ npm run production:check
 
 The command creates a random project name, private temporary runtime, random
 loopback port, fresh volumes, and fresh credentials. It builds images, starts
-real PostgreSQL and MinIO, creates a second tenant and viewer credential, proves
-cross-tenant UUID/SSE isolation, per-role authorization, tenant-prefixed S3
-checkpoints, a tenant-neutral control-plane container, public/internal
-authentication and port isolation, reruns both bootstrap jobs to prove
-idempotency and the bucket-scoped
+real PostgreSQL and MinIO, enables bounded self-registration, and proves invalid
+and duplicate requests, atomic owner creation, plus a real concurrent race at
+the total-tenant cap (exactly one success and one `429`). It issues a viewer,
+proves owner/viewer conversation reads, cross-tenant conversation/UUID/SSE
+isolation, per-role authorization, tenant-prefixed S3 checkpoints, a
+tenant-neutral control-plane container, public/internal authentication and port
+isolation, reruns both bootstrap jobs to prove idempotency and the bucket-scoped
 no-delete credential, repairs Java, interrupts and reconnects the control plane, verifies
 ambiguous-command failure and spool quarantine, scales the control plane from
 one to two and back, restores a follow-up from S3, restarts the Supervisor into

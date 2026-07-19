@@ -23,6 +23,8 @@ const processEnvironment = {
   AGENT_DOCK_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENT_DOCK_HTTP_BIND_ADDRESS: "127.0.0.1",
   AGENT_DOCK_HTTP_PORT: String(httpPort),
+  AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: "true",
+  AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: "3",
   AGENT_DOCK_SUPERVISOR_ID: supervisorId,
   COMPOSE_PROJECT_NAME: projectName,
 };
@@ -211,6 +213,18 @@ async function postAs(token, path, body, expectedStatus, idempotencyKey) {
 
 async function post(path, body, expectedStatus, idempotencyKey) {
   return postAs(apiToken, path, body, expectedStatus, idempotencyKey);
+}
+
+async function registerTenant(tenantSlug, displayName, expectedStatus) {
+  return http(
+    "/v1/registrations",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenantSlug, displayName }),
+    },
+    expectedStatus,
+  );
 }
 
 function parseSseFrame(raw) {
@@ -694,6 +708,7 @@ async function main() {
     { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
     401,
   );
+  await http("/v1/conversations", {}, 401);
   await http(
     "/v1/projects",
     {
@@ -704,35 +719,38 @@ async function main() {
     401,
   );
 
-  report("create_second_private_tenant");
-  const createdTenantB = await tenantAdmin([
-    "create",
-    "--slug",
-    `tenant-${suffix}`,
-    "--display-name",
-    "Production Tenant B",
-    "--maximum-projects",
-    "10",
-    "--maximum-sessions",
-    "20",
-    "--maximum-unsettled-turns",
-    "10",
-    "--maximum-concurrent-turns",
-    "1",
-  ]);
-  assert.equal(createdTenantB.operation, "tenant.created");
-  assert.equal(Object.hasOwn(createdTenantB.credential, "secretSha256"), false);
-  const tenantBToken = createdTenantB.credential.token;
+  report("validate_public_registration");
+  await registerTenant("INVALID SLUG", "Invalid tenant", 400);
+  assert.equal(await psql("select count(*) from tenants"), "1");
+  const createdTenantB = (await registerTenant(`tenant-${suffix}`, "Production Tenant B", 201))
+    .body;
+  assert.equal(Object.hasOwn(createdTenantB, "secretSha256"), false);
+  const tenantBToken = createdTenantB.apiToken;
   const tenantBId = createdTenantB.tenantId;
   assert.match(tenantBToken, /^adk_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43,}$/i);
   assert.match(tenantBId, /^[0-9a-f-]{36}$/i);
   secretValues.push(tenantBToken);
+  await registerTenant(`tenant-${suffix}`, "Duplicate tenant", 409);
+
+  const capacityAttempts = await Promise.all([
+    registerTenant(`capacity-a-${suffix}`, "Capacity Tenant A"),
+    registerTenant(`capacity-b-${suffix}`, "Capacity Tenant B"),
+  ]);
+  assert.deepEqual(
+    capacityAttempts.map(({ response }) => response.status).sort((left, right) => left - right),
+    [201, 429],
+  );
+  const capacityTenant = capacityAttempts.find(({ response }) => response.status === 201)?.body;
+  assert.equal(typeof capacityTenant?.apiToken, "string");
+  secretValues.push(capacityTenant.apiToken);
+  assert.equal(await psql("select count(*) from tenants"), "3");
+
   const issuedViewerB = await tenantAdmin([
     "issue",
     "--tenant",
     tenantBId,
     "--user-id",
-    createdTenantB.ownerUserId,
+    createdTenantB.userId,
     "--label",
     "production viewer",
     "--role",
@@ -785,6 +803,45 @@ async function main() {
   assert.equal(tenantBStream.events.at(-1).type, "turn.completed");
   await assertCursor(sessionB.sessionId, 10);
   await assertCheckpointObjects(sessionB.sessionId, 2, tenantBId);
+
+  const [conversationListA, conversationListB, viewerConversationListB] = await Promise.all([
+    http("/v1/conversations", { headers: authenticatedHeaders() }, 200),
+    http("/v1/conversations", { headers: authenticatedHeaders({}, tenantBToken) }, 200),
+    http("/v1/conversations", { headers: authenticatedHeaders({}, viewerBToken) }, 200),
+  ]);
+  assert.equal(
+    conversationListA.body.conversations.some(
+      (conversation) => conversation.sessionId === sessionB.sessionId,
+    ),
+    false,
+  );
+  assert.deepEqual(
+    conversationListB.body.conversations.map((conversation) => conversation.sessionId),
+    [sessionB.sessionId],
+  );
+  assert.equal(conversationListB.body.conversations[0].turnCount, 1);
+  assert.deepEqual(viewerConversationListB.body, conversationListB.body);
+
+  const [conversationB, viewerConversationB] = await Promise.all([
+    http(
+      `/v1/conversations/${sessionB.sessionId}`,
+      { headers: authenticatedHeaders({}, tenantBToken) },
+      200,
+    ),
+    http(
+      `/v1/conversations/${sessionB.sessionId}`,
+      { headers: authenticatedHeaders({}, viewerBToken) },
+      200,
+    ),
+  ]);
+  assert.equal(conversationB.body.session.sessionId, sessionB.sessionId);
+  assert.equal(conversationB.body.project.name, sharedProjectName);
+  assert.deepEqual(
+    conversationB.body.turns.map((turn) => turn.prompt),
+    [repairPrompt],
+  );
+  assert.deepEqual(viewerConversationB.body, conversationB.body);
+  await http(`/v1/conversations/${sessionB.sessionId}`, { headers: authenticatedHeaders() }, 404);
 
   await postAs(
     apiToken,
@@ -1190,6 +1247,27 @@ async function main() {
     "2",
   );
 
+  const [finalConversationListA, finalConversationListB] = await Promise.all([
+    http("/v1/conversations", { headers: authenticatedHeaders() }, 200),
+    http("/v1/conversations", { headers: authenticatedHeaders({}, tenantBToken) }, 200),
+  ]);
+  assert.equal(
+    finalConversationListA.body.conversations.some(
+      (conversation) => conversation.sessionId === sessionB.sessionId,
+    ),
+    false,
+  );
+  assert.equal(
+    finalConversationListA.body.conversations.some(
+      (conversation) => conversation.sessionId === session.sessionId,
+    ),
+    true,
+  );
+  assert.deepEqual(
+    finalConversationListB.body.conversations.map((conversation) => conversation.sessionId),
+    [sessionB.sessionId],
+  );
+
   await assertNoSecretsInDeployment(secretValues, [
     ...tenantBStream.events,
     ...tenantBReplay.events,
@@ -1207,6 +1285,7 @@ async function main() {
     oldBootId: bootBeforeReconnect.bootId,
     freshBootId: freshBoot.bootId,
     durableEvents: 22,
+    registeredTenants: 3,
   });
 }
 

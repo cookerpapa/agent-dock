@@ -3,6 +3,10 @@ import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 import { DurableEventStore } from "./durable-event-store.ts";
+import {
+  PublicTenantRegistrationService,
+  type PublicTenantRegistrationConfiguration,
+} from "./public-tenant-registration.ts";
 import { SessionEventHub } from "./session-event-hub.ts";
 import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
 import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
@@ -18,6 +22,7 @@ export type ControlPlaneModuleOptions = Omit<
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
   staticRequestIdentity?: TenantRequestIdentity;
+  publicRegistration?: PublicTenantRegistrationConfiguration;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -51,6 +56,22 @@ export class ControlPlaneModule {
           useValue: new ControlPlaneStoreFactory({
             database: options.database,
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
+        {
+          provide: PublicTenantRegistrationService,
+          useValue: new PublicTenantRegistrationService({
+            database: options.database,
+            ...(options.publicRegistration ?? {
+              enabled: false,
+              maximumTenants: 2,
+              tenantQuotas: {
+                maximumProjects: 10,
+                maximumSessions: 100,
+                maximumUnsettledTurns: 10,
+                maximumConcurrentTurns: 1,
+              },
+            }),
           }),
         },
         {

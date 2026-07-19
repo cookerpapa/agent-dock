@@ -140,6 +140,16 @@ describe.sequential("production bootstrap and configuration", () => {
       supervisorManagementBaseUrl: "http://supervisor-host:4100/",
       host: "0.0.0.0",
       port: 3000,
+      publicRegistration: {
+        enabled: false,
+        maximumTenants: 32,
+        tenantQuotas: {
+          maximumProjects: 10,
+          maximumSessions: 100,
+          maximumUnsettledTurns: 10,
+          maximumConcurrentTurns: 1,
+        },
+      },
     });
     expect(runtime).not.toHaveProperty("tenantId");
     expect(runtime).not.toHaveProperty("defaultModelProfileId");

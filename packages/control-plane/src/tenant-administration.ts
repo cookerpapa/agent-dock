@@ -20,6 +20,7 @@ export type CreatePrivateTenantOptions = {
   ownerDisplayName: string;
   ownerCredentialLabel?: string;
   quotas?: Partial<TenantQuotaConfiguration>;
+  maximumTenants?: number;
   idGenerator?: () => string;
   randomSecret?: () => string;
   clock?: () => Date;
@@ -55,7 +56,8 @@ const DEFAULT_QUOTAS: TenantQuotaConfiguration = {
 };
 
 export class TenantAdministrationError extends Error {
-  readonly code: "tenant_conflict" | "tenant_not_found" | "user_not_found";
+  readonly code:
+    "tenant_conflict" | "tenant_capacity_reached" | "tenant_not_found" | "user_not_found";
 
   constructor(code: TenantAdministrationError["code"], safeMessage: string) {
     super(safeMessage);
@@ -164,6 +166,10 @@ export async function createPrivateTenant(
     128,
   );
   const quotas = quotaConfiguration(options.quotas);
+  const maximumTenants =
+    options.maximumTenants === undefined
+      ? undefined
+      : positiveInteger(options.maximumTenants, "maximumTenants", 1_000_000);
   const idGenerator = options.idGenerator ?? randomUUID;
   const tenantId = validUuid(idGenerator(), "generated tenantId");
   const ownerUserId = validUuid(idGenerator(), "generated ownerUserId");
@@ -187,6 +193,35 @@ export async function createPrivateTenant(
 
   try {
     await database.transaction().execute(async (transaction) => {
+      if (maximumTenants !== undefined) {
+        const admissionAnchor = await transaction
+          .selectFrom("tenants")
+          .select("id")
+          .orderBy("id", "asc")
+          .limit(1)
+          .forUpdate()
+          .executeTakeFirst();
+        if (admissionAnchor === undefined) {
+          throw new TenantAdministrationError(
+            "tenant_capacity_reached",
+            "Tenant registration admission is unavailable",
+          );
+        }
+        const tenantCount = await transaction
+          .selectFrom("tenants")
+          .select((expression) => expression.fn.countAll<string>().as("count"))
+          .executeTakeFirstOrThrow();
+        const parsedTenantCount = Number(tenantCount.count);
+        if (!Number.isSafeInteger(parsedTenantCount) || parsedTenantCount < 1) {
+          throw new Error("Persisted tenant count is invalid");
+        }
+        if (parsedTenantCount >= maximumTenants) {
+          throw new TenantAdministrationError(
+            "tenant_capacity_reached",
+            "Tenant registration capacity has been reached",
+          );
+        }
+      }
       await transaction
         .insertInto("tenants")
         .values({ id: tenantId, slug, created_at: now })

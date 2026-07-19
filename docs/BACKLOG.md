@@ -108,5 +108,7 @@ extension-policy support would overstate the current boundary.
 - [x] Remove tenant identity and tenant API token from the running control-plane container
 - [x] Show verified tenant/user/role in Web, retain token only in memory, and disable viewer writes
 - [x] Prove two-tenant HTTP isolation, role denial, fair lanes, quota isolation, restart/scale, SSE, and S3 prefixes
+- [x] Add opt-in anonymous tenant registration with bounded public admission
+- [x] Add tenant-scoped conversation list/detail APIs and Web history switching
 - [ ] Add public identity federation, billing, abuse controls, and a separate mutually hostile SaaS threat model
 - [ ] Add measured warm-pool eviction and tenant token/cost accounting

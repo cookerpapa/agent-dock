@@ -2,6 +2,7 @@ import { parseUuidPathParameter } from "@agent-dock/protocol";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import type { TenantQuotaConfiguration } from "./tenant-administration.ts";
 
 const MAX_SECRET_BYTES = 16 * 1_024;
 
@@ -18,6 +19,11 @@ export type ProductionControlPlaneConfig = {
   host: string;
   port: number;
   maximumLanesPerSupervisor: number;
+  publicRegistration: {
+    enabled: boolean;
+    maximumTenants: number;
+    tenantQuotas: TenantQuotaConfiguration;
+  };
 };
 
 export type ProductionBootstrapConfig = {
@@ -139,6 +145,25 @@ export async function loadProductionControlPlaneConfig(
     environment,
     "AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP",
   );
+  const publicTenantMaximumUnsettledTurns = integerValue(
+    environment,
+    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+    10,
+    1,
+    1_000_000,
+  );
+  const publicTenantMaximumConcurrentTurns = integerValue(
+    environment,
+    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
+    1,
+    1,
+    256,
+  );
+  if (publicTenantMaximumConcurrentTurns > publicTenantMaximumUnsettledTurns) {
+    throw new TypeError(
+      "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+    );
+  }
   return {
     databaseUrl: await loadProductionDatabaseUrl(environment),
     supervisorEnrollmentToken: await secret(
@@ -176,6 +201,34 @@ export async function loadProductionControlPlaneConfig(
       1,
       256,
     ),
+    publicRegistration: {
+      enabled: booleanValue(environment, "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED"),
+      maximumTenants: integerValue(
+        environment,
+        "AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
+        32,
+        2,
+        1_000_000,
+      ),
+      tenantQuotas: {
+        maximumProjects: integerValue(
+          environment,
+          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS",
+          10,
+          1,
+          1_000_000,
+        ),
+        maximumSessions: integerValue(
+          environment,
+          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS",
+          100,
+          1,
+          1_000_000,
+        ),
+        maximumUnsettledTurns: publicTenantMaximumUnsettledTurns,
+        maximumConcurrentTurns: publicTenantMaximumConcurrentTurns,
+      },
+    },
   };
 }
 

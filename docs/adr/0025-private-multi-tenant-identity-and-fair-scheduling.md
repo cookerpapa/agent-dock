@@ -2,6 +2,9 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Amended by: ADR-0026 adds an opt-in, bounded loopback registration and
+  conversation-discovery surface without changing the authenticated tenant
+  authority
 
 ## Context
 

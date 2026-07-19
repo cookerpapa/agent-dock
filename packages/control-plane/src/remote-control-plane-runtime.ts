@@ -197,6 +197,9 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.productionHttpGateway === undefined
         ? {}
         : { productionHttpGateway: options.productionHttpGateway }),
+      ...(options.publicRegistration === undefined
+        ? {}
+        : { publicRegistration: options.publicRegistration }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

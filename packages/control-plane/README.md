@@ -9,8 +9,18 @@ multi-tenant slice is composed in the supported single-host topology.
 
 ## Implemented endpoints
 
+- `POST /v1/registrations` is the only optionally anonymous route. When the
+  operator explicitly enables it, one transaction creates a bounded tenant,
+  owner, deterministic model profile/policy, and indexed owner credential. The
+  plaintext token is returned once; disabled deployments return `404`.
 - `GET /v1/identity` returns the verified tenant slug, tenant-local user, and
   `owner`/`member`/`viewer` role without credential metadata.
+- `GET /v1/conversations` returns only the authenticated tenant's newest 100
+  sessions and an explicit truncation flag.
+- `GET /v1/conversations/:sessionId` returns project/session metadata and the
+  newest 200 durable prompt turns. A known foreign session is indistinguishable
+  from a nonexistent session, and truncated history includes a safe SSE replay
+  boundary.
 - `POST /v1/projects` creates a project and its initial workspace atomically.
 - `POST /v1/projects/:projectId/sessions` creates a cold session using the
   operator-configured default model profile.
@@ -241,8 +251,11 @@ its PGlite database and spool directory are deliberately temporary.
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires the database plus Supervisor enrollment/management configuration; it
 has no process-wide tenant/default profile and mounts no tenant API token.
-Database migration, initial bootstrap, and offline tenant/credential
-administration remain explicit deployment steps. The continuously running remote worker,
+Database migration, initial bootstrap, and privileged offline
+tenant/credential administration remain explicit deployment steps. Optional
+self-registration is a capacity-bounded loopback demonstration surface, not a
+replacement for operator credential recovery or a public identity provider.
+The continuously running remote worker,
 authenticated Supervisor transport, and in-flight lease/assignment
 reconciliation are composed in production. Generic repository restore, public
 identity federation, mTLS for multi-host placement, policy-approved arbitrary

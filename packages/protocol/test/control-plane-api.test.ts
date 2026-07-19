@@ -4,15 +4,19 @@ import {
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseConversationDetailResource,
+  parseConversationListResource,
   parseControlPlaneApiError,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
+  parseCreateTenantRegistrationRequest,
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseProjectResource,
   parseSessionResource,
   parseTenantIdentityResource,
+  parseTenantRegistrationResource,
   parseUuidPathParameter,
 } from "../src/index.ts";
 
@@ -75,6 +79,66 @@ describe("control-plane public API schemas", () => {
         role: "member",
       }),
     ).toMatchObject({ tenantSlug: "private-alpha", role: "member" });
+    expect(
+      parseTenantRegistrationResource({
+        tenantId: "80000000-0000-4000-8000-000000000001",
+        tenantSlug: "public-alpha",
+        userId: "80000000-0000-4000-8000-000000000002",
+        displayName: "Alpha Owner",
+        role: "owner",
+        apiToken: `adk_80000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+      }),
+    ).toMatchObject({ tenantSlug: "public-alpha", role: "owner" });
+    expect(
+      parseConversationListResource({
+        conversations: [
+          {
+            sessionId: "30000000-0000-4000-8000-000000000001",
+            projectId: "10000000-0000-4000-8000-000000000001",
+            workspaceId: "20000000-0000-4000-8000-000000000001",
+            projectName: "Java repair demo",
+            state: "idle",
+            turnCount: 1,
+            createdAt,
+            updatedAt: createdAt,
+            lastActiveAt: createdAt,
+          },
+        ],
+        truncated: false,
+      }),
+    ).toMatchObject({ conversations: [{ projectName: "Java repair demo" }] });
+    expect(
+      parseConversationDetailResource({
+        project: {
+          projectId: "10000000-0000-4000-8000-000000000001",
+          workspaceId: "20000000-0000-4000-8000-000000000001",
+          name: "Java repair demo",
+          createdAt,
+        },
+        session: {
+          sessionId: "30000000-0000-4000-8000-000000000001",
+          projectId: "10000000-0000-4000-8000-000000000001",
+          workspaceId: "20000000-0000-4000-8000-000000000001",
+          state: "running",
+          modelProfileId: "40000000-0000-4000-8000-000000000001",
+          createdAt,
+          updatedAt: createdAt,
+          lastActiveAt: createdAt,
+        },
+        turns: [
+          {
+            turnId: "50000000-0000-4000-8000-000000000001",
+            commandId: "60000000-0000-4000-8000-000000000001",
+            mailboxPosition: 1,
+            prompt: "repair it",
+            state: "running",
+            acceptedAt: createdAt,
+          },
+        ],
+        historyTruncated: false,
+        replayAfterSequence: 0,
+      }),
+    ).toMatchObject({ turns: [{ prompt: "repair it" }] });
   });
 
   it("rejects malformed public resources", () => {
@@ -116,6 +180,12 @@ describe("control-plane public API schemas", () => {
       prompt: "  fix the test  ",
       thinkingLevel: "low",
     });
+    expect(
+      parseCreateTenantRegistrationRequest({
+        tenantSlug: "  Team-Alpha  ",
+        displayName: "  Alpha Owner  ",
+      }),
+    ).toEqual({ tenantSlug: "team-alpha", displayName: "Alpha Owner" });
   });
 
   it("validates workspace and path identities as UUIDs", () => {
@@ -139,6 +209,15 @@ describe("control-plane public API schemas", () => {
     expect(() => parseAcceptTurnRequest({ prompt: "hello", thinkingLevel: "turbo" })).toThrow(
       ControlPlaneApiValidationError,
     );
+    expect(() =>
+      parseCreateTenantRegistrationRequest({ tenantSlug: "bad slug", displayName: "Owner" }),
+    ).toThrow(ControlPlaneApiValidationError);
+    expect(() =>
+      parseCreateTenantRegistrationRequest({
+        tenantSlug: "valid-slug",
+        displayName: "x".repeat(257),
+      }),
+    ).toThrow(ControlPlaneApiValidationError);
   });
 
   it("accepts portable idempotency keys and rejects ambiguous header values", () => {

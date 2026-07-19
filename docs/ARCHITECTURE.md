@@ -52,6 +52,17 @@ allocates a positive, immutable `mailbox_position` from its durable
 resource exposes that position. A duplicate idempotent request returns the
 original position and consumes no new one.
 
+The multi-tenant HTTP surface also has `GET /v1/identity`,
+`GET /v1/conversations`, and `GET /v1/conversations/:sessionId`. Authentication
+resolves the tenant before a store is constructed; clients never select a
+tenant. Lists are bounded to the newest 100 sessions, details to the newest 200
+prompt turns, and foreign exact UUIDs return the same `404` as absent rows.
+`POST /v1/registrations` is the sole optional anonymous route. It is disabled
+by default and, when explicitly enabled for loopback validation, atomically
+creates one bounded tenant/owner/profile/policy and returns an indexed owner
+token once. Concurrent admission serializes on a stable tenant row so the
+configured total count cannot be exceeded.
+
 The second Phase 1 slice adds an explicit transactional-outbox dispatcher. It
 claims one due command using `FOR UPDATE SKIP LOCKED`, locks the owning session,
 and enforces lowest-nonterminal-`mailbox_position` order. Timestamp and UUID
@@ -211,8 +222,9 @@ it does not imply generic repository/provider/extension support, public SaaS,
 Kubernetes, or direct Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
-Supervisor pool executes globally fair tenant work. See ADR-0023, ADR-0025, and
-the production runbook.
+Supervisor pool executes globally fair tenant work. Optional loopback
+self-registration changes tenant admission convenience, not that threat model.
+See ADR-0023, ADR-0025, ADR-0026, and the production runbook.
 
 ### Model profiles and credentials
 
@@ -668,4 +680,10 @@ browser requests same-origin without enabling permissive CORS. The local demo
 starts ephemeral PGlite and independent execution/cancellation polling loops.
 The production Web build requires the public bearer login, is served by a
 non-root read-only Caddy container, proxies only `/v1`, rejects private internal
-and health paths, and publishes the deployment's only loopback host port.
+and health paths, and publishes the deployment's only loopback host port. Its
+login card can request an opt-in self-service tenant, verify the returned
+one-time owner token, and then list only that tenant's conversations. Token
+change/logout clears transcript, conversation list, pending operations, SSE
+cursor, and stream before another security context is rendered. Historical
+selection loads bounded prompt metadata and then resumes the matching durable
+SSE suffix; the token remains in memory rather than Web Storage or the URL.

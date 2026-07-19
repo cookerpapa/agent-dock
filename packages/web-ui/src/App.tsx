@@ -9,7 +9,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { TenantIdentityResource } from "@agent-dock/protocol";
+import type { ConversationSummaryResource, TenantIdentityResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import {
   activeTurn,
@@ -277,15 +277,22 @@ function apiFailureMessage(error: unknown): string {
 }
 
 export default function App() {
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [apiToken, setApiToken] = useState("");
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [credentialInput, setCredentialInput] = useState("");
   const [credentialChecking, setCredentialChecking] = useState(false);
+  const [registrationSlug, setRegistrationSlug] = useState("");
+  const [registrationDisplayName, setRegistrationDisplayName] = useState("");
+  const [newlyIssuedToken, setNewlyIssuedToken] = useState<string | null>(null);
   const api = useMemo(
     () => new AgentDockApi(globalThis.fetch.bind(globalThis), apiToken || undefined),
     [apiToken],
   );
   const [state, setState] = useState(createInitialSessionView);
+  const [conversations, setConversations] = useState<readonly ConversationSummaryResource[]>([]);
+  const [conversationListTruncated, setConversationListTruncated] = useState(false);
+  const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [operation, setOperation] = useState<"creating" | "submitting" | "cancelling" | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
@@ -309,6 +316,45 @@ export default function App() {
     setState((current) => sessionViewReducer(current, action));
   };
 
+  function clearTenantView(): void {
+    lastSequenceRef.current = 0;
+    setState(createInitialSessionView());
+    setConversations([]);
+    setConversationListTruncated(false);
+    setConversationLoading(null);
+    setOperation(null);
+    setReconnectGeneration(0);
+  }
+
+  async function refreshConversations(candidateApi: AgentDockApi = api): Promise<void> {
+    const listed = await candidateApi.listConversations();
+    setConversations(listed.conversations);
+    setConversationListTruncated(listed.truncated);
+  }
+
+  useEffect(() => {
+    if (identity === null || apiToken.length === 0) {
+      setConversations([]);
+      setConversationListTruncated(false);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .listConversations()
+      .then((listed) => {
+        if (cancelled) return;
+        setConversations(listed.conversations);
+        setConversationListTruncated(listed.truncated);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        update({ type: "api.error", message: apiFailureMessage(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, apiToken, identity?.tenantId]);
+
   useEffect(() => {
     const sessionId = state.session?.sessionId;
     if (sessionId === undefined) return;
@@ -321,6 +367,13 @@ export default function App() {
       onEvent(event) {
         lastSequenceRef.current = event.seq;
         update({ type: "stream.event", event });
+        if (
+          event.type === "turn.completed" ||
+          event.type === "turn.failed" ||
+          event.type === "turn.cancelled"
+        ) {
+          void refreshConversations().catch(() => undefined);
+        }
       },
       onStatus(status) {
         update({ type: "stream.status", status });
@@ -344,11 +397,42 @@ export default function App() {
     try {
       const candidateApi = new AgentDockApi(globalThis.fetch.bind(globalThis), token);
       const resolvedIdentity = await candidateApi.getIdentity();
-      lastSequenceRef.current = 0;
-      setState(createInitialSessionView());
+      clearTenantView();
       setIdentity(resolvedIdentity);
       setApiToken(token);
       setCredentialInput("");
+      setNewlyIssuedToken(null);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setCredentialChecking(false);
+    }
+  }
+
+  async function registerTenant(): Promise<void> {
+    if (registrationSlug.trim().length === 0 || registrationDisplayName.trim().length === 0) {
+      update({ type: "api.error", message: "Tenant slug and owner display name are required." });
+      return;
+    }
+    setCredentialChecking(true);
+    update({ type: "api.error.cleared" });
+    try {
+      const anonymousApi = new AgentDockApi(globalThis.fetch.bind(globalThis));
+      const registration = await anonymousApi.registerTenant(
+        registrationSlug,
+        registrationDisplayName,
+      );
+      const candidateApi = new AgentDockApi(
+        globalThis.fetch.bind(globalThis),
+        registration.apiToken,
+      );
+      const resolvedIdentity = await candidateApi.getIdentity();
+      clearTenantView();
+      setIdentity(resolvedIdentity);
+      setApiToken(registration.apiToken);
+      setNewlyIssuedToken(registration.apiToken);
+      setRegistrationSlug("");
+      setRegistrationDisplayName("");
     } catch (error: unknown) {
       update({ type: "api.error", message: apiFailureMessage(error) });
     } finally {
@@ -357,11 +441,27 @@ export default function App() {
   }
 
   function forgetCredential(): void {
-    lastSequenceRef.current = 0;
-    setState(createInitialSessionView());
+    clearTenantView();
     setIdentity(null);
     setApiToken("");
-    setOperation(null);
+    setNewlyIssuedToken(null);
+    setAuthMode("login");
+  }
+
+  async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
+    if (conversationLoading !== null || operation !== null) return;
+    setConversationLoading(conversation.sessionId);
+    update({ type: "api.error.cleared" });
+    try {
+      const detail = await api.getConversation(conversation.sessionId);
+      lastSequenceRef.current = detail.replayAfterSequence;
+      update({ type: "conversation.loaded", conversation: detail });
+      setSidebarOpen(false);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setConversationLoading(null);
+    }
   }
 
   async function createSession() {
@@ -373,6 +473,7 @@ export default function App() {
       const session = await api.createSession(project);
       lastSequenceRef.current = 0;
       update({ type: "session.created", project, session });
+      await refreshConversations();
       setSidebarOpen(false);
       return session;
     } catch (error: unknown) {
@@ -397,6 +498,7 @@ export default function App() {
         session = await api.createSession(project);
         lastSequenceRef.current = 0;
         update({ type: "session.created", project, session });
+        await refreshConversations();
       }
       const accepted = await api.acceptTurn(
         session.sessionId,
@@ -405,6 +507,7 @@ export default function App() {
         "off",
       );
       update({ type: "turn.accepted", accepted, prompt: normalizedPrompt });
+      await refreshConversations();
     } catch (error: unknown) {
       update({ type: "api.error", message: apiFailureMessage(error) });
     } finally {
@@ -475,27 +578,87 @@ export default function App() {
           className="credential-card"
           onSubmit={(event) => {
             event.preventDefault();
-            void acceptCredential();
+            void (authMode === "login" ? acceptCredential() : registerTenant());
           }}
         >
           <div className="brand-mark" aria-hidden="true">
             AD
           </div>
-          <span className="empty-kicker">SELF-HOSTED ACCESS</span>
-          <h1>Connect to AgentDock</h1>
-          <p>Enter a tenant API token. It is verified first and kept only in browser memory.</p>
-          <label htmlFor="api-credential">API token</label>
-          <input
-            autoComplete="off"
-            id="api-credential"
-            onChange={(event) => setCredentialInput(event.target.value)}
-            spellCheck={false}
-            type="password"
-            value={credentialInput}
-          />
+          <span className="empty-kicker">SELF-HOSTED MULTI-TENANT ACCESS</span>
+          <div className="credential-tabs" role="tablist" aria-label="Authentication mode">
+            <button
+              aria-selected={authMode === "login"}
+              className={authMode === "login" ? "active" : ""}
+              onClick={() => {
+                setAuthMode("login");
+                update({ type: "api.error.cleared" });
+              }}
+              role="tab"
+              type="button"
+            >
+              use token
+            </button>
+            <button
+              aria-selected={authMode === "register"}
+              className={authMode === "register" ? "active" : ""}
+              onClick={() => {
+                setAuthMode("register");
+                update({ type: "api.error.cleared" });
+              }}
+              role="tab"
+              type="button"
+            >
+              create tenant
+            </button>
+          </div>
+          <h1>{authMode === "login" ? "Connect to AgentDock" : "Create an isolated tenant"}</h1>
+          {authMode === "login" ? (
+            <>
+              <p>Enter a tenant API token. It is verified and kept only in browser memory.</p>
+              <label htmlFor="api-credential">API token</label>
+              <input
+                autoComplete="off"
+                id="api-credential"
+                onChange={(event) => setCredentialInput(event.target.value)}
+                spellCheck={false}
+                type="password"
+                value={credentialInput}
+              />
+            </>
+          ) : (
+            <>
+              <p>
+                Create a local tenant with independent conversations, quotas, events, and
+                checkpoints. Registration may be disabled by the operator.
+              </p>
+              <label htmlFor="registration-slug">Tenant slug</label>
+              <input
+                autoComplete="organization"
+                id="registration-slug"
+                onChange={(event) => setRegistrationSlug(event.target.value)}
+                placeholder="team-alpha"
+                spellCheck={false}
+                value={registrationSlug}
+              />
+              <label htmlFor="registration-display-name">Owner display name</label>
+              <input
+                autoComplete="name"
+                id="registration-display-name"
+                onChange={(event) => setRegistrationDisplayName(event.target.value)}
+                placeholder="Alpha Owner"
+                value={registrationDisplayName}
+              />
+            </>
+          )}
           {state.apiError ? <div className="credential-error">{state.apiError}</div> : null}
           <button disabled={credentialChecking} type="submit">
-            {credentialChecking ? "verifying…" : "continue"}
+            {credentialChecking
+              ? authMode === "login"
+                ? "verifying…"
+                : "creating…"
+              : authMode === "login"
+                ? "continue"
+                : "create tenant and continue"}
           </button>
         </form>
       </main>
@@ -532,42 +695,76 @@ export default function App() {
             <span aria-hidden="true">＋</span> new demo session
           </button>
         </div>
-        <div className="tree-heading">
-          <span>SESSION TREE</span>
-          <span>{state.turns.length}</span>
+        <div className="sidebar-scroll">
+          <div className="tree-heading">
+            <span>MY CONVERSATIONS</span>
+            <span>{conversations.length}</span>
+          </div>
+          <nav className="conversation-list" aria-label="Tenant conversations">
+            {conversations.length === 0 ? (
+              <div className="tree-empty">No conversations in this tenant.</div>
+            ) : (
+              conversations.map((conversation) => (
+                <button
+                  className={
+                    state.session?.sessionId === conversation.sessionId
+                      ? "conversation-item active"
+                      : "conversation-item"
+                  }
+                  disabled={conversationLoading !== null || operation !== null}
+                  key={conversation.sessionId}
+                  onClick={() => void openConversation(conversation)}
+                  type="button"
+                >
+                  <span className="conversation-name">{conversation.projectName}</span>
+                  <span className="conversation-meta">
+                    {conversation.state} · {String(conversation.turnCount)} turns ·{" "}
+                    {shortId(conversation.sessionId)}
+                  </span>
+                </button>
+              ))
+            )}
+            {conversationListTruncated ? (
+              <div className="tree-placeholder">Showing the newest 100 conversations.</div>
+            ) : null}
+          </nav>
+          <div className="tree-heading">
+            <span>CURRENT SESSION</span>
+            <span>{state.turns.length}</span>
+          </div>
+          <nav className="session-tree" aria-label="Session tree">
+            {state.session === null ? (
+              <div className="tree-empty">Select or create a durable session.</div>
+            ) : (
+              <div className="tree-root">
+                <div className="tree-session active">
+                  <span className="tree-caret">⌄</span>
+                  <span className="role-dot root-dot" />
+                  <span className="tree-label">root</span>
+                  <span className="tree-id">{shortId(state.session.sessionId)}</span>
+                </div>
+                <div className="tree-children">
+                  {state.turns.length === 0 ? (
+                    <div className="tree-placeholder">ready for first turn</div>
+                  ) : (
+                    state.turns.map((turn, index) => (
+                      <a
+                        className="tree-turn"
+                        href={`#turn-${turn.turnId}`}
+                        key={turn.turnId}
+                        onClick={() => setSidebarOpen(false)}
+                      >
+                        <span className={`tree-status tree-status-${turn.status}`} />
+                        <span>turn {String(index + 1)}</span>
+                        <span className="tree-id">{shortId(turn.turnId)}</span>
+                      </a>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </nav>
         </div>
-        <nav className="session-tree" aria-label="Session tree">
-          {state.session === null ? (
-            <div className="tree-empty">No durable session yet.</div>
-          ) : (
-            <div className="tree-root">
-              <div className="tree-session active">
-                <span className="tree-caret">⌄</span>
-                <span className="role-dot root-dot" />
-                <span className="tree-label">root</span>
-                <span className="tree-id">{shortId(state.session.sessionId)}</span>
-              </div>
-              <div className="tree-children">
-                {state.turns.length === 0 ? (
-                  <div className="tree-placeholder">ready for first turn</div>
-                ) : (
-                  state.turns.map((turn, index) => (
-                    <a
-                      className="tree-turn"
-                      href={`#turn-${turn.turnId}`}
-                      key={turn.turnId}
-                      onClick={() => setSidebarOpen(false)}
-                    >
-                      <span className={`tree-status tree-status-${turn.status}`} />
-                      <span>turn {String(index + 1)}</span>
-                      <span className="tree-id">{shortId(turn.turnId)}</span>
-                    </a>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </nav>
         <footer className="sidebar-footer">
           {identity ? (
             <div className="tenant-identity">
@@ -639,6 +836,30 @@ export default function App() {
             ) : null}
           </div>
         </header>
+        {newlyIssuedToken ? (
+          <section className="credential-notice" aria-label="New owner API token">
+            <div>
+              <strong>Save this owner token now.</strong>
+              <span>It is shown once and is not recoverable from the database.</span>
+            </div>
+            <input aria-label="New owner API token" readOnly value={newlyIssuedToken} />
+            <button
+              onClick={() => void globalThis.navigator.clipboard?.writeText(newlyIssuedToken)}
+              type="button"
+            >
+              copy
+            </button>
+            <button onClick={() => setNewlyIssuedToken(null)} type="button">
+              dismiss
+            </button>
+          </section>
+        ) : null}
+        {state.historyTruncated ? (
+          <div className="history-notice">
+            This conversation is showing its newest 200 prompt turns and matching durable event
+            suffix.
+          </div>
+        ) : null}
         {state.apiError ? (
           <div className="error-banner" role="alert">
             <span>request not confirmed</span>

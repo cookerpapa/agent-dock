@@ -1,10 +1,12 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import {
+  NonNegativeSafeIntegerSchema,
   PositiveSafeIntegerSchema,
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
+import { SessionStateSchema } from "./event-envelope.ts";
 
 export const TurnThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -35,6 +37,31 @@ export const TenantIdentityResourceSchema = Type.Object(
     userId: UuidSchema,
     displayName: Type.String({ minLength: 1, maxLength: 256 }),
     role: TenantApiRoleSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const CreateTenantRegistrationRequestSchema = Type.Object(
+  {
+    tenantSlug: Type.String({ minLength: 1, maxLength: 128 }),
+    displayName: Type.String({ minLength: 1, maxLength: 256 }),
+  },
+  { additionalProperties: false },
+);
+
+export const TenantRegistrationResourceSchema = Type.Object(
+  {
+    tenantId: UuidSchema,
+    tenantSlug: Type.String({ minLength: 1, maxLength: 64 }),
+    userId: UuidSchema,
+    displayName: Type.String({ minLength: 1, maxLength: 256 }),
+    role: Type.Literal("owner"),
+    apiToken: Type.String({
+      minLength: 84,
+      maxLength: 297,
+      pattern:
+        "^adk_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.[A-Za-z0-9_-]{43,256}$",
+    }),
   },
   { additionalProperties: false },
 );
@@ -71,6 +98,77 @@ export const SessionResourceSchema = Type.Object(
     state: Type.Literal("cold"),
     modelProfileId: UuidSchema,
     createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationTurnStateSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("dispatching"),
+  Type.Literal("running"),
+  Type.Literal("waiting_approval"),
+  Type.Literal("cancelling"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+]);
+
+export const ConversationSummaryResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    projectId: UuidSchema,
+    workspaceId: UuidSchema,
+    projectName: Type.String({ minLength: 1, maxLength: 256 }),
+    state: SessionStateSchema,
+    turnCount: NonNegativeSafeIntegerSchema,
+    createdAt: UtcTimestampSchema,
+    updatedAt: UtcTimestampSchema,
+    lastActiveAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationListResourceSchema = Type.Object(
+  {
+    conversations: Type.Array(ConversationSummaryResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationSessionResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    projectId: UuidSchema,
+    workspaceId: UuidSchema,
+    state: SessionStateSchema,
+    modelProfileId: UuidSchema,
+    createdAt: UtcTimestampSchema,
+    updatedAt: UtcTimestampSchema,
+    lastActiveAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationTurnResourceSchema = Type.Object(
+  {
+    turnId: UuidSchema,
+    commandId: UuidSchema,
+    mailboxPosition: PositiveSafeIntegerSchema,
+    prompt: Type.String({ minLength: 1, maxLength: 100_000 }),
+    state: ConversationTurnStateSchema,
+    acceptedAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationDetailResourceSchema = Type.Object(
+  {
+    project: ProjectResourceSchema,
+    session: ConversationSessionResourceSchema,
+    turns: Type.Array(ConversationTurnResourceSchema, { maxItems: 200 }),
+    historyTruncated: Type.Boolean(),
+    replayAfterSequence: NonNegativeSafeIntegerSchema,
   },
   { additionalProperties: false },
 );
@@ -132,10 +230,18 @@ export const ControlPlaneApiErrorSchema = Type.Object(
 export type TurnThinkingLevel = Static<typeof TurnThinkingLevelSchema>;
 export type TenantApiRole = Static<typeof TenantApiRoleSchema>;
 export type TenantIdentityResource = Static<typeof TenantIdentityResourceSchema>;
+export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
+export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
 export type SessionResource = Static<typeof SessionResourceSchema>;
+export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
+export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
+export type ConversationListResource = Static<typeof ConversationListResourceSchema>;
+export type ConversationSessionResource = Static<typeof ConversationSessionResourceSchema>;
+export type ConversationTurnResource = Static<typeof ConversationTurnResourceSchema>;
+export type ConversationDetailResource = Static<typeof ConversationDetailResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
 export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellationRequestSchema>;
@@ -181,6 +287,35 @@ export function parseTenantIdentityResource(value: unknown): TenantIdentityResou
   return parseSchema(TenantIdentityResourceSchema, value, "tenant identity resource");
 }
 
+export function parseCreateTenantRegistrationRequest(
+  value: unknown,
+): CreateTenantRegistrationRequest {
+  const request = parseSchema(
+    CreateTenantRegistrationRequestSchema,
+    value,
+    "tenant registration request",
+  );
+  const tenantSlug = request.tenantSlug.trim().toLowerCase();
+  const displayName = request.displayName.trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(tenantSlug)) {
+    throw new ControlPlaneApiValidationError(
+      "Tenant slug must contain 1-64 lowercase letters, digits, or hyphens",
+    );
+  }
+  if (
+    displayName.length === 0 ||
+    new TextEncoder().encode(displayName).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(displayName)
+  ) {
+    throw new ControlPlaneApiValidationError("Display name must contain 1-256 safe UTF-8 bytes");
+  }
+  return { tenantSlug, displayName };
+}
+
+export function parseTenantRegistrationResource(value: unknown): TenantRegistrationResource {
+  return parseSchema(TenantRegistrationResourceSchema, value, "tenant registration resource");
+}
+
 export function parseCreateSessionRequest(value: unknown): CreateSessionRequest {
   return parseSchema(CreateSessionRequestSchema, value, "create-session request");
 }
@@ -207,6 +342,14 @@ export function parseProjectResource(value: unknown): ProjectResource {
 
 export function parseSessionResource(value: unknown): SessionResource {
   return parseSchema(SessionResourceSchema, value, "session resource");
+}
+
+export function parseConversationListResource(value: unknown): ConversationListResource {
+  return parseSchema(ConversationListResourceSchema, value, "conversation list resource");
+}
+
+export function parseConversationDetailResource(value: unknown): ConversationDetailResource {
+  return parseSchema(ConversationDetailResourceSchema, value, "conversation detail resource");
 }
 
 export function parseAcceptedTurnResource(value: unknown): AcceptedTurnResource {

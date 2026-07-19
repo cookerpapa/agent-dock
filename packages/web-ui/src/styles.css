@@ -44,6 +44,7 @@ body {
 }
 
 button,
+input,
 textarea {
   color: inherit;
   font: inherit;
@@ -62,6 +63,7 @@ button:hover:not(:disabled) {
 }
 
 button:focus-visible,
+input:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 summary:focus-visible,
@@ -92,11 +94,18 @@ a {
 .sidebar {
   z-index: 20;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--border);
   background: #131512;
+}
+
+.sidebar-scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .brand {
@@ -168,11 +177,46 @@ a {
 }
 
 .session-tree {
-  min-height: 0;
   padding: 7px 6px 16px;
-  overflow: auto;
-  scrollbar-color: var(--border-strong) transparent;
-  scrollbar-width: thin;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 3px;
+  padding: 7px 6px 12px;
+}
+
+.conversation-item {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.conversation-item.active {
+  border-color: var(--border);
+  background: #1c211b;
+}
+
+.conversation-name,
+.conversation-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-name {
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.conversation-meta {
+  color: var(--faint);
+  font-size: 8.5px;
 }
 
 .tree-empty,
@@ -415,6 +459,50 @@ a {
   background: #261a18;
   color: var(--red);
   font-size: 10.5px;
+}
+
+.credential-notice {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #5a5132;
+  background: #272313;
+  color: var(--yellow);
+}
+
+.credential-notice > div {
+  display: grid;
+}
+
+.credential-notice span {
+  color: #afa47b;
+  font-size: 9px;
+}
+
+.credential-notice input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid #5a5132;
+  border-radius: 4px;
+  background: #17150e;
+  color: #ddd3aa;
+}
+
+.credential-notice button {
+  padding: 4px 7px;
+  border-color: #5a5132;
+  background: transparent;
+  color: #cbbd83;
+}
+
+.history-notice {
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--muted);
+  font-size: 9.5px;
 }
 
 .error-banner > span {
@@ -1083,6 +1171,15 @@ a {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .credential-notice {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .credential-notice > div,
+  .credential-notice input {
+    grid-column: 1 / -1;
+  }
+
   .error-banner > span {
     display: none;
   }
@@ -1115,7 +1212,31 @@ a {
   border: 1px solid #d8d8d2;
   border-radius: 12px;
   background: #fff;
+  color: #24251f;
   box-shadow: 0 18px 60px rgb(0 0 0 / 8%);
+}
+
+.credential-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #d8d8d2;
+  border-radius: 8px;
+  background: #f4f4f0;
+}
+
+.credential-tabs button {
+  min-height: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: #77786f;
+}
+
+.credential-tabs button.active {
+  border-color: #c9c9c1;
+  background: #fff;
+  color: #24251f;
 }
 
 .credential-card h1,
@@ -1136,6 +1257,7 @@ a {
   border-radius: 7px;
   padding: 0 12px;
   font: inherit;
+  color: #24251f;
 }
 
 .credential-card button {

@@ -163,9 +163,14 @@ concurrent-turn limits are transactional. One tenant-neutral worker pool uses a
 least-recently-served cursor while preserving per-session mailbox order, and
 cancellation bypasses normal fairness as safety work. Dual-tenant integration
 and production tests cover known foreign UUID probes, quota isolation, role
-denial, restart/scale, and tenant-prefixed S3 restore. Warm-pool eviction,
-token/cost accounting, overload metrics, public identity federation, and a
-mutually hostile/public SaaS threat model remain open.
+denial, restart/scale, and tenant-prefixed S3 restore. An opt-in loopback
+registration route now atomically creates a bounded tenant/owner/profile/policy
+and returns an indexed token once; real-PostgreSQL acceptance proves concurrent
+requests cannot exceed the total-tenant cap. Tenant-scoped recent-conversation
+list/detail APIs and Web history switching make that isolation inspectable.
+Warm-pool eviction, token/cost accounting, overload metrics, public identity
+federation/recovery, and a mutually hostile/public SaaS threat model remain
+open.
 
 ## Phase 5: cloud-aware subagents (3 weeks)
 

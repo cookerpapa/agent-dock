@@ -1,15 +1,21 @@
 import {
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseConversationDetailResource,
+  parseConversationListResource,
   parseControlPlaneApiError,
   parseProjectResource,
   parseSessionResource,
   parseTenantIdentityResource,
+  parseTenantRegistrationResource,
+  type ConversationDetailResource,
+  type ConversationListResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ProjectResource,
   type SessionResource,
   type TenantIdentityResource,
+  type TenantRegistrationResource,
   type TurnThinkingLevel,
 } from "@agent-dock/protocol";
 
@@ -109,6 +115,32 @@ export class AgentDockApi {
   async getIdentity(): Promise<TenantIdentityResource> {
     return parseTenantIdentityResource(
       await request(this.#fetch, "/v1/identity", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async registerTenant(
+    tenantSlug: string,
+    displayName: string,
+  ): Promise<TenantRegistrationResource> {
+    return parseTenantRegistrationResource(
+      await request(this.#fetch, "/v1/registrations", jsonRequest({ tenantSlug, displayName })),
+    );
+  }
+
+  async listConversations(): Promise<ConversationListResource> {
+    return parseConversationListResource(
+      await request(this.#fetch, "/v1/conversations", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async getConversation(sessionId: string): Promise<ConversationDetailResource> {
+    return parseConversationDetailResource(
+      await request(
+        this.#fetch,
+        `/v1/conversations/${encodeURIComponent(sessionId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
     );
   }
 

@@ -13,6 +13,13 @@ export {
 } from "./tenant-identity.ts";
 
 export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+export {
+  PublicTenantRegistrationError,
+  PublicTenantRegistrationService,
+  type PublicTenantRegistrationConfiguration,
+  type PublicTenantRegistrationErrorCode,
+  type PublicTenantRegistrationOptions,
+} from "./public-tenant-registration.ts";
 export { TenantRequestContext, TenantRequestContextError } from "./tenant-request-context.ts";
 
 export {
@@ -182,6 +189,7 @@ export {
 export {
   CONTROL_PLANE_LIVE_PATH,
   CONTROL_PLANE_READY_PATH,
+  TENANT_REGISTRATION_PATH,
   ProductionHttpGateway,
   type ProductionHttpGatewayOptions,
 } from "./production-http-gateway.ts";

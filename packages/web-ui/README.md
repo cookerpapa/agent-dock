@@ -17,6 +17,12 @@ JSONL, launches a process, talks to Docker, or receives a provider credential.
 - verifies a pasted tenant credential through `/v1/identity`, displays the
   tenant/user/role, keeps the token only in memory, clears session state on
   logout, and disables mutation controls for `viewer`.
+- offers opt-in tenant registration, verifies the one-time owner token before
+  switching security context, and never stores that token in Web Storage or a
+  URL;
+- lists only the authenticated tenant's recent conversations, loads bounded
+  prompt history, and resumes the matching durable SSE suffix when a user
+  switches sessions.
 
 All API resources and events are validated with `@agent-dock/protocol`. Markdown
 raw HTML is disabled by default, remote images are replaced with inert labels,
@@ -47,6 +53,6 @@ npm run test --workspace @agent-dock/web-ui
 
 The Phase 2 checkpoint slice permits a second turn on the same session. It
 rehydrates Pi JSONL and the bounded sample workspace into a new disposable
-container before the follow-up runs. Session discovery after page reload,
-approval responses, arbitrary repository import, and a production S3/MinIO
-adapter remain deferred.
+container before the follow-up runs. Recent session discovery now survives a
+page reload after the user presents the token again. Approval responses,
+arbitrary repository import, and public identity recovery remain deferred.

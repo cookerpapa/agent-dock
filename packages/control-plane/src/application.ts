@@ -9,6 +9,7 @@ import type { SessionEventStreamOptions } from "./session-event-stream.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
+import type { PublicTenantRegistrationConfiguration } from "./public-tenant-registration.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
   ControlPlaneStoreOptions,
@@ -22,6 +23,7 @@ export type ControlPlaneApplicationOptions = Omit<
   sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
+  publicRegistration?: PublicTenantRegistrationConfiguration;
 };
 
 export async function createControlPlaneApplication(

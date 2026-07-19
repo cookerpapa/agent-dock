@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import {
   parseAcceptTurnRequest,
+  parseCreateTenantRegistrationRequest,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
@@ -20,12 +21,16 @@ import {
   parseUuidPathParameter,
   type AcceptedTurnResource,
   type AcceptedTurnCancellationResource,
+  type ConversationDetailResource,
+  type ConversationListResource,
   type ProjectResource,
   type SessionResource,
   type TenantIdentityResource,
+  type TenantRegistrationResource,
 } from "@agent-dock/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+import { PublicTenantRegistrationService } from "./public-tenant-registration.ts";
 import { SessionEventStream } from "./session-event-stream.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 
@@ -33,9 +38,16 @@ import { TenantRequestContext } from "./tenant-request-context.ts";
 export class ControlPlaneController {
   constructor(
     @Inject(ControlPlaneStoreFactory) private readonly controlPlaneStores: ControlPlaneStoreFactory,
+    @Inject(PublicTenantRegistrationService)
+    private readonly publicTenantRegistration: PublicTenantRegistrationService,
     @Inject(TenantRequestContext) private readonly tenantRequestContext: TenantRequestContext,
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
   ) {}
+
+  @Post("registrations")
+  async registerTenant(@Body() body: unknown): Promise<TenantRegistrationResource> {
+    return this.publicTenantRegistration.register(parseCreateTenantRegistrationRequest(body));
+  }
 
   @Get("identity")
   identity(@Req() request: FastifyRequest): TenantIdentityResource {
@@ -57,6 +69,22 @@ export class ControlPlaneController {
     const request = parseCreateProjectRequest(body);
     const identity = this.tenantRequestContext.requireMutation(httpRequest);
     return this.controlPlaneStores.forIdentity(identity).createProject(request.name);
+  }
+
+  @Get("conversations")
+  async listConversations(@Req() request: FastifyRequest): Promise<ConversationListResource> {
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).listConversations();
+  }
+
+  @Get("conversations/:sessionId")
+  async getConversation(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<ConversationDetailResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).getConversation(sessionId);
   }
 
   @Post("projects/:projectId/sessions")

@@ -61,6 +61,7 @@ export async function startControlPlane(): Promise<void> {
     const provisioningGateway = new SupervisorProvisioningGateway({ provisioner });
     const httpGateway = new ProductionHttpGateway({
       authenticator: new PostgresTenantApiAuthenticator({ database }),
+      publicRegistrationEnabled: config.publicRegistration.enabled,
       readiness: async () => {
         if (runtime?.state !== "running") return false;
         await sql`select 1`.execute(database);
@@ -77,6 +78,7 @@ export async function startControlPlane(): Promise<void> {
         new HttpSandboxAssignmentInventory(managementClient, identity.sandboxId),
       supervisorProvisioningGateway: provisioningGateway,
       productionHttpGateway: httpGateway,
+      publicRegistration: config.publicRegistration,
       worker: { maxLanesPerConnection: config.maximumLanesPerSupervisor },
     });
     await runtime.listen(config.port, config.host);

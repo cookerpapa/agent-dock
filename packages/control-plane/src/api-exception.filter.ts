@@ -3,6 +3,7 @@ import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@agen
 import type { FastifyReply } from "fastify";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
 import { DurableEventStoreError } from "./durable-event-store.ts";
+import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
 
 type ErrorResponse = {
@@ -22,6 +23,15 @@ function mappedError(error: unknown): ErrorResponse {
       status: error.code === "authentication_required" ? 401 : 403,
       body: { error: { code: error.code, message: error.message } },
     };
+  }
+  if (error instanceof PublicTenantRegistrationError) {
+    const status =
+      error.code === "registration_disabled"
+        ? 404
+        : error.code === "tenant_slug_unavailable"
+          ? 409
+          : 429;
+    return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof ControlPlaneStoreError) {
     const status =

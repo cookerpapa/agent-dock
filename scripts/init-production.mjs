@@ -180,6 +180,23 @@ function httpPort() {
   return String(parsed);
 }
 
+function booleanEnvironmentValue(name, fallback) {
+  const value = process.env[name] ?? fallback;
+  if (value !== "true" && value !== "false") {
+    throw new Error(`${name} must be true or false`);
+  }
+  return value;
+}
+
+function integerEnvironmentValue(name, fallback, minimum, maximum) {
+  const value = process.env[name] ?? String(fallback);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer from ${String(minimum)} to ${String(maximum)}`);
+  }
+  return String(parsed);
+}
+
 function applicationIdentity() {
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
@@ -266,6 +283,45 @@ const supervisorId = boundedEnvironmentValue(
   "agent-dock-supervisor-1",
   /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/,
 );
+const publicRegistrationEnabled = booleanEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED",
+  "false",
+);
+const publicRegistrationMaximumTenants = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
+  32,
+  2,
+  1_000_000,
+);
+const publicTenantMaximumProjects = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS",
+  10,
+  1,
+  1_000_000,
+);
+const publicTenantMaximumSessions = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS",
+  100,
+  1,
+  1_000_000,
+);
+const publicTenantMaximumUnsettledTurns = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+  10,
+  1,
+  1_000_000,
+);
+const publicTenantMaximumConcurrentTurns = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
+  1,
+  1,
+  256,
+);
+if (Number(publicTenantMaximumConcurrentTurns) > Number(publicTenantMaximumUnsettledTurns)) {
+  throw new Error(
+    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+  );
+}
 
 await writePrivateFile(resolve(secretsDirectory, "postgres-password"), `${postgresPassword}\n`);
 await writePrivateFile(
@@ -311,6 +367,12 @@ const environment = [
   `AGENT_DOCK_SUPERVISOR_ID=${supervisorId}`,
   "AGENT_DOCK_SUPERVISOR_CAPACITY=2",
   "AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR=8",
+  `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,
+  `AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=${publicRegistrationMaximumTenants}`,
+  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS=${publicTenantMaximumProjects}`,
+  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS=${publicTenantMaximumSessions}`,
+  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS=${publicTenantMaximumUnsettledTurns}`,
+  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
   "AGENT_DOCK_CHECKPOINT_BUCKET=agent-dock-checkpoints",
   "AGENT_DOCK_CHECKPOINT_REGION=us-east-1",
   "",

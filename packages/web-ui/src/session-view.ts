@@ -1,6 +1,8 @@
 import type {
   AcceptedTurnResource,
   AgentDockEvent,
+  ConversationDetailResource,
+  ConversationSessionResource,
   ProjectResource,
   SessionState,
   SessionResource,
@@ -78,16 +80,18 @@ export type SessionViewStatus = "none" | SessionState;
 
 export type SessionViewState = {
   project: ProjectResource | null;
-  session: SessionResource | null;
+  session: SessionResource | ConversationSessionResource | null;
   sessionState: SessionViewStatus;
   lastSequence: number;
   turns: readonly TurnView[];
+  historyTruncated: boolean;
   connection: ConnectionView;
   apiError: string | null;
 };
 
 export type SessionViewAction =
   | { type: "session.created"; project: ProjectResource; session: SessionResource }
+  | { type: "conversation.loaded"; conversation: ConversationDetailResource }
   | { type: "turn.accepted"; accepted: AcceptedTurnResource; prompt: string }
   | { type: "turn.cancellation.requested"; turnId: string }
   | { type: "stream.status"; status: SessionStreamStatus }
@@ -102,6 +106,7 @@ export function createInitialSessionView(): SessionViewState {
     sessionState: "none",
     lastSequence: 0,
     turns: [],
+    historyTruncated: false,
     connection: { phase: "offline", attempt: 0, message: null },
     apiError: null,
   };
@@ -334,6 +339,37 @@ export function sessionViewReducer(
       project: action.project,
       session: action.session,
       sessionState: action.session.state,
+      connection: { phase: "offline", attempt: 0, message: "Opening durable event stream" },
+    };
+  }
+  if (action.type === "conversation.loaded") {
+    return {
+      ...createInitialSessionView(),
+      project: action.conversation.project,
+      session: action.conversation.session,
+      sessionState: action.conversation.session.state,
+      lastSequence: action.conversation.replayAfterSequence,
+      turns: action.conversation.turns.map((turn): TurnView => ({
+        turnId: turn.turnId,
+        commandId: turn.commandId,
+        mailboxPosition: turn.mailboxPosition,
+        prompt: turn.prompt,
+        acceptedAt: turn.acceptedAt,
+        status:
+          turn.state === "queued" || turn.state === "dispatching"
+            ? "queued"
+            : turn.state === "waiting_approval"
+              ? "running"
+              : turn.state,
+        items: [],
+        startedSequence: null,
+        terminalSequence: null,
+        stopReason: null,
+        failure: null,
+        cancellation: null,
+        workspacePatch: null,
+      })),
+      historyTruncated: action.conversation.historyTruncated,
       connection: { phase: "offline", attempt: 0, message: "Opening durable event stream" },
     };
   }

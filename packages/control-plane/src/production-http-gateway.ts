@@ -3,10 +3,12 @@ import { bindTenantRequestIdentity, type TenantApiAuthenticator } from "./tenant
 
 export const CONTROL_PLANE_LIVE_PATH = "/health/live";
 export const CONTROL_PLANE_READY_PATH = "/health/ready";
+export const TENANT_REGISTRATION_PATH = "/v1/registrations";
 
 export type ProductionHttpGatewayOptions = {
   authenticator: TenantApiAuthenticator;
   readiness: () => boolean | Promise<boolean>;
+  publicRegistrationEnabled?: boolean;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
@@ -17,11 +19,13 @@ function bearerToken(value: string | undefined): string | undefined {
 export class ProductionHttpGateway {
   readonly #authenticator: TenantApiAuthenticator;
   readonly #readiness: () => boolean | Promise<boolean>;
+  readonly #publicRegistrationEnabled: boolean;
   #installed = false;
 
   constructor(options: ProductionHttpGatewayOptions) {
     this.#authenticator = options.authenticator;
     this.#readiness = options.readiness;
+    this.#publicRegistrationEnabled = options.publicRegistrationEnabled ?? false;
   }
 
   install(fastify: FastifyInstance): void {
@@ -30,6 +34,16 @@ export class ProductionHttpGateway {
     fastify.addHook("onRequest", async (request, reply) => {
       const path = request.raw.url?.split("?", 1)[0] ?? "";
       if (!path.startsWith("/v1/") && path !== "/v1") return;
+      if (request.method === "POST" && path === TENANT_REGISTRATION_PATH) {
+        if (this.#publicRegistrationEnabled) return;
+        await reply.code(404).send({
+          error: {
+            code: "route_not_found",
+            message: "The requested API route was not found",
+          },
+        });
+        return;
+      }
       const token = bearerToken(request.headers.authorization);
       let identity;
       try {

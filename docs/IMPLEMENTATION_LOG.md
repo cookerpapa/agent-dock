@@ -1221,3 +1221,46 @@
   policy、warm-pool cost accounting 和可观测性仍未宣称完成。若继续产品能力，优先做 generic repository import +
   request-scoped model gateway；原因是多租户 runtime correctness 已有真实部署证据，当前可用性的主要瓶颈已经是
   安全接入用户代码和模型凭据。
+
+## 2026-07-19 — 可选公开注册与租户会话发现
+
+- 目标：让使用者无需宿主 CLI 就能创建两个独立 tenant，从浏览器直接验证多租户边界；同时补上刷新后找不到历史
+  session 的产品缺口。这里的“公开”只表示一个可选的匿名 HTTP admission，不扩大当前 loopback、单宿主、
+  deterministic fixture 的生产声明。
+- 决策：新增 ADR-0026。生产网关只对精确的 `POST /v1/registrations` 放行匿名请求，并且默认关闭；GET、子路径和
+  其余 `/v1` 仍必须 bearer auth。注册请求只接受规范化 slug 与安全 UTF-8 display name，一个 PostgreSQL
+  transaction 原子创建 tenant、owner、fake-model binding/profile、runtime policy 和 indexed owner token。明文
+  token 只返回一次，数据库仍只保存 SHA-256 digest。
+- 有界 admission：配置提供 total tenant cap 以及每个 self-service tenant 的 project/session/unsettled/concurrent
+  quotas。注册 transaction 先锁稳定的第一个 tenant row，再计数并插入；因此并发请求也不能越过 cap。duplicate
+  slug 返回 `409 tenant_slug_unavailable`，容量耗尽返回 `429 registration_capacity_reached`，失败路径不返回 UUID/
+  token，也不留下 partial rows。offline admin 仍是独立可信边界。
+- 会话发现：新增 tenant-scoped `GET /v1/conversations` 和 `GET /v1/conversations/:sessionId`。列表按 durable
+  `last_active_at` 返回最新 100 个 session；详情返回 project/session 与最新 200 个 prompt turn。截断时同时返回
+  `historyTruncated` 和对应 durable SSE replay boundary，避免 Web 把被省略的旧 event 插到错误位置。所有 SQL 从
+  authenticated store 获得 tenant；已知 foreign session 与不存在 session 一样为 `404`。
+- Web：登录卡加入 `use token/create tenant` 两种入口。注册成功后先用一次性 token 调 `/v1/identity` 验证，再切换
+  security context；token 只在 React memory 和可 dismiss 的一次性提示中出现。侧栏加载当前 tenant 的会话列表，
+  选择会话后先恢复 prompt metadata，再从服务器给出的 cursor 续接 SSE。注册、换 token、logout 都先清空旧
+  transcript/list/cursor/operation/stream；viewer 可以读列表/详情但不能写。
+- 配置与运维：Compose 和 `production:init` 支持 `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED`、total cap 与四项
+  tenant quota。新 runtime 会校验并持久化首次设置；旧 runtime 可只修改私有 `.env` 后 idempotent deploy。运行手册
+  明确说明没有 password/OIDC/recovery/CAPTCHA/rate-limit/billing，也不允许据此把 plain-HTTP loopback ingress 直接
+  暴露公网。
+- 自动测试：新增 protocol parsing、gateway exact-route、原子注册、digest-only persistence、invalid/duplicate/
+  capacity、owner/viewer role、双 tenant list/detail/SSE isolation、Web API/reducer/security-context 测试。新增 PGlite
+  integration 后，四个重型 PGlite/WebSocket 文件并行曾分别触发两个不可重复的时序超时；失败用例单独均通过，
+  将 control-plane suite 从 4 workers 降为 2 后整包稳定通过，业务断言未放宽。
+- 真实生产验收：默认 full-build run `agent-dock-check-d0fb9502cc` 和初始化修正后的 cached-image run
+  `agent-dock-check-d9b3f6389d` 均输出 `production_check_passed`。每次都在真实 PostgreSQL 下以 total cap 3 证明两个
+  并发注册恰好一个 `201`、一个 `429`，并验证 owner/viewer conversation reads、foreign detail/SSE `404`、两租户
+  checkpoint、same-boot reconnect、`1 -> 2 -> 1`、fresh boot、cancellation、22 条连续 event、secret scan 和精确清理。
+- 仓库门禁：最终 `npm run ci` 完整通过 production Web build、所有 workspace typecheck、260 passed/7 conditional
+  skipped tests、两个 zero-model-call Pi spikes 和 `npm audit --audit-level=high`（0 vulnerabilities）。
+- 当前部署：保留原 PostgreSQL/MinIO/boot/spool volumes、stable tenant/user/token，把
+  `agent-dock-production` 的 registration 开关设为 true、total cap 32 后重新部署；五个常驻 service healthy，仍只发布
+  `127.0.0.1:8080`。无污染探针得到 health `200`、同 slug registration `409`、匿名 conversation list `401`，旧 token
+  仍解析为原 `agent-dock` owner 且只看到本 tenant 的列表。
+- 当前边界：用户现在可以用两个无痕/独立浏览器 context 自助创建 tenant 并验证互不可见，但丢失一次性 token 仍需
+  operator offline 发新 credential。真正面向公网前仍需独立的人类 identity/recovery、edge TLS、rate limiting、
+  abuse/billing、审计与 hostile-tenant sandbox threat model。

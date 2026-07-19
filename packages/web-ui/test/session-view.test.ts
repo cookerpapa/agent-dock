@@ -1,6 +1,7 @@
 import type {
   AcceptedTurnResource,
   AgentDockEvent,
+  ConversationDetailResource,
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
@@ -95,6 +96,48 @@ describe("session transcript reducer", () => {
       [2, "Run the follow-up checks", "queued"],
     ]);
     expect(activeTurn(state)?.mailboxPosition).toBe(1);
+  });
+
+  it("loads bounded historical prompt metadata before replaying its durable suffix", () => {
+    const conversation: ConversationDetailResource = {
+      project,
+      session: {
+        ...session,
+        state: "running",
+        updatedAt: CREATED_AT,
+        lastActiveAt: CREATED_AT,
+      },
+      turns: [
+        {
+          turnId: TURN_ID,
+          commandId: accepted.commandId,
+          mailboxPosition: 8,
+          prompt: "Historical private prompt",
+          state: "running",
+          acceptedAt: CREATED_AT,
+        },
+      ],
+      historyTruncated: true,
+      replayAfterSequence: 10,
+    };
+    let state = sessionViewReducer(createInitialSessionView(), {
+      type: "conversation.loaded",
+      conversation,
+    });
+    expect(state).toMatchObject({
+      lastSequence: 10,
+      sessionState: "running",
+      historyTruncated: true,
+      turns: [{ prompt: "Historical private prompt", mailboxPosition: 8, status: "running" }],
+    });
+    state = sessionViewReducer(state, {
+      type: "stream.event",
+      event: envelope(11, { type: "assistant.text.delta", payload: { text: "continued" } }),
+    });
+    expect(state.lastSequence).toBe(11);
+    expect(state.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: "text", text: "continued" }),
+    ]);
   });
 
   it("keeps ordered text/tool lifecycle and the final bounded patch", () => {

@@ -11,6 +11,8 @@ import type {
   AcceptTurnRequest,
   AcceptedTurnCancellationResource,
   AcceptedTurnResource,
+  ConversationDetailResource,
+  ConversationListResource,
   CreateTurnCancellationRequest,
   ProjectResource,
   SessionResource,
@@ -125,6 +127,8 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
 }
 
 const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
+const MAX_CONVERSATION_SUMMARIES = 100;
+const MAX_CONVERSATION_TURNS = 200;
 const TURN_ACCEPTING_SESSION_STATES = new Set<SessionState>([
   "cold",
   "idle",
@@ -347,6 +351,181 @@ export class ControlPlaneStore {
         createdAt: isoTimestamp(session.created_at),
       };
     });
+  }
+
+  async listConversations(): Promise<ConversationListResource> {
+    const rows = await this.#database
+      .selectFrom("sessions as session_row")
+      .innerJoin("projects as project", (join) =>
+        join
+          .onRef("project.tenant_id", "=", "session_row.tenant_id")
+          .onRef("project.id", "=", "session_row.project_id"),
+      )
+      .leftJoin("turns as turn", (join) =>
+        join
+          .onRef("turn.tenant_id", "=", "session_row.tenant_id")
+          .onRef("turn.session_id", "=", "session_row.id"),
+      )
+      .select([
+        "session_row.id as sessionId",
+        "session_row.project_id as projectId",
+        "session_row.workspace_id as workspaceId",
+        "session_row.state as state",
+        "session_row.created_at as createdAt",
+        "session_row.updated_at as updatedAt",
+        "session_row.last_active_at as lastActiveAt",
+        "project.name as projectName",
+      ])
+      .select((expression) => expression.fn.count<string>("turn.id").as("turnCount"))
+      .where("session_row.tenant_id", "=", this.#tenantId)
+      .groupBy([
+        "session_row.id",
+        "session_row.project_id",
+        "session_row.workspace_id",
+        "session_row.state",
+        "session_row.created_at",
+        "session_row.updated_at",
+        "session_row.last_active_at",
+        "project.name",
+      ])
+      .orderBy("session_row.last_active_at", "desc")
+      .orderBy("session_row.id", "desc")
+      .limit(MAX_CONVERSATION_SUMMARIES + 1)
+      .execute();
+    return {
+      conversations: rows.slice(0, MAX_CONVERSATION_SUMMARIES).map((row) => ({
+        sessionId: row.sessionId,
+        projectId: row.projectId,
+        workspaceId: row.workspaceId,
+        projectName: row.projectName,
+        state: row.state,
+        turnCount: nonNegativeSafeInteger(row.turnCount, "Conversation turn count"),
+        createdAt: isoTimestamp(row.createdAt),
+        updatedAt: isoTimestamp(row.updatedAt),
+        lastActiveAt: isoTimestamp(row.lastActiveAt),
+      })),
+      truncated: rows.length > MAX_CONVERSATION_SUMMARIES,
+    };
+  }
+
+  async getConversation(sessionId: string): Promise<ConversationDetailResource> {
+    const conversation = await this.#database
+      .selectFrom("sessions as session_row")
+      .innerJoin("projects as project", (join) =>
+        join
+          .onRef("project.tenant_id", "=", "session_row.tenant_id")
+          .onRef("project.id", "=", "session_row.project_id"),
+      )
+      .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
+      .select([
+        "session_row.id as sessionId",
+        "session_row.project_id as projectId",
+        "session_row.workspace_id as workspaceId",
+        "session_row.desired_model_profile_id as modelProfileId",
+        "session_row.state as sessionState",
+        "session_row.created_at as sessionCreatedAt",
+        "session_row.updated_at as sessionUpdatedAt",
+        "session_row.last_active_at as lastActiveAt",
+        "project.name as projectName",
+        "project.created_at as projectCreatedAt",
+        "cursor.last_persisted_seq as lastPersistedSequence",
+      ])
+      .where("session_row.tenant_id", "=", this.#tenantId)
+      .where("session_row.id", "=", sessionId)
+      .executeTakeFirst();
+    if (conversation === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Conversation was not found");
+    }
+
+    const newestTurnRows = await this.#database
+      .selectFrom("commands as command")
+      .innerJoin("turns as turn", (join) =>
+        join
+          .onRef("turn.tenant_id", "=", "command.tenant_id")
+          .onRef("turn.id", "=", "command.turn_id"),
+      )
+      .select([
+        "turn.id as turnId",
+        "turn.input_kind as inputKind",
+        "turn.input_text as prompt",
+        "turn.state as turnState",
+        "command.id as commandId",
+        "command.mailbox_position as mailboxPosition",
+        "command.created_at as acceptedAt",
+      ])
+      .where("command.tenant_id", "=", this.#tenantId)
+      .where("command.session_id", "=", sessionId)
+      .where("command.kind", "=", "turn.execute")
+      .where("command.mailbox_position", "is not", null)
+      .orderBy("command.mailbox_position", "desc")
+      .orderBy("command.id", "desc")
+      .limit(MAX_CONVERSATION_TURNS + 1)
+      .execute();
+    const historyTruncated = newestTurnRows.length > MAX_CONVERSATION_TURNS;
+    const includedRows = newestTurnRows.slice(0, MAX_CONVERSATION_TURNS).reverse();
+    const turns = includedRows.map((row) => {
+      if (row.inputKind !== "prompt" || row.prompt === null || row.mailboxPosition === null) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Conversation contains an invalid prompt turn",
+        );
+      }
+      return {
+        turnId: row.turnId,
+        commandId: row.commandId,
+        mailboxPosition: positiveSafeInteger(row.mailboxPosition, "Conversation mailbox position"),
+        prompt: row.prompt,
+        state: row.turnState,
+        acceptedAt: isoTimestamp(row.acceptedAt),
+      };
+    });
+
+    let replayAfterSequence = 0;
+    if (historyTruncated) {
+      const includedTurnIds = turns.map((turn) => turn.turnId);
+      const earliestIncludedEvent = await this.#database
+        .selectFrom("session_events")
+        .select((expression) => expression.fn.min<string>("seq").as("sequence"))
+        .where("tenant_id", "=", this.#tenantId)
+        .where("session_id", "=", sessionId)
+        .where("turn_id", "in", includedTurnIds)
+        .executeTakeFirstOrThrow();
+      replayAfterSequence =
+        earliestIncludedEvent.sequence === null
+          ? nonNegativeSafeInteger(
+              conversation.lastPersistedSequence,
+              "Conversation durable event cursor",
+            )
+          : Math.max(
+              0,
+              positiveSafeInteger(
+                earliestIncludedEvent.sequence,
+                "Conversation first included event sequence",
+              ) - 1,
+            );
+    }
+
+    return {
+      project: {
+        projectId: conversation.projectId,
+        workspaceId: conversation.workspaceId,
+        name: conversation.projectName,
+        createdAt: isoTimestamp(conversation.projectCreatedAt),
+      },
+      session: {
+        sessionId: conversation.sessionId,
+        projectId: conversation.projectId,
+        workspaceId: conversation.workspaceId,
+        state: conversation.sessionState,
+        modelProfileId: conversation.modelProfileId,
+        createdAt: isoTimestamp(conversation.sessionCreatedAt),
+        updatedAt: isoTimestamp(conversation.sessionUpdatedAt),
+        lastActiveAt: isoTimestamp(conversation.lastActiveAt),
+      },
+      turns,
+      historyTruncated,
+      replayAfterSequence,
+    };
   }
 
   async acceptTurn(
