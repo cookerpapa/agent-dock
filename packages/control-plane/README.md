@@ -108,6 +108,50 @@ full image, sandbox, PostgreSQL, and SSE proof with:
 npm run sandbox:check
 ```
 
+## Settled checkpoint object storage
+
+`PostgresSandboxCheckpointStore` keeps lease/fence validation, revision CAS,
+artifact metadata, independent SHA-256 hashes, and the authoritative settled
+pointer pair in PostgreSQL. Its byte-store interface has two implementations:
+
+- `FileCheckpointObjectStore` is the private-directory adapter used by the
+  ephemeral local demo.
+- `S3CheckpointObjectStore` stores the same bounded logical keys in one
+  configured S3-compatible bucket/prefix. It uses conditional single-part
+  writes, precomputed SHA-256 checksums, bounded downloads, and safe error
+  translation. It never receives a database connection or sandbox identity.
+
+The production worker can call
+`createS3CheckpointObjectStoreFromEnvironment()`. It recognizes:
+
+- `AGENT_DOCK_CHECKPOINT_S3_BUCKET` (required);
+- `AGENT_DOCK_CHECKPOINT_S3_REGION`, falling back to `AWS_REGION` or
+  `AWS_DEFAULT_REGION`;
+- optional `AGENT_DOCK_CHECKPOINT_S3_ENDPOINT` and
+  `AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX`;
+- optional strict booleans `AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE` and
+  `AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT`;
+- optional `AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS` from 1 through 10.
+
+There is deliberately no AgentDock-specific access-key or secret variable. The
+AWS SDK standard credential provider chain supplies IAM roles, Web Identity, or
+standard AWS credential environment variables. Plain HTTP requires explicit
+opt-in and is intended only for a private development endpoint. Bucket creation,
+encryption, lifecycle, replication, IAM, and credential rotation stay outside
+the application.
+
+Run the real compatibility and host-independence proof with:
+
+```bash
+npm run object-store:check
+```
+
+It starts a digest-pinned MinIO fixture on an ephemeral loopback port with no
+volume, creates a bucket, writes through one S3 client, destroys it, and restores
+through another. It also proves no-overwrite publication, database-hash
+corruption detection, and hard object-size rejection. The fixture is not a
+production deployment recommendation.
+
 ## Local browser demo
 
 The repository-level `npm run demo` command builds the same sandbox image and
@@ -122,7 +166,9 @@ database and development checkpoint directory disappear on shutdown. Within
 that runtime, successful turns persist Pi JSONL and a bounded workspace manifest
 before `turn.completed`, so the same session can continue in a fresh container.
 `src/main.ts` still requires operator-owned PostgreSQL/profile bootstrap and
-does not start a local Docker supervisor or configure production object storage.
+does not start a local Docker supervisor or the production dispatch worker. The
+S3 factory is exported for that worker rather than silently changing the
+HTTP-only entry point.
 
 ## Verification boundary
 

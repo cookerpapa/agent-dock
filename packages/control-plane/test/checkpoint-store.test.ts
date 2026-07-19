@@ -2,13 +2,19 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
-import { FileCheckpointObjectStore, PostgresSandboxCheckpointStore } from "../src/index.ts";
+import {
+  FileCheckpointObjectStore,
+  PostgresSandboxCheckpointStore,
+  S3CheckpointObjectStore,
+  type S3CheckpointObjectStoreOptions,
+} from "../src/index.ts";
 
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",
@@ -98,16 +104,16 @@ function workspace(label: string): Uint8Array {
   );
 }
 
-async function seed(): Promise<void> {
-  await database
+async function seed(targetDatabase: Kysely<Database> = database): Promise<void> {
+  await targetDatabase
     .insertInto("tenants")
     .values({ id: IDS.tenant, slug: "checkpoint-owner" })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("projects")
     .values({ id: IDS.project, tenant_id: IDS.tenant, name: "checkpoint-project" })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("workspaces")
     .values({
       id: IDS.workspace,
@@ -116,7 +122,7 @@ async function seed(): Promise<void> {
       object_snapshot_key: null,
     })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("credential_bindings")
     .values({
       id: IDS.credential,
@@ -128,7 +134,7 @@ async function seed(): Promise<void> {
       status: "active",
     })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("model_profiles")
     .values({
       id: IDS.profile,
@@ -143,7 +149,7 @@ async function seed(): Promise<void> {
       enabled: true,
     })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("sessions")
     .values({
       id: IDS.session,
@@ -160,7 +166,7 @@ async function seed(): Promise<void> {
       row_version: 1,
     })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("turns")
     .values([
       {
@@ -193,7 +199,7 @@ async function seed(): Promise<void> {
       },
     ])
     .execute();
-  await database
+  await targetDatabase
     .insertInto("commands")
     .values([
       {
@@ -223,7 +229,7 @@ async function seed(): Promise<void> {
       },
     ])
     .execute();
-  await database
+  await targetDatabase
     .insertInto("sandboxes")
     .values({
       id: IDS.sandbox,
@@ -234,7 +240,7 @@ async function seed(): Promise<void> {
       active_sessions: 1,
     })
     .execute();
-  await database
+  await targetDatabase
     .insertInto("session_leases")
     .values({
       session_id: IDS.session,
@@ -246,8 +252,11 @@ async function seed(): Promise<void> {
     .execute();
 }
 
-async function insertCompletedEvent(turn: 1 | 2): Promise<void> {
-  await database
+async function insertCompletedEvent(
+  turn: 1 | 2,
+  targetDatabase: Kysely<Database> = database,
+): Promise<void> {
+  await targetDatabase
     .insertInto("session_events")
     .values({
       event_id: `60000000-0000-4000-8000-00000000000${String(turn)}`,
@@ -288,7 +297,7 @@ afterAll(async () => {
   await rm(objectRoot, { recursive: true, force: true });
 });
 
-describe("PostgreSQL settled checkpoint store", () => {
+describe.sequential("PostgreSQL settled checkpoint store", () => {
   it("commits artifacts under a lease, cold-loads them, and rejects stale or corrupt state", async () => {
     let artifactSequence = 0;
     const store = new PostgresSandboxCheckpointStore({
@@ -391,4 +400,155 @@ describe("PostgreSQL settled checkpoint store", () => {
       code: "stale_checkpoint_fence",
     });
   }, 30_000);
+});
+
+type S3IntegrationConfiguration = {
+  options: S3CheckpointObjectStoreOptions;
+  physicalPrefix: string;
+  credentials: {
+    accessKeyId: string;
+    secretAccessKey: string;
+  };
+};
+
+function s3IntegrationConfiguration(): S3IntegrationConfiguration {
+  const endpoint = process.env.AGENT_DOCK_TEST_S3_ENDPOINT;
+  const bucket = process.env.AGENT_DOCK_TEST_S3_BUCKET;
+  const accessKeyId = process.env.AGENT_DOCK_TEST_S3_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AGENT_DOCK_TEST_S3_SECRET_ACCESS_KEY;
+  const physicalPrefix = process.env.AGENT_DOCK_TEST_S3_KEY_PREFIX;
+  if (
+    endpoint === undefined ||
+    bucket === undefined ||
+    accessKeyId === undefined ||
+    secretAccessKey === undefined ||
+    physicalPrefix === undefined
+  ) {
+    throw new Error("S3 checkpoint integration environment is incomplete");
+  }
+  const credentials = { accessKeyId, secretAccessKey };
+  return {
+    physicalPrefix,
+    credentials,
+    options: {
+      endpoint,
+      bucket,
+      region: "us-east-1",
+      keyPrefix: physicalPrefix,
+      forcePathStyle: true,
+      allowInsecureEndpoint: endpoint.startsWith("http://"),
+      credentials,
+      maxAttempts: 2,
+    },
+  };
+}
+
+const s3IntegrationEnabled = process.env.AGENT_DOCK_TEST_S3_ENDPOINT !== undefined;
+
+describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store", () => {
+  it("restores through a fresh adapter and detects immutable conflicts and remote corruption", async () => {
+    const configuration = s3IntegrationConfiguration();
+    const isolatedPglite = await PGlite.create();
+    const isolatedSocket = new PGLiteSocketServer({
+      db: isolatedPglite,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    let isolatedDatabase: Kysely<Database> | undefined;
+    let readerObjectStore: S3CheckpointObjectStore | undefined;
+    let rawClient: S3Client | undefined;
+    try {
+      rawClient = new S3Client({
+        endpoint: configuration.options.endpoint!,
+        region: configuration.options.region,
+        forcePathStyle: true,
+        credentials: configuration.credentials,
+        maxAttempts: 1,
+      });
+      await rawClient.send(new CreateBucketCommand({ Bucket: configuration.options.bucket }));
+      await isolatedSocket.start();
+      isolatedDatabase = createDatabase({
+        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
+        maxConnections: 2,
+      });
+      await runMigrations(isolatedDatabase, "up");
+      await seed(isolatedDatabase);
+
+      const writerObjectStore = new S3CheckpointObjectStore(configuration.options);
+      let savedRevision: string;
+      try {
+        const writer = new PostgresSandboxCheckpointStore({
+          database: isolatedDatabase,
+          objectStore: writerObjectStore,
+          idGenerator: (() => {
+            let sequence = 0;
+            return () => `70000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
+          })(),
+        });
+        const saved = await writer.save(command(1), null, {
+          piSession: piSession("remote"),
+          workspace: workspace("remote"),
+        });
+        savedRevision = saved.revision;
+        await writerObjectStore.put("probes/immutable.bin", Buffer.from("first"));
+        await insertCompletedEvent(1, isolatedDatabase);
+      } finally {
+        writerObjectStore.destroy();
+      }
+
+      readerObjectStore = new S3CheckpointObjectStore(configuration.options);
+      await expect(
+        readerObjectStore.put("probes/immutable.bin", Buffer.from("replacement")),
+      ).rejects.toMatchObject({ code: "checkpoint_object_exists", retryable: false });
+      await expect(readerObjectStore.get("probes/immutable.bin")).resolves.toEqual(
+        Buffer.from("first"),
+      );
+
+      const reader = new PostgresSandboxCheckpointStore({
+        database: isolatedDatabase,
+        objectStore: readerObjectStore,
+      });
+      await expect(reader.load(command(1))).resolves.toEqual({
+        revision: savedRevision,
+        piSession: piSession("remote"),
+        workspace: workspace("remote"),
+      });
+
+      const session = await isolatedDatabase
+        .selectFrom("sessions")
+        .select("pi_session_snapshot_key")
+        .where("id", "=", IDS.session)
+        .executeTakeFirstOrThrow();
+      expect(session.pi_session_snapshot_key).not.toBeNull();
+      await rawClient.send(
+        new PutObjectCommand({
+          Bucket: configuration.options.bucket,
+          Key: `${configuration.physicalPrefix}/${session.pi_session_snapshot_key!}`,
+          Body: Buffer.from("corrupt"),
+        }),
+      );
+      await expect(reader.load(command(1))).rejects.toMatchObject({
+        code: "checkpoint_corrupt",
+        retryable: false,
+      });
+
+      await rawClient.send(
+        new PutObjectCommand({
+          Bucket: configuration.options.bucket,
+          Key: `${configuration.physicalPrefix}/probes/oversized.bin`,
+          Body: Buffer.alloc(2 * 1_024 * 1_024 + 1),
+        }),
+      );
+      await expect(readerObjectStore.get("probes/oversized.bin")).rejects.toMatchObject({
+        code: "checkpoint_object_invalid",
+        retryable: false,
+      });
+    } finally {
+      rawClient?.destroy();
+      readerObjectStore?.destroy();
+      await isolatedDatabase?.destroy();
+      await isolatedSocket.stop().catch(() => undefined);
+      await isolatedPglite.close().catch(() => undefined);
+    }
+  }, 60_000);
 });

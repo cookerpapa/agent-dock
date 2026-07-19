@@ -85,7 +85,7 @@ function revisionFor(piSessionKey: string, workspaceKey: string): string {
     .digest("hex");
 }
 
-function validateObjectKey(value: string): string {
+export function validateCheckpointObjectKey(value: string): string {
   if (
     value.length < 1 ||
     value.length > 2_048 ||
@@ -175,7 +175,7 @@ export class FileCheckpointObjectStore implements CheckpointObjectStore {
   }
 
   #target(objectKey: string): string {
-    const target = resolve(this.#rootDirectory, validateObjectKey(objectKey));
+    const target = resolve(this.#rootDirectory, validateCheckpointObjectKey(objectKey));
     if (target !== this.#rootDirectory && !target.startsWith(`${this.#rootDirectory}${sep}`)) {
       throw new SandboxCheckpointStoreError(
         "checkpoint_object_key_invalid",
@@ -253,8 +253,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       sha256: sha256(checkpoint.workspace),
       sizeBytes: checkpoint.workspace.byteLength,
     };
-    validateObjectKey(piReference.objectKey);
-    validateObjectKey(workspaceReference.objectKey);
+    validateCheckpointObjectKey(piReference.objectKey);
+    validateCheckpointObjectKey(workspaceReference.objectKey);
 
     await this.#objectStore.put(piReference.objectKey, checkpoint.piSession);
     try {

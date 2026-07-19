@@ -86,5 +86,7 @@ honestly remain available after settlement. The composer now also remains
 available during an active turn: another prompt is visibly queued as a separate
 follow-up, receives and displays its durable mailbox position, and never implies
 that it steered the running model loop. Browser reload/session discovery,
-approval responses, real repository import, MinIO/S3 storage, and runner
-restart recovery remain Phase 2/3 work.
+approval responses, real repository import, production worker composition, and
+ambiguous acknowledged-command recovery remain Phase 2/3 work. S3-compatible
+checkpoint storage exists below the UI and never exposes object keys or bytes to
+the browser.

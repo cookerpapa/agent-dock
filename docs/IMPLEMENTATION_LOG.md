@@ -1039,3 +1039,36 @@
 - 下一步：实现 S3-compatible checkpoint object store，并用 localhost MinIO 做跨宿主恢复测试。原因是
   command owner 与 browser event 已能跨 control-plane replica，但 Pi JSONL/workspace checkpoint 仍写在开发
   机本地目录；Supervisor 移到另一宿主机时读不到 settled state，这才是下一项阻止真正云化的边界。
+
+## 2026-07-19 — S3-compatible settled checkpoint 与跨宿主恢复
+
+- 目标：让 settled Pi JSONL/workspace bytes 脱离某台 Supervisor 的本地目录，同时保留 ADR-0011 已证明的
+  checkpoint-before-terminal、lease/fence、revision CAS 和 durable `turn.completed` commit marker。
+- 决策：新增 ADR-0021。PostgreSQL 继续保存 provider-neutral logical key、byte length、SHA-256 和两个
+  authoritative pointer；bucket、endpoint、prefix 与 credential 只属于部署配置，不写进数据库、public event、
+  SSE、Docker args/env、sandbox 或日志。因此无需 migration，也没有第二套 recovery protocol。
+- 写入：新增 `S3CheckpointObjectStore`，对最多 2 MiB 的 object 使用 single-part `PutObject`、
+  `If-None-Match: *`、精确 `Content-Length` 与预计算 SHA-256。`412` 表示 fresh key 已存在并 fail closed；并发
+  `409` 可重试。不会因 UUID “大概率不碰撞”就允许覆盖。
+- 读取：请求 checksum metadata，同时检查 declared length 和实际 stream 的 hard limit；超限立即断流并安全吸收
+  Node stream 的异步 error。若 S3 checksum 不符先拒绝；即使远端对象被合法覆盖、checksum 随之更新，
+  `PostgresSandboxCheckpointStore` 仍用独立数据库 hash 检出 `checkpoint_corrupt`。
+- 配置/安全：bucket、region、endpoint、prefix、boolean 和 retry 数均 fail-fast 校验；custom endpoint 默认
+  path-style，明文 HTTP 必须显式 opt-in。SDK/network failure 映射成 closed safe error，不返回 endpoint、key、
+  access/secret/session token 或原始 SDK message。生产 factory 不新增 AgentDock secret channel，凭据继续走 AWS
+  SDK 标准 provider chain。
+- 可执行证据：`npm run object-store:check` 使用 digest-pinned、仅绑定 `127.0.0.1`、无 volume 的一次性 MinIO。
+  独立 writer 写入并销毁后，fresh reader 仅凭相同 PostgreSQL metadata 与 S3 namespace 恢复完整 Pi/workspace；
+  同 key 替换被拒绝，raw overwrite 被数据库 hash 检出，2 MiB + 1 byte object 被拒绝。测试完成会按精确
+  container name 清理。该旧式 fixture 只证明 S3 API compatibility，不是 production MinIO 推荐。
+- 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、209 passed/7
+  conditional skipped tests、两个 zero-model-call Pi spikes 和 0 vulnerabilities。重构后的
+  `npm run object-store:check` 又独立通过 file/S3 两个 checkpoint tests，MinIO 容器随后删除；所有路径都不
+  调用真实模型，不消耗 subscription/API token。
+- 当前边界：demo 仍故意使用 ephemeral PGlite + private file store；`main.ts` 仍是 HTTP/SSE entry point，不会
+  静默启动 Docker worker。bucket provisioning、IAM、encryption、lifecycle/GC、replication 与 credential rotation
+  都是明确的部署职责；成功 supersede 的旧 checkpoint 尚未做 lifecycle GC。
+- 下一步：把 production provisioner/owner adapter、Supervisor gateway、retirement/maintenance loop、
+  execute/cancel dispatcher 和 S3 checkpoint factory 组合成一个显式 runtime process。原因是各个 durability
+  算法已分别跨 socket、replica、container 和 object store 通过，但当前部署 `main.ts` 仍只会接受请求，不会
+  自动消费 outbox；先完成真实 composition，才能做端到端重启/扩缩容验收，而不是继续增加孤立组件。

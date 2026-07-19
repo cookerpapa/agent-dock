@@ -55,7 +55,8 @@ Docker / Kubernetes Sandbox
 - Internal protocol: versioned TypeBox schemas over an outbound WebSocket
 - Browser event delivery: SSE with resumable sequence numbers
 - Metadata and durable commands: PostgreSQL with Kysely
-- Session/workspace artifacts: MinIO locally, S3-compatible storage later
+- Session/workspace artifacts: S3-compatible object storage, with MinIO used as
+  the disposable compatibility fixture and a private file adapter for the demo
 - Sandbox: Docker first, Kubernetes later
 - Frontend: React, kept deliberately small
 - Observability: OpenTelemetry, Prometheus, Grafana, Loki, Tempo
@@ -108,6 +109,7 @@ only after a measured requirement appears.
 - [ADR-0018: supervisor reconnect and generation recovery](docs/adr/0018-supervisor-reconnect-and-generation-recovery.md)
 - [ADR-0019: cross-instance supervisor command ownership](docs/adr/0019-cross-instance-supervisor-command-ownership.md)
 - [ADR-0020: cross-replica session event notification](docs/adr/0020-cross-replica-session-event-notification.md)
+- [ADR-0021: S3-compatible settled checkpoint storage](docs/adr/0021-s3-compatible-settled-checkpoint-storage.md)
 
 ## Current executable spikes
 
@@ -176,6 +178,19 @@ SSE:
 ```bash
 npm run sandbox:check
 ```
+
+Portable settled-checkpoint storage is verified against a digest-pinned,
+loopback-only, disposable MinIO fixture. The test creates no volume, spends no
+model tokens, conditionally publishes immutable objects, destroys the writer,
+restores through a fresh S3 client, detects remote corruption, and removes the
+container afterward:
+
+```bash
+npm run object-store:check
+```
+
+The fixture proves S3 API compatibility; it is not a production MinIO version
+or deployment recommendation.
 
 The complete Phase 1 user flow is available as a one-command local demo. It
 builds the sandbox image and production frontend bundle, starts an ephemeral
@@ -283,12 +298,16 @@ stored by the trusted host before `turn.completed`; the next turn restores both
 into a different ephemeral container. The demo therefore supports a genuine
 same-session follow-up without keeping an idle Pi process alive.
 
-The development object-store adapter is a private host directory coupled to the
-ephemeral demo database; it is not MinIO/S3 or host-loss durability. Generic
-repository import, policy-approved extension loading, a request-scoped model
-gateway, production supervisor authentication/owner and automatic dispatch-worker
-wiring remain separate work. Queued-turn withdrawal, acknowledged-cancellation
-crash recovery, and Windows Job Object containment are also deferred.
+The ephemeral demo still uses a private host directory coupled to its temporary
+database. The production storage boundary now also has an S3-compatible adapter:
+PostgreSQL retains the fenced logical pointers and independent hashes, while the
+bucket retains immutable Pi/workspace bytes. A test discards the writer and
+restores through a fresh client against disposable MinIO, so this path no longer
+depends on one Supervisor host directory. Generic repository import,
+policy-approved extension loading, a request-scoped model gateway, production
+supervisor authentication/owner, and automatic dispatch-worker wiring remain
+separate work. Queued-turn withdrawal, acknowledged-cancellation crash recovery,
+and Windows Job Object containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
 uses it to atomically persist each closed `event.publish` before transport and
@@ -392,5 +411,8 @@ is active are explicit queued follow-ups—not steer—and the Web page displays
 their durable positions. A five-input integration test concurrently accepts the
 four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
 idempotent replay without position gaps.
-Phase 2 next addresses the MinIO/S3 object-store adapter and production
-provisioner/dispatch-worker wiring rather than keeping a process per conversation.
+The S3-compatible checkpoint adapter is now complete and MinIO-tested. Phase 2
+next composes the production provisioner/owner, Supervisor gateway, maintenance
+loops, and execute/cancel dispatch workers into an explicit runtime process.
+The reason is that the individual durable mechanisms are executable, but the
+production HTTP entry point still accepts work without starting its executor.

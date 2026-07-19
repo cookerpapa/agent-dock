@@ -72,7 +72,7 @@ extension-policy support would overstate the current boundary.
 - [x] Ignore a staged pointer unless its turn has a durable `turn.completed` commit marker
 - [x] Prove a second same-session turn in a different container sees prior messages and files
 - [x] Re-enable the Web composer for same-session follow-up turns
-- [ ] Replace the development file object store with a MinIO/S3 adapter
+- [x] Add an immutable S3-compatible object store and prove fresh-client restore against MinIO
 - [x] Make the supervisor event spool crash-safe and replay it after supervisor restart
 - [x] Add transactional cross-replica live event notification with durable SSE fallback
 - [x] Allocate an immutable positive execute-command mailbox position per session

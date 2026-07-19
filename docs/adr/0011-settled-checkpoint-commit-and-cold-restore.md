@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-19
+- Extended by: [ADR-0021](0021-s3-compatible-settled-checkpoint-storage.md)
 
 ## Context
 
@@ -67,7 +68,8 @@ supervisor must not replace a newer session snapshot after losing its lease.
 8. The development object-store adapter uses a private host directory with
    atomic file publication and hash verification. It exercises the same
    checkpoint-store contract but is not claimed to survive host loss. MinIO/S3
-   is a later adapter, not a different recovery model.
+   is a later adapter, not a different recovery model. ADR-0021 subsequently
+   adds that adapter without changing this commit/recovery protocol.
 9. The current slice is intentionally bounded: at most 2 MiB of Pi JSONL, 2 MiB
    of workspace manifest, 512 regular files, 512 KiB per file, and 512 UTF-8
    bytes per relative path. Larger repositories require an archive/object

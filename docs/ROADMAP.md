@@ -58,7 +58,7 @@ Deliverables:
 - idempotency keys;
 - prompt, steer, and follow-up semantics;
 - durable supervisor-side event replay and cross-replica live notification;
-- Pi JSONL and artifact upload to MinIO;
+- Pi JSONL and artifact upload to S3-compatible storage, verified with MinIO;
 - leases, fencing tokens, cold load, and settled-turn recovery.
 
 Exit criteria: duplicate requests do not duplicate turns; five inputs to the
@@ -86,8 +86,11 @@ capacity, and retires an old sandbox only after runtime absence is confirmed.
 A durable authenticated registration/health manager now owns connection
 generations, exact same-boot reconnect, new-boot fencing, timeout quarantine,
 and a retryable cross-replica retirement claim that requires owner-stop proof
-before reconciliation. MinIO/S3, explicit steer implementation, and a concrete
-production owner-process adapter remain.
+before reconciliation. Settled checkpoint bytes can now use an immutable
+S3-compatible adapter without changing the PostgreSQL pointer/CAS protocol. A
+disposable MinIO test discards the writer, restores with a fresh client, and
+detects collision, corruption, and oversize failures. Explicit steer and a
+concrete production owner-process adapter remain.
 Registration and heartbeat now also pass through an authenticated, bounded,
 ordered outbound WebSocket gateway/client, including cross-replica stale-socket
 rejection. Capability-gated remote execute/cancel now preserves the local

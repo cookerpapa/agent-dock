@@ -354,9 +354,14 @@ manifest are content-hashed, stored outside the container, recorded as artifact
 metadata under the current fence, and restored into the next fresh container.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
 worker crash after upload but before terminal publication falls back to the
-previous settled pair. The development adapter uses a private host directory;
-MinIO/S3, cross-control-plane live notification, generic repository snapshot
-import/export, and production remote sandbox assignment remain unimplemented.
+previous settled pair. The demo adapter uses a private host directory. The
+production adapter keeps the same provider-neutral logical keys in PostgreSQL
+and conditionally stores bounded bytes in a configured S3-compatible
+bucket/prefix. A digest-pinned localhost MinIO proof discards the writer and
+restores through a fresh client; declared and streamed size limits, S3 checksum,
+and the independent database hash fail closed on corruption. Generic repository
+snapshot import/export and production remote sandbox assignment remain
+unimplemented.
 The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
 in-flight execution is never recreated: after the old owner boot is fenced, the
