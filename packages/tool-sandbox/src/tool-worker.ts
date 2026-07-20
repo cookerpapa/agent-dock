@@ -372,7 +372,14 @@ export async function prepareToolWorkspace(
     TOOL_WORKSPACE_DIRECTORY,
   );
   await execute("git", ["add", "--all"], TOOL_WORKSPACE_DIRECTORY);
-  await execute("git", ["commit", "--quiet", "-m", "fixture baseline"], TOOL_WORKSPACE_DIRECTORY);
+  // An empty product Workspace is a valid starting point. Keep a real Git
+  // baseline even when there are no files so later edits still produce a
+  // deterministic diff against the accepted source snapshot.
+  await execute(
+    "git",
+    ["commit", "--allow-empty", "--quiet", "-m", "fixture baseline"],
+    TOOL_WORKSPACE_DIRECTORY,
+  );
   if (workspaceRestore !== undefined) {
     await restoreWorkspaceSnapshot(
       TOOL_WORKSPACE_DIRECTORY,

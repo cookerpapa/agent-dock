@@ -403,6 +403,42 @@ export default function ChatApp() {
     return () => controller.abort();
   }, [authPhase, reconnectGeneration, refreshConversations, state.session?.sessionId, update]);
 
+  // A Run can fail before the trusted Runner publishes its first session
+  // event (for example during Sandbox provisioning). The durable Run record is
+  // therefore the terminal-state fallback for the streaming transcript.
+  useEffect(() => {
+    const runId = currentTurn?.runId;
+    if (runId === null || runId === undefined || authPhase !== "authenticated") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const run = await api.getRun(runId);
+        if (cancelled) return;
+        update({ type: "run.reconciled", run });
+        if (
+          run.state === "completed" ||
+          run.state === "failed" ||
+          run.state === "cancelled" ||
+          run.state === "timed_out" ||
+          run.state === "superseded"
+        ) {
+          setInspectorRefreshSignal((value) => value + 1);
+          await refreshConversations().catch(() => undefined);
+          return;
+        }
+      } catch {
+        if (cancelled) return;
+      }
+      timer = setTimeout(() => void poll(), 1_000);
+    };
+    timer = setTimeout(() => void poll(), 500);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [api, authPhase, currentTurn?.runId, refreshConversations, update]);
+
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.lastSequence, state.turns.length]);

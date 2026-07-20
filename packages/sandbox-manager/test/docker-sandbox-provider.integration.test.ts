@@ -4,7 +4,12 @@ import type {
   ToolSandboxOperationRequest,
   ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
+import {
+  createWorkspaceSnapshot,
+  encodeWorkspaceSnapshotBlob,
+} from "@agent-dock/workspace-runtime";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { DockerSandboxProvider, ToolSandboxManager } from "../src/index.ts";
 
@@ -15,6 +20,7 @@ const ids = [
   "10000000-0000-4000-8000-000000000101",
   "10000000-0000-4000-8000-000000000102",
   "10000000-0000-4000-8000-000000000103",
+  "10000000-0000-4000-8000-000000000104",
 ] as const;
 
 function assignment(index: number): ToolSandboxAssignment {
@@ -95,8 +101,10 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
     });
     const firstAssignment = assignment(1);
     const secondAssignment = assignment(2);
+    const emptyAssignment = assignment(3);
     let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
     let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    let empty: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
     try {
       first = await manager.create(createRequest(1));
       second = await manager.create(createRequest(2));
@@ -257,8 +265,50 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
       await manager.stop(first.activationId, firstAssignment);
       expect(await dockerContainerExists(first.runtimeId)).toBe(false);
       first = undefined;
+
+      empty = await manager.create({
+        ...createRequest(3),
+        workspaceSeed: {
+          kind: "snapshot",
+          snapshot: encodeWorkspaceSnapshotBlob(createWorkspaceSnapshot([])),
+        },
+      });
+      expect(
+        bashOutput(
+          await manager.execute(
+            empty.capability,
+            operation(
+              empty.activationId,
+              "50000000-0000-4000-8000-000000000010",
+              "git status --short; git log -1 --format=%s",
+            ),
+          ),
+        ),
+      ).toBe("fixture baseline\n");
+      await manager.stop(empty.activationId, emptyAssignment);
+      expect(await dockerContainerExists(empty.runtimeId)).toBe(false);
+      empty = undefined;
+
+      const invalidSnapshot = Buffer.from('{"format":"invalid","files":[]}\n', "utf8");
+      await expect(
+        manager.create({
+          ...createRequest(4),
+          workspaceSeed: {
+            kind: "snapshot",
+            snapshot: {
+              encoding: "base64",
+              sha256: createHash("sha256").update(invalidSnapshot).digest("hex"),
+              sizeBytes: invalidSnapshot.byteLength,
+              data: invalidSnapshot.toString("base64"),
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: "tool_worker_failed" });
       await expect(provider.listAssignments(firstAssignment.sandboxId)).resolves.toEqual([]);
     } finally {
+      if (empty !== undefined) {
+        await manager.stop(empty.activationId, emptyAssignment).catch(() => undefined);
+      }
       if (second !== undefined) {
         await manager.stop(second.activationId, secondAssignment).catch(() => undefined);
       }

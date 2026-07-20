@@ -371,13 +371,18 @@ async function readSessionEventsUntil(
       const response = await fetch(
         `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events`,
         {
-          headers: authenticatedHeaders(
-            {
-              accept: "text/event-stream",
-              "last-event-id": String(cursor),
-            },
-            token,
-          ),
+          headers: token.startsWith("agent_dock_session=")
+            ? cookieHeaders(token, {
+                accept: "text/event-stream",
+                "last-event-id": String(cursor),
+              })
+            : authenticatedHeaders(
+                {
+                  accept: "text/event-stream",
+                  "last-event-id": String(cursor),
+                },
+                token,
+              ),
           signal: controller.signal,
         },
       );
@@ -1370,6 +1375,33 @@ async function main() {
     productConversations.body.conversations.map((conversation) => conversation.sessionId),
     [productSession.sessionId],
   );
+  const productTurn = (
+    await postWithCookie(
+      initialProductCookie,
+      `/v1/sessions/${productSession.sessionId}/turns`,
+      { prompt: "Verify that a browser account can activate an empty Workspace." },
+      202,
+      `production-product-empty-${suffix}`,
+    )
+  ).body;
+  const productStream = await readSessionEventsUntil(
+    productSession.sessionId,
+    0,
+    isTerminalFor(productTurn.turnId),
+    120_000,
+    initialProductCookie,
+  );
+  assert.equal(productStream.events.at(-1).type, "turn.completed");
+  assert(productStream.events.some((event) => event.type === "assistant.text.delta"));
+  const productRun = await waitFor(async () => {
+    const response = await http(
+      `/v1/runs/${productTurn.runId}`,
+      { headers: cookieHeaders(initialProductCookie) },
+      200,
+    );
+    return response.body.state === "completed" ? response : false;
+  }, "browser account empty Workspace Run settlement");
+  assert.equal(productRun.body.state, "completed");
   const logout = await postWithCookie(initialProductCookie, "/v1/auth/logout", {}, 200);
   assert.deepEqual(logout.body, { loggedOut: true });
   assert.match(logout.response.headers.get("set-cookie") ?? "", /Max-Age=0/);

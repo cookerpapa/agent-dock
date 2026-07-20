@@ -1051,11 +1051,9 @@ export class DockerSandboxProvider implements SandboxProvider {
         const line = activation.stdoutBuffer.subarray(0, newline).toString("utf8").trim();
         activation.stdoutBuffer = activation.stdoutBuffer.subarray(newline + 1);
         if (line.length > 0) {
+          let output: ToolWorkerOutput;
           try {
-            this.#handleWorkerOutput(
-              activation,
-              parseToolWorkerOutput(JSON.parse(line) as unknown),
-            );
+            output = parseToolWorkerOutput(JSON.parse(line) as unknown);
           } catch {
             fail(
               new SandboxManagerError(
@@ -1063,6 +1061,20 @@ export class DockerSandboxProvider implements SandboxProvider {
                 "Tool Sandbox emitted invalid output",
                 false,
               ),
+            );
+            return;
+          }
+          try {
+            this.#handleWorkerOutput(activation, output);
+          } catch (error: unknown) {
+            fail(
+              error instanceof SandboxManagerError
+                ? error
+                : new SandboxManagerError(
+                    "tool_worker_protocol_error",
+                    "Tool Sandbox emitted invalid output",
+                    false,
+                  ),
             );
           }
         }

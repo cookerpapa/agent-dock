@@ -224,6 +224,29 @@ describe("session transcript reducer", () => {
     });
   });
 
+  it("reconciles a provisioning failure even when no session event was published", () => {
+    const state = sessionViewReducer(preparedState(), {
+      type: "run.reconciled",
+      run: {
+        runId: accepted.runId,
+        state: "failed",
+        failure: {
+          code: "workspace_seed_unavailable",
+          message: "Workspace source could not be provisioned",
+          retryable: true,
+        },
+      },
+    });
+
+    expect(activeTurn(state)).toBeUndefined();
+    expect(state.sessionState).toBe("idle");
+    expect(state.turns[0]).toMatchObject({
+      runId: accepted.runId,
+      status: "failed",
+      failure: { code: "workspace_seed_unavailable" },
+    });
+  });
+
   it("refuses to render a sequence gap", () => {
     const state = sessionViewReducer(preparedState(), {
       type: "stream.event",

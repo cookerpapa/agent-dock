@@ -4,6 +4,7 @@ import type {
   ConversationDetailResource,
   ConversationSessionResource,
   ProjectResource,
+  RunResource,
   SessionState,
   SessionResource,
   WorkspacePatch,
@@ -52,6 +53,7 @@ export type TranscriptItem =
     };
 
 export type TurnView = {
+  runId: string | null;
   turnId: string;
   commandId: string | null;
   mailboxPosition: number | null;
@@ -94,6 +96,10 @@ export type SessionViewAction =
   | { type: "conversation.loaded"; conversation: ConversationDetailResource }
   | { type: "turn.accepted"; accepted: AcceptedTurnResource; prompt: string }
   | { type: "turn.cancellation.requested"; turnId: string }
+  | {
+      type: "run.reconciled";
+      run: Pick<RunResource, "runId" | "state" | "stopReason" | "failure">;
+    }
   | { type: "stream.status"; status: SessionStreamStatus }
   | { type: "stream.event"; event: AgentDockEvent }
   | { type: "api.error"; message: string }
@@ -114,6 +120,7 @@ export function createInitialSessionView(): SessionViewState {
 
 function unknownTurn(turnId: string): TurnView {
   return {
+    runId: null,
     turnId,
     commandId: null,
     mailboxPosition: null,
@@ -350,6 +357,7 @@ export function sessionViewReducer(
       sessionState: action.conversation.session.state,
       lastSequence: action.conversation.replayAfterSequence,
       turns: action.conversation.turns.map((turn): TurnView => ({
+        runId: turn.runId,
         turnId: turn.turnId,
         commandId: turn.commandId,
         mailboxPosition: turn.mailboxPosition,
@@ -365,8 +373,15 @@ export function sessionViewReducer(
         startedSequence: null,
         terminalSequence: null,
         stopReason: null,
-        failure: null,
-        cancellation: null,
+        failure:
+          turn.state === "failed"
+            ? {
+                code: "run_failed",
+                message: "这次运行失败了，请重试。",
+                retryable: true,
+              }
+            : null,
+        cancellation: turn.state === "cancelled" ? { reason: "cancelled", forced: false } : null,
         workspacePatch: null,
       })),
       historyTruncated: action.conversation.historyTruncated,
@@ -376,6 +391,7 @@ export function sessionViewReducer(
   if (action.type === "turn.accepted") {
     const turns = updateTurn(state.turns, action.accepted.turnId, (turn) => ({
       ...turn,
+      runId: action.accepted.runId,
       commandId: action.accepted.commandId,
       mailboxPosition: action.accepted.mailboxPosition,
       prompt: action.prompt,
@@ -383,6 +399,62 @@ export function sessionViewReducer(
       status: turn.startedSequence === null ? "queued" : turn.status,
     }));
     return { ...state, turns, apiError: null };
+  }
+  if (action.type === "run.reconciled") {
+    const turns = state.turns.map((turn): TurnView => {
+      if (turn.runId !== action.run.runId) return turn;
+      if (turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled") {
+        return turn;
+      }
+      if (action.run.state === "completed") {
+        return {
+          ...turn,
+          status: "completed",
+          stopReason: action.run.stopReason ?? "stop",
+        };
+      }
+      if (action.run.state === "cancelled") {
+        return {
+          ...turn,
+          status: "cancelled",
+          stopReason: "cancelled",
+          cancellation: { reason: "cancelled", forced: false },
+        };
+      }
+      if (
+        action.run.state === "failed" ||
+        action.run.state === "timed_out" ||
+        action.run.state === "superseded"
+      ) {
+        return {
+          ...turn,
+          status: "failed",
+          failure:
+            action.run.failure === undefined
+              ? action.run.state === "timed_out"
+                ? { code: "run_timed_out", message: "运行超时，请重试。", retryable: true }
+                : { code: "run_failed", message: "这次运行失败了，请重试。", retryable: true }
+              : {
+                  ...action.run.failure,
+                  message: action.run.failure.message ?? "这次运行失败了，请重试。",
+                },
+        };
+      }
+      if (action.run.state === "cancel_requested") return { ...turn, status: "cancelling" };
+      if (action.run.state === "running" || action.run.state === "checkpointing") {
+        return { ...turn, status: "running" };
+      }
+      return { ...turn, status: "queued" };
+    });
+    const hasActiveTurn = turns.some(
+      (turn) =>
+        turn.status === "queued" || turn.status === "running" || turn.status === "cancelling",
+    );
+    return {
+      ...state,
+      turns,
+      sessionState: hasActiveTurn ? state.sessionState : "idle",
+    };
   }
   if (action.type === "turn.cancellation.requested") {
     return {

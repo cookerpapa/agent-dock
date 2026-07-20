@@ -1634,3 +1634,17 @@
   production backup/restore acceptance 均通过；后者覆盖四 tenant 隔离、Control Plane 扩缩/重启、Supervisor fresh boot、取消、
   durable event replay、Workspace version 延续、观测目标、加密备份恢复和恢复后继续执行。该结果证明本次入口改造没有绕过或删除
   Milestone 1–7 的执行、安全、耐久化和运维能力。
+
+## 2026-07-20 — 空 Workspace 首轮执行故障修复
+
+- 现象与定位：真实浏览器账户提交“你好”后，Run 在 1.8 秒内以 `supervisor_execution_failed` 结束，且没有产生 model request，
+  排除了 DeepSeek 延迟和 token 消耗。对应 Trace 将根因定位到 Sandbox `create`：空 snapshot 恢复后执行普通 Git baseline commit，
+  因没有文件可提交而失败；Provider 又把合法的 `worker.failed` 错误错误归类为 `tool_worker_protocol_error`。由于失败发生在第一个
+  Session event 之前，页面只依赖 SSE 时会一直显示“正在思考”。
+- 修复：Tool Worker 使用 `git commit --allow-empty` 建立真实空基线，后续文件仍可生成确定性 Diff；Docker Provider 将 JSON/schema
+  解析错误与 Worker 报告的运行错误分开，保留后者的安全错误码。Web 为每个 active Turn 保存 `runId`，以 durable Run API 对账
+  queued/running/terminal 状态；即使 provisioning 阶段没有发布事件，也会停止等待并显示失败或超时，重开历史失败对话也有兜底提示。
+- 防回归：真实 Docker Provider contract 新增空 snapshot 启动、空 baseline、命令执行、完整清理和合法 Worker failure 传播；Web
+  reducer 新增 pre-event failure 测试；production gate 现在用 HttpOnly 浏览器 Cookie 在空 Workspace 中真实跑完 Pi、Tool Sandbox、
+  assistant delta、checkpoint 和 Run settlement。全仓 CI、真实 Docker/Pi gate 及四 tenant backup/restore production gate 均通过。
+  同时将高成本 PGlite migration 包限制为两个 worker，29 个数据库测试稳定通过，避免宿主资源竞争造成的成批假超时。
