@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { access, lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,17 @@ const environmentFile = resolve(runtimeDirectory, ".env");
 const input = process.argv.slice(2);
 if (input.length === 0) throw new Error("A Docker Compose command is required");
 await access(environmentFile);
+
+const imageRevision =
+  process.env.AGENT_DOCK_IMAGE_REVISION ??
+  execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
+  throw new Error("AGENT_DOCK_IMAGE_REVISION must be a full lowercase Git commit");
+}
 
 const applicationSecretNames = [
   "api-token",
@@ -75,6 +86,7 @@ await new Promise((resolvePromise, rejectPromise) => {
     cwd: repositoryRoot,
     env: {
       ...process.env,
+      AGENT_DOCK_IMAGE_REVISION: imageRevision,
       AGENT_DOCK_APPLICATION_UID: String(applicationOwner.uid),
       AGENT_DOCK_APPLICATION_GID: String(applicationOwner.gid),
     },

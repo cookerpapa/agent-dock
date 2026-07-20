@@ -6,6 +6,10 @@ x-logging: &bounded-logging
     max-file: "3"
     max-size: 10m
 
+x-application-build-args: &application-build-args
+  AGENT_DOCK_VERSION: ${AGENT_DOCK_IMAGE_VERSION:-production}
+  AGENT_DOCK_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
+
 x-application-security: &application-security
   read_only: true
   init: true
@@ -231,6 +235,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/control-plane/Dockerfile
+      args: *application-build-args
     restart: "no"
     depends_on:
       postgres:
@@ -254,6 +259,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/control-plane/Dockerfile
+      args: *application-build-args
     restart: unless-stopped
     depends_on:
       database-bootstrap:
@@ -295,6 +301,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/supervisor-host/Dockerfile
+      args: *application-build-args
     restart: unless-stopped
     depends_on:
       control-plane:
@@ -448,6 +455,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/sandbox-manager/Dockerfile
+      args: *application-build-args
     restart: unless-stopped
     depends_on:
       repository-network-bootstrap:
@@ -525,6 +533,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/github-gateway/Dockerfile
+      args: *application-build-args
     restart: unless-stopped
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
     environment:
@@ -578,13 +587,14 @@ services:
     build:
       context: ../..
       dockerfile: packages/web-ui/Dockerfile
+      args: *application-build-args
     restart: unless-stopped
     depends_on:
       control-plane:
         condition: service_healthy
     environment:
-      XDG_CONFIG_HOME: /config
-      XDG_DATA_HOME: /data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+      XDG_DATA_HOME: /tmp/caddy-data
     ports:
       - ${AGENT_DOCK_HTTP_BIND_ADDRESS:-127.0.0.1}:${AGENT_DOCK_HTTP_PORT:-8080}:8080
     networks:
@@ -792,6 +802,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/tool-sandbox/Dockerfile
+      args: *application-build-args
     network_mode: none
     restart: "no"
 

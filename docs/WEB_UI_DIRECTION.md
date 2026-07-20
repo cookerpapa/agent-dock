@@ -46,10 +46,10 @@ must never appear in the DOM or browser developer logs.
 
 ## Deferred behavior
 
-Fork creation, branch deletion, automatic next-question loops, arbitrary model
-selection, and advanced session-tree editing are not required for the first
-vertical slice. The layout should leave room for them without delaying durable
-turn submission, SSE streaming, cancellation, and recovery.
+Automatic next-question loops, arbitrary provider/model URLs, branch deletion,
+live execution previews, and advanced session-tree editing remain deferred.
+Fork, rollback, archive, bounded model selection, and GitHub PR delivery now
+exist through explicit product operations.
 
 ## Phase 1 visual acceptance
 
@@ -90,3 +90,19 @@ approval responses, real repository import, production worker composition, and
 ambiguous acknowledged-command recovery remain Phase 2/3 work. S3-compatible
 checkpoint storage exists below the UI and never exposes object keys or bytes to
 the browser.
+
+## Implemented product inspector
+
+Milestone 7 adds a responsive right-side Session inspector while preserving the
+Pi-export-inspired transcript. Its tabs present immutable Workspace history,
+structured compare, files, Artifacts, durable Run/Attempt transitions, tests,
+tenant/run usage, context compaction, owner metrics, and a derived execution
+activity feed. Fork/rollback/archive and retry-as-new-Run are idempotent public
+API actions; terminal history is never rewritten.
+
+Preview is deliberately inert: at most 256 KiB of valid UTF-8 is rendered in an
+escaped `<pre>`, binary data is labelled, and repository HTML/scripts are never
+embedded. The optional GitHub App workflow lets an owner synchronize an
+installation, choose only an enabled exact-commit repository, and explicitly
+deliver the selected Workspace version as branch/commit/Check/Pull Request
+through the trusted Gateway. With no configured App, the server fails closed.

@@ -14,10 +14,13 @@ configuration, durable storage, health checks, restart behavior, security
 boundaries, and a destructive disposable acceptance test. It does not turn the
 service into a general coding-agent SaaS. A workspace may use the image-owned
 Java repair fixture or a small public GitHub repository pinned to an exact
-commit. A tenant owner may keep the default deterministic model or configure an
-allowlisted DeepSeek model and encrypted API key. It does not support arbitrary
-Git URLs, private repositories, arbitrary provider URLs, policy-approved third-
-party extensions, public Internet SaaS, Kubernetes, or direct Internet exposure.
+commit. An operator-configured GitHub App may additionally expose allowlisted
+private repositories and trusted Pull Request delivery without giving GitHub
+credentials to repository code. A tenant owner may keep the default
+deterministic model or configure an allowlisted DeepSeek model and encrypted API
+key. It does not support arbitrary Git URLs, arbitrary provider URLs,
+policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
+direct Internet exposure.
 The optional registration route is not verified
 human identity, billing, OIDC, recovery, abuse prevention, or a mutually
 hostile Docker-host boundary. Those limits are part of the product contract,
@@ -38,7 +41,9 @@ Controlled public GitHub import and immutable workspace seeds are recorded in
 The trusted Pi Runner and remote Tool Sandbox split is recorded in
 [ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
 The provider-neutral runtime boundary is recorded in
-[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). See also the
+[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). Product operations,
+recovery, and release evidence are recorded in
+[ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
 [threat model](THREAT_MODEL.md), [network matrix](NETWORK_MATRIX.md), and
 [Sandbox Provider contract](SANDBOX_PROVIDER.md).
 
@@ -48,9 +53,9 @@ The provider-neutral runtime boundary is recorded in
   socket and Tool Sandboxes use POSIX process-group cancellation semantics.
 - Docker Engine with the Compose plugin. The acceptance topology is currently
   exercised on Docker Engine `29.4.2` and Compose `5.1.3`.
-- Node.js `24.12.0` and npm `11.6.2` for the repository scripts. The built
+- Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
   application images pin their own Node and service image digests.
-- Enough local CPU, memory, and storage for PostgreSQL, MinIO, five application
+- Enough local CPU, memory, and storage for PostgreSQL, MinIO, six application
   images, and up to two concurrent workers. The Compose file declares explicit
   per-service limits; capacity should be measured against the intended host.
 - A private checkout and a trusted operator account. Anyone who can read the
@@ -82,7 +87,7 @@ npm run production:deploy
 ```
 
 The first invocation creates `deploy/production/runtime/`, generates private
-random credentials and stable logical IDs, builds all five pinned application
+random credentials and stable logical IDs, builds all six pinned application
 images, migrates and bootstraps PostgreSQL, creates a private checkpoint bucket,
 and waits for every long-running service to become healthy. A completed runtime
 directory is reused on later invocations. A non-empty partial directory is
@@ -106,6 +111,16 @@ Web Storage, a URL, or a durable server-side session. Reloading or logging out
 therefore requires the token again. The token command intentionally
 writes a secret to stdout, so do not run it in CI logs, shell tracing, a screen
 recording, or an untrusted terminal multiplexer.
+
+After opening a Session, `inspect` opens the product evidence surface:
+Workspace versions/files/structured comparisons, bounded escaped Artifact
+previews, Run/Attempt transitions, test results, usage/context, and owner-only
+operations/activity. Mutating controls submit normal idempotent fork, rollback,
+archive, or retry-as-new-Run requests; the browser never rewrites a terminal
+Run. For a configured GitHub App, the create-workspace panel synchronizes one
+installation and shows only enabled repositories, while the Workspace panel
+offers an explicit branch/commit/Check/Pull Request action. The default
+placeholder App configuration fails those paths closed.
 
 To choose a different loopback port or an external runtime directory, set these
 values only before the first initialization:
@@ -219,7 +234,7 @@ Runner, and must use a durable `AGENT_DOCK_MICROVM_STATE_DIRECTORY`. If the
 sandbox daemon needs an upstream proxy, configure it where that daemon starts;
 never forward proxy credentials to Tool execution.
 
-Persistent state is split into four declared volumes:
+Persistent state is split into seven declared volumes:
 
 - `postgres-data`: tenants, encrypted model credentials, token usage, sessions,
   commands, leases, events, checkpoint metadata, Supervisor generations, and
@@ -227,11 +242,15 @@ Persistent state is split into four declared volumes:
 - `minio-data`: immutable Pi JSONL and workspace checkpoint bytes;
 - `supervisor-boot`: fsynced current/recent boot ownership ledger;
 - `supervisor-spool`: active unacknowledged event publications and permanently
-  stale quarantine evidence.
+  stale quarantine evidence;
+- `prometheus-data`: retained platform time-series evidence;
+- `grafana-data`: dashboard/operator state;
+- `jaeger-data`: retained trace evidence.
 
 PostgreSQL metadata and MinIO objects form one logical checkpoint. The boot and
 spool volumes are also required for honest owner-stop proof and event recovery;
-do not treat any one of these volumes as a complete backup by itself.
+the observability volumes preserve the operator evidence shown by the deployed
+product. Do not treat any subset as the supported complete recovery point.
 
 ## Routine commands
 
@@ -241,13 +260,13 @@ npm run production:build    # rebuild all application and worker images
 npm run production:up       # start already-built images and wait for health
 npm run production:ps       # show service state and health
 npm run production:logs     # follow bounded container logs
-npm run production:down     # stop the topology and preserve all four volumes
+npm run production:down     # stop the topology and preserve all seven volumes
 ```
 
 `production:down` is non-destructive. Do not append `--volumes` during normal
 operation. Removing the Compose volumes permanently deletes the database,
-checkpoint bytes, owner ledger, and spool evidence; take and verify a coordinated
-backup first and resolve the exact Compose project/volume names with
+checkpoint bytes, owner ledger, spool, and retained telemetry; take and verify
+a coordinated backup first and resolve the exact Compose project/volume names with
 `docker compose ls` and `docker volume ls` rather than using globs.
 
 Container logs use Docker's bounded `json-file` policy: three files of at most
@@ -363,8 +382,10 @@ content-idempotent. Already accepted turns keep their snapshotted version;
 future turns use the replacement. The database stores AES-256-GCM ciphertext
 whose associated data includes tenant, binding, version, provider, and master
 key version. Provider-reported input, output, cache-read, and cache-write tokens
-are written to `usage_ledger` for each model call. Monetary cost remains zero
-until versioned provider pricing is modeled.
+are written to `usage_ledger` for each model call. Monetary cost uses immutable
+integer micro-USD snapshots from the tenant owner's model-governance rates.
+Bootstrap rates are deliberately zero; AgentDock never guesses current provider
+pricing.
 
 The Web clears the key field after submit and does not place it in Web Storage.
 The trusted Supervisor decrypts the exact snapshotted version and gives its
@@ -375,7 +396,7 @@ Treat the Supervisor, Sandbox Manager, PostgreSQL, private runtime directory,
 and Docker authority as the trusted computing base; this is not a mutually
 hostile public-SaaS sandbox.
 
-## Controlled public GitHub workspaces
+## Controlled GitHub workspaces
 
 After login, open the `new workspace` panel. Keep `sample Java` for the bundled
 fixture, or choose `public GitHub` and provide only:
@@ -405,8 +426,26 @@ DNS firewall; do not claim this as a mutually hostile public-tenant boundary.
 Current repository limits are at most 512 regular files, 512 KiB per file, and
 2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
 files, redirects, submodules, LFS filters, oversized content, and commit mismatch
-fail closed. Private repositories, arbitrary Git hosts, branch refresh, sparse
-checkout, pull requests, and write-back are not supported.
+fail closed. Arbitrary Git hosts, branch/tag refresh, sparse checkout, and direct
+Tool-Sandbox GitHub credentials are not supported.
+
+For private repositories and PR write-back, create a least-privilege GitHub App
+outside AgentDock, install it only on intended repositories, stop the topology,
+replace `secrets/github-app-private-key.pem` in the private runtime with the App
+PEM while preserving mode `0600` and the application UID/GID, and add the
+positive `AGENT_DOCK_GITHUB_APP_ID` to that runtime's private `.env`. Restart
+with `production:up`. The Web owner enters an installation ID, synchronizes its
+repository list, and can choose only a repository explicitly enabled in
+AgentDock. Exact commit SHA remains mandatory.
+
+The Gateway creates short-lived installation tokens in trusted memory. Private
+snapshot bytes cross its authenticated RPC boundary; PR delivery consumes a
+tenant/version-validated patch Artifact and performs branch, commit, Check Run,
+and PR API operations inside the Gateway. The token never reaches the Control
+Plane, Runner, Tool Sandbox, events, or Artifact. Production ships with a
+placeholder key/empty App ID and fails these operations closed. Deterministic
+GitHub API contract tests do not constitute a live installation; validate a
+real App in a private test repository before relying on delivery.
 
 ## TLS and network exposure
 
@@ -464,31 +503,59 @@ as audit evidence and has no automatic garbage collection in this slice.
 
 ## Backup and restore
 
-Back up all durable authorities as one recovery point:
+The supported recovery point is a cold, encrypted bundle. Stop accepting work,
+wait for all active turns to settle or cancel them, then stop the topology
+without removing volumes:
 
-1. Stop new ingress traffic and wait for active turns to settle or cancel them.
-2. Run `npm run production:down`. This preserves the named volumes and gives a
-   simple crash-consistent single-host boundary.
-3. Snapshot or archive `postgres-data`, `minio-data`, `supervisor-boot`, and
-   `supervisor-spool` together with the private runtime directory. Use the
-   Docker/storage platform's documented named-volume backup mechanism; never
-   copy PostgreSQL's live data directory while it is running.
-4. Encrypt the backup, restrict it like production credentials, record the
-   image version and Git commit, and test restoration on an isolated host.
-5. Restart with `npm run production:up` and verify health.
+```bash
+npm run production:down
+npm run production:backup -- \
+  --output /secure/off-host/agent-dock-2026-07-20.adbackup \
+  --passphrase-file /secure/keys/agent-dock-backup.passphrase
+npm run production:up
+```
+
+The passphrase file must be a non-symlink regular file, mode `0600`, containing
+20–4096 bytes. Generate and store it independently from the backup. The command
+refuses a running Compose project or an existing output, archives the runtime
+plus all seven named volumes, records sizes/SHA-256, Git status/revision, image
+version, and exact local image IDs, then encrypts and authenticates the complete
+payload with AES-256-GCM and a scrypt-derived key. Treat both backup and key as
+sensitive; storing them together removes the intended protection.
+
+Restore only into a new project name and an absent or empty runtime path, after
+installing the recorded checkout and exact local images:
+
+```bash
+npm run production:restore -- \
+  --input /secure/off-host/agent-dock-2026-07-20.adbackup \
+  --passphrase-file /secure/keys/agent-dock-backup.passphrase \
+  --runtime-dir /srv/agent-dock-restored \
+  --project-name agent-dock-restored \
+  --confirm-empty
+
+AGENT_DOCK_RUNTIME_DIRECTORY=/srv/agent-dock-restored \
+COMPOSE_PROJECT_NAME=agent-dock-restored \
+npm run production:up
+```
+
+Restore authenticates the payload before use, rejects unsafe paths, verifies
+every authority hash and exact image ID, recreates only the seven new project
+volumes, rebinds the runtime path, hardens permissions, and validates Compose.
+It never overwrites an existing container, volume, or non-empty runtime. After
+startup verify both tenant views, event cursor continuity, current Workspace
+version/Artifact reads, Supervisor retirement, and one new completed turn before
+admitting traffic. `npm run production:check` performs this complete drill on a
+disposable populated topology.
 
 For larger installations, use `pg_dump` plus an S3-native versioned/replicated
 bucket and a coordinated ledger/spool snapshot instead of raw volumes. A logical
 database dump without the matching object namespace is incomplete, because
 PostgreSQL stores independent hashes and pointers while MinIO stores bytes.
 
-Restore onto an isolated host in this order: restore the private runtime
-directory and all four volumes, install the recorded checkout/image version,
-run `npm run production:config`, then run `npm run production:up`. Verify boot
-retirement, checkpoint restore, event cursor continuity, and absence of orphan
-workers before admitting traffic. If the ledger/spool cannot be restored, do
-not fabricate owner proof or delete leases manually; preserve the database and
-perform an explicit incident reconciliation.
+If the ledger/spool cannot be restored, do not fabricate owner proof or delete
+leases manually; preserve the database and perform an explicit incident
+reconciliation.
 
 ## Upgrade and rollback
 
@@ -580,7 +647,12 @@ a fresh boot, reconciles the old boot, cancels a live Tool Sandbox, audits the
 execution boundary (only the Manager owns the Docker socket; Tool Sandboxes are
 mount-free, credential-free, and networkless), verifies non-root host-UID
 portability and secret absence, and replays 22 durable ordered events. It then
-removes only its exact random containers, networks, volumes, and runtime path.
+exercises the built Web/Session inspector API surface, safe file and patch
+reads, Run usage/tests/context, owner activity, and fork/archive/rollback. The
+gate finally shuts the populated stack down, creates an authenticated encrypted
+seven-volume backup, restores it under a new random Compose project, verifies
+both tenants and all 22 events, completes another Pi turn, and removes both
+projects' exact containers, networks, volumes, and runtime paths.
 
 Never set `AGENT_DOCK_PRODUCTION_CHECK_KEEP=1` in shared CI. That diagnostic
 option intentionally leaves the isolated topology and its secret directory for
@@ -593,6 +665,25 @@ After the deployment acceptance passes, run the complete repository gate:
 ```bash
 npm run ci
 ```
+
+For a release, build from the clean commit and produce local checksummed
+supply-chain evidence:
+
+```bash
+AGENT_DOCK_IMAGE_VERSION=0.1.0 npm run production:build
+AGENT_DOCK_IMAGE_VERSION=0.1.0 npm run release:evidence -- \
+  --output-dir dist/release-evidence-0.1.0
+```
+
+The command verifies every image's OCI version/full-revision labels and exact
+image ID, writes a production-dependency CycloneDX SBOM, one CycloneDX SBOM and
+complete HIGH/CRITICAL vulnerability report per image, a manifest, and
+`SHA256SUMS`. A digest-pinned Trivy runs against read-only image archives with no
+Docker socket and blocks any fixable HIGH or CRITICAL finding. The worktree must
+be clean unless `--allow-dirty` is explicitly used for diagnosis; dirty evidence
+is marked and must not be published as a release. The matching CI matrix uses
+commit-pinned SBOM, scanner, and artifact Actions. See
+[the release process](RELEASE_PROCESS.md) for review and retention policy.
 
 Together these commands are the executable boundary for the supported private
 multi-tenant production slice. They deliberately stay on the deterministic

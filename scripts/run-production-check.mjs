@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +24,7 @@ const grafanaPort = await distinctAvailablePort(allocatedPorts);
 const baseUrl = `http://127.0.0.1:${String(httpPort)}`;
 const keepDeployment = process.env.AGENT_DOCK_PRODUCTION_CHECK_KEEP === "1";
 const skipBuild = process.env.AGENT_DOCK_PRODUCTION_CHECK_SKIP_BUILD === "1";
+const restoredProjectName = `${projectName}-restore`;
 const processEnvironment = {
   ...process.env,
   AGENT_DOCK_RUNTIME_DIRECTORY: runtimeDirectory,
@@ -39,6 +40,8 @@ const processEnvironment = {
 };
 let initialized = false;
 let apiToken = "";
+let recoveryDirectory;
+let restoredDeployment;
 
 function report(stage, details = {}) {
   process.stdout.write(`${JSON.stringify({ stage, ...details })}\n`);
@@ -88,17 +91,21 @@ function run(command, args, options = {}) {
   });
 }
 
-function composeArguments(args) {
+function composeArgumentsFor(projectNameValue, environmentFileValue, args) {
   return [
     "compose",
     "--project-name",
-    projectName,
+    projectNameValue,
     "--env-file",
-    environmentFile,
+    environmentFileValue,
     "--file",
     composeFile,
     ...args,
   ];
+}
+
+function composeArguments(args) {
+  return composeArgumentsFor(projectName, environmentFile, args);
 }
 
 function composeCapture(args, timeoutMs = 120_000) {
@@ -107,6 +114,24 @@ function composeCapture(args, timeoutMs = 120_000) {
 
 function composeRun(args) {
   return run("docker", composeArguments(args));
+}
+
+function composeCaptureFor(deployment, args, timeoutMs = 120_000) {
+  return capture(
+    "docker",
+    composeArgumentsFor(deployment.projectName, deployment.environmentFile, args),
+    { timeoutMs, environment: deployment.environment },
+  );
+}
+
+function composeRunFor(deployment, args) {
+  return run(
+    "docker",
+    composeArgumentsFor(deployment.projectName, deployment.environmentFile, args),
+    {
+      environment: deployment.environment,
+    },
+  );
 }
 
 async function tenantAdmin(args) {
@@ -189,6 +214,22 @@ async function waitForHealthyService(service, expectedCount = 1, timeoutMs = 90_
       return statuses.every((status) => status === "healthy") ? ids : false;
     },
     `${service} health (${String(expectedCount)} replicas)`,
+    timeoutMs,
+  );
+}
+
+async function waitForHealthyServiceIn(deployment, service, expectedCount = 1, timeoutMs = 90_000) {
+  return waitFor(
+    async () => {
+      const output = await composeCaptureFor(deployment, ["ps", "--quiet", service]);
+      const ids = output.length === 0 ? [] : output.split(/\r?\n/).filter(Boolean);
+      if (ids.length !== expectedCount) return false;
+      const statuses = await Promise.all(
+        ids.map((id) => capture("docker", ["inspect", "--format", "{{.State.Health.Status}}", id])),
+      );
+      return statuses.every((status) => status === "healthy") ? ids : false;
+    },
+    `${deployment.projectName} ${service} health (${String(expectedCount)} replicas)`,
     timeoutMs,
   );
 }
@@ -767,6 +808,299 @@ async function assertNoSecretsInDeployment(secretValues, events) {
     assert.equal(logs.includes(secret), false, "Container logs contain a secret value");
     assert.equal(serializedEvents.includes(secret), false, "Durable events contain a secret value");
   }
+}
+
+async function assertProductSurface({ sessionId, runIds }) {
+  report("validate_product_surface", { sessionId });
+  const [runs, versions, usage, governance, context, operations, audit, ...runUsages] =
+    await Promise.all([
+      http(`/v1/sessions/${sessionId}/runs`, { headers: authenticatedHeaders() }, 200),
+      http(
+        `/v1/sessions/${sessionId}/workspace-versions`,
+        {
+          headers: authenticatedHeaders(),
+        },
+        200,
+      ),
+      http("/v1/usage", { headers: authenticatedHeaders() }, 200),
+      http("/v1/model-governance", { headers: authenticatedHeaders() }, 200),
+      http(`/v1/sessions/${sessionId}/context`, { headers: authenticatedHeaders() }, 200),
+      http("/v1/operations/summary", { headers: authenticatedHeaders() }, 200),
+      http("/v1/operations/audit", { headers: authenticatedHeaders() }, 200),
+      ...runIds.map((runId) =>
+        http(`/v1/runs/${runId}/usage`, { headers: authenticatedHeaders() }, 200),
+      ),
+    ]);
+  assert(runIds.every((runId) => runs.body.runs.some((run) => run.runId === runId)));
+  assert.equal(versions.body.versions.length, runIds.length);
+  assert.equal(versions.body.currentVersionId, versions.body.versions[0].versionId);
+  const completedModelRequests = runUsages.reduce(
+    (count, response) =>
+      count + response.body.modelRequests.filter((request) => request.state === "completed").length,
+    0,
+  );
+  report("validate_product_usage", {
+    tenantRequests: usage.body.totals.requests,
+    completedModelRequests,
+    requestsByRun: runUsages.map((response, index) => ({
+      runId: runIds[index],
+      states: response.body.modelRequests.map((request) => request.state),
+    })),
+  });
+  // The deterministic production acceptance provider is intentionally embedded in the trusted
+  // runner. It exercises Pi and the remote tool boundary without consuming a tenant credential,
+  // so Model Gateway request and usage rows are expected to remain empty here. The governed
+  // non-zero path is covered by the Model Gateway integration suite.
+  assert(runUsages.every((response) => response.body.modelRequests.length === 0));
+  assert.equal(completedModelRequests, 0);
+  assert(usage.body.totals.requests >= completedModelRequests);
+  assert(governance.body.limits.maximumModelRequestsPerRun > 0);
+  assert.equal(context.body.layers.length, 6);
+  assert(operations.body.runs.completed >= runIds.length);
+  assert(audit.body.events.some((event) => event.category === "run_attempt"));
+  assert.equal(
+    audit.body.events.some((event) => event.category === "model"),
+    false,
+  );
+
+  const selectedRunId = runIds.at(-1);
+  const [run, tests] = await Promise.all([
+    http(`/v1/runs/${selectedRunId}`, { headers: authenticatedHeaders() }, 200),
+    http(`/v1/runs/${selectedRunId}/test-results`, { headers: authenticatedHeaders() }, 200),
+  ]);
+  assert.equal(run.body.state, "completed");
+  assert.equal(run.body.attempts.at(-1).state, "completed");
+  assert(run.body.attempts.at(-1).transitions.length >= 5);
+  assert(tests.body.results.some((result) => result.status === "passed"));
+
+  const currentVersion = versions.body.versions[0];
+  const firstVersion = versions.body.versions.at(-1);
+  const [version, files, comparison] = await Promise.all([
+    http(
+      `/v1/workspace-versions/${currentVersion.versionId}`,
+      { headers: authenticatedHeaders() },
+      200,
+    ),
+    http(
+      `/v1/workspace-versions/${currentVersion.versionId}/files`,
+      { headers: authenticatedHeaders() },
+      200,
+    ),
+    http(
+      `/v1/workspace-versions/${firstVersion.versionId}/compare/${currentVersion.versionId}`,
+      { headers: authenticatedHeaders() },
+      200,
+    ),
+  ]);
+  assert.equal(version.body.revision, currentVersion.revision);
+  assert.equal(files.body.files.length, currentVersion.fileCount);
+  assert.equal(comparison.body.baseVersionId, firstVersion.versionId);
+  const sourceFile = files.body.files.find((file) => file.path.endsWith("Calculator.java"));
+  assert(sourceFile !== undefined);
+  const source = await http(
+    `/v1/workspace-versions/${currentVersion.versionId}/file?path=${encodeURIComponent(sourceFile.path)}`,
+    { headers: authenticatedHeaders() },
+    200,
+  );
+  assert.match(source.text, /return left \+ right/);
+  const patchArtifact = firstVersion.artifacts.find((artifact) => artifact.kind === "patch");
+  assert(patchArtifact !== undefined);
+  const patch = await http(
+    `/v1/artifacts/${patchArtifact.artifactId}/content`,
+    { headers: authenticatedHeaders() },
+    200,
+  );
+  assert.match(patch.text, /return left \+ right/);
+
+  const fork = (
+    await post(
+      `/v1/sessions/${sessionId}/forks`,
+      { versionId: currentVersion.versionId },
+      201,
+      `production-fork-${suffix}`,
+    )
+  ).body;
+  assert.equal(fork.kind, "fork");
+  assert.equal(fork.replayed, false);
+  const archive = (
+    await post(
+      `/v1/sessions/${fork.forkedSessionId}/archive`,
+      { archived: true },
+      201,
+      `production-archive-${suffix}`,
+    )
+  ).body;
+  assert.equal(archive.kind, "archive");
+  const unarchive = (
+    await post(
+      `/v1/sessions/${fork.forkedSessionId}/archive`,
+      { archived: false },
+      201,
+      `production-unarchive-${suffix}`,
+    )
+  ).body;
+  assert.equal(unarchive.kind, "unarchive");
+  const rollback = (
+    await post(
+      `/v1/sessions/${sessionId}/workspace-rollback`,
+      {
+        versionId: firstVersion.versionId,
+        expectedCurrentVersionId: currentVersion.versionId,
+      },
+      201,
+      `production-rollback-old-${suffix}`,
+    )
+  ).body;
+  assert.equal(rollback.kind, "rollback");
+  const restoreLatest = (
+    await post(
+      `/v1/sessions/${sessionId}/workspace-rollback`,
+      {
+        versionId: currentVersion.versionId,
+        expectedCurrentVersionId: firstVersion.versionId,
+      },
+      201,
+      `production-rollback-latest-${suffix}`,
+    )
+  ).body;
+  assert.equal(restoreLatest.versionId, currentVersion.versionId);
+
+  const auditAfterOperations = await http(
+    "/v1/operations/audit",
+    { headers: authenticatedHeaders() },
+    200,
+  );
+  assert(auditAfterOperations.body.events.some((event) => event.category === "workspace"));
+
+  const document = await http("/", {}, 200);
+  const scriptPath = document.text.match(/<script[^>]+src="([^"]+)"/)?.[1];
+  assert.equal(typeof scriptPath, "string");
+  const bundle = await http(scriptPath, {}, 200);
+  assert.match(bundle.text, /Session inspector/);
+  assert.match(bundle.text, /GitHub PR delivery/);
+  return {
+    currentVersion,
+    forkedSessionId: fork.forkedSessionId,
+    auditEvents: auditAfterOperations.body.events.length,
+  };
+}
+
+async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBToken, cursor }) {
+  report("stop_for_encrypted_backup", { projectName });
+  await composeRun(["down", "--remove-orphans", "--timeout", "15"]);
+  recoveryDirectory = await mkdtemp(join(tmpdir(), `agent-dock-recovery-${suffix}-`));
+  const passphraseFile = resolve(recoveryDirectory, "backup-passphrase");
+  const backupPath = resolve(recoveryDirectory, "production.adbackup");
+  const restoredRuntimeDirectory = resolve(recoveryDirectory, "restored-runtime");
+  await writeFile(passphraseFile, randomBytes(48).toString("base64url"), { mode: 0o600 });
+  await chmod(passphraseFile, 0o600);
+
+  report("create_encrypted_backup");
+  await run(
+    process.execPath,
+    [
+      "scripts/production-backup.mjs",
+      "--output",
+      backupPath,
+      "--passphrase-file",
+      passphraseFile,
+      "--runtime-dir",
+      runtimeDirectory,
+      "--project-name",
+      projectName,
+    ],
+    { environment: processEnvironment },
+  );
+  const backupSizeBytes = (await stat(backupPath)).size;
+  assert(backupSizeBytes > 0);
+
+  report("restore_encrypted_backup", { restoredProjectName });
+  await run(
+    process.execPath,
+    [
+      "scripts/production-restore.mjs",
+      "--input",
+      backupPath,
+      "--passphrase-file",
+      passphraseFile,
+      "--runtime-dir",
+      restoredRuntimeDirectory,
+      "--project-name",
+      restoredProjectName,
+      "--confirm-empty",
+    ],
+    { environment: processEnvironment },
+  );
+  const restoredEnvironmentFile = resolve(restoredRuntimeDirectory, ".env");
+  const restoredEnvironment = {
+    ...processEnvironment,
+    AGENT_DOCK_RUNTIME_DIRECTORY: restoredRuntimeDirectory,
+    COMPOSE_PROJECT_NAME: restoredProjectName,
+  };
+  restoredDeployment = {
+    projectName: restoredProjectName,
+    environmentFile: restoredEnvironmentFile,
+    environment: restoredEnvironment,
+  };
+  await composeRunFor(restoredDeployment, ["up", "--detach", "--wait"]);
+  await Promise.all(
+    [
+      "postgres",
+      "minio",
+      "control-plane",
+      "supervisor-host",
+      "sandbox-manager",
+      "github-gateway",
+      "web",
+      "observability-ingress",
+    ].map((service) => waitForHealthyServiceIn(restoredDeployment, service, 1, 120_000)),
+  );
+
+  const [identity, conversationsA, conversationsB, restoredVersions, restoredAudit] =
+    await Promise.all([
+      http("/v1/identity", { headers: authenticatedHeaders() }, 200),
+      http("/v1/conversations", { headers: authenticatedHeaders() }, 200),
+      http("/v1/conversations", { headers: authenticatedHeaders({}, tenantBToken) }, 200),
+      http(
+        `/v1/sessions/${sessionId}/workspace-versions`,
+        { headers: authenticatedHeaders() },
+        200,
+      ),
+      http("/v1/operations/audit", { headers: authenticatedHeaders() }, 200),
+    ]);
+  assert.match(identity.body.tenantId, /^[0-9a-f-]{36}$/i);
+  assert(conversationsA.body.conversations.some((item) => item.sessionId === sessionId));
+  assert(
+    conversationsB.body.conversations.some((item) => item.sessionId === secondTenantSessionId),
+  );
+  assert.equal(restoredVersions.body.currentVersionId, restoredVersions.body.versions[0].versionId);
+  assert(restoredAudit.body.events.some((event) => event.category === "workspace"));
+  const replay = await readSessionEventsUntil(sessionId, 0, (event) => event.seq === cursor);
+  assert.equal(replay.cursor, cursor);
+
+  const restoredFollowUp = (
+    await post(
+      `/v1/sessions/${sessionId}/turns`,
+      { prompt: "Verify the restored backup can continue this coding session." },
+      202,
+      `production-restored-followup-${suffix}`,
+    )
+  ).body;
+  const restoredStream = await readSessionEventsUntil(
+    sessionId,
+    cursor,
+    isTerminalFor(restoredFollowUp.turnId),
+    120_000,
+  );
+  assert.equal(restoredStream.events.at(-1).type, "turn.completed");
+  assert(restoredStream.cursor > cursor);
+  await waitFor(async () => (await managedWorkerIds()).length === 0, "restored worker removal");
+  report("recovery_drill_passed", {
+    backupSizeBytes,
+    restoredProjectName,
+    restoredCursor: restoredStream.cursor,
+  });
+  return { backupSizeBytes, restoredCursor: restoredStream.cursor };
 }
 
 async function main() {
@@ -1490,6 +1824,11 @@ async function main() {
     [sessionB.sessionId],
   );
 
+  const productEvidence = await assertProductSurface({
+    sessionId: session.sessionId,
+    runIds: [recoveredRepair.runId, followUp.runId, postRestart.runId],
+  });
+
   await assertNoSecretsInDeployment(secretValues, [
     ...tenantBStream.events,
     ...tenantBReplay.events,
@@ -1510,6 +1849,14 @@ async function main() {
     "cross-service Jaeger traces",
     60_000,
   );
+  const recoveryEvidence = keepDeployment
+    ? undefined
+    : await performRecoveryDrill({
+        sessionId: session.sessionId,
+        secondTenantSessionId: sessionB.sessionId,
+        tenantBToken,
+        cursor: 22,
+      });
   report("production_check_passed", {
     projectName,
     repairedSessionId: session.sessionId,
@@ -1520,6 +1867,10 @@ async function main() {
     registeredTenants: 3,
     prometheusTargets: 3,
     jaegerServices: jaegerServices.length,
+    productWorkspaceVersion: productEvidence.currentVersion.versionNumber,
+    productAuditEvents: productEvidence.auditEvents,
+    forkedSessionId: productEvidence.forkedSessionId,
+    recovery: recoveryEvidence,
   });
 }
 
@@ -1532,16 +1883,38 @@ try {
     const logs = await composeCapture(["logs", "--no-color", "--tail", "120"], 60_000).catch(
       () => "",
     );
+    const restoredLogs =
+      restoredDeployment === undefined
+        ? ""
+        : await composeCaptureFor(
+            restoredDeployment,
+            ["logs", "--no-color", "--tail", "120"],
+            60_000,
+          ).catch(() => "");
     if (logs.length > 0) process.stderr.write(`${logs}\n`);
+    if (restoredLogs.length > 0) process.stderr.write(`${restoredLogs}\n`);
   }
 } finally {
+  if (restoredDeployment !== undefined && !keepDeployment) {
+    await composeRunFor(restoredDeployment, [
+      "down",
+      "--volumes",
+      "--remove-orphans",
+      "--timeout",
+      "15",
+    ]).catch(() => undefined);
+  }
   if (initialized && !keepDeployment) {
     await composeRun(["down", "--volumes", "--remove-orphans", "--timeout", "15"]).catch(
       () => undefined,
     );
   }
-  if (!keepDeployment) await rm(runtimeDirectory, { recursive: true, force: true });
-  else report("deployment_preserved", { projectName, runtimeDirectory, baseUrl });
+  if (!keepDeployment) {
+    await rm(runtimeDirectory, { recursive: true, force: true });
+    if (recoveryDirectory !== undefined) {
+      await rm(recoveryDirectory, { recursive: true, force: true });
+    }
+  } else report("deployment_preserved", { projectName, runtimeDirectory, baseUrl });
 }
 
 if (failure !== undefined) throw failure;

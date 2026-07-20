@@ -12,7 +12,7 @@
     "spikes/*"
   ],
   "scripts": {
-    "ci": "npm run format:check && npm run build && npm run check && npm run security:audit",
+    "ci": "npm run format:check && npm run build && npm run check && npm run backup:crypto-check && npm run security:audit",
     "build": "npm run build --workspaces --if-present",
     "container:config": "docker compose config --quiet",
     "container:check": "node scripts/run-container-check.mjs",
@@ -32,6 +32,10 @@
     "production:tenant": "node scripts/production-compose.mjs run --rm --no-deps database-bootstrap /app/packages/control-plane/src/tenant-admin.ts",
     "production:check": "node scripts/run-production-check.mjs",
     "production:github-check": "node scripts/run-live-github-workspace-check.mjs",
+    "production:backup": "node scripts/production-backup.mjs",
+    "production:restore": "node scripts/production-restore.mjs",
+    "backup:crypto-check": "node scripts/run-backup-crypto-check.mjs",
+    "release:evidence": "node scripts/generate-release-evidence.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",

@@ -1,5 +1,13 @@
 # Implementation roadmap
 
+This file preserves the original aspirational phase roadmap, including optional
+subagents and Kubernetes work that the owner has not requested. The
+dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
+private single-host product are tracked in
+[`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and are complete through
+ADR-0036. Do not interpret completion of that product plan as a claim that the
+optional Phase 5 subagent tree or Phase 7 Kubernetes release below exists.
+
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
 original phase history and current implementation status.
@@ -198,9 +206,10 @@ registration route now atomically creates a bounded tenant/owner/profile/policy
 and returns an indexed token once; real-PostgreSQL acceptance proves concurrent
 requests cannot exceed the total-tenant cap. Tenant-scoped recent-conversation
 list/detail APIs and Web history switching make that isolation inspectable.
-Warm-pool eviction, token/cost accounting, overload metrics, public identity
-federation/recovery, and a mutually hostile/public SaaS threat model remain
-open.
+Per-Run/tenant token, tool, wall-clock, and owner-priced cost governance plus
+durable usage now exist under ADR-0033; operational metrics exist under
+ADR-0034. Warm-pool eviction, public identity federation/recovery, and a
+mutually hostile/public SaaS threat model remain open.
 
 ## Phase 5: cloud-aware subagents (3 weeks)
 

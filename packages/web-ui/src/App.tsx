@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import type {
   ConversationSummaryResource,
   DeepSeekModelId,
+  GitHubInstallationResource,
   ModelConfigurationResource,
   TenantIdentityResource,
   WorkspaceSourceRequest,
@@ -26,6 +28,7 @@ import {
   type TurnViewStatus,
 } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
+import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
 
 const DEFAULT_PROMPT = "Run the tests, repair the Java bug, and verify the result.";
 const MIN_SIDEBAR_WIDTH = 216;
@@ -309,6 +312,14 @@ export default function App() {
     useState<WorkspaceSourceRequest["kind"]>("sample_java");
   const [workspaceRepository, setWorkspaceRepository] = useState("");
   const [workspaceCommitSha, setWorkspaceCommitSha] = useState("");
+  const [workspaceInstallationId, setWorkspaceInstallationId] = useState("");
+  const [workspaceRepositoryId, setWorkspaceRepositoryId] = useState("");
+  const [githubInstallation, setGitHubInstallation] = useState<GitHubInstallationResource | null>(
+    null,
+  );
+  const [githubInstallationLoading, setGitHubInstallationLoading] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
   const [credentialInput, setCredentialInput] = useState("");
   const [credentialChecking, setCredentialChecking] = useState(false);
   const [registrationSlug, setRegistrationSlug] = useState("");
@@ -347,6 +358,10 @@ export default function App() {
     setState((current) => sessionViewReducer(current, action));
   };
 
+  const reportInspectorError = useCallback((message: string): void => {
+    setState((current) => sessionViewReducer(current, { type: "api.error", message }));
+  }, []);
+
   function clearTenantView(): void {
     lastSequenceRef.current = 0;
     setState(createInitialSessionView());
@@ -364,6 +379,12 @@ export default function App() {
     setWorkspaceSourceKind("sample_java");
     setWorkspaceRepository("");
     setWorkspaceCommitSha("");
+    setWorkspaceInstallationId("");
+    setWorkspaceRepositoryId("");
+    setGitHubInstallation(null);
+    setGitHubInstallationLoading(false);
+    setInspectorOpen(false);
+    setInspectorRefreshSignal(0);
   }
 
   async function refreshConversations(candidateApi: AgentDockApi = api): Promise<void> {
@@ -434,6 +455,7 @@ export default function App() {
           event.type === "turn.failed" ||
           event.type === "turn.cancelled"
         ) {
+          setInspectorRefreshSignal((value) => value + 1);
           void refreshConversations().catch(() => undefined);
         }
       },
@@ -547,6 +569,21 @@ export default function App() {
     }
   }
 
+  async function openConversationById(sessionId: string): Promise<void> {
+    setConversationLoading(sessionId);
+    update({ type: "api.error.cleared" });
+    try {
+      const detail = await api.getConversation(sessionId);
+      lastSequenceRef.current = detail.replayAfterSequence;
+      update({ type: "conversation.loaded", conversation: detail });
+      setInspectorRefreshSignal((value) => value + 1);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setConversationLoading(null);
+    }
+  }
+
   async function provisionSession(name: string, source: WorkspaceSourceRequest) {
     if (!canMutate) return undefined;
     setOperation("creating");
@@ -576,17 +613,53 @@ export default function App() {
     const source: WorkspaceSourceRequest =
       workspaceSourceKind === "sample_java"
         ? { kind: "sample_java" }
-        : {
-            kind: "github_public",
-            repository: workspaceRepository.trim(),
-            commitSha: workspaceCommitSha.trim(),
-          };
+        : workspaceSourceKind === "github_public"
+          ? {
+              kind: "github_public",
+              repository: workspaceRepository.trim(),
+              commitSha: workspaceCommitSha.trim(),
+            }
+          : {
+              kind: "github_app",
+              installationId: Number(workspaceInstallationId),
+              repositoryId: Number(workspaceRepositoryId),
+              commitSha: workspaceCommitSha.trim(),
+            };
     const session = await provisionSession(name, source);
     if (session !== undefined) {
       setWorkspacePanelOpen(false);
       setWorkspaceName("");
       setWorkspaceRepository("");
       setWorkspaceCommitSha("");
+      setWorkspaceInstallationId("");
+      setWorkspaceRepositoryId("");
+      setGitHubInstallation(null);
+    }
+  }
+
+  async function loadGitHubInstallation(): Promise<void> {
+    const installationId = Number(workspaceInstallationId);
+    if (!Number.isSafeInteger(installationId) || installationId < 1) {
+      update({ type: "api.error", message: "GitHub App installation ID must be positive." });
+      return;
+    }
+    setGitHubInstallationLoading(true);
+    update({ type: "api.error.cleared" });
+    try {
+      const installation =
+        identity?.role === "owner"
+          ? await api.registerGitHubInstallation(installationId)
+          : await api.getGitHubInstallation(installationId);
+      setGitHubInstallation(installation);
+      setWorkspaceRepositoryId(
+        String(
+          installation.repositories.find((repository) => repository.enabled)?.repositoryId ?? "",
+        ),
+      );
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setGitHubInstallationLoading(false);
     }
   }
 
@@ -615,9 +688,39 @@ export default function App() {
         "off",
       );
       update({ type: "turn.accepted", accepted, prompt: normalizedPrompt });
+      setInspectorRefreshSignal((value) => value + 1);
       await refreshConversations();
     } catch (error: unknown) {
       update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function retryRun(runId: string): Promise<void> {
+    if (!canMutate || state.session === null || operation !== null || !sessionCanQueueTurn) return;
+    const run = await api.getRun(runId);
+    const original = state.turns.find((turn) => turn.turnId === run.turnId);
+    if (original === undefined) {
+      throw new AgentDockApiError(
+        409,
+        "retry_prompt_unavailable",
+        "Original Run prompt is not loaded",
+      );
+    }
+    setOperation("submitting");
+    update({ type: "api.error.cleared" });
+    try {
+      const accepted = await api.acceptTurn(
+        state.session.sessionId,
+        original.prompt,
+        newIdempotencyKey("retry"),
+        "off",
+      );
+      update({ type: "turn.accepted", accepted, prompt: original.prompt });
+      setPrompt(original.prompt);
+      setInspectorRefreshSignal((value) => value + 1);
+      await refreshConversations();
     } finally {
       setOperation(null);
     }
@@ -956,6 +1059,15 @@ export default function App() {
                 model
               </button>
             ) : null}
+            <button
+              aria-pressed={inspectorOpen}
+              disabled={state.session === null}
+              onClick={() => setInspectorOpen((open) => !open)}
+              title="Inspect Workspace versions, Runs, tests, usage, and audit"
+              type="button"
+            >
+              inspect
+            </button>
             {AUTH_REQUIRED ? (
               <button onClick={forgetCredential} title="Forget API token" type="button">
                 logout
@@ -1047,8 +1159,8 @@ export default function App() {
             <div className="workspace-panel-heading">
               <strong>Create an isolated workspace</strong>
               <span>
-                Public GitHub imports accept only owner/repository plus an exact 40-character commit
-                SHA. The repository is fetched once by a credential-free importer.
+                Import the built-in sample, a public exact commit, or a tenant-scoped GitHub App
+                repository. Every source is pinned to immutable input.
               </span>
             </div>
             <label htmlFor="workspace-name">name</label>
@@ -1071,6 +1183,7 @@ export default function App() {
             >
               <option value="sample_java">Built-in Java repair sample</option>
               <option value="github_public">Public GitHub exact commit</option>
+              <option value="github_app">GitHub App repository</option>
             </select>
             {workspaceSourceKind === "github_public" ? (
               <>
@@ -1099,13 +1212,77 @@ export default function App() {
                 />
               </>
             ) : null}
+            {workspaceSourceKind === "github_app" ? (
+              <div className="github-installation-picker">
+                <label htmlFor="workspace-installation">installation ID</label>
+                <input
+                  autoComplete="off"
+                  disabled={operation !== null || githubInstallationLoading}
+                  id="workspace-installation"
+                  inputMode="numeric"
+                  min="1"
+                  onChange={(event) => {
+                    setWorkspaceInstallationId(event.target.value);
+                    setGitHubInstallation(null);
+                    setWorkspaceRepositoryId("");
+                  }}
+                  placeholder="GitHub App installation ID"
+                  type="number"
+                  value={workspaceInstallationId}
+                />
+                <button
+                  disabled={
+                    operation !== null ||
+                    githubInstallationLoading ||
+                    workspaceInstallationId.trim() === ""
+                  }
+                  onClick={() => void loadGitHubInstallation()}
+                  type="button"
+                >
+                  {githubInstallationLoading ? "syncing…" : "sync installation"}
+                </button>
+                <label htmlFor="workspace-private-repository">repository</label>
+                <select
+                  disabled={operation !== null || githubInstallation === null}
+                  id="workspace-private-repository"
+                  onChange={(event) => setWorkspaceRepositoryId(event.target.value)}
+                  value={workspaceRepositoryId}
+                >
+                  <option value="">select enabled repository</option>
+                  {githubInstallation?.repositories
+                    .filter((repository) => repository.enabled)
+                    .map((repository) => (
+                      <option key={repository.repositoryId} value={repository.repositoryId}>
+                        {repository.fullName} {repository.private ? "· private" : "· public"}
+                      </option>
+                    ))}
+                </select>
+                <label htmlFor="workspace-private-commit">commit SHA</label>
+                <input
+                  autoComplete="off"
+                  disabled={operation !== null}
+                  id="workspace-private-commit"
+                  maxLength={40}
+                  minLength={40}
+                  onChange={(event) => setWorkspaceCommitSha(event.target.value)}
+                  pattern="[0-9a-f]{40}"
+                  placeholder="exact 40-character commit SHA"
+                  spellCheck={false}
+                  value={workspaceCommitSha}
+                />
+              </div>
+            ) : null}
             <div className="workspace-panel-actions">
               <button
                 disabled={
                   operation !== null ||
                   workspaceName.trim() === "" ||
                   (workspaceSourceKind === "github_public" &&
-                    (workspaceRepository.trim() === "" || workspaceCommitSha.trim() === ""))
+                    (workspaceRepository.trim() === "" || workspaceCommitSha.trim() === "")) ||
+                  (workspaceSourceKind === "github_app" &&
+                    (workspaceInstallationId.trim() === "" ||
+                      workspaceRepositoryId.trim() === "" ||
+                      workspaceCommitSha.trim() === ""))
                 }
                 type="submit"
               >
@@ -1136,14 +1313,31 @@ export default function App() {
             </button>
           </div>
         ) : null}
-        <div className="transcript-scroll">
-          <div className="transcript">
-            {state.turns.length === 0 ? (
-              <EmptyTranscript realModel={usesRealModel} />
-            ) : (
-              state.turns.map((turn) => <TurnTranscript key={turn.turnId} turn={turn} />)
-            )}
+        <div className={`workspace-stage ${inspectorOpen ? "inspector-visible" : ""}`}>
+          <div className="transcript-scroll">
+            <div className="transcript">
+              {state.turns.length === 0 ? (
+                <EmptyTranscript realModel={usesRealModel} />
+              ) : (
+                state.turns.map((turn) => <TurnTranscript key={turn.turnId} turn={turn} />)
+              )}
+            </div>
           </div>
+          {inspectorOpen ? (
+            <WorkspaceInspector
+              api={api}
+              busy={currentTurn !== undefined || operation !== null}
+              onClose={() => setInspectorOpen(false)}
+              onError={reportInspectorError}
+              onForked={openConversationById}
+              onRetry={retryRun}
+              onSessionChanged={refreshConversations}
+              refreshSignal={inspectorRefreshSignal}
+              role={identity?.role ?? null}
+              sessionId={state.session?.sessionId ?? null}
+              source={state.project?.source ?? null}
+            />
+          ) : null}
         </div>
         <footer className="composer-shell">
           <div className="composer">

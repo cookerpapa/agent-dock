@@ -248,6 +248,33 @@ export const OperationalInsightsResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const OperationalAuditEventResourceSchema = Type.Object(
+  {
+    eventId: UuidSchema,
+    category: Type.Union([
+      Type.Literal("run_attempt"),
+      Type.Literal("workspace"),
+      Type.Literal("model"),
+      Type.Literal("github"),
+    ]),
+    action: Type.String({ minLength: 1, maxLength: 128 }),
+    state: Type.String({ minLength: 1, maxLength: 128 }),
+    subjectId: UuidSchema,
+    summary: Type.String({ minLength: 1, maxLength: 1_024 }),
+    occurredAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const OperationalAuditLogResourceSchema = Type.Object(
+  {
+    tenantId: UuidSchema,
+    events: Type.Array(OperationalAuditEventResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 const ModelRequestAuditResourceSchema = Type.Object(
   {
     requestId: UuidSchema,
@@ -987,6 +1014,8 @@ export type ReplaceModelGovernanceRequest = Static<typeof ReplaceModelGovernance
 export type ModelGovernanceResource = Static<typeof ModelGovernanceResourceSchema>;
 export type UsageSummaryResource = Static<typeof UsageSummaryResourceSchema>;
 export type OperationalInsightsResource = Static<typeof OperationalInsightsResourceSchema>;
+export type OperationalAuditEventResource = Static<typeof OperationalAuditEventResourceSchema>;
+export type OperationalAuditLogResource = Static<typeof OperationalAuditLogResourceSchema>;
 export type RunUsageResource = Static<typeof RunUsageResourceSchema>;
 export type SessionContextResource = Static<typeof SessionContextResourceSchema>;
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
@@ -1167,6 +1196,10 @@ export function parseUsageSummaryResource(value: unknown): UsageSummaryResource 
 
 export function parseOperationalInsightsResource(value: unknown): OperationalInsightsResource {
   return parseSchema(OperationalInsightsResourceSchema, value, "operational-insights resource");
+}
+
+export function parseOperationalAuditLogResource(value: unknown): OperationalAuditLogResource {
+  return parseSchema(OperationalAuditLogResourceSchema, value, "operational-audit-log resource");
 }
 
 export function parseRunUsageResource(value: unknown): RunUsageResource {

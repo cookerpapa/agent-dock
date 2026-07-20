@@ -39,6 +39,7 @@ import {
   type ProjectResource,
   type ModelConfigurationResource,
   type ModelGovernanceResource,
+  type OperationalAuditLogResource,
   type OperationalInsightsResource,
   type RunUsageResource,
   type SessionContextResource,
@@ -145,6 +146,11 @@ export class ControlPlaneController {
     @Req() request: FastifyRequest,
   ): Promise<OperationalInsightsResource> {
     return this.operationalInsights.get(this.tenantRequestContext.requireOwner(request));
+  }
+
+  @Get("operations/audit")
+  async getOperationalAudit(@Req() request: FastifyRequest): Promise<OperationalAuditLogResource> {
+    return this.operationalInsights.audit(this.tenantRequestContext.requireOwner(request));
   }
 
   @Get("runs/:runId/usage")

@@ -833,6 +833,15 @@ cursor, and stream before another security context is rendered. Historical
 selection loads bounded prompt metadata and then resumes the matching durable
 SSE suffix; the token remains in memory rather than Web Storage or the URL.
 
+The Milestone 7 Session inspector is a read/operation projection over the same
+public tenant API. It exposes immutable Workspace history, structured compare,
+escaped file/Artifact text preview, Run/Attempt transitions, tests,
+usage/context, and owner-only operational activity. Fork, rollback, archive,
+and retry submit normal authenticated commands; retry always creates a new Run.
+GitHub App selection and PR delivery remain explicit owner/user operations
+through the trusted Gateway. Repository content is never executed in the
+browser, and binary content is never embedded as active content.
+
 ## 11. Observability and evaluation
 
 Migration 012 assigns every durable Run a stable W3C trace ID. The dispatch
@@ -854,3 +863,30 @@ full Agent Loop; targeted injected faults prove protocol invariants; the Docker
 Provider gate proves the isolation contract with real Pi; and 10/50/100
 simultaneous HTTP requests measure Control Plane Session admission/read latency.
 No result is relabelled as model-intelligence quality or 100-active-Run capacity.
+
+## 12. Recovery and release authority
+
+A supported cold recovery point contains the private runtime configuration and
+seven named volumes:
+
+```text
+runtime (.env, deployment manifest, service credentials)
+PostgreSQL + MinIO
+Supervisor boot + event spool
+Prometheus + Grafana + Jaeger
+```
+
+The backup tool refuses a running Compose project, archives those authorities,
+records per-file SHA-256 plus exact image IDs/Git revision, then encrypts and
+authenticates one payload. Restore refuses existing containers, volumes, or a
+non-empty runtime; validates authenticated bytes, paths, hashes, images, and
+Compose configuration; and creates a new project namespace. The production
+gate proves continued model/tool/checkpoint execution after that restore. This
+is a crash-consistent single-host cold backup, not continuous replication.
+
+Every application image records OCI version and full Git revision labels.
+Local release evidence and CI produce CycloneDX root/image SBOMs and Trivy
+HIGH/CRITICAL reports. Unfixable findings remain visible; any fixable HIGH or
+CRITICAL finding blocks the release. The scanner never receives the Docker
+socket: local evidence saves an exact image archive and mounts that archive
+read-only into a digest-pinned scanner container.

@@ -28,10 +28,20 @@ describe("settled sandbox checkpoint envelope", () => {
     const encoded = encodeSettledCheckpoint({
       piSession: piSession(),
       workspace: emptyWorkspace,
+      workspacePatch: {
+        format: "unified_diff",
+        patch: "diff --git a/Main.java b/Main.java\n",
+        truncated: false,
+      },
     });
     expect(decodeSettledCheckpoint(encoded)).toEqual({
       piSession: piSession(),
       workspace: emptyWorkspace,
+      workspacePatch: {
+        format: "unified_diff",
+        patch: "diff --git a/Main.java b/Main.java\n",
+        truncated: false,
+      },
     });
     expect(
       validateLoadedCheckpoint({

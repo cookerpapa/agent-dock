@@ -1,5 +1,9 @@
 import type { Database } from "@agent-dock/database";
-import type { OperationalInsightsResource } from "@agent-dock/protocol";
+import type {
+  OperationalAuditEventResource,
+  OperationalAuditLogResource,
+  OperationalInsightsResource,
+} from "@agent-dock/protocol";
 import { sql, type Kysely } from "kysely";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
@@ -208,6 +212,115 @@ export class OperationalInsightsService {
         code: failure.code!,
         count: integer(failure.count, "failure count"),
       })),
+    };
+  }
+
+  async audit(identity: TenantRequestIdentity): Promise<OperationalAuditLogResource> {
+    const limit = 101;
+    const [attemptRows, workspaceRows, modelRows, githubRows] = await Promise.all([
+      this.#database
+        .selectFrom("run_attempt_transitions")
+        .select(["id", "run_id", "to_state", "reason", "occurred_at"])
+        .where("tenant_id", "=", identity.tenantId)
+        .orderBy("occurred_at", "desc")
+        .limit(limit)
+        .execute(),
+      this.#database
+        .selectFrom("workspace_operations")
+        .select(["id", "session_id", "kind", "from_version_id", "to_version_id", "created_at"])
+        .where("tenant_id", "=", identity.tenantId)
+        .orderBy("created_at", "desc")
+        .limit(limit)
+        .execute(),
+      this.#database
+        .selectFrom("model_requests")
+        .select([
+          "id",
+          "run_id",
+          "state",
+          "requested_provider",
+          "requested_model_id",
+          "actual_provider",
+          "actual_model_id",
+          "fallback_reason",
+          "failure_code",
+          "started_at",
+          "settled_at",
+        ])
+        .where("tenant_id", "=", identity.tenantId)
+        .orderBy("started_at", "desc")
+        .limit(limit)
+        .execute(),
+      this.#database
+        .selectFrom("github_pull_request_deliveries")
+        .select([
+          "id",
+          "workspace_version_id",
+          "state",
+          "head_branch",
+          "pull_request_number",
+          "failure_code",
+          "created_at",
+          "updated_at",
+        ])
+        .where("tenant_id", "=", identity.tenantId)
+        .orderBy("updated_at", "desc")
+        .limit(limit)
+        .execute(),
+    ]);
+
+    const events: OperationalAuditEventResource[] = [
+      ...attemptRows.map((row) => ({
+        eventId: row.id,
+        category: "run_attempt" as const,
+        action: `attempt.${row.to_state}`,
+        state: row.to_state,
+        subjectId: row.run_id,
+        summary: row.reason,
+        occurredAt: timestamp(row.occurred_at),
+      })),
+      ...workspaceRows.map((row) => ({
+        eventId: row.id,
+        category: "workspace" as const,
+        action: `workspace.${row.kind}`,
+        state: "committed",
+        subjectId: row.session_id,
+        summary: `version ${row.from_version_id ?? "none"} -> ${row.to_version_id ?? "none"}`,
+        occurredAt: timestamp(row.created_at),
+      })),
+      ...modelRows.map((row) => ({
+        eventId: row.id,
+        category: "model" as const,
+        action: "model.request",
+        state: row.state,
+        subjectId: row.run_id,
+        summary: `${row.requested_provider}/${row.requested_model_id} -> ${row.actual_provider ?? "unsettled"}/${row.actual_model_id ?? "unsettled"}${row.fallback_reason === null ? "" : `; fallback=${row.fallback_reason}`}${row.failure_code === null ? "" : `; failure=${row.failure_code}`}`,
+        occurredAt: timestamp(row.settled_at ?? row.started_at),
+      })),
+      ...githubRows.map((row) => ({
+        eventId: row.id,
+        category: "github" as const,
+        action: "github.pull_request",
+        state: row.state,
+        subjectId: row.workspace_version_id,
+        summary: `branch ${row.head_branch}${row.pull_request_number === null ? "" : `; PR #${String(row.pull_request_number)}`}${row.failure_code === null ? "" : `; failure=${row.failure_code}`}`,
+        occurredAt: timestamp(row.updated_at ?? row.created_at),
+      })),
+    ];
+    events.sort(
+      (left, right) =>
+        right.occurredAt.localeCompare(left.occurredAt) ||
+        right.eventId.localeCompare(left.eventId),
+    );
+    return {
+      tenantId: identity.tenantId,
+      events: events.slice(0, 100),
+      truncated:
+        events.length > 100 ||
+        attemptRows.length === limit ||
+        workspaceRows.length === limit ||
+        modelRows.length === limit ||
+        githubRows.length === limit,
     };
   }
 }

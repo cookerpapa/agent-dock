@@ -338,9 +338,11 @@ async function main(): Promise<void> {
         ...(message.checkpoint.mode === "settled"
           ? {
               onSettled: async ({ piSession }: { piSession: Uint8Array }) => {
+                const workspacePatch = await collectGitWorkspacePatch(WORKSPACE_DIRECTORY);
                 await publishCheckpoint(message, {
                   piSession,
                   workspace: await captureWorkspaceSnapshot(WORKSPACE_DIRECTORY),
+                  ...(workspacePatch === undefined ? {} : { workspacePatch }),
                 });
               },
             }

@@ -28,6 +28,7 @@ still remain outside the current private-deployment claim.
 - GitHub App private key, short-lived installation tokens, and repository write authority;
 - Pi JSONL conversation history;
 - tenant workspace contents and resulting patches;
+- encrypted coordinated backups and their independently stored passphrases;
 - the Docker host and its socket.
 
 ## Trust zones
@@ -101,6 +102,9 @@ Assumed trusted or out of scope for the current claim:
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 | Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
 | Shared host kernel exposes a larger escape surface | optional `docker_microvm` Provider nests the unchanged hardened worker behind a separate LinuxKit kernel | guest/host kernel comparison, deny-all probe, lifecycle/reconciliation and real Pi tests |
+| Backup is tampered with, partially restored, or overwrites live state | AES-GCM authenticated payload, scrypt key derivation, per-authority hashes, safe archive paths, exact image IDs, new empty project/runtime only | crypto tamper/wrong-key check and complete production restore drill |
+| Repository or Artifact preview executes active content in the browser | React-escaped bounded UTF-8 text only; binary is labelled; no HTML/script/live-preview embedding | Web component/API tests and production bundle/product flow |
+| Fixable severe image vulnerability ships unnoticed | immutable-pinned scanner, complete HIGH/CRITICAL report, CycloneDX SBOM, zero-fixable-HIGH/CRITICAL gate | CI image matrix and local release-evidence command |
 
 ## Credential flow
 
@@ -130,7 +134,8 @@ Before exposing arbitrary untrusted repositories to the public Internet:
 3. add public identity recovery, broader abuse/rate controls, audit retention,
    and incident response around the existing tenant model budgets;
 4. isolate project/user extension code from Pi and model credentials;
-5. publish image provenance, SBOM, vulnerability scanning, and patch policy;
+5. add signed provenance attestations and automated patch cadence on top of the
+   current OCI labels, CycloneDX SBOMs, and vulnerability gate;
 6. run an independent penetration review of the Manager and host configuration.
 
 The observability backends remain on an internal Docker network. A separate
@@ -144,9 +149,12 @@ platform secret, database network, Docker socket, or Tool Sandbox authority.
 npm run sandbox-provider:check
 npm run sandbox-microvm:check
 npm run production:check
+npm run release:evidence
 ```
 
 The first command checks the default shared-kernel Provider. The second repeats
 the security/lifecycle and real Pi repair path through a separate-kernel
 microVM. The third creates and removes a complete disposable production
-topology and tests multi-tenant recovery behavior.
+topology, tests multi-tenant behavior, and restores a coordinated encrypted
+backup before continuing a Run. The fourth produces checksummed SBOM and image
+vulnerability evidence from clean revision-labelled images.

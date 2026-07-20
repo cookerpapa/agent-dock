@@ -216,7 +216,17 @@ async function readSseEvents(
   let buffer = "";
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Timed out reading SSE events")), timeoutMs);
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `Timed out reading SSE events after ${events.length}/${count}: ${events
+              .map((event) => event.event)
+              .join(", ")}`,
+          ),
+        ),
+      timeoutMs,
+    );
     timer.unref();
   });
   const reading = (async () => {
@@ -853,6 +863,9 @@ describe.sequential("single-user durable turn intake API", () => {
       tools: { calls: expect.any(Number), failures: expect.any(Number) },
       failures: expect.any(Array),
     });
+    const audit = await http.inject({ method: "GET", url: "/v1/operations/audit" });
+    expect(audit.statusCode).toBe(200);
+    expect(audit.json()).toEqual({ tenantId: IDS.tenant, events: [], truncated: false });
     expect(JSON.stringify(durable.outboxPayload)).not.toContain("fix the failing test");
   });
 
@@ -2317,101 +2330,117 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       expect(sessionResponse.statusCode).toBe(201);
       const dockerSession = sessionResponse.json() as SessionResource;
-      const turnResponse = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${dockerSession.sessionId}/turns`,
-        headers: { "idempotency-key": "docker-java-repair" },
-        payload: { prompt: "Run the tests, repair the Java bug, and verify the result." },
-      });
-      expect(turnResponse.statusCode).toBe(202);
-      const accepted = turnResponse.json() as AcceptedTurnResource;
-
-      await database
-        .insertInto("sandboxes")
-        .values({
-          id: IDS.dockerSandbox,
-          supervisor_id: "local-docker-sandbox-test",
-          boot_id: IDS.dockerSandboxBoot,
-          state: "ready",
-          max_concurrent_sessions: 1,
-          active_sessions: 0,
-        })
-        .executeTakeFirstOrThrow();
-
-      const published: EventPublishMessage[] = [];
-      const persistedBeforeAck: number[] = [];
-      let containerName: string | undefined;
-      const leaseCoordinator = new SessionLeaseCoordinator({
-        database,
-        sandboxId: IDS.dockerSandbox,
-        leaseDurationMs: 120_000,
-      });
-      const checkpointStore = new PostgresSandboxCheckpointStore({
-        database,
-        objectStore: new FileCheckpointObjectStore({ rootDirectory: checkpointRoot }),
-      });
-      const runner = new DockerSandboxTurnRunner({
-        image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
-        runtimeIdentity: {
-          supervisorId: "local-docker-sandbox-test",
-          bootId: IDS.dockerSandboxBoot,
-          sandboxId: IDS.dockerSandbox,
-        },
-        dockerCommand: process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
-        scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
-        checkpointStore,
-        executionTimeoutMs: 60_000,
-        onContainerReady(identity) {
-          containerName = identity.containerName;
-        },
-      });
-      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
-      const backend = new LocalSupervisorExecutionBackend({
-        supervisor,
-        leaseCoordinator,
-        eventIngestor: {
-          async ingest(value) {
-            const message = parseSupervisorToControlMessage(value);
-            if (message.type !== "event.publish") throw new Error("Expected event publication");
-            const acknowledgement = await durableEventStore.ingest(message);
-            const persisted = await database
-              .selectFrom("session_events")
-              .select(["event_id", "seq"])
-              .where("session_id", "=", dockerSession.sessionId)
-              .where("seq", "=", String(message.payload.event.seq))
-              .executeTakeFirstOrThrow();
-            expect(persisted.event_id).toBe(message.payload.event.eventId);
-            persistedBeforeAck.push(Number(persisted.seq));
-            return acknowledgement;
-          },
-        },
-        onEvent(message) {
-          published.push(message);
-        },
-      });
-      const dispatcher = new OutboxDispatcher({
-        database,
-        tenantId: IDS.tenant,
-        backend,
-        leaseManager: leaseCoordinator,
-      });
-
       const liveAbort = new AbortController();
-      const liveResponse = await fetch(`${baseUrl}/v1/sessions/${dockerSession.sessionId}/events`, {
-        signal: liveAbort.signal,
-      });
-      expect(liveResponse.status).toBe(200);
-      const liveEventsPromise = readSseEvents(liveResponse, 10, 60_000);
       try {
+        await database.transaction().execute(async (transaction) => {
+          await transaction
+            .updateTable("credential_bindings")
+            .set({ provider: "agent-dock-fake" })
+            .where("id", "=", IDS.credential)
+            .executeTakeFirstOrThrow();
+          await transaction
+            .updateTable("model_profiles")
+            .set({ provider: "agent-dock-fake", model_id: "agent-dock-fake" })
+            .where("id", "=", IDS.profile)
+            .executeTakeFirstOrThrow();
+        });
+        const turnResponse = await http.inject({
+          method: "POST",
+          url: `/v1/sessions/${dockerSession.sessionId}/turns`,
+          headers: { "idempotency-key": "docker-java-repair" },
+          payload: { prompt: "Run the tests, repair the Java bug, and verify the result." },
+        });
+        expect(turnResponse.statusCode).toBe(202);
+        const accepted = turnResponse.json() as AcceptedTurnResource;
+
+        await database
+          .insertInto("sandboxes")
+          .values({
+            id: IDS.dockerSandbox,
+            supervisor_id: "local-docker-sandbox-test",
+            boot_id: IDS.dockerSandboxBoot,
+            state: "ready",
+            max_concurrent_sessions: 1,
+            active_sessions: 0,
+          })
+          .executeTakeFirstOrThrow();
+
+        const published: EventPublishMessage[] = [];
+        const persistedBeforeAck: number[] = [];
+        let containerName: string | undefined;
+        const leaseCoordinator = new SessionLeaseCoordinator({
+          database,
+          sandboxId: IDS.dockerSandbox,
+          leaseDurationMs: 120_000,
+        });
+        const checkpointStore = new PostgresSandboxCheckpointStore({
+          database,
+          objectStore: new FileCheckpointObjectStore({ rootDirectory: checkpointRoot }),
+        });
+        const runner = new DockerSandboxTurnRunner({
+          image: process.env.AGENT_DOCK_DOCKER_IMAGE ?? "agent-dock/pi-workspace:phase2",
+          runtimeIdentity: {
+            supervisorId: "local-docker-sandbox-test",
+            bootId: IDS.dockerSandboxBoot,
+            sandboxId: IDS.dockerSandbox,
+          },
+          dockerCommand: process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
+          scenario: ({ restoring }) => (restoring ? "java_followup" : "java_repair"),
+          checkpointStore,
+          executionTimeoutMs: 60_000,
+          onContainerReady(identity) {
+            containerName = identity.containerName;
+          },
+        });
+        const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+        const backend = new LocalSupervisorExecutionBackend({
+          supervisor,
+          leaseCoordinator,
+          eventIngestor: {
+            async ingest(value) {
+              const message = parseSupervisorToControlMessage(value);
+              if (message.type !== "event.publish") throw new Error("Expected event publication");
+              const acknowledgement = await durableEventStore.ingest(message);
+              const persisted = await database
+                .selectFrom("session_events")
+                .select(["event_id", "seq"])
+                .where("session_id", "=", dockerSession.sessionId)
+                .where("seq", "=", String(message.payload.event.seq))
+                .executeTakeFirstOrThrow();
+              expect(persisted.event_id).toBe(message.payload.event.eventId);
+              persistedBeforeAck.push(Number(persisted.seq));
+              return acknowledgement;
+            },
+          },
+          onEvent(message) {
+            published.push(message);
+          },
+        });
+        const dispatcher = new OutboxDispatcher({
+          database,
+          tenantId: IDS.tenant,
+          backend,
+          leaseManager: leaseCoordinator,
+        });
+
+        const liveResponse = await fetch(
+          `${baseUrl}/v1/sessions/${dockerSession.sessionId}/events`,
+          {
+            signal: liveAbort.signal,
+          },
+        );
+        expect(liveResponse.status).toBe(200);
+        const liveEventsPromise = readSseEvents(liveResponse, 10, 60_000);
+        void liveEventsPromise.catch(() => undefined);
         const dispatchResult = await dispatcher.dispatchNext();
-        const liveEvents = await liveEventsPromise;
-        expect(dispatchResult).toMatchObject({
+        expect(dispatchResult, JSON.stringify(dispatchResult)).toMatchObject({
           status: "completed",
           commandId: accepted.commandId,
           sessionId: dockerSession.sessionId,
           turnId: accepted.turnId,
           attempt: 1,
         });
+        const liveEvents = await liveEventsPromise;
         const expectedTypes = [
           "turn.started",
           "tool.started",
@@ -2587,6 +2616,18 @@ describe.sequential("single-user durable turn intake API", () => {
         ).toEqual({ last_persisted_seq: "16", acknowledged_through_seq: "16" });
       } finally {
         liveAbort.abort();
+        await database.transaction().execute(async (transaction) => {
+          await transaction
+            .updateTable("credential_bindings")
+            .set({ provider: "openai-codex" })
+            .where("id", "=", IDS.credential)
+            .executeTakeFirstOrThrow();
+          await transaction
+            .updateTable("model_profiles")
+            .set({ provider: "openai-codex", model_id: "gpt-5.4-mini" })
+            .where("id", "=", IDS.profile)
+            .executeTakeFirstOrThrow();
+        });
         await rm(checkpointRoot, { recursive: true, force: true });
       }
     },

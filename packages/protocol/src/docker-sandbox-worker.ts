@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { TurnCancellationReasonSchema } from "./event-envelope.ts";
+import { TurnCancellationReasonSchema, WorkspacePatchSchema } from "./event-envelope.ts";
 import { DeepSeekModelIdSchema } from "./control-plane-api.ts";
 import {
   EventAckMessageSchema,
@@ -66,6 +66,7 @@ export const SandboxSettledCheckpointSchema = Type.Object(
     format: Type.Literal("agent-dock.settled-checkpoint.v1"),
     piSession: SandboxCheckpointBlobSchema,
     workspace: SandboxCheckpointBlobSchema,
+    workspacePatch: Type.Optional(WorkspacePatchSchema),
   },
   { additionalProperties: false },
 );

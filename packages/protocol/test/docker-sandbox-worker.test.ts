@@ -132,9 +132,18 @@ describe("Docker sandbox worker protocol", () => {
           format: "agent-dock.settled-checkpoint.v1",
           piSession: blob,
           workspace: blob,
+          workspacePatch: {
+            format: "unified_diff",
+            patch: "diff --git a/Main.java b/Main.java\n",
+            truncated: false,
+          },
         },
       }),
-    ).toMatchObject({ type: "sandbox.checkpoint.publish", baseRevision: null });
+    ).toMatchObject({
+      type: "sandbox.checkpoint.publish",
+      baseRevision: null,
+      checkpoint: { workspacePatch: { format: "unified_diff", truncated: false } },
+    });
     expect(
       parseDockerSandboxWorkerInput({
         sandboxProtocolVersion: 1,

@@ -160,6 +160,9 @@ export function encodeSettledCheckpoint(
       "Pi session snapshot",
     ),
     workspace: encodeBlob(checkpoint.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot"),
+    ...(checkpoint.workspacePatch === undefined
+      ? {}
+      : { workspacePatch: checkpoint.workspacePatch }),
   };
 }
 
@@ -192,7 +195,13 @@ export function decodeSettledCheckpoint(
   );
   validatePiSessionSnapshot(piSession);
   validateWorkspaceSnapshot(workspace);
-  return { piSession, workspace };
+  return {
+    piSession,
+    workspace,
+    ...(checkpoint.workspacePatch === undefined
+      ? {}
+      : { workspacePatch: checkpoint.workspacePatch }),
+  };
 }
 
 export function validateLoadedCheckpoint(

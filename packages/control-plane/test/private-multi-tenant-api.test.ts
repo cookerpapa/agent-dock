@@ -331,6 +331,12 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
     });
     expect(denied.statusCode).toBe(403);
     expect(denied.json()).toMatchObject({ error: { code: "authorization_denied" } });
+    const auditDenied = await http.inject({
+      method: "GET",
+      url: "/v1/operations/audit",
+      headers: authorization(memberAToken),
+    });
+    expect(auditDenied.statusCode).toBe(403);
 
     const bravo = await http.inject({
       method: "GET",
@@ -346,6 +352,17 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
       failures: [],
     });
     expect(bravo.body).not.toContain(tenantA.tenantId);
+    const bravoAudit = await http.inject({
+      method: "GET",
+      url: "/v1/operations/audit",
+      headers: authorization(tenantB.credential.token),
+    });
+    expect(bravoAudit.statusCode).toBe(200);
+    expect(bravoAudit.json()).toEqual({
+      tenantId: tenantB.tenantId,
+      events: [],
+      truncated: false,
+    });
   });
 
   it("invalidates a revoked tenant credential without affecting another tenant", async () => {

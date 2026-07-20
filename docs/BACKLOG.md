@@ -138,7 +138,8 @@ extension-policy support would overstate the current boundary.
 - [x] Add the Pi-export-inspired Web new-workspace panel and safe source status to conversation discovery
 - [x] Prove two real Pi/DeepSeek turns reuse one seed, persist tool events/token usage, restore state, and leave no importer
 - [ ] Add a DNS-aware repository egress proxy before claiming a mutually hostile public-tenant boundary
-- [ ] Design private-repository credentials, extension policy, and pull-request write-back as separate threat-modeled slices
+- [x] Add a trusted GitHub App credential boundary for private exact-commit import and Pull Request write-back
+- [ ] Isolate and policy-gate project/user extensions before enabling them
 
 ## Phase 4 private multi-tenant slice
 
@@ -160,9 +161,10 @@ extension-policy support would overstate the current boundary.
 - [x] Add a Supervisor-only DeepSeek gateway with turn-scoped capabilities and internal-only worker networking
 - [x] Run pinned Pi against a real provider, preserve checkpoints/diffs, and persist per-call tenant token usage
 - [ ] Add public identity federation, billing, abuse controls, and a separate mutually hostile SaaS threat model
-- [ ] Add measured warm-pool eviction, priced cost accounting, budgets, and quota enforcement
+- [ ] Add measured warm-pool eviction if cold-start data justifies it
+- [x] Add owner-priced cost accounting, model/tool/token/time budgets, and quota enforcement
 
-## Cloud platform milestones 3–5
+## Cloud platform milestones 3–7
 
 - [x] Add immutable Workspace history, compare, fork, rollback, archive, structured files/diff/tests/artifacts
 - [x] Add trusted GitHub App Gateway contracts for private import and branch/commit/PR/Check delivery
@@ -172,3 +174,11 @@ extension-policy support would overstate the current boundary.
 - [x] Deploy persisted Prometheus, Jaeger, and provisioned Grafana behind loopback-only ingress
 - [x] Expose an owner-only tenant operational summary without global metric access
 - [x] Publish reproducible coding, fault, Sandbox security, and 10/50/100 HTTP load evaluations
+- [x] Add and validate the opt-in Docker Sandboxes/LinuxKit microVM Provider
+- [x] Expose Workspace files/history/compare/Artifacts, Runs/Attempts, tests, usage/context, and owner activity in the authenticated Web product
+- [x] Expose fork/rollback/archive, retry-as-new-Run, GitHub App repository selection, and explicit PR delivery in the Web product
+- [x] Add authenticated encrypted cold backup/restore for the runtime and all seven durable volumes
+- [x] Prove restored tenant isolation, events, Workspace state, and continued execution in the disposable production gate
+- [x] Add OCI revision labels, root/image CycloneDX SBOMs, complete HIGH/CRITICAL reports, and a fixable-HIGH/CRITICAL release gate
+- [x] Pin third-party supply-chain Actions by immutable commit and publish a reproducible release-evidence command
+- [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

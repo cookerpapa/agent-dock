@@ -1,26 +1,61 @@
 import {
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseArchiveSessionRequest,
   parseConversationDetailResource,
   parseConversationListResource,
   parseControlPlaneApiError,
+  parseForkSessionRequest,
+  parseGitHubInstallationResource,
+  parseGitHubPullRequestDeliveryResource,
   parseModelConfigurationResource,
+  parseModelGovernanceResource,
+  parseOperationalAuditLogResource,
+  parseOperationalInsightsResource,
   parseProjectResource,
+  parseRollbackWorkspaceRequest,
+  parseRunListResource,
+  parseRunResource,
+  parseRunUsageResource,
   parseSessionResource,
+  parseSessionContextResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
+  parseTestResultListResource,
+  parseUsageSummaryResource,
+  parseWorkspaceFileListResource,
+  parseWorkspaceOperationResource,
+  parseWorkspaceVersionCompareResource,
+  parseWorkspaceVersionListResource,
+  parseWorkspaceVersionResource,
   type ConversationDetailResource,
   type ConversationListResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ProjectResource,
   type DeepSeekModelId,
+  type GitHubInstallationResource,
+  type GitHubPullRequestDeliveryResource,
   type ModelConfigurationResource,
+  type ModelGovernanceResource,
+  type OperationalAuditLogResource,
+  type OperationalInsightsResource,
+  type RunListResource,
+  type RunResource,
+  type RunUsageResource,
   type SessionResource,
+  type SessionContextResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
+  type TestResultListResource,
   type TurnThinkingLevel,
+  type UsageSummaryResource,
+  type WorkspaceFileListResource,
+  type WorkspaceOperationResource,
   type WorkspaceSourceRequest,
+  type WorkspaceVersionCompareResource,
+  type WorkspaceVersionListResource,
+  type WorkspaceVersionResource,
 } from "@agent-dock/protocol";
 
 export class AgentDockApiError extends Error {
@@ -84,6 +119,42 @@ async function request(
     }
   }
   return body;
+}
+
+async function requestBytes(
+  fetchImplementation: FetchImplementation,
+  path: string,
+  authorizationToken?: string,
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  let response: Response;
+  try {
+    response = await fetchImplementation(path, {
+      method: "GET",
+      ...(authorizationToken === undefined
+        ? {}
+        : { headers: { authorization: `Bearer ${authorizationToken}` } }),
+    });
+  } catch {
+    throw new AgentDockApiError(0, "network_error", "Control plane is unreachable");
+  }
+  if (!response.ok) {
+    const body = await responseJson(response);
+    try {
+      const parsed = parseControlPlaneApiError(body);
+      throw new AgentDockApiError(response.status, parsed.error.code, parsed.error.message);
+    } catch (error: unknown) {
+      if (error instanceof AgentDockApiError) throw error;
+      throw new AgentDockApiError(
+        response.status,
+        "invalid_error_response",
+        `Control plane rejected the request with HTTP ${String(response.status)}`,
+      );
+    }
+  }
+  return {
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    contentType: response.headers.get("content-type") ?? "application/octet-stream",
+  };
 }
 
 function jsonRequest(
@@ -151,6 +222,45 @@ export class AgentDockApi {
     );
   }
 
+  async getModelGovernance(): Promise<ModelGovernanceResource> {
+    return parseModelGovernanceResource(
+      await request(
+        this.#fetch,
+        "/v1/model-governance",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getUsage(): Promise<UsageSummaryResource> {
+    return parseUsageSummaryResource(
+      await request(this.#fetch, "/v1/usage", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async getOperationalInsights(): Promise<OperationalInsightsResource> {
+    return parseOperationalInsightsResource(
+      await request(
+        this.#fetch,
+        "/v1/operations/summary",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getOperationalAudit(): Promise<OperationalAuditLogResource> {
+    return parseOperationalAuditLogResource(
+      await request(
+        this.#fetch,
+        "/v1/operations/audit",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async registerTenant(
     tenantSlug: string,
     displayName: string,
@@ -172,6 +282,235 @@ export class AgentDockApi {
         this.#fetch,
         `/v1/conversations/${encodeURIComponent(sessionId)}`,
         { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async listRuns(sessionId: string): Promise<RunListResource> {
+    return parseRunListResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/runs`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getRun(runId: string): Promise<RunResource> {
+    return parseRunResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getRunUsage(runId: string): Promise<RunUsageResource> {
+    return parseRunUsageResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}/usage`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async listRunTestResults(runId: string): Promise<TestResultListResource> {
+    return parseTestResultListResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}/test-results`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getSessionContext(sessionId: string): Promise<SessionContextResource> {
+    return parseSessionContextResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/context`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async listWorkspaceVersions(sessionId: string): Promise<WorkspaceVersionListResource> {
+    return parseWorkspaceVersionListResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/workspace-versions`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getWorkspaceVersion(versionId: string): Promise<WorkspaceVersionResource> {
+    return parseWorkspaceVersionResource(
+      await request(
+        this.#fetch,
+        `/v1/workspace-versions/${encodeURIComponent(versionId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async listWorkspaceFiles(versionId: string): Promise<WorkspaceFileListResource> {
+    return parseWorkspaceFileListResource(
+      await request(
+        this.#fetch,
+        `/v1/workspace-versions/${encodeURIComponent(versionId)}/files`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  readWorkspaceFile(
+    versionId: string,
+    path: string,
+  ): Promise<{ bytes: Uint8Array; contentType: string }> {
+    return requestBytes(
+      this.#fetch,
+      `/v1/workspace-versions/${encodeURIComponent(versionId)}/file?path=${encodeURIComponent(path)}`,
+      this.#authorizationToken,
+    );
+  }
+
+  async compareWorkspaceVersions(
+    baseVersionId: string,
+    targetVersionId: string,
+  ): Promise<WorkspaceVersionCompareResource> {
+    return parseWorkspaceVersionCompareResource(
+      await request(
+        this.#fetch,
+        `/v1/workspace-versions/${encodeURIComponent(baseVersionId)}/compare/${encodeURIComponent(targetVersionId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  readArtifact(artifactId: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    return requestBytes(
+      this.#fetch,
+      `/v1/artifacts/${encodeURIComponent(artifactId)}/content`,
+      this.#authorizationToken,
+    );
+  }
+
+  async forkSession(
+    sessionId: string,
+    versionId: string,
+    idempotencyKey: string,
+  ): Promise<WorkspaceOperationResource> {
+    const body = parseForkSessionRequest({ versionId });
+    return parseWorkspaceOperationResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/forks`,
+        jsonRequest(body, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async rollbackWorkspace(
+    sessionId: string,
+    versionId: string,
+    expectedCurrentVersionId: string,
+    idempotencyKey: string,
+  ): Promise<WorkspaceOperationResource> {
+    const body = parseRollbackWorkspaceRequest({ versionId, expectedCurrentVersionId });
+    return parseWorkspaceOperationResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/workspace-rollback`,
+        jsonRequest(body, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async archiveSession(
+    sessionId: string,
+    archived: boolean,
+    idempotencyKey: string,
+  ): Promise<WorkspaceOperationResource> {
+    const body = parseArchiveSessionRequest({ archived });
+    return parseWorkspaceOperationResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
+        jsonRequest(body, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async registerGitHubInstallation(installationId: number): Promise<GitHubInstallationResource> {
+    return parseGitHubInstallationResource(
+      await request(
+        this.#fetch,
+        "/v1/github/installations",
+        jsonRequest({ installationId }),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getGitHubInstallation(installationId: number): Promise<GitHubInstallationResource> {
+    return parseGitHubInstallationResource(
+      await request(
+        this.#fetch,
+        `/v1/github/installations/${String(installationId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async setGitHubRepositoryEnabled(
+    installationId: number,
+    repositoryId: number,
+    enabled: boolean,
+  ): Promise<GitHubInstallationResource> {
+    return parseGitHubInstallationResource(
+      await request(
+        this.#fetch,
+        `/v1/github/installations/${String(installationId)}/repositories/${String(repositoryId)}`,
+        jsonRequest({ enabled }, undefined, "PUT"),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async createGitHubPullRequest(
+    versionId: string,
+    input: {
+      repositoryId: number;
+      baseBranch: string;
+      baseCommitSha: string;
+      headBranch: string;
+      title: string;
+      body: string;
+    },
+    idempotencyKey: string,
+  ): Promise<GitHubPullRequestDeliveryResource> {
+    return parseGitHubPullRequestDeliveryResource(
+      await request(
+        this.#fetch,
+        `/v1/workspace-versions/${encodeURIComponent(versionId)}/pull-requests`,
+        jsonRequest(input, idempotencyKey),
         this.#authorizationToken,
       ),
     );
@@ -241,6 +580,8 @@ export class AgentDockApi {
   }
 }
 
-export function newIdempotencyKey(prefix: "turn" | "cancel"): string {
+export function newIdempotencyKey(
+  prefix: "turn" | "cancel" | "fork" | "rollback" | "archive" | "retry" | "pr",
+): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

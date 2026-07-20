@@ -1573,3 +1573,35 @@
 - 下一步：Milestone 7 将把现有 Workspace/files/diff/tests/artifacts/Run/usage/audit API 完整呈现在 Web 产品中，并补齐
   backup/restore drill、release/SBOM/image scan 和从 clean checkout 可复现的一键部署。原因是执行内核边界已经有第二条真实路径，
   最后最大缺口是用户是否能完成完整工作流，以及运维人员是否能可靠升级和恢复。
+
+## 2026-07-20 — Milestone 7：产品闭环、恢复演练与发布证据
+
+- 产品闭环：Web 新增 Session inspector，把 Workspace 文件树与安全文本预览、结构化 Diff、Artifact、Run/Attempt/transition、
+  测试结果、usage/context/governance、owner operations/activity 放入同一界面；支持失败 Run retry、Session fork、Workspace
+  rollback/restore/archive，以及由用户显式触发、绑定 immutable Workspace version 的 GitHub PR delivery。GitHub App 未配置时
+  UI 和 Gateway 都 fail closed，不冒充 live private-repository/PR 结果。
+- 运维可见性：新增 owner-only `/v1/operations/audit`，从 tenant-scoped RunAttempt transition、Workspace operation、model request
+  和 GitHub delivery 派生最近执行活动。它明确不是包含 actor/IP 的完整合规审计；viewer 被拒绝，foreign tenant 数据不可见。
+- 冷备恢复：新增 `production:backup` / `production:restore`。平台停机后将 private runtime 与 PostgreSQL、MinIO、Supervisor
+  boot/spool、Prometheus、Grafana、Jaeger 七个 volume 打包，逐文件 SHA-256 后用 scrypt + AES-256-GCM 认证加密。restore 只接受
+  空的新 project/runtime，验证认证标签、路径、manifest、hash 和六个精确本地 image ID，再创建 volume 和校验 Compose；失败
+  会回收本次新建资源。独立 crypto gate 证明 1 MiB round trip、篡改与错误口令均被拒绝。
+- 恢复实测：完整 disposable production gate 在三租户、22 条 replayable events、3 个 Workspace version、31 条 product activity
+  和 3 个 Jaeger service 验收后停栈，生成 7,285,908-byte 加密备份；新 project 恢复所有七个 volume，验证两个 tenant 的
+  conversation/workspace/audit 和 22 条原事件，再真实提交一轮 deterministic Pi follow-up，event cursor 从 22 继续到 28。
+  原/恢复拓扑、临时 volume、network、Tool Sandbox 和进程全部清理。
+- 发布证据：新增 clean-worktree `release:evidence`，绑定完整 Git SHA 与六个 OCI-labelled production image ID，生成 root 和逐镜像
+  CycloneDX、完整 HIGH/CRITICAL JSON、manifest 与 `SHA256SUMS`。digest-pinned Trivy 只在更新数据库时联网，随后用 read-only
+  image archive、无 socket/网络/capability 扫描；任何可修复 HIGH/CRITICAL 都阻断发布。真实门禁先发现旧 Caddy 镜像的
+  62 HIGH/6 CRITICAL 可修复项；最终改为 pinned Go 1.26.5 编译 Caddy 2.11.4，并放入 minimal Alpine runtime 后，Web 镜像
+  fixable HIGH/CRITICAL 均为 0。Tool Sandbox 的本地证据只扫 OS package，npm package 由 root SBOM/audit 覆盖；CI 保留完整
+  language-package image scan，差异写入 manifest 和 release 文档。
+- CI/镜像：Node 更新到 24.18.0；六个生产镜像都写 OCI version/revision，trusted Node runtime 删除全局 npm/corepack。
+  CI 增加 root SBOM 和六镜像矩阵，固定 Anchore、Trivy 与 artifact Action commit，既保留全部严重发现，也只对已有修复版本的
+  HIGH/CRITICAL fail。`npm run ci` 通过 340 passed/10 conditional skipped tests、两个 Pi compatibility spike、backup crypto gate
+  和 npm audit（0）；`container:check`、真实 Docker `sandbox-provider:check` 及 whole-Pi `sandbox:check` 均通过。兼容门禁还修复并
+  证明 Docker settled-checkpoint 会把 Git Patch 与 Pi transcript、Workspace snapshot 一起原子持久化，而不是只把 Patch 留在
+  终态事件中。
+- 产品边界：Milestone 1–7 对应的私有/loopback 单主机产品闭环已完成，但这仍不是 anonymous hostile public SaaS。公开注册只在
+  显式容量上限下启用；默认 Docker Provider 共享 host kernel，microVM Provider 依赖 Docker Sandboxes；registry signing、
+  Kubernetes、多地域、完整 actor audit 和公网 abuse defense 仍属于未来部署决策，未伪装成当前能力。

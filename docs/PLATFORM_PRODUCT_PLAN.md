@@ -134,12 +134,38 @@ dependency-egress claims remain excluded.
 
 ### Milestone 7: product completion and public demonstration
 
+Status: complete under ADR-0036 for the requested private/loopback product
+boundary. Public Internet exposure remains deliberately excluded.
+
 - file browser, structured diff, artifacts, tests, preview, fork/retry, and
   audit/admin pages;
 - backup/restore drill, migrations, release images, SBOM and image scanning;
 - documented one-command private deployment;
 - separately threat-modelled public demo with identity, abuse controls, budget,
   and stronger sandbox isolation.
+
+The authenticated Session inspector now exposes Workspace versions and safe
+file/Artifact text previews, structured comparisons, Run/Attempt history,
+tests, usage/context, fork/rollback/archive, retry-as-new-Run, owner operational
+activity, GitHub App repository selection, and explicit PR delivery. Preview
+does not execute repository content. The owner-only activity feed is derived
+from immutable execution rows and is explicitly not represented as a complete
+human-actor audit.
+
+The cold recovery command authenticates and encrypts the runtime plus all seven
+durable volumes, binds a manifest to exact image IDs/revision/hashes, and
+restores only into a new empty project. Production acceptance now executes that
+backup/restore round trip and proves a post-restore turn. Revision-labelled
+images, root/image CycloneDX SBOMs, full HIGH/CRITICAL reports, a zero-fixable-
+HIGH/CRITICAL release gate, and immutable-pinned CI Actions close the release
+evidence loop.
+
+The plan originally named a separately threat-modelled public demo. The owner
+subsequently constrained deployment to private/loopback use, so bounded
+self-registration is used only to demonstrate multi-tenant isolation. OIDC,
+account recovery, abuse prevention, billing, public ingress, arbitrary
+dependency egress, and a hostile anonymous SaaS review were not silently added
+or claimed.
 
 ## Deliberate exclusions until justified
 

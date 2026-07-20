@@ -1,4 +1,4 @@
-FROM node:24.12.0-bookworm-slim@sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99 AS builder
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -14,14 +14,32 @@ COPY packages/web-ui/vite.config.ts packages/web-ui/vite.config.ts
 ENV VITE_AGENT_DOCK_AUTH_REQUIRED=true
 RUN npm run build --workspace @agent-dock/web-ui
 
-FROM caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS caddy-builder
 
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    go install -trimpath \
+      -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4-agent-dock" \
+      github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+    && /go/bin/caddy version | grep -F "v2.11.4-agent-dock"
+
+FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+
+ARG AGENT_DOCK_VERSION=development
+ARG AGENT_DOCK_REVISION=unknown
 LABEL org.opencontainers.image.title="AgentDock production web ingress" \
-      org.opencontainers.image.description="Static authenticated Web UI and narrow /v1 reverse proxy"
+      org.opencontainers.image.description="Static authenticated Web UI and narrow /v1 reverse proxy" \
+      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
+      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 
+ENV HOME=/tmp \
+    XDG_CONFIG_HOME=/tmp/caddy-config \
+    XDG_DATA_HOME=/tmp/caddy-data
+
+COPY --from=caddy-builder /go/bin/caddy /usr/bin/caddy
 COPY packages/web-ui/Caddyfile /etc/caddy/Caddyfile
 COPY --from=builder /app/packages/web-ui/dist /srv
-RUN setcap -r /usr/bin/caddy
 
 USER 1000:1000
 EXPOSE 8080

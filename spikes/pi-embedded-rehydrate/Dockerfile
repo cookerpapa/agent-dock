@@ -1,4 +1,4 @@
-FROM node:24.12.0-bookworm-slim@sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 
 LABEL org.opencontainers.image.title="AgentDock embedded rehydrate spike" \
       org.opencontainers.image.description="Zero-token Phase 0 execution-density probe"

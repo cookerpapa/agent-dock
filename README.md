@@ -87,6 +87,7 @@ only after a measured requirement appears.
 - [Network matrix](docs/NETWORK_MATRIX.md)
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
 - [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
+- [Release evidence process](docs/RELEASE_PROCESS.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Long-term Cloud Agent Platform plan](docs/PLATFORM_PRODUCT_PLAN.md)
 - [Initial backlog](docs/BACKLOG.md)
@@ -126,7 +127,12 @@ only after a measured requirement appears.
 - [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
 - [ADR-0029: trusted Pi runner and remote tool sandbox](docs/adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md)
 - [ADR-0030: pluggable sandbox provider boundary](docs/adr/0030-pluggable-sandbox-provider-boundary.md)
+- [ADR-0031: durable Run Attempt protocol](docs/adr/0031-durable-run-attempt-protocol.md)
+- [ADR-0032: versioned Workspaces and GitHub Gateway](docs/adr/0032-versioned-workspaces-and-github-gateway.md)
+- [ADR-0033: context and model governance](docs/adr/0033-context-and-model-governance.md)
+- [ADR-0034: observability and reproducible evaluation](docs/adr/0034-observability-and-reproducible-evaluation.md)
 - [ADR-0035: Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
+- [ADR-0036: product operations and release evidence](docs/adr/0036-product-operations-and-release-evidence.md)
 
 ## Current executable spikes
 
@@ -175,10 +181,12 @@ npm run ci
 ```
 
 It checks Prettier formatting, the production frontend build, TypeScript types,
-the complete unit/contract suite, the two zero-token Pi spikes, and
-high-severity dependency advisories. The separate
+the complete unit/contract suite, authenticated-backup cryptography, the two
+zero-token Pi spikes, and high-severity dependency advisories. The separate
 Gitleaks job scans complete Git history with read-only repository permissions.
-The opt-in live subscription probe is deliberately excluded from both commands.
+Six parallel supply-chain jobs generate image CycloneDX SBOMs, retain complete
+HIGH/CRITICAL reports, and reject fixable HIGH/CRITICAL findings. The opt-in
+live subscription probe is deliberately excluded from these commands.
 
 The hardened Phase 0 runner topology, including its effective Docker
 `HostConfig`, is exercised with:
@@ -289,16 +297,20 @@ npm run sandbox-microvm:check
 ```
 
 This is production-complete for the bounded private multi-tenant Java fixture
-and controlled small public GitHub repositories pinned to an exact commit,
+and controlled GitHub repositories pinned to an exact commit (public by
+default, private through an explicitly configured GitHub App),
 with either the deterministic fake or an owner-configured DeepSeek model.
 Request identity, roles, encrypted per-tenant provider credentials,
 resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,
 opt-in loopback self-registration, and tenant-scoped conversation discovery
 share one bounded Supervisor pool. Cold conversations retain durable Pi and
 workspace checkpoints but consume no Pi child process, Tool Sandbox, dedicated
-thread, or timer. It is not an arbitrary Git host/private-repo service,
-untrusted extension host, public Internet SaaS, Kubernetes release, or direct
-Internet ingress.
+thread, or timer. The Web Session inspector exposes immutable Workspace
+history/files/compare, safe Artifact previews, Runs/Attempts, tests,
+usage/context, workspace operations, owner activity, and optional GitHub PR
+delivery. Cold encrypted backup/restore and checksummed release evidence are
+executable operator paths. It is not an arbitrary Git host, untrusted extension
+host, public Internet SaaS, Kubernetes release, or direct Internet ingress.
 
 ## Current status
 

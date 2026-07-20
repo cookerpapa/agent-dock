@@ -212,4 +212,33 @@ describe("tenant-aware browser API", () => {
       api.getConversation("20000000-0000-4000-8000-000000000001"),
     ).resolves.toMatchObject({ session: { state: "idle" } });
   });
+
+  it("loads tenant-scoped operational audit and binary Workspace content", async () => {
+    const tenantId = "10000000-0000-4000-8000-000000000002";
+    const versionId = "20000000-0000-4000-8000-000000000001";
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      if (String(input) === "/v1/operations/audit") {
+        return new Response(JSON.stringify({ tenantId, events: [], truncated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      expect(String(input)).toBe(`/v1/workspace-versions/${versionId}/file?path=src%2FMain.java`);
+      return new Response("class Main {}\n", {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+
+    await expect(api.getOperationalAudit()).resolves.toEqual({
+      tenantId,
+      events: [],
+      truncated: false,
+    });
+    const file = await api.readWorkspaceFile(versionId, "src/Main.java");
+    expect(new TextDecoder().decode(file.bytes)).toBe("class Main {}\n");
+  });
 });
