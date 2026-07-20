@@ -447,11 +447,18 @@ async function waitForWorker(commandId) {
 
 async function assertWorkerSecurity(containerId, secretValues) {
   const inspected = JSON.parse(await capture("docker", ["inspect", containerId]))[0];
+  const labels = inspected.Config.Labels ?? {};
   assert.equal(inspected.Config.User, "1000:1000");
   assert.equal(inspected.HostConfig.NetworkMode, "none");
   assert.equal(inspected.HostConfig.ReadonlyRootfs, true);
   assert(inspected.HostConfig.CapDrop.includes("ALL"));
   assert.equal(inspected.HostConfig.SecurityOpt.includes("no-new-privileges:true"), true);
+  assert.equal(inspected.HostConfig.PidsLimit, 128);
+  assert.equal(inspected.HostConfig.Memory, 768 * 1_024 * 1_024);
+  assert.equal(inspected.HostConfig.NanoCpus, 1_000_000_000);
+  assert.equal(typeof labels["agent-dock.tenant-id"], "string");
+  assert.equal(typeof labels["agent-dock.attempt-id"], "string");
+  assert.equal(labels["agent-dock.attempt-id"], labels["agent-dock.lease-id"]);
   assert.equal(
     inspected.Mounts.some((mount) => mount.Type === "bind"),
     false,
@@ -578,6 +585,7 @@ async function assertExecutionBoundary() {
   assert.equal(repositoryNetwork.Name, `${projectName}_repository-egress`);
   assert.deepEqual(Object.keys(repositoryNetwork.Containers ?? {}), []);
   const managerEnvironment = manager.Config.Env ?? [];
+  assert(managerEnvironment.includes("AGENT_DOCK_SANDBOX_PROVIDER=docker"));
   for (const prefix of [
     "DATABASE_URL=",
     "DATABASE_URL_FILE=",

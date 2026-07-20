@@ -82,8 +82,13 @@ only after a measured requirement appears.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Sandbox Provider contract](docs/SANDBOX_PROVIDER.md)
+- [Network matrix](docs/NETWORK_MATRIX.md)
+- [Run lifecycle](docs/RUN_LIFECYCLE.md)
 - [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
 - [Implementation roadmap](docs/ROADMAP.md)
+- [Long-term Cloud Agent Platform plan](docs/PLATFORM_PRODUCT_PLAN.md)
 - [Initial backlog](docs/BACKLOG.md)
 - [Vibe coding playbook](docs/VIBE_CODING_PLAYBOOK.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
@@ -119,6 +124,7 @@ only after a measured requirement appears.
 - [ADR-0027: tenant model credentials and brokered Pi execution](docs/adr/0027-tenant-model-credentials-and-brokered-pi-execution.md)
 - [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
 - [ADR-0029: trusted Pi runner and remote tool sandbox](docs/adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md)
+- [ADR-0030: pluggable sandbox provider boundary](docs/adr/0030-pluggable-sandbox-provider-boundary.md)
 
 ## Current executable spikes
 
@@ -188,6 +194,16 @@ SSE:
 npm run sandbox:check
 ```
 
+The current trusted-Runner boundary and provider-neutral Manager are exercised
+separately with a source-built Tool image. This command verifies effective
+cgroups/namespaces, credential and `/proc` isolation, cross-tenant workspaces,
+network denial, path/symlink escape, output limits, cancellation, cleanup, and a
+real pinned-Pi remote-tool repair loop:
+
+```bash
+npm run sandbox-provider:check
+```
+
 Portable settled-checkpoint storage is verified against a digest-pinned,
 loopback-only, disposable MinIO fixture. The test creates no volume, spends no
 model tokens, conditionally publishes immutable objects, destroys the writer,
@@ -243,7 +259,10 @@ Manager, the Web ingress, and ephemeral Tool Sandboxes. Only the Sandbox
 Manager owns the Docker socket. Pi and the tenant model credential remain in the
 trusted Runner; `read/write/edit/bash` cross a narrow RPC boundary into a
 mount-free, credential-free Tool Sandbox with `network=none`. Only the Web
-ingress publishes a loopback port. See the
+ingress publishes a loopback port. The Manager now separates capability and
+identity enforcement from a provider-neutral `SandboxProvider`; Docker is the
+only implemented Provider, while gVisor and managed microVMs remain explicit,
+untested future backends. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
 

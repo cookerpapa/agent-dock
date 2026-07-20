@@ -7,12 +7,14 @@ import {
 } from "../src/index.ts";
 
 const assignment = {
+  tenantId: "tenant-tool-protocol",
   supervisorId: "supervisor-tool-protocol",
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",
   commandId: "command-tool-protocol",
   sessionId: "session-tool-protocol",
   turnId: "turn-tool-protocol",
+  attemptId: "10000000-0000-4000-8000-000000000003",
   leaseId: "10000000-0000-4000-8000-000000000003",
   fencingToken: 9,
 } as const;

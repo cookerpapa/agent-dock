@@ -14,7 +14,8 @@ import {
   SANDBOX_MANAGER_READY_PATH,
   SANDBOX_MANAGER_SERVICE_PATH,
 } from "./client.ts";
-import { DockerToolSandboxManager, SandboxManagerError } from "./docker-tool-sandbox-manager.ts";
+import { SandboxManagerError } from "./sandbox-provider.ts";
+import type { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 
 const DEFAULT_BODY_LIMIT = 5 * 1_024 * 1_024;
 
@@ -27,7 +28,7 @@ export type SandboxManagerServerOptions = {
 };
 
 export type SandboxManagerBackend = Pick<
-  DockerToolSandboxManager,
+  ToolSandboxManager,
   | "checkHealth"
   | "create"
   | "capture"

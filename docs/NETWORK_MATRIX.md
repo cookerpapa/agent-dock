@@ -1,0 +1,69 @@
+# Network matrix
+
+## Rule
+
+No untrusted Tool Sandbox joins a platform network. Access is granted to a
+trusted component only when its responsibility requires it. Network membership
+does not replace application authentication.
+
+## Production networks
+
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | Provider egress | Repository egress | Public ports |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Web ingress | yes | no | no | no | no | no | no | loopback `8080` |
+| Control Plane | API | yes | yes | no | no | no | no | none |
+| Trusted Pi Runner | no | yes | yes | yes | yes | yes | no | none |
+| Sandbox Manager | no | no | no | no | yes | no | no | none |
+| Tool Sandbox | no | no | no | no | no | no | no | none |
+| Repository importer | no | no | no | no | no | no | yes | none |
+| PostgreSQL | no | no | yes | no | no | no | no | none |
+| MinIO | no | no | no | yes | no | no | no | none |
+
+The repository-network bootstrap is a credential-free one-shot container used
+only to make Compose create the otherwise dynamic egress bridge. It exits before
+normal service and importer work. The Manager controls importer lifecycle but
+does not join repository egress itself.
+
+## Credential and authority matrix
+
+| Component | Tenant API auth | Model secret | DB credential | Object-store credential | Manager token | Docker socket |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Browser/Web | bearer token in browser memory | no | no | no | no | no |
+| Control Plane | digest verification | encrypted credential authority | yes | no | no | no |
+| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped checkpoint identity | yes | no |
+| Sandbox Manager | no | no | no | no | own service-token verifier | **yes** |
+| Tool Sandbox | no | no | no | no | no | no |
+| Repository importer | no | no | no | no | no | no |
+
+## Tool Sandbox denial targets
+
+The integration suite attempts all of these from inside a live Tool Sandbox:
+
+```text
+control-plane:4100
+postgres:5432
+minio:9000
+sandbox-manager:4300
+host.docker.internal
+1.1.1.1:443
+```
+
+All must be unreachable. It also inspects `env`, `/proc/self/environ`,
+`/proc/1/environ`, PID 1's command line, cgroup limits, mounts, capabilities,
+and Docker socket absence.
+
+## Future dependency network
+
+Dependency installation must not attach a Tool Sandbox to provider egress or a
+platform bridge. The planned shape is:
+
+```text
+Tool Sandbox
+    -> authenticated narrow egress proxy
+       -> DNS-resolved allowlist
+          -> selected Maven/npm/PyPI endpoints
+```
+
+The proxy must address DNS rebinding, redirects, IP literals, private/link-local
+ranges, request size, response size, method restrictions, logging redaction,
+and per-run budget. Until that slice exists, Tool execution remains offline.

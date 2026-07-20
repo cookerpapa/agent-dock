@@ -36,6 +36,12 @@ protocol, record the decision under `docs/adr/` before implementation.
   and object storage as durable artifact/snapshot storage.
 - Do not claim exactly-once semantics for arbitrary shell commands or external side effects.
 - Do not run untrusted tools in the control-plane or trusted Agent Runner process.
+- Keep activation authorization and identity fencing in the provider-neutral
+  ToolSandboxManager; a SandboxProvider may own runtime mechanics but must not
+  receive Manager bearer credentials or expose its native SDK to the Runner.
+- Provider selection is trusted deployment policy. Do not claim a planned
+  gVisor, microVM, Kubernetes, or managed Provider until its shared acceptance
+  suite passes.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
 - Do not add Kafka, Flink, Redis, Temporal, or Kubernetes merely to make the

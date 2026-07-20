@@ -6,15 +6,25 @@ import {
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
-  type ToolSandboxCreateRequest,
-  type ToolSandboxCreateResponse,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWorkerOutput,
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_TOOL_SANDBOX_POLICY,
+  SandboxManagerError,
+  type SandboxCreateSpec,
+  type SandboxEffectiveIsolation,
+  type SandboxHandle,
+  type SandboxInspection,
+  type SandboxPolicy,
+  type SandboxProvider,
+  type SandboxReadFileInput,
+  type SandboxWriteFileInput,
+} from "./sandbox-provider.ts";
 
 const MAX_WORKER_STDOUT_BYTES = 8 * 1_024 * 1_024;
 const MAX_WORKER_STDERR_BYTES = 4_096;
@@ -26,29 +36,19 @@ const MAX_IMPORT_STDOUT_BYTES = 3 * 1_024 * 1_024;
 export const TOOL_SANDBOX_LABELS = {
   managed: "agent-dock.managed",
   activationId: "agent-dock.activation-id",
+  tenantId: "agent-dock.tenant-id",
   supervisorId: "agent-dock.supervisor-id",
   bootId: "agent-dock.boot-id",
   sandboxId: "agent-dock.sandbox-id",
   commandId: "agent-dock.command-id",
   sessionId: "agent-dock.session-id",
   turnId: "agent-dock.turn-id",
+  attemptId: "agent-dock.attempt-id",
   leaseId: "agent-dock.lease-id",
   fencingToken: "agent-dock.fencing-token",
 } as const;
 
-export class SandboxManagerError extends Error {
-  readonly code: string;
-  readonly retryable: boolean;
-
-  constructor(code: string, safeMessage: string, retryable: boolean) {
-    super(safeMessage);
-    this.name = "SandboxManagerError";
-    this.code = code;
-    this.retryable = retryable;
-  }
-}
-
-export type DockerToolSandboxManagerOptions = {
+export type DockerSandboxProviderOptions = {
   toolImage: string;
   repositoryImportNetwork: string;
   dockerCommand?: string;
@@ -56,7 +56,6 @@ export type DockerToolSandboxManagerOptions = {
   cleanupTimeoutMs?: number;
   repositoryImportTimeoutMs?: number;
   idGenerator?: () => string;
-  capabilityGenerator?: () => string;
 };
 
 type Deferred<T> = {
@@ -67,12 +66,18 @@ type Deferred<T> = {
 
 type ExitResult = { code: number | null; signal: NodeJS.Signals | null };
 
+type DockerManagedRuntime = SupervisorRuntimeAssignment & {
+  activationId: string;
+  tenantId: string;
+  attemptId: string;
+};
+
 type Activation = {
   activationId: string;
-  capabilityDigest: Buffer;
   assignment: ToolSandboxAssignment;
   runtimeName: string;
   runtimeId?: string;
+  handle?: SandboxHandle;
   child: ChildProcessWithoutNullStreams;
   exit: Promise<ExitResult>;
   ready: Deferred<void>;
@@ -136,12 +141,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 
 function sameAssignment(left: ToolSandboxAssignment, right: ToolSandboxAssignment): boolean {
   return (
+    left.tenantId === right.tenantId &&
     left.supervisorId === right.supervisorId &&
     left.bootId === right.bootId &&
     left.sandboxId === right.sandboxId &&
     left.commandId === right.commandId &&
     left.sessionId === right.sessionId &&
     left.turnId === right.turnId &&
+    left.attemptId === right.attemptId &&
     left.leaseId === right.leaseId &&
     left.fencingToken === right.fencingToken
   );
@@ -165,15 +172,20 @@ function sameRuntimeAssignment(
   );
 }
 
-function capabilityDigest(value: string): Buffer {
-  return createHash("sha256").update(value, "utf8").digest();
-}
-
-function validCapability(value: string): string {
-  if (!/^adts_[A-Za-z0-9_-]{43}$/.test(value)) {
-    throw new TypeError("Tool Sandbox capability generator returned an invalid value");
-  }
-  return value;
+function assignmentMatchesRuntime(
+  assignment: ToolSandboxAssignment,
+  runtime: SupervisorRuntimeAssignment,
+): boolean {
+  return (
+    assignment.supervisorId === runtime.supervisorId &&
+    assignment.bootId === runtime.bootId &&
+    assignment.sandboxId === runtime.sandboxId &&
+    assignment.commandId === runtime.commandId &&
+    assignment.sessionId === runtime.sessionId &&
+    assignment.turnId === runtime.turnId &&
+    assignment.leaseId === runtime.leaseId &&
+    assignment.fencingToken === runtime.fencingToken
+  );
 }
 
 function runtimeName(activationId: string): string {
@@ -185,7 +197,35 @@ function dockerArgs(
   name: string,
   activationId: string,
   assignment: ToolSandboxAssignment,
+  policy: SandboxPolicy,
 ): readonly string[] {
+  for (const [nameValue, value] of Object.entries(assignment)) {
+    if (nameValue === "fencingToken") continue;
+    bounded(String(value), `Tool Sandbox assignment ${nameValue}`, 512);
+  }
+  if (
+    policy.policyVersion !== 1 ||
+    policy.network.mode !== "deny_all" ||
+    policy.user !== "1000:1000" ||
+    !policy.readOnlyRootFilesystem ||
+    policy.privileged ||
+    !policy.dropAllCapabilities ||
+    !policy.noNewPrivileges ||
+    policy.allowHostMounts ||
+    policy.allowDockerSocket
+  ) {
+    throw new SandboxManagerError(
+      "unsupported_sandbox_policy",
+      "Docker Sandbox Provider does not support the requested policy",
+      false,
+    );
+  }
+  const resources = policy.resources;
+  for (const [nameValue, value] of Object.entries(resources)) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new TypeError(`Sandbox resource limit ${nameValue} is invalid`);
+    }
+  }
   return [
     "run",
     "--rm",
@@ -196,6 +236,8 @@ function dockerArgs(
     `${TOOL_SANDBOX_LABELS.managed}=true`,
     "--label",
     `${TOOL_SANDBOX_LABELS.activationId}=${activationId}`,
+    "--label",
+    `${TOOL_SANDBOX_LABELS.tenantId}=${assignment.tenantId}`,
     "--label",
     `${TOOL_SANDBOX_LABELS.supervisorId}=${assignment.supervisorId}`,
     "--label",
@@ -209,11 +251,13 @@ function dockerArgs(
     "--label",
     `${TOOL_SANDBOX_LABELS.turnId}=${assignment.turnId}`,
     "--label",
+    `${TOOL_SANDBOX_LABELS.attemptId}=${assignment.attemptId}`,
+    "--label",
     `${TOOL_SANDBOX_LABELS.leaseId}=${assignment.leaseId}`,
     "--label",
     `${TOOL_SANDBOX_LABELS.fencingToken}=${String(assignment.fencingToken)}`,
     "--user",
-    "1000:1000",
+    policy.user,
     "--read-only",
     "--network",
     "none",
@@ -223,17 +267,17 @@ function dockerArgs(
     "--security-opt",
     "no-new-privileges:true",
     "--pids-limit",
-    "128",
+    String(resources.pids),
     "--memory",
-    "768m",
+    String(resources.memoryBytes),
     "--cpus",
-    "1.0",
+    String(resources.cpuNano / 1_000_000_000),
     "--ulimit",
-    "nofile=1024:1024",
+    `nofile=${String(resources.openFiles)}:${String(resources.openFiles)}`,
     "--tmpfs",
-    "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=1000,gid=1000",
+    `/tmp:rw,noexec,nosuid,nodev,size=${String(resources.temporaryBytes)},mode=1777,uid=1000,gid=1000`,
     "--tmpfs",
-    "/workspace:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700",
+    `/workspace:rw,nosuid,nodev,size=${String(resources.workspaceBytes)},uid=1000,gid=1000,mode=0700`,
     "--workdir",
     "/workspace",
     "--stop-timeout",
@@ -299,10 +343,15 @@ function labelsToAssignment(
   runtimeId: string,
   runtimeNameValue: string,
   labels: Record<string, unknown>,
-): SupervisorRuntimeAssignment {
+): DockerManagedRuntime {
   const required = (key: string): string => {
     const value = labels[key];
-    if (typeof value !== "string" || value.length < 1 || value.length > 512) {
+    if (
+      typeof value !== "string" ||
+      value.length < 1 ||
+      value.length > 512 ||
+      /[\u0000-\u001f\u007f]/.test(value)
+    ) {
       throw new SandboxManagerError(
         "docker_assignment_identity_invalid",
         "Managed Tool Sandbox labels were invalid",
@@ -322,12 +371,15 @@ function labelsToAssignment(
   return {
     containerId: runtimeId,
     containerName: runtimeNameValue.replace(/^\//, ""),
+    activationId: required(TOOL_SANDBOX_LABELS.activationId),
+    tenantId: required(TOOL_SANDBOX_LABELS.tenantId),
     supervisorId: required(TOOL_SANDBOX_LABELS.supervisorId),
     bootId: required(TOOL_SANDBOX_LABELS.bootId),
     sandboxId: required(TOOL_SANDBOX_LABELS.sandboxId),
     commandId: required(TOOL_SANDBOX_LABELS.commandId),
     sessionId: required(TOOL_SANDBOX_LABELS.sessionId),
     turnId: required(TOOL_SANDBOX_LABELS.turnId),
+    attemptId: required(TOOL_SANDBOX_LABELS.attemptId),
     leaseId: required(TOOL_SANDBOX_LABELS.leaseId),
     fencingToken,
   };
@@ -338,6 +390,7 @@ export function buildToolSandboxDockerArguments(
   name: string,
   activationId: string,
   assignment: ToolSandboxAssignment,
+  policy: SandboxPolicy = DEFAULT_TOOL_SANDBOX_POLICY,
 ): readonly string[] {
   bounded(image, "Tool Sandbox image");
   if (!/^[a-z0-9][a-z0-9_.-]{0,62}$/.test(name)) {
@@ -346,10 +399,11 @@ export function buildToolSandboxDockerArguments(
   if (!/^[0-9a-f-]{36}$/.test(activationId)) {
     throw new TypeError("Tool Sandbox activation ID is invalid");
   }
-  return dockerArgs(image, name, activationId, assignment);
+  return dockerArgs(image, name, activationId, assignment, policy);
 }
 
-export class DockerToolSandboxManager {
+export class DockerSandboxProvider implements SandboxProvider {
+  readonly providerId = "docker";
   readonly #toolImage: string;
   readonly #repositoryImportNetwork: string;
   readonly #dockerCommand: string;
@@ -357,10 +411,9 @@ export class DockerToolSandboxManager {
   readonly #cleanupTimeoutMs: number;
   readonly #repositoryImportTimeoutMs: number;
   readonly #idGenerator: () => string;
-  readonly #capabilityGenerator: () => string;
   readonly #activations = new Map<string, Activation>();
 
-  constructor(options: DockerToolSandboxManagerOptions) {
+  constructor(options: DockerSandboxProviderOptions) {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image");
     this.#repositoryImportNetwork = dockerNetwork(options.repositoryImportNetwork);
     this.#dockerCommand = bounded(options.dockerCommand ?? "docker", "Docker command");
@@ -380,12 +433,6 @@ export class DockerToolSandboxManager {
       300_000,
     );
     this.#idGenerator = options.idGenerator ?? randomUUID;
-    this.#capabilityGenerator =
-      options.capabilityGenerator ?? (() => `adts_${randomBytes(32).toString("base64url")}`);
-  }
-
-  get activeCount(): number {
-    return this.#activations.size;
   }
 
   async checkHealth(): Promise<void> {
@@ -400,8 +447,8 @@ export class DockerToolSandboxManager {
     }
   }
 
-  async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    const activationId = this.#idGenerator();
+  async create(spec: SandboxCreateSpec): Promise<SandboxHandle> {
+    const activationId = spec.activationId;
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         activationId,
@@ -416,19 +463,23 @@ export class DockerToolSandboxManager {
         false,
       );
     }
-    const capability = validCapability(this.#capabilityGenerator());
     const name = runtimeName(activationId);
     const child = spawn(
       this.#dockerCommand,
-      buildToolSandboxDockerArguments(this.#toolImage, name, activationId, request.assignment),
+      buildToolSandboxDockerArguments(
+        this.#toolImage,
+        name,
+        activationId,
+        spec.assignment,
+        spec.policy,
+      ),
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     const ready = deferred<void>();
     void ready.promise.catch(() => undefined);
     const activation: Activation = {
       activationId,
-      capabilityDigest: capabilityDigest(capability),
-      assignment: request.assignment,
+      assignment: spec.assignment,
       runtimeName: name,
       child,
       exit: new Promise<ExitResult>((resolveExit) => {
@@ -449,35 +500,41 @@ export class DockerToolSandboxManager {
         toolWorkerProtocolVersion: 1,
         type: "worker.initialize",
         activationId,
-        workspaceSeed: request.workspaceSeed,
-        ...(request.workspaceRestore === undefined
-          ? {}
-          : { workspaceRestore: request.workspaceRestore }),
+        workspaceSeed: spec.workspaceSeed,
+        ...(spec.workspaceRestore === undefined ? {} : { workspaceRestore: spec.workspaceRestore }),
       });
       await withTimeout(ready.promise, this.#readyTimeoutMs, "Tool Sandbox readiness");
       activation.runtimeId = await this.#inspectRuntimeId(name);
-      return {
-        managerProtocolVersion: 1,
-        type: "tool_sandbox.created",
-        requestId: request.requestId,
+      const handle: SandboxHandle = {
+        providerApiVersion: 1,
+        providerId: this.providerId,
         activationId,
-        capability,
         runtimeId: activation.runtimeId,
         runtimeName: name,
         workspaceRoot: "/workspace",
+        assignment: spec.assignment,
       };
+      activation.handle = handle;
+      return handle;
     } catch (error: unknown) {
       await this.#stopActivation(activation);
       throw error;
     }
   }
 
-  async execute(
-    capability: string,
+  async exec(
+    handle: SandboxHandle,
     request: ToolSandboxOperationRequest,
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
-    const activation = this.#authorized(request.activationId, capability);
+    const activation = this.#ownedHandle(handle);
+    if (request.activationId !== handle.activationId) {
+      throw new SandboxManagerError(
+        "tool_sandbox_identity_mismatch",
+        "Tool operation activation identity did not match",
+        false,
+      );
+    }
     if (activation.stopping || activation.failed !== undefined) {
       throw new SandboxManagerError(
         "tool_sandbox_unavailable",
@@ -530,12 +587,69 @@ export class DockerToolSandboxManager {
     }
   }
 
-  async capture(
-    activationId: string,
-    assignment: ToolSandboxAssignment,
-    requestId: string,
-  ): Promise<ToolSandboxCaptureResponse> {
-    const activation = this.#owned(activationId, assignment);
+  async readFile(
+    handle: SandboxHandle,
+    input: SandboxReadFileInput,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    const response = await this.exec(
+      handle,
+      {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.operation",
+        activationId: handle.activationId,
+        operationId: input.operationId,
+        operation: "file.read",
+        path: input.path,
+      },
+      signal,
+    );
+    if (response.type === "tool_sandbox.operation_failed") {
+      throw new SandboxManagerError(response.code, response.message, response.retryable);
+    }
+    if (response.operation !== "file.read") {
+      throw new SandboxManagerError(
+        "sandbox_provider_protocol_error",
+        "Docker Sandbox Provider returned the wrong file operation",
+        false,
+      );
+    }
+    return Buffer.from(response.content, "base64");
+  }
+
+  async writeFile(
+    handle: SandboxHandle,
+    input: SandboxWriteFileInput,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const response = await this.exec(
+      handle,
+      {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.operation",
+        activationId: handle.activationId,
+        operationId: input.operationId,
+        operation: "file.write",
+        path: input.path,
+        content: input.content,
+      },
+      signal,
+    );
+    if (response.type === "tool_sandbox.operation_failed") {
+      throw new SandboxManagerError(response.code, response.message, response.retryable);
+    }
+    if (response.operation !== "file.write") {
+      throw new SandboxManagerError(
+        "sandbox_provider_protocol_error",
+        "Docker Sandbox Provider returned the wrong file operation",
+        false,
+      );
+    }
+  }
+
+  async snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse> {
+    const activation = this.#ownedHandle(handle);
+    const activationId = handle.activationId;
     if (activation.captures.has(requestId)) {
       throw new SandboxManagerError(
         "tool_capture_replay",
@@ -559,20 +673,74 @@ export class DockerToolSandboxManager {
     }
   }
 
-  async stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
-    const activation = this.#activations.get(activationId);
+  async stop(handle: SandboxHandle): Promise<void> {
+    const activation = this.#activations.get(handle.activationId);
     if (activation === undefined) {
-      await this.#confirmNamedActivationAbsent(activationId, assignment);
+      await this.destroy(handle);
       return;
     }
-    if (!sameAssignment(activation.assignment, assignment)) {
+    this.#ownedHandle(handle);
+    await this.#stopActivation(activation);
+  }
+
+  async destroy(handle: SandboxHandle): Promise<void> {
+    const current = await this.#inspectAssignment(handle.runtimeId);
+    if (current === undefined) {
+      this.#activations.delete(handle.activationId);
+      return;
+    }
+    if (!this.#managedRuntimeMatchesHandle(current, handle)) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
-        "Tool Sandbox assignment identity did not match",
+        "Tool Sandbox handle identity did not match",
         false,
       );
     }
-    await this.#stopActivation(activation);
+    await this.#removeContainer(current.containerId);
+    this.#activations.delete(handle.activationId);
+  }
+
+  async destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
+    const activation = this.#activations.get(activationId);
+    if (activation !== undefined) {
+      if (!sameAssignment(activation.assignment, assignment)) {
+        throw new SandboxManagerError(
+          "tool_sandbox_identity_mismatch",
+          "Tool Sandbox assignment identity did not match",
+          false,
+        );
+      }
+      await this.#stopActivation(activation);
+      return;
+    }
+    await this.#confirmNamedActivationAbsent(activationId, assignment);
+  }
+
+  async inspect(handle: SandboxHandle): Promise<SandboxInspection> {
+    const current = await this.#inspectAssignment(handle.runtimeId);
+    if (current === undefined) {
+      return {
+        providerApiVersion: 1,
+        providerId: this.providerId,
+        state: "absent",
+        handle,
+      };
+    }
+    if (!this.#managedRuntimeMatchesHandle(current, handle)) {
+      throw new SandboxManagerError(
+        "tool_sandbox_identity_mismatch",
+        "Tool Sandbox inspection identity did not match",
+        false,
+      );
+    }
+    const inspected = await this.#inspectEffectiveIsolation(handle.runtimeId);
+    return {
+      providerApiVersion: 1,
+      providerId: this.providerId,
+      state: inspected.running ? "running" : "stopped",
+      handle,
+      effectiveIsolation: inspected.effectiveIsolation,
+    };
   }
 
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
@@ -633,7 +801,7 @@ export class DockerToolSandboxManager {
     if (tracked !== undefined) {
       if (
         tracked.runtimeName !== assignment.containerName ||
-        !sameAssignment(tracked.assignment, assignment)
+        !assignmentMatchesRuntime(tracked.assignment, assignment)
       ) {
         throw new SandboxManagerError(
           "docker_assignment_identity_mismatch",
@@ -827,9 +995,16 @@ export class DockerToolSandboxManager {
   }
 
   async close(): Promise<void> {
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       [...this.#activations.values()].map((value) => this.#stopActivation(value)),
     );
+    if (results.some((result) => result.status === "rejected")) {
+      throw new SandboxManagerError(
+        "sandbox_provider_cleanup_unverified",
+        "Docker Sandbox Provider shutdown could not confirm complete cleanup",
+        true,
+      );
+    }
   }
 
   #attachWorker(activation: Activation): void {
@@ -951,34 +1126,35 @@ export class DockerToolSandboxManager {
     throw error;
   }
 
-  #authorized(activationId: string, capability: string): Activation {
-    const activation = this.#activations.get(activationId);
-    const candidate = capabilityDigest(capability);
-    const expected = activation?.capabilityDigest ?? Buffer.alloc(32);
+  #ownedHandle(handle: SandboxHandle): Activation {
+    const activation = this.#activations.get(handle.activationId);
     if (
+      handle.providerApiVersion !== 1 ||
+      handle.providerId !== this.providerId ||
       activation === undefined ||
-      candidate.byteLength !== expected.byteLength ||
-      !timingSafeEqual(candidate, expected)
+      activation.handle === undefined ||
+      activation.handle.runtimeId !== handle.runtimeId ||
+      activation.handle.runtimeName !== handle.runtimeName ||
+      !sameAssignment(activation.assignment, handle.assignment)
     ) {
       throw new SandboxManagerError(
-        "invalid_tool_capability",
-        "Tool Sandbox operation is not authorized",
+        "tool_sandbox_identity_mismatch",
+        "Tool Sandbox handle identity did not match",
         false,
       );
     }
     return activation;
   }
 
-  #owned(activationId: string, assignment: ToolSandboxAssignment): Activation {
-    const activation = this.#activations.get(activationId);
-    if (activation === undefined || !sameAssignment(activation.assignment, assignment)) {
-      throw new SandboxManagerError(
-        "tool_sandbox_identity_mismatch",
-        "Tool Sandbox assignment identity did not match",
-        false,
-      );
-    }
-    return activation;
+  #managedRuntimeMatchesHandle(current: DockerManagedRuntime, handle: SandboxHandle): boolean {
+    return (
+      current.containerId === handle.runtimeId &&
+      current.containerName === handle.runtimeName &&
+      current.activationId === handle.activationId &&
+      current.tenantId === handle.assignment.tenantId &&
+      current.attemptId === handle.assignment.attemptId &&
+      assignmentMatchesRuntime(handle.assignment, current)
+    );
   }
 
   async #inspectRuntimeId(name: string): Promise<string> {
@@ -999,7 +1175,7 @@ export class DockerToolSandboxManager {
     return id;
   }
 
-  async #inspectAssignment(reference: string): Promise<SupervisorRuntimeAssignment | undefined> {
+  async #inspectAssignment(reference: string): Promise<DockerManagedRuntime | undefined> {
     if (!/^[a-z0-9][a-z0-9_.-]{0,127}$/i.test(reference)) {
       throw new TypeError("Tool Sandbox runtime reference is invalid");
     }
@@ -1066,6 +1242,100 @@ export class DockerToolSandboxManager {
     return labelsToAssignment(value.Id, value.Name, labels);
   }
 
+  async #inspectEffectiveIsolation(reference: string): Promise<{
+    running: boolean;
+    effectiveIsolation: SandboxEffectiveIsolation;
+  }> {
+    const result = await dockerExec(
+      this.#dockerCommand,
+      ["inspect", reference],
+      this.#cleanupTimeoutMs,
+    );
+    if (result.code !== 0) {
+      throw new SandboxManagerError(
+        "docker_inventory_unverified",
+        "Tool Sandbox effective isolation could not be verified",
+        true,
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.stdout) as unknown;
+    } catch {
+      throw new SandboxManagerError(
+        "docker_inventory_malformed",
+        "Docker returned malformed Tool Sandbox inspection",
+        false,
+      );
+    }
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 1 ||
+      typeof parsed[0] !== "object" ||
+      parsed[0] === null
+    ) {
+      throw new SandboxManagerError(
+        "docker_inventory_malformed",
+        "Docker returned ambiguous Tool Sandbox inspection",
+        false,
+      );
+    }
+    const value = parsed[0] as {
+      Config?: { User?: unknown };
+      State?: { Running?: unknown };
+      HostConfig?: {
+        Privileged?: unknown;
+        ReadonlyRootfs?: unknown;
+        NetworkMode?: unknown;
+        PidsLimit?: unknown;
+        Memory?: unknown;
+        NanoCpus?: unknown;
+        CapDrop?: unknown;
+        SecurityOpt?: unknown;
+      };
+      Mounts?: unknown;
+    };
+    const host = value.HostConfig;
+    if (
+      typeof value.Config?.User !== "string" ||
+      typeof value.State?.Running !== "boolean" ||
+      typeof host?.Privileged !== "boolean" ||
+      typeof host.ReadonlyRootfs !== "boolean" ||
+      typeof host.NetworkMode !== "string" ||
+      !Array.isArray(value.Mounts)
+    ) {
+      throw new SandboxManagerError(
+        "docker_assignment_identity_invalid",
+        "Tool Sandbox effective isolation was invalid",
+        false,
+      );
+    }
+    const mounts = value.Mounts as Array<{ Source?: unknown; Destination?: unknown }>;
+    const strings = (input: unknown): readonly string[] =>
+      Array.isArray(input) && input.every((entry) => typeof entry === "string") ? input : [];
+    const numberOrNull = (input: unknown): number | null =>
+      typeof input === "number" && Number.isSafeInteger(input) && input > 0 ? input : null;
+    return {
+      running: value.State.Running,
+      effectiveIsolation: {
+        user: value.Config.User,
+        privileged: host.Privileged,
+        readOnlyRootFilesystem: host.ReadonlyRootfs,
+        networkMode: host.NetworkMode,
+        mountCount: mounts.length,
+        hasDockerSocket: mounts.some(
+          (mount) =>
+            mount.Source === "/var/run/docker.sock" || mount.Destination === "/var/run/docker.sock",
+        ),
+        pidLimit: numberOrNull(host.PidsLimit),
+        memoryBytes: numberOrNull(host.Memory),
+        cpuNano: numberOrNull(host.NanoCpus),
+        droppedCapabilities: strings(host.CapDrop),
+        securityOptions: strings(host.SecurityOpt),
+      },
+    };
+  }
+
   async #stopActivation(activation: Activation): Promise<void> {
     if (activation.stopping) {
       await withTimeout(activation.exit, this.#cleanupTimeoutMs, "Tool Sandbox stop").catch(
@@ -1076,7 +1346,6 @@ export class DockerToolSandboxManager {
       return;
     }
     activation.stopping = true;
-    activation.capabilityDigest.fill(0);
     try {
       sendLine(activation, {
         toolWorkerProtocolVersion: 1,
@@ -1146,12 +1415,15 @@ export class DockerToolSandboxManager {
     const current = await this.#inspectAssignment(runtimeName(activationId));
     if (current === undefined) return;
     if (
+      current.activationId !== activationId ||
+      current.tenantId !== assignment.tenantId ||
       current.supervisorId !== assignment.supervisorId ||
       current.bootId !== assignment.bootId ||
       current.sandboxId !== assignment.sandboxId ||
       current.commandId !== assignment.commandId ||
       current.sessionId !== assignment.sessionId ||
       current.turnId !== assignment.turnId ||
+      current.attemptId !== assignment.attemptId ||
       current.leaseId !== assignment.leaseId ||
       current.fencingToken !== assignment.fencingToken
     ) {

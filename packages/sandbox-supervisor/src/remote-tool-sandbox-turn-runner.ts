@@ -74,10 +74,12 @@ function assignment(
   runtimeIdentity: SandboxRuntimeIdentity,
 ): ToolSandboxAssignment {
   return {
+    tenantId: command.payload.tenantId,
     ...runtimeIdentity,
     commandId: command.payload.commandId,
     sessionId: command.payload.sessionId,
     turnId: command.payload.turnId,
+    attemptId: command.payload.leaseId,
     leaseId: command.payload.leaseId,
     fencingToken: command.payload.fencingToken,
   };

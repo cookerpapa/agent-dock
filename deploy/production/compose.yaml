@@ -424,6 +424,7 @@ services:
       NODE_ENV: production
       AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
       AGENT_DOCK_SANDBOX_MANAGER_PORT: "4300"
+      AGENT_DOCK_SANDBOX_PROVIDER: docker
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
       AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
       AGENT_DOCK_DOCKER_COMMAND: docker

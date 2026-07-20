@@ -33,12 +33,14 @@ const Base64Schema = Type.String({
 
 export const ToolSandboxAssignmentSchema = Type.Object(
   {
+    tenantId: OpaqueIdSchema,
     supervisorId: OpaqueIdSchema,
     bootId: UuidSchema,
     sandboxId: UuidSchema,
     commandId: OpaqueIdSchema,
     sessionId: OpaqueIdSchema,
     turnId: OpaqueIdSchema,
+    attemptId: UuidSchema,
     leaseId: UuidSchema,
     fencingToken: PositiveSafeIntegerSchema,
   },

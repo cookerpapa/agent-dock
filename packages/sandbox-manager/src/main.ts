@@ -1,14 +1,16 @@
 import { loadSandboxManagerConfig } from "./config.ts";
-import { DockerToolSandboxManager } from "./docker-tool-sandbox-manager.ts";
+import { DockerSandboxProvider } from "./docker-sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
+import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 
 const config = await loadSandboxManagerConfig();
-const manager = new DockerToolSandboxManager({
+const provider = new DockerSandboxProvider({
   toolImage: config.toolImage,
   repositoryImportNetwork: config.repositoryImportNetwork,
   dockerCommand: config.dockerCommand,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
 });
+const manager = new ToolSandboxManager({ provider });
 const server = new SandboxManagerServer({
   host: config.host,
   port: config.port,

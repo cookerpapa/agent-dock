@@ -107,6 +107,12 @@ extension-policy support would overstate the current boundary.
 - [x] Route controlled GitHub imports through the Manager without giving the Manager repository-network membership
 - [x] Add production secret migration, volume ownership bootstrap, health checks, images, and internal sandbox-control network
 - [x] Prove real Pi `bash/edit` RPC, final diff/checkpoint, cancellation, cleanup, socket ownership, and secret absence
+- [x] ADR-0030: separate Manager authorization/lifecycle from a provider-neutral SandboxProvider
+- [x] Bind Provider handles to tenant, session, turn, attempt, lease, fence, and opaque runtime identity
+- [x] Implement DockerSandboxProvider create/exec/read/write/snapshot/inspect/stop/destroy and orphan cleanup
+- [x] Reject unimplemented Provider selection and unsupported non-deny-all Tool network policies
+- [x] Add a source-built Provider gate for cgroups, `/proc`/credential isolation, cross-tenant workspaces, network denial, symlink/output bounds, cancellation, and exact cleanup
+- [x] Publish the threat model, Provider contract, network matrix, and Run lifecycle
 - [ ] Isolate and policy-gate user/project Pi extensions before enabling discovery in production
 - [ ] Replace shared-kernel Docker with gVisor/Kata/Firecracker or a managed sandbox before a hostile public-SaaS claim
 

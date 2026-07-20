@@ -5,9 +5,10 @@ import type {
   ToolSandboxCreateRequest,
 } from "@agent-dock/protocol";
 import {
-  DockerToolSandboxManager,
+  DockerSandboxProvider,
   SandboxManagerClient,
   SandboxManagerServer,
+  ToolSandboxManager,
 } from "@agent-dock/sandbox-manager";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -69,11 +70,12 @@ function inspect(reference: string): Promise<Record<string, any>> {
 describe.skipIf(!enabled)("trusted Pi Runner with remote Tool Sandbox", () => {
   it("repairs code through RPC while the Docker worker stays offline and credential-free", async () => {
     const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
-    const backend = new DockerToolSandboxManager({
+    const provider = new DockerSandboxProvider({
       toolImage,
       dockerCommand,
       repositoryImportNetwork: "bridge",
     });
+    const backend = new ToolSandboxManager({ provider });
     const server = new SandboxManagerServer({
       host: "127.0.0.1",
       port: 0,

@@ -6,6 +6,7 @@ export type SandboxManagerConfig = {
   host: string;
   port: number;
   serviceToken: string;
+  sandboxProvider: "docker";
   toolImage: string;
   dockerCommand: string;
   repositoryImportNetwork: string;
@@ -68,10 +69,15 @@ async function readSecret(path: string): Promise<string> {
 export async function loadSandboxManagerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SandboxManagerConfig> {
+  const sandboxProvider = environment.AGENT_DOCK_SANDBOX_PROVIDER ?? "docker";
+  if (sandboxProvider !== "docker") {
+    throw new TypeError("Configured Sandbox Provider is not supported by this build");
+  }
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
+    sandboxProvider,
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
     dockerCommand: bounded(environment.AGENT_DOCK_DOCKER_COMMAND ?? "docker", "dockerCommand"),
     repositoryImportNetwork: bounded(

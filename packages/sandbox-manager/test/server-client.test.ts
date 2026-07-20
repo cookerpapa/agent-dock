@@ -15,12 +15,14 @@ const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {
+  tenantId: "tenant-manager-test",
   supervisorId: "supervisor-manager-test",
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",
   commandId: "command-manager-test",
   sessionId: "session-manager-test",
   turnId: "turn-manager-test",
+  attemptId: "10000000-0000-4000-8000-000000000003",
   leaseId: "10000000-0000-4000-8000-000000000003",
   fencingToken: 4,
 };

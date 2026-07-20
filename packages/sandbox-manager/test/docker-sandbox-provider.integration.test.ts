@@ -1,0 +1,271 @@
+import type {
+  ToolSandboxAssignment,
+  ToolSandboxCreateRequest,
+  ToolSandboxOperationRequest,
+  ToolSandboxOperationResponse,
+} from "@agent-dock/protocol";
+import { execFile } from "node:child_process";
+import { describe, expect, it } from "vitest";
+import { DockerSandboxProvider, ToolSandboxManager } from "../src/index.ts";
+
+const enabled = process.env.AGENT_DOCK_SANDBOX_PROVIDER_TEST === "1";
+const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
+const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
+const ids = [
+  "10000000-0000-4000-8000-000000000101",
+  "10000000-0000-4000-8000-000000000102",
+  "10000000-0000-4000-8000-000000000103",
+] as const;
+
+function assignment(index: number): ToolSandboxAssignment {
+  const suffix = String(index).padStart(3, "0");
+  const attemptId = `20000000-0000-4000-8000-000000000${suffix}`;
+  return {
+    tenantId: `tenant-provider-${String(index)}`,
+    supervisorId: "supervisor-provider-integration",
+    bootId: "30000000-0000-4000-8000-000000000001",
+    sandboxId: "30000000-0000-4000-8000-000000000002",
+    commandId: `command-provider-${String(index)}`,
+    sessionId: `session-provider-${String(index)}`,
+    turnId: `turn-provider-${String(index)}`,
+    attemptId,
+    leaseId: attemptId,
+    fencingToken: index,
+  };
+}
+
+function createRequest(index: number): ToolSandboxCreateRequest {
+  return {
+    managerProtocolVersion: 1,
+    type: "tool_sandbox.create",
+    requestId: `40000000-0000-4000-8000-000000000${String(index).padStart(3, "0")}`,
+    assignment: assignment(index),
+    workspaceSeed: { kind: "sample_java" },
+  };
+}
+
+function operation(
+  activationId: string,
+  operationId: string,
+  command: string,
+  timeoutMs = 5_000,
+): ToolSandboxOperationRequest {
+  return {
+    managerProtocolVersion: 1,
+    type: "tool_sandbox.operation",
+    activationId,
+    operationId,
+    operation: "bash.exec",
+    command,
+    cwd: "/workspace",
+    timeoutMs,
+  };
+}
+
+function bashOutput(response: ToolSandboxOperationResponse): string {
+  if (response.type !== "tool_sandbox.operation_result" || response.operation !== "bash.exec") {
+    throw new Error("Expected a successful Bash response");
+  }
+  return Buffer.from(response.output, "base64").toString("utf8");
+}
+
+function dockerContainerExists(reference: string): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    execFile(
+      dockerCommand,
+      ["inspect", "--format", "{{.Id}}", reference],
+      { encoding: "utf8", timeout: 10_000, maxBuffer: 64 * 1_024 },
+      (error) => resolvePromise(error === null),
+    );
+  });
+}
+
+describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
+  it("enforces identity, cgroups, namespace isolation, bounded output and exact cleanup", async () => {
+    let nextId = 0;
+    const provider = new DockerSandboxProvider({
+      toolImage,
+      dockerCommand,
+      repositoryImportNetwork: "bridge",
+    });
+    const manager = new ToolSandboxManager({
+      provider,
+      idGenerator: () => ids[nextId++]!,
+      capabilityGenerator: () => `adts_${String(nextId).repeat(43).slice(0, 43)}`,
+    });
+    const firstAssignment = assignment(1);
+    const secondAssignment = assignment(2);
+    let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    try {
+      first = await manager.create(createRequest(1));
+      second = await manager.create(createRequest(2));
+
+      await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
+        state: "running",
+        handle: {
+          providerId: "docker",
+          assignment: {
+            tenantId: firstAssignment.tenantId,
+            sessionId: firstAssignment.sessionId,
+            turnId: firstAssignment.turnId,
+            attemptId: firstAssignment.attemptId,
+          },
+        },
+        effectiveIsolation: {
+          user: "1000:1000",
+          privileged: false,
+          readOnlyRootFilesystem: true,
+          networkMode: "none",
+          mountCount: 0,
+          hasDockerSocket: false,
+          pidLimit: 128,
+          memoryBytes: 768 * 1_024 * 1_024,
+          cpuNano: 1_000_000_000,
+          droppedCapabilities: ["ALL"],
+        },
+      });
+
+      const environment = bashOutput(
+        await manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000001",
+            "env; tr '\\0' '\\n' < /proc/self/environ; tr '\\0' '\\n' < /proc/1/environ; printf 'pid1='; tr '\\0' ' ' < /proc/1/cmdline",
+          ),
+        ),
+      );
+      expect(environment).not.toMatch(
+        /AGENT_DOCK|DATABASE_URL|AWS_|api[_-]?key|token|secret|credential|admg_|adts_/i,
+      );
+      expect(environment).not.toMatch(/pi\s+--mode\s+rpc|supervisor-host|control-plane/i);
+
+      const cgroups = bashOutput(
+        await manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000002",
+            "printf 'memory='; cat /sys/fs/cgroup/memory.max; printf 'pids='; cat /sys/fs/cgroup/pids.max; printf 'cpu='; cat /sys/fs/cgroup/cpu.max; printf 'workspace='; df -B1 --output=size /workspace | tail -1",
+          ),
+        ),
+      );
+      expect(cgroups).toContain(`memory=${String(768 * 1_024 * 1_024)}`);
+      expect(cgroups).toContain("pids=128");
+      expect(cgroups).toMatch(/cpu=100000\s+100000/);
+      const workspaceBytes = Number(/workspace=\s*(\d+)/.exec(cgroups)?.[1]);
+      expect(workspaceBytes).toBeGreaterThan(0);
+      expect(workspaceBytes).toBeLessThanOrEqual(128 * 1_024 * 1_024);
+
+      const networkProbe = bashOutput(
+        await manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000003",
+            `node -e 'const net=require("node:net");const t=[["control-plane",4100],["postgres",5432],["minio",9000],["sandbox-manager",4300],["host.docker.internal",80],["1.1.1.1",443]];Promise.all(t.map(([host,port])=>new Promise(resolve=>{const s=net.connect({host,port});let done=false;const finish=value=>{if(done)return;done=true;s.destroy();resolve(value)};s.setTimeout(300,()=>finish("blocked"));s.once("error",()=>finish("blocked"));s.once("connect",()=>finish("reachable"))}))).then(values=>{console.log(JSON.stringify(values));process.exit(values.includes("reachable")?2:0)})'`,
+            5_000,
+          ),
+        ),
+      );
+      expect(networkProbe).not.toContain("reachable");
+
+      await expect(
+        manager.execute(second.capability, {
+          managerProtocolVersion: 1,
+          type: "tool_sandbox.operation",
+          activationId: second.activationId,
+          operationId: "50000000-0000-4000-8000-000000000004",
+          operation: "file.write",
+          path: "tenant-private.txt",
+          content: "second tenant only",
+        }),
+      ).resolves.toMatchObject({ operation: "file.write" });
+      await expect(
+        manager.execute(first.capability, {
+          managerProtocolVersion: 1,
+          type: "tool_sandbox.operation",
+          activationId: first.activationId,
+          operationId: "50000000-0000-4000-8000-000000000005",
+          operation: "file.read",
+          path: "tenant-private.txt",
+        }),
+      ).resolves.toMatchObject({
+        type: "tool_sandbox.operation_failed",
+        code: "tool_file_unavailable",
+      });
+
+      await manager.execute(
+        first.capability,
+        operation(
+          first.activationId,
+          "50000000-0000-4000-8000-000000000006",
+          "ln -s /etc/passwd escaped-link",
+        ),
+      );
+      await expect(
+        manager.execute(first.capability, {
+          managerProtocolVersion: 1,
+          type: "tool_sandbox.operation",
+          activationId: first.activationId,
+          operationId: "50000000-0000-4000-8000-000000000007",
+          operation: "file.read",
+          path: "escaped-link",
+        }),
+      ).resolves.toMatchObject({
+        type: "tool_sandbox.operation_failed",
+        code: "tool_symlink_rejected",
+      });
+
+      await expect(
+        manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000008",
+            `node -e 'process.stdout.write("x".repeat(1100000))'`,
+            10_000,
+          ),
+        ),
+      ).resolves.toMatchObject({
+        type: "tool_sandbox.operation_failed",
+        code: "tool_output_limit",
+      });
+
+      const longOperation = manager.execute(
+        second.capability,
+        operation(
+          second.activationId,
+          "50000000-0000-4000-8000-000000000009",
+          "sleep 300 & wait",
+          300_000,
+        ),
+      );
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+      await manager.stop(second.activationId, secondAssignment);
+      const cancellation = await Promise.allSettled([longOperation]);
+      expect(
+        cancellation[0]?.status === "rejected" ||
+          (cancellation[0]?.status === "fulfilled" &&
+            cancellation[0].value.type === "tool_sandbox.operation_failed" &&
+            cancellation[0].value.code === "tool_cancelled"),
+      ).toBe(true);
+      expect(await dockerContainerExists(second.runtimeId)).toBe(false);
+      second = undefined;
+
+      await manager.stop(first.activationId, firstAssignment);
+      expect(await dockerContainerExists(first.runtimeId)).toBe(false);
+      first = undefined;
+      await expect(provider.listAssignments(firstAssignment.sandboxId)).resolves.toEqual([]);
+    } finally {
+      if (second !== undefined) {
+        await manager.stop(second.activationId, secondAssignment).catch(() => undefined);
+      }
+      if (first !== undefined) {
+        await manager.stop(first.activationId, firstAssignment).catch(() => undefined);
+      }
+      await manager.close().catch(() => undefined);
+    }
+  }, 120_000);
+});

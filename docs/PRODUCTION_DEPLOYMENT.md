@@ -37,6 +37,10 @@ Controlled public GitHub import and immutable workspace seeds are recorded in
 [ADR-0028](adr/0028-controlled-github-workspace-import.md).
 The trusted Pi Runner and remote Tool Sandbox split is recorded in
 [ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
+The provider-neutral runtime boundary is recorded in
+[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). See also the
+[threat model](THREAT_MODEL.md), [network matrix](NETWORK_MATRIX.md), and
+[Sandbox Provider contract](SANDBOX_PROVIDER.md).
 
 ## Prerequisites
 
@@ -172,7 +176,10 @@ never forwarded to remote bash.
 The separate `sandbox-manager` is the only root-equivalent application service
 because it owns `/var/run/docker.sock`. It has no database, S3, provider,
 enrollment, or tenant credential and exposes only authenticated bounded
-lifecycle/tool/inventory operations. Tool Sandboxes are created per active turn,
+lifecycle/tool/inventory operations. It fixes
+`AGENT_DOCK_SANDBOX_PROVIDER=docker`; an unknown or not-yet-implemented Provider
+fails startup rather than silently falling back. Capability authorization and
+identity fencing remain above the Provider implementation. Tool Sandboxes are created per active turn,
 not per conversation: they run as UID/GID `1000:1000`, with `--network none`, no
 host bind mount, inherited environment credential, published port, Docker
 socket, or writable root filesystem, and are removed after completion or
@@ -505,6 +512,18 @@ Every replacement must remain a bounded, non-symlink regular file with mode
 Compose environment variables, command arguments, Git, issue trackers, or logs.
 
 ## Reproducible production acceptance
+
+Before the full topology gate, the isolated execution plane can be reproduced
+without model tokens:
+
+```bash
+npm run sandbox-provider:check
+```
+
+This source-builds the Tool image and checks effective cgroups, namespace and
+network isolation, `/proc`/credential absence, cross-tenant workspaces,
+path/symlink defense, bounded output, cancellation, cleanup, and the real Pi
+remote-tool repair loop.
 
 Run the destructive acceptance topology separately from a real deployment:
 

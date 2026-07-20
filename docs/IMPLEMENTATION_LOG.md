@@ -1402,3 +1402,39 @@
   容器仍共享宿主内核；Manager 的 socket 仍属于 TCB。用户已明确暂缓 project extension 与 approval boundary，因此下一步
   不扩功能，先用 CI、加强后的 production gate 和当前部署检查把这次执行边界固化；若未来开放公网任意代码，应再评估
   gVisor/Kata/Firecracker 或托管 microVM，并单独写 threat model。
+
+## 2026-07-20 — Provider-neutral Sandbox runtime 与长期平台路线
+
+- 目标与原因：接受“长期打磨、可公开演示、能经受系统设计追问”的产品定位，把上一阶段已经跑通的 Docker Tool Sandbox
+  从具体实现提升为可维护的 Provider 边界，同时保存后续 Durable Run、Workspace/GitHub、Context、Observability/Eval、
+  第二 Provider 和产品完善的依赖顺序。完整路线保存在 `docs/PLATFORM_PRODUCT_PLAN.md`；本轮只声明并完成 Milestone 1，
+  不把 gVisor、Vercel、GitHub App、PR 或 Temporal 写成已有能力。
+- 架构决策：新增 ADR-0030。`ToolSandboxManager` 属于可信控制边界，负责 capability digest、常量时间鉴权、operation replay
+  防护、activation 生命周期和 assignment/policy 校验；`SandboxProvider` 只负责 runtime mechanics，不接触 bearer
+  capability，也不向 Agent Runtime 暴露 Docker SDK/handle。当前部署配置是闭合 union，只接受经过验证的 `docker`；未知
+  Provider 启动即失败，避免配置看似生效、实际静默降级。
+- Provider 合同：新增 `create/exec/readFile/writeFile/snapshot/stop/destroy/inspect/inventory/reconcile/close` 等 provider-neutral
+  能力。不可变 handle 绑定 `provider/activationId/tenantId/sessionId/turnId/attemptId`；当前 `attemptId` 明确映射现有 lease ID，
+  等 Milestone 2 引入独立 `RunAttempt` 后再迁移。Docker 实现移入 `DockerSandboxProvider`，Provider 本身不生成、保存或校验
+  capability。
+- 固定策略：Tool Sandbox 使用 UID 1000、非 privileged、read-only rootfs、`cap_drop=ALL`、
+  `no-new-privileges`、`network=none`、零 host mount/socket/port，并固定 CPU 1、memory 768 MiB、pids 128、nofile 1024、
+  `/tmp` 64 MiB、workspace 128 MiB、单次输出 1 MiB、命令 300 秒和 turn 900 秒上限。网络策略类型预留 deny-all、GitHub、
+  package registries 和 explicit hosts，但 Docker Tool provider 当前只实现 deny-all；其余策略 fail closed，不借助 platform
+  internal network 伪装 allowlist。
+- 自动隔离证据：新增 opt-in `npm run sandbox-provider:check`。真实 Docker 测试创建两个 tenant 的 sandbox，并从容器内验证
+  UID、capabilities、read-only、network、mount/socket、CPU/memory/PID/cgroup 限额；证明 `env`、自身和 PID 1 的 `/proc`
+  都没有平台/模型凭据，Control Plane/PostgreSQL/MinIO/Manager/host gateway/公网均不可达，跨租户文件不可见，路径穿越和
+  symlink escape 被拒绝，无限输出被截断，取消后后台进程及容器消失。随后由 pinned Pi 真实执行远程 bash/edit/bash 的
+  Java 修复与 checkpoint；整个 gate 不调用模型、不消耗 token。
+- 仓库门禁：最终 `npm run ci` 完整通过 production Web build、所有 workspace typecheck、301 passed/9 conditional skipped
+  tests、两个 zero-model-call Pi spikes 和 `npm audit --audit-level=high`（0 vulnerabilities）。Disposable full-build production
+  gate `agent-dock-check-9b1a344c13` 通过公开注册、3 tenant 隔离、control-plane restart、`1 -> 2 -> 1`、fresh Supervisor
+  boot、active worker cancel、22 条 durable events、新 provider/resource/identity 断言和精确清理。
+- 当前部署：正式栈已更新到同一批镜像，五个常驻服务 healthy，Web 仍只发布 `127.0.0.1:8080`。Supervisor 是非 root、
+  read-only 且没有 Docker socket；Manager 只加入 sandbox-control，是唯一 socket owner；空闲时 managed sandbox 与 importer
+  均为 0。受控 importer 再次导入 `octocat/hello-world` 固定 commit，得到相同的 217-byte snapshot 和 SHA-256
+  `7ff9e22d573d6ac65f521f3a07b9412558210bbe419fec8896473187f000e9f2`，完成后 repository-egress endpoint 回到 0。
+- 下一步：实施 Milestone 2 的显式 Durable Run Protocol：独立 `Run/RunAttempt`、lease/heartbeat/fencing、HTTP 幂等键、
+  terminal/checkpoint CAS 与故障注入。原因是 Sandbox 安全边界已经可替换且有真实证据，下一项最大系统风险不在增加工具，
+  而在 Worker 崩溃、重复投递和旧 Attempt 延迟完成时，能否保证状态与 Workspace 不被覆盖。

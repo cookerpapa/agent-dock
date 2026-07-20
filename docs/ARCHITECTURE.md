@@ -189,6 +189,17 @@ credential-free, `--network none` Tool Sandbox per active turn. The Tool Sandbox
 contains only the workspace and toolchains. A settled capture returns the
 workspace snapshot and bounded Git patch before the terminal event is published.
 
+ADR-0030 splits the Manager's stable authorization/lifecycle contract from the
+runtime implementation. `ToolSandboxManager` owns activation capabilities,
+replay checks, exact assignment authorization, and the fixed deployment policy.
+It passes an immutable, provider-neutral handle to `SandboxProvider`; that
+handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
+identity without exposing a Docker client or provider SDK. The current
+`DockerSandboxProvider` implements creation, worker transport, read/write/exec,
+snapshot, effective inspection, stop/destroy, inventory, and confirmed orphan
+cleanup. Unknown configured providers fail startup. `docker_gvisor` and managed
+microVM providers remain planned until they pass the same executable contract.
+
 ### TypeScript sandbox supervisor
 
 Responsibilities:
@@ -326,6 +337,13 @@ The sandbox is the security and workspace boundary. The initial implementation
 uses Docker; the target implementation supports Kubernetes pods and optional
 stronger runtimes such as gVisor or Kata.
 
+The runtime is selected only by trusted deployment configuration, never by a
+prompt, tenant request, or Tool RPC. The Provider contract reserves deny-all,
+GitHub, package-registry, and explicit-host network policy shapes, but the
+current Docker Tool implementation accepts only deny-all. GitHub import remains
+a separate credential-free workload on its dedicated egress bridge. See
+`docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
+
 Minimum controls:
 
 - non-root user and read-only root filesystem;
@@ -428,8 +446,8 @@ recovery. See ADR-0024.
 6. The supervisor validates the fencing token, resolves and reverifies the
    immutable workspace seed, and loads settled session/workspace state.
 7. The selected execution backend activates Pi with the fixed remote-tool
-   extension, creates a Tool Sandbox through the Manager, and executes the
-   agent loop.
+   extension, creates a Tool Sandbox through the Manager and configured
+   SandboxProvider, and executes the agent loop.
 8. The supervisor translates and emits sequenced events; the control plane persists and ACKs them.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.

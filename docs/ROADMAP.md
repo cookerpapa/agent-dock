@@ -1,5 +1,9 @@
 # Implementation roadmap
 
+The dependency-ordered long-term product direction is maintained in
+[`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
+original phase history and current implementation status.
+
 Assumption: one developer using AI-assisted implementation for roughly 15 hours
 per week. Time ranges include verification, documentation, debugging, and the
 work needed to understand and explain the generated system.
@@ -154,6 +158,15 @@ legacy adapter/test path. User/project extensions, interactive approvals,
 stronger-than-shared-kernel isolation, and mutually hostile public tenants are
 still outside the claim. The owner explicitly deferred extension and approval
 work, so those items are not represented as silently complete.
+
+ADR-0030 now adds the long-term Provider seam: one provider-neutral Manager owns
+capabilities and identity while `DockerSandboxProvider` owns only runtime
+operations. Handles bind tenant/session/turn/attempt/lease/fence, deployment
+policy is fixed above the Provider, and effective inspection plus a dedicated
+zero-token Docker gate prove cgroups, network denial, `/proc` and credential
+isolation, cross-tenant workspace isolation, bounded output, cancellation, and
+cleanup. gVisor and managed microVM Providers remain planned rather than
+claimed.
 
 This bounded tool-sandbox slice is resume-ready.
 
