@@ -11,7 +11,7 @@ import {
   type TurnState,
 } from "@agent-dock/domain";
 import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
-import type { CancelTurnCommandMessage } from "@agent-dock/protocol";
+import type { CancelTurnCommandMessage, TurnBudgetSnapshot } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import {
@@ -48,6 +48,7 @@ export type TurnExecutionRequest = {
     credentialBindingId: string;
     credentialBindingVersion: string;
   };
+  budgets?: TurnBudgetSnapshot;
 };
 
 export type TurnExecutionAcknowledgement = {
@@ -218,6 +219,14 @@ function safeMailboxPosition(value: string): number {
     throw new OutboxDispatcherInvariantError(
       "The v1 turn dispatcher requires a positive mailbox position",
     );
+  }
+  return parsed;
+}
+
+function safeNonNegativeInteger(value: number | string, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new OutboxDispatcherInvariantError(`${name} must be a non-negative safe integer`);
   }
   return parsed;
 }
@@ -520,6 +529,16 @@ export class OutboxDispatcher {
           "run.current_attempt_id as currentAttemptId",
           "run.attempt_count as runAttemptCount",
           "run.row_version as runVersion",
+          "policy.maximum_model_requests_per_run as maximumModelRequests",
+          "policy.maximum_tokens_per_run as maximumTokens",
+          "policy.maximum_cost_microusd_per_run as maximumCostMicrousd",
+          "policy.daily_token_budget as dailyTokenBudget",
+          "policy.monthly_cost_microusd_budget as monthlyCostMicrousdBudget",
+          "policy.maximum_tool_calls_per_run as maximumToolCalls",
+          "policy.maximum_tool_output_bytes as maximumToolOutputBytes",
+          "policy.maximum_run_duration_ms as maximumRunDurationMs",
+          "policy.compaction_reserve_tokens as compactionReserveTokens",
+          "policy.compaction_keep_recent_tokens as compactionKeepRecentTokens",
         ])
         .where(
           this.#tenantId === undefined
@@ -623,6 +642,20 @@ export class OutboxDispatcher {
         );
       }
       safeMailboxPosition(row.mailboxPosition);
+
+      const usedToolCalls = await transaction
+        .selectFrom("session_events")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", row.tenantId)
+        .where("session_id", "=", row.sessionId)
+        .where("turn_id", "=", row.turnId)
+        .where("type", "=", "tool.started")
+        .executeTakeFirstOrThrow();
+      const maximumToolCalls = safeNonNegativeInteger(row.maximumToolCalls, "tool-call budget");
+      const remainingToolCalls = Math.max(
+        0,
+        maximumToolCalls - safeNonNegativeInteger(usedToolCalls.count, "used tool-call count"),
+      );
 
       const attemptNumber = row.attempts + 1;
       if (row.runAttemptCount !== row.attempts) {
@@ -806,6 +839,37 @@ export class OutboxDispatcher {
             thinkingLevel: row.thinkingLevel,
             credentialBindingId: row.credentialBindingId,
             credentialBindingVersion: row.credentialBindingVersion,
+          },
+          budgets: {
+            maximumModelRequests: safeNonNegativeInteger(
+              row.maximumModelRequests,
+              "model-request budget",
+            ),
+            maximumTokens: safeNonNegativeInteger(row.maximumTokens, "run token budget"),
+            maximumCostMicrousd: safeNonNegativeInteger(row.maximumCostMicrousd, "run cost budget"),
+            dailyTokenBudget: safeNonNegativeInteger(row.dailyTokenBudget, "daily token budget"),
+            monthlyCostMicrousdBudget: safeNonNegativeInteger(
+              row.monthlyCostMicrousdBudget,
+              "monthly cost budget",
+            ),
+            maximumToolCalls,
+            remainingToolCalls,
+            maximumToolOutputBytes: safeNonNegativeInteger(
+              row.maximumToolOutputBytes,
+              "tool output budget",
+            ),
+            maximumRunDurationMs: safeNonNegativeInteger(
+              row.maximumRunDurationMs,
+              "Run duration budget",
+            ),
+            compactionReserveTokens: safeNonNegativeInteger(
+              row.compactionReserveTokens,
+              "compaction reserve",
+            ),
+            compactionKeepRecentTokens: safeNonNegativeInteger(
+              row.compactionKeepRecentTokens,
+              "compaction recent context",
+            ),
           },
         },
       };

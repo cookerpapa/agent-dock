@@ -134,6 +134,24 @@ async function seedDemoRuntime(database: ReturnType<typeof createDatabase>): Pro
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("model_rates")
+    .values({
+      tenant_id: DEMO_IDS.tenant,
+      provider: "agent-dock-fake",
+      model_id: "embedded-java-repair",
+    })
+    .executeTakeFirstOrThrow();
+  await database
+    .insertInto("model_routing_policies")
+    .values({
+      tenant_id: DEMO_IDS.tenant,
+      model_profile_id: DEMO_IDS.profile,
+      fallback_provider: null,
+      fallback_model_id: null,
+      enabled: false,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("tenant_runtime_policies")
     .values({
       tenant_id: DEMO_IDS.tenant,

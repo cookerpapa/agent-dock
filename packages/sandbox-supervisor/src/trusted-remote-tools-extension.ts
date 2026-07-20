@@ -15,14 +15,20 @@ import {
   type ReadOperations,
   type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
-import { randomUUID } from "node:crypto";
-import { extname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { extname, isAbsolute, resolve, sep } from "node:path";
+import { TextDecoder } from "node:util";
 
 const WORKSPACE_ROOT = "/workspace";
 const OPERATION_URL_ENV = "AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL";
 const ACTIVATION_ID_ENV = "AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID";
 const CAPABILITY_ENV = "AGENT_DOCK_TRUSTED_TOOL_CAPABILITY";
+const REMAINING_TOOL_CALLS_ENV = "AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS";
+const MAXIMUM_TOOL_OUTPUT_BYTES_ENV = "AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES";
+const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024;
+const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
   ? Omit<T, "managerProtocolVersion" | "type" | "activationId" | "operationId">
@@ -52,6 +58,9 @@ function runtimeConfiguration(): {
   operationUrl: string;
   activationId: string;
   capability: string;
+  remainingToolCalls: number;
+  maximumToolOutputBytes: number;
+  toolOutputDirectory: string;
 } {
   const operationUrl = requiredEnvironment(OPERATION_URL_ENV);
   const parsed = new URL(operationUrl);
@@ -66,15 +75,42 @@ function runtimeConfiguration(): {
   }
   const activationId = requiredEnvironment(ACTIVATION_ID_ENV);
   const capability = requiredEnvironment(CAPABILITY_ENV);
+  const remainingToolCalls = Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV));
+  const maximumToolOutputBytes = Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV));
+  const configuredToolOutputDirectory = requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV);
+  const toolOutputDirectory = resolve(configuredToolOutputDirectory);
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       activationId,
     ) ||
-    !/^adts_[A-Za-z0-9_-]{43}$/.test(capability)
+    !/^adts_[A-Za-z0-9_-]{43}$/.test(capability) ||
+    !Number.isSafeInteger(remainingToolCalls) ||
+    remainingToolCalls < 0 ||
+    remainingToolCalls > 10_000 ||
+    !Number.isSafeInteger(maximumToolOutputBytes) ||
+    maximumToolOutputBytes < 1_024 ||
+    maximumToolOutputBytes > 1_048_576 ||
+    !isAbsolute(configuredToolOutputDirectory) ||
+    toolOutputDirectory !== configuredToolOutputDirectory ||
+    toolOutputDirectory === "/"
   ) {
     throw new Error("Trusted Tool Sandbox identity is invalid");
   }
-  return { operationUrl: parsed.toString(), activationId, capability };
+  return {
+    operationUrl: parsed.toString(),
+    activationId,
+    capability,
+    remainingToolCalls,
+    maximumToolOutputBytes,
+    toolOutputDirectory,
+  };
+}
+
+function boundedOutput(value: Buffer, maximumBytes: number): Buffer {
+  if (value.byteLength <= maximumBytes) return value;
+  const marker = Buffer.from("\n[AgentDock truncated command output]\n", "utf8");
+  const bodyBytes = Math.max(0, maximumBytes - marker.byteLength);
+  return Buffer.concat([value.subarray(0, bodyBytes), marker]);
 }
 
 function canonicalBase64(value: string): Buffer {
@@ -122,6 +158,14 @@ function errorForPi(error: unknown, timeoutSeconds?: number): Error {
 
 export default function trustedRemoteTools(pi: ExtensionAPI): void {
   const runtime = runtimeConfiguration();
+  let remainingToolCalls = runtime.remainingToolCalls;
+
+  const consumeToolCall = (): void => {
+    if (remainingToolCalls < 1) {
+      throw new Error("tool_budget_exhausted: Run tool-call budget is exhausted");
+    }
+    remainingToolCalls -= 1;
+  };
 
   const operation = async (
     request: RemoteOperationInput,
@@ -185,13 +229,49 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     return parsed;
   };
 
-  const readOperations: ReadOperations = {
+  const preserveLargeOutput = async (toolCallId: string, value: Buffer): Promise<void> => {
+    if (value.byteLength <= runtime.maximumToolOutputBytes) return;
+    const fileName = `${createHash("sha256").update(toolCallId, "utf8").digest("hex")}.output`;
+    const target = resolve(runtime.toolOutputDirectory, fileName);
+    if (!target.startsWith(`${runtime.toolOutputDirectory}${sep}`)) {
+      throw new Error("tool_artifact_path_invalid: Tool output artifact path escaped");
+    }
+    await writeFile(target, value, { flag: "wx", mode: 0o600 });
+  };
+
+  const loadProjectInstructions = async (): Promise<string | undefined> => {
+    let response: ToolSandboxOperationResponse;
+    try {
+      response = await operation({ operation: "file.read", path: "AGENTS.md" });
+    } catch (error: unknown) {
+      if (error instanceof RemoteToolError && error.code === "tool_file_unavailable") {
+        return undefined;
+      }
+      throw error;
+    }
+    if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+    if (response.operation !== "file.read") throw new Error("Tool response kind changed");
+    const bytes = canonicalBase64(response.content);
+    const bounded = bytes.subarray(0, MAX_PROJECT_INSTRUCTIONS_BYTES);
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(bounded);
+    } catch {
+      return undefined;
+    }
+    if (content.includes("\0") || content.trim().length === 0) return undefined;
+    return `${content}${bytes.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by AgentDock]" : ""}`;
+  };
+
+  const readOperations = (toolCallId?: string): ReadOperations => ({
     readFile: async (path) => {
       try {
         const response = await operation({ operation: "file.read", path });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "file.read") throw new Error("Tool response kind changed");
-        return canonicalBase64(response.content);
+        const content = canonicalBase64(response.content);
+        if (toolCallId !== undefined) await preserveLargeOutput(toolCallId, content);
+        return content;
       } catch (error: unknown) {
         throw errorForPi(error);
       }
@@ -219,7 +299,7 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
           return null;
       }
     },
-  };
+  });
   const writeOperations: WriteOperations = {
     writeFile: async (path, content) => {
       try {
@@ -239,11 +319,11 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     },
   };
   const editOperations: EditOperations = {
-    readFile: readOperations.readFile,
+    readFile: readOperations().readFile,
     writeFile: writeOperations.writeFile,
-    access: readOperations.access,
+    access: readOperations().access,
   };
-  const bashOperations: BashOperations = {
+  const bashOperations = (toolCallId: string): BashOperations => ({
     exec: async (command, cwd, { onData, signal, timeout }) => {
       const timeoutSeconds = timeout && timeout > 0 ? timeout : 10;
       try {
@@ -260,14 +340,36 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
         );
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "bash.exec") throw new Error("Tool response kind changed");
-        const output = canonicalBase64(response.output);
+        const fullOutput = canonicalBase64(response.output);
+        await preserveLargeOutput(toolCallId, fullOutput);
+        const output = boundedOutput(fullOutput, runtime.maximumToolOutputBytes);
         if (output.byteLength > 0) onData(output);
         return { exitCode: response.exitCode };
       } catch (error: unknown) {
         throw errorForPi(error, timeoutSeconds);
       }
     },
-  };
+  });
+
+  pi.on("before_agent_start", async (event) => {
+    const cwdLine = /^Current working directory:.*$/m;
+    const sandboxLine = "Current working directory: /workspace (isolated Tool Sandbox)";
+    const basePrompt = cwdLine.test(event.systemPrompt)
+      ? event.systemPrompt.replace(cwdLine, sandboxLine)
+      : `${event.systemPrompt}\n\n${sandboxLine}`;
+    const projectInstructions = await loadProjectInstructions();
+    const platformContext = [
+      "## AgentDock execution context",
+      "All file and command tools operate in the isolated /workspace Tool Sandbox.",
+      "Large tool results are bounded in model context and preserved as tenant-scoped artifacts.",
+    ].join("\n");
+    if (projectInstructions === undefined) {
+      return { systemPrompt: `${basePrompt}\n\n${platformContext}` };
+    }
+    return {
+      systemPrompt: `${basePrompt}\n\n${platformContext}\n\n## Project instructions (repository-controlled)\n${projectInstructions}`,
+    };
+  });
 
   const readTool = createReadTool(WORKSPACE_ROOT);
   const writeTool = createWriteTool(WORKSPACE_ROOT);
@@ -277,7 +379,8 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
   pi.registerTool({
     ...readTool,
     async execute(id, params, signal, onUpdate) {
-      return createReadTool(WORKSPACE_ROOT, { operations: readOperations }).execute(
+      consumeToolCall();
+      return createReadTool(WORKSPACE_ROOT, { operations: readOperations(id) }).execute(
         id,
         params,
         signal,
@@ -288,6 +391,7 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
   pi.registerTool({
     ...writeTool,
     async execute(id, params, signal, onUpdate) {
+      consumeToolCall();
       return createWriteTool(WORKSPACE_ROOT, { operations: writeOperations }).execute(
         id,
         params,
@@ -299,6 +403,7 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
   pi.registerTool({
     ...editTool,
     async execute(id, params, signal, onUpdate) {
+      consumeToolCall();
       return createEditTool(WORKSPACE_ROOT, { operations: editOperations }).execute(
         id,
         params,
@@ -310,7 +415,8 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
   pi.registerTool({
     ...bashTool,
     async execute(id, params, signal, onUpdate) {
-      return createBashTool(WORKSPACE_ROOT, { operations: bashOperations }).execute(
+      consumeToolCall();
+      return createBashTool(WORKSPACE_ROOT, { operations: bashOperations(id) }).execute(
         id,
         params,
         signal,
@@ -319,14 +425,8 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     },
   });
 
-  pi.on("user_bash", async () => ({ operations: bashOperations }));
-  pi.on("before_agent_start", async (event) => {
-    const currentDirectoryLine = /^Current working directory:.*$/m;
-    const replacement = "Current working directory: /workspace (isolated Tool Sandbox)";
-    return {
-      systemPrompt: currentDirectoryLine.test(event.systemPrompt)
-        ? event.systemPrompt.replace(currentDirectoryLine, replacement)
-        : `${event.systemPrompt}\n\n${replacement}`,
-    };
+  pi.on("user_bash", async () => {
+    consumeToolCall();
+    return { operations: bashOperations(randomUUID()) };
   });
 }

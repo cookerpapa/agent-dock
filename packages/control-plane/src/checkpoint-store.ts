@@ -2,6 +2,7 @@ import type { Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
 import {
   MAX_PI_SESSION_SNAPSHOT_BYTES,
+  MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
 } from "@agent-dock/protocol";
@@ -10,9 +11,11 @@ import {
   validatePiSessionSnapshot,
   validateWorkspaceSnapshot,
   type CapturedSandboxCheckpoint,
+  type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
+  type SavedToolOutputArtifact,
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID } from "node:crypto";
 import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
@@ -231,6 +234,61 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       }
     });
     return { revision: metadata.revision, piSession, workspace };
+  }
+
+  async saveToolOutput(
+    command: ExecuteTurnCommandMessage,
+    output: CapturedToolOutput,
+  ): Promise<SavedToolOutputArtifact> {
+    if (
+      output.toolCallId.length < 1 ||
+      output.toolCallId.length > 256 ||
+      output.bytes.byteLength < 1 ||
+      output.bytes.byteLength > MAX_TOOL_OUTPUT_BYTES
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "tool_output_invalid",
+        "Tool output artifact is outside its identity or byte limit",
+        false,
+      );
+    }
+    const artifactId = this.#idGenerator();
+    const digest = sha256(output.bytes);
+    const safe = [
+      "tool-outputs",
+      command.payload.tenantId,
+      command.payload.sessionId,
+      command.payload.runId,
+      command.payload.attemptId,
+    ].map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "-"));
+    const objectKey = `${safe.join("/")}/${artifactId}-${digest}.log`;
+    validateCheckpointObjectKey(objectKey);
+    await this.#objectStore.put(objectKey, output.bytes);
+    try {
+      await this.#database.transaction().execute(async (transaction) => {
+        await this.#assertCurrentSession(transaction, command, validDate(this.#clock), true);
+        await transaction
+          .insertInto("artifacts")
+          .values({
+            id: artifactId,
+            tenant_id: command.payload.tenantId,
+            session_id: command.payload.sessionId,
+            turn_id: command.payload.turnId,
+            run_id: command.payload.runId,
+            kind: "tool_output",
+            object_key: objectKey,
+            sha256: digest,
+            size_bytes: output.bytes.byteLength,
+            file_name: `tool-output-${artifactId}.log`,
+            media_type: "text/plain; charset=utf-8",
+          })
+          .executeTakeFirstOrThrow();
+      });
+    } catch (error: unknown) {
+      await this.#objectStore.delete(objectKey).catch(() => undefined);
+      throw error;
+    }
+    return { artifactId, sha256: digest, sizeBytes: output.bytes.byteLength };
   }
 
   async save(

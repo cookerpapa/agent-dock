@@ -59,7 +59,16 @@ per-session timer.
 Pi's Agent Loop and conversation state remain trusted. `read/write/edit/bash`
 cross Tool RPC. The Manager validates the activation capability and unique
 operation ID before the Provider sends a closed worker request. Tool output is
-bounded before returning to Pi.
+bounded before returning to Pi. If a read/bash result crosses the context
+allowance, its full Provider-bounded bytes are persisted as a fenced Tool
+Artifact before the `tool.completed` event exposes the Artifact ID.
+
+Before every provider call, the trusted Model Gateway locks the tenant policy,
+verifies the current RunAttempt and reserves request/token/cost capacity across
+the Run plus tenant day/month windows. Budget denial happens before provider
+egress. A selected fallback reuses that reservation; completion snapshots the
+actual provider/model/rates/tokens/cost. The Pi process is also bounded by the
+Turn's wall-clock and remaining Tool-call snapshot.
 
 One shared Supervisor heartbeat reports all active assignments. PostgreSQL
 renews only the exact current lease/fence, current RunAttempt, boot, command

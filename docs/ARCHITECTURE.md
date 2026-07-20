@@ -326,8 +326,32 @@ resolves the exact snapshotted version and substitutes a random, expiring,
 request-limited per-turn gateway capability. Long-lived keys never enter Pi
 JSONL, workspace snapshots, Docker arguments/environment/labels, browser events,
 logs, or the untrusted tool environment. Provider-reported token counts are
-persisted per tenant/turn; mutable monetary prices are not inferred. See
-ADR-0006 and ADR-0027.
+persisted per tenant/Run/model request. Tenant owners configure integer
+micro-USD rates; each completed request snapshots the actual rate and cost,
+while the bootstrap zero rate is never described as an external provider price.
+See ADR-0006, ADR-0027 and ADR-0033.
+
+### Context and model governance
+
+The trusted Model Gateway reserves request, token and cost capacity in a
+PostgreSQL transaction before provider egress. It aggregates completed usage
+with unexpired reservations under a tenant-policy lock, verifies the current
+RunAttempt, and audits both admissions and denials. A configured single fallback
+is limited to selected 429/5xx/timeout classes and remains inside the original
+reservation. Actual provider/model, four rate components, tokens and integer
+cost are settled atomically with the linked usage record.
+
+Pi remains the context owner. Each activation uses an ordered context stack:
+the Pi/platform system prompt, a bounded `AGENTS.md` read through Tool RPC when
+present, Pi's restored summary, recent JSONL messages, bounded tool results and
+the current accepted task. Native compaction settings come from the Turn budget
+snapshot. Start/end observations are durable, but PostgreSQL receives only
+summary version/hash and token metadata—not summary content.
+
+Read/bash results larger than the model-context allowance are written by the
+trusted extension to an activation-private directory. The Runner commits the
+full bounded bytes as a fenced, tenant/run-scoped `tool_output` artifact before
+publishing its opaque reference; Pi and SSE retain only the bounded result.
 
 ### Deterministic model test boundary
 
@@ -419,7 +443,7 @@ Authoritative for control state:
 - sandbox leases and fencing tokens;
 - approvals;
 - event sequence/index;
-- usage ledger;
+- model reservations, compaction audit, immutable usage/rate/cost ledger;
 - transactional outbox.
 
 It also stores model-profile policy, opaque credential bindings, tenant runtime

@@ -64,6 +64,8 @@ export type WorkspaceOperationKind = "fork" | "rollback" | "archive" | "unarchiv
 export type GitHubInstallationStatus = "active" | "suspended" | "removed";
 export type GitHubPullRequestDeliveryState = "pending" | "delivering" | "completed" | "failed";
 export type GitHubWebhookDeliveryStatus = "processed" | "ignored" | "failed";
+export type ModelRequestState = "reserved" | "completed" | "failed" | "aborted" | "budget_denied";
+export type ContextCompactionState = "running" | "completed" | "aborted" | "failed";
 
 export interface TenantTable {
   id: string;
@@ -86,6 +88,16 @@ export interface TenantRuntimePolicyTable {
   maximum_sessions: GeneratedInteger;
   maximum_unsettled_turns: GeneratedInteger;
   maximum_concurrent_turns: GeneratedInteger;
+  maximum_model_requests_per_run: GeneratedInteger;
+  maximum_tokens_per_run: GeneratedInt8;
+  maximum_cost_microusd_per_run: GeneratedInt8;
+  daily_token_budget: GeneratedInt8;
+  monthly_cost_microusd_budget: GeneratedInt8;
+  maximum_tool_calls_per_run: GeneratedInteger;
+  maximum_tool_output_bytes: GeneratedInteger;
+  maximum_run_duration_ms: GeneratedInteger;
+  compaction_reserve_tokens: GeneratedInteger;
+  compaction_keep_recent_tokens: GeneratedInteger;
   last_scheduled_at: GeneratedTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -602,7 +614,92 @@ export interface UsageLedgerTable {
   cache_read_tokens: Int8;
   cache_write_tokens: Int8;
   cost_amount: ColumnType<string, number | string, number | string>;
+  run_id: GeneratedNullable<string>;
+  attempt_id: GeneratedNullable<string>;
+  model_request_id: GeneratedNullable<string>;
+  model_profile_id: GeneratedNullable<string>;
+  cost_microusd: NullableInt8;
   created_at: GeneratedTimestamp;
+}
+
+export interface ModelRateTable {
+  tenant_id: string;
+  provider: string;
+  model_id: string;
+  input_microusd_per_million: GeneratedInt8;
+  output_microusd_per_million: GeneratedInt8;
+  cache_read_microusd_per_million: GeneratedInt8;
+  cache_write_microusd_per_million: GeneratedInt8;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface ModelRoutingPolicyTable {
+  tenant_id: string;
+  model_profile_id: string;
+  fallback_provider: string | null;
+  fallback_model_id: string | null;
+  fallback_on_rate_limit: GeneratedBoolean;
+  fallback_on_server_error: GeneratedBoolean;
+  fallback_on_timeout: GeneratedBoolean;
+  enabled: GeneratedBoolean;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface ModelRequestTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  run_id: string;
+  attempt_id: string;
+  model_profile_id: string;
+  request_sequence: number;
+  requested_provider: string;
+  requested_model_id: string;
+  actual_provider: string | null;
+  actual_model_id: string | null;
+  state: ModelRequestState;
+  fallback_reason: string | null;
+  reserved_input_tokens: Int8;
+  reserved_output_tokens: Int8;
+  reserved_cost_microusd: Int8;
+  actual_input_tokens: NullableInt8;
+  actual_output_tokens: NullableInt8;
+  actual_cache_read_tokens: NullableInt8;
+  actual_cache_write_tokens: NullableInt8;
+  actual_input_microusd_per_million: NullableInt8;
+  actual_output_microusd_per_million: NullableInt8;
+  actual_cache_read_microusd_per_million: NullableInt8;
+  actual_cache_write_microusd_per_million: NullableInt8;
+  actual_cost_microusd: NullableInt8;
+  upstream_status: number | null;
+  failure_code: string | null;
+  reservation_expires_at: Timestamp;
+  started_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
+}
+
+export interface ContextCompactionTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  run_id: string;
+  attempt_id: string;
+  started_event_id: string;
+  completed_event_id: string | null;
+  reason: "manual" | "threshold" | "overflow";
+  state: ContextCompactionState;
+  tokens_before: NullableInt8;
+  estimated_tokens_after: NullableInt8;
+  first_kept_entry_id: string | null;
+  summary_sha256: string | null;
+  summary_version: number | null;
+  will_retry: GeneratedBoolean;
+  started_at: Timestamp;
+  completed_at: NullableTimestamp;
 }
 
 export interface Database {
@@ -638,6 +735,10 @@ export interface Database {
   artifacts: ArtifactTable;
   test_results: TestResultTable;
   usage_ledger: UsageLedgerTable;
+  model_rates: ModelRateTable;
+  model_routing_policies: ModelRoutingPolicyTable;
+  model_requests: ModelRequestTable;
+  context_compactions: ContextCompactionTable;
   github_app_installations: GitHubAppInstallationTable;
   github_repositories: GitHubRepositoryTable;
   github_pull_request_deliveries: GitHubPullRequestDeliveryTable;

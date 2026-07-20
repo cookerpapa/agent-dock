@@ -74,11 +74,21 @@ automated GitHub API contract tests are not described as a live installation.
 
 ### Milestone 4: context and model governance
 
+Status: complete under ADR-0033.
+
 - explicit context budget and layered context construction;
 - measured Pi compaction records and summary versions;
 - large tool output moved to artifacts with bounded summaries;
 - per-run model/tool/token/cost/wall-clock limits;
 - fallback/routing policy and complete usage ledger.
+
+The trusted extension now supplies the execution-context and bounded
+repository-instruction layers while Pi retains transcript and native compaction
+authority. Compaction metadata, model reservations, immutable actual-rate/cost
+attribution, one-policy fallback, per-Run/day/month budgets, wall-clock/tool
+limits and full large-output Artifacts are tenant-scoped and exercised through
+the product API. Seeded rates are deliberately zero until an owner configures
+them; no external provider price is inferred.
 
 ### Milestone 5: observability and evaluation
 

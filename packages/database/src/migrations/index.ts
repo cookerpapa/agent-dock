@@ -9,6 +9,7 @@ import * as encryptedTenantModelCredentials from "./007_encrypted_tenant_model_c
 import * as controlledWorkspaceSources from "./008_controlled_workspace_sources.ts";
 import * as durableRunsAndAttempts from "./009_durable_runs_and_attempts.ts";
 import * as versionedWorkspacesAndGitHubDelivery from "./010_versioned_workspaces_and_github_delivery.ts";
+import * as contextAndModelGovernance from "./011_context_and_model_governance.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -23,6 +24,7 @@ export const migrationProvider: MigrationProvider = {
       "008_controlled_workspace_sources": controlledWorkspaceSources,
       "009_durable_runs_and_attempts": durableRunsAndAttempts,
       "010_versioned_workspaces_and_github_delivery": versionedWorkspacesAndGitHubDelivery,
+      "011_context_and_model_governance": contextAndModelGovernance,
     };
   },
 };
@@ -76,3 +78,8 @@ export {
   down as downVersionedWorkspacesAndGitHubDelivery,
   up as upVersionedWorkspacesAndGitHubDelivery,
 } from "./010_versioned_workspaces_and_github_delivery.ts";
+
+export {
+  down as downContextAndModelGovernance,
+  up as upContextAndModelGovernance,
+} from "./011_context_and_model_governance.ts";

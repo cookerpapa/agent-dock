@@ -90,7 +90,9 @@ Assumed trusted or out of scope for the current claim:
 | Old/failed Attempt publishes a Workspace version | staged version is bound to Run/Attempt and settled in the fenced terminal transaction; failures abandon it and restore prior pointers | version consistency and stale-attempt tests |
 | GitHub token reaches repository code | only the Gateway owns App key/tokens; private import returns canonical bytes and write-back consumes a trusted artifact | Gateway contract and Tool-Sandbox environment/network tests |
 | GitHub webhook forgery/replay | raw-body HMAC verification, bounded normalized schema, service RPC, unique delivery ID and content hash | Gateway HMAC and Control Plane deduplication tests |
-| Secret leaks through output | closed public schemas, bounded outputs, no raw Pi payloads, repository secret scan | CI, production secret audit, Gitleaks workflow |
+| Secret leaks through output | closed public schemas, bounded previews, tenant-scoped full-output Artifacts, no raw Pi payloads, repository secret scan | artifact/event tests, production secret audit, Gitleaks workflow |
+| Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
+| Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 
 ## Credential flow
 
@@ -116,8 +118,8 @@ Before exposing arbitrary untrusted repositories to the public Internet:
 1. replace or augment shared-kernel Docker with an integration-tested gVisor,
    Kata, Firecracker, or managed microVM Provider;
 2. put repository and dependency egress behind a DNS-aware allowlisting proxy;
-3. add public identity recovery, abuse controls, budgets, rate limits, audit
-   retention, and incident response;
+3. add public identity recovery, broader abuse/rate controls, audit retention,
+   and incident response around the existing tenant model budgets;
 4. isolate project/user extension code from Pi and model credentials;
 5. publish image provenance, SBOM, vulnerability scanning, and patch policy;
 6. run an independent penetration review of the Manager and host configuration.

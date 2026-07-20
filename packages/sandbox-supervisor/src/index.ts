@@ -47,6 +47,8 @@ export {
   type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
   type PiRpcSettledCheckpoint,
+  type PiRpcToolOutputArtifact,
+  type PiRpcToolOutputCapture,
   type PiRpcTurnResult,
   type PiRpcTurnRunnerOptions,
 } from "./pi-rpc-turn-runner.ts";
@@ -118,9 +120,11 @@ export {
   validateLoadedCheckpoint,
   validatePiSessionSnapshot,
   type CapturedSandboxCheckpoint,
+  type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
+  type SavedToolOutputArtifact,
 } from "./sandbox-checkpoint.ts";
 
 export {

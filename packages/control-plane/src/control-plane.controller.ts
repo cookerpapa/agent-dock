@@ -26,6 +26,7 @@ import {
   parsePositiveIntegerPathParameter,
   parseRegisterGitHubInstallationRequest,
   parseReplaceModelConfigurationRequest,
+  parseReplaceModelGovernanceRequest,
   parseRollbackWorkspaceRequest,
   parseSetGitHubRepositoryRequest,
   parseUuidPathParameter,
@@ -37,6 +38,10 @@ import {
   type GitHubPullRequestDeliveryResource,
   type ProjectResource,
   type ModelConfigurationResource,
+  type ModelGovernanceResource,
+  type RunUsageResource,
+  type SessionContextResource,
+  type UsageSummaryResource,
   type RunListResource,
   type RunResource,
   type SessionResource,
@@ -57,6 +62,7 @@ import { SessionEventStream } from "./session-event-stream.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import { WorkspaceVersionService } from "./workspace-version-service.ts";
+import { ModelGovernanceService } from "./model-governance-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -68,6 +74,8 @@ export class ControlPlaneController {
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
     @Inject(TenantModelConfigurationService)
     private readonly tenantModelConfiguration: TenantModelConfigurationService,
+    @Inject(ModelGovernanceService)
+    private readonly modelGovernance: ModelGovernanceService,
     @Inject(WorkspaceVersionService)
     private readonly workspaceVersions: WorkspaceVersionService,
     @Inject(GitHubIntegrationService)
@@ -104,6 +112,49 @@ export class ControlPlaneController {
     return this.tenantModelConfiguration.replace(
       this.tenantRequestContext.resolve(request),
       parseReplaceModelConfigurationRequest(body),
+    );
+  }
+
+  @Get("model-governance")
+  async getModelGovernance(@Req() request: FastifyRequest): Promise<ModelGovernanceResource> {
+    return this.modelGovernance.get(this.tenantRequestContext.resolve(request));
+  }
+
+  @Put("model-governance")
+  async replaceModelGovernance(
+    @Req() request: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<ModelGovernanceResource> {
+    return this.modelGovernance.replace(
+      this.tenantRequestContext.resolve(request),
+      parseReplaceModelGovernanceRequest(body),
+    );
+  }
+
+  @Get("usage")
+  async getUsage(@Req() request: FastifyRequest): Promise<UsageSummaryResource> {
+    return this.modelGovernance.usage(this.tenantRequestContext.resolve(request));
+  }
+
+  @Get("runs/:runId/usage")
+  async getRunUsage(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+  ): Promise<RunUsageResource> {
+    return this.modelGovernance.runUsage(
+      this.tenantRequestContext.resolve(request),
+      parseUuidPathParameter(runIdValue, "runId"),
+    );
+  }
+
+  @Get("sessions/:sessionId/context")
+  async getSessionContext(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<SessionContextResource> {
+    return this.modelGovernance.sessionContext(
+      this.tenantRequestContext.resolve(request),
+      parseUuidPathParameter(sessionIdValue, "sessionId"),
     );
   }
 

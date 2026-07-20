@@ -27,6 +27,17 @@ export type SavedSandboxCheckpoint = {
   revision: string;
 };
 
+export type CapturedToolOutput = {
+  toolCallId: string;
+  bytes: Uint8Array;
+};
+
+export type SavedToolOutputArtifact = {
+  artifactId: string;
+  sha256: string;
+  sizeBytes: number;
+};
+
 export interface SandboxCheckpointStore {
   load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined>;
   save(
@@ -34,6 +45,10 @@ export interface SandboxCheckpointStore {
     baseRevision: string | null,
     checkpoint: CapturedSandboxCheckpoint,
   ): Promise<SavedSandboxCheckpoint>;
+  saveToolOutput?(
+    command: ExecuteTurnCommandMessage,
+    output: CapturedToolOutput,
+  ): Promise<SavedToolOutputArtifact>;
 }
 
 function sha256(value: Uint8Array): string {

@@ -395,6 +395,7 @@ export class DurableEventStore implements DurableEventIngestor {
       .executeTakeFirstOrThrow();
 
     await this.#recordStructuredTestResult(transaction, tenantId, message, now);
+    await this.#recordContextCompaction(transaction, tenantId, message);
 
     const cursorUpdate = await transaction
       .updateTable("session_event_cursors")
@@ -489,11 +490,89 @@ export class DurableEventStore implements DurableEventIngestor {
         exit_code: null,
         duration_ms: Math.min(durationMs, 86_400_000),
         summary,
-        artifact_id: null,
+        artifact_id: event.payload.outputArtifact?.artifactId ?? null,
         created_at: now,
       })
       .onConflict((conflict) => conflict.columns(["run_id", "tool_call_id"]).doNothing())
       .execute();
+  }
+
+  async #recordContextCompaction(
+    transaction: Transaction<Database>,
+    tenantId: string,
+    message: EventPublishMessage,
+  ): Promise<void> {
+    const event = message.payload.event;
+    if (
+      (event.type !== "context.compaction.started" &&
+        event.type !== "context.compaction.completed") ||
+      event.turnId === null
+    ) {
+      return;
+    }
+    const run = await transaction
+      .selectFrom("runs")
+      .select(["id", "current_attempt_id"])
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "=", event.sessionId)
+      .where("turn_id", "=", event.turnId)
+      .executeTakeFirst();
+    if (run === undefined || run.current_attempt_id === null) {
+      throw new DurableEventStoreError(
+        "event_store_invariant",
+        "Compaction event has no current Run Attempt",
+      );
+    }
+    const occurredAt = new Date(event.occurredAt);
+    if (event.type === "context.compaction.started") {
+      await transaction
+        .insertInto("context_compactions")
+        .values({
+          id: event.eventId,
+          tenant_id: tenantId,
+          session_id: event.sessionId,
+          turn_id: event.turnId,
+          run_id: run.id,
+          attempt_id: run.current_attempt_id,
+          started_event_id: event.eventId,
+          completed_event_id: null,
+          reason: event.payload.reason,
+          state: "running",
+          tokens_before: null,
+          estimated_tokens_after: null,
+          first_kept_entry_id: null,
+          summary_sha256: null,
+          summary_version: null,
+          will_retry: false,
+          started_at: occurredAt,
+          completed_at: null,
+        })
+        .executeTakeFirstOrThrow();
+      return;
+    }
+
+    const updated = await transaction
+      .updateTable("context_compactions")
+      .set({
+        completed_event_id: event.eventId,
+        state: event.payload.status,
+        tokens_before: event.payload.tokensBefore ?? null,
+        estimated_tokens_after: event.payload.estimatedTokensAfter ?? null,
+        first_kept_entry_id: event.payload.firstKeptEntryId ?? null,
+        summary_sha256: event.payload.summarySha256 ?? null,
+        summary_version: event.payload.summaryVersion ?? null,
+        will_retry: event.payload.willRetry,
+        completed_at: occurredAt,
+      })
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "=", event.sessionId)
+      .where("turn_id", "=", event.turnId)
+      .where("run_id", "=", run.id)
+      .where("attempt_id", "=", run.current_attempt_id)
+      .where("state", "=", "running")
+      .where("reason", "=", event.payload.reason)
+      .executeTakeFirst();
+    expectOne(updated.numUpdatedRows, "settling a native Pi compaction");
   }
 
   async #validateEventOwnership(

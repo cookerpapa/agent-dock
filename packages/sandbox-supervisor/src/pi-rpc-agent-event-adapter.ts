@@ -3,6 +3,7 @@ import type {
   AgentDockEventFactory,
   CancelTurnCommandMessage,
 } from "@agent-dock/protocol";
+import { createHash } from "node:crypto";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -26,11 +27,35 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
   // The public v1 protocol publishes durable tool boundaries and the final
   // result. Pi's partial tool output is intentionally not persisted yet.
   "tool_execution_update",
-  "compaction_start",
-  "compaction_end",
   "auto_retry_start",
   "auto_retry_end",
 ]);
+
+const DEFAULT_MAXIMUM_TOOL_OUTPUT_BYTES = 65_536;
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
+}
+
+function compactionReason(value: unknown): "manual" | "threshold" | "overflow" | undefined {
+  return value === "manual" || value === "threshold" || value === "overflow" ? value : undefined;
+}
+
+function boundedToolOutput(value: unknown, maximumBytes: number): unknown {
+  let serialized: string;
+  try {
+    serialized = typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    return { truncated: true, preview: "[unserializable tool output]" };
+  }
+  if (Buffer.byteLength(serialized, "utf8") <= maximumBytes) return value;
+  const marker = "\n[AgentDock truncated tool output]";
+  const previewBytes = Math.max(0, maximumBytes - Buffer.byteLength(marker, "utf8"));
+  return {
+    truncated: true,
+    preview: `${Buffer.from(serialized, "utf8").subarray(0, previewBytes).toString("utf8")}${marker}`,
+  };
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,10 +90,20 @@ export class PiRpcAgentEventAdapter {
   #settled = false;
   #lastAssistantStopReason: AssistantStopReason | undefined;
   #cancellationReason: TurnCancellationReason | undefined;
+  #compactionActive = false;
+  readonly #maximumToolOutputBytes: number;
 
-  constructor(eventFactory: AgentDockEventFactory, options: { inputKind: "prompt" | "continue" }) {
+  constructor(
+    eventFactory: AgentDockEventFactory,
+    options: { inputKind: "prompt" | "continue"; maximumToolOutputBytes?: number },
+  ) {
     this.#eventFactory = eventFactory;
     this.#inputKind = options.inputKind;
+    const maximum = options.maximumToolOutputBytes ?? DEFAULT_MAXIMUM_TOOL_OUTPUT_BYTES;
+    if (!Number.isSafeInteger(maximum) || maximum < 1_024 || maximum > 1_048_576) {
+      throw new TypeError("maximumToolOutputBytes must be between 1024 and 1048576");
+    }
+    this.#maximumToolOutputBytes = maximum;
   }
 
   requestCancellation(reason: TurnCancellationReason): void {
@@ -198,7 +233,75 @@ export class PiRpcAgentEventAdapter {
           payload: {
             toolCallId: value.toolCallId,
             isError: value.isError,
-            ...(value.result === undefined ? {} : { output: value.result }),
+            ...(value.result === undefined
+              ? {}
+              : { output: boundedToolOutput(value.result, this.#maximumToolOutputBytes) }),
+          },
+        }),
+      };
+    }
+
+    if (value.type === "compaction_start") {
+      const reason = compactionReason(value.reason);
+      if (!this.#agentStarted || this.#compactionActive || reason === undefined) {
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi compaction start is outside a valid active boundary",
+        };
+      }
+      this.#compactionActive = true;
+      return {
+        kind: "mapped",
+        terminal: false,
+        event: this.#eventFactory.next({
+          type: "context.compaction.started",
+          payload: { reason },
+        }),
+      };
+    }
+
+    if (value.type === "compaction_end") {
+      const reason = compactionReason(value.reason);
+      if (!this.#agentStarted || !this.#compactionActive || reason === undefined) {
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi compaction completion has no matching active compaction",
+        };
+      }
+      if (typeof value.aborted !== "boolean" || typeof value.willRetry !== "boolean") {
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi compaction completion is missing its settlement state",
+        };
+      }
+      const result = isRecord(value.result) ? value.result : undefined;
+      const tokensBefore = nonNegativeInteger(result?.tokensBefore);
+      const estimatedTokensAfter = nonNegativeInteger(result?.estimatedTokensAfter);
+      const firstKeptEntryId =
+        typeof result?.firstKeptEntryId === "string" && result.firstKeptEntryId.length > 0
+          ? result.firstKeptEntryId.slice(0, 256)
+          : undefined;
+      const summarySha256 =
+        typeof result?.summary === "string"
+          ? createHash("sha256").update(result.summary, "utf8").digest("hex")
+          : undefined;
+      this.#compactionActive = false;
+      return {
+        kind: "mapped",
+        terminal: false,
+        event: this.#eventFactory.next({
+          type: "context.compaction.completed",
+          payload: {
+            reason,
+            status: value.aborted ? "aborted" : result === undefined ? "failed" : "completed",
+            willRetry: value.willRetry,
+            ...(tokensBefore === undefined ? {} : { tokensBefore }),
+            ...(estimatedTokensAfter === undefined ? {} : { estimatedTokensAfter }),
+            ...(firstKeptEntryId === undefined ? {} : { firstKeptEntryId }),
+            ...(summarySha256 === undefined ? {} : { summarySha256, summaryVersion: 1 }),
           },
         }),
       };

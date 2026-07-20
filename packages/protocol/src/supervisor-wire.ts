@@ -89,6 +89,27 @@ const TurnModelSnapshotSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const TurnBudgetSnapshotSchema = Type.Object(
+  {
+    maximumModelRequests: Type.Integer({ minimum: 1, maximum: 1_024 }),
+    maximumTokens: Type.Integer({ minimum: 1, maximum: 1_000_000_000 }),
+    maximumCostMicrousd: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
+    dailyTokenBudget: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
+    monthlyCostMicrousdBudget: Type.Integer({
+      minimum: 1,
+      maximum: 1_000_000_000_000_000,
+    }),
+    maximumToolCalls: Type.Integer({ minimum: 1, maximum: 10_000 }),
+    remainingToolCalls: Type.Integer({ minimum: 0, maximum: 10_000 }),
+    maximumToolOutputBytes: Type.Integer({ minimum: 1_024, maximum: 1_048_576 }),
+    maximumRunDurationMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
+    compactionReserveTokens: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+    compactionKeepRecentTokens: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+  },
+  { additionalProperties: false },
+);
+export type TurnBudgetSnapshot = Static<typeof TurnBudgetSnapshotSchema>;
+
 const ApprovalResolutionSchema = Type.Union([
   Type.Object(
     {
@@ -176,6 +197,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         nextEventSeq: PositiveSafeIntegerSchema,
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
         model: TurnModelSnapshotSchema,
+        budgets: Type.Optional(TurnBudgetSnapshotSchema),
       },
       { additionalProperties: false },
     ),

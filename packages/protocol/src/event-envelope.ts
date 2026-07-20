@@ -127,6 +127,63 @@ const ToolCompletedEventSchema = Type.Object(
         toolCallId: OpaqueIdSchema,
         isError: Type.Boolean(),
         output: Type.Optional(Type.Unknown()),
+        outputArtifact: Type.Optional(
+          Type.Object(
+            {
+              artifactId: UuidSchema,
+              sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+              sizeBytes: Type.Integer({ minimum: 1, maximum: 1_048_576 }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const ContextCompactionStartedEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("context.compaction.started"),
+    payload: Type.Object(
+      {
+        reason: Type.Union([
+          Type.Literal("manual"),
+          Type.Literal("threshold"),
+          Type.Literal("overflow"),
+        ]),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const ContextCompactionCompletedEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("context.compaction.completed"),
+    payload: Type.Object(
+      {
+        reason: Type.Union([
+          Type.Literal("manual"),
+          Type.Literal("threshold"),
+          Type.Literal("overflow"),
+        ]),
+        status: Type.Union([
+          Type.Literal("completed"),
+          Type.Literal("aborted"),
+          Type.Literal("failed"),
+        ]),
+        willRetry: Type.Boolean(),
+        tokensBefore: Type.Optional(Type.Integer({ minimum: 0 })),
+        estimatedTokensAfter: Type.Optional(Type.Integer({ minimum: 0 })),
+        firstKeptEntryId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        summarySha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        summaryVersion: Type.Optional(PositiveSafeIntegerSchema),
       },
       { additionalProperties: false },
     ),
@@ -278,6 +335,8 @@ export const AgentDockEventSchema = Type.Union([
   AssistantTextDeltaEventSchema,
   ToolStartedEventSchema,
   ToolCompletedEventSchema,
+  ContextCompactionStartedEventSchema,
+  ContextCompactionCompletedEventSchema,
   ApprovalRequestedEventSchema,
   ApprovalResolvedEventSchema,
   UiNotificationEventSchema,
@@ -292,6 +351,8 @@ export type AgentDockEvent =
   | Static<typeof AssistantTextDeltaEventSchema>
   | Static<typeof ToolStartedEventSchema>
   | Static<typeof ToolCompletedEventSchema>
+  | Static<typeof ContextCompactionStartedEventSchema>
+  | Static<typeof ContextCompactionCompletedEventSchema>
   | Static<typeof ApprovalRequestedEventSchema>
   | Static<typeof ApprovalResolvedEventSchema>
   | Static<typeof UiNotificationEventSchema>

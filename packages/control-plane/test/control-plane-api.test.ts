@@ -548,6 +548,117 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(cursor).toEqual({ last_persisted_seq: "0", acknowledged_through_seq: "0" });
   });
 
+  it("exposes owner-managed model governance and tenant-scoped usage/context views", async () => {
+    const governance = await http.inject({ method: "GET", url: "/v1/model-governance" });
+    expect(governance.statusCode).toBe(200);
+    expect(governance.json()).toMatchObject({
+      limits: {
+        maximumModelRequestsPerRun: 32,
+        maximumTokensPerRun: 200_000,
+        maximumToolCallsPerRun: 128,
+      },
+      fallback: { enabled: false },
+    });
+    const replaced = await http.inject({
+      method: "PUT",
+      url: "/v1/model-governance",
+      payload: {
+        limits: {
+          maximumModelRequestsPerRun: 40,
+          maximumTokensPerRun: 240_000,
+          maximumCostMicrousdPerRun: 6_000_000,
+          dailyTokenBudget: 3_000_000,
+          monthlyCostMicrousdBudget: 60_000_000,
+          maximumToolCallsPerRun: 160,
+          maximumToolOutputBytes: 65_536,
+          maximumRunDurationMs: 900_000,
+          compactionReserveTokens: 16_384,
+          compactionKeepRecentTokens: 20_000,
+        },
+        rates: [
+          {
+            provider: "deepseek",
+            modelId: "deepseek-v4-flash",
+            inputMicrousdPerMillion: 1_000_000,
+            outputMicrousdPerMillion: 2_000_000,
+            cacheReadMicrousdPerMillion: 500_000,
+            cacheWriteMicrousdPerMillion: 2_500_000,
+          },
+        ],
+        fallback: {
+          enabled: false,
+          onRateLimit: true,
+          onServerError: true,
+          onTimeout: true,
+        },
+      },
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json()).toMatchObject({
+      limits: { maximumModelRequestsPerRun: 40, maximumTokensPerRun: 240_000 },
+      rates: [
+        expect.objectContaining({
+          modelId: "deepseek-v4-flash",
+          inputMicrousdPerMillion: 1_000_000,
+        }),
+      ],
+    });
+
+    const usage = await http.inject({ method: "GET", url: "/v1/usage" });
+    expect(usage.statusCode).toBe(200);
+    expect(usage.json()).toEqual({
+      tenantId: IDS.tenant,
+      totals: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costMicrousd: 0,
+      },
+      byModel: [],
+    });
+    const context = await http.inject({
+      method: "GET",
+      url: `/v1/sessions/${session.sessionId}/context`,
+    });
+    expect(context.statusCode).toBe(200);
+    expect(context.json()).toEqual({
+      sessionId: session.sessionId,
+      compaction: { reserveTokens: 16_384, keepRecentTokens: 20_000 },
+      layers: [
+        { order: 0, kind: "platform_system", source: "pi+agent-dock", availability: "always" },
+        {
+          order: 1,
+          kind: "project_instructions",
+          source: "workspace:AGENTS.md",
+          availability: "when_available",
+          maximumBytes: 16_384,
+        },
+        {
+          order: 2,
+          kind: "session_summary",
+          source: "pi-native-compaction",
+          availability: "when_available",
+        },
+        {
+          order: 3,
+          kind: "recent_messages",
+          source: "pi-session-jsonl",
+          availability: "always",
+        },
+        {
+          order: 4,
+          kind: "tool_results",
+          source: "bounded-tool-results",
+          availability: "when_available",
+        },
+        { order: 5, kind: "current_task", source: "accepted-turn", availability: "always" },
+      ],
+      history: [],
+    });
+  });
+
   it("persists a public GitHub exact commit as pending source metadata", async () => {
     const commitSha = "a".repeat(40);
     const response = await http.inject({
@@ -691,6 +802,16 @@ describe.sequential("single-user durable turn intake API", () => {
         turnId: firstAccepted.turnId,
         kind: "turn.execute",
       },
+    });
+    const usage = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${firstAccepted.runId}/usage`,
+    });
+    expect(usage.statusCode).toBe(200);
+    expect(usage.json()).toMatchObject({
+      runId: firstAccepted.runId,
+      totals: { requests: 0, costMicrousd: 0 },
+      modelRequests: [],
     });
     const queuedRuns = await http.inject({
       method: "GET",

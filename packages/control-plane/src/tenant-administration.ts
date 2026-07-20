@@ -267,6 +267,28 @@ export async function createPrivateTenant(
         })
         .executeTakeFirstOrThrow();
       await transaction
+        .insertInto("model_rates")
+        .values({
+          tenant_id: tenantId,
+          provider: "agent-dock-fake",
+          model_id: "agent-dock-fake",
+          created_at: now,
+          updated_at: now,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("model_routing_policies")
+        .values({
+          tenant_id: tenantId,
+          model_profile_id: defaultModelProfileId,
+          fallback_provider: null,
+          fallback_model_id: null,
+          enabled: false,
+          created_at: now,
+          updated_at: now,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
         .insertInto("tenant_runtime_policies")
         .values({
           tenant_id: tenantId,

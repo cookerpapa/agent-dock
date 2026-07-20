@@ -1,5 +1,6 @@
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type { EventPublishMessage, ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -224,6 +225,53 @@ describe("PiRpcTurnRunner integration", () => {
         process.env.NODE_OPTIONS = previousNodeOptions;
       }
       await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("persists a full large tool result before publishing its bounded event reference", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-tool-output-test-"));
+    const events: EventPublishMessage[] = [];
+    const captured: Uint8Array[] = [];
+    try {
+      const runner = new PiRpcTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: "http://127.0.0.1:1/v1",
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        piRpcEntryPath: resolve(import.meta.dirname, "fixtures/tool-output-rpc.mjs"),
+        persistToolOutputArtifact: async ({ toolCallId, bytes }) => {
+          expect(toolCallId).toBe("tool-call-large-output");
+          captured.push(bytes);
+          return {
+            artifactId: "60000000-0000-4000-8000-000000000001",
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            sizeBytes: bytes.byteLength,
+          };
+        },
+      });
+      await runner.run(command, (message) => {
+        events.push(message);
+      });
+      expect(captured).toHaveLength(1);
+      expect(captured[0]).toEqual(Buffer.alloc(2_048, 0x61));
+      expect(
+        events.find((event) => event.payload.event.type === "tool.completed")?.payload.event,
+      ).toMatchObject({
+        type: "tool.completed",
+        payload: {
+          output: "bounded preview",
+          outputArtifact: {
+            artifactId: "60000000-0000-4000-8000-000000000001",
+            sizeBytes: 2_048,
+          },
+        },
+      });
+    } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 30_000);

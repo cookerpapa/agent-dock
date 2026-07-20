@@ -1,5 +1,6 @@
 import {
   createAgentDockEventFactory,
+  MAX_TOOL_OUTPUT_BYTES,
   parseSupervisorToControlMessage,
   type AgentDockEvent,
   type CancelTurnCommandMessage,
@@ -8,7 +9,8 @@ import {
   type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -55,10 +57,22 @@ export type PiRpcTurnRunnerOptions = {
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
+  persistToolOutputArtifact?: (output: PiRpcToolOutputCapture) => Promise<PiRpcToolOutputArtifact>;
 };
 
 export type PiRpcSettledCheckpoint = {
   piSession: Uint8Array;
+};
+
+export type PiRpcToolOutputCapture = {
+  toolCallId: string;
+  bytes: Uint8Array;
+};
+
+export type PiRpcToolOutputArtifact = {
+  artifactId: string;
+  sha256: string;
+  sizeBytes: number;
 };
 
 export type PiBuiltinToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
@@ -83,6 +97,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const MAX_STDOUT_BUFFER_BYTES = 8 * 1_024 * 1_024;
 const MAX_STDERR_BYTES = 4_096;
 const RUNTIME_API_KEY_ENV = "AGENT_DOCK_RUNTIME_API_KEY";
+const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
 const PI_BUILTIN_TOOL_NAMES = new Set<PiBuiltinToolName>([
   "read",
   "bash",
@@ -389,6 +404,24 @@ function modelConfigJson(config: PiModelRuntimeConfig): string {
   )}\n`;
 }
 
+function settingsConfigJson(command: ExecuteTurnCommandMessage): string {
+  const budgets = command.payload.budgets;
+  return `${JSON.stringify(
+    {
+      compaction: {
+        enabled: true,
+        reserveTokens: budgets?.compactionReserveTokens ?? 16_384,
+        keepRecentTokens: budgets?.compactionKeepRecentTokens ?? 20_000,
+      },
+      retry: { enabled: true },
+      enableInstallTelemetry: false,
+      enableAnalytics: false,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 function resolvePinnedPiRpcEntry(moduleUrl: string): string {
   const packageJson = findPackageJSON("@earendil-works/pi-coding-agent", moduleUrl);
   if (packageJson === undefined) {
@@ -481,14 +514,20 @@ export class PiRpcTurnRunner {
     const agentDirectory = resolve(temporaryRoot, "agent");
     const sessionDirectory = resolve(temporaryRoot, "sessions");
     const sessionFile = resolve(sessionDirectory, "session.jsonl");
+    const toolOutputDirectory = resolve(temporaryRoot, "tool-outputs");
     const persistSession =
       this.#options.restorePiSession !== undefined || this.#options.onSettled !== undefined;
     try {
       await Promise.all([
         mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
+        mkdir(toolOutputDirectory, { recursive: true, mode: 0o700 }),
         ...(persistSession ? [mkdir(sessionDirectory, { recursive: true, mode: 0o700 })] : []),
       ]);
       await writeFile(resolve(agentDirectory, "models.json"), modelConfigJson(runtimeConfig), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await writeFile(resolve(agentDirectory, "settings.json"), settingsConfigJson(command), {
         encoding: "utf8",
         mode: 0o600,
       });
@@ -503,6 +542,12 @@ export class PiRpcTurnRunner {
         true,
       );
     }
+    const childEnvironment = sanitizedEnvironment(
+      runtimeConfig.apiKey,
+      agentDirectory,
+      this.#options.trustedEnvironment,
+    );
+    childEnvironment[TOOL_OUTPUT_DIRECTORY_ENV] = toolOutputDirectory;
     const child = spawn(
       process.execPath,
       [
@@ -531,11 +576,7 @@ export class PiRpcTurnRunner {
       {
         cwd: workspaceDirectory,
         detached: process.platform !== "win32",
-        env: sanitizedEnvironment(
-          runtimeConfig.apiKey,
-          agentDirectory,
-          this.#options.trustedEnvironment,
-        ),
+        env: childEnvironment,
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -559,7 +600,12 @@ export class PiRpcTurnRunner {
           idGenerator: this.#idGenerator,
         },
       ),
-      { inputKind: command.payload.input.kind },
+      {
+        inputKind: command.payload.input.kind,
+        ...(command.payload.budgets === undefined
+          ? {}
+          : { maximumToolOutputBytes: command.payload.budgets.maximumToolOutputBytes }),
+      },
     );
     let requestSequence = 0;
     let stdoutBuffer = Buffer.alloc(0);
@@ -644,6 +690,43 @@ export class PiRpcTurnRunner {
         throw new PiRpcTurnError("pi_protocol_error", outcome.reason, false);
       }
       let publicEvent = outcome.event;
+      if (
+        publicEvent.type === "tool.completed" &&
+        this.#options.persistToolOutputArtifact !== undefined
+      ) {
+        const artifactPath = resolve(
+          toolOutputDirectory,
+          `${createHash("sha256")
+            .update(publicEvent.payload.toolCallId, "utf8")
+            .digest("hex")}.output`,
+        );
+        const metadata = await lstat(artifactPath).catch((error: unknown) => {
+          if (isRecord(error) && error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (metadata !== undefined) {
+          if (
+            !metadata.isFile() ||
+            metadata.isSymbolicLink() ||
+            metadata.size > MAX_TOOL_OUTPUT_BYTES
+          ) {
+            throw new PiRpcTurnError(
+              "tool_output_artifact_invalid",
+              "Trusted tool output artifact was invalid",
+              false,
+            );
+          }
+          const bytes = await readFile(artifactPath);
+          const outputArtifact = await this.#options.persistToolOutputArtifact({
+            toolCallId: publicEvent.payload.toolCallId,
+            bytes,
+          });
+          publicEvent = {
+            ...publicEvent,
+            payload: { ...publicEvent.payload, outputArtifact },
+          };
+        }
+      }
       if (publicEvent.type === "turn.completed") {
         if (this.#options.onSettled) {
           let piSession: Uint8Array;

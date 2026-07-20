@@ -37,6 +37,8 @@ export {
   type TenantModelConfigurationServiceOptions,
 } from "./tenant-model-configuration.ts";
 
+export { ModelGovernanceError, ModelGovernanceService } from "./model-governance-service.ts";
+
 export {
   TenantAdministrationError,
   createPrivateTenant,

@@ -73,6 +73,222 @@ export const ModelConfigurationResourceSchema = Type.Union([
   ),
 ]);
 
+const ModelGovernanceLimitsSchema = Type.Object(
+  {
+    maximumModelRequestsPerRun: Type.Integer({ minimum: 1, maximum: 1_024 }),
+    maximumTokensPerRun: Type.Integer({ minimum: 2_048, maximum: 1_000_000_000 }),
+    maximumCostMicrousdPerRun: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
+    dailyTokenBudget: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
+    monthlyCostMicrousdBudget: Type.Integer({
+      minimum: 1,
+      maximum: 1_000_000_000_000_000,
+    }),
+    maximumToolCallsPerRun: Type.Integer({ minimum: 1, maximum: 10_000 }),
+    maximumToolOutputBytes: Type.Integer({ minimum: 1_024, maximum: 1_048_576 }),
+    maximumRunDurationMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
+    compactionReserveTokens: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+    compactionKeepRecentTokens: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
+  },
+  { additionalProperties: false },
+);
+
+const ModelRateResourceSchema = Type.Object(
+  {
+    provider: Type.String({ minLength: 1, maxLength: 128 }),
+    modelId: Type.String({ minLength: 1, maxLength: 256 }),
+    inputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    outputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    cacheReadMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    cacheWriteMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
+const ReplaceModelRateSchema = Type.Object(
+  {
+    provider: Type.Literal("deepseek"),
+    modelId: DeepSeekModelIdSchema,
+    inputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    outputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    cacheReadMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+    cacheWriteMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
+const ModelFallbackPolicySchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    provider: Type.Optional(Type.Literal("deepseek")),
+    modelId: Type.Optional(DeepSeekModelIdSchema),
+    onRateLimit: Type.Boolean(),
+    onServerError: Type.Boolean(),
+    onTimeout: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const ReplaceModelGovernanceRequestSchema = Type.Object(
+  {
+    limits: ModelGovernanceLimitsSchema,
+    rates: Type.Array(ReplaceModelRateSchema, { minItems: 1, maxItems: 2 }),
+    fallback: ModelFallbackPolicySchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ModelGovernanceResourceSchema = Type.Object(
+  {
+    limits: ModelGovernanceLimitsSchema,
+    rates: Type.Array(ModelRateResourceSchema, { maxItems: 32 }),
+    fallback: ModelFallbackPolicySchema,
+    updatedAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+const UsageTotalsSchema = Type.Object(
+  {
+    requests: NonNegativeSafeIntegerSchema,
+    inputTokens: NonNegativeSafeIntegerSchema,
+    outputTokens: NonNegativeSafeIntegerSchema,
+    cacheReadTokens: NonNegativeSafeIntegerSchema,
+    cacheWriteTokens: NonNegativeSafeIntegerSchema,
+    costMicrousd: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const UsageSummaryResourceSchema = Type.Object(
+  {
+    tenantId: UuidSchema,
+    totals: UsageTotalsSchema,
+    byModel: Type.Array(
+      Type.Object(
+        {
+          provider: Type.String({ minLength: 1, maxLength: 128 }),
+          modelId: Type.String({ minLength: 1, maxLength: 256 }),
+          totals: UsageTotalsSchema,
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 64 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const ModelRequestAuditResourceSchema = Type.Object(
+  {
+    requestId: UuidSchema,
+    sequence: PositiveSafeIntegerSchema,
+    state: Type.Union([
+      Type.Literal("reserved"),
+      Type.Literal("completed"),
+      Type.Literal("failed"),
+      Type.Literal("aborted"),
+      Type.Literal("budget_denied"),
+    ]),
+    requestedProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    requestedModelId: Type.String({ minLength: 1, maxLength: 256 }),
+    actualProvider: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    actualModelId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    fallbackReason: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    reservedTokens: NonNegativeSafeIntegerSchema,
+    actualTokens: Type.Optional(NonNegativeSafeIntegerSchema),
+    reservedCostMicrousd: NonNegativeSafeIntegerSchema,
+    actualCostMicrousd: Type.Optional(NonNegativeSafeIntegerSchema),
+    actualRate: Type.Optional(
+      Type.Object(
+        {
+          inputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+          outputMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+          cacheReadMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+          cacheWriteMicrousdPerMillion: NonNegativeSafeIntegerSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    startedAt: UtcTimestampSchema,
+    settledAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const RunUsageResourceSchema = Type.Object(
+  {
+    runId: UuidSchema,
+    totals: UsageTotalsSchema,
+    modelRequests: Type.Array(ModelRequestAuditResourceSchema, { maxItems: 1_024 }),
+  },
+  { additionalProperties: false },
+);
+
+export const SessionContextResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    compaction: Type.Object(
+      {
+        reserveTokens: PositiveSafeIntegerSchema,
+        keepRecentTokens: PositiveSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    layers: Type.Array(
+      Type.Object(
+        {
+          order: Type.Integer({ minimum: 0, maximum: 5 }),
+          kind: Type.Union([
+            Type.Literal("platform_system"),
+            Type.Literal("project_instructions"),
+            Type.Literal("session_summary"),
+            Type.Literal("recent_messages"),
+            Type.Literal("tool_results"),
+            Type.Literal("current_task"),
+          ]),
+          source: Type.String({ minLength: 1, maxLength: 128 }),
+          availability: Type.Union([Type.Literal("always"), Type.Literal("when_available")]),
+          maximumBytes: Type.Optional(PositiveSafeIntegerSchema),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 6, maxItems: 6 },
+    ),
+    history: Type.Array(
+      Type.Object(
+        {
+          compactionId: UuidSchema,
+          turnId: UuidSchema,
+          runId: UuidSchema,
+          attemptId: UuidSchema,
+          reason: Type.Union([
+            Type.Literal("manual"),
+            Type.Literal("threshold"),
+            Type.Literal("overflow"),
+          ]),
+          state: Type.Union([
+            Type.Literal("running"),
+            Type.Literal("completed"),
+            Type.Literal("aborted"),
+            Type.Literal("failed"),
+          ]),
+          tokensBefore: Type.Optional(NonNegativeSafeIntegerSchema),
+          estimatedTokensAfter: Type.Optional(NonNegativeSafeIntegerSchema),
+          summarySha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+          summaryVersion: Type.Optional(PositiveSafeIntegerSchema),
+          willRetry: Type.Boolean(),
+          startedAt: UtcTimestampSchema,
+          completedAt: Type.Optional(UtcTimestampSchema),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 200 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const TenantIdentityResourceSchema = Type.Object(
   {
     tenantId: UuidSchema,
@@ -696,6 +912,11 @@ export type ReplaceModelConfigurationRequest = Static<
   typeof ReplaceModelConfigurationRequestSchema
 >;
 export type ModelConfigurationResource = Static<typeof ModelConfigurationResourceSchema>;
+export type ReplaceModelGovernanceRequest = Static<typeof ReplaceModelGovernanceRequestSchema>;
+export type ModelGovernanceResource = Static<typeof ModelGovernanceResourceSchema>;
+export type UsageSummaryResource = Static<typeof UsageSummaryResourceSchema>;
+export type RunUsageResource = Static<typeof RunUsageResourceSchema>;
+export type SessionContextResource = Static<typeof SessionContextResourceSchema>;
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
 export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
 export type GitHubRepositorySource = Static<typeof GitHubRepositorySourceSchema>;
@@ -825,6 +1046,59 @@ export function parseReplaceModelConfigurationRequest(
 
 export function parseModelConfigurationResource(value: unknown): ModelConfigurationResource {
   return parseSchema(ModelConfigurationResourceSchema, value, "model configuration resource");
+}
+
+export function parseReplaceModelGovernanceRequest(value: unknown): ReplaceModelGovernanceRequest {
+  const request = parseSchema(
+    ReplaceModelGovernanceRequestSchema,
+    value,
+    "replace-model-governance request",
+  );
+  if (
+    request.limits.compactionReserveTokens + request.limits.compactionKeepRecentTokens >
+    request.limits.maximumTokensPerRun
+  ) {
+    throw new ControlPlaneApiValidationError(
+      "Compaction reserve and recent-context tokens must fit the run token budget",
+    );
+  }
+  if (
+    new Set(request.rates.map((rate) => `${rate.provider}/${rate.modelId}`)).size !==
+    request.rates.length
+  ) {
+    throw new ControlPlaneApiValidationError("Model rates must have unique provider/model entries");
+  }
+  if (
+    request.fallback.enabled &&
+    (request.fallback.provider === undefined || request.fallback.modelId === undefined)
+  ) {
+    throw new ControlPlaneApiValidationError(
+      "Enabled model fallback requires a provider and model",
+    );
+  }
+  if (
+    !request.fallback.enabled &&
+    (request.fallback.provider !== undefined || request.fallback.modelId !== undefined)
+  ) {
+    throw new ControlPlaneApiValidationError("Disabled model fallback cannot name a model");
+  }
+  return request;
+}
+
+export function parseModelGovernanceResource(value: unknown): ModelGovernanceResource {
+  return parseSchema(ModelGovernanceResourceSchema, value, "model-governance resource");
+}
+
+export function parseUsageSummaryResource(value: unknown): UsageSummaryResource {
+  return parseSchema(UsageSummaryResourceSchema, value, "usage-summary resource");
+}
+
+export function parseRunUsageResource(value: unknown): RunUsageResource {
+  return parseSchema(RunUsageResourceSchema, value, "run-usage resource");
+}
+
+export function parseSessionContextResource(value: unknown): SessionContextResource {
+  return parseSchema(SessionContextResourceSchema, value, "session-context resource");
 }
 
 export function parseCreateTenantRegistrationRequest(

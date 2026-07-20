@@ -133,6 +133,26 @@ export async function bootstrapProductionDatabase(
       ])
       .where("id", "=", config.modelProfileId)
       .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("model_rates")
+      .values({
+        tenant_id: config.tenantId,
+        provider: profile.provider,
+        model_id: profile.model_id,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .execute();
+    await transaction
+      .insertInto("model_routing_policies")
+      .values({
+        tenant_id: config.tenantId,
+        model_profile_id: config.modelProfileId,
+        fallback_provider: null,
+        fallback_model_id: null,
+        enabled: false,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .execute();
     const credentialVersion = Number(profile.credential_binding_version);
     const deterministicProfile =
       profile.provider === "agent-dock-fake" &&

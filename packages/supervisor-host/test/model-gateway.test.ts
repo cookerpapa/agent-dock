@@ -21,7 +21,6 @@ const IDS = {
   command: "50000000-0000-4000-8000-000000000001",
   message: "60000000-0000-4000-8000-000000000001",
   lease: "70000000-0000-4000-8000-000000000001",
-  usage: "80000000-0000-4000-8000-000000000001",
 } as const;
 const PROVIDER_SECRET = `sk-${"p".repeat(48)}`;
 const MASTER_KEY = Buffer.alloc(32, 21).toString("base64url");
@@ -61,6 +60,18 @@ beforeAll(async () => {
     modelId: "deepseek-v4-flash",
     apiKey: PROVIDER_SECRET,
   });
+  await database
+    .updateTable("model_rates")
+    .set({
+      input_microusd_per_million: 1_000_000,
+      output_microusd_per_million: 2_000_000,
+      cache_read_microusd_per_million: 500_000,
+      cache_write_microusd_per_million: 3_000_000,
+    })
+    .where("tenant_id", "=", tenant.tenantId)
+    .where("provider", "=", "deepseek")
+    .where("model_id", "=", "deepseek-v4-flash")
+    .executeTakeFirstOrThrow();
   const now = new Date("2026-07-19T15:00:00.000Z");
   await database
     .insertInto("projects")
@@ -116,6 +127,71 @@ beforeAll(async () => {
       created_at: now,
     })
     .executeTakeFirstOrThrow();
+  await database
+    .insertInto("commands")
+    .values({
+      id: IDS.command,
+      tenant_id: tenant.tenantId,
+      session_id: IDS.session,
+      turn_id: IDS.turn,
+      idempotency_key: "gateway-live-1",
+      kind: "turn.execute",
+      state: "acknowledged",
+      mailbox_position: 1,
+      payload: {},
+      created_at: now,
+      dispatched_at: now,
+      acknowledged_at: now,
+    })
+    .executeTakeFirstOrThrow();
+  const runId = "60000000-0000-4000-8000-000000000001";
+  const attemptId = "70000000-0000-4000-8000-000000000001";
+  await database
+    .insertInto("runs")
+    .values({
+      id: runId,
+      tenant_id: tenant.tenantId,
+      project_id: IDS.project,
+      workspace_id: IDS.workspace,
+      session_id: IDS.session,
+      turn_id: IDS.turn,
+      command_id: IDS.command,
+      idempotency_key: "gateway-live-1",
+      state: "queued",
+      current_attempt_id: null,
+      attempt_count: 0,
+      queued_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .executeTakeFirstOrThrow();
+  await database
+    .insertInto("run_attempts")
+    .values({
+      id: attemptId,
+      tenant_id: tenant.tenantId,
+      run_id: runId,
+      attempt_number: 1,
+      state: "running",
+      claim_owner_id: "gateway-test",
+      claim_expires_at: new Date(now.valueOf() + 60_000),
+      claimed_at: now,
+      running_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .executeTakeFirstOrThrow();
+  await database
+    .updateTable("runs")
+    .set({
+      state: "running",
+      current_attempt_id: attemptId,
+      attempt_count: 1,
+      started_at: now,
+      updated_at: now,
+    })
+    .where("id", "=", runId)
+    .executeTakeFirstOrThrow();
   command = {
     protocolVersion: 1,
     messageId: IDS.message,
@@ -128,9 +204,9 @@ beforeAll(async () => {
       projectId: IDS.project,
       workspaceId: IDS.workspace,
       sessionId: IDS.session,
-      runId: "60000000-0000-4000-8000-000000000001",
+      runId,
       turnId: IDS.turn,
-      attemptId: "70000000-0000-4000-8000-000000000001",
+      attemptId,
       agentId: "root",
       leaseId: IDS.lease,
       fencingToken: 1,
@@ -171,7 +247,6 @@ beforeAll(async () => {
     port: 0,
     advertisedBaseUrl: "http://supervisor-host:4200",
     fetchImplementation: upstreamFetch,
-    idGenerator: () => IDS.usage,
   });
   await gateway.start();
 });
@@ -220,8 +295,11 @@ describe.sequential("tenant model gateway", () => {
         "input_tokens as inputTokens",
         "output_tokens as outputTokens",
         "cache_read_tokens as cacheReadTokens",
+        "cost_microusd as costMicrousd",
       ])
-      .where("id", "=", IDS.usage)
+      .where("turn_id", "=", IDS.turn)
+      .orderBy("created_at", "asc")
+      .limit(1)
       .executeTakeFirstOrThrow();
     expect(usage).toMatchObject({
       tenantId: command.payload.tenantId,
@@ -229,6 +307,25 @@ describe.sequential("tenant model gateway", () => {
       inputTokens: "10",
       outputTokens: "3",
       cacheReadTokens: "2",
+      costMicrousd: "17",
+    });
+    const requestAudit = await database
+      .selectFrom("model_requests")
+      .select([
+        "state",
+        "actual_model_id as actualModelId",
+        "actual_input_microusd_per_million as actualInputRate",
+        "actual_cost_microusd as costMicrousd",
+      ])
+      .where("turn_id", "=", IDS.turn)
+      .orderBy("request_sequence", "asc")
+      .limit(1)
+      .executeTakeFirstOrThrow();
+    expect(requestAudit).toEqual({
+      state: "completed",
+      actualModelId: "deepseek-v4-flash",
+      actualInputRate: "1000000",
+      costMicrousd: "17",
     });
 
     await lease.release();
@@ -262,6 +359,117 @@ describe.sequential("tenant model gateway", () => {
     );
     expect(response.status).toBe(403);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    await lease.release();
+  });
+
+  it("denies an exhausted run budget before provider egress and audits the decision", async () => {
+    await database
+      .updateTable("tenant_runtime_policies")
+      .set({ maximum_model_requests_per_run: 1 })
+      .where("tenant_id", "=", command.payload.tenantId)
+      .executeTakeFirstOrThrow();
+    const lease = await gateway.issue(command);
+    const response = await fetch(
+      `http://127.0.0.1:${String(gateway.listeningPort)}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${lease.runtime.capability}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-v4-flash",
+          stream: true,
+          messages: [{ role: "user", content: "must not egress" }],
+        }),
+      },
+    );
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ error: { code: "model_request_limit" } });
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    expect(
+      await database
+        .selectFrom("model_requests")
+        .select(["state", "failure_code as failureCode"])
+        .where("turn_id", "=", IDS.turn)
+        .where("state", "=", "budget_denied")
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "budget_denied", failureCode: "model_request_limit" });
+    await lease.release();
+  });
+
+  it("falls back once on a configured rate limit and attributes usage to the actual model", async () => {
+    await database.transaction().execute(async (transaction) => {
+      await transaction
+        .updateTable("tenant_runtime_policies")
+        .set({ maximum_model_requests_per_run: 32 })
+        .where("tenant_id", "=", command.payload.tenantId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("model_rates")
+        .values({
+          tenant_id: command.payload.tenantId,
+          provider: "deepseek",
+          model_id: "deepseek-v4-pro",
+          input_microusd_per_million: 2_000_000,
+          output_microusd_per_million: 4_000_000,
+        })
+        .onConflict((conflict) => conflict.doNothing())
+        .execute();
+      await transaction
+        .updateTable("model_routing_policies")
+        .set({
+          fallback_provider: "deepseek",
+          fallback_model_id: "deepseek-v4-pro",
+          fallback_on_rate_limit: true,
+          enabled: true,
+        })
+        .where("tenant_id", "=", command.payload.tenantId)
+        .where("model_profile_id", "=", command.payload.model.profileId)
+        .executeTakeFirstOrThrow();
+    });
+    upstreamFetch
+      .mockImplementationOnce(
+        async () =>
+          new Response('{"error":"limited"}', { status: 429, headers: { "retry-after": "1" } }),
+      )
+      .mockImplementationOnce(async (_input, init) => {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ model: "deepseek-v4-pro" });
+        return new Response(
+          [
+            'data: {"choices":[{"delta":{"content":"fallback"}}]}',
+            'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+            "data: [DONE]",
+            "",
+          ].join("\n\n"),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      });
+    const lease = await gateway.issue(command);
+    const response = await fetch(
+      `http://127.0.0.1:${String(gateway.listeningPort)}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${lease.runtime.capability}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-v4-flash",
+          stream: true,
+          messages: [{ role: "user", content: "fallback" }],
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("fallback");
+    const audit = await database
+      .selectFrom("model_requests")
+      .select(["actual_model_id as actualModelId", "fallback_reason as fallbackReason"])
+      .where("turn_id", "=", IDS.turn)
+      .where("fallback_reason", "=", "rate_limit")
+      .executeTakeFirstOrThrow();
+    expect(audit).toEqual({ actualModelId: "deepseek-v4-pro", fallbackReason: "rate_limit" });
     await lease.release();
   });
 });

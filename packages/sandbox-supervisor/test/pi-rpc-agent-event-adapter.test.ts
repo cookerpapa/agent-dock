@@ -8,6 +8,8 @@ function createAdapter() {
     "11111111-1111-4111-8111-111111111111",
     "22222222-2222-4222-8222-222222222222",
     "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
   ];
   return new PiRpcAgentEventAdapter(
     createAgentDockEventFactory(
@@ -148,5 +150,61 @@ describe("PiRpcAgentEventAdapter", () => {
       sourceType: "future_pi_event",
       reason: "No reviewed AgentDock v1 mapping exists for this Pi event type",
     });
+  });
+
+  it("maps native Pi compaction without exposing its summary", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+    expect(adapter.adapt({ type: "compaction_start", reason: "threshold" })).toMatchObject({
+      kind: "mapped",
+      event: { type: "context.compaction.started", payload: { reason: "threshold" } },
+    });
+    const completed = adapter.adapt({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      willRetry: false,
+      result: {
+        summary: "private compacted transcript",
+        firstKeptEntryId: "entry-9",
+        tokensBefore: 91_000,
+        estimatedTokensAfter: 19_500,
+      },
+    });
+    expect(completed).toMatchObject({
+      kind: "mapped",
+      event: {
+        type: "context.compaction.completed",
+        payload: {
+          status: "completed",
+          tokensBefore: 91_000,
+          estimatedTokensAfter: 19_500,
+          firstKeptEntryId: "entry-9",
+          summarySha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      },
+    });
+    expect(JSON.stringify(completed)).not.toContain("private compacted transcript");
+  });
+
+  it("bounds persisted tool output", () => {
+    const adapter = new PiRpcAgentEventAdapter(
+      createAgentDockEventFactory(
+        { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
+        { idGenerator: () => "11111111-1111-4111-8111-111111111111" },
+      ),
+      { inputKind: "prompt", maximumToolOutputBytes: 1_024 },
+    );
+    const outcome = adapter.adapt({
+      type: "tool_execution_end",
+      toolCallId: "large",
+      isError: false,
+      result: "x".repeat(4_096),
+    });
+    expect(outcome).toMatchObject({
+      kind: "mapped",
+      event: { payload: { output: { truncated: true } } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(outcome), "utf8")).toBeLessThan(1_500);
   });
 });

@@ -378,6 +378,15 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       idGenerator: () => `40000000-0000-4000-8000-${String(++artifactSequence).padStart(12, "0")}`,
     });
     await expect(store.load(command(1))).resolves.toBeUndefined();
+    const toolOutput = Buffer.alloc(2_048, 0x61);
+    const savedToolOutput = await store.saveToolOutput(command(1), {
+      toolCallId: "tool-call-large-output",
+      bytes: toolOutput,
+    });
+    expect(savedToolOutput).toMatchObject({
+      sha256: createHash("sha256").update(toolOutput).digest("hex"),
+      sizeBytes: 2_048,
+    });
     const first = await store.save(command(1), null, {
       piSession: piSession("first"),
       workspace: workspace("first"),
@@ -386,7 +395,17 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     await expect(store.load(command(1))).resolves.toBeUndefined();
     await insertCompletedEvent(1);
     await expect(store.load(command(1))).resolves.toMatchObject({ revision: first.revision });
-    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(2);
+    const firstArtifacts = await database
+      .selectFrom("artifacts")
+      .select(["id", "kind", "run_id"])
+      .where("turn_id", "=", IDS.turn1)
+      .execute();
+    expect(firstArtifacts).toHaveLength(3);
+    expect(firstArtifacts).toContainEqual({
+      id: savedToolOutput.artifactId,
+      kind: "tool_output",
+      run_id: IDS.run1,
+    });
 
     await database.transaction().execute(async (transaction) => {
       await transaction
@@ -490,7 +509,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       workspace: workspace("second"),
     });
     expect(second.revision).not.toBe(first.revision);
-    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(4);
+    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
     await expect(freshStore.load(command(2))).resolves.toMatchObject({ revision: first.revision });
     await insertCompletedEvent(2);
     await expect(freshStore.load(command(2))).resolves.toMatchObject({ revision: second.revision });
@@ -501,7 +520,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
         workspace: workspace("stale"),
       }),
     ).rejects.toMatchObject({ code: "checkpoint_conflict" });
-    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(4);
+    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
 
     const session = await database
       .selectFrom("sessions")

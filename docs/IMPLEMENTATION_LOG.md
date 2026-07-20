@@ -1496,3 +1496,28 @@
 - Next: Milestone 4 will add durable context/compaction records and enforce per-Run and per-tenant token/cost/tool budgets at the trusted
   Model Gateway. This comes before observability because the Usage ledger and budget decisions need to become stable domain data that
   later traces, metrics, dashboards, and eval reports can consume.
+
+## 2026-07-20 — Milestone 4：Context 与 Model Governance
+
+- 目标与原因：长会话不能只依赖无限增长的 `messages[]`，真实多租户也不能等 provider 返回后才统计额度。先把上下文、请求
+  预留、价格快照和完整 usage 变成稳定领域数据，后续 Trace、Dashboard 和 Eval 才有可信的数据源。
+- 上下文：保留 Pi 对 transcript 和 compaction 的唯一所有权。每次 activation 写入 tenant budget 对应的 native compaction
+  settings；固定 extension 将 Pi/platform system、最多 16 KiB 的 workspace `AGENTS.md`、Pi summary、recent messages、bounded
+  tool results 和当前 task 按顺序组合。Compaction start/end 进入 durable event，PostgreSQL 只保存 token、first-kept entry、
+  summary version 与 SHA-256，不复制摘要正文。
+- 预算：migration 011 扩展 tenant policy，并新增 model rate、routing、request reservation 和 compaction audit。每个 Turn 固化
+  model request/token/cost/tool/output/wall-clock snapshot；同 Session 保持串行。Tool 次数在 trusted extension 发 RPC 前扣减，
+  Run timeout 取 tenant 与部署上限较小值。
+- Model Gateway：在 provider egress 前锁 tenant policy，清理过期 reservation，验证 current RunAttempt，汇总 completed usage 与
+  active reservation，再原子写 `reserved` 或 `budget_denied`。只允许一次显式 fallback，限 429/5xx/timeout 策略。完成时记录实际
+  provider/model、四类 token、四类 owner-configured micro-USD rate、整数 cost，并写一条 linked usage ledger；bootstrap rate 为 0，
+  不冒充实时官方价格。
+- 大输出：read/bash 超过 context 限额时，Pi 只收到 bounded preview；完整但 Provider-bounded 的 bytes 先写 activation-private
+  trusted directory，再由 checkpoint store 以 current Run/Attempt/lease/fence 校验写成 tenant-scoped `tool_output` Artifact，最后
+  `tool.completed` 才发布 opaque artifact ID/hash/size。失败 Run 也不会因为没有 checkpoint 而丢失该工具证据。
+- 产品 API：新增 owner-only governance replace，以及 tenant-scoped usage、Run model-request audit 和 Session context/compaction
+  history。Viewer 不能改 policy，foreign Run/Session 与不存在资源保持相同 `404`。
+- 自动证据：migration up/down、reservation/fallback/pre-egress denial、actual rate/cost、tool budget、context layer、native
+  compaction privacy、large-output capture/persistence/event reference、tenant/role 隔离均有 deterministic tests；正式门禁结果在
+  本里程碑 commit 前以仓库 CI 复核。最终 `npm run ci` 通过 production Web build、所有 workspace typecheck、330 passed/
+  9 environment-conditional skipped tests、两个 zero-model-call Pi spikes 和 high-level audit（0 vulnerabilities）。

@@ -195,6 +195,17 @@ export class TenantModelConfigurationService {
             .where("id", "=", profile.id)
             .executeTakeFirstOrThrow();
         }
+        await transaction
+          .insertInto("model_rates")
+          .values({
+            tenant_id: identity.tenantId,
+            provider: "deepseek",
+            model_id: request.modelId,
+            created_at: now,
+            updated_at: now,
+          })
+          .onConflict((conflict) => conflict.doNothing())
+          .execute();
         return {
           mode: "real",
           provider: "deepseek",
@@ -274,6 +285,30 @@ export class TenantModelConfigurationService {
         .where("tenant_id", "=", identity.tenantId)
         .where("id", "=", profile.id)
         .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("model_rates")
+        .values({
+          tenant_id: identity.tenantId,
+          provider: "deepseek",
+          model_id: request.modelId,
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflict((conflict) => conflict.doNothing())
+        .execute();
+      await transaction
+        .insertInto("model_routing_policies")
+        .values({
+          tenant_id: identity.tenantId,
+          model_profile_id: profile.id,
+          fallback_provider: null,
+          fallback_model_id: null,
+          enabled: false,
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflict((conflict) => conflict.doNothing())
+        .execute();
       return {
         mode: "real",
         provider: "deepseek",

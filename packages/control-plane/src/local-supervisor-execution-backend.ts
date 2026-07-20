@@ -299,6 +299,7 @@ export class LocalSupervisorExecutionBackend
               "credential binding version",
             ),
           },
+          ...(request.budgets === undefined ? {} : { budgets: request.budgets }),
         },
       });
       if (parsed.type !== "command.turn.execute") {

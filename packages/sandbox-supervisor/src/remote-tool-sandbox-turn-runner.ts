@@ -309,8 +309,20 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: this.#manager.operationUrl,
           AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID: activation.activationId,
           AGENT_DOCK_TRUSTED_TOOL_CAPABILITY: activation.capability,
+          AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: String(
+            command.payload.budgets?.remainingToolCalls ?? 128,
+          ),
+          AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
+            command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+          ),
         },
         collectWorkspacePatch: () => capturedPatch,
+        ...(this.#checkpointStore?.saveToolOutput === undefined
+          ? {}
+          : {
+              persistToolOutputArtifact: (output: { toolCallId: string; bytes: Uint8Array }) =>
+                this.#checkpointStore!.saveToolOutput!(command, output),
+            }),
         ...(loadedCheckpoint === undefined ? {} : { restorePiSession: loadedCheckpoint.piSession }),
         onSettled: async ({ piSession }) => {
           if (activation === undefined) {
@@ -364,9 +376,17 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           : { requestTimeoutMs: this.#requestTimeoutMs }),
         ...(this.#turnTimeoutMs === undefined
           ? {
-              turnTimeoutMs: usesEmbeddedFake ? 60_000 : modelRuntimeLease!.runtime.turnTimeoutMs,
+              turnTimeoutMs: Math.min(
+                command.payload.budgets?.maximumRunDurationMs ?? Number.MAX_SAFE_INTEGER,
+                usesEmbeddedFake ? 60_000 : modelRuntimeLease!.runtime.turnTimeoutMs,
+              ),
             }
-          : { turnTimeoutMs: this.#turnTimeoutMs }),
+          : {
+              turnTimeoutMs: Math.min(
+                this.#turnTimeoutMs,
+                command.payload.budgets?.maximumRunDurationMs ?? Number.MAX_SAFE_INTEGER,
+              ),
+            }),
       });
       return await runner.run(command, publishEvent, signal);
     } finally {
