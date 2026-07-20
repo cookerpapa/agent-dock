@@ -143,7 +143,19 @@ Deliverables:
 Exit criteria: cross-tenant filesystem access, host credential access, runaway
 processes, and unapproved dangerous actions are blocked in repeatable tests.
 
-This is the first resume-ready release.
+Current status: the tool-execution boundary is complete for the supported
+single-host slice. ADR-0029 splits the trusted Pi Runner from the only
+Docker-owning Sandbox Manager; Pi's built-ins are disabled and replaced through
+public operation APIs; each active turn receives a credential-free,
+networkless, non-root Tool Sandbox. Production acceptance proves remote
+`bash/edit`, checkpoint/diff capture, cancellation, exact cleanup, socket
+ownership, and secret absence. The old whole-Pi Docker runner remains only as a
+legacy adapter/test path. User/project extensions, interactive approvals,
+stronger-than-shared-kernel isolation, and mutually hostile public tenants are
+still outside the claim. The owner explicitly deferred extension and approval
+work, so those items are not represented as silently complete.
+
+This bounded tool-sandbox slice is resume-ready.
 
 ## Phase 4: multi-tenant scheduling (2-3 weeks)
 

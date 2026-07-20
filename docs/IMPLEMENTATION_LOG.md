@@ -1360,3 +1360,45 @@
   branch refresh、monorepo 超限、extension、PR/write-back。若继续增强简历项目，下一步优先做 extension policy + approval
   boundary，而不是立刻扩大 Git 来源；原因是“用户代码能导入并执行”已有端到端证据，接下来最能体现工程判断的是让
   project extension 的权限、secret、网络和人工审批变成可验证策略。
+
+## 2026-07-20 — Trusted Pi Runner、Sandbox Manager 与无凭据 Tool Sandbox
+
+- 目标与原因：把“Pi 与用户命令在同一个临时容器里”的旧边界拆成用户提出的官方推荐形态：Pi、对话状态和模型认证留在
+  可信区，只有 `read/write/edit/bash` 进入隔离执行环境。这样用户命令即使读取全部 Sandbox 环境，也得不到 DeepSeek key、
+  Model Gateway capability、数据库、MinIO、Supervisor enrollment credential 或 Docker socket。
+- 架构决策：新增 ADR-0029。Control Plane 继续负责 tenant/session/turn/queue/database；非 root Supervisor 现在是稳定的
+  Trusted Pi Runner；独立 Sandbox Manager 是唯一挂载 Docker socket 的服务；每个 active turn 创建一个 UID 1000、
+  `network=none`、read-only rootfs、无 mount/port/credential 的 Tool Sandbox。冷会话只保留 PostgreSQL/MinIO checkpoint，
+  不占 Pi 子进程、Sandbox、线程或计时器。
+- Pi 集成：生产 Pi 显式使用 `--no-builtin-tools --no-extensions`，只加载一个镜像内固定 extension。extension 用 Pi 官方
+  `createReadTool/createWriteTool/createEditTool/createBashTool` 接口，把工具调用通过带 service token 与单次 activation
+  capability 的 HTTP RPC 发给 Manager；Pi 的 agent loop、`messages[]`、compact/session JSONL 和 Model Gateway 仍在可信
+  Runner。`user_bash` 也走同一远程边界，传入 Pi 的环境变量不会被转发到 bash。
+- 工具与状态：新增版本化、strict-schema 的 Tool Sandbox protocol，以及独立 `workspace-runtime` 包。Sandbox worker 支持
+  bounded bash、取消/超时/进程组回收、read/write/edit 所需文件操作、workspace seed/restore、Git baseline、snapshot 和
+  cumulative bounded diff。终态先 capture 再生成 diff，保证最后一次工具修改不会漏进 `turn.completed`。
+- Manager 边界：Manager 只提供 create/operation/capture/stop/inventory 和受控 GitHub import；activation capability 只存
+  SHA-256 digest，并拒绝 operation ID 重放。容器 identity 用完整 assignment labels 逐字段核对，所有 stop 都确认 absent；
+  import cleanup 不再静默忽略。Runner 没有 Docker socket，Manager 没有 DB/S3/provider/enrollment credential，也不加入
+  repository-egress；导入器只加入 repository-egress，普通 Tool Sandbox 永远无网络。
+- 生产迁移：Compose 新增 `sandbox-manager`、`tool-sandbox-image` 与一次性 volume ownership bootstrap；Supervisor 镜像删除
+  Docker CLI/socket 并固定非 root 用户。另一个无凭据、立即退出的 network bootstrap 只负责让 Compose 创建 importer 专用
+  `repository-egress`，Manager 与 Runner 均不加入。旧 deployment version 与既有四个 volume 保持兼容，`production:init`
+  幂等补发私有 manager token。生产健康检查先验证 Manager，再允许 Runner ready。
+- 自动证据：protocol、Manager client/server 鉴权与 capability、Docker 参数、固定无凭据工具环境均有单元测试；真实 Docker
+  integration 启动 Pi + Manager + Tool Sandbox，完成 bash → edit → bash Java 修复，并检查 Sandbox UID、`network=none`、
+  read-only、无 mount、无敏感 env、终态 diff 和删除确认。完整 `npm run ci` 通过 production Web build、所有 workspace
+  typecheck、297 passed/8 conditional skipped tests、两个 zero-token Pi spikes 和 high-level audit（0 vulnerabilities）。
+- Disposable production gate：五个当前源码镜像完成重建后，最终门禁 `agent-dock-check-e8840586cc` 复用这些镜像，通过三租户
+  隔离、control-plane restart 与 `1 -> 2 -> 1`、fresh boot、S3 双轮恢复、active Sandbox cancel 和 22 条 durable events。新增
+  inspection 断言还证明
+  Supervisor 无 socket、Manager 是唯一 socket owner、两者均非 privileged/read-only rootfs、Manager 无 DB/S3/model credential、
+  Tool Sandbox 无 network/mount/secret env；随机容器、网络、volume 与 runtime 最终精确清理。
+- 真实仓库烟测：把同一批镜像部署到本机生产实例后，经 Manager 临时 importer 导入 `octocat/hello-world` 的固定 commit
+  `7fd1a60b01f91b314f59955a4e4d4e80d8edf11d`；client 对 snapshot envelope、manifest 和内容 hash 完整解码，得到 217-byte
+  snapshot（SHA-256 `7ff9e22d573d6ac65f521f3a07b9412558210bbe419fec8896473187f000e9f2`）。完成后 importer、
+  `repository-egress` endpoint 和 managed Sandbox 均为 0；该烟测不调用模型、不消耗 token。
+- 当前产品边界：这是可在单台 Linux Docker host 私有部署的多租户 cloud coding agent，而不是 hostile-public SaaS。Docker
+  容器仍共享宿主内核；Manager 的 socket 仍属于 TCB。用户已明确暂缓 project extension 与 approval boundary，因此下一步
+  不扩功能，先用 CI、加强后的 production gate 和当前部署检查把这次执行边界固化；若未来开放公网任意代码，应再评估
+  gVisor/Kata/Firecracker 或托管 microVM，并单独写 threat model。

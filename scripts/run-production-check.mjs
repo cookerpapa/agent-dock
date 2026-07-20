@@ -525,7 +525,7 @@ async function assertApplicationIdentity() {
   const applicationSecret = await stat(resolve(runtimeDirectory, "secrets/api-token"));
   assert.notEqual(applicationSecret.uid, 0);
   const expected = `${String(applicationSecret.uid)}:${String(applicationSecret.gid)}`;
-  for (const service of ["database-bootstrap", "control-plane"]) {
+  for (const service of ["database-bootstrap", "control-plane", "supervisor-host"]) {
     const output = await composeCapture(["ps", "--all", "--quiet", service]);
     const ids = output.split(/\r?\n/).filter(Boolean);
     assert(ids.length >= 1);
@@ -538,6 +538,60 @@ async function assertApplicationIdentity() {
   }
 }
 
+async function assertExecutionBoundary() {
+  const supervisorId = (await serviceContainerIds("supervisor-host"))[0];
+  const managerId = (await serviceContainerIds("sandbox-manager"))[0];
+  assert(supervisorId);
+  assert(managerId);
+  const [supervisor, manager] = await Promise.all(
+    [supervisorId, managerId].map(async (id) =>
+      JSON.parse(await capture("docker", ["inspect", id])).at(0),
+    ),
+  );
+  const hasDockerSocket = (container) =>
+    (container.Mounts ?? []).some((mount) => mount.Destination === "/var/run/docker.sock");
+  assert.equal(hasDockerSocket(supervisor), false);
+  assert.equal(hasDockerSocket(manager), true);
+  assert.equal(supervisor.HostConfig.Privileged, false);
+  assert.equal(manager.HostConfig.Privileged, false);
+  assert.equal(supervisor.HostConfig.ReadonlyRootfs, true);
+  assert.equal(manager.HostConfig.ReadonlyRootfs, true);
+  assert.deepEqual(supervisor.HostConfig.CapDrop, ["ALL"]);
+  assert.deepEqual(supervisor.HostConfig.CapAdd ?? [], []);
+  assert(manager.HostConfig.CapDrop.includes("ALL"));
+  assert(
+    manager.HostConfig.CapAdd.some(
+      (capability) => capability === "DAC_READ_SEARCH" || capability === "CAP_DAC_READ_SEARCH",
+    ),
+  );
+  const supervisorNetworks = Object.keys(supervisor.NetworkSettings.Networks ?? {});
+  const managerNetworks = Object.keys(manager.NetworkSettings.Networks ?? {});
+  assert(supervisorNetworks.some((name) => name.endsWith("_sandbox-control")));
+  assert.equal(
+    supervisorNetworks.some((name) => name.endsWith("_repository-egress")),
+    false,
+  );
+  assert.deepEqual(managerNetworks, [`${projectName}_sandbox-control`]);
+  const repositoryNetwork = JSON.parse(
+    await capture("docker", ["network", "inspect", `${projectName}_repository-egress`]),
+  ).at(0);
+  assert.equal(repositoryNetwork.Name, `${projectName}_repository-egress`);
+  assert.deepEqual(Object.keys(repositoryNetwork.Containers ?? {}), []);
+  const managerEnvironment = manager.Config.Env ?? [];
+  for (const prefix of [
+    "DATABASE_URL=",
+    "DATABASE_URL_FILE=",
+    "AWS_",
+    "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+    "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",
+  ]) {
+    assert.equal(
+      managerEnvironment.some((value) => value.startsWith(prefix)),
+      false,
+    );
+  }
+}
+
 async function readSecretValues() {
   const names = [
     "api-token",
@@ -546,6 +600,7 @@ async function readSecretValues() {
     "minio-root-user",
     "model-credential-master-key",
     "postgres-password",
+    "sandbox-manager-token",
     "supervisor-enrollment-token",
     "supervisor-management-token",
   ];
@@ -605,6 +660,7 @@ async function assertPrivateRuntimeFiles() {
       "minio-root-user",
       "model-credential-master-key",
       "postgres-password",
+      "sandbox-manager-token",
       "supervisor-enrollment-token",
       "supervisor-management-token",
     ].map((name) => resolve(runtimeDirectory, "secrets", name)),
@@ -683,8 +739,9 @@ async function main() {
       "build",
       "control-plane",
       "supervisor-host",
+      "sandbox-manager",
       "web",
-      "sandbox-image",
+      "tool-sandbox-image",
     ]);
   }
 
@@ -695,6 +752,7 @@ async function main() {
     waitForHealthyService("minio"),
     waitForHealthyService("control-plane"),
     waitForHealthyService("supervisor-host"),
+    waitForHealthyService("sandbox-manager"),
     waitForHealthyService("web"),
   ]);
   report("repeat_bootstrap");
@@ -702,6 +760,7 @@ async function main() {
   await composeRun(["run", "--rm", "--no-deps", "database-bootstrap"]);
   await assertOnlyWebPublished();
   await assertApplicationIdentity();
+  await assertExecutionBoundary();
   await assertTenantNeutralControlPlaneRuntime();
   await assertObjectStorePolicy(applicationAccessKey);
 

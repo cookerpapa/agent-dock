@@ -4,11 +4,6 @@ import {
   type SupervisorManagementResponse,
   type SupervisorRuntimeAssignment,
 } from "@agent-dock/protocol";
-import {
-  DockerSandboxAssignmentInventory,
-  SandboxAssignmentInventoryError,
-  type SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -31,10 +26,15 @@ export type SupervisorManagementServerOptions = {
   bootLedger: SupervisorBootLedger;
   stopCurrentBoot: () => Promise<void>;
   readiness: () => boolean;
-  dockerCommand?: string;
-  inventoryTimeoutMs?: number;
+  assignmentInventory: SupervisorAssignmentInventory;
   bodyLimit?: number;
 };
+
+export interface SupervisorAssignmentInventory {
+  listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]>;
+  terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
+  confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
+}
 
 export class SupervisorManagementServerError extends Error {
   readonly code: string;
@@ -71,43 +71,24 @@ function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
 }
 
-function toProtocolAssignment(value: SandboxRuntimeAssignment): SupervisorRuntimeAssignment {
-  return {
-    containerId: value.runtimeId,
-    containerName: value.runtimeName,
-    supervisorId: value.supervisorId,
-    bootId: value.bootId,
-    sandboxId: value.sandboxId,
-    commandId: value.commandId,
-    sessionId: value.sessionId,
-    turnId: value.turnId,
-    leaseId: value.leaseId,
-    fencingToken: value.fencingToken,
-  };
-}
-
-function fromProtocolAssignment(value: SupervisorRuntimeAssignment): SandboxRuntimeAssignment {
-  return {
-    runtimeId: value.containerId,
-    runtimeName: value.containerName,
-    supervisorId: value.supervisorId,
-    bootId: value.bootId,
-    sandboxId: value.sandboxId,
-    commandId: value.commandId,
-    sessionId: value.sessionId,
-    turnId: value.turnId,
-    leaseId: value.leaseId,
-    fencingToken: value.fencingToken,
-  };
-}
-
 function safeFailure(error: unknown): SupervisorManagementServerError {
   if (error instanceof SupervisorManagementServerError) return error;
   if (error instanceof SupervisorBootLedgerError) {
     return new SupervisorManagementServerError(error.code, error.message, false);
   }
-  if (error instanceof SandboxAssignmentInventoryError) {
-    return new SupervisorManagementServerError(error.code, error.message, error.retryable);
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    "retryable" in error &&
+    typeof error.retryable === "boolean"
+  ) {
+    return new SupervisorManagementServerError(
+      error.code,
+      "Sandbox assignment inventory operation failed",
+      error.retryable,
+    );
   }
   return new SupervisorManagementServerError(
     "supervisor_management_failed",
@@ -125,8 +106,7 @@ export class SupervisorManagementServer {
   readonly #bootLedger: SupervisorBootLedger;
   readonly #stopCurrentBoot: () => Promise<void>;
   readonly #readiness: () => boolean;
-  readonly #dockerCommand: string;
-  readonly #inventoryTimeoutMs: number | undefined;
+  readonly #assignmentInventory: SupervisorAssignmentInventory;
   #stopOperation: Promise<void> | undefined;
   #address: string | undefined;
 
@@ -142,8 +122,7 @@ export class SupervisorManagementServer {
     this.#bootLedger = options.bootLedger;
     this.#stopCurrentBoot = options.stopCurrentBoot;
     this.#readiness = options.readiness;
-    this.#dockerCommand = options.dockerCommand ?? "docker";
-    this.#inventoryTimeoutMs = options.inventoryTimeoutMs;
+    this.#assignmentInventory = options.assignmentInventory;
     this.#server = Fastify({
       logger: false,
       bodyLimit: positiveInteger(options.bodyLimit ?? DEFAULT_BODY_LIMIT, "bodyLimit", 1024 * 1024),
@@ -238,18 +217,13 @@ export class SupervisorManagementServer {
       );
     }
 
-    const inventory = new DockerSandboxAssignmentInventory({
-      sandboxId: message.sandboxId,
-      dockerCommand: this.#dockerCommand,
-      ...(this.#inventoryTimeoutMs === undefined ? {} : { timeoutMs: this.#inventoryTimeoutMs }),
-    });
     if (message.type === "assignments.list") {
       return {
         protocolVersion: 1,
         type: "assignments.listed",
         requestId: message.requestId,
         sandboxId: message.sandboxId,
-        assignments: (await inventory.listAssignments()).map(toProtocolAssignment),
+        assignments: [...(await this.#assignmentInventory.listAssignments(message.sandboxId))],
       };
     }
     if (message.assignment.sandboxId !== message.sandboxId) {
@@ -269,18 +243,10 @@ export class SupervisorManagementServer {
         false,
       );
     }
-    const assignment = fromProtocolAssignment(message.assignment);
     if (message.type === "assignment.terminate_and_confirm") {
-      await inventory.terminateAndConfirmAbsent(assignment);
+      await this.#assignmentInventory.terminateAndConfirmAbsent(message.assignment);
     } else {
-      const current = await inventory.inspectAssignment(assignment.runtimeId);
-      if (current !== undefined) {
-        throw new SupervisorManagementServerError(
-          "docker_assignment_still_alive",
-          "Docker sandbox absence could not be confirmed",
-          false,
-        );
-      }
+      await this.#assignmentInventory.confirmAbsent(message.assignment);
     }
     return {
       protocolVersion: 1,

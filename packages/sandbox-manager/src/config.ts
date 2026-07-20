@@ -1,0 +1,89 @@
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { isAbsolute } from "node:path";
+
+export type SandboxManagerConfig = {
+  host: string;
+  port: number;
+  serviceToken: string;
+  toolImage: string;
+  dockerCommand: string;
+  repositoryImportNetwork: string;
+  repositoryImportTimeoutMs: number;
+};
+
+function required(environment: NodeJS.ProcessEnv, name: string): string {
+  const value = environment[name];
+  if (value === undefined || value.trim().length === 0) {
+    throw new TypeError(`Required Sandbox Manager configuration ${name} is missing`);
+  }
+  return value;
+}
+
+function bounded(value: string, name: string, maximum = 1_024): string {
+  if (value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new TypeError(`${name} is invalid`);
+  }
+  return value;
+}
+
+function integer(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = value === undefined ? fallback : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new TypeError("Sandbox Manager numeric configuration is invalid");
+  }
+  return parsed;
+}
+
+async function readSecret(path: string): Promise<string> {
+  if (!isAbsolute(path) || path.includes("\0")) {
+    throw new TypeError("AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE must be an absolute path");
+  }
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.size < 32 ||
+      metadata.size > 4_096
+    ) {
+      throw new TypeError("Sandbox Manager token file is not private and bounded");
+    }
+    const value = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
+    if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(value)) {
+      throw new TypeError("Sandbox Manager token file is invalid");
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function loadSandboxManagerConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<SandboxManagerConfig> {
+  return {
+    host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
+    port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
+    serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
+    toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
+    dockerCommand: bounded(environment.AGENT_DOCK_DOCKER_COMMAND ?? "docker", "dockerCommand"),
+    repositoryImportNetwork: bounded(
+      required(environment, "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK"),
+      "repositoryImportNetwork",
+      128,
+    ),
+    repositoryImportTimeoutMs: integer(
+      environment.AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS,
+      180_000,
+      1_000,
+      300_000,
+    ),
+  };
+}

@@ -13,27 +13,25 @@ export type SupervisorHostConfig = {
   allowInsecureInternalHttp: boolean;
   enrollmentToken: string;
   managementToken: string;
+  sandboxManagerServiceToken: string;
   modelCredentialMasterKey: string;
   databaseUrl: string;
   managementHost: string;
   managementPort: number;
   maxConcurrentSessions: number;
-  sandboxImage: string;
-  dockerCommand: string;
+  sandboxManagerBaseUrl: string;
+  sandboxManagerRequestTimeoutMs: number;
+  trustedWorkspaceDirectory: string;
   bootStateDirectory: string;
   eventSpoolDirectory: string;
-  dockerProbeTimeoutMs: number;
   modelGatewayHost: string;
   modelGatewayPort: number;
   modelGatewayAdvertisedBaseUrl: string;
-  sandboxModelNetwork: string;
   modelGatewayCapabilityTtlMs: number;
   modelGatewayMaximumRequestsPerTurn: number;
   modelGatewayUpstreamRequestTimeoutMs: number;
   piModelRequestTimeoutMs: number;
   piTurnTimeoutMs: number;
-  repositoryImportNetwork: string;
-  repositoryImportTimeoutMs: number;
   repositoryImportLeaseMs: number;
   repositoryImportWaitMs: number;
 };
@@ -127,11 +125,20 @@ function modelGatewayBaseUrl(value: string): string {
   return parsed.toString();
 }
 
-function dockerNetwork(value: string, name: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value === "none") {
+function internalServiceBaseUrl(value: string, allowInsecure: boolean, name: string): string {
+  const parsed = new URL(value);
+  if (
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "/" && parsed.pathname !== "") ||
+    (parsed.protocol === "http:" && !allowInsecure)
+  ) {
     throw new TypeError(`${name} is invalid`);
   }
-  return value;
+  return parsed.toString();
 }
 
 async function readSecretFile(path: string, name: string): Promise<string> {
@@ -209,6 +216,11 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
       allowInlineSecrets,
     ),
+    sandboxManagerServiceToken: await secret(
+      environment,
+      "AGENT_DOCK_SANDBOX_MANAGER_TOKEN",
+      allowInlineSecrets,
+    ),
     modelCredentialMasterKey: await secret(
       environment,
       "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
@@ -228,25 +240,21 @@ export async function loadSupervisorHostConfig(
       65_535,
     ),
     maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 2, 1, 256),
-    sandboxImage: bounded(
-      required(environment, "AGENT_DOCK_SANDBOX_IMAGE"),
-      "AGENT_DOCK_SANDBOX_IMAGE",
-      1_024,
+    sandboxManagerBaseUrl: internalServiceBaseUrl(
+      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
+      allowInsecureInternalHttp,
+      "AGENT_DOCK_SANDBOX_MANAGER_URL",
     ),
-    dockerCommand: bounded(
-      environment.AGENT_DOCK_DOCKER_COMMAND ?? "docker",
-      "AGENT_DOCK_DOCKER_COMMAND",
-      1_024,
+    sandboxManagerRequestTimeoutMs: integerValue(
+      environment,
+      "AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS",
+      300_000,
+      1_000,
+      900_000,
     ),
+    trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),
     bootStateDirectory: required(environment, "AGENT_DOCK_BOOT_STATE_DIRECTORY"),
     eventSpoolDirectory: required(environment, "AGENT_DOCK_EVENT_SPOOL_DIRECTORY"),
-    dockerProbeTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_DOCKER_PROBE_TIMEOUT_MS",
-      10_000,
-      100,
-      60_000,
-    ),
     modelGatewayHost: bounded(
       environment.AGENT_DOCK_MODEL_GATEWAY_HOST ?? "127.0.0.1",
       "AGENT_DOCK_MODEL_GATEWAY_HOST",
@@ -255,10 +263,6 @@ export async function loadSupervisorHostConfig(
     modelGatewayPort: integerValue(environment, "AGENT_DOCK_MODEL_GATEWAY_PORT", 4_200, 1, 65_535),
     modelGatewayAdvertisedBaseUrl: modelGatewayBaseUrl(
       required(environment, "AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL"),
-    ),
-    sandboxModelNetwork: dockerNetwork(
-      required(environment, "AGENT_DOCK_SANDBOX_MODEL_NETWORK"),
-      "AGENT_DOCK_SANDBOX_MODEL_NETWORK",
     ),
     modelGatewayCapabilityTtlMs: integerValue(
       environment,
@@ -294,17 +298,6 @@ export async function loadSupervisorHostConfig(
       10 * 60_000,
       1_000,
       15 * 60_000,
-    ),
-    repositoryImportNetwork: dockerNetwork(
-      required(environment, "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK"),
-      "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK",
-    ),
-    repositoryImportTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS",
-      180_000,
-      1_000,
-      300_000,
     ),
     repositoryImportLeaseMs: integerValue(
       environment,

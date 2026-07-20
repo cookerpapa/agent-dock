@@ -19,7 +19,7 @@ import {
 } from "@agent-dock/sandbox-supervisor";
 import Fastify from "fastify";
 import { type Kysely, sql } from "kysely";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   AssignmentReconciler,
   CancellationDispatcher,
@@ -40,6 +40,10 @@ import {
 const CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000001";
 const SECOND_CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000002";
 const TOKEN = `agent-dock-${"r".repeat(48)}`;
+
+// This file composes a real PGlite socket and two WebSocket runtimes. Preserve
+// the polling assertions while allowing normal scheduler delay in full CI.
+vi.setConfig({ testTimeout: 15_000, hookTimeout: 15_000 });
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -286,7 +290,7 @@ async function lifecycle(seed: SeededTurn) {
   return { ...state, publishedAt: outbox?.published_at ?? null };
 }
 
-async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 3_000) {
+async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (!(await predicate())) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for remote supervisor state");

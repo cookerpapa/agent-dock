@@ -13,10 +13,12 @@
   "dependencies": {
     "@agent-dock/fake-model-server": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
+    "@agent-dock/workspace-runtime": "0.1.0",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "ws": "8.21.1"
   },
   "devDependencies": {
+    "@agent-dock/sandbox-manager": "0.1.0",
     "@types/ws": "8.18.1"
   }
 }

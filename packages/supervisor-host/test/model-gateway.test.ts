@@ -168,7 +168,6 @@ beforeAll(async () => {
     host: "127.0.0.1",
     port: 0,
     advertisedBaseUrl: "http://supervisor-host:4200",
-    sandboxNetwork: "agent-dock-test_model-runtime",
     fetchImplementation: upstreamFetch,
     idGenerator: () => IDS.usage,
   });
@@ -186,7 +185,6 @@ describe.sequential("tenant model gateway", () => {
   it("brokers a bound capability and durably records streamed provider usage", async () => {
     const lease = await gateway.issue(command);
     expect(lease).toMatchObject({
-      network: "agent-dock-test_model-runtime",
       runtime: {
         kind: "openai_compatible_gateway",
         provider: "deepseek",

@@ -96,6 +96,14 @@ export {
   type DockerSandboxWorkspaceSeedResolver,
 } from "./docker-sandbox-turn-runner.ts";
 
+export {
+  RemoteToolSandboxTurnRunner,
+  type RemoteToolSandboxTurnRunnerOptions,
+  type ToolSandboxManagerBoundary,
+  type TrustedModelRuntimeLease,
+  type TrustedModelRuntimeLeaseResolver,
+} from "./remote-tool-sandbox-turn-runner.ts";
+
 export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
 
 export {

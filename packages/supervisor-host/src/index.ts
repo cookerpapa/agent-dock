@@ -31,6 +31,7 @@ export {
   type SupervisorHostRuntimeOptions,
   type SupervisorHostRuntimeState,
   type SupervisorHostTerminalReason,
+  type SupervisorSandboxManager,
 } from "./runtime.ts";
 export {
   TenantModelGateway,

@@ -118,6 +118,7 @@ only after a measured requirement appears.
 - [ADR-0026: opt-in self-service registration and conversation discovery](docs/adr/0026-opt-in-self-service-registration-and-conversation-discovery.md)
 - [ADR-0027: tenant model credentials and brokered Pi execution](docs/adr/0027-tenant-model-credentials-and-brokered-pi-execution.md)
 - [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
+- [ADR-0029: trusted Pi runner and remote tool sandbox](docs/adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md)
 
 ## Current executable spikes
 
@@ -237,11 +238,12 @@ npm run production:deploy
 ```
 
 It starts persistent PostgreSQL and MinIO, an authenticated remote control
-plane, one trusted Docker-owning Supervisor host, the Web ingress, and ephemeral
-Pi workers. Fake-model workers remain networkless; a real-model worker joins
-only an internal model-runtime network and reaches DeepSeek through a
-turn-scoped Supervisor gateway capability. Only the Web ingress publishes a
-loopback port. See the
+plane, one trusted non-root Pi Agent Runner, a separate authenticated Sandbox
+Manager, the Web ingress, and ephemeral Tool Sandboxes. Only the Sandbox
+Manager owns the Docker socket. Pi and the tenant model credential remain in the
+trusted Runner; `read/write/edit/bash` cross a narrow RPC boundary into a
+mount-free, credential-free Tool Sandbox with `network=none`. Only the Web
+ingress publishes a loopback port. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
 
@@ -251,8 +253,10 @@ with either the deterministic fake or an owner-configured DeepSeek model.
 Request identity, roles, encrypted per-tenant provider credentials,
 resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,
 opt-in loopback self-registration, and tenant-scoped conversation discovery
-share one bounded Supervisor pool. It is not an arbitrary Git host/private-repo
-service, extension host, public Internet SaaS, Kubernetes release, or direct
+share one bounded Supervisor pool. Cold conversations retain durable Pi and
+workspace checkpoints but consume no Pi child process, Tool Sandbox, dedicated
+thread, or timer. It is not an arbitrary Git host/private-repo service,
+untrusted extension host, public Internet SaaS, Kubernetes release, or direct
 Internet ingress.
 
 ## Current status
@@ -308,18 +312,17 @@ owns final turn/session settlement. Natural completion wins if it commits first;
 a post-ACK cancellation failure fails the session without returning an
 unconfirmed sandbox reservation to the ready pool.
 
-The fifth Phase 1 slice replaces the local workspace with an ephemeral Docker
-activation. A trusted host-side runner starts a non-root, read-only container
-with no bind mounts, Docker socket, ports, or inherited long-lived credentials
-and with CPU, memory, PID, file-descriptor, `/tmp`, and workspace limits. Fake
-activations are networkless; a real activation has only broker access through
-an expiring, turn-bound capability. The container copies a sample Java repository into workspace tmpfs,
-creates a baseline Git commit, and starts pinned Pi with only `bash` and `edit`
-enabled. The deterministic model drives a failing test, one source edit, and a
-passing verification test. Every tool boundary is durably ACKed through the
-existing fenced event path, and `turn.completed` carries a validated, 64 KiB
-bounded unified diff. Completion and cancellation both confirm that the outer
-container is gone.
+The fifth Phase 1 slice originally replaced the local workspace with one
+ephemeral Docker activation containing Pi and its tools. ADR-0029 supersedes
+that production boundary: pinned Pi now stays in the trusted non-root Runner,
+with extension discovery and built-in local tools disabled, while one fixed
+image-owned extension routes `read/write/edit/bash` to a separate ephemeral
+Tool Sandbox. The Sandbox is read-only outside bounded tmpfs, has no bind mount,
+Docker socket, port, network, or inherited credential, and has CPU, memory, PID,
+file-descriptor, `/tmp`, and workspace limits. The deterministic model still
+drives a failing test, source edit, and passing verification; every tool
+boundary is durably ACKed, `turn.completed` carries the bounded unified diff,
+and completion/cancellation confirm Sandbox removal.
 
 The sixth Phase 1 slice adds the React session surface. It retains Pi `/export`'s
 compact monospace language, independently scrolling and keyboard-resizable tree
@@ -346,11 +349,11 @@ retirement maintenance, and graceful drain. The client performs bounded
 same-boot reconnect after transient transport loss. The default project source
 is one trusted sample fixture; a project may instead name a normalized public
 GitHub `owner/repository` plus an exact 40-hex commit. At each successful settled
-boundary, Pi JSONL and a bounded,
-hashed regular-file workspace manifest cross the private worker channel and are
-stored by the trusted host before `turn.completed`; the next turn restores both
-into a different ephemeral container. The demo therefore supports a genuine
-same-session follow-up without keeping an idle Pi process alive.
+boundary, trusted Pi JSONL and a bounded, hashed regular-file workspace manifest
+captured through the private tool channel are stored before `turn.completed`;
+the next turn restores both into a fresh Pi activation and a different
+ephemeral Tool Sandbox. Production therefore supports a genuine same-session
+follow-up without keeping an idle Pi process or Sandbox alive.
 
 The ephemeral demo still uses a private host directory coupled to its temporary
 database. The production storage boundary now also has an S3-compatible adapter:
@@ -360,9 +363,9 @@ restores through a fresh client against disposable MinIO, so this path no longer
 depends on one Supervisor host directory. The production Compose topology now
 uses that adapter against persistent MinIO and keeps credentials only in the
 trusted Supervisor host. For a GitHub source, one expiring PostgreSQL lease
-elects a disposable, credential-free importer. It fetches only the pinned commit
-on a dedicated egress bridge, rejects unsupported files, removes Git metadata,
-and publishes a content-addressed immutable seed to MinIO. Every activation
+elects a disposable, credential-free importer through the Sandbox Manager. It
+fetches only the pinned commit on a dedicated egress bridge, rejects unsupported
+files, removes Git metadata, and publishes a content-addressed immutable seed to MinIO. Every activation
 reverifies that seed; the first Pi turn creates its Git baseline from it, and
 follow-ups overlay the settled checkpoint without cloning again. Private
 repositories, arbitrary URLs, submodules, LFS, branch refresh, pull-request
@@ -496,7 +499,8 @@ The S3-compatible checkpoint adapter is now complete and MinIO-tested. Phase 2
 now also has an explicit remote control-plane composition whose bounded workers
 automatically execute and cancel real WebSocket Supervisor work while maintenance
 continues independently. The production slice supplies the concrete trusted
-Supervisor process, fresh boot identity, exact owner-stop/inventory proof,
+Supervisor/Pi Runner, separate socket-owning Sandbox Manager, fresh boot
+identity, exact owner-stop/inventory proof,
 file-backed public/enrollment/management credentials, S3 checkpoint composition,
 private networks, persistent volumes, pinned images, Web ingress, and executable
 restart/scale/recovery acceptance. Permanently stale post-disconnect spool events

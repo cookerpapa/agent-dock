@@ -179,16 +179,27 @@ and Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
 tool side effects.
 
+ADR-0029 supersedes that original production placement without deleting its
+legacy adapter/tests. In the supported deployment, pinned Pi RPC and the model
+gateway run in the trusted Agent Runner. Pi's built-in local tools are disabled;
+one fixed image-owned extension implements `read`, `write`, `edit`, and `bash`
+with Pi's public operation interfaces and sends a narrow authenticated RPC to a
+separate Sandbox Manager. The Manager alone owns Docker and starts one
+credential-free, `--network none` Tool Sandbox per active turn. The Tool Sandbox
+contains only the workspace and toolchains. A settled capture returns the
+workspace snapshot and bounded Git patch before the terminal event is published.
+
 ### TypeScript sandbox supervisor
 
 Responsibilities:
 
 - start and supervise a pinned `pi --mode rpc` child process;
+- disable Pi's local built-ins and load only the fixed remote-tool extension;
 - translate typed Pi commands/events into the versioned AgentDock contract;
 - proxy extension UI requests and responses between Pi and the web client;
 - spool unacknowledged events locally and replay them after reconnect;
-- propagate cancellation and shutdown to the complete Pi/tool process tree;
-- manage Git worktrees and workspace snapshots;
+- propagate cancellation to Pi and the separately managed Tool Sandbox;
+- commit Pi JSONL plus remotely captured workspace snapshots;
 - report heartbeat, resource usage, and health.
 
 ### Trusted Supervisor host and production topology
@@ -197,26 +208,30 @@ Responsibilities:
 Supervisor identity. Every process start generates a fresh boot, sandbox, and
 memory-only connection secret; network reconnects retain that boot. A private
 fsynced ledger preserves bounded current/recent generations so owner-stop proof
-cannot be invented after a restart. The host probes Docker, PostgreSQL, and S3,
+cannot be invented after a restart. The host probes the Sandbox Manager,
+PostgreSQL, and S3,
 provisions the boot through a file-backed enrollment credential, recovers its
 event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
 
-The host alone receives the Docker socket and S3 credential. It composes the
-Docker runner, disposable public-GitHub importer, PostgreSQL workspace-import
+The host receives S3/database credentials and fixed provider egress, but no
+Docker socket. It composes the pinned Pi Runner, PostgreSQL workspace-import
 lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
-S3-compatible byte store, tenant model-credential resolver/gateway,
+S3-compatible byte store, tenant model-credential resolver/loopback gateway,
 active/quarantine spool roots, reconnect client, and an authenticated private
-management endpoint. The control plane receives neither Docker authority nor S3
-credentials; Pi workers receive neither of those, database/API/owner credentials,
-nor any long-lived provider credential. Fake workers have no network. Real-model
-workers have only a Compose-internal route to the Supervisor gateway; only that
-trusted host also has fixed provider egress. A one-shot importer joins only the
-repository-egress bridge, receives no prompt or secret, and cannot join the
-database, object-storage, management, model-runtime, or provider-egress
-networks. The trusted Supervisor anchors that bridge in the bundled Compose
-topology, so its reachable HTTP surfaces still require credentials or a turn
-capability that the importer does not possess.
+management endpoint. A separate `@agent-dock/sandbox-manager` service is the
+only application container with `/var/run/docker.sock`. Its authenticated API
+is limited to create/execute/capture/stop, exact assignment inventory, and a
+fixed public-GitHub importer. It receives no database, S3, provider, enrollment,
+or tenant credential.
+
+Each Tool Sandbox is non-root, read-only, mount-free, capability-dropped, and
+networkless. Docker arguments contain no environment values. Its worker creates
+a fixed subprocess environment instead of inheriting the Manager or Runner
+environment. Therefore model-gateway capabilities, service tokens, database
+paths, and cloud credentials cannot enter `bash`, including through
+`/proc/*/environ`. The one-shot importer joins only repository egress and has no
+prompt or credentials; the Manager itself does not join that network.
 Every assignment inventory request is constrained again to a sandbox generation
 known by this host's ledger, and a terminate/absence request must match that
 generation's stable Supervisor and exact boot before Docker is inspected.
@@ -226,9 +241,10 @@ identity limited to bucket location/list and object get/put for one bucket; its
 policy does not grant object deletion.
 
 The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
-migration/bootstrap jobs, one control-plane replica, one trusted host, static Web
-ingress, isolated networks, private secret-file mounts, health checks, bounded
-resources/logs, and four declared volumes. Only Web publishes a loopback port.
+migration/bootstrap jobs, one control-plane replica, one trusted Pi Runner, one
+socket-owning Sandbox Manager, static Web ingress, isolated networks, private
+secret-file mounts, health checks, bounded resources/logs, and four declared
+volumes. Only Web publishes a loopback port.
 This topology is complete for the bounded private multi-tenant fixture and
 controlled public GitHub commits with either a deterministic model or owner-
 configured DeepSeek; it does not imply arbitrary/private repository,
@@ -238,7 +254,7 @@ tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
-See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, and the production
+See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, and the production
 runbook.
 
 ### Model profiles and credentials
@@ -298,10 +314,11 @@ process.
 
 ### Pi RPC process
 
-The Pi process uses native session, extension, package, command, compaction,
-retry, and event behavior. It is the only process that loads user or project
-extensions. Inactive sessions are snapshotted and the complete sandbox is
-evicted rather than leaving one Pi process alive per stored session.
+The trusted Pi process uses native session, command, compaction, retry, and
+event behavior. Production disables extension discovery and loads only the
+fixed remote-tool extension. User/project extensions remain unsupported until
+their execution and permission boundary is separately implemented. Inactive
+sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 
 ### Sandbox
 
@@ -320,14 +337,15 @@ Minimum controls:
 - no long-lived model/provider secrets exposed to the agent.
 
 The Phase 0 Compose topology remains a zero-token configuration probe. The
-Phase 1 Java repair path now activates a separate one-shot container with UID/GID
+production Java repair path activates a separate one-shot Tool Sandbox with UID/GID
 `1000:1000`, read-only rootfs, the engine's default seccomp policy, dropped
 capabilities, `no-new-privileges`, no ports/binds/devices, and bounded CPU,
 memory, PIDs, file descriptors, `/tmp`, and workspace tmpfs. It does not mount a
-host repository or Docker socket. The embedded fake model requires no network or
-real credential. The real-provider path joins only the validated internal model
-network and uses the trusted request-scoped gateway; the Supervisor alone joins
-provider egress, so Pi/tools never receive a long-lived provider credential.
+host repository or Docker socket. Both fake and real Tool Sandboxes use
+`--network none`. Pinned Pi and the request-scoped model gateway stay together
+in the trusted Runner; the Runner alone joins provider egress and receives a
+short-lived model capability, while remote tools receive neither it nor the
+long-lived provider credential.
 
 ## 3. State ownership
 
@@ -409,8 +427,9 @@ recovery. See ADR-0024.
 5. The scheduler assigns or creates a sandbox runner.
 6. The supervisor validates the fencing token, resolves and reverifies the
    immutable workspace seed, and loads settled session/workspace state.
-7. The selected execution backend activates Pi, loads policy-approved
-   extensions, and executes the agent loop.
+7. The selected execution backend activates Pi with the fixed remote-tool
+   extension, creates a Tool Sandbox through the Manager, and executes the
+   agent loop.
 8. The supervisor translates and emits sequenced events; the control plane persists and ACKs them.
 9. On `agent_settled`, the runner creates stable snapshots.
 10. The control plane completes the turn and schedules the next mailbox command.
@@ -425,11 +444,12 @@ atomically, and returns the cumulative ACK only after commit. The same durable
 log, including the bounded final patch, is available through SSE and resumes
 after a browser reconnect with `Last-Event-ID`. Step 9 uses a private
 checkpoint-before-terminal ACK: Pi JSONL and a safe regular-file workspace
-manifest are content-hashed, stored outside the container, recorded as artifact
-metadata under the current fence, and restored into the next fresh container.
+manifest are content-hashed, stored outside the Tool Sandbox, recorded as
+artifact metadata under the current fence, and restored into the next fresh Pi
+activation and Tool Sandbox.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
-worker crash after upload but before terminal publication falls back to the
-previous settled pair. The demo adapter uses a private host directory. The
+Runner or Tool Sandbox failure after upload but before terminal publication
+falls back to the previous settled pair. The demo adapter uses a private host directory. The
 production adapter keeps the same provider-neutral logical keys in PostgreSQL
 and conditionally stores bounded bytes in a configured S3-compatible
 bucket/prefix. A digest-pinned localhost MinIO proof discards the writer and
@@ -437,13 +457,14 @@ restores through a fresh client; declared and streamed size limits, S3 checksum,
 and the independent database hash fail closed on corruption. The supported
 production topology composes this S3 path with the trusted remote Supervisor.
 For a public GitHub source, PostgreSQL grants one expiring lease for the first
-activation. A separate hardened Docker importer fetches the exact 40-hex commit,
-removes `.git`, captures the existing safe manifest, and conditionally writes a
-content-addressed seed below a tenant/workspace prefix. Publishing ready state
+activation. The Sandbox Manager starts a separate hardened Docker importer that
+fetches the exact 40-hex commit, removes `.git`, captures the existing safe
+manifest, and conditionally writes a content-addressed seed below a
+tenant/workspace prefix. Publishing ready state
 and the workspace pointer is one fenced transaction. Concurrent activations
 wait; expired leases are reclaimable; stale owners cannot publish. Every turn
-revalidates object key, size, digest, and manifest before the worker receives
-the seed. A settled session checkpoint overlays that baseline, so a follow-up
+revalidates object key, size, digest, and manifest before the Tool Sandbox
+receives the seed. A settled session checkpoint overlays that baseline, so a follow-up
 neither reclones nor depends on GitHub availability. See ADR-0028.
 The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
@@ -676,9 +697,9 @@ compatibility:
   mappings and are never passed through as raw Pi objects;
 - terminal shortcuts, themes, and custom TUI components are unsupported or
   explicitly remapped and covered by a published compatibility matrix;
-- project-local extensions load only after a recorded trust decision;
-- all extension code remains inside the sandbox because it has arbitrary Node
-  process permissions.
+- production loads only the image-owned remote-tool extension;
+- project-local extension discovery is disabled until arbitrary Node extension
+  code has a dedicated isolation and policy design.
 
 Extension state is classified as `portable` (stateless or reconstructed from
 session entries), `workspace` (reconstructed from durable files), or

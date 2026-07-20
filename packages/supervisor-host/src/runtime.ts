@@ -8,18 +8,17 @@ import {
 } from "@agent-dock/control-plane/model-credential-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
+import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
-  DockerSandboxTurnRunner,
-  DockerGitHubWorkspaceImporter,
   FileEventSpoolStore,
   LocalSandboxSupervisor,
+  RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
   type DockerSandboxScenario,
   type DockerSandboxScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { SupervisorBootLedger, type SupervisorHostBootIdentity } from "./boot-ledger.ts";
@@ -37,9 +36,23 @@ export type SupervisorHostRuntimeOptions = {
   database?: Kysely<Database>;
   objectStore: CheckpointObjectStore & { checkHealth(): Promise<void>; destroy(): void };
   provisioningClient?: SupervisorProvisioningClient;
+  sandboxManager?: SupervisorSandboxManager;
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
 };
+
+export type SupervisorSandboxManager = Pick<
+  SandboxManagerClient,
+  | "operationUrl"
+  | "checkHealth"
+  | "create"
+  | "capture"
+  | "stop"
+  | "importGitHub"
+  | "listAssignments"
+  | "terminateAndConfirmAbsent"
+  | "confirmAbsent"
+>;
 
 export type SupervisorHostTerminalReason = "owner_stopped" | "connection_failed";
 
@@ -78,29 +91,6 @@ function connectionSecret(value: string): string {
   return value;
 }
 
-function dockerProbe(command: string, timeoutMs: number): Promise<void> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      command,
-      ["version", "--format", "{{.Server.Version}}"],
-      { encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1_024 },
-      (error, stdout) => {
-        if (error || !/^\d+\.\d+(?:\.\d+)?\s*$/.test(stdout)) {
-          rejectPromise(
-            new SupervisorHostRuntimeError(
-              "docker_unavailable",
-              "Docker service is unavailable to the Supervisor host",
-              true,
-            ),
-          );
-          return;
-        }
-        resolvePromise();
-      },
-    );
-  });
-}
-
 export class SupervisorHostRuntime {
   readonly #config: SupervisorHostConfig;
   readonly #database: Kysely<Database>;
@@ -110,6 +100,7 @@ export class SupervisorHostRuntime {
     destroy(): void;
   };
   readonly #provisioningClient: SupervisorProvisioningClient;
+  readonly #sandboxManager: SupervisorSandboxManager;
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
   readonly #ownerStoppedPromise: Promise<void>;
@@ -141,6 +132,14 @@ export class SupervisorHostRuntime {
         baseUrl: options.config.controlPlaneBaseUrl,
         enrollmentToken: options.config.enrollmentToken,
         allowInsecureHttp: options.config.allowInsecureInternalHttp,
+      });
+    this.#sandboxManager =
+      options.sandboxManager ??
+      new SandboxManagerClient({
+        baseUrl: options.config.sandboxManagerBaseUrl,
+        serviceToken: options.config.sandboxManagerServiceToken,
+        allowInsecureHttp: options.config.allowInsecureInternalHttp,
+        requestTimeoutMs: options.config.sandboxManagerRequestTimeoutMs,
       });
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#connectionSecretGenerator =
@@ -215,8 +214,7 @@ export class SupervisorHostRuntime {
           this.#settleTerminal("owner_stopped");
         }
       },
-      dockerCommand: this.#config.dockerCommand,
-      inventoryTimeoutMs: this.#config.dockerProbeTimeoutMs,
+      assignmentInventory: this.#sandboxManager,
     });
     this.#managementServer = managementServer;
     try {
@@ -224,7 +222,7 @@ export class SupervisorHostRuntime {
       await Promise.all([
         sql`select 1`.execute(this.#database),
         this.#objectStore.checkHealth(),
-        dockerProbe(this.#config.dockerCommand, this.#config.dockerProbeTimeoutMs),
+        this.#sandboxManager.checkHealth(),
       ]);
 
       const secret = connectionSecret(this.#connectionSecretGenerator());
@@ -248,12 +246,9 @@ export class SupervisorHostRuntime {
       const workspaceSeedResolver = new PostgresWorkspaceSeedResolver({
         database: this.#database,
         objectStore: this.#objectStore,
-        importer: new DockerGitHubWorkspaceImporter({
-          image: this.#config.sandboxImage,
-          dockerCommand: this.#config.dockerCommand,
-          network: this.#config.repositoryImportNetwork,
-          timeoutMs: this.#config.repositoryImportTimeoutMs,
-        }),
+        importer: {
+          import: (source, signal) => this.#sandboxManager.importGitHub(source, signal),
+        },
         importLeaseMs: this.#config.repositoryImportLeaseMs,
         maximumWaitMs: this.#config.repositoryImportWaitMs,
       });
@@ -266,7 +261,6 @@ export class SupervisorHostRuntime {
         host: this.#config.modelGatewayHost,
         port: this.#config.modelGatewayPort,
         advertisedBaseUrl: this.#config.modelGatewayAdvertisedBaseUrl,
-        sandboxNetwork: this.#config.sandboxModelNetwork,
         capabilityTtlMs: this.#config.modelGatewayCapabilityTtlMs,
         maximumRequestsPerTurn: this.#config.modelGatewayMaximumRequestsPerTurn,
         upstreamRequestTimeoutMs: this.#config.modelGatewayUpstreamRequestTimeoutMs,
@@ -275,15 +269,15 @@ export class SupervisorHostRuntime {
       });
       await modelGateway.start();
       this.#modelGateway = modelGateway;
-      const runner = new DockerSandboxTurnRunner({
-        image: this.#config.sandboxImage,
-        dockerCommand: this.#config.dockerCommand,
+      const runner = new RemoteToolSandboxTurnRunner({
+        manager: this.#sandboxManager,
         runtimeIdentity: identity,
+        trustedWorkspaceDirectory: this.#config.trustedWorkspaceDirectory,
         checkpointStore,
         scenario: resolveProductionSandboxScenario,
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
         workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),
-        executionTimeoutMs: this.#config.piTurnTimeoutMs + 30_000,
+        turnTimeoutMs: this.#config.piTurnTimeoutMs,
       });
       const spoolStore = new FileEventSpoolStore({
         rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),

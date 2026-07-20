@@ -18,6 +18,7 @@ const applicationSecretNames = [
   "api-token",
   "database-url",
   "model-credential-master-key",
+  "sandbox-manager-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
 ];
@@ -44,7 +45,7 @@ const [command, ...commandArguments] = input;
 const profileArguments = command === "build" ? ["--profile", "image-only"] : [];
 const serviceArguments =
   command === "build" && commandArguments.length === 0
-    ? ["control-plane", "supervisor-host", "web", "sandbox-image"]
+    ? ["control-plane", "supervisor-host", "sandbox-manager", "web", "tool-sandbox-image"]
     : commandArguments;
 const args = [
   "compose",

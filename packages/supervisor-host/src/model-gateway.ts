@@ -4,7 +4,7 @@ import {
 } from "@agent-dock/control-plane/model-credential-runtime";
 import type { Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
-import type { DockerSandboxModelRuntimeLease } from "@agent-dock/sandbox-supervisor";
+import type { TrustedModelRuntimeLease } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -43,7 +43,6 @@ export type TenantModelGatewayOptions = {
   host: string;
   port: number;
   advertisedBaseUrl: string;
-  sandboxNetwork: string;
   capabilityTtlMs?: number;
   maximumRequestsPerTurn?: number;
   upstreamRequestTimeoutMs?: number;
@@ -112,16 +111,6 @@ function advertisedBaseUrl(value: string): string {
     );
   }
   return parsed.toString().replace(/\/$/, "");
-}
-
-function sandboxNetwork(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value === "none") {
-    throw new TenantModelGatewayError(
-      "invalid_gateway_configuration",
-      "Model gateway sandbox network is invalid",
-    );
-  }
-  return value;
 }
 
 function validDate(clock: () => Date): Date {
@@ -248,7 +237,6 @@ export class TenantModelGateway {
   readonly #host: string;
   readonly #port: number;
   readonly #advertisedBaseUrl: string;
-  readonly #sandboxNetwork: string;
   readonly #capabilityTtlMs: number;
   readonly #maximumRequestsPerTurn: number;
   readonly #upstreamRequestTimeoutMs: number;
@@ -272,7 +260,6 @@ export class TenantModelGateway {
     }
     this.#port = options.port;
     this.#advertisedBaseUrl = advertisedBaseUrl(options.advertisedBaseUrl);
-    this.#sandboxNetwork = sandboxNetwork(options.sandboxNetwork);
     this.#capabilityTtlMs = positiveInteger(
       options.capabilityTtlMs ?? 10 * 60_000,
       "capabilityTtlMs",
@@ -341,7 +328,7 @@ export class TenantModelGateway {
     });
   }
 
-  issue(command: ExecuteTurnCommandMessage): Promise<DockerSandboxModelRuntimeLease> {
+  issue(command: ExecuteTurnCommandMessage): Promise<TrustedModelRuntimeLease> {
     return this.#issue(command);
   }
 
@@ -350,7 +337,7 @@ export class TenantModelGateway {
     return this.#closing;
   }
 
-  async #issue(command: ExecuteTurnCommandMessage): Promise<DockerSandboxModelRuntimeLease> {
+  async #issue(command: ExecuteTurnCommandMessage): Promise<TrustedModelRuntimeLease> {
     if (!this.#started) {
       throw new TenantModelGatewayError("gateway_not_started", "Model gateway is not listening");
     }
@@ -400,7 +387,6 @@ export class TenantModelGateway {
     this.#capabilities.set(digest, active);
     let released = false;
     return {
-      network: this.#sandboxNetwork,
       runtime: {
         kind: "openai_compatible_gateway",
         provider: "deepseek",

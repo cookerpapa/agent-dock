@@ -14,23 +14,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import type { Kysely } from "kysely";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-
-const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
-
-vi.mock("node:child_process", async (importOriginal) => {
-  const original = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...original,
-    execFile: execFileMock,
-  };
-});
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   PRODUCTION_CANCELLATION_PROBE_PROMPT,
   resolveProductionSandboxScenario,
   SupervisorHostRuntime,
   type SupervisorHostConfig,
+  type SupervisorSandboxManager,
 } from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "90000000-0000-4000-8000-000000000001";
@@ -63,15 +54,6 @@ afterAll(async () => {
   await pglite?.close();
 });
 
-beforeEach(() => {
-  execFileMock.mockReset();
-  execFileMock.mockImplementation((...args: unknown[]) => {
-    const callback = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
-    queueMicrotask(() => callback(null, "29.4.2\n", ""));
-    return {};
-  });
-});
-
 function objectStore() {
   let destroyed = false;
   return {
@@ -93,14 +75,27 @@ function objectStore() {
   };
 }
 
-function emptyInventory() {
+function sandboxManager(): SupervisorSandboxManager {
   return {
+    operationUrl: "http://sandbox-manager.test/internal/v1/tool-operation",
+    async checkHealth() {},
+    async create() {
+      throw new Error("unused");
+    },
+    async capture() {
+      throw new Error("unused");
+    },
+    async stop() {},
+    async importGitHub() {
+      throw new Error("unused");
+    },
     async listAssignments() {
       return [];
     },
     async terminateAndConfirmAbsent() {
       throw new Error("No assignments exist");
     },
+    async confirmAbsent() {},
   };
 }
 
@@ -165,27 +160,25 @@ describe("SupervisorHostRuntime", () => {
       allowInsecureInternalHttp: true,
       enrollmentToken: ENROLLMENT_TOKEN,
       managementToken: MANAGEMENT_TOKEN,
+      sandboxManagerServiceToken: `sandbox-manager-${"s".repeat(48)}`,
       modelCredentialMasterKey: Buffer.alloc(32, 7).toString("base64url"),
       databaseUrl: connectionString,
       managementHost: "127.0.0.1",
       managementPort: 0,
       maxConcurrentSessions: 2,
-      sandboxImage: "agent-dock/sandbox:test",
-      dockerCommand: "fake-docker",
+      sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
+      sandboxManagerRequestTimeoutMs: 300_000,
+      trustedWorkspaceDirectory: root,
       bootStateDirectory: join(root, "boot"),
       eventSpoolDirectory: join(root, "spool"),
-      dockerProbeTimeoutMs: 1_000,
       modelGatewayHost: "127.0.0.1",
       modelGatewayPort: 0,
       modelGatewayAdvertisedBaseUrl: "http://model-gateway.test:4200",
-      sandboxModelNetwork: "agent-dock-test-model-runtime",
       modelGatewayCapabilityTtlMs: 60_000,
       modelGatewayMaximumRequestsPerTurn: 8,
       modelGatewayUpstreamRequestTimeoutMs: 10_000,
       piModelRequestTimeoutMs: 15_000,
       piTurnTimeoutMs: 60_000,
-      repositoryImportNetwork: "agent-dock-test-repository-egress",
-      repositoryImportTimeoutMs: 180_000,
       repositoryImportLeaseMs: 240_000,
       repositoryImportWaitMs: 300_000,
     };
@@ -196,6 +189,7 @@ describe("SupervisorHostRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
+        sandboxManager: sandboxManager(),
       });
       await first.start();
       expect(first.state).toBe("ready");
@@ -208,6 +202,7 @@ describe("SupervisorHostRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
+        sandboxManager: sandboxManager(),
       });
       await second.start();
       expect(second.state).toBe("ready");

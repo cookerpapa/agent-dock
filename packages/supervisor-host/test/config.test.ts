@@ -34,6 +34,11 @@ describe("Supervisor host production configuration", () => {
         "management",
         `manage-${"m".repeat(48)}`,
       ),
+      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+        root,
+        "sandbox-manager",
+        `sandbox-manager-${"s".repeat(48)}`,
+      ),
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
         root,
         "model-master-key",
@@ -44,20 +49,20 @@ describe("Supervisor host production configuration", () => {
         "database",
         "postgresql://agentdock:secret@postgres:5432/agentdock",
       ),
-      AGENT_DOCK_SANDBOX_IMAGE: "agent-dock/sandbox:0.1.0",
+      AGENT_DOCK_SANDBOX_MANAGER_URL: "http://sandbox-manager:4300",
+      AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
       AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
       AGENT_DOCK_SUPERVISOR_CAPACITY: "3",
-      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://supervisor-host:4200",
-      AGENT_DOCK_SANDBOX_MODEL_NETWORK: "agent-dock-production_model-runtime",
-      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "agent-dock-production_repository-egress",
+      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
     });
     expect(config).toMatchObject({
       supervisorId: "supervisor-production-1",
       supervisorWebSocketUrl: "ws://control-plane:3000/internal/v1/supervisor",
       maxConcurrentSessions: 3,
       managementPort: 4100,
-      repositoryImportNetwork: "agent-dock-production_repository-egress",
+      sandboxManagerBaseUrl: "http://sandbox-manager:4300/",
+      trustedWorkspaceDirectory: "/workspace",
     });
   });
 

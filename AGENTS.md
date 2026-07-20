@@ -21,11 +21,13 @@ protocol, record the decision under `docs/adr/` before implementation.
 
 ## Engineering rules
 
-- Keep Pi-specific RPC messages inside the sandbox-supervisor adapter; the
+- Keep Pi-specific RPC messages inside the trusted runner/sandbox-supervisor adapter; the
   public API and durable domain model must use AgentDock-owned schemas.
-- Run Pi and all user/project extensions only inside the sandbox, never in the
-  NestJS API/control-plane process.
-- Use Pi's native extension/resource discovery rather than reimplementing it.
+- Run the fixed Pi core only in the trusted Agent Runner, never in the API/control-plane
+  process. Route every untrusted file or shell operation to a separate Tool Sandbox.
+- Load only image-owned trusted infrastructure extensions in the Agent Runner. Future
+  user/project extensions require a separately threat-modelled sandbox boundary.
+- Use Pi's public tool/extension APIs rather than patching its agent loop.
 - Treat unsupported TUI-only extension behavior explicitly in a compatibility matrix.
 - Persist commands before acknowledging them.
 - Use idempotency keys, leases, and fencing tokens for distributed mutations.
@@ -33,7 +35,7 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Treat Pi session JSONL as conversation history, PostgreSQL as control state,
   and object storage as durable artifact/snapshot storage.
 - Do not claim exactly-once semantics for arbitrary shell commands or external side effects.
-- Do not run untrusted tools in the control-plane process.
+- Do not run untrusted tools in the control-plane or trusted Agent Runner process.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
 - Do not add Kafka, Flink, Redis, Temporal, or Kubernetes merely to make the

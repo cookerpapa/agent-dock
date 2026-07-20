@@ -3,8 +3,8 @@
 This runbook deploys AgentDock's currently supported production slice on one
 Linux Docker host. The result is a durable, authenticated, private multi-tenant
 service with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral
-remote control plane, one shared trusted Supervisor host, isolated one-shot Pi
-workers, and a static Web UI. Multiple tenants can share this runtime without
+remote control plane, one shared trusted Pi Agent Runner, separate one-shot Tool
+Sandboxes, and a static Web UI. Multiple tenants can share this runtime without
 sharing their API resources, event streams, quotas, or checkpoint namespaces.
 An operator may explicitly enable capacity-bounded anonymous registration to
 make that isolation easy to test from two browser contexts.
@@ -35,21 +35,23 @@ recorded in
 [ADR-0027](adr/0027-tenant-model-credentials-and-brokered-pi-execution.md).
 Controlled public GitHub import and immutable workspace seeds are recorded in
 [ADR-0028](adr/0028-controlled-github-workspace-import.md).
+The trusted Pi Runner and remote Tool Sandbox split is recorded in
+[ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
 
 ## Prerequisites
 
-- A Linux Docker host. The trusted Supervisor uses the Linux Docker socket and
-  the worker's POSIX process-group cancellation semantics.
+- A Linux Docker host. The dedicated Sandbox Manager uses the Linux Docker
+  socket and Tool Sandboxes use POSIX process-group cancellation semantics.
 - Docker Engine with the Compose plugin. The acceptance topology is currently
   exercised on Docker Engine `29.4.2` and Compose `5.1.3`.
 - Node.js `24.12.0` and npm `11.6.2` for the repository scripts. The built
   application images pin their own Node and service image digests.
-- Enough local CPU, memory, and storage for PostgreSQL, MinIO, four application
+- Enough local CPU, memory, and storage for PostgreSQL, MinIO, five application
   images, and up to two concurrent workers. The Compose file declares explicit
   per-service limits; capacity should be measured against the intended host.
 - A private checkout and a trusted operator account. Anyone who can read the
   generated runtime directory or access the Docker socket is inside the trusted
-  computing base.
+  computing base. Only the Sandbox Manager service receives that socket.
 
 Do not use a shared untrusted Docker socket or an unreviewed rootless/remote
 Docker context without separately validating its socket ownership, mount, and
@@ -76,7 +78,7 @@ npm run production:deploy
 ```
 
 The first invocation creates `deploy/production/runtime/`, generates private
-random credentials and stable logical IDs, builds all four pinned application
+random credentials and stable logical IDs, builds all five pinned application
 images, migrates and bootstraps PostgreSQL, creates a private checkpoint bucket,
 and waits for every long-running service to become healthy. A completed runtime
 directory is reused on later invocations. A non-empty partial directory is
@@ -142,13 +144,16 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                       |              +-> PostgreSQL
                                       |              +-> outbound Supervisor WebSocket
                                       v
-                              trusted Supervisor host -> MinIO checkpoints
+                              trusted Pi Agent Runner -> MinIO checkpoints
                                       |         |
                                       |         +-> fixed provider API (egress only here)
+                                      |         +-> loopback Model Gateway
                                       |
-                                      +-> Docker socket -> ephemeral Pi worker
-                                                           | fake: no network
-                                                           + real: internal gateway only
+                                      +-> narrow authenticated tool RPC
+                                                   |
+                                             Sandbox Manager -> Docker socket
+                                                   |
+                                             Tool Sandbox (`network=none`)
 ```
 
 The database, object store, Supervisor management endpoint, boot-provisioning
@@ -157,16 +162,22 @@ Compose networks. Caddy returns `404` for `/internal/*` and `/health/*`; it only
 proxies `/v1/*` and serves static assets. Liveness is exposed as `/healthz` and
 contains no dependency detail.
 
-The trusted `supervisor-host` container is deliberately root-equivalent because
-it owns `/var/run/docker.sock`. Neither the control plane nor any Pi worker gets
-that socket. Workers are created per active turn, not per conversation: they run
-as UID/GID `1000:1000`, with no host bind mount, inherited long-lived deployment
-secret, published port, or writable root filesystem, and are removed after
-completion or cancellation. A fake worker has `--network none`. A real worker
-joins only the internal `model-runtime` network and receives an expiring,
-turn-bound gateway capability; only the Supervisor also joins provider egress
-and decrypts the real key. Cold sessions consume no process, worker container,
-socket, timer, or dedicated thread.
+The trusted `supervisor-host` runs as the deployment's non-root application UID
+and has no Docker socket. It runs pinned Pi with built-in local tools and
+extension discovery disabled, then loads one fixed image-owned extension that
+routes `read/write/edit/bash` through the private `sandbox-control` network. Pi
+and the loopback Model Gateway receive a turn capability; that environment is
+never forwarded to remote bash.
+
+The separate `sandbox-manager` is the only root-equivalent application service
+because it owns `/var/run/docker.sock`. It has no database, S3, provider,
+enrollment, or tenant credential and exposes only authenticated bounded
+lifecycle/tool/inventory operations. Tool Sandboxes are created per active turn,
+not per conversation: they run as UID/GID `1000:1000`, with `--network none`, no
+host bind mount, inherited environment credential, published port, Docker
+socket, or writable root filesystem, and are removed after completion or
+cancellation. Cold sessions consume no Pi process, Tool Sandbox, socket, timer,
+or dedicated thread.
 
 Persistent state is split into four declared volumes:
 
@@ -316,11 +327,13 @@ are written to `usage_ledger` for each model call. Monetary cost remains zero
 until versioned provider pricing is modeled.
 
 The Web clears the key field after submit and does not place it in Web Storage.
-The trusted Supervisor decrypts the exact snapshotted version, gives the Pi
-worker only a short-lived, request-limited turn capability, and revokes it when
-the activation settles. The worker has no direct provider egress. Treat the
-Supervisor, PostgreSQL, private runtime directory, and Docker authority as the
-trusted computing base; this is not a mutually hostile public-SaaS sandbox.
+The trusted Supervisor decrypts the exact snapshotted version and gives its
+in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
+capability. The capability is revoked when the activation settles and never
+crosses the remote-tool RPC boundary. Tool Sandboxes have no network at all.
+Treat the Supervisor, Sandbox Manager, PostgreSQL, private runtime directory,
+and Docker authority as the trusted computing base; this is not a mutually
+hostile public-SaaS sandbox.
 
 ## Controlled public GitHub workspaces
 
@@ -334,20 +347,20 @@ fixture, or choose `public GitHub` and provide only:
 The API intentionally accepts no URL, branch, tag, credential, SSH form, Git
 configuration, or arbitrary host. Project, workspace, and pending source state
 commit in one tenant-scoped transaction. The first turn may take longer because
-the Supervisor must win an expiring PostgreSQL import lease, start a hardened
-one-shot importer, and publish the verified content-addressed seed to MinIO.
+the Supervisor must win an expiring PostgreSQL import lease, ask the Sandbox
+Manager to start a hardened one-shot importer, and publish the verified
+content-addressed seed to MinIO.
 Concurrent first turns wait for that seed. Every later activation rechecks its
 object key, byte count, SHA-256, and manifest, then overlays the last settled
 session checkpoint; it does not clone again.
 
 The importer has no bind mount, Docker socket, prompt, provider/deployment
 credential, published port, or membership in the database, object-storage,
-management, model-runtime, or provider-egress networks. It joins only the
-repository-egress bridge. The trusted Supervisor also anchors that bridge in
-this single-host topology, but all of its reachable privileged endpoints require
-a credential or turn capability that the importer never receives. A fixed
-GitHub URL is an application restriction, not a DNS firewall; do not claim this
-as a mutually hostile public-tenant boundary.
+management, sandbox-control, or provider-egress networks. It joins only the
+repository-egress bridge. Neither the trusted Supervisor nor the Sandbox
+Manager joins that bridge, so the importer has no direct path to their private
+HTTP surfaces. A fixed GitHub URL is still an application restriction, not a
+DNS firewall; do not claim this as a mutually hostile public-tenant boundary.
 
 Current repository limits are at most 512 regular files, 512 KiB per file, and
 2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
@@ -379,14 +392,17 @@ enterprise RBAC, rate limiting, billing, or abuse protection.
 
 Use `npm run production:ps` for the first health view. Expected steady state:
 
-- `postgres`, `minio`, `control-plane`, `supervisor-host`, and `web` are healthy;
-- `database-bootstrap` and `minio-bootstrap` exited successfully;
-- no `sandbox-image` service is running;
+- `postgres`, `minio`, `control-plane`, `sandbox-manager`, `supervisor-host`,
+  and `web` are healthy;
+- `database-bootstrap`, `minio-bootstrap`, `supervisor-volume-bootstrap`, and
+  the credential-free `repository-network-bootstrap` exited successfully;
+- no `tool-sandbox-image` service is running;
 - no container with `agent-dock.managed=true` remains after a turn settles;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.
 
-The Supervisor is ready only after Docker, PostgreSQL, MinIO, provisioning,
-spool recovery, and its current outbound WebSocket are ready. A transient
+The Supervisor is ready only after the authenticated Sandbox Manager,
+PostgreSQL, MinIO, provisioning, spool recovery, and its current outbound
+WebSocket are ready. A transient
 control-plane restart may make a committed command's outcome ambiguous. The
 system then fails that command/session as `connection_closed`, never replays its
 possible side effects, quarantines a permanently stale final spool event with a
@@ -402,9 +418,9 @@ load-test before treating extra replicas as an availability SLA.
 
 Alert operationally on prolonged unhealthy/restarting services, a growing
 retirement queue, repeated `connection_closed` failures, non-empty active spool
-after recovery, quarantine growth, PostgreSQL/MinIO capacity, and managed worker
-containers that outlive their command deadline. Quarantine is retained as audit
-evidence and has no automatic garbage collection in this slice.
+after recovery, quarantine growth, PostgreSQL/MinIO capacity, and managed Tool
+Sandbox containers that outlive their command deadline. Quarantine is retained
+as audit evidence and has no automatic garbage collection in this slice.
 
 ## Backup and restore
 
@@ -505,13 +521,14 @@ proves owner/viewer conversation reads, cross-tenant conversation/UUID/SSE
 isolation, per-role authorization, tenant-prefixed S3 checkpoints, a
 tenant-neutral control-plane container, public/internal authentication and port
 isolation, reruns both bootstrap jobs to prove idempotency and the bucket-scoped
-no-delete credential, repairs Java, interrupts and reconnects the control plane, verifies
-ambiguous-command failure and spool quarantine, scales the control plane from
+no-delete credential, repairs Java, interrupts and reconnects the control plane,
+verifies ambiguous-command failure and spool quarantine, scales the control plane from
 one to two and back, restores a follow-up from S3, restarts the Supervisor into
-a fresh boot, reconciles the old boot, cancels a live worker, audits worker
-hardening, non-root host-UID portability, and secret absence, and replays 22
-durable ordered events. It then removes only its exact random containers,
-networks, volumes, and runtime path.
+a fresh boot, reconciles the old boot, cancels a live Tool Sandbox, audits the
+execution boundary (only the Manager owns the Docker socket; Tool Sandboxes are
+mount-free, credential-free, and networkless), verifies non-root host-UID
+portability and secret absence, and replays 22 durable ordered events. It then
+removes only its exact random containers, networks, volumes, and runtime path.
 
 Never set `AGENT_DOCK_PRODUCTION_CHECK_KEEP=1` in shared CI. That diagnostic
 option intentionally leaves the isolated topology and its secret directory for
@@ -543,7 +560,9 @@ between turns, and confirms no importer container survived. Override the source
 only with both `AGENT_DOCK_LIVE_GITHUB_REPOSITORY=owner/repository` and
 `AGENT_DOCK_LIVE_GITHUB_COMMIT_SHA=<40-hex-sha>`. The check can consume provider
 quota and modify the configured tenant by adding a project/session; it is
-therefore guarded and excluded from routine CI. Inspect the real worker's sole
-`model-runtime` network during release validation, and rotate or revoke a
-temporary test key afterward. Any broader claim requires its own ADR, threat
-model, and acceptance evidence.
+therefore guarded and excluded from routine CI. During release validation,
+confirm the Pi runtime remains inside the trusted non-root Supervisor, that only
+the Sandbox Manager owns the Docker socket, and that the transient Tool Sandbox
+has `network=none` and no credential-bearing environment or mount. Rotate or
+revoke a temporary test key afterward. Any broader claim requires its own ADR,
+threat model, and acceptance evidence.

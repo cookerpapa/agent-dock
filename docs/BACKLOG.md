@@ -94,6 +94,22 @@ extension-policy support would overstate the current boundary.
 - [x] Prove the production topology across control-plane reconnect/scale, Supervisor fresh boot/retirement, S3 restore, cancellation, secret audit, and cleanup
 - [ ] Design mTLS/SPIFFE credentials for a multi-host or Kubernetes topology after that deployment target exists
 
+## Trusted Pi Runner and remote Tool Sandbox slice
+
+- [x] ADR-0029: keep Pi/model auth trusted and route untrusted tools to a separate sandbox
+- [x] Add closed Manager/tool-worker protocols with activation capabilities and exact assignment identity
+- [x] Extract bounded workspace snapshot and Git-patch logic into a shared runtime package
+- [x] Disable Pi built-in local tools and register remote read/write/edit/bash through Pi's public operations APIs
+- [x] Make the Sandbox Manager the only Docker-socket owner with create/execute/capture/stop and inventory APIs
+- [x] Run one non-root, read-only, mount-free, `network=none` Tool Sandbox per active turn
+- [x] Use a fixed credential-free subprocess environment and never forward Pi/model environment to bash
+- [x] Keep the model gateway loopback-local to the trusted Runner and revoke turn capabilities on settlement
+- [x] Route controlled GitHub imports through the Manager without giving the Manager repository-network membership
+- [x] Add production secret migration, volume ownership bootstrap, health checks, images, and internal sandbox-control network
+- [x] Prove real Pi `bash/edit` RPC, final diff/checkpoint, cancellation, cleanup, socket ownership, and secret absence
+- [ ] Isolate and policy-gate user/project Pi extensions before enabling discovery in production
+- [ ] Replace shared-kernel Docker with gVisor/Kata/Firecracker or a managed sandbox before a hostile public-SaaS claim
+
 ## Controlled public GitHub workspace slice
 
 - [x] ADR-0028: exact-commit public GitHub source and immutable seed boundary
@@ -105,7 +121,7 @@ extension-policy support would overstate the current boundary.
 - [x] Disable redirects, hooks, credential helpers, submodules, LFS, external/file protocols, and interactive auth
 - [x] Reuse the bounded regular-file workspace manifest and fail closed on unsupported repositories
 - [x] Store a content-addressed immutable seed in S3 and verify key/hash/size/manifest on every activation
-- [x] Establish the imported commit as the Pi worker's Git baseline before overlaying a settled session checkpoint
+- [x] Establish the imported commit as the Tool Sandbox's Git baseline before overlaying a settled session checkpoint
 - [x] Include tracked edits, deletions, and newly created files in the cumulative final patch
 - [x] Add the Pi-export-inspired Web new-workspace panel and safe source status to conversation discovery
 - [x] Prove two real Pi/DeepSeek turns reuse one seed, persist tool events/token usage, restore state, and leave no importer

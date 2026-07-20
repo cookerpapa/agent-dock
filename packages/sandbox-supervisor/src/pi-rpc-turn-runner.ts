@@ -49,6 +49,9 @@ export type PiRpcTurnRunnerOptions = {
   idGenerator?: () => string;
   piRpcEntryPath?: string;
   enabledTools?: readonly PiBuiltinToolName[];
+  disableBuiltinTools?: boolean;
+  trustedExtensionPaths?: readonly string[];
+  trustedEnvironment?: Readonly<Record<string, string>>;
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
@@ -165,7 +168,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
-function sanitizedEnvironment(apiKey: string, agentDirectory: string): NodeJS.ProcessEnv {
+function sanitizedEnvironment(
+  apiKey: string,
+  agentDirectory: string,
+  trustedEnvironment: Readonly<Record<string, string>> | undefined,
+): NodeJS.ProcessEnv {
   const sensitiveName = /(api[_-]?key|token|secret|password|credential|auth)/i;
   const processInjectionName =
     /^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*|BASH_ENV|ENV|CDPATH)$/i;
@@ -177,6 +184,18 @@ function sanitizedEnvironment(apiKey: string, agentDirectory: string): NodeJS.Pr
   environment.PI_OFFLINE = "1";
   environment.PI_TELEMETRY = "0";
   environment[RUNTIME_API_KEY_ENV] = apiKey;
+  for (const [name, value] of Object.entries(trustedEnvironment ?? {})) {
+    if (
+      !/^AGENT_DOCK_TRUSTED_[A-Z0-9_]{1,96}$/.test(name) ||
+      name === RUNTIME_API_KEY_ENV ||
+      value.length < 1 ||
+      value.length > 4_096 ||
+      /[\r\n\0]/.test(value)
+    ) {
+      throw new TypeError("trustedEnvironment contains an invalid entry");
+    }
+    environment[name] = value;
+  }
   return environment;
 }
 
@@ -390,6 +409,8 @@ export class PiRpcTurnRunner {
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
   readonly #enabledTools: readonly PiBuiltinToolName[];
+  readonly #disableBuiltinTools: boolean;
+  readonly #trustedExtensionPaths: readonly string[];
 
   constructor(options: PiRpcTurnRunnerOptions) {
     this.#options = options;
@@ -416,6 +437,20 @@ export class PiRpcTurnRunner {
       throw new TypeError("enabledTools must be a unique Pi built-in tool allowlist");
     }
     this.#enabledTools = [...enabledTools];
+    this.#disableBuiltinTools = options.disableBuiltinTools ?? false;
+    const trustedExtensionPaths = (options.trustedExtensionPaths ?? []).map((path) =>
+      resolve(path),
+    );
+    if (
+      trustedExtensionPaths.length > 8 ||
+      new Set(trustedExtensionPaths).size !== trustedExtensionPaths.length
+    ) {
+      throw new TypeError("trustedExtensionPaths must be a unique bounded list");
+    }
+    this.#trustedExtensionPaths = trustedExtensionPaths;
+    if (this.#disableBuiltinTools && this.#enabledTools.length !== 0) {
+      throw new TypeError("disableBuiltinTools cannot be combined with enabledTools");
+    }
   }
 
   async run(
@@ -483,17 +518,24 @@ export class PiRpcTurnRunner {
           : ["--no-session"]),
         "--offline",
         "--no-extensions",
+        ...this.#trustedExtensionPaths.flatMap((path) => ["--extension", path]),
         "--no-skills",
         "--no-prompt-templates",
         "--no-context-files",
-        ...(this.#enabledTools.length === 0
-          ? ["--no-tools"]
-          : ["--tools", this.#enabledTools.join(",")]),
+        ...(this.#disableBuiltinTools
+          ? ["--no-builtin-tools"]
+          : this.#enabledTools.length === 0
+            ? ["--no-tools"]
+            : ["--tools", this.#enabledTools.join(",")]),
       ],
       {
         cwd: workspaceDirectory,
         detached: process.platform !== "win32",
-        env: sanitizedEnvironment(runtimeConfig.apiKey, agentDirectory),
+        env: sanitizedEnvironment(
+          runtimeConfig.apiKey,
+          agentDirectory,
+          this.#options.trustedEnvironment,
+        ),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -591,7 +633,7 @@ export class PiRpcTurnRunner {
       if (message.type === "extension_ui_request") {
         throw new PiRpcTurnError(
           "pi_protocol_error",
-          "Pi requested extension UI while extensions were disabled",
+          "Pi requested unsupported extension UI",
           false,
         );
       }
@@ -603,15 +645,6 @@ export class PiRpcTurnRunner {
       }
       let publicEvent = outcome.event;
       if (publicEvent.type === "turn.completed") {
-        if (this.#options.collectWorkspacePatch) {
-          const workspacePatch = await this.#options.collectWorkspacePatch();
-          if (workspacePatch !== undefined) {
-            publicEvent = {
-              ...publicEvent,
-              payload: { ...publicEvent.payload, workspacePatch },
-            };
-          }
-        }
         if (this.#options.onSettled) {
           let piSession: Uint8Array;
           try {
@@ -624,6 +657,15 @@ export class PiRpcTurnRunner {
             );
           }
           await this.#options.onSettled({ piSession });
+        }
+        if (this.#options.collectWorkspacePatch) {
+          const workspacePatch = await this.#options.collectWorkspacePatch();
+          if (workspacePatch !== undefined) {
+            publicEvent = {
+              ...publicEvent,
+              payload: { ...publicEvent.payload, workspacePatch },
+            };
+          }
         }
       }
       const candidate = eventMessage(publicEvent);

@@ -285,6 +285,10 @@ services:
         condition: service_healthy
       minio-bootstrap:
         condition: service_completed_successfully
+      sandbox-manager:
+        condition: service_healthy
+      supervisor-volume-bootstrap:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
@@ -295,25 +299,24 @@ services:
       AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
+      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
+      AGENT_DOCK_SANDBOX_MANAGER_URL: http://sandbox-manager:4300
+      AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "300000"
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
-      AGENT_DOCK_SANDBOX_IMAGE: agent-dock/pi-workspace:${AGENT_DOCK_IMAGE_VERSION:-production}
-      AGENT_DOCK_DOCKER_COMMAND: docker
+      AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state
-      AGENT_DOCK_MODEL_GATEWAY_HOST: 0.0.0.0
+      AGENT_DOCK_MODEL_GATEWAY_HOST: 127.0.0.1
       AGENT_DOCK_MODEL_GATEWAY_PORT: "4200"
-      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: http://supervisor-host:4200
-      AGENT_DOCK_SANDBOX_MODEL_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_model-runtime
+      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: http://127.0.0.1:4200
       AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "600000"
       AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN: "32"
       AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
       AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
       AGENT_DOCK_PI_TURN_TIMEOUT_MS: "600000"
-      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
-      AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
       AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS: "240000"
       AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "300000"
       AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
@@ -324,7 +327,6 @@ services:
       AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
       AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - supervisor-boot:/var/lib/agent-dock/boot-volume
       - supervisor-spool:/var/lib/agent-dock/spool-volume
       - type: bind
@@ -340,6 +342,10 @@ services:
         target: /run/agent-dock-secrets/supervisor-management-token
         read_only: true
       - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
+        target: /run/agent-dock-secrets/sandbox-manager-token
+        read_only: true
+      - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
         target: /run/agent-dock-secrets/model-credential-master-key
         read_only: true
@@ -351,9 +357,8 @@ services:
       - management
       - database
       - object-storage
-      - model-runtime
+      - sandbox-control
       - provider-egress
-      - repository-egress
     healthcheck:
       test:
         [
@@ -367,14 +372,110 @@ services:
       retries: 30
       start_period: 15s
     <<: *application-security
-    cap_add:
-      - DAC_OVERRIDE
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /workspace:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
     pids_limit: 256
     mem_limit: 768m
     cpus: 2.0
     stop_grace_period: 45s
+    logging: *bounded-logging
+
+  supervisor-volume-bootstrap:
+    image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: "no"
+    entrypoint: [/bin/sh, -eu, -c]
+    command:
+      - |
+        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
+        chown -R "$${owner}" /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume
+        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume -type d -exec chmod 0700 {} +
+        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume -type f -exec chmod 0600 {} +
+    user: "0:0"
+    volumes:
+      - supervisor-boot:/var/lib/agent-dock/boot-volume
+      - supervisor-spool:/var/lib/agent-dock/spool-volume
+    network_mode: none
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    logging: *bounded-logging
+
+  sandbox-manager:
+    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/sandbox-manager/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      repository-network-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
+      AGENT_DOCK_SANDBOX_MANAGER_PORT: "4300"
+      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
+      AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
+      AGENT_DOCK_DOCKER_COMMAND: docker
+      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
+      AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
+        target: /run/agent-dock-secrets/sandbox-manager-token
+        read_only: true
+    networks:
+      - sandbox-control
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4300/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    <<: *application-security
+    cap_add:
+      - DAC_READ_SEARCH
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  repository-network-bootstrap:
+    image: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: "no"
+    entrypoint: [/bin/true]
+    user: "1000:1000"
+    networks:
+      - repository-egress
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 16
+    mem_limit: 32m
+    cpus: 0.1
     logging: *bounded-logging
 
   web:
@@ -411,12 +512,12 @@ services:
     stop_grace_period: 15s
     logging: *bounded-logging
 
-  sandbox-image:
+  tool-sandbox-image:
     profiles: [image-only]
-    image: agent-dock/pi-workspace:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
-      dockerfile: packages/sandbox-supervisor/Dockerfile
+      dockerfile: packages/tool-sandbox/Dockerfile
     network_mode: none
     restart: "no"
 
@@ -430,8 +531,7 @@ networks:
     internal: true
   object-storage:
     internal: true
-  model-runtime:
-    name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_model-runtime
+  sandbox-control:
     internal: true
   provider-egress: {}
   repository-egress:

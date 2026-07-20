@@ -1,0 +1,138 @@
+import type {
+  ToolSandboxAssignment,
+  ToolSandboxCreateRequest,
+  ToolSandboxOperationRequest,
+} from "@agent-dock/protocol";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  SANDBOX_MANAGER_SERVICE_PATH,
+  SandboxManagerClient,
+  SandboxManagerServer,
+  type SandboxManagerBackend,
+} from "../src/index.ts";
+
+const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
+const CAPABILITY = `adts_${"c".repeat(43)}`;
+const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
+const assignment: ToolSandboxAssignment = {
+  supervisorId: "supervisor-manager-test",
+  bootId: "10000000-0000-4000-8000-000000000001",
+  sandboxId: "10000000-0000-4000-8000-000000000002",
+  commandId: "command-manager-test",
+  sessionId: "session-manager-test",
+  turnId: "turn-manager-test",
+  leaseId: "10000000-0000-4000-8000-000000000003",
+  fencingToken: 4,
+};
+
+const servers: SandboxManagerServer[] = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+});
+
+function backend(): SandboxManagerBackend {
+  return {
+    async checkHealth() {},
+    async create(request) {
+      return {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.created",
+        requestId: request.requestId,
+        activationId: ACTIVATION_ID,
+        capability: CAPABILITY,
+        runtimeId: "a".repeat(64),
+        runtimeName: "agent-dock-tool-test",
+        workspaceRoot: "/workspace",
+      };
+    },
+    async capture() {
+      throw new Error("unused");
+    },
+    async stop() {},
+    async execute(capability, request) {
+      if (capability !== CAPABILITY) throw new Error("wrong capability");
+      return {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.operation_result",
+        activationId: request.activationId,
+        operationId: request.operationId,
+        operation: "bash.exec",
+        exitCode: 0,
+        output: Buffer.from("isolated\n").toString("base64"),
+      };
+    },
+    async importGitHub() {
+      return Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
+    },
+    async listAssignments() {
+      return [];
+    },
+    async terminateAndConfirmAbsent() {},
+    async confirmAbsent() {},
+    async close() {},
+  };
+}
+
+describe("Sandbox Manager authenticated RPC", () => {
+  it("separates the service credential from the per-activation tool capability", async () => {
+    const server = new SandboxManagerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: SERVICE_TOKEN,
+      manager: backend(),
+    });
+    servers.push(server);
+    const address = await server.listen();
+    const client = new SandboxManagerClient({
+      baseUrl: address,
+      serviceToken: SERVICE_TOKEN,
+      allowInsecureHttp: true,
+    });
+    await expect(client.checkHealth()).resolves.toBeUndefined();
+
+    const request: ToolSandboxCreateRequest = {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.create",
+      requestId: "10000000-0000-4000-8000-000000000011",
+      assignment,
+      workspaceSeed: { kind: "sample_java" },
+    };
+    await expect(client.create(request)).resolves.toMatchObject({
+      activationId: ACTIVATION_ID,
+      capability: CAPABILITY,
+    });
+
+    const operation: ToolSandboxOperationRequest = {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.operation",
+      activationId: ACTIVATION_ID,
+      operationId: "10000000-0000-4000-8000-000000000012",
+      operation: "bash.exec",
+      command: "pwd",
+      cwd: "/workspace",
+      timeoutMs: 1_000,
+    };
+    await expect(client.operation(CAPABILITY, operation)).resolves.toMatchObject({
+      operation: "bash.exec",
+      exitCode: 0,
+    });
+    await expect(
+      client.importGitHub(
+        {
+          kind: "github_public",
+          repository: "octocat/hello-world",
+          commitSha: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+        },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual(Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n'));
+
+    const unauthorized = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    expect(unauthorized.status).toBe(401);
+  });
+});

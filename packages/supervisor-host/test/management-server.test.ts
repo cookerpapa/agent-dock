@@ -1,14 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
-
-vi.mock("node:child_process", async (importOriginal) => {
-  const original = await importOriginal<typeof import("node:child_process")>();
-  return { ...original, execFile: execFileMock };
-});
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   HttpSandboxAssignmentInventory,
@@ -38,55 +31,20 @@ const ASSIGNMENT = {
   leaseId: "10000000-0000-4000-8000-000000000006",
   fencingToken: 3,
 };
+const PROTOCOL_ASSIGNMENT = {
+  containerId: ASSIGNMENT.runtimeId,
+  containerName: ASSIGNMENT.runtimeName,
+  supervisorId: ASSIGNMENT.supervisorId,
+  bootId: ASSIGNMENT.bootId,
+  sandboxId: ASSIGNMENT.sandboxId,
+  commandId: ASSIGNMENT.commandId,
+  sessionId: ASSIGNMENT.sessionId,
+  turnId: ASSIGNMENT.turnId,
+  leaseId: ASSIGNMENT.leaseId,
+  fencingToken: ASSIGNMENT.fencingToken,
+};
 
 const roots: string[] = [];
-const dockerResults: Array<{ code: number; stdout?: string; stderr?: string }> = [];
-
-function inspection(): string {
-  return JSON.stringify([
-    {
-      Id: RUNTIME_ID,
-      Name: `/${ASSIGNMENT.runtimeName}`,
-      Config: {
-        Labels: {
-          "agent-dock.managed": "true",
-          "agent-dock.supervisor-id": IDENTITY.supervisorId,
-          "agent-dock.boot-id": IDENTITY.bootId,
-          "agent-dock.sandbox-id": IDENTITY.sandboxId,
-          "agent-dock.command-id": ASSIGNMENT.commandId,
-          "agent-dock.session-id": ASSIGNMENT.sessionId,
-          "agent-dock.turn-id": ASSIGNMENT.turnId,
-          "agent-dock.lease-id": ASSIGNMENT.leaseId,
-          "agent-dock.fencing-token": String(ASSIGNMENT.fencingToken),
-        },
-      },
-    },
-  ]);
-}
-
-beforeEach(() => {
-  dockerResults.length = 0;
-  execFileMock.mockReset();
-  execFileMock.mockImplementation((...args: unknown[]) => {
-    const callback = args.at(-1) as (
-      error: (Error & { code?: number }) | null,
-      stdout: string,
-      stderr: string,
-    ) => void;
-    const result = dockerResults.shift();
-    if (result === undefined) throw new Error("Unexpected fake Docker command");
-    queueMicrotask(() => {
-      callback(
-        result.code === 0
-          ? null
-          : Object.assign(new Error("fake Docker command failed"), { code: result.code }),
-        result.stdout ?? "",
-        result.stderr ?? "",
-      );
-    });
-    return {};
-  });
-});
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -102,6 +60,8 @@ async function harness() {
   await ledger.beginBoot(IDENTITY);
   let ready = false;
   let stopCalls = 0;
+  let assignments = [PROTOCOL_ASSIGNMENT];
+  let terminationCalls = 0;
   const server = new SupervisorManagementServer({
     host: "127.0.0.1",
     port: 0,
@@ -112,7 +72,25 @@ async function harness() {
     stopCurrentBoot: async () => {
       stopCalls += 1;
     },
-    dockerCommand: "fake-docker",
+    assignmentInventory: {
+      async listAssignments(sandboxId) {
+        return assignments.filter((assignment) => assignment.sandboxId === sandboxId);
+      },
+      async terminateAndConfirmAbsent(assignment) {
+        terminationCalls += 1;
+        assignments = assignments.filter(
+          (candidate) => candidate.containerId !== assignment.containerId,
+        );
+      },
+      async confirmAbsent(assignment) {
+        if (assignments.some((candidate) => candidate.containerId === assignment.containerId)) {
+          throw Object.assign(new Error("still alive"), {
+            code: "tool_sandbox_still_alive",
+            retryable: false,
+          });
+        }
+      },
+    },
   });
   const address = await server.listen();
   const client = new HttpSupervisorManagementClient({
@@ -130,6 +108,9 @@ async function harness() {
     },
     stopCalls() {
       return stopCalls;
+    },
+    terminationCalls() {
+      return terminationCalls;
     },
   };
 }
@@ -171,20 +152,14 @@ describe("trusted Supervisor management boundary", () => {
     }
   });
 
-  it("round-trips exact Docker assignment inventory and absence proof", async () => {
+  it("round-trips exact Tool Sandbox inventory and absence proof through the manager boundary", async () => {
     const value = await harness();
     try {
       const inventory = new HttpSandboxAssignmentInventory(value.client, IDENTITY.sandboxId);
-      dockerResults.push({ code: 0, stdout: `${RUNTIME_ID}\n` }, { code: 0, stdout: inspection() });
       await expect(inventory.listAssignments()).resolves.toEqual([ASSIGNMENT]);
 
-      dockerResults.push(
-        { code: 0, stdout: inspection() },
-        { code: 0, stdout: RUNTIME_ID },
-        { code: 1, stderr: `No such container: ${RUNTIME_ID}` },
-      );
       await expect(inventory.terminateAndConfirmAbsent(ASSIGNMENT)).resolves.toBeUndefined();
-      expect(execFileMock).toHaveBeenCalledTimes(5);
+      expect(value.terminationCalls()).toBe(1);
 
       const unknownInventory = new HttpSandboxAssignmentInventory(
         value.client,
@@ -200,7 +175,7 @@ describe("trusted Supervisor management boundary", () => {
           bootId: globalThis.crypto.randomUUID(),
         }),
       ).rejects.toMatchObject({ code: "assignment_scope_mismatch", retryable: false });
-      expect(execFileMock).toHaveBeenCalledTimes(5);
+      expect(value.terminationCalls()).toBe(1);
     } finally {
       await value.server.close();
     }

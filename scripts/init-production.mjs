@@ -137,6 +137,23 @@ async function ensureModelCredentialMasterKey(runtimeDirectory) {
   return true;
 }
 
+async function ensureSandboxManagerToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/sandbox-manager-token");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+      throw new Error("Production Sandbox Manager token is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomSecret()}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
 async function validateExisting(runtimeDirectory) {
   const manifestPath = resolve(runtimeDirectory, "deployment.json");
   let manifestBytes;
@@ -246,6 +263,7 @@ await assertPrivateDirectory(runtimeDirectory);
 
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
+  const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
   process.stdout.write(
@@ -253,6 +271,7 @@ if (await validateExisting(runtimeDirectory)) {
       initialized: true,
       reused: true,
       modelCredentialMasterKeyCreated,
+      sandboxManagerTokenCreated,
       objectStoreCredentialMigrated,
       runtimeDirectory,
     })}\n`,
@@ -362,6 +381,7 @@ await writePrivateFile(
   resolve(secretsDirectory, "supervisor-management-token"),
   `${randomSecret()}\n`,
 );
+await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "aws-credentials"),
   `[default]\naws_access_key_id = ${minioApplicationUser}\naws_secret_access_key = ${minioApplicationPassword}\n`,

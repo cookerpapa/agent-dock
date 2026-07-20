@@ -10,6 +10,10 @@ import type { Kysely } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostgresWorkspaceSeedResolver, WorkspaceSeedError } from "../src/index.ts";
 
+// Each case starts and migrates a real PGlite socket. Under the full workspace
+// CI load this can legitimately cross Vitest's 5-second unit-test default.
+vi.setConfig({ testTimeout: 15_000, hookTimeout: 15_000 });
+
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",
   foreignTenant: "10000000-0000-4000-8000-000000000002",
