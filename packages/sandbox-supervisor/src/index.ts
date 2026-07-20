@@ -103,6 +103,10 @@ export {
   type TrustedModelRuntimeLease,
   type TrustedModelRuntimeLeaseResolver,
 } from "./remote-tool-sandbox-turn-runner.ts";
+export {
+  type RunAttemptExecutionPhase,
+  type RunAttemptPhaseObserver,
+} from "./run-attempt-phase.ts";
 
 export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
 

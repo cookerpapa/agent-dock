@@ -16,6 +16,7 @@ import {
   parseModelConfigurationResource,
   parseProjectResource,
   parseReplaceModelConfigurationRequest,
+  parseRunResource,
   parseSessionResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
@@ -48,6 +49,7 @@ describe("control-plane public API schemas", () => {
     ).toMatchObject({ state: "cold" });
     expect(
       parseAcceptedTurnResource({
+        runId: "50000000-0000-4000-8000-000000000010",
         turnId: "50000000-0000-4000-8000-000000000001",
         sessionId: "30000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",
@@ -131,6 +133,7 @@ describe("control-plane public API schemas", () => {
         },
         turns: [
           {
+            runId: "50000000-0000-4000-8000-000000000010",
             turnId: "50000000-0000-4000-8000-000000000001",
             commandId: "60000000-0000-4000-8000-000000000001",
             mailboxPosition: 1,
@@ -143,6 +146,59 @@ describe("control-plane public API schemas", () => {
         replayAfterSequence: 0,
       }),
     ).toMatchObject({ turns: [{ prompt: "repair it" }] });
+
+    expect(
+      parseRunResource({
+        runId: "50000000-0000-4000-8000-000000000010",
+        projectId: "10000000-0000-4000-8000-000000000001",
+        workspaceId: "20000000-0000-4000-8000-000000000001",
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        turnId: "50000000-0000-4000-8000-000000000001",
+        commandId: "60000000-0000-4000-8000-000000000001",
+        state: "running",
+        attemptCount: 1,
+        currentAttemptId: "50000000-0000-4000-8000-000000000011",
+        queuedAt: createdAt,
+        startedAt: createdAt,
+        updatedAt: createdAt,
+        attempts: [
+          {
+            attemptId: "50000000-0000-4000-8000-000000000011",
+            attemptNumber: 1,
+            state: "running",
+            claimOwnerId: "control-plane-1",
+            claimExpiresAt: "2026-07-19T00:01:00.000Z",
+            sandboxId: "50000000-0000-4000-8000-000000000012",
+            leaseId: "50000000-0000-4000-8000-000000000013",
+            fencingToken: 1,
+            claimedAt: createdAt,
+            provisioningAt: createdAt,
+            runningAt: createdAt,
+            lastHeartbeatAt: createdAt,
+            transitions: [
+              {
+                fromState: null,
+                toState: "claimed",
+                reason: "outbox_claim",
+                occurredAt: createdAt,
+              },
+              {
+                fromState: "claimed",
+                toState: "provisioning",
+                reason: "command_acknowledged",
+                occurredAt: createdAt,
+              },
+              {
+                fromState: "provisioning",
+                toState: "running",
+                reason: "pi_started",
+                occurredAt: createdAt,
+              },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({ state: "running", attempts: [{ attemptNumber: 1 }] });
   });
 
   it("rejects malformed public resources", () => {
@@ -154,6 +210,7 @@ describe("control-plane public API schemas", () => {
     ).toThrow(/accepted-turn resource/);
     expect(() =>
       parseAcceptedTurnResource({
+        runId: "50000000-0000-4000-8000-000000000010",
         turnId: "50000000-0000-4000-8000-000000000001",
         sessionId: "30000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",

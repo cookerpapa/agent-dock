@@ -1024,12 +1024,14 @@ export class SupervisorWebSocketClient {
       this.#fail("heartbeat_build_failed", "Supervisor heartbeat could not be built", false);
       return;
     }
+    // Heartbeats are serialized and the next interval starts only after this ACK.
+    // Giving the database-backed control plane merely one heartbeat interval to
+    // reply makes healthy connections flap under short-lived write contention.
+    // Keep enough time for one subsequent heartbeat before the durable liveness
+    // deadline instead.
     const acknowledgementTimeoutMs = Math.max(
       1,
-      Math.min(
-        this.#registered.payload.heartbeatIntervalMs,
-        this.#registered.payload.heartbeatTimeoutMs - this.#registered.payload.heartbeatIntervalMs,
-      ),
+      this.#registered.payload.heartbeatTimeoutMs - this.#registered.payload.heartbeatIntervalMs,
     );
     const timeout = setTimeout(() => {
       this.#fail("heartbeat_ack_timeout", "Supervisor heartbeat acknowledgement timed out", true);

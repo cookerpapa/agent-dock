@@ -3,6 +3,8 @@ import type {
   ApprovalState,
   CommandState as DomainCommandState,
   ModelThinkingLevel,
+  RunAttemptState,
+  RunState,
   SandboxState,
   SessionState,
   TurnState,
@@ -207,6 +209,67 @@ export interface TurnTable {
   created_at: GeneratedTimestamp;
   started_at: NullableTimestamp;
   settled_at: NullableTimestamp;
+}
+
+export interface RunTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  workspace_id: string;
+  session_id: string;
+  turn_id: string;
+  command_id: string;
+  idempotency_key: string;
+  state: RunState;
+  current_attempt_id: string | null;
+  attempt_count: GeneratedInteger;
+  stop_reason: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  failure_retryable: boolean | null;
+  row_version: GeneratedInt8;
+  queued_at: GeneratedTimestamp;
+  started_at: NullableTimestamp;
+  settled_at: NullableTimestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface RunAttemptTable {
+  id: string;
+  tenant_id: string;
+  run_id: string;
+  attempt_number: number;
+  state: RunAttemptState;
+  claim_owner_id: string;
+  claim_expires_at: Timestamp;
+  sandbox_id: string | null;
+  lease_id: string | null;
+  fencing_token: NullableInt8;
+  checkpoint_revision: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  failure_retryable: boolean | null;
+  claimed_at: GeneratedTimestamp;
+  provisioning_at: NullableTimestamp;
+  restoring_at: NullableTimestamp;
+  running_at: NullableTimestamp;
+  checkpointing_at: NullableTimestamp;
+  last_heartbeat_at: NullableTimestamp;
+  settled_at: NullableTimestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface RunAttemptTransitionTable {
+  id: string;
+  tenant_id: string;
+  run_id: string;
+  attempt_id: string;
+  from_state: RunAttemptState | null;
+  to_state: RunAttemptState;
+  reason: string;
+  occurred_at: GeneratedTimestamp;
 }
 
 export interface AgentNodeTable {
@@ -425,6 +488,9 @@ export interface Database {
   tenant_model_credentials: TenantModelCredentialTable;
   sessions: SessionTable;
   turns: TurnTable;
+  runs: RunTable;
+  run_attempts: RunAttemptTable;
+  run_attempt_transitions: RunAttemptTransitionTable;
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
   supervisor_connections: SupervisorConnectionTable;

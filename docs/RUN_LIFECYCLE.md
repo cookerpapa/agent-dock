@@ -8,10 +8,12 @@ An HTTP retry with the same key and body returns the same Turn. The same key wit
 a different body is rejected.
 
 ```text
-queued -> dispatching -> running -> checkpointing -> completed
-                   |          |                  -> failed
-                   |          -> cancelling -> cancelled
-                   -> queued (pre-ACK only)
+Run: queued -> claimed -> provisioning -> restoring? -> running
+     -> checkpointing -> completed
+                      \-> cancel_requested -> cancelled
+     \-> queued (a failed pre-ACK Attempt only)
+
+Attempt terminal alternatives: failed | timed_out | superseded
 ```
 
 AgentDock does not claim exactly-once execution for shell commands or external
@@ -19,20 +21,23 @@ side effects.
 
 ## Attempt identity and claim
 
-The dispatcher claims work with PostgreSQL locking, then obtains:
+The dispatcher claims work with PostgreSQL locking, creates an immutable-numbered
+`RunAttempt`, and obtains:
 
 ```text
-commandId
-leaseId / attemptId
+runId / attemptId / attemptNumber
+commandId / turnId
+leaseId
 fencingToken
 lease expiry
 Supervisor boot and connection generation
 ```
 
-Today the lease UUID is also the Provider attempt UUID. A retry before durable
-execution acknowledgement receives a new lease/fence. Once execution is
-acknowledged, a crash is ambiguous and the Turn fails instead of blindly
-replaying commands.
+`attemptId` is independent from `leaseId`. Lease acquisition binds the exact
+current Attempt to sandbox, lease, and fence in PostgreSQL before execution ACK.
+A retry before durable acknowledgement terminates the old Attempt and creates a
+new one. Once execution is acknowledged, a crash is ambiguous and the Run fails
+instead of blindly replaying commands.
 
 ## Two-phase start
 
@@ -40,7 +45,8 @@ replaying commands.
 2. Supervisor validates capacity/identity and returns a side-effect-free ACK.
 3. Control Plane commits `ACKNOWLEDGED/RUNNING` under the current lease/fence.
 4. Control Plane sends `command.commit`.
-5. Trusted Runner resolves model and workspace state.
+5. Trusted Runner durably advances the Attempt through restore/run/checkpoint
+   phases while resolving model and workspace state.
 6. `ToolSandboxManager` creates one Provider handle and capability.
 7. Provider waits for Tool worker readiness and inspected runtime identity.
 8. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
@@ -56,8 +62,8 @@ operation ID before the Provider sends a closed worker request. Tool output is
 bounded before returning to Pi.
 
 One shared Supervisor heartbeat reports all active assignments. PostgreSQL
-renews only the exact current lease/fence, boot, command lifecycle, and event
-cursor. Lease loss revokes execution authority.
+renews only the exact current lease/fence, current RunAttempt, boot, command
+lifecycle, and event cursor. Lease loss revokes execution authority.
 
 ## Checkpoint commit
 
@@ -67,7 +73,8 @@ At `agent_settled`:
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
 4. Bytes are conditionally written to object storage.
-5. PostgreSQL advances the workspace revision with lease/fence CAS.
+5. PostgreSQL advances the checkpoint pointer with session-version,
+   Run/Attempt, lease, and fence CAS; the Attempt records the committed revision.
 6. `turn.completed` is durably published as the commit marker.
 7. Manager revokes the capability and Provider confirms runtime absence.
 
@@ -99,6 +106,7 @@ reconciliation.
 | Tool Sandbox exit | active operation fails; capability is revoked; runtime is removed |
 | Event ACK loss | Supervisor file spool redelivers the identical event |
 | Checkpoint upload interruption | previous settled revision remains authoritative |
+| Old Attempt resumes late | current-attempt/lease/fence checks reject its phase, checkpoint, and terminal writes |
 
 ## Terminal invariant
 

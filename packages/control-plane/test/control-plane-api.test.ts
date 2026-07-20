@@ -10,7 +10,10 @@ import type {
   ProjectResource,
   SessionResource,
 } from "@agent-dock/protocol";
-import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
+import {
+  parseControlToSupervisorMessage,
+  parseSupervisorToControlMessage,
+} from "@agent-dock/protocol";
 import {
   DockerSandboxTurnRunner,
   FileEventSpoolStore,
@@ -39,6 +42,7 @@ import {
   OutboxDispatcherStaleClaimError,
   PostgresSessionEventNotifications,
   PostgresSandboxCheckpointStore,
+  PostgresRunAttemptPhaseObserver,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
   type TurnCancellationBackend,
@@ -53,6 +57,8 @@ const IDS = {
   profile: "40000000-0000-4000-8000-000000000001",
   sandbox: "50000000-0000-4000-8000-000000000001",
   sandboxBoot: "60000000-0000-4000-8000-000000000001",
+  phaseSandbox: "50000000-0000-4000-8000-000000000012",
+  phaseSandboxBoot: "60000000-0000-4000-8000-000000000012",
   cancellationSandbox: "50000000-0000-4000-8000-000000000002",
   cancellationSandboxBoot: "60000000-0000-4000-8000-000000000002",
   dockerSandbox: "50000000-0000-4000-8000-000000000003",
@@ -318,6 +324,7 @@ async function createAssignedTurn(options: {
   const acquiredAt = new Date(now.valueOf() - 10_000);
   const validUntil = new Date(now.valueOf() + (options.expired ? -5_000 : 60_000));
   const leaseId = globalThis.crypto.randomUUID();
+  const attemptId = globalThis.crypto.randomUUID();
   await database.transaction().execute(async (transaction) => {
     await transaction
       .insertInto("sandboxes")
@@ -329,6 +336,59 @@ async function createAssignedTurn(options: {
         max_concurrent_sessions: 1,
         active_sessions: 1,
       })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("run_attempts")
+      .values({
+        id: attemptId,
+        tenant_id: IDS.tenant,
+        run_id: accepted.runId,
+        attempt_number: 1,
+        state: options.phase === "acknowledged" ? "running" : "claimed",
+        claim_owner_id: "reconciliation-test",
+        claim_expires_at: validUntil,
+        sandbox_id: options.sandboxId,
+        lease_id: leaseId,
+        fencing_token: 1,
+        checkpoint_revision: null,
+        failure_code: null,
+        failure_message: null,
+        failure_retryable: null,
+        claimed_at: acquiredAt,
+        provisioning_at: options.phase === "acknowledged" ? now : null,
+        restoring_at: null,
+        running_at: options.phase === "acknowledged" ? now : null,
+        checkpointing_at: null,
+        last_heartbeat_at: acquiredAt,
+        settled_at: null,
+        created_at: acquiredAt,
+        updated_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("run_attempt_transitions")
+      .values({
+        id: globalThis.crypto.randomUUID(),
+        tenant_id: IDS.tenant,
+        run_id: accepted.runId,
+        attempt_id: attemptId,
+        from_state: null,
+        to_state: options.phase === "acknowledged" ? "running" : "claimed",
+        reason: "reconciliation_test_seed",
+        occurred_at: acquiredAt,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({
+        state: options.phase === "acknowledged" ? "running" : "claimed",
+        current_attempt_id: attemptId,
+        attempt_count: 1,
+        started_at: options.phase === "acknowledged" ? now : null,
+        row_version: sql<string>`${sql.ref("row_version")} + 1`,
+        updated_at: now,
+      })
+      .where("id", "=", accepted.runId)
       .executeTakeFirstOrThrow();
     await transaction
       .updateTable("commands")
@@ -594,6 +654,7 @@ describe.sequential("single-user durable turn intake API", () => {
     firstAccepted = response.json() as AcceptedTurnResource;
     expect(firstAccepted).toMatchObject({
       sessionId: session.sessionId,
+      runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       mailboxPosition: 1,
       state: "queued",
       replayed: false,
@@ -630,6 +691,34 @@ describe.sequential("single-user durable turn intake API", () => {
         turnId: firstAccepted.turnId,
         kind: "turn.execute",
       },
+    });
+    const queuedRuns = await http.inject({
+      method: "GET",
+      url: `/v1/sessions/${session.sessionId}/runs`,
+    });
+    expect(queuedRuns.statusCode).toBe(200);
+    expect(queuedRuns.json()).toMatchObject({
+      truncated: false,
+      runs: [
+        {
+          runId: firstAccepted.runId,
+          turnId: firstAccepted.turnId,
+          commandId: firstAccepted.commandId,
+          state: "queued",
+          attemptCount: 0,
+          attempts: [],
+        },
+      ],
+    });
+    const queuedRun = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${firstAccepted.runId}`,
+    });
+    expect(queuedRun.statusCode).toBe(200);
+    expect(queuedRun.json()).toMatchObject({
+      runId: firstAccepted.runId,
+      state: "queued",
+      attemptCount: 0,
     });
     expect(JSON.stringify(durable.outboxPayload)).not.toContain("fix the failing test");
   });
@@ -1118,6 +1207,41 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     expect(backend.records).toHaveLength(3);
     expect(JSON.stringify(backend.records)).not.toContain("retry without leaking this prompt");
+    const runResponse = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${accepted.runId}`,
+    });
+    expect(runResponse.statusCode).toBe(200);
+    const run = runResponse.json();
+    expect(run).toMatchObject({
+      runId: accepted.runId,
+      state: "completed",
+      attemptCount: 2,
+      attempts: [
+        {
+          attemptNumber: 1,
+          state: "failed",
+          failure: { code: "runner_busy", retryable: true },
+        },
+        {
+          attemptNumber: 2,
+          state: "completed",
+        },
+      ],
+    });
+    expect(
+      run.attempts.map((attempt: { transitions: Array<{ reason: string }> }) =>
+        attempt.transitions.map((transition) => transition.reason),
+      ),
+    ).toEqual([
+      ["outbox_claimed", "execution_retry_scheduled"],
+      [
+        "outbox_claimed",
+        "command_acknowledged",
+        "backend_settled_without_phase_signal",
+        "execution_completed",
+      ],
+    ]);
   });
 
   it("stops pre-ACK retry after the configured attempt limit", async () => {
@@ -1208,6 +1332,120 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(durable.commandCompletedAt).not.toBeNull();
     expect(durable.settledAt).not.toBeNull();
     expect(durable.publishedAt).not.toBeNull();
+  });
+
+  it("persists trusted Runner phases and the committed checkpoint revision", async () => {
+    const projectResponse = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: { name: "Durable Run Phase Fixture" },
+    });
+    expect(projectResponse.statusCode).toBe(201);
+    const phaseProject = projectResponse.json() as ProjectResource;
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${phaseProject.projectId}/sessions`,
+      payload: { workspaceId: phaseProject.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const phaseSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${phaseSession.sessionId}/turns`,
+      headers: { "idempotency-key": "durable-run-phases" },
+      payload: { prompt: "Persist every trusted execution phase." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+    await database
+      .insertInto("sandboxes")
+      .values({
+        id: IDS.phaseSandbox,
+        supervisor_id: "durable-phase-test",
+        boot_id: IDS.phaseSandboxBoot,
+        state: "ready",
+        max_concurrent_sessions: 1,
+        active_sessions: 0,
+      })
+      .executeTakeFirstOrThrow();
+    const leaseCoordinator = new SessionLeaseCoordinator({
+      database,
+      sandboxId: IDS.phaseSandbox,
+      leaseDurationMs: 120_000,
+    });
+    const observer = new PostgresRunAttemptPhaseObserver({ database });
+    const revision = "a".repeat(64);
+    const backend: TurnExecutionBackend = {
+      async execute(request, lifecycle) {
+        const lease = await leaseCoordinator.acquire(request);
+        await lifecycle.started(lease);
+        const command = parseControlToSupervisorMessage({
+          protocolVersion: 1,
+          messageId: globalThis.crypto.randomUUID(),
+          sentAt: new Date().toISOString(),
+          type: "command.turn.execute",
+          payload: {
+            commandId: request.commandId,
+            idempotencyKey: request.idempotencyKey,
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            workspaceId: request.workspaceId,
+            sessionId: request.sessionId,
+            runId: request.runId,
+            turnId: request.turnId,
+            attemptId: request.attemptId,
+            agentId: "root",
+            leaseId: lease.leaseId,
+            fencingToken: lease.fencingToken,
+            nextEventSeq: Number(request.nextEventSeq),
+            input: { kind: "prompt", text: request.input.prompt },
+            model: {
+              ...request.model,
+              credentialBindingVersion: Number(request.model.credentialBindingVersion),
+            },
+          },
+        });
+        if (command.type !== "command.turn.execute") throw new Error("Expected execute command");
+        await observer.transition(command, "restoring");
+        await observer.transition(command, "running");
+        await observer.transition(command, "checkpointing");
+        await observer.checkpointCommitted(command, revision);
+        return { stopReason: "phase_protocol_verified" };
+      },
+    };
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend,
+      leaseManager: leaseCoordinator,
+    });
+    const phaseResult = await dispatcher.dispatchNext();
+    expect(phaseResult.status, JSON.stringify(phaseResult)).toBe("completed");
+    const response = await http.inject({ method: "GET", url: `/v1/runs/${accepted.runId}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      state: "completed",
+      stopReason: "phase_protocol_verified",
+      attemptCount: 1,
+      attempts: [
+        {
+          state: "completed",
+          checkpointRevision: revision,
+          transitions: [
+            { fromState: null, toState: "claimed", reason: "outbox_claimed" },
+            { fromState: "claimed", toState: "provisioning", reason: "command_acknowledged" },
+            { fromState: "provisioning", toState: "restoring", reason: "trusted_runner_restoring" },
+            { fromState: "restoring", toState: "running", reason: "trusted_runner_running" },
+            {
+              fromState: "running",
+              toState: "checkpointing",
+              reason: "trusted_runner_checkpointing",
+            },
+            { fromState: "checkpointing", toState: "completed", reason: "execution_completed" },
+          ],
+        },
+      ],
+    });
   });
 
   it("records cancellation as too late when natural completion wins before its ACK", async () => {
@@ -1736,7 +1974,10 @@ describe.sequential("single-user durable turn intake API", () => {
             projectId: project.projectId,
             workspaceId: project.workspaceId,
             sessionId: piSession.sessionId,
+            runId: accepted.runId,
             turnId: accepted.turnId,
+            attemptId: "50000000-0000-4000-8000-000000000001",
+            attemptNumber: 1,
             commandId: accepted.commandId,
             idempotencyKey: "pinned-pi-fake-model",
             nextEventSeq: "1",

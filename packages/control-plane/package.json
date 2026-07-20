@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
-    "./model-credential-runtime": "./src/model-credential-runtime.ts"
+    "./model-credential-runtime": "./src/model-credential-runtime.ts",
+    "./run-attempt-runtime": "./src/run-attempt-runtime.ts"
   },
   "scripts": {
     "demo": "tsx src/demo.ts",

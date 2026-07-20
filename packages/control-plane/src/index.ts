@@ -258,3 +258,7 @@ export {
   type ControlPlaneStoreErrorCode,
   type ControlPlaneStoreOptions,
 } from "./control-plane-store.ts";
+export {
+  PostgresRunAttemptPhaseObserver,
+  type PostgresRunAttemptPhaseObserverOptions,
+} from "./run-attempt-runtime.ts";

@@ -27,6 +27,8 @@ import {
   type ConversationListResource,
   type ProjectResource,
   type ModelConfigurationResource,
+  type RunListResource,
+  type RunResource,
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
@@ -107,6 +109,26 @@ export class ControlPlaneController {
     const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).getConversation(sessionId);
+  }
+
+  @Get("sessions/:sessionId/runs")
+  async listRuns(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<RunListResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).listRuns(sessionId);
+  }
+
+  @Get("runs/:runId")
+  async getRun(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+  ): Promise<RunResource> {
+    const runId = parseUuidPathParameter(runIdValue, "runId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).getRun(runId);
   }
 
   @Post("projects/:projectId/sessions")

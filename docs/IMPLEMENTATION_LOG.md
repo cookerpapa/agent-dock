@@ -1438,3 +1438,31 @@
 - 下一步：实施 Milestone 2 的显式 Durable Run Protocol：独立 `Run/RunAttempt`、lease/heartbeat/fencing、HTTP 幂等键、
   terminal/checkpoint CAS 与故障注入。原因是 Sandbox 安全边界已经可替换且有真实证据，下一项最大系统风险不在增加工具，
   而在 Worker 崩溃、重复投递和旧 Attempt 延迟完成时，能否保证状态与 Workspace 不被覆盖。
+
+## 2026-07-20 — Durable Run / RunAttempt 执行协议
+
+- 目标与原因：把原先分散在 Turn、Command、outbox attempt 与 session lease 中的执行语义提升为产品可见、可追责的
+  `Run/RunAttempt`。同一个用户请求拥有稳定 Run；每次 at-least-once 调度领取拥有独立 Attempt，避免把重试次数、lease 或
+  Turn 错当成 Worker 执行身份。
+- 存储与 API：migration 009 新增 tenant-owned `runs`、immutable-numbered `run_attempts` 和 append-only
+  `run_attempt_transitions`，并安全回填旧 Turn。Turn/Command/outbox/Run 在接受事务中原子创建；`202` 响应包含 `runId`，新增
+  tenant-scoped Run list/detail API，Attempt 历史包含 claim/phase/heartbeat/assignment/checkpoint/failure/settlement，foreign UUID
+  与不存在资源保持相同 `404`。
+- 执行权：每次 outbox claim 创建新 Attempt；pre-ACK retry 先把旧 Attempt 标记 failed，再将 Run 返回 queued。Supervisor
+  wire 和 Provider assignment 携带独立 Run/Attempt UUID；session lease acquire 把 current Attempt 与 sandbox/lease/fence
+  原子绑定，heartbeat 在同一事务续租 Attempt claim 和 session lease。旧 Attempt、旧 lease 或旧 fence 的 phase、checkpoint、
+  terminal write 全部 fail closed。
+- 阶段与结算：trusted Runner 通过独立 observer 持久化 provisioning/restoring/running/checkpointing 和 checkpoint revision；
+  complete/fail/timeout/cancel 在锁定的 current Attempt 下与 Command/Turn/Session/outbox/lease 结算。Assignment reconciler 在
+  requeue/fail 前先终止旧 Attempt；checkpoint CAS 同时验证 Run、Attempt、lease、fence，上传成功但 CAS 失败的对象不会成为
+  current workspace。
+- 故障证据：测试覆盖重复领取与多 Attempt history、旧 claimant/旧 fence、checkpoint revision、lost assignment、取消竞态、
+  timeout/failure 分类、同 Session FIFO 和 tenant 隔离。全量复跑还发现 Supervisor 心跳 ACK 原来只容许一个 heartbeat interval；
+  PostgreSQL 短暂写竞争会误触发断线。现在串行 heartbeat 使用 `timeout - interval` 作为 ACK 窗口，连续五轮真实远程执行/取消
+  复跑稳定通过。
+- 仓库门禁：`npm run ci` 完整通过 production Web build、全部 workspace typecheck、306 passed/9 conditional skipped tests、
+  两个 zero-model-call Pi spikes 和 high-level dependency audit（0 vulnerabilities）。语义声明仍是
+  `at-least-once scheduling + idempotent/fenced commit`，不声称任意 shell、LLM 或外部副作用 exactly once。
+- 下一步：进入 Milestone 3，先把 settled checkpoint 从“一个 current pointer”扩展成 tenant-scoped immutable Workspace
+  version/history，再在这个版本协议上实现 compare/fork/rollback/archive 和 trusted GitHub App write-back；原因是 PR 交付必须
+  引用一个稳定、可审计、不会被旧 Attempt 覆盖的 Workspace 版本。

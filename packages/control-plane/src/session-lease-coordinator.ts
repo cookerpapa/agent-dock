@@ -240,6 +240,18 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
               .onRef("command.turn_id", "=", "turn.id")
               .on("command.kind", "=", "turn.execute"),
           )
+          .innerJoin("runs as run", (join) =>
+            join
+              .onRef("run.tenant_id", "=", "command.tenant_id")
+              .onRef("run.session_id", "=", "command.session_id")
+              .onRef("run.turn_id", "=", "command.turn_id")
+              .onRef("run.command_id", "=", "command.id"),
+          )
+          .innerJoin("run_attempts as run_attempt", (join) =>
+            join
+              .onRef("run_attempt.run_id", "=", "run.id")
+              .onRef("run_attempt.id", "=", "run.current_attempt_id"),
+          )
           .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
           .select([
             "lease.lease_id as leaseId",
@@ -249,11 +261,15 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
             "session_row.state as sessionState",
             "turn.state as turnState",
             "command.state as commandState",
+            "run_attempt.id as runAttemptId",
+            "run_attempt.state as runAttemptState",
+            "run_attempt.lease_id as runAttemptLeaseId",
+            "run_attempt.fencing_token as runAttemptFencingToken",
             "cursor.last_persisted_seq as persistedSequence",
           ])
           .where("lease.session_id", "=", observation.sessionId)
           .where("lease.sandbox_id", "=", this.#sandboxId)
-          .forUpdate(["lease", "session_row", "turn", "command", "cursor"])
+          .forUpdate(["lease", "session_row", "turn", "command", "run", "run_attempt", "cursor"])
           .executeTakeFirst();
         if (assignment === undefined) continue;
 
@@ -277,6 +293,14 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           !ACTIVE_SESSION_STATES.has(assignment.sessionState) ||
           !ACTIVE_TURN_STATES.has(assignment.turnState) ||
           assignment.commandState !== "acknowledged" ||
+          assignment.runAttemptLeaseId !== observation.leaseId ||
+          safeInteger(assignment.runAttemptFencingToken ?? -1, "run attempt fencing token") !==
+            observation.fencingToken ||
+          assignment.runAttemptState === "completed" ||
+          assignment.runAttemptState === "failed" ||
+          assignment.runAttemptState === "cancelled" ||
+          assignment.runAttemptState === "timed_out" ||
+          assignment.runAttemptState === "superseded" ||
           observation.lastAcknowledgedSeq > persistedSequence ||
           persistedSequence > observation.lastProducedSeq
         ) {
@@ -292,6 +316,18 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           .where("valid_until", ">", now)
           .executeTakeFirst();
         if (updated.numUpdatedRows !== 1n) continue;
+        const attemptHeartbeat = await transaction
+          .updateTable("run_attempts")
+          .set({
+            claim_expires_at: validUntil,
+            last_heartbeat_at: now,
+            updated_at: now,
+          })
+          .where("id", "=", assignment.runAttemptId)
+          .where("lease_id", "=", observation.leaseId)
+          .where("fencing_token", "=", String(observation.fencingToken))
+          .executeTakeFirst();
+        expectOne(attemptHeartbeat.numUpdatedRows, "renewing a run attempt heartbeat");
         renewals.push({
           sessionId: observation.sessionId,
           leaseId: observation.leaseId,
@@ -376,6 +412,68 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           "invalid_state",
           "Session is not ready for an execution lease",
           true,
+        );
+      }
+      if (this.#connectionGuard !== undefined) {
+        const guardedSandbox = await transaction
+          .selectFrom("sandboxes")
+          .select(["supervisor_id", "boot_id"])
+          .where("id", "=", this.#sandboxId)
+          .executeTakeFirst();
+        if (guardedSandbox === undefined) {
+          throw new SessionLeaseCoordinatorError(
+            "sandbox_unavailable",
+            "Execution sandbox is unavailable",
+            true,
+          );
+        }
+        await this.#currentRegisteredConnection(
+          transaction,
+          {
+            supervisorId: guardedSandbox.supervisor_id,
+            bootId: guardedSandbox.boot_id,
+          },
+          now,
+          true,
+        );
+      }
+
+      const runAttempt = await transaction
+        .selectFrom("runs as run")
+        .innerJoin("run_attempts as attempt", (join) =>
+          join
+            .onRef("attempt.run_id", "=", "run.id")
+            .onRef("attempt.id", "=", "run.current_attempt_id"),
+        )
+        .select([
+          "run.state as runState",
+          "run.current_attempt_id as currentAttemptId",
+          "attempt.state as attemptState",
+          "attempt.sandbox_id as sandboxId",
+          "attempt.lease_id as leaseId",
+          "attempt.fencing_token as fencingToken",
+        ])
+        .where("run.tenant_id", "=", request.tenantId)
+        .where("run.id", "=", request.runId)
+        .where("run.session_id", "=", request.sessionId)
+        .where("run.turn_id", "=", request.turnId)
+        .where("run.command_id", "=", request.commandId)
+        .where("attempt.id", "=", request.attemptId)
+        .forUpdate(["run", "attempt"])
+        .executeTakeFirst();
+      if (
+        runAttempt === undefined ||
+        runAttempt.currentAttemptId !== request.attemptId ||
+        runAttempt.runState !== "claimed" ||
+        runAttempt.attemptState !== "claimed" ||
+        runAttempt.sandboxId !== null ||
+        runAttempt.leaseId !== null ||
+        runAttempt.fencingToken !== null
+      ) {
+        throw new SessionLeaseCoordinatorError(
+          "stale_attempt",
+          "Run attempt is unavailable for execution",
+          false,
         );
       }
 
@@ -490,6 +588,24 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
         .executeTakeFirst();
       expectOne(sandboxUpdate.numUpdatedRows, "reserving sandbox capacity");
 
+      const attemptUpdate = await transaction
+        .updateTable("run_attempts")
+        .set({
+          sandbox_id: sandbox.id,
+          lease_id: leaseId,
+          fencing_token: fencingToken,
+          claim_expires_at: validUntil,
+          last_heartbeat_at: now,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", request.tenantId)
+        .where("run_id", "=", request.runId)
+        .where("id", "=", request.attemptId)
+        .where("state", "=", "claimed")
+        .where("sandbox_id", "is", null)
+        .executeTakeFirst();
+      expectOne(attemptUpdate.numUpdatedRows, "binding a run attempt lease");
+
       return { leaseId, fencingToken };
     });
   }
@@ -501,6 +617,15 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
     now: Date,
   ): Promise<void> {
     await this.#currentLease(transaction, request, acknowledgement, now, true);
+  }
+
+  async assertCurrentOrExpired(
+    transaction: Transaction<Database>,
+    request: TurnExecutionRequest,
+    acknowledgement: TurnExecutionAcknowledgement,
+    now: Date,
+  ): Promise<void> {
+    await this.#currentLease(transaction, request, acknowledgement, now, false);
   }
 
   async assertCurrentLease(
@@ -558,6 +683,10 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
       ) {
         throw new SessionLeaseCoordinatorError("stale_fence", "Execution lease is stale", false);
       }
+      await this.#currentRunAttempt(transaction, request, {
+        leaseId: lease.lease_id,
+        fencingToken,
+      });
       return { leaseId: lease.lease_id, fencingToken };
     });
   }
@@ -611,7 +740,46 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
     ) {
       throw new SessionLeaseCoordinatorError("stale_fence", "Execution lease is stale", false);
     }
+    await this.#currentRunAttempt(transaction, request, acknowledgement);
     return lease;
+  }
+
+  async #currentRunAttempt(
+    transaction: Transaction<Database>,
+    request: TurnExecutionRequest,
+    acknowledgement: TurnExecutionAcknowledgement,
+  ): Promise<void> {
+    const attempt = await transaction
+      .selectFrom("runs as run")
+      .innerJoin("run_attempts as attempt", (join) =>
+        join
+          .onRef("attempt.run_id", "=", "run.id")
+          .onRef("attempt.id", "=", "run.current_attempt_id"),
+      )
+      .select([
+        "run.current_attempt_id as currentAttemptId",
+        "attempt.sandbox_id as sandboxId",
+        "attempt.lease_id as leaseId",
+        "attempt.fencing_token as fencingToken",
+      ])
+      .where("run.tenant_id", "=", request.tenantId)
+      .where("run.id", "=", request.runId)
+      .where("run.session_id", "=", request.sessionId)
+      .where("run.turn_id", "=", request.turnId)
+      .where("run.command_id", "=", request.commandId)
+      .where("attempt.id", "=", request.attemptId)
+      .forUpdate(["run", "attempt"])
+      .executeTakeFirst();
+    if (
+      attempt === undefined ||
+      attempt.currentAttemptId !== request.attemptId ||
+      attempt.sandboxId !== this.#sandboxId ||
+      attempt.leaseId !== acknowledgement.leaseId ||
+      safeInteger(attempt.fencingToken ?? -1, "run attempt fencing token") !==
+        acknowledgement.fencingToken
+    ) {
+      throw new SessionLeaseCoordinatorError("stale_attempt", "Run attempt is stale", false);
+    }
   }
 
   async #releaseLeaseRow(

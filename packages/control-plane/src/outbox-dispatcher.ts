@@ -1,6 +1,9 @@
 import type { Database } from "@agent-dock/database";
 import {
+  isTerminalRunAttemptState,
   transitionCommand,
+  transitionRun,
+  transitionRunAttempt,
   transitionSession,
   transitionTurn,
   type CommandState,
@@ -10,10 +13,12 @@ import {
 import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
 import type { CancelTurnCommandMessage } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { randomUUID } from "node:crypto";
 import {
   validateSupervisorDispatchAffinity,
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
+import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -24,7 +29,10 @@ export type TurnExecutionRequest = {
   projectId: string;
   workspaceId: string;
   sessionId: string;
+  runId: string;
   turnId: string;
+  attemptId: string;
+  attemptNumber: number;
   commandId: string;
   idempotencyKey: string;
   nextEventSeq: string;
@@ -64,6 +72,12 @@ export interface TurnExecutionBackend {
 
 export interface TurnExecutionLeaseManager {
   assertCurrent(
+    transaction: Transaction<Database>,
+    request: TurnExecutionRequest,
+    acknowledgement: TurnExecutionAcknowledgement,
+    now: Date,
+  ): Promise<void>;
+  assertCurrentOrExpired?(
     transaction: Transaction<Database>,
     request: TurnExecutionRequest,
     acknowledgement: TurnExecutionAcknowledgement,
@@ -159,6 +173,8 @@ export type OutboxDispatcherOptions = {
   claimLeaseMs?: number;
   retryDelayMs?: number;
   maxAttempts?: number;
+  claimOwnerId?: string;
+  idGenerator?: () => string;
   leaseManager?: TurnExecutionLeaseManager;
   supervisorAffinity?: SupervisorDispatchAffinity;
 };
@@ -176,6 +192,10 @@ type LifecycleRows = {
   sessionState: SessionState;
   outboxAttempts: number;
   outboxPublishedAt: Date | string | null;
+  runState: import("@agent-dock/domain").RunState;
+  runVersion: string;
+  currentAttemptId: string | null;
+  runAttemptState: import("@agent-dock/domain").RunAttemptState;
 };
 
 type ExecutionFailure = {
@@ -219,6 +239,24 @@ function normalizeFailure(error: unknown): ExecutionFailure {
       quarantineSession: error.quarantineSession,
     };
   }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    "retryable" in error &&
+    typeof error.retryable === "boolean"
+  ) {
+    return {
+      code: error.code,
+      safeMessage: error instanceof Error ? error.message : "Execution backend failed",
+      retryable: error.retryable,
+      quarantineSession:
+        "quarantineSession" in error && typeof error.quarantineSession === "boolean"
+          ? error.quarantineSession
+          : false,
+    };
+  }
   return {
     code: "execution_backend_error",
     safeMessage: "Execution backend failed",
@@ -241,6 +279,8 @@ export class OutboxDispatcher {
   readonly #claimLeaseMs: number;
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
+  readonly #claimOwnerId: string;
+  readonly #idGenerator: () => string;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
 
@@ -258,6 +298,15 @@ export class OutboxDispatcher {
       "retryDelayMs",
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
+    this.#claimOwnerId = options.claimOwnerId ?? "control-plane";
+    if (
+      this.#claimOwnerId.length < 1 ||
+      this.#claimOwnerId.length > 256 ||
+      /[\u0000-\u001f\u007f]/.test(this.#claimOwnerId)
+    ) {
+      throw new TypeError("claimOwnerId is invalid");
+    }
+    this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#leaseManager = options.leaseManager;
     this.#supervisorAffinity =
       options.supervisorAffinity === undefined
@@ -434,6 +483,13 @@ export class OutboxDispatcher {
             .onRef("session_row.tenant_id", "=", "command.tenant_id")
             .onRef("session_row.id", "=", "command.session_id"),
         )
+        .innerJoin("runs as run", (join) =>
+          join
+            .onRef("run.tenant_id", "=", "command.tenant_id")
+            .onRef("run.session_id", "=", "command.session_id")
+            .onRef("run.turn_id", "=", "turn.id")
+            .onRef("run.command_id", "=", "command.id"),
+        )
         .innerJoin("tenant_runtime_policies as policy", "policy.tenant_id", "command.tenant_id")
         .select([
           "outbox.id as outboxId",
@@ -459,6 +515,11 @@ export class OutboxDispatcher {
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
+          "run.id as runId",
+          "run.state as runState",
+          "run.current_attempt_id as currentAttemptId",
+          "run.attempt_count as runAttemptCount",
+          "run.row_version as runVersion",
         ])
         .where(
           this.#tenantId === undefined
@@ -535,7 +596,7 @@ export class OutboxDispatcher {
         .orderBy("outbox.created_at", "asc")
         .orderBy("outbox.id", "asc")
         .limit(1)
-        .forUpdate(["outbox", "session_row", "policy"])
+        .forUpdate(["outbox", "session_row", "policy", "run"])
         .skipLocked()
         .executeTakeFirst();
 
@@ -562,6 +623,112 @@ export class OutboxDispatcher {
         );
       }
       safeMailboxPosition(row.mailboxPosition);
+
+      const attemptNumber = row.attempts + 1;
+      if (row.runAttemptCount !== row.attempts) {
+        throw new OutboxDispatcherInvariantError(
+          "Run attempt count does not match its durable outbox",
+        );
+      }
+      if (row.currentAttemptId !== null) {
+        const previous = await transaction
+          .selectFrom("run_attempts")
+          .select(["state"])
+          .where("tenant_id", "=", row.tenantId)
+          .where("run_id", "=", row.runId)
+          .where("id", "=", row.currentAttemptId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (previous === undefined) {
+          throw new OutboxDispatcherInvariantError("Current run attempt is missing");
+        }
+        if (!isTerminalRunAttemptState(previous.state)) {
+          const superseded = await transaction
+            .updateTable("run_attempts")
+            .set({ state: "superseded", settled_at: now, updated_at: now })
+            .where("tenant_id", "=", row.tenantId)
+            .where("run_id", "=", row.runId)
+            .where("id", "=", row.currentAttemptId)
+            .where("state", "=", previous.state)
+            .executeTakeFirst();
+          expectOne(superseded.numUpdatedRows, "superseding a stale run attempt");
+          await transaction
+            .insertInto("run_attempt_transitions")
+            .values({
+              id: this.#idGenerator(),
+              tenant_id: row.tenantId,
+              run_id: row.runId,
+              attempt_id: row.currentAttemptId,
+              from_state: previous.state,
+              to_state: "superseded",
+              reason: "outbox_claim_expired",
+              occurred_at: now,
+            })
+            .executeTakeFirstOrThrow();
+        }
+      }
+      const attemptId = this.#idGenerator();
+      await transaction
+        .insertInto("run_attempts")
+        .values({
+          id: attemptId,
+          tenant_id: row.tenantId,
+          run_id: row.runId,
+          attempt_number: attemptNumber,
+          state: "claimed",
+          claim_owner_id: this.#claimOwnerId,
+          claim_expires_at: leaseUntil,
+          sandbox_id: null,
+          lease_id: null,
+          fencing_token: null,
+          checkpoint_revision: null,
+          failure_code: null,
+          failure_message: null,
+          failure_retryable: null,
+          provisioning_at: null,
+          restoring_at: null,
+          running_at: null,
+          checkpointing_at: null,
+          last_heartbeat_at: null,
+          settled_at: null,
+          claimed_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("run_attempt_transitions")
+        .values({
+          id: this.#idGenerator(),
+          tenant_id: row.tenantId,
+          run_id: row.runId,
+          attempt_id: attemptId,
+          from_state: null,
+          to_state: "claimed",
+          reason: "outbox_claimed",
+          occurred_at: now,
+        })
+        .executeTakeFirstOrThrow();
+      const runUpdate = await transaction
+        .updateTable("runs")
+        .set({
+          state: "claimed",
+          current_attempt_id: attemptId,
+          attempt_count: attemptNumber,
+          stop_reason: null,
+          failure_code: null,
+          failure_message: null,
+          failure_retryable: null,
+          settled_at: null,
+          row_version: sql<string>`${sql.ref("row_version")} + 1`,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", row.tenantId)
+        .where("id", "=", row.runId)
+        .where("row_version", "=", row.runVersion)
+        .where("attempt_count", "=", row.runAttemptCount)
+        .executeTakeFirst();
+      expectOne(runUpdate.numUpdatedRows, "claiming a run");
 
       const policyUpdate = await transaction
         .updateTable("tenant_runtime_policies")
@@ -618,13 +785,16 @@ export class OutboxDispatcher {
 
       return {
         outboxId: row.outboxId,
-        attempt: row.attempts + 1,
+        attempt: attemptNumber,
         request: {
           tenantId: row.tenantId,
           projectId: row.projectId,
           workspaceId: row.workspaceId,
           sessionId: row.sessionId,
+          runId: row.runId,
           turnId: row.turnId,
+          attemptId,
+          attemptNumber,
           commandId: row.commandId,
           idempotencyKey: row.idempotencyKey,
           nextEventSeq: row.nextEventSeq,
@@ -662,6 +832,22 @@ export class OutboxDispatcher {
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
         await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
       }
+      await transitionCurrentRunAttempt(
+        transaction,
+        {
+          tenantId: claim.request.tenantId,
+          runId: claim.request.runId,
+          attemptId: claim.request.attemptId,
+        },
+        {
+          runState: "provisioning",
+          attemptState: "provisioning",
+          reason: "command_acknowledged",
+          now,
+          heartbeat: true,
+          transitionId: this.#idGenerator(),
+        },
+      );
 
       let nextSessionState: SessionState;
       if (rows.sessionState === "cold") {
@@ -744,6 +930,43 @@ export class OutboxDispatcher {
         );
       }
 
+      if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
+        await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
+      }
+      if (rows.runAttemptState === "provisioning" || rows.runAttemptState === "restoring") {
+        await transitionCurrentRunAttempt(
+          transaction,
+          {
+            tenantId: claim.request.tenantId,
+            runId: claim.request.runId,
+            attemptId: claim.request.attemptId,
+          },
+          {
+            runState: "running",
+            attemptState: "running",
+            reason: "backend_settled_without_phase_signal",
+            now,
+            transitionId: this.#idGenerator(),
+          },
+        );
+      }
+      await transitionCurrentRunAttempt(
+        transaction,
+        {
+          tenantId: claim.request.tenantId,
+          runId: claim.request.runId,
+          attemptId: claim.request.attemptId,
+        },
+        {
+          runState: "completed",
+          attemptState: "completed",
+          reason: "execution_completed",
+          now,
+          stopReason,
+          transitionId: this.#idGenerator(),
+        },
+      );
+
       const commandUpdate = await transaction
         .updateTable("commands")
         .set({
@@ -811,6 +1034,56 @@ export class OutboxDispatcher {
             "Only an unacknowledged command can return to the mailbox",
           );
         }
+        const attemptState = transitionRunAttempt(rows.runAttemptState, "failed");
+        const attemptUpdate = await transaction
+          .updateTable("run_attempts")
+          .set({
+            state: attemptState,
+            failure_code: failure.code,
+            failure_message: failure.safeMessage,
+            failure_retryable: failure.retryable,
+            settled_at: now,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", claim.request.tenantId)
+          .where("run_id", "=", claim.request.runId)
+          .where("id", "=", claim.request.attemptId)
+          .where("state", "=", rows.runAttemptState)
+          .executeTakeFirst();
+        expectOne(attemptUpdate.numUpdatedRows, "failing a retryable run attempt");
+        await transaction
+          .insertInto("run_attempt_transitions")
+          .values({
+            id: this.#idGenerator(),
+            tenant_id: claim.request.tenantId,
+            run_id: claim.request.runId,
+            attempt_id: claim.request.attemptId,
+            from_state: rows.runAttemptState,
+            to_state: attemptState,
+            reason: "execution_retry_scheduled",
+            occurred_at: now,
+          })
+          .executeTakeFirstOrThrow();
+        const runUpdate = await transaction
+          .updateTable("runs")
+          .set({
+            state: transitionRun(rows.runState, "queued"),
+            stop_reason: null,
+            failure_code: null,
+            failure_message: null,
+            failure_retryable: null,
+            settled_at: null,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", claim.request.tenantId)
+          .where("id", "=", claim.request.runId)
+          .where("current_attempt_id", "=", claim.request.attemptId)
+          .where("state", "=", rows.runState)
+          .where("row_version", "=", rows.runVersion)
+          .executeTakeFirst();
+        expectOne(runUpdate.numUpdatedRows, "requeueing a run");
+
         const commandUpdate = await transaction
           .updateTable("commands")
           .set({ state: transitionCommand(rows.commandState, "pending") })
@@ -855,6 +1128,40 @@ export class OutboxDispatcher {
           "Outbox publication does not match the reported execution phase",
         );
       }
+
+      if (started && this.#leaseManager !== undefined && acknowledgement !== undefined) {
+        if (this.#leaseManager.assertCurrentOrExpired !== undefined) {
+          await this.#leaseManager.assertCurrentOrExpired(
+            transaction,
+            claim.request,
+            acknowledgement,
+            now,
+          );
+        } else {
+          await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
+        }
+      }
+      const timedOut = /(?:^|_)timeout$/.test(failure.code) || failure.code === "pi_timeout";
+      await transitionCurrentRunAttempt(
+        transaction,
+        {
+          tenantId: claim.request.tenantId,
+          runId: claim.request.runId,
+          attemptId: claim.request.attemptId,
+        },
+        {
+          runState: timedOut ? "timed_out" : "failed",
+          attemptState: timedOut ? "timed_out" : "failed",
+          reason: timedOut ? "execution_timed_out" : "execution_failed",
+          now,
+          failure: {
+            code: failure.code,
+            message: failure.safeMessage,
+            retryable: failure.retryable,
+          },
+          transitionId: this.#idGenerator(),
+        },
+      );
 
       const commandUpdate = await transaction
         .updateTable("commands")
@@ -966,6 +1273,17 @@ export class OutboxDispatcher {
           .onRef("outbox.tenant_id", "=", "command.tenant_id")
           .on("outbox.id", "=", claim.outboxId),
       )
+      .innerJoin("runs as run", (join) =>
+        join
+          .onRef("run.tenant_id", "=", "command.tenant_id")
+          .onRef("run.turn_id", "=", "turn.id")
+          .onRef("run.command_id", "=", "command.id"),
+      )
+      .innerJoin("run_attempts as run_attempt", (join) =>
+        join
+          .onRef("run_attempt.run_id", "=", "run.id")
+          .onRef("run_attempt.id", "=", "run.current_attempt_id"),
+      )
       .select([
         "command.state as commandState",
         "command.failure_code as commandFailureCode",
@@ -973,21 +1291,49 @@ export class OutboxDispatcher {
         "session_row.state as sessionState",
         "outbox.attempts as outboxAttempts",
         "outbox.published_at as outboxPublishedAt",
+        "run.state as runState",
+        "run.row_version as runVersion",
+        "run.current_attempt_id as currentAttemptId",
+        "run_attempt.state as runAttemptState",
       ])
       .where("command.tenant_id", "=", claim.request.tenantId)
       .where("command.id", "=", claim.request.commandId)
       .where("turn.id", "=", claim.request.turnId)
       .where("session_row.id", "=", claim.request.sessionId)
-      .forUpdate(["command", "turn", "session_row", "outbox"])
+      .where("run.id", "=", claim.request.runId)
+      .where("run_attempt.id", "=", claim.request.attemptId)
+      .forUpdate(["command", "turn", "session_row", "outbox", "run", "run_attempt"])
       .executeTakeFirst();
 
     if (!row) {
+      const authority = await transaction
+        .selectFrom("outbox")
+        .innerJoin("runs as run", (join) =>
+          join
+            .onRef("run.tenant_id", "=", "outbox.tenant_id")
+            .on("run.id", "=", claim.request.runId),
+        )
+        .select(["outbox.attempts as outboxAttempts", "run.current_attempt_id as attemptId"])
+        .where("outbox.id", "=", claim.outboxId)
+        .where("outbox.tenant_id", "=", claim.request.tenantId)
+        .forUpdate(["outbox", "run"])
+        .executeTakeFirst();
+      if (
+        authority !== undefined &&
+        (authority.outboxAttempts !== claim.attempt ||
+          authority.attemptId !== claim.request.attemptId)
+      ) {
+        throw new OutboxDispatcherStaleClaimError("Run attempt was superseded");
+      }
       throw new OutboxDispatcherInvariantError("Claimed command lifecycle rows are missing");
     }
     if (row.outboxAttempts !== claim.attempt) {
       throw new OutboxDispatcherStaleClaimError(
         `Outbox claim attempt ${claim.attempt} was superseded by attempt ${row.outboxAttempts}`,
       );
+    }
+    if (row.currentAttemptId !== claim.request.attemptId) {
+      throw new OutboxDispatcherStaleClaimError("Run attempt was superseded");
     }
     return row;
   }

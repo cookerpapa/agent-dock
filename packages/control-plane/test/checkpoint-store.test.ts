@@ -31,6 +31,10 @@ const IDS = {
   lease2: "10000000-0000-4000-8000-000000000012",
   command1: "30000000-0000-4000-8000-000000000001",
   command2: "30000000-0000-4000-8000-000000000002",
+  run1: "40000000-0000-4000-8000-000000000001",
+  run2: "40000000-0000-4000-8000-000000000002",
+  attempt1: "50000000-0000-4000-8000-000000000001",
+  attempt2: "50000000-0000-4000-8000-000000000002",
 } as const;
 
 let pglite: PGlite;
@@ -51,7 +55,9 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
       projectId: IDS.project,
       workspaceId: IDS.workspace,
       sessionId: IDS.session,
+      runId: turn === 1 ? IDS.run1 : IDS.run2,
       turnId: turn === 1 ? IDS.turn1 : IDS.turn2,
+      attemptId: turn === 1 ? IDS.attempt1 : IDS.attempt2,
       agentId: "root",
       leaseId: turn === 1 ? IDS.lease1 : IDS.lease2,
       fencingToken: turn,
@@ -230,6 +236,38 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
     ])
     .execute();
   await targetDatabase
+    .insertInto("runs")
+    .values([
+      {
+        id: IDS.run1,
+        tenant_id: IDS.tenant,
+        project_id: IDS.project,
+        workspace_id: IDS.workspace,
+        session_id: IDS.session,
+        turn_id: IDS.turn1,
+        command_id: IDS.command1,
+        idempotency_key: "checkpoint-turn-1",
+        state: "running",
+        current_attempt_id: null,
+        attempt_count: 0,
+        started_at: new Date(),
+      },
+      {
+        id: IDS.run2,
+        tenant_id: IDS.tenant,
+        project_id: IDS.project,
+        workspace_id: IDS.workspace,
+        session_id: IDS.session,
+        turn_id: IDS.turn2,
+        command_id: IDS.command2,
+        idempotency_key: "checkpoint-turn-2",
+        state: "queued",
+        current_attempt_id: null,
+        attempt_count: 0,
+      },
+    ])
+    .execute();
+  await targetDatabase
     .insertInto("sandboxes")
     .values({
       id: IDS.sandbox,
@@ -249,6 +287,40 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       fencing_token: 1,
       valid_until: new Date(Date.now() + 60_000),
     })
+    .execute();
+  const claimedAt = new Date(Date.now() - 1_000);
+  await targetDatabase
+    .insertInto("run_attempts")
+    .values({
+      id: IDS.attempt1,
+      tenant_id: IDS.tenant,
+      run_id: IDS.run1,
+      attempt_number: 1,
+      state: "running",
+      claim_owner_id: "checkpoint-test",
+      claim_expires_at: new Date(Date.now() + 60_000),
+      sandbox_id: IDS.sandbox,
+      lease_id: IDS.lease1,
+      fencing_token: 1,
+      checkpoint_revision: null,
+      failure_code: null,
+      failure_message: null,
+      failure_retryable: null,
+      provisioning_at: claimedAt,
+      restoring_at: null,
+      running_at: claimedAt,
+      checkpointing_at: null,
+      last_heartbeat_at: claimedAt,
+      settled_at: null,
+      claimed_at: claimedAt,
+      created_at: claimedAt,
+      updated_at: claimedAt,
+    })
+    .execute();
+  await targetDatabase
+    .updateTable("runs")
+    .set({ current_attempt_id: IDS.attempt1, attempt_count: 1 })
+    .where("id", "=", IDS.run1)
     .execute();
 }
 
@@ -350,6 +422,55 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
           fencing_token: 2,
           valid_until: new Date(Date.now() + 60_000),
         })
+        .execute();
+      const claimedAt = new Date(Date.now() - 1_000);
+      await transaction
+        .insertInto("run_attempts")
+        .values({
+          id: IDS.attempt2,
+          tenant_id: IDS.tenant,
+          run_id: IDS.run2,
+          attempt_number: 1,
+          state: "running",
+          claim_owner_id: "checkpoint-test",
+          claim_expires_at: new Date(Date.now() + 60_000),
+          sandbox_id: IDS.sandbox,
+          lease_id: IDS.lease2,
+          fencing_token: 2,
+          checkpoint_revision: null,
+          failure_code: null,
+          failure_message: null,
+          failure_retryable: null,
+          provisioning_at: claimedAt,
+          restoring_at: claimedAt,
+          running_at: claimedAt,
+          checkpointing_at: null,
+          last_heartbeat_at: claimedAt,
+          settled_at: null,
+          claimed_at: claimedAt,
+          created_at: claimedAt,
+          updated_at: claimedAt,
+        })
+        .execute();
+      await transaction
+        .updateTable("runs")
+        .set({
+          state: "running",
+          current_attempt_id: IDS.attempt2,
+          attempt_count: 1,
+          started_at: claimedAt,
+        })
+        .where("id", "=", IDS.run2)
+        .execute();
+      await transaction
+        .updateTable("run_attempts")
+        .set({ state: "completed", settled_at: claimedAt, updated_at: claimedAt })
+        .where("id", "=", IDS.attempt1)
+        .execute();
+      await transaction
+        .updateTable("runs")
+        .set({ state: "completed", stop_reason: "stop", settled_at: claimedAt })
+        .where("id", "=", IDS.run1)
         .execute();
     });
 

@@ -113,6 +113,11 @@ extension-policy support would overstate the current boundary.
 - [x] Reject unimplemented Provider selection and unsupported non-deny-all Tool network policies
 - [x] Add a source-built Provider gate for cgroups, `/proc`/credential isolation, cross-tenant workspaces, network denial, symlink/output bounds, cancellation, and exact cleanup
 - [x] Publish the threat model, Provider contract, network matrix, and Run lifecycle
+- [x] Add explicit tenant-scoped Run and immutable-numbered RunAttempt resources
+- [x] Carry independent run/attempt identity through Supervisor and Provider boundaries
+- [x] Persist claim, restore, run, checkpoint, heartbeat, failure, cancellation, and terminal history
+- [x] Fence checkpoint and terminal writes by the current Attempt plus lease authority
+- [x] Reconcile lost assignments by terminating the old Attempt before requeue/failure
 - [ ] Isolate and policy-gate user/project Pi extensions before enabling discovery in production
 - [ ] Replace shared-kernel Docker with gVisor/Kata/Firecracker or a managed sandbox before a hostile public-SaaS claim
 

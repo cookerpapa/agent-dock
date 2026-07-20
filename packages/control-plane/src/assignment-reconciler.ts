@@ -3,6 +3,8 @@ import {
   transitionAgentNode,
   transitionApproval,
   transitionCommand,
+  transitionRun,
+  transitionRunAttempt,
   transitionSandbox,
   transitionSession,
   transitionTurn,
@@ -13,6 +15,8 @@ import type {
   SandboxRuntimeAssignment,
 } from "@agent-dock/sandbox-supervisor";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { randomUUID } from "node:crypto";
+import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =
@@ -443,6 +447,33 @@ export class AssignmentReconciler {
       .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${executeCommand.id}`)
       .forUpdate()
       .executeTakeFirstOrThrow();
+    const run = await transaction
+      .selectFrom("runs as run")
+      .innerJoin("run_attempts as attempt", (join) =>
+        join
+          .onRef("attempt.run_id", "=", "run.id")
+          .onRef("attempt.id", "=", "run.current_attempt_id"),
+      )
+      .select([
+        "run.id as runId",
+        "run.state as runState",
+        "run.row_version as runVersion",
+        "run.current_attempt_id as attemptId",
+        "attempt.state as attemptState",
+      ])
+      .where("run.tenant_id", "=", session.tenant_id)
+      .where("run.session_id", "=", candidate.sessionId)
+      .where("run.turn_id", "=", turn.id)
+      .where("run.command_id", "=", executeCommand.id)
+      .forUpdate(["run", "attempt"])
+      .executeTakeFirstOrThrow();
+    if (run.attemptId === null) {
+      throw new AssignmentReconcilerError(
+        "assignment_invariant",
+        "Active assignment had no current run attempt",
+        false,
+      );
+    }
 
     const safelyUnacknowledged =
       executeCommand.state === "dispatched" &&
@@ -451,6 +482,53 @@ export class AssignmentReconciler {
       executeOutbox.published_at === null &&
       commands.length === 1;
     if (safelyUnacknowledged) {
+      const failedAttemptState = transitionRunAttempt(run.attemptState, "failed");
+      await transaction
+        .updateTable("run_attempts")
+        .set({
+          state: failedAttemptState,
+          failure_code: ASSIGNMENT_LOST,
+          failure_message: ASSIGNMENT_LOST_MESSAGE,
+          failure_retryable: true,
+          settled_at: now,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", session.tenant_id)
+        .where("run_id", "=", run.runId)
+        .where("id", "=", run.attemptId)
+        .where("state", "=", run.attemptState)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("run_attempt_transitions")
+        .values({
+          id: randomUUID(),
+          tenant_id: session.tenant_id,
+          run_id: run.runId,
+          attempt_id: run.attemptId,
+          from_state: run.attemptState,
+          to_state: failedAttemptState,
+          reason: "assignment_lost_before_ack",
+          occurred_at: now,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("runs")
+        .set({
+          state: transitionRun(run.runState, "queued"),
+          stop_reason: null,
+          failure_code: null,
+          failure_message: null,
+          failure_retryable: null,
+          settled_at: null,
+          row_version: sql<string>`${sql.ref("row_version")} + 1`,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", session.tenant_id)
+        .where("id", "=", run.runId)
+        .where("current_attempt_id", "=", run.attemptId)
+        .where("state", "=", run.runState)
+        .where("row_version", "=", run.runVersion)
+        .executeTakeFirstOrThrow();
       await transaction
         .updateTable("commands")
         .set({
@@ -483,6 +561,26 @@ export class AssignmentReconciler {
         false,
       );
     }
+    await transitionCurrentRunAttempt(
+      transaction,
+      {
+        tenantId: session.tenant_id,
+        runId: run.runId,
+        attemptId: run.attemptId,
+      },
+      {
+        runState: "failed",
+        attemptState: "failed",
+        reason: "assignment_lost_after_ack",
+        now,
+        failure: {
+          code: ASSIGNMENT_LOST,
+          message: ASSIGNMENT_LOST_MESSAGE,
+          retryable: false,
+        },
+        transitionId: randomUUID(),
+      },
+    );
     for (const command of commands) {
       if (!NONTERMINAL_COMMAND_STATES.has(command.state)) continue;
       await transaction

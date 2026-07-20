@@ -16,6 +16,8 @@ import type {
   CreateProjectRequest,
   CreateTurnCancellationRequest,
   ProjectResource,
+  RunListResource,
+  RunResource,
   SessionResource,
   WorkspaceSourceResource,
 } from "@agent-dock/protocol";
@@ -48,6 +50,7 @@ export class ControlPlaneStoreError extends Error {
 }
 
 type AcceptedTurnRow = {
+  runId: string;
   commandId: string;
   mailboxPosition: string;
   turnId: string;
@@ -168,6 +171,7 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
 const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
 const MAX_CONVERSATION_SUMMARIES = 100;
 const MAX_CONVERSATION_TURNS = 200;
+const MAX_SESSION_RUNS = 100;
 const TURN_ACCEPTING_SESSION_STATES = new Set<SessionState>([
   "cold",
   "idle",
@@ -225,6 +229,7 @@ function acceptedTurnResource(
     );
   }
   return {
+    runId: row.runId,
     turnId: row.turnId,
     sessionId: row.sessionId,
     commandId: row.commandId,
@@ -522,7 +527,14 @@ export class ControlPlaneStore {
           .onRef("turn.tenant_id", "=", "command.tenant_id")
           .onRef("turn.id", "=", "command.turn_id"),
       )
+      .innerJoin("runs as run", (join) =>
+        join
+          .onRef("run.tenant_id", "=", "command.tenant_id")
+          .onRef("run.turn_id", "=", "turn.id")
+          .onRef("run.command_id", "=", "command.id"),
+      )
       .select([
+        "run.id as runId",
         "turn.id as turnId",
         "turn.input_kind as inputKind",
         "turn.input_text as prompt",
@@ -549,6 +561,7 @@ export class ControlPlaneStore {
         );
       }
       return {
+        runId: row.runId,
         turnId: row.turnId,
         commandId: row.commandId,
         mailboxPosition: positiveSafeInteger(row.mailboxPosition, "Conversation mailbox position"),
@@ -607,6 +620,37 @@ export class ControlPlaneStore {
     };
   }
 
+  async listRuns(sessionId: string): Promise<RunListResource> {
+    const session = await this.#database
+      .selectFrom("sessions")
+      .select("id")
+      .where("tenant_id", "=", this.#tenantId)
+      .where("id", "=", sessionId)
+      .executeTakeFirst();
+    if (session === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Session was not found");
+    }
+    const rows = await this.#database
+      .selectFrom("runs")
+      .select("id")
+      .where("tenant_id", "=", this.#tenantId)
+      .where("session_id", "=", sessionId)
+      .orderBy("created_at", "desc")
+      .orderBy("id", "desc")
+      .limit(MAX_SESSION_RUNS + 1)
+      .execute();
+    return {
+      runs: await Promise.all(
+        rows.slice(0, MAX_SESSION_RUNS).map((row) => this.#loadRunResource(row.id)),
+      ),
+      truncated: rows.length > MAX_SESSION_RUNS,
+    };
+  }
+
+  async getRun(runId: string): Promise<RunResource> {
+    return this.#loadRunResource(runId);
+  }
+
   async acceptTurn(
     sessionId: string,
     idempotencyKey: string,
@@ -633,6 +677,148 @@ export class ControlPlaneStore {
       }
       return acceptedTurnResource(concurrentWinner, fingerprint, true);
     }
+  }
+
+  async #loadRunResource(runId: string): Promise<RunResource> {
+    const run = await this.#database
+      .selectFrom("runs")
+      .selectAll()
+      .where("tenant_id", "=", this.#tenantId)
+      .where("id", "=", runId)
+      .executeTakeFirst();
+    if (run === undefined) throw new ControlPlaneStoreError("not_found", "Run was not found");
+
+    const attempts = await this.#database
+      .selectFrom("run_attempts")
+      .selectAll()
+      .where("tenant_id", "=", this.#tenantId)
+      .where("run_id", "=", run.id)
+      .orderBy("attempt_number", "asc")
+      .limit(32)
+      .execute();
+    const transitions = await this.#database
+      .selectFrom("run_attempt_transitions")
+      .select(["attempt_id", "from_state", "to_state", "reason", "occurred_at"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("run_id", "=", run.id)
+      .orderBy("occurred_at", "asc")
+      .orderBy("id", "asc")
+      .execute();
+    const optionalTimestamp = (value: Date | string | null): string | undefined =>
+      value === null ? undefined : isoTimestamp(value);
+    const transitionRank: Record<string, number> = {
+      claimed: 1,
+      provisioning: 2,
+      restoring: 3,
+      running: 4,
+      checkpointing: 5,
+      cancel_requested: 6,
+      completed: 7,
+      failed: 7,
+      cancelled: 7,
+      timed_out: 7,
+      superseded: 7,
+    };
+    const failure = (
+      code: string | null,
+      message: string | null,
+      retryable: boolean | null,
+    ): { code: string; message?: string; retryable: boolean } | undefined => {
+      if (code === null && message === null && retryable === null) return undefined;
+      if (code === null || retryable === null) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Run failure metadata is incomplete",
+        );
+      }
+      return { code, ...(message === null ? {} : { message }), retryable };
+    };
+
+    return {
+      runId: run.id,
+      projectId: run.project_id,
+      workspaceId: run.workspace_id,
+      sessionId: run.session_id,
+      turnId: run.turn_id,
+      commandId: run.command_id,
+      state: run.state,
+      attemptCount: nonNegativeSafeInteger(run.attempt_count, "Run attempt count"),
+      ...(run.current_attempt_id === null ? {} : { currentAttemptId: run.current_attempt_id }),
+      ...(run.stop_reason === null ? {} : { stopReason: run.stop_reason }),
+      ...(failure(run.failure_code, run.failure_message, run.failure_retryable) === undefined
+        ? {}
+        : { failure: failure(run.failure_code, run.failure_message, run.failure_retryable)! }),
+      queuedAt: isoTimestamp(run.queued_at),
+      ...(optionalTimestamp(run.started_at) === undefined
+        ? {}
+        : { startedAt: optionalTimestamp(run.started_at)! }),
+      ...(optionalTimestamp(run.settled_at) === undefined
+        ? {}
+        : { settledAt: optionalTimestamp(run.settled_at)! }),
+      updatedAt: isoTimestamp(run.updated_at),
+      attempts: attempts.map((attempt) => {
+        const attemptFailure = failure(
+          attempt.failure_code,
+          attempt.failure_message,
+          attempt.failure_retryable,
+        );
+        return {
+          attemptId: attempt.id,
+          attemptNumber: positiveSafeInteger(String(attempt.attempt_number), "Run attempt number"),
+          state: attempt.state,
+          claimOwnerId: attempt.claim_owner_id,
+          claimExpiresAt: isoTimestamp(attempt.claim_expires_at),
+          ...(attempt.sandbox_id === null ? {} : { sandboxId: attempt.sandbox_id }),
+          ...(attempt.lease_id === null ? {} : { leaseId: attempt.lease_id }),
+          ...(attempt.fencing_token === null
+            ? {}
+            : {
+                fencingToken: positiveSafeInteger(
+                  attempt.fencing_token,
+                  "Run attempt fencing token",
+                ),
+              }),
+          ...(attempt.checkpoint_revision === null
+            ? {}
+            : { checkpointRevision: attempt.checkpoint_revision }),
+          ...(attemptFailure === undefined ? {} : { failure: attemptFailure }),
+          claimedAt: isoTimestamp(attempt.claimed_at),
+          ...(optionalTimestamp(attempt.provisioning_at) === undefined
+            ? {}
+            : { provisioningAt: optionalTimestamp(attempt.provisioning_at)! }),
+          ...(optionalTimestamp(attempt.restoring_at) === undefined
+            ? {}
+            : { restoringAt: optionalTimestamp(attempt.restoring_at)! }),
+          ...(optionalTimestamp(attempt.running_at) === undefined
+            ? {}
+            : { runningAt: optionalTimestamp(attempt.running_at)! }),
+          ...(optionalTimestamp(attempt.checkpointing_at) === undefined
+            ? {}
+            : { checkpointingAt: optionalTimestamp(attempt.checkpointing_at)! }),
+          ...(optionalTimestamp(attempt.last_heartbeat_at) === undefined
+            ? {}
+            : { lastHeartbeatAt: optionalTimestamp(attempt.last_heartbeat_at)! }),
+          ...(optionalTimestamp(attempt.settled_at) === undefined
+            ? {}
+            : { settledAt: optionalTimestamp(attempt.settled_at)! }),
+          transitions: transitions
+            .filter((transition) => transition.attempt_id === attempt.id)
+            .sort((left, right) => {
+              const time =
+                new Date(left.occurred_at).valueOf() - new Date(right.occurred_at).valueOf();
+              return time !== 0
+                ? time
+                : transitionRank[left.to_state]! - transitionRank[right.to_state]!;
+            })
+            .map((transition) => ({
+              fromState: transition.from_state,
+              toState: transition.to_state,
+              reason: transition.reason,
+              occurredAt: isoTimestamp(transition.occurred_at),
+            })),
+        };
+      }),
+    };
   }
 
   async acceptTurnCancellation(
@@ -684,11 +870,19 @@ export class ControlPlaneStore {
     const turnId = this.#idGenerator();
     const commandId = this.#idGenerator();
     const outboxId = this.#idGenerator();
+    const runId = this.#idGenerator();
     return this.#database.transaction().execute(async (transaction) => {
       const policy = await this.#lockTenantPolicy(transaction);
       const session = await transaction
         .selectFrom("sessions")
-        .select(["id", "desired_model_profile_id", "state", "next_mailbox_position"])
+        .select([
+          "id",
+          "project_id",
+          "workspace_id",
+          "desired_model_profile_id",
+          "state",
+          "next_mailbox_position",
+        ])
         .where("tenant_id", "=", this.#tenantId)
         .where("id", "=", sessionId)
         .forUpdate()
@@ -778,6 +972,29 @@ export class ControlPlaneStore {
         .executeTakeFirstOrThrow();
 
       await transaction
+        .insertInto("runs")
+        .values({
+          id: runId,
+          tenant_id: this.#tenantId,
+          project_id: session.project_id,
+          workspace_id: session.workspace_id,
+          session_id: session.id,
+          turn_id: turnId,
+          command_id: command.id,
+          idempotency_key: idempotencyKey,
+          state: "queued",
+          current_attempt_id: null,
+          attempt_count: 0,
+          stop_reason: null,
+          failure_code: null,
+          failure_message: null,
+          failure_retryable: null,
+          started_at: null,
+          settled_at: null,
+        })
+        .executeTakeFirstOrThrow();
+
+      await transaction
         .insertInto("outbox")
         .values({
           id: outboxId,
@@ -817,6 +1034,7 @@ export class ControlPlaneStore {
 
       return acceptedTurnResource(
         {
+          runId,
           commandId: command.id,
           mailboxPosition: String(mailboxPosition),
           turnId,
@@ -837,7 +1055,14 @@ export class ControlPlaneStore {
     const row = await this.#database
       .selectFrom("commands as command")
       .innerJoin("turns as turn", "turn.id", "command.turn_id")
+      .innerJoin("runs as run", (join) =>
+        join
+          .onRef("run.tenant_id", "=", "command.tenant_id")
+          .onRef("run.turn_id", "=", "turn.id")
+          .onRef("run.command_id", "=", "command.id"),
+      )
       .select([
+        "run.id as runId",
         "command.id as commandId",
         "command.mailbox_position as mailboxPosition",
         "command.created_at as commandCreatedAt",

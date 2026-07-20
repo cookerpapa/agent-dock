@@ -9,6 +9,9 @@ export {
   type CredentialBindingStatus,
   type CredentialKind,
   type Database,
+  type RunAttemptTable,
+  type RunAttemptTransitionTable,
+  type RunTable,
   type SandboxRetirementReason,
   type SandboxRetirementState,
   type SupervisorConnectionCloseReason,
@@ -21,6 +24,7 @@ export {
 
 export {
   downDurableEventDelivery,
+  downDurableRunsAndAttempts,
   downExplicitSessionMailbox,
   downEncryptedTenantModelCredentials,
   downControlledWorkspaceSources,
@@ -29,6 +33,7 @@ export {
   downSupervisorConnectionHealth,
   migrationProvider,
   upDurableEventDelivery,
+  upDurableRunsAndAttempts,
   upExplicitSessionMailbox,
   upEncryptedTenantModelCredentials,
   upControlledWorkspaceSources,

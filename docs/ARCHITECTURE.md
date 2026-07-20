@@ -68,8 +68,11 @@ claims one due command using `FOR UPDATE SKIP LOCKED`, locks the owning session,
 and enforces lowest-nonterminal-`mailbox_position` order. Timestamp and UUID
 order are not correctness inputs. The claim transaction
 moves `pending/queued` to `dispatched/dispatching` and gives the outbox record a
-bounded reclaim time. The incremented attempt acts as a local fencing token, so
-a superseded pre-ACK claimant cannot later start. An execution backend must
+bounded reclaim time. Milestone 2 supersedes the original delivery-counter
+authority with an explicit `RunAttempt`: each claim creates a new immutable
+Attempt UUID and number, while the stable `Run` remains bound to the accepted
+Turn and idempotency key. The outbox count must agree with the Run attempt
+count, but it is no longer used as the runtime identity. An execution backend must
 persist `started()` before doing work; this advances the command to
 `acknowledged`, the turn to `running`, and the session to `running`, and marks
 the outbox delivery published. A retryable pre-ACK failure returns the command
@@ -199,6 +202,21 @@ identity without exposing a Docker client or provider SDK. The current
 snapshot, effective inspection, stop/destroy, inventory, and confirmed orphan
 cleanup. Unknown configured providers fail startup. `docker_gvisor` and managed
 microVM providers remain planned until they pass the same executable contract.
+
+ADR-0031 adds the durable execution vocabulary above those boundaries. Public
+tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
+records claim owner/expiry, phase timestamps, heartbeat, sandbox/lease/fence,
+safe failure classification, checkpoint revision, and append-only Attempt
+transitions. The trusted Runner advances `provisioning -> restoring -> running
+-> checkpointing`; a pre-ACK retry terminates the old Attempt and returns only
+the Run to `queued`. Lease acquisition binds the exact current Attempt to a
+sandbox, lease, and fencing token, while shared heartbeat renewal extends both
+lease and Attempt authority transactionally. Checkpoint and terminal writes
+must match current Run/Attempt plus lease/fence. Assignment reconciliation
+settles the old Attempt before requeue/failure, so a delayed worker cannot
+overwrite a newer checkpoint or terminal state. The supported claim remains
+at-least-once scheduling with fenced/idempotent commits, not exactly-once model
+or shell execution.
 
 ### TypeScript sandbox supervisor
 

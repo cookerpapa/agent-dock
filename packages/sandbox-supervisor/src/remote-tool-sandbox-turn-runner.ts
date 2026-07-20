@@ -35,6 +35,7 @@ import {
   validateSandboxRuntimeIdentity,
   type SandboxRuntimeIdentity,
 } from "./docker-sandbox-assignment-inventory.ts";
+import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 
 export interface ToolSandboxManagerBoundary {
   create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse>;
@@ -63,6 +64,7 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   modelRuntimeLeaseResolver?: TrustedModelRuntimeLeaseResolver;
   workspaceSeedResolver?: DockerSandboxWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
+  runAttemptPhaseObserver?: RunAttemptPhaseObserver;
   trustedExtensionPath?: string;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
@@ -79,7 +81,7 @@ function assignment(
     commandId: command.payload.commandId,
     sessionId: command.payload.sessionId,
     turnId: command.payload.turnId,
-    attemptId: command.payload.leaseId,
+    attemptId: command.payload.attemptId,
     leaseId: command.payload.leaseId,
     fencingToken: command.payload.fencingToken,
   };
@@ -122,6 +124,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #modelRuntimeLeaseResolver: TrustedModelRuntimeLeaseResolver | undefined;
   readonly #workspaceSeedResolver: DockerSandboxWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
+  readonly #runAttemptPhaseObserver: RunAttemptPhaseObserver | undefined;
   readonly #trustedExtensionPath: string;
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
@@ -135,6 +138,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#modelRuntimeLeaseResolver = options.modelRuntimeLeaseResolver;
     this.#workspaceSeedResolver = options.workspaceSeedResolver;
     this.#checkpointStore = options.checkpointStore;
+    this.#runAttemptPhaseObserver = options.runAttemptPhaseObserver;
     this.#trustedExtensionPath = resolve(
       options.trustedExtensionPath ?? defaultTrustedExtensionPath(),
     );
@@ -166,6 +170,17 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           error,
           "checkpoint_load_failed",
           "The settled checkpoint could not be loaded",
+        );
+      }
+    }
+    if (loadedCheckpoint !== undefined && this.#runAttemptPhaseObserver !== undefined) {
+      try {
+        await this.#runAttemptPhaseObserver.transition(command, "restoring");
+      } catch (error: unknown) {
+        throw safePiError(
+          error,
+          "run_phase_persist_failed",
+          "Run restore phase could not be persisted",
         );
       }
     }
@@ -249,6 +264,17 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         fakeModel = new FakeModelServer({ defaultScenario: scenario });
         await fakeModel.start();
       }
+      if (this.#runAttemptPhaseObserver !== undefined) {
+        try {
+          await this.#runAttemptPhaseObserver.transition(command, "running");
+        } catch (error: unknown) {
+          throw safePiError(
+            error,
+            "run_phase_persist_failed",
+            "Run execution phase could not be persisted",
+          );
+        }
+      }
 
       const runner = new PiRpcTurnRunner({
         resolveWorkspaceDirectory: () => this.#trustedWorkspaceDirectory,
@@ -294,15 +320,31 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               true,
             );
           }
+          if (this.#runAttemptPhaseObserver !== undefined) {
+            try {
+              await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
+            } catch (error: unknown) {
+              throw safePiError(
+                error,
+                "run_phase_persist_failed",
+                "Run checkpoint phase could not be persisted",
+              );
+            }
+          }
           const captured = await this.#manager.capture(activation.activationId, toolAssignment);
           const workspace = decodeWorkspaceSnapshotBlob(captured.workspace);
           capturedPatch = captured.workspacePatch;
           if (this.#checkpointStore !== undefined) {
             try {
-              await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
-                piSession,
-                workspace,
-              });
+              const saved = await this.#checkpointStore.save(
+                command,
+                loadedCheckpoint?.revision ?? null,
+                {
+                  piSession,
+                  workspace,
+                },
+              );
+              await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
             } catch (error: unknown) {
               throw safePiError(
                 error,

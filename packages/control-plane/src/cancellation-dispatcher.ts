@@ -22,6 +22,7 @@ import {
   validateSupervisorDispatchAffinity,
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
+import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -135,6 +136,9 @@ type CancellationLifecycleRows = {
   sessionState: SessionState;
   outboxAttempts: number;
   outboxPublishedAt: Date | string | null;
+  runState: import("@agent-dock/domain").RunState;
+  runAttemptState: import("@agent-dock/domain").RunAttemptState;
+  currentAttemptId: string | null;
 };
 
 type CancellationFailure = {
@@ -357,6 +361,18 @@ export class CancellationDispatcher {
             .onRef("session_row.tenant_id", "=", "cancellation.tenant_id")
             .onRef("session_row.id", "=", "cancellation.session_id"),
         )
+        .innerJoin("runs as run", (join) =>
+          join
+            .onRef("run.tenant_id", "=", "target.tenant_id")
+            .onRef("run.session_id", "=", "target.session_id")
+            .onRef("run.turn_id", "=", "target.turn_id")
+            .onRef("run.command_id", "=", "target.id"),
+        )
+        .innerJoin("run_attempts as run_attempt", (join) =>
+          join
+            .onRef("run_attempt.run_id", "=", "run.id")
+            .onRef("run_attempt.id", "=", "run.current_attempt_id"),
+        )
         .select([
           "outbox.tenant_id as tenantId",
           "outbox.id as outboxId",
@@ -381,6 +397,9 @@ export class CancellationDispatcher {
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
+          "run.id as runId",
+          "run_attempt.id as runAttemptId",
+          "run_attempt.attempt_number as runAttemptNumber",
         ])
         .where(
           this.#tenantId === undefined
@@ -413,7 +432,15 @@ export class CancellationDispatcher {
         .orderBy("outbox.created_at", "asc")
         .orderBy("outbox.id", "asc")
         .limit(1)
-        .forUpdate(["outbox", "cancellation", "target", "turn", "session_row"])
+        .forUpdate([
+          "outbox",
+          "cancellation",
+          "target",
+          "turn",
+          "session_row",
+          "run",
+          "run_attempt",
+        ])
         .skipLocked()
         .executeTakeFirst();
       if (row === undefined) return undefined;
@@ -478,7 +505,10 @@ export class CancellationDispatcher {
             projectId: row.projectId,
             workspaceId: row.workspaceId,
             sessionId: row.sessionId,
+            runId: row.runId,
             turnId: row.turnId,
+            attemptId: row.runAttemptId,
+            attemptNumber: row.runAttemptNumber,
             commandId: row.targetCommandId,
             idempotencyKey: row.targetIdempotencyKey,
             nextEventSeq: row.nextEventSeq,
@@ -540,6 +570,21 @@ export class CancellationDispatcher {
         claim.request.target,
         acknowledgement,
         now,
+      );
+      await transitionCurrentRunAttempt(
+        transaction,
+        {
+          tenantId: claim.request.target.tenantId,
+          runId: claim.request.target.runId,
+          attemptId: claim.request.target.attemptId,
+        },
+        {
+          runState: "cancel_requested",
+          attemptState: "cancel_requested",
+          reason: `cancellation_${claim.request.reason}`,
+          now,
+          heartbeat: true,
+        },
       );
 
       const cancellationUpdate = await transaction
@@ -631,6 +676,28 @@ export class CancellationDispatcher {
           "Cancellation termination confirmation lacks its durable terminal event",
         );
       }
+
+      await this.#leaseManager.assertCurrent(
+        transaction,
+        claim.request.target,
+        acknowledgement,
+        now,
+      );
+      await transitionCurrentRunAttempt(
+        transaction,
+        {
+          tenantId: claim.request.target.tenantId,
+          runId: claim.request.target.runId,
+          attemptId: claim.request.target.attemptId,
+        },
+        {
+          runState: "cancelled",
+          attemptState: "cancelled",
+          reason: "cancellation_confirmed",
+          now,
+          stopReason: "cancelled",
+        },
+      );
 
       const cancellationUpdate = await transaction
         .updateTable("commands")
@@ -766,6 +833,25 @@ export class CancellationDispatcher {
             "A started cancellation must own the cancelling lifecycle",
           );
         }
+        await transitionCurrentRunAttempt(
+          transaction,
+          {
+            tenantId: claim.request.target.tenantId,
+            runId: claim.request.target.runId,
+            attemptId: claim.request.target.attemptId,
+          },
+          {
+            runState: "failed",
+            attemptState: "failed",
+            reason: "cancellation_failed",
+            now,
+            failure: {
+              code: failure.code,
+              message: failure.safeMessage,
+              retryable: false,
+            },
+          },
+        );
         const targetUpdate = await transaction
           .updateTable("commands")
           .set({
@@ -871,6 +957,18 @@ export class CancellationDispatcher {
           .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
           .on("outbox.id", "=", claim.outboxId),
       )
+      .innerJoin("runs as run", (join) =>
+        join
+          .onRef("run.tenant_id", "=", "target.tenant_id")
+          .onRef("run.session_id", "=", "target.session_id")
+          .onRef("run.turn_id", "=", "target.turn_id")
+          .onRef("run.command_id", "=", "target.id"),
+      )
+      .innerJoin("run_attempts as run_attempt", (join) =>
+        join
+          .onRef("run_attempt.run_id", "=", "run.id")
+          .onRef("run_attempt.id", "=", "run.current_attempt_id"),
+      )
       .select([
         "cancellation.state as cancellationCommandState",
         "target.state as targetCommandState",
@@ -878,13 +976,18 @@ export class CancellationDispatcher {
         "session_row.state as sessionState",
         "outbox.attempts as outboxAttempts",
         "outbox.published_at as outboxPublishedAt",
+        "run.state as runState",
+        "run.current_attempt_id as currentAttemptId",
+        "run_attempt.state as runAttemptState",
       ])
       .where("cancellation.tenant_id", "=", claim.request.target.tenantId)
       .where("cancellation.id", "=", claim.request.commandId)
       .where("target.id", "=", claim.request.target.commandId)
       .where("turn.id", "=", claim.request.target.turnId)
       .where("session_row.id", "=", claim.request.target.sessionId)
-      .forUpdate(["cancellation", "target", "turn", "session_row", "outbox"])
+      .where("run.id", "=", claim.request.target.runId)
+      .where("run_attempt.id", "=", claim.request.target.attemptId)
+      .forUpdate(["cancellation", "target", "turn", "session_row", "outbox", "run", "run_attempt"])
       .executeTakeFirst();
     if (row === undefined) {
       throw new CancellationDispatcherInvariantError(
@@ -895,6 +998,9 @@ export class CancellationDispatcher {
       throw new CancellationDispatcherStaleClaimError(
         `Cancellation claim attempt ${claim.attempt} was superseded by attempt ${row.outboxAttempts}`,
       );
+    }
+    if (row.currentAttemptId !== claim.request.target.attemptId) {
+      throw new CancellationDispatcherStaleClaimError("Cancellation target attempt was superseded");
     }
     return row;
   }

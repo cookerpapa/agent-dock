@@ -39,10 +39,9 @@ internal provider seam without claiming that an untested provider works.
 
 5. Every handle is immutable and bound to provider, activation, tenant,
    session, turn, and attempt identity plus the complete existing
-   supervisor/boot/sandbox/command/lease/fence assignment. In the current
-   control protocol the execution lease UUID is also the attempt UUID; a future
-   durable `RunAttempt` row may replace that mapping without changing the
-   provider contract.
+   supervisor/boot/sandbox/command/lease/fence assignment. ADR-0031 replaced the
+   initial lease-as-attempt alias with independent durable `Run` and
+   `RunAttempt` UUIDs without changing the provider contract.
 6. The Manager chooses a versioned `SandboxPolicy`; callers cannot submit
    images, mounts, runtime classes, networks, resource limits, or host paths.
 7. Network policy is a closed union with `deny_all`, GitHub import, package

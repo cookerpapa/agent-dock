@@ -248,6 +248,71 @@ async function createAcceptedTurn(): Promise<{
   const accepted = await store.acceptTurn(session.sessionId, `turn-${uuid()}`, {
     prompt: "keep this assignment alive",
   });
+  const attemptId = uuid();
+  const claimedAt = new Date("2026-07-01T00:00:00.000Z");
+  await database.transaction().execute(async (transaction) => {
+    await transaction
+      .insertInto("run_attempts")
+      .values({
+        id: attemptId,
+        tenant_id: tenantId,
+        run_id: accepted.runId,
+        attempt_number: 1,
+        state: "claimed",
+        claim_owner_id: "supervisor-connection-test",
+        claim_expires_at: new Date("2026-08-01T00:00:00.000Z"),
+        sandbox_id: null,
+        lease_id: null,
+        fencing_token: null,
+        checkpoint_revision: null,
+        failure_code: null,
+        failure_message: null,
+        failure_retryable: null,
+        provisioning_at: null,
+        restoring_at: null,
+        running_at: null,
+        checkpointing_at: null,
+        last_heartbeat_at: null,
+        settled_at: null,
+        claimed_at: claimedAt,
+        created_at: claimedAt,
+        updated_at: claimedAt,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("run_attempt_transitions")
+      .values({
+        id: uuid(),
+        tenant_id: tenantId,
+        run_id: accepted.runId,
+        attempt_id: attemptId,
+        from_state: null,
+        to_state: "claimed",
+        reason: "supervisor_connection_test_claim",
+        occurred_at: claimedAt,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({ state: "claimed", current_attempt_id: attemptId, attempt_count: 1 })
+      .where("id", "=", accepted.runId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("commands")
+      .set({ state: "dispatched", dispatched_at: claimedAt })
+      .where("id", "=", accepted.commandId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("turns")
+      .set({ state: "dispatching" })
+      .where("id", "=", accepted.turnId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("outbox")
+      .set({ attempts: 1 })
+      .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${accepted.commandId}`)
+      .executeTakeFirstOrThrow();
+  });
   return {
     sessionId: session.sessionId,
     turnId: accepted.turnId,
@@ -257,7 +322,10 @@ async function createAcceptedTurn(): Promise<{
       projectId: project.projectId,
       workspaceId: project.workspaceId,
       sessionId: session.sessionId,
+      runId: accepted.runId,
       turnId: accepted.turnId,
+      attemptId,
+      attemptNumber: 1,
       commandId: accepted.commandId,
       idempotencyKey: `execute-${accepted.commandId}`,
       nextEventSeq: "1",
@@ -304,6 +372,27 @@ async function markAssignmentAcknowledged(options: {
       .updateTable("outbox")
       .set({ attempts: 1, published_at: options.now })
       .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${options.commandId}`)
+      .executeTakeFirstOrThrow();
+    const run = await transaction
+      .selectFrom("runs")
+      .select(["id", "current_attempt_id"])
+      .where("command_id", "=", options.commandId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("run_attempts")
+      .set({
+        state: "running",
+        provisioning_at: options.now,
+        running_at: options.now,
+        last_heartbeat_at: options.now,
+        updated_at: options.now,
+      })
+      .where("id", "=", run.current_attempt_id!)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({ state: "running", started_at: options.now, updated_at: options.now })
+      .where("id", "=", run.id)
       .executeTakeFirstOrThrow();
   });
 }

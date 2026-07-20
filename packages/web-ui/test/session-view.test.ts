@@ -37,6 +37,7 @@ const session: SessionResource = {
 const accepted: AcceptedTurnResource = {
   turnId: TURN_ID,
   sessionId: SESSION_ID,
+  runId: "50000000-0000-4000-8000-000000000002",
   commandId: "60000000-0000-4000-8000-000000000001",
   mailboxPosition: 1,
   state: "queued",
@@ -111,6 +112,7 @@ describe("session transcript reducer", () => {
       turns: [
         {
           turnId: TURN_ID,
+          runId: accepted.runId,
           commandId: accepted.commandId,
           mailboxPosition: 8,
           prompt: "Historical private prompt",

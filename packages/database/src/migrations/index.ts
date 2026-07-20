@@ -7,6 +7,7 @@ import * as supervisorBootCredentials from "./005_supervisor_boot_credentials.ts
 import * as privateMultiTenantIdentity from "./006_private_multi_tenant_identity.ts";
 import * as encryptedTenantModelCredentials from "./007_encrypted_tenant_model_credentials.ts";
 import * as controlledWorkspaceSources from "./008_controlled_workspace_sources.ts";
+import * as durableRunsAndAttempts from "./009_durable_runs_and_attempts.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -19,6 +20,7 @@ export const migrationProvider: MigrationProvider = {
       "006_private_multi_tenant_identity": privateMultiTenantIdentity,
       "007_encrypted_tenant_model_credentials": encryptedTenantModelCredentials,
       "008_controlled_workspace_sources": controlledWorkspaceSources,
+      "009_durable_runs_and_attempts": durableRunsAndAttempts,
     };
   },
 };
@@ -62,3 +64,8 @@ export {
   down as downControlledWorkspaceSources,
   up as upControlledWorkspaceSources,
 } from "./008_controlled_workspace_sources.ts";
+
+export {
+  down as downDurableRunsAndAttempts,
+  up as upDurableRunsAndAttempts,
+} from "./009_durable_runs_and_attempts.ts";

@@ -48,14 +48,45 @@ export const CommandStateSchema = Type.Union([
   Type.Literal("failed"),
 ]);
 
+export const RunStateSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("claimed"),
+  Type.Literal("provisioning"),
+  Type.Literal("restoring"),
+  Type.Literal("running"),
+  Type.Literal("checkpointing"),
+  Type.Literal("cancel_requested"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("timed_out"),
+  Type.Literal("superseded"),
+]);
+
+export const RunAttemptStateSchema = Type.Union([
+  Type.Literal("claimed"),
+  Type.Literal("provisioning"),
+  Type.Literal("restoring"),
+  Type.Literal("running"),
+  Type.Literal("checkpointing"),
+  Type.Literal("cancel_requested"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("timed_out"),
+  Type.Literal("superseded"),
+]);
+
 export type TurnState = Static<typeof TurnStateSchema>;
 export type SandboxState = Static<typeof SandboxStateSchema>;
 export type ApprovalState = Static<typeof ApprovalStateSchema>;
 export type AgentNodeState = Static<typeof AgentNodeStateSchema>;
 export type CommandState = Static<typeof CommandStateSchema>;
+export type RunState = Static<typeof RunStateSchema>;
+export type RunAttemptState = Static<typeof RunAttemptStateSchema>;
 
 export type DomainEntityKind =
-  "session" | "turn" | "sandbox" | "approval" | "agent_node" | "command";
+  "session" | "turn" | "sandbox" | "approval" | "agent_node" | "command" | "run" | "run_attempt";
 
 type TransitionTable<State extends string> = Readonly<Record<State, readonly State[]>>;
 
@@ -115,6 +146,43 @@ const commandTransitions = {
   completed: [],
   failed: [],
 } as const satisfies TransitionTable<CommandState>;
+
+const runTransitions = {
+  queued: ["claimed", "cancel_requested", "failed"],
+  claimed: ["queued", "provisioning", "cancel_requested", "failed", "timed_out", "superseded"],
+  provisioning: [
+    "queued",
+    "restoring",
+    "running",
+    "cancel_requested",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  restoring: ["queued", "running", "cancel_requested", "failed", "timed_out", "superseded"],
+  running: ["checkpointing", "cancel_requested", "completed", "failed", "timed_out", "superseded"],
+  checkpointing: ["cancel_requested", "completed", "failed", "timed_out", "superseded"],
+  cancel_requested: ["cancelled", "failed", "timed_out", "superseded"],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  timed_out: [],
+  superseded: [],
+} as const satisfies TransitionTable<RunState>;
+
+const runAttemptTransitions = {
+  claimed: ["provisioning", "failed", "timed_out", "superseded"],
+  provisioning: ["restoring", "running", "cancel_requested", "failed", "timed_out", "superseded"],
+  restoring: ["running", "cancel_requested", "failed", "timed_out", "superseded"],
+  running: ["checkpointing", "cancel_requested", "completed", "failed", "timed_out", "superseded"],
+  checkpointing: ["cancel_requested", "completed", "failed", "timed_out", "superseded"],
+  cancel_requested: ["cancelled", "failed", "timed_out", "superseded"],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  timed_out: [],
+  superseded: [],
+} as const satisfies TransitionTable<RunAttemptState>;
 
 export class DomainTransitionError extends Error {
   readonly entityKind: DomainEntityKind;
@@ -198,6 +266,22 @@ export function transitionCommand(from: CommandState, to: CommandState): Command
   return transition("command", commandTransitions, from, to);
 }
 
+export function canTransitionRun(from: RunState, to: RunState): boolean {
+  return canTransition(runTransitions, from, to);
+}
+
+export function transitionRun(from: RunState, to: RunState): RunState {
+  return transition("run", runTransitions, from, to);
+}
+
+export function canTransitionRunAttempt(from: RunAttemptState, to: RunAttemptState): boolean {
+  return canTransition(runAttemptTransitions, from, to);
+}
+
+export function transitionRunAttempt(from: RunAttemptState, to: RunAttemptState): RunAttemptState {
+  return transition("run_attempt", runAttemptTransitions, from, to);
+}
+
 export function isTerminalTurnState(state: TurnState): boolean {
   return state === "completed" || state === "failed" || state === "cancelled";
 }
@@ -216,4 +300,24 @@ export function isTerminalAgentNodeState(state: AgentNodeState): boolean {
 
 export function isTerminalCommandState(state: CommandState): boolean {
   return state === "completed" || state === "failed";
+}
+
+export function isTerminalRunState(state: RunState): boolean {
+  return (
+    state === "completed" ||
+    state === "failed" ||
+    state === "cancelled" ||
+    state === "timed_out" ||
+    state === "superseded"
+  );
+}
+
+export function isTerminalRunAttemptState(state: RunAttemptState): boolean {
+  return (
+    state === "completed" ||
+    state === "failed" ||
+    state === "cancelled" ||
+    state === "timed_out" ||
+    state === "superseded"
+  );
 }

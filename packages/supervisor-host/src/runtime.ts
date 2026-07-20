@@ -6,6 +6,7 @@ import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
 } from "@agent-dock/control-plane/model-credential-runtime";
+import { PostgresRunAttemptPhaseObserver } from "@agent-dock/control-plane/run-attempt-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
@@ -274,6 +275,9 @@ export class SupervisorHostRuntime {
         runtimeIdentity: identity,
         trustedWorkspaceDirectory: this.#config.trustedWorkspaceDirectory,
         checkpointStore,
+        runAttemptPhaseObserver: new PostgresRunAttemptPhaseObserver({
+          database: this.#database,
+        }),
         scenario: resolveProductionSandboxScenario,
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
         workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),

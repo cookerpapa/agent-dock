@@ -33,7 +33,9 @@ const CommandIdentityProperties = {
   projectId: OpaqueIdSchema,
   workspaceId: OpaqueIdSchema,
   sessionId: OpaqueIdSchema,
+  runId: UuidSchema,
   turnId: OpaqueIdSchema,
+  attemptId: UuidSchema,
   agentId: OpaqueIdSchema,
   ...LeaseProperties,
 };

@@ -138,7 +138,10 @@ function executionRequest(seed: SeededTurn): TurnExecutionRequest {
     projectId: seed.project.projectId,
     workspaceId: seed.project.workspaceId,
     sessionId: seed.session.sessionId,
+    runId: seed.accepted.runId,
     turnId: seed.accepted.turnId,
+    attemptId: "50000000-0000-4000-8000-000000000001",
+    attemptNumber: 1,
     commandId: seed.accepted.commandId,
     idempotencyKey: `direct-${seed.accepted.commandId}`,
     nextEventSeq: "1",
@@ -152,6 +155,75 @@ function executionRequest(seed: SeededTurn): TurnExecutionRequest {
       credentialBindingVersion: "1",
     },
   };
+}
+
+async function claimForDirectExecution(seed: SeededTurn): Promise<TurnExecutionRequest> {
+  const request = executionRequest(seed);
+  const now = new Date();
+  await database.transaction().execute(async (transaction) => {
+    await transaction
+      .insertInto("run_attempts")
+      .values({
+        id: request.attemptId,
+        tenant_id: request.tenantId,
+        run_id: request.runId,
+        attempt_number: 1,
+        state: "claimed",
+        claim_owner_id: "remote-direct-test",
+        claim_expires_at: new Date(now.valueOf() + 60_000),
+        sandbox_id: null,
+        lease_id: null,
+        fencing_token: null,
+        checkpoint_revision: null,
+        failure_code: null,
+        failure_message: null,
+        failure_retryable: null,
+        provisioning_at: null,
+        restoring_at: null,
+        running_at: null,
+        checkpointing_at: null,
+        last_heartbeat_at: null,
+        settled_at: null,
+        claimed_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("run_attempt_transitions")
+      .values({
+        id: uuid(),
+        tenant_id: request.tenantId,
+        run_id: request.runId,
+        attempt_id: request.attemptId,
+        from_state: null,
+        to_state: "claimed",
+        reason: "remote_direct_test_claim",
+        occurred_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({ state: "claimed", current_attempt_id: request.attemptId, attempt_count: 1 })
+      .where("id", "=", request.runId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("commands")
+      .set({ state: "dispatched", dispatched_at: now })
+      .where("id", "=", request.commandId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("turns")
+      .set({ state: "dispatching" })
+      .where("id", "=", request.turnId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("outbox")
+      .set({ attempts: 1, available_at: new Date(now.valueOf() + 30_000) })
+      .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${request.commandId}`)
+      .executeTakeFirstOrThrow();
+  });
+  return request;
 }
 
 function emptyInventory() {
@@ -873,6 +945,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
 
   it("releases a prepared command and its lease when durable acknowledgement fails", async () => {
     const seeded = await seedTurn();
+    const directRequest = await claimForDirectExecution(seeded);
     let runCalls = 0;
     const network = await startNetwork(seeded, {
       async run() {
@@ -882,7 +955,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
     });
     try {
       await expect(
-        network.backend.execute(executionRequest(seeded), {
+        network.backend.execute(directRequest, {
           async started() {
             throw new Error("simulated durable transaction failure");
           },

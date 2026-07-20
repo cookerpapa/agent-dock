@@ -464,6 +464,18 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
           .onRef("command_row.session_id", "=", "turn_row.session_id")
           .onRef("command_row.turn_id", "=", "turn_row.id"),
       )
+      .innerJoin("runs as run_row", (join) =>
+        join
+          .onRef("run_row.tenant_id", "=", "command_row.tenant_id")
+          .onRef("run_row.session_id", "=", "command_row.session_id")
+          .onRef("run_row.turn_id", "=", "command_row.turn_id")
+          .onRef("run_row.command_id", "=", "command_row.id"),
+      )
+      .innerJoin("run_attempts as attempt_row", (join) =>
+        join
+          .onRef("attempt_row.run_id", "=", "run_row.id")
+          .onRef("attempt_row.id", "=", "run_row.current_attempt_id"),
+      )
       .select([
         "session_row.tenant_id as tenantId",
         "session_row.project_id as projectId",
@@ -476,13 +488,24 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         "turn_row.state as turnState",
         "command_row.kind as commandKind",
         "command_row.state as commandState",
+        "run_row.id as runId",
+        "run_row.state as runState",
+        "run_row.current_attempt_id as currentAttemptId",
+        "attempt_row.id as attemptId",
+        "attempt_row.state as attemptState",
+        "attempt_row.sandbox_id as attemptSandboxId",
+        "attempt_row.lease_id as attemptLeaseId",
+        "attempt_row.fencing_token as attemptFencingToken",
         "lease.lease_id as leaseId",
+        "lease.sandbox_id as leaseSandboxId",
         "lease.fencing_token as fencingToken",
         "lease.valid_until as validUntil",
       ])
       .where("session_row.id", "=", command.payload.sessionId)
       .where("turn_row.id", "=", command.payload.turnId)
-      .where("command_row.id", "=", command.payload.commandId);
+      .where("command_row.id", "=", command.payload.commandId)
+      .where("run_row.id", "=", command.payload.runId)
+      .where("attempt_row.id", "=", command.payload.attemptId);
     if (lock) query = query.forUpdate("session_row");
     const row = await query.executeTakeFirst();
     if (
@@ -497,6 +520,20 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       row.turnState !== "running" ||
       row.commandKind !== "turn.execute" ||
       row.commandState !== "acknowledged" ||
+      row.runId !== command.payload.runId ||
+      row.currentAttemptId !== command.payload.attemptId ||
+      row.attemptId !== command.payload.attemptId ||
+      row.attemptLeaseId !== command.payload.leaseId ||
+      row.attemptSandboxId !== row.leaseSandboxId ||
+      Number(row.attemptFencingToken) !== command.payload.fencingToken ||
+      (row.runState !== "provisioning" &&
+        row.runState !== "restoring" &&
+        row.runState !== "running" &&
+        row.runState !== "checkpointing") ||
+      (row.attemptState !== "provisioning" &&
+        row.attemptState !== "restoring" &&
+        row.attemptState !== "running" &&
+        row.attemptState !== "checkpointing") ||
       new Date(row.validUntil).valueOf() <= now.valueOf()
     ) {
       throw new SandboxCheckpointStoreError(

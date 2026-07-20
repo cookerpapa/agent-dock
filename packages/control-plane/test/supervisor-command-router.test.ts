@@ -19,6 +19,8 @@ const IDS = {
   sandbox: "10000000-0000-4000-8000-000000000007",
   event: "10000000-0000-4000-8000-000000000008",
   eventMessage: "10000000-0000-4000-8000-000000000009",
+  run: "10000000-0000-4000-8000-000000000010",
+  attempt: "10000000-0000-4000-8000-000000000011",
 } as const;
 
 const SENT_AT = "2026-07-19T07:00:00.000Z";
@@ -36,7 +38,9 @@ function command(): ExecuteTurnCommandMessage {
       projectId: "project-1",
       workspaceId: "workspace-1",
       sessionId: "session-1",
+      runId: IDS.run,
       turnId: "turn-1",
+      attemptId: IDS.attempt,
       agentId: "root",
       leaseId: IDS.lease,
       fencingToken: 1,

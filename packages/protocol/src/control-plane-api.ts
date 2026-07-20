@@ -241,6 +241,7 @@ export const ConversationSessionResourceSchema = Type.Object(
 
 export const ConversationTurnResourceSchema = Type.Object(
   {
+    runId: UuidSchema,
     turnId: UuidSchema,
     commandId: UuidSchema,
     mailboxPosition: PositiveSafeIntegerSchema,
@@ -272,6 +273,7 @@ export const AcceptTurnRequestSchema = Type.Object(
 
 export const AcceptedTurnResourceSchema = Type.Object(
   {
+    runId: UuidSchema,
     turnId: UuidSchema,
     sessionId: UuidSchema,
     commandId: UuidSchema,
@@ -279,6 +281,108 @@ export const AcceptedTurnResourceSchema = Type.Object(
     state: Type.Literal("queued"),
     acceptedAt: UtcTimestampSchema,
     replayed: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const RunStateSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("claimed"),
+  Type.Literal("provisioning"),
+  Type.Literal("restoring"),
+  Type.Literal("running"),
+  Type.Literal("checkpointing"),
+  Type.Literal("cancel_requested"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("timed_out"),
+  Type.Literal("superseded"),
+]);
+
+export const RunAttemptStateSchema = Type.Union([
+  Type.Literal("claimed"),
+  Type.Literal("provisioning"),
+  Type.Literal("restoring"),
+  Type.Literal("running"),
+  Type.Literal("checkpointing"),
+  Type.Literal("cancel_requested"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("timed_out"),
+  Type.Literal("superseded"),
+]);
+
+const RunFailureResourceSchema = Type.Object(
+  {
+    code: Type.String({ minLength: 1, maxLength: 128 }),
+    message: Type.Optional(Type.String({ minLength: 1, maxLength: 1_024 })),
+    retryable: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const RunAttemptTransitionResourceSchema = Type.Object(
+  {
+    fromState: Type.Union([RunAttemptStateSchema, Type.Null()]),
+    toState: RunAttemptStateSchema,
+    reason: Type.String({ minLength: 1, maxLength: 256 }),
+    occurredAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const RunAttemptResourceSchema = Type.Object(
+  {
+    attemptId: UuidSchema,
+    attemptNumber: PositiveSafeIntegerSchema,
+    state: RunAttemptStateSchema,
+    claimOwnerId: Type.String({ minLength: 1, maxLength: 256 }),
+    claimExpiresAt: UtcTimestampSchema,
+    sandboxId: Type.Optional(UuidSchema),
+    leaseId: Type.Optional(UuidSchema),
+    fencingToken: Type.Optional(PositiveSafeIntegerSchema),
+    checkpointRevision: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+    failure: Type.Optional(RunFailureResourceSchema),
+    claimedAt: UtcTimestampSchema,
+    provisioningAt: Type.Optional(UtcTimestampSchema),
+    restoringAt: Type.Optional(UtcTimestampSchema),
+    runningAt: Type.Optional(UtcTimestampSchema),
+    checkpointingAt: Type.Optional(UtcTimestampSchema),
+    lastHeartbeatAt: Type.Optional(UtcTimestampSchema),
+    settledAt: Type.Optional(UtcTimestampSchema),
+    transitions: Type.Array(RunAttemptTransitionResourceSchema, { maxItems: 128 }),
+  },
+  { additionalProperties: false },
+);
+
+export const RunResourceSchema = Type.Object(
+  {
+    runId: UuidSchema,
+    projectId: UuidSchema,
+    workspaceId: UuidSchema,
+    sessionId: UuidSchema,
+    turnId: UuidSchema,
+    commandId: UuidSchema,
+    state: RunStateSchema,
+    attemptCount: NonNegativeSafeIntegerSchema,
+    currentAttemptId: Type.Optional(UuidSchema),
+    stopReason: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    failure: Type.Optional(RunFailureResourceSchema),
+    queuedAt: UtcTimestampSchema,
+    startedAt: Type.Optional(UtcTimestampSchema),
+    settledAt: Type.Optional(UtcTimestampSchema),
+    updatedAt: UtcTimestampSchema,
+    attempts: Type.Array(RunAttemptResourceSchema, { maxItems: 32 }),
+  },
+  { additionalProperties: false },
+);
+
+export const RunListResourceSchema = Type.Object(
+  {
+    runs: Type.Array(RunResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -342,6 +446,12 @@ export type ConversationTurnResource = Static<typeof ConversationTurnResourceSch
 export type ConversationDetailResource = Static<typeof ConversationDetailResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
+export type RunState = Static<typeof RunStateSchema>;
+export type RunAttemptState = Static<typeof RunAttemptStateSchema>;
+export type RunAttemptTransitionResource = Static<typeof RunAttemptTransitionResourceSchema>;
+export type RunAttemptResource = Static<typeof RunAttemptResourceSchema>;
+export type RunResource = Static<typeof RunResourceSchema>;
+export type RunListResource = Static<typeof RunListResourceSchema>;
 export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellationRequestSchema>;
 export type AcceptedTurnCancellationResource = Static<
   typeof AcceptedTurnCancellationResourceSchema
@@ -485,6 +595,14 @@ export function parseConversationDetailResource(value: unknown): ConversationDet
 
 export function parseAcceptedTurnResource(value: unknown): AcceptedTurnResource {
   return parseSchema(AcceptedTurnResourceSchema, value, "accepted-turn resource");
+}
+
+export function parseRunResource(value: unknown): RunResource {
+  return parseSchema(RunResourceSchema, value, "run resource");
+}
+
+export function parseRunListResource(value: unknown): RunListResource {
+  return parseSchema(RunListResourceSchema, value, "run list resource");
 }
 
 export function parseAcceptedTurnCancellationResource(

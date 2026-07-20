@@ -31,6 +31,8 @@ an interface does not make them supported.
 
 ### Milestone 2: durable Run protocol
 
+Status: complete.
+
 Build on the existing command/outbox/lease/fence implementation and make the
 product vocabulary explicit:
 
@@ -40,6 +42,12 @@ product vocabulary explicit:
 - atomic terminal settlement and checkpoint revision CAS evidence;
 - fault injection for duplicate delivery, old-worker completion, database/object
   store interruption, and cancel/complete races.
+
+Implemented as ADR-0031. Public tenant-scoped Run APIs expose bounded Attempt
+history; the supervisor wire and Provider assignment carry independent Run and
+Attempt UUIDs; lease acquisition/heartbeat, trusted Runner phases, checkpoint
+revision, cancellation, reconciliation, terminal settlement, and stale-claim
+tests all use the same current-attempt fence.
 
 At-least-once scheduling plus fenced/idempotent commits remains the claim. The
 system must not claim exactly-once arbitrary shell execution.
