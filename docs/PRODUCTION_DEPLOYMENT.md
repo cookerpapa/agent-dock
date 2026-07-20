@@ -144,8 +144,9 @@ Only the Web service publishes a host port, bound to loopback by default:
 
 ```text
 browser -> web/Caddy -> authenticated /v1 API -> control-plane
-                                      |              |
+       GitHub webhook -> HMAC Gateway |              |
                                       |              +-> PostgreSQL
+                                      |              +-> GitHub Gateway RPC
                                       |              +-> outbound Supervisor WebSocket
                                       v
                               trusted Pi Agent Runner -> MinIO checkpoints
@@ -159,6 +160,14 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                                    |
                                              Tool Sandbox (`network=none`)
 ```
+
+The optional `github-gateway` is the only service that reads the GitHub App
+private key or obtains installation tokens. It joins only `github-control` and
+provider egress; it has no database, MinIO, model, Manager, or Docker authority.
+The Control Plane and trusted Runner call it with a service credential, while
+the Tool Sandbox is not attached to its network. With the default empty App ID
+and placeholder key, liveness remains healthy but private import, installation
+registration, and PR delivery return `github_app_not_configured`.
 
 The database, object store, Supervisor management endpoint, boot-provisioning
 route, readiness endpoints, and outbound Supervisor transport stay on isolated

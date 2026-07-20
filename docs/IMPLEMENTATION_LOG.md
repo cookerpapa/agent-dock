@@ -1466,3 +1466,33 @@
 - 下一步：进入 Milestone 3，先把 settled checkpoint 从“一个 current pointer”扩展成 tenant-scoped immutable Workspace
   version/history，再在这个版本协议上实现 compare/fork/rollback/archive 和 trusted GitHub App write-back；原因是 PR 交付必须
   引用一个稳定、可审计、不会被旧 Attempt 覆盖的 Workspace 版本。
+## 2026-07-20 — Milestone 3: versioned Workspace and GitHub-native delivery
+
+- Added migration 010 for immutable Workspace versions, operation audit,
+  structured test results, GitHub installations/repositories, PR deliveries,
+  and webhook delivery deduplication.
+- Checkpoints now stage a version under Run/Attempt identity and settle or
+  abandon it with the terminal Run transition. Failed Runs restore the prior
+  pointers; rollback is honored by the next cold restore.
+- Added tenant-scoped history, files, compare, artifact download, fork,
+  rollback, archive, and test-result APIs.
+- Added the separate trusted GitHub Gateway, in-memory installation tokens,
+  exact-commit snapshot import, deletion-aware Git object/PR/Check delivery,
+  HMAC webhook verification, and authenticated normalized webhook ingestion.
+- Added authenticated Supervisor-to-Control-Plane artifact transport so the
+  Control Plane does not acquire the object-store credential.
+- Added migration, version consistency, tenant isolation, GitHub API contract,
+  private import, webhook, and artifact transport tests.
+- The independent production acceptance gate passed from a cold Compose deployment with migration 010, repeatable bootstrap,
+  public multi-tenant registration, tenant-scoped conversations, structured failed/passed test results, immutable Workspace version
+  settlement, artifact persistence, Control Plane restart and 1→2→1 replica scaling, same-boot reconnect, fresh Supervisor boot,
+  exact RunAttempt/Lease/Fencing container identity checks, active cancellation, and orphan-free teardown. The run produced 22
+  replayable events for the restored session and admitted exactly three tenants under the configured registration cap.
+- The full repository gate passed the production Web build, every workspace typecheck, 318 tests with 9 environment-conditional
+  skips, both zero-model-call Pi compatibility spikes, and the high-level dependency audit with 0 vulnerabilities.
+- GitHub App behavior is covered against a deterministic GitHub API contract. A live private-repository/PR write-back is deliberately
+  not claimed because production App credentials are not configured in this local deployment; the Gateway remains disabled by default
+  and fails closed until those secrets are supplied.
+- Next: Milestone 4 will add durable context/compaction records and enforce per-Run and per-tenant token/cost/tool budgets at the trusted
+  Model Gateway. This comes before observability because the Usage ledger and budget decisions need to become stable domain data that
+  later traces, metrics, dashboards, and eval reports can consume.

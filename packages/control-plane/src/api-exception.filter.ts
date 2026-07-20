@@ -6,6 +6,8 @@ import { DurableEventStoreError } from "./durable-event-store.ts";
 import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
 import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";
+import { WorkspaceVersionError } from "./workspace-version-service.ts";
+import { GitHubIntegrationError } from "./github-integration-service.ts";
 
 type ErrorResponse = {
   status: number;
@@ -51,6 +53,28 @@ function mappedError(error: unknown): ErrorResponse {
             : error.code === "conflict" || error.code === "idempotency_conflict"
               ? 409
               : 503;
+    return { status, body: { error: { code: error.code, message: error.message } } };
+  }
+  if (error instanceof WorkspaceVersionError) {
+    const status =
+      error.code === "not_found"
+        ? 404
+        : error.code === "conflict" || error.code === "idempotency_conflict"
+          ? 409
+          : error.code === "tenant_quota_exceeded"
+            ? 429
+            : 503;
+    return { status, body: { error: { code: error.code, message: error.message } } };
+  }
+  if (error instanceof GitHubIntegrationError) {
+    const status =
+      error.code === "not_found"
+        ? 404
+        : error.code === "idempotency_conflict" || error.code === "conflict"
+          ? 409
+          : error.code === "github_app_not_configured" || error.retryable
+            ? 503
+            : 502;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof DurableEventStoreError) {

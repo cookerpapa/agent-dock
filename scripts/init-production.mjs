@@ -154,6 +154,38 @@ async function ensureSandboxManagerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureGitHubGatewaySecrets(runtimeDirectory) {
+  const application = applicationIdentity();
+  const specs = [
+    ["github-gateway-token", `${randomSecret()}\n`, /^[A-Za-z0-9_-]{64}$/],
+    ["github-webhook-secret", `${randomSecret()}\n`, /^[A-Za-z0-9_-]{64}$/],
+    ["github-app-private-key.pem", "not-configured\n", /^not-configured$/],
+  ];
+  const created = [];
+  for (const [name, contents, pattern] of specs) {
+    const path = resolve(runtimeDirectory, "secrets", name);
+    try {
+      const existing = (await readPrivateFile(path)).trim();
+      if (!pattern.test(existing) && name !== "github-app-private-key.pem") {
+        throw new Error(`Production ${name} is invalid`);
+      }
+      if (
+        name === "github-app-private-key.pem" &&
+        existing !== "not-configured" &&
+        !existing.includes("PRIVATE KEY")
+      ) {
+        throw new Error("Production GitHub App private key file is invalid");
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await writePrivateFile(path, contents);
+      if (application.changeOwnership) await chown(path, application.uid, application.gid);
+      created.push(name);
+    }
+  }
+  return created;
+}
+
 async function validateExisting(runtimeDirectory) {
   const manifestPath = resolve(runtimeDirectory, "deployment.json");
   let manifestBytes;
@@ -264,6 +296,7 @@ await assertPrivateDirectory(runtimeDirectory);
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
+  const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
   process.stdout.write(
@@ -272,6 +305,7 @@ if (await validateExisting(runtimeDirectory)) {
       reused: true,
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
+      githubGatewaySecretsCreated,
       objectStoreCredentialMigrated,
       runtimeDirectory,
     })}\n`,
@@ -382,6 +416,9 @@ await writePrivateFile(
   `${randomSecret()}\n`,
 );
 await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "github-gateway-token"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "github-webhook-secret"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "github-app-private-key.pem"), "not-configured\n");
 await writePrivateFile(
   resolve(secretsDirectory, "aws-credentials"),
   `[default]\naws_access_key_id = ${minioApplicationUser}\naws_secret_access_key = ${minioApplicationPassword}\n`,

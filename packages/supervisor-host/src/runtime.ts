@@ -8,6 +8,7 @@ import {
 } from "@agent-dock/control-plane/model-credential-runtime";
 import { PostgresRunAttemptPhaseObserver } from "@agent-dock/control-plane/run-attempt-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
+import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
@@ -27,7 +28,7 @@ import type { SupervisorHostConfig } from "./config.ts";
 import { SupervisorManagementServer } from "./management-server.ts";
 import { TenantModelGateway } from "./model-gateway.ts";
 import { SupervisorProvisioningClient } from "./provisioning-client.ts";
-import { PostgresWorkspaceSeedResolver } from "./workspace-seed.ts";
+import { GatewayGitHubWorkspaceImporter, PostgresWorkspaceSeedResolver } from "./workspace-seed.ts";
 
 export type SupervisorHostRuntimeState =
   "idle" | "starting" | "ready" | "draining" | "stopped" | "failed";
@@ -216,6 +217,7 @@ export class SupervisorHostRuntime {
         }
       },
       assignmentInventory: this.#sandboxManager,
+      artifactStore: this.#objectStore,
     });
     this.#managementServer = managementServer;
     try {
@@ -244,12 +246,24 @@ export class SupervisorHostRuntime {
         database: this.#database,
         objectStore: this.#objectStore,
       });
+      const githubGateway =
+        this.#config.githubGatewayBaseUrl === undefined ||
+        this.#config.githubGatewayServiceToken === undefined
+          ? undefined
+          : new GitHubGatewayClient({
+              baseUrl: this.#config.githubGatewayBaseUrl,
+              serviceToken: this.#config.githubGatewayServiceToken,
+              allowInsecureHttp: this.#config.allowInsecureInternalHttp,
+            });
       const workspaceSeedResolver = new PostgresWorkspaceSeedResolver({
         database: this.#database,
         objectStore: this.#objectStore,
         importer: {
           import: (source, signal) => this.#sandboxManager.importGitHub(source, signal),
         },
+        ...(githubGateway === undefined
+          ? {}
+          : { privateImporter: new GatewayGitHubWorkspaceImporter(githubGateway) }),
         importLeaseMs: this.#config.repositoryImportLeaseMs,
         maximumWaitMs: this.#config.repositoryImportWaitMs,
       });

@@ -189,6 +189,112 @@ export async function transitionCurrentRunAttempt(
     .executeTakeFirst();
   expectOne(runUpdate.numUpdatedRows, "Updating a run");
 
+  if (terminalRun) {
+    if (runState === "completed") {
+      const version = await transaction
+        .updateTable("workspace_versions")
+        .set({ state: "settled", settled_at: now })
+        .where("tenant_id", "=", identity.tenantId)
+        .where("run_id", "=", identity.runId)
+        .where("attempt_id", "=", identity.attemptId)
+        .where("state", "=", "staged")
+        .returning(["id", "session_id", "pi_artifact_id", "workspace_artifact_id"])
+        .executeTakeFirst();
+      if (version !== undefined) {
+        await transaction
+          .updateTable("test_results")
+          .set({ workspace_version_id: version.id })
+          .where("tenant_id", "=", identity.tenantId)
+          .where("run_id", "=", identity.runId)
+          .execute();
+        const artifacts = await transaction
+          .selectFrom("artifacts")
+          .select(["id", "object_key"])
+          .where("tenant_id", "=", identity.tenantId)
+          .where("id", "in", [version.pi_artifact_id, version.workspace_artifact_id])
+          .execute();
+        const piKey = artifacts.find(
+          (artifact) => artifact.id === version.pi_artifact_id,
+        )?.object_key;
+        const workspaceKey = artifacts.find(
+          (artifact) => artifact.id === version.workspace_artifact_id,
+        )?.object_key;
+        if (piKey === undefined || workspaceKey === undefined) {
+          throw new RunAttemptLifecycleError(
+            "workspace_version_corrupt",
+            "Settled Workspace version artifacts are missing",
+          );
+        }
+        const sessionUpdate = await transaction
+          .updateTable("sessions")
+          .set({
+            current_workspace_version_id: version.id,
+            pi_session_snapshot_key: piKey,
+            workspace_snapshot_key: workspaceKey,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", identity.tenantId)
+          .where("id", "=", version.session_id)
+          .executeTakeFirst();
+        expectOne(sessionUpdate.numUpdatedRows, "Advancing the current workspace version");
+      }
+    } else {
+      await transaction
+        .updateTable("workspace_versions")
+        .set({ state: "abandoned" })
+        .where("tenant_id", "=", identity.tenantId)
+        .where("run_id", "=", identity.runId)
+        .where("attempt_id", "=", identity.attemptId)
+        .where("state", "=", "staged")
+        .execute();
+      const session = await transaction
+        .selectFrom("sessions as session_row")
+        .leftJoin(
+          "workspace_versions as version",
+          "version.id",
+          "session_row.current_workspace_version_id",
+        )
+        .leftJoin("artifacts as pi", "pi.id", "version.pi_artifact_id")
+        .leftJoin("artifacts as workspace", "workspace.id", "version.workspace_artifact_id")
+        .select([
+          "session_row.id",
+          "session_row.current_workspace_version_id as currentVersionId",
+          "pi.object_key as piKey",
+          "workspace.object_key as workspaceKey",
+        ])
+        .where("session_row.tenant_id", "=", identity.tenantId)
+        .where(
+          "session_row.id",
+          "=",
+          sql<string>`(select session_id from runs where id = ${identity.runId})`,
+        )
+        .executeTakeFirst();
+      if (session !== undefined) {
+        if (
+          session.currentVersionId !== null &&
+          (session.piKey === null || session.workspaceKey === null)
+        ) {
+          throw new RunAttemptLifecycleError(
+            "workspace_version_corrupt",
+            "Current Workspace version artifacts are missing",
+          );
+        }
+        await transaction
+          .updateTable("sessions")
+          .set({
+            pi_session_snapshot_key: session.piKey,
+            workspace_snapshot_key: session.workspaceKey,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", identity.tenantId)
+          .where("id", "=", session.id)
+          .executeTakeFirstOrThrow();
+      }
+    }
+  }
+
   if (row.attemptState !== attemptState) {
     await transaction
       .insertInto("run_attempt_transitions")

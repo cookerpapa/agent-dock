@@ -22,7 +22,7 @@ type WorkspaceSnapshotManifest = {
   files: WorkspaceSnapshotFile[];
 };
 
-type RestoredFile = {
+export type WorkspaceSnapshotFileContent = {
   path: string;
   executable: boolean;
   content: Buffer;
@@ -163,7 +163,7 @@ export async function captureWorkspaceSnapshot(workspaceDirectory: string): Prom
   return encoded;
 }
 
-function parseWorkspaceSnapshot(snapshot: Uint8Array): RestoredFile[] {
+export function parseWorkspaceSnapshot(snapshot: Uint8Array): WorkspaceSnapshotFileContent[] {
   if (snapshot.byteLength < 1 || snapshot.byteLength > MAX_WORKSPACE_SNAPSHOT_BYTES) {
     throw snapshotError("Workspace manifest is outside its byte limit");
   }
@@ -184,7 +184,7 @@ function parseWorkspaceSnapshot(snapshot: Uint8Array): RestoredFile[] {
     throw snapshotError("Workspace manifest shape is invalid");
   }
 
-  const restored: RestoredFile[] = [];
+  const restored: WorkspaceSnapshotFileContent[] = [];
   const paths = new Set<string>();
   for (const candidate of parsed.files) {
     if (
@@ -219,6 +219,55 @@ function parseWorkspaceSnapshot(snapshot: Uint8Array): RestoredFile[] {
     }
   }
   return restored;
+}
+
+export function createWorkspaceSnapshot(
+  files: readonly {
+    path: string;
+    executable: boolean;
+    content: Uint8Array;
+  }[],
+): Uint8Array {
+  if (files.length > MAX_WORKSPACE_SNAPSHOT_FILES) {
+    throw snapshotError("Workspace contains too many files for this checkpoint format");
+  }
+  const paths = new Set<string>();
+  const entries: WorkspaceSnapshotFile[] = files.map((file) => {
+    if (
+      !validRelativePath(file.path) ||
+      typeof file.executable !== "boolean" ||
+      file.content.byteLength > MAX_WORKSPACE_SNAPSHOT_FILE_BYTES ||
+      paths.has(file.path)
+    ) {
+      throw snapshotError("Workspace file entry is invalid");
+    }
+    paths.add(file.path);
+    const content = Buffer.from(file.content);
+    return {
+      path: file.path,
+      executable: file.executable,
+      sizeBytes: content.byteLength,
+      sha256: sha256(content),
+      content: content.toString("base64"),
+    };
+  });
+  entries.sort((left, right) => comparePaths(left.path, right.path));
+  for (let index = 0; index < entries.length - 1; index += 1) {
+    const current = entries[index];
+    const next = entries[index + 1];
+    if (current && next?.path.startsWith(`${current.path}/`)) {
+      throw snapshotError("Workspace manifest contains a file/directory collision");
+    }
+  }
+  const encoded = Buffer.from(
+    `${JSON.stringify({ format: "agent-dock.workspace-manifest.v1", files: entries })}\n`,
+    "utf8",
+  );
+  if (encoded.byteLength > MAX_WORKSPACE_SNAPSHOT_BYTES) {
+    throw snapshotError("Workspace manifest is outside its byte limit");
+  }
+  validateWorkspaceSnapshot(encoded);
+  return encoded;
 }
 
 export async function restoreWorkspaceSnapshot(

@@ -19,6 +19,7 @@ import type {
   RunListResource,
   RunResource,
   SessionResource,
+  TestResultListResource,
   WorkspaceSourceResource,
 } from "@agent-dock/protocol";
 import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
@@ -93,6 +94,9 @@ type WorkspaceSourceRow = {
   sourceCommitSha: string | null;
   sourceStatus: string;
   sourceFailureCode: string | null;
+  sourceInstallationId: string | null;
+  sourceRepositoryId: string | null;
+  sourcePrivate: boolean | null;
 };
 
 function workspaceSourceResource(row: WorkspaceSourceRow): WorkspaceSourceResource {
@@ -112,6 +116,31 @@ function workspaceSourceResource(row: WorkspaceSourceRow): WorkspaceSourceResour
       kind: "github_public",
       repository: row.sourceRepository,
       commitSha: row.sourceCommitSha,
+      status: row.sourceStatus,
+      ...(row.sourceStatus === "failed" && row.sourceFailureCode !== null
+        ? { failureCode: row.sourceFailureCode }
+        : {}),
+    };
+  }
+  if (
+    row.sourceKind === "github_app" &&
+    row.sourceRepository !== null &&
+    row.sourceCommitSha !== null &&
+    row.sourceInstallationId !== null &&
+    row.sourceRepositoryId !== null &&
+    row.sourcePrivate !== null &&
+    (row.sourceStatus === "pending" ||
+      row.sourceStatus === "importing" ||
+      row.sourceStatus === "ready" ||
+      row.sourceStatus === "failed")
+  ) {
+    return {
+      kind: "github_app",
+      installationId: positiveSafeInteger(row.sourceInstallationId, "GitHub installation ID"),
+      repositoryId: positiveSafeInteger(row.sourceRepositoryId, "GitHub repository ID"),
+      repository: row.sourceRepository,
+      commitSha: row.sourceCommitSha,
+      private: row.sourcePrivate,
       status: row.sourceStatus,
       ...(row.sourceStatus === "failed" && row.sourceFailureCode !== null
         ? { failureCode: row.sourceFailureCode }
@@ -313,6 +342,29 @@ export class ControlPlaneStore {
             "Tenant project quota has been reached",
           );
         }
+        const appRepository =
+          source.kind === "github_app"
+            ? await transaction
+                .selectFrom("github_repositories as repository")
+                .innerJoin("github_app_installations as installation", (join) =>
+                  join
+                    .onRef("installation.tenant_id", "=", "repository.tenant_id")
+                    .onRef("installation.installation_id", "=", "repository.installation_id"),
+                )
+                .select(["repository.full_name", "repository.private"])
+                .where("repository.tenant_id", "=", this.#tenantId)
+                .where("repository.repository_id", "=", String(source.repositoryId))
+                .where("repository.installation_id", "=", String(source.installationId))
+                .where("repository.enabled", "=", true)
+                .where("installation.status", "=", "active")
+                .executeTakeFirst()
+            : undefined;
+        if (source.kind === "github_app" && appRepository === undefined) {
+          throw new ControlPlaneStoreError(
+            "not_found",
+            "GitHub App repository was not found or is not allowlisted",
+          );
+        }
         const project = await transaction
           .insertInto("projects")
           .values({ id: projectId, tenant_id: this.#tenantId, name: request.name })
@@ -333,15 +385,22 @@ export class ControlPlaneStore {
             tenant_id: this.#tenantId,
             workspace_id: workspaceId,
             kind: source.kind,
-            repository: source.kind === "github_public" ? source.repository : null,
-            commit_sha: source.kind === "github_public" ? source.commitSha : null,
-            status: source.kind === "github_public" ? "pending" : "ready",
+            repository:
+              source.kind === "github_public"
+                ? source.repository
+                : source.kind === "github_app"
+                  ? appRepository!.full_name
+                  : null,
+            commit_sha: source.kind === "sample_java" ? null : source.commitSha,
+            status: source.kind === "sample_java" ? "ready" : "pending",
             object_key: null,
             sha256: null,
             size_bytes: null,
             import_lease_id: null,
             lease_expires_at: null,
             failure_code: null,
+            github_installation_id: source.kind === "github_app" ? source.installationId : null,
+            github_repository_id: source.kind === "github_app" ? source.repositoryId : null,
           })
           .executeTakeFirstOrThrow();
         return {
@@ -357,7 +416,17 @@ export class ControlPlaneStore {
                   commitSha: source.commitSha,
                   status: "pending",
                 }
-              : { kind: "sample_java", status: "ready" },
+              : source.kind === "github_app"
+                ? {
+                    kind: "github_app",
+                    installationId: source.installationId,
+                    repositoryId: source.repositoryId,
+                    repository: appRepository!.full_name,
+                    commitSha: source.commitSha,
+                    private: appRepository!.private,
+                    status: "pending",
+                  }
+                : { kind: "sample_java", status: "ready" },
         };
       });
     } catch (error) {
@@ -495,6 +564,11 @@ export class ControlPlaneStore {
           .onRef("source.tenant_id", "=", "session_row.tenant_id")
           .onRef("source.workspace_id", "=", "session_row.workspace_id"),
       )
+      .leftJoin("github_repositories as github_repository", (join) =>
+        join
+          .onRef("github_repository.tenant_id", "=", "source.tenant_id")
+          .onRef("github_repository.repository_id", "=", "source.github_repository_id"),
+      )
       .select([
         "session_row.id as sessionId",
         "session_row.project_id as projectId",
@@ -511,6 +585,9 @@ export class ControlPlaneStore {
         "source.commit_sha as sourceCommitSha",
         "source.status as sourceStatus",
         "source.failure_code as sourceFailureCode",
+        "source.github_installation_id as sourceInstallationId",
+        "source.github_repository_id as sourceRepositoryId",
+        "github_repository.private as sourcePrivate",
         "cursor.last_persisted_seq as lastPersistedSequence",
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
@@ -649,6 +726,43 @@ export class ControlPlaneStore {
 
   async getRun(runId: string): Promise<RunResource> {
     return this.#loadRunResource(runId);
+  }
+
+  async listTestResults(runId: string): Promise<TestResultListResource> {
+    const run = await this.#database
+      .selectFrom("runs")
+      .select("id")
+      .where("tenant_id", "=", this.#tenantId)
+      .where("id", "=", runId)
+      .executeTakeFirst();
+    if (run === undefined) throw new ControlPlaneStoreError("not_found", "Run was not found");
+    const rows = await this.#database
+      .selectFrom("test_results")
+      .selectAll()
+      .where("tenant_id", "=", this.#tenantId)
+      .where("run_id", "=", runId)
+      .orderBy("created_at")
+      .limit(100)
+      .execute();
+    return {
+      runId,
+      results: rows.map((row) => ({
+        testResultId: row.id,
+        runId: row.run_id,
+        ...(row.workspace_version_id === null
+          ? {}
+          : { workspaceVersionId: row.workspace_version_id }),
+        toolCallId: row.tool_call_id,
+        command: row.command,
+        suite: row.suite,
+        status: row.status,
+        ...(row.exit_code === null ? {} : { exitCode: row.exit_code }),
+        ...(row.duration_ms === null ? {} : { durationMs: row.duration_ms }),
+        ...(row.summary === null ? {} : { summary: row.summary }),
+        ...(row.artifact_id === null ? {} : { artifactId: row.artifact_id }),
+        createdAt: isoTimestamp(row.created_at),
+      })),
+    };
   }
 
   async acceptTurn(
@@ -882,6 +996,7 @@ export class ControlPlaneStore {
           "desired_model_profile_id",
           "state",
           "next_mailbox_position",
+          "archived_at",
         ])
         .where("tenant_id", "=", this.#tenantId)
         .where("id", "=", sessionId)
@@ -889,6 +1004,9 @@ export class ControlPlaneStore {
         .executeTakeFirst();
       if (!session) {
         throw new ControlPlaneStoreError("not_found", "Session was not found");
+      }
+      if (session.archived_at !== null) {
+        throw new ControlPlaneStoreError("conflict", "Archived Session cannot accept turns");
       }
       if (session.desired_model_profile_id !== this.#defaultModelProfileId) {
         throw new ControlPlaneStoreError(

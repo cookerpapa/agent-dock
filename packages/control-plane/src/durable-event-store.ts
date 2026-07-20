@@ -394,6 +394,8 @@ export class DurableEventStore implements DurableEventIngestor {
       })
       .executeTakeFirstOrThrow();
 
+    await this.#recordStructuredTestResult(transaction, tenantId, message, now);
+
     const cursorUpdate = await transaction
       .updateTable("session_event_cursors")
       .set({
@@ -422,6 +424,76 @@ export class DurableEventStore implements DurableEventIngestor {
     expectOne(sessionUpdate.numUpdatedRows, "advancing the session event sequence");
 
     return { tenantId, acknowledgedThroughSeq: event.seq };
+  }
+
+  async #recordStructuredTestResult(
+    transaction: Transaction<Database>,
+    tenantId: string,
+    message: EventPublishMessage,
+    now: Date,
+  ): Promise<void> {
+    const event = message.payload.event;
+    if (event.type !== "tool.completed" || event.turnId === null) return;
+    const started = await transaction
+      .selectFrom("session_events")
+      .select(["payload", "occurred_at"])
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "=", event.sessionId)
+      .where("turn_id", "=", event.turnId)
+      .where("type", "=", "tool.started")
+      .where(sql<boolean>`${sql.ref("payload")} ->> 'toolCallId' = ${event.payload.toolCallId}`)
+      .orderBy("seq", "desc")
+      .executeTakeFirst();
+    if (started === undefined || started.payload.toolName !== "bash") return;
+    const input = started.payload.input;
+    if (typeof input !== "object" || input === null || !("command" in input)) return;
+    const command = (input as { command?: unknown }).command;
+    if (typeof command !== "string" || command.length < 1 || command.length > 4_096) return;
+    if (
+      !/(?:^|\s)(?:npm|pnpm|yarn|mvn|gradle|\.\/gradlew|pytest|python\s+-m\s+pytest|go|cargo|dotnet)\b[^\n]*(?:test|check)|(?:^|\s)(?:pytest|go\s+test|cargo\s+test|dotnet\s+test)\b|(?:^|\s)(?:(?:bash|sh)\s+)?(?:\.\/)?(?:[A-Za-z0-9._-]+\/)*(?:test|check)(?:[-_.][A-Za-z0-9._-]+)*\.sh(?:\s|$)/i.test(
+        command,
+      )
+    ) {
+      return;
+    }
+    const run = await transaction
+      .selectFrom("runs")
+      .select("id")
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "=", event.sessionId)
+      .where("turn_id", "=", event.turnId)
+      .executeTakeFirst();
+    if (run === undefined) return;
+    const output = event.payload.output;
+    const summary =
+      output === undefined
+        ? null
+        : (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 2_000);
+    const durationMs = Math.max(
+      0,
+      new Date(event.occurredAt).valueOf() - new Date(started.occurred_at).valueOf(),
+    );
+    await transaction
+      .insertInto("test_results")
+      .values({
+        id: event.eventId,
+        tenant_id: tenantId,
+        session_id: event.sessionId,
+        turn_id: event.turnId,
+        run_id: run.id,
+        workspace_version_id: null,
+        tool_call_id: event.payload.toolCallId,
+        command,
+        suite: command.split(/\s+/)[0]?.slice(0, 256) || "test",
+        status: event.payload.isError ? "failed" : "passed",
+        exit_code: null,
+        duration_ms: Math.min(durationMs, 86_400_000),
+        summary,
+        artifact_id: null,
+        created_at: now,
+      })
+      .onConflict((conflict) => conflict.columns(["run_id", "tool_call_id"]).doNothing())
+      .execute();
   }
 
   async #validateEventOwnership(

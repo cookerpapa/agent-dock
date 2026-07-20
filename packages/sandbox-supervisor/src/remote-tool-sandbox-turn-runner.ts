@@ -342,6 +342,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 {
                   piSession,
                   workspace,
+                  ...(capturedPatch === undefined ? {} : { workspacePatch: capturedPatch }),
                 },
               );
               await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);

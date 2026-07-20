@@ -4,6 +4,7 @@ import {
   type CheckpointObjectStore,
 } from "@agent-dock/control-plane/checkpoint-runtime";
 import type { Database } from "@agent-dock/database";
+import { GitHubGatewayClient, GitHubGatewayError } from "@agent-dock/github-gateway";
 import {
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type ExecuteTurnCommandMessage,
@@ -22,7 +23,7 @@ type GitHubWorkspaceImporter = {
 };
 
 type WorkspaceSourceRow = {
-  kind: "sample_java" | "github_public";
+  kind: "sample_java" | "github_public" | "github_app";
   repository: string | null;
   commitSha: string | null;
   status: "pending" | "importing" | "ready" | "failed";
@@ -31,18 +32,71 @@ type WorkspaceSourceRow = {
   sha256: string | null;
   sizeBytes: string | null;
   leaseExpiresAt: Date | string | null;
+  installationId: string | null;
+  repositoryId: string | null;
 };
 
 export type PostgresWorkspaceSeedResolverOptions = {
   database: Kysely<Database>;
   objectStore: CheckpointObjectStore;
   importer: GitHubWorkspaceImporter;
+  privateImporter?: PrivateGitHubWorkspaceImporter;
   importLeaseMs?: number;
   maximumWaitMs?: number;
   pollIntervalMs?: number;
   clock?: () => Date;
   idGenerator?: () => string;
 };
+
+export interface PrivateGitHubWorkspaceImporter {
+  import(
+    source: { installationId: number; repositoryId: number; commitSha: string },
+    signal: AbortSignal,
+  ): Promise<Uint8Array>;
+}
+
+export class GatewayGitHubWorkspaceImporter implements PrivateGitHubWorkspaceImporter {
+  readonly #gateway: GitHubGatewayClient;
+  readonly #idGenerator: () => string;
+
+  constructor(gateway: GitHubGatewayClient, idGenerator: () => string = randomUUID) {
+    this.#gateway = gateway;
+    this.#idGenerator = idGenerator;
+  }
+
+  async import(
+    source: { installationId: number; repositoryId: number; commitSha: string },
+    signal: AbortSignal,
+  ): Promise<Uint8Array> {
+    if (signal.aborted) {
+      throw new WorkspaceSeedError(
+        "workspace_seed_cancelled",
+        "Workspace import was cancelled",
+        true,
+      );
+    }
+    const requestId = this.#idGenerator();
+    const response = await this.#gateway.request({
+      type: "repository.snapshot",
+      requestId,
+      ...source,
+    });
+    if (
+      response.type !== "repository.snapshotted" ||
+      response.requestId !== requestId ||
+      response.repository.repositoryId !== source.repositoryId ||
+      response.repository.installationId !== source.installationId ||
+      response.commitSha !== source.commitSha
+    ) {
+      throw new WorkspaceSeedError(
+        "github_gateway_response_mismatch",
+        "GitHub Gateway response did not match",
+        false,
+      );
+    }
+    return Buffer.from(response.workspaceSnapshotBase64, "base64");
+  }
+}
 
 export class WorkspaceSeedError extends PiRpcTurnError {
   constructor(code: string, safeMessage: string, retryable: boolean) {
@@ -56,6 +110,14 @@ function positiveInteger(value: number, name: string, maximum: number): number {
     throw new TypeError(`${name} is invalid`);
   }
   return value;
+}
+
+function safeId(value: string, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new WorkspaceSeedError("workspace_seed_metadata_invalid", `${name} is invalid`, false);
+  }
+  return parsed;
 }
 
 function validDate(clock: () => Date): Date {
@@ -116,6 +178,7 @@ export class PostgresWorkspaceSeedResolver {
   readonly #database: Kysely<Database>;
   readonly #objectStore: CheckpointObjectStore;
   readonly #importer: GitHubWorkspaceImporter;
+  readonly #privateImporter: PrivateGitHubWorkspaceImporter | undefined;
   readonly #importLeaseMs: number;
   readonly #maximumWaitMs: number;
   readonly #pollIntervalMs: number;
@@ -126,6 +189,7 @@ export class PostgresWorkspaceSeedResolver {
     this.#database = options.database;
     this.#objectStore = options.objectStore;
     this.#importer = options.importer;
+    this.#privateImporter = options.privateImporter;
     this.#importLeaseMs = positiveInteger(
       options.importLeaseMs ?? 240_000,
       "importLeaseMs",
@@ -163,7 +227,7 @@ export class PostgresWorkspaceSeedResolver {
         })
         .where("tenant_id", "=", command.payload.tenantId)
         .where("workspace_id", "=", command.payload.workspaceId)
-        .where("kind", "=", "github_public")
+        .where("kind", "=", source.kind)
         .where((expression) =>
           expression.or([
             expression("status", "in", ["pending", "failed"]),
@@ -173,19 +237,58 @@ export class PostgresWorkspaceSeedResolver {
             ]),
           ]),
         )
-        .returning(["repository", "commit_sha as commitSha"])
+        .returning([
+          "kind",
+          "repository",
+          "commit_sha as commitSha",
+          "github_installation_id as installationId",
+          "github_repository_id as repositoryId",
+        ])
         .executeTakeFirst();
       if (claimed !== undefined && claimed.repository !== null && claimed.commitSha !== null) {
-        return this.#importAndPublish(
-          command,
-          leaseId,
-          {
-            kind: "github_public",
-            repository: claimed.repository,
-            commitSha: claimed.commitSha,
-          },
-          signal,
-        );
+        if (claimed.kind === "github_public") {
+          return this.#importAndPublish(
+            command,
+            leaseId,
+            () =>
+              this.#importer.import(
+                {
+                  kind: "github_public",
+                  repository: claimed.repository!,
+                  commitSha: claimed.commitSha!,
+                },
+                signal,
+              ),
+            signal,
+          );
+        }
+        if (
+          claimed.kind === "github_app" &&
+          claimed.installationId !== null &&
+          claimed.repositoryId !== null
+        ) {
+          if (this.#privateImporter === undefined) {
+            throw new WorkspaceSeedError(
+              "github_app_not_configured",
+              "Private GitHub import is not configured",
+              false,
+            );
+          }
+          return this.#importAndPublish(
+            command,
+            leaseId,
+            () =>
+              this.#privateImporter!.import(
+                {
+                  installationId: safeId(claimed.installationId!, "GitHub installation ID"),
+                  repositoryId: safeId(claimed.repositoryId!, "GitHub repository ID"),
+                  commitSha: claimed.commitSha!,
+                },
+                signal,
+              ),
+            signal,
+          );
+        }
       }
       await abortableDelay(this.#pollIntervalMs, signal);
     }
@@ -214,6 +317,8 @@ export class PostgresWorkspaceSeedResolver {
         "source.sha256",
         "source.size_bytes as sizeBytes",
         "source.lease_expires_at as leaseExpiresAt",
+        "source.github_installation_id as installationId",
+        "source.github_repository_id as repositoryId",
       ])
       .where("workspace.tenant_id", "=", command.payload.tenantId)
       .where("workspace.project_id", "=", command.payload.projectId)
@@ -258,11 +363,11 @@ export class PostgresWorkspaceSeedResolver {
   async #importAndPublish(
     command: ExecuteTurnCommandMessage,
     leaseId: string,
-    source: GitHubRepositorySource,
+    importWorkspace: () => Promise<Uint8Array>,
     signal: AbortSignal,
   ): Promise<Uint8Array> {
     try {
-      const bytes = await this.#importer.import(source, signal);
+      const bytes = await importWorkspace();
       validateWorkspaceSnapshot(bytes);
       const digest = sha256(bytes);
       const objectKey = validateCheckpointObjectKey(
@@ -351,7 +456,9 @@ export class PostgresWorkspaceSeedResolver {
           ? error
           : error instanceof GitHubWorkspaceImporterError
             ? new WorkspaceSeedError(error.code, error.message, error.retryable)
-            : new WorkspaceSeedError("workspace_import_failed", "Workspace import failed", true);
+            : error instanceof GitHubGatewayError
+              ? new WorkspaceSeedError(error.code, error.message, error.retryable)
+              : new WorkspaceSeedError("workspace_import_failed", "Workspace import failed", true);
       const now = validDate(this.#clock);
       await this.#database
         .updateTable("workspace_sources")

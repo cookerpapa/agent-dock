@@ -39,4 +39,15 @@ export class TenantRequestContext {
     }
     return identity;
   }
+
+  requireOwner(request: FastifyRequest): TenantRequestIdentity {
+    const identity = this.resolve(request);
+    if (identity.role !== "owner") {
+      throw new TenantRequestContextError(
+        "authorization_denied",
+        "Only a tenant owner can administer external integrations",
+      );
+    }
+    return identity;
+  }
 }

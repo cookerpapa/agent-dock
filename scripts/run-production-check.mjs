@@ -387,7 +387,7 @@ async function assertCheckpointObjects(sessionId, expectedCount, tenantId) {
     const separator = row.indexOf("|");
     const kind = row.slice(0, separator);
     const objectKey = row.slice(separator + 1);
-    assert(["pi_session_snapshot", "workspace_snapshot"].includes(kind));
+    assert(["pi_session_snapshot", "workspace_snapshot", "patch"].includes(kind));
     assert.match(objectKey, /^[a-zA-Z0-9/_.-]+$/);
     if (tenantId !== undefined) {
       assert.equal(objectKey.startsWith(`checkpoints/${tenantId}/${sessionId}/`), true);
@@ -413,9 +413,12 @@ async function assertCursor(sessionId, expected) {
     )}`,
   );
   assert.equal(row, `${String(expected)}|${String(expected)}`);
-  assert.equal(
-    await psql(`select count(*) from session_leases where session_id = ${sqlLiteral(sessionId)}`),
-    "0",
+  await waitFor(
+    async () =>
+      (await psql(
+        `select count(*) from session_leases where session_id = ${sqlLiteral(sessionId)}`,
+      )) === "0",
+    `session ${sessionId} lease release`,
   );
 }
 
@@ -445,7 +448,7 @@ async function waitForWorker(commandId) {
   );
 }
 
-async function assertWorkerSecurity(containerId, secretValues) {
+async function assertWorkerSecurity(containerId, secretValues, expectedAssignment) {
   const inspected = JSON.parse(await capture("docker", ["inspect", containerId]))[0];
   const labels = inspected.Config.Labels ?? {};
   assert.equal(inspected.Config.User, "1000:1000");
@@ -456,9 +459,21 @@ async function assertWorkerSecurity(containerId, secretValues) {
   assert.equal(inspected.HostConfig.PidsLimit, 128);
   assert.equal(inspected.HostConfig.Memory, 768 * 1_024 * 1_024);
   assert.equal(inspected.HostConfig.NanoCpus, 1_000_000_000);
-  assert.equal(typeof labels["agent-dock.tenant-id"], "string");
-  assert.equal(typeof labels["agent-dock.attempt-id"], "string");
-  assert.equal(labels["agent-dock.attempt-id"], labels["agent-dock.lease-id"]);
+  assert.deepEqual(
+    {
+      tenantId: labels["agent-dock.tenant-id"],
+      supervisorId: labels["agent-dock.supervisor-id"],
+      bootId: labels["agent-dock.boot-id"],
+      sandboxId: labels["agent-dock.sandbox-id"],
+      commandId: labels["agent-dock.command-id"],
+      sessionId: labels["agent-dock.session-id"],
+      turnId: labels["agent-dock.turn-id"],
+      attemptId: labels["agent-dock.attempt-id"],
+      leaseId: labels["agent-dock.lease-id"],
+      fencingToken: Number(labels["agent-dock.fencing-token"]),
+    },
+    expectedAssignment,
+  );
   assert.equal(
     inspected.Mounts.some((mount) => mount.Type === "bind"),
     false,
@@ -532,7 +547,12 @@ async function assertApplicationIdentity() {
   const applicationSecret = await stat(resolve(runtimeDirectory, "secrets/api-token"));
   assert.notEqual(applicationSecret.uid, 0);
   const expected = `${String(applicationSecret.uid)}:${String(applicationSecret.gid)}`;
-  for (const service of ["database-bootstrap", "control-plane", "supervisor-host"]) {
+  for (const service of [
+    "database-bootstrap",
+    "control-plane",
+    "supervisor-host",
+    "github-gateway",
+  ]) {
     const output = await composeCapture(["ps", "--all", "--quiet", service]);
     const ids = output.split(/\r?\n/).filter(Boolean);
     assert(ids.length >= 1);
@@ -548,10 +568,12 @@ async function assertApplicationIdentity() {
 async function assertExecutionBoundary() {
   const supervisorId = (await serviceContainerIds("supervisor-host"))[0];
   const managerId = (await serviceContainerIds("sandbox-manager"))[0];
+  const githubGatewayId = (await serviceContainerIds("github-gateway"))[0];
   assert(supervisorId);
   assert(managerId);
-  const [supervisor, manager] = await Promise.all(
-    [supervisorId, managerId].map(async (id) =>
+  assert(githubGatewayId);
+  const [supervisor, manager, githubGateway] = await Promise.all(
+    [supervisorId, managerId, githubGatewayId].map(async (id) =>
       JSON.parse(await capture("docker", ["inspect", id])).at(0),
     ),
   );
@@ -559,6 +581,7 @@ async function assertExecutionBoundary() {
     (container.Mounts ?? []).some((mount) => mount.Destination === "/var/run/docker.sock");
   assert.equal(hasDockerSocket(supervisor), false);
   assert.equal(hasDockerSocket(manager), true);
+  assert.equal(hasDockerSocket(githubGateway), false);
   assert.equal(supervisor.HostConfig.Privileged, false);
   assert.equal(manager.HostConfig.Privileged, false);
   assert.equal(supervisor.HostConfig.ReadonlyRootfs, true);
@@ -573,12 +596,30 @@ async function assertExecutionBoundary() {
   );
   const supervisorNetworks = Object.keys(supervisor.NetworkSettings.Networks ?? {});
   const managerNetworks = Object.keys(manager.NetworkSettings.Networks ?? {});
+  const githubGatewayNetworks = Object.keys(githubGateway.NetworkSettings.Networks ?? {});
   assert(supervisorNetworks.some((name) => name.endsWith("_sandbox-control")));
   assert.equal(
     supervisorNetworks.some((name) => name.endsWith("_repository-egress")),
     false,
   );
   assert.deepEqual(managerNetworks, [`${projectName}_sandbox-control`]);
+  assert.deepEqual(
+    githubGatewayNetworks.sort(),
+    [`${projectName}_github-control`, `${projectName}_provider-egress`].sort(),
+  );
+  const githubEnvironment = githubGateway.Config.Env ?? [];
+  for (const prefix of [
+    "DATABASE_URL=",
+    "DATABASE_URL_FILE=",
+    "AWS_",
+    "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+    "AGENT_DOCK_SANDBOX_MANAGER_TOKEN",
+  ]) {
+    assert.equal(
+      githubEnvironment.some((value) => value.startsWith(prefix)),
+      false,
+    );
+  }
   const repositoryNetwork = JSON.parse(
     await capture("docker", ["network", "inspect", `${projectName}_repository-egress`]),
   ).at(0);
@@ -604,6 +645,8 @@ async function readSecretValues() {
   const names = [
     "api-token",
     "database-url",
+    "github-gateway-token",
+    "github-webhook-secret",
     "minio-root-password",
     "minio-root-user",
     "model-credential-master-key",
@@ -664,6 +707,9 @@ async function assertPrivateRuntimeFiles() {
       "api-token",
       "aws-credentials",
       "database-url",
+      "github-app-private-key.pem",
+      "github-gateway-token",
+      "github-webhook-secret",
       "minio-root-password",
       "minio-root-user",
       "model-credential-master-key",
@@ -748,6 +794,7 @@ async function main() {
       "control-plane",
       "supervisor-host",
       "sandbox-manager",
+      "github-gateway",
       "web",
       "tool-sandbox-image",
     ]);
@@ -761,6 +808,7 @@ async function main() {
     waitForHealthyService("control-plane"),
     waitForHealthyService("supervisor-host"),
     waitForHealthyService("sandbox-manager"),
+    waitForHealthyService("github-gateway"),
     waitForHealthyService("web"),
   ]);
   report("repeat_bootstrap");
@@ -879,7 +927,27 @@ async function main() {
   );
   assert.equal(tenantBStream.events.at(-1).type, "turn.completed");
   await assertCursor(sessionB.sessionId, 10);
-  await assertCheckpointObjects(sessionB.sessionId, 2, tenantBId);
+  await assertCheckpointObjects(sessionB.sessionId, 3, tenantBId);
+  const tenantBVersions = await http(
+    `/v1/sessions/${sessionB.sessionId}/workspace-versions`,
+    { headers: authenticatedHeaders({}, tenantBToken) },
+    200,
+  );
+  assert.equal(tenantBVersions.body.versions.length, 1);
+  assert.equal(tenantBVersions.body.currentVersionId, tenantBVersions.body.versions[0].versionId);
+  const tenantBTests = await http(
+    `/v1/runs/${repairB.runId}/test-results`,
+    { headers: authenticatedHeaders({}, tenantBToken) },
+    200,
+  );
+  assert(tenantBTests.body.results.length >= 1);
+  assert(tenantBTests.body.results.some((result) => result.status === "passed"));
+  assert(tenantBTests.body.results.some((result) => result.status === "failed"));
+  assert(
+    tenantBTests.body.results.every(
+      (result) => result.workspaceVersionId === tenantBVersions.body.currentVersionId,
+    ),
+  );
 
   const [conversationListA, conversationListB, viewerConversationListB] = await Promise.all([
     http("/v1/conversations", { headers: authenticatedHeaders() }, 200),
@@ -1142,7 +1210,7 @@ async function main() {
   assert.match(repairEvents.at(-1).payload.workspacePatch.patch, /return left \+ right/);
   assert.equal(JSON.stringify(repairEvents).includes(repairPrompt), false);
   await assertCursor(session.sessionId, 10);
-  await assertCheckpointObjects(session.sessionId, 2);
+  await assertCheckpointObjects(session.sessionId, 3);
 
   report("scale_control_plane", { replicas: 2 });
   await composeRun([
@@ -1178,7 +1246,7 @@ async function main() {
     /Prior conversation and Java repair restored/,
   );
   await assertCursor(session.sessionId, 16);
-  await assertCheckpointObjects(session.sessionId, 4);
+  await assertCheckpointObjects(session.sessionId, 6);
 
   report("scale_control_plane", { replicas: 1 });
   await composeRun([
@@ -1237,7 +1305,7 @@ async function main() {
   assert.equal(postRestartStream.cursor, 22);
   assert.equal(postRestartStream.events.at(-1).type, "turn.completed");
   await assertCursor(session.sessionId, 22);
-  await assertCheckpointObjects(session.sessionId, 6);
+  await assertCheckpointObjects(session.sessionId, 9);
 
   report("cancel_active_worker", { bootId: freshBoot.bootId });
   const cancellationProject = (
@@ -1264,7 +1332,25 @@ async function main() {
     (event) => event.turnId === cancellationTurn.turnId && event.type === "turn.started",
   );
   const workerId = await waitForWorker(cancellationTurn.commandId);
-  await assertWorkerSecurity(workerId, secretValues);
+  const cancellationRun = (
+    await http(`/v1/runs/${cancellationTurn.runId}`, { headers: authenticatedHeaders() }, 200)
+  ).body;
+  const cancellationAttempt = cancellationRun.attempts.find(
+    (attempt) => attempt.attemptId === cancellationRun.currentAttemptId,
+  );
+  assert(cancellationAttempt !== undefined);
+  await assertWorkerSecurity(workerId, secretValues, {
+    tenantId: identityA.body.tenantId,
+    supervisorId,
+    bootId: freshBoot.bootId,
+    sandboxId: cancellationAttempt.sandboxId,
+    commandId: cancellationTurn.commandId,
+    sessionId: cancellationSession.sessionId,
+    turnId: cancellationTurn.turnId,
+    attemptId: cancellationAttempt.attemptId,
+    leaseId: cancellationAttempt.leaseId,
+    fencingToken: cancellationAttempt.fencingToken,
+  });
   await post(
     `/v1/sessions/${cancellationSession.sessionId}/turns/${cancellationTurn.turnId}/cancellations`,
     { gracePeriodMs: 2_000 },
@@ -1314,7 +1400,7 @@ async function main() {
     tenantBToken,
   );
   assert.equal(tenantBReplay.events.length, 10);
-  await assertCheckpointObjects(sessionB.sessionId, 2, tenantBId);
+  await assertCheckpointObjects(sessionB.sessionId, 3, tenantBId);
   assert.equal(
     await psql(
       `select count(distinct tenant_id) from sessions where id in (${sqlLiteral(

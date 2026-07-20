@@ -8,16 +8,17 @@ does not replace application authentication.
 
 ## Production networks
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | Provider egress | Repository egress | Public ports |
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Provider egress | Repository egress | Public ports |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Web ingress | yes | no | no | no | no | no | no | loopback `8080` |
-| Control Plane | API | yes | yes | no | no | no | no | none |
-| Trusted Pi Runner | no | yes | yes | yes | yes | yes | no | none |
-| Sandbox Manager | no | no | no | no | yes | no | no | none |
-| Tool Sandbox | no | no | no | no | no | no | no | none |
-| Repository importer | no | no | no | no | no | no | yes | none |
-| PostgreSQL | no | no | yes | no | no | no | no | none |
-| MinIO | no | no | no | yes | no | no | no | none |
+| Web ingress | yes | no | no | no | no | yes (webhook proxy only) | no | no | loopback `8080` |
+| Control Plane | API | yes | yes | no | no | yes | no | no | none |
+| Trusted Pi Runner | no | yes | yes | yes | yes | yes | yes | no | none |
+| Sandbox Manager | no | no | no | no | yes | no | no | no | none |
+| GitHub Gateway | no | no | no | no | no | yes | yes | no | none |
+| Tool Sandbox | no | no | no | no | no | no | no | no | none |
+| Repository importer | no | no | no | no | no | no | no | yes | none |
+| PostgreSQL | no | no | yes | no | no | no | no | no | none |
+| MinIO | no | no | no | yes | no | no | no | no | none |
 
 The repository-network bootstrap is a credential-free one-shot container used
 only to make Compose create the otherwise dynamic egress bridge. It exits before
@@ -26,14 +27,15 @@ does not join repository egress itself.
 
 ## Credential and authority matrix
 
-| Component | Tenant API auth | Model secret | DB credential | Object-store credential | Manager token | Docker socket |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Browser/Web | bearer token in browser memory | no | no | no | no | no |
-| Control Plane | digest verification | encrypted credential authority | yes | no | no | no |
-| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped checkpoint identity | yes | no |
-| Sandbox Manager | no | no | no | no | own service-token verifier | **yes** |
-| Tool Sandbox | no | no | no | no | no | no |
-| Repository importer | no | no | no | no | no | no |
+| Component | Tenant API auth | Model secret | DB credential | Object-store credential | Manager token | GitHub App key/token | Docker socket |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Browser/Web | bearer token in browser memory | no | no | no | no | no | no |
+| Control Plane | digest verification | encrypted credential authority | yes | no | no | no (service RPC only) | no |
+| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped checkpoint identity | yes | no (service RPC only) | no |
+| Sandbox Manager | no | no | no | no | own service-token verifier | no | **yes** |
+| GitHub Gateway | no | no | no | no | no | **yes** | no |
+| Tool Sandbox | no | no | no | no | no | no | no |
+| Repository importer | no | no | no | no | no | no | no |
 
 ## Tool Sandbox denial targets
 
@@ -51,6 +53,12 @@ host.docker.internal
 All must be unreachable. It also inspects `env`, `/proc/self/environ`,
 `/proc/1/environ`, PID 1's command line, cgroup limits, mounts, capabilities,
 and Docker socket absence.
+
+The Tool Sandbox is not attached to `github-control`, so enabling a GitHub App
+does not give agent-generated commands a path to the Gateway. The Gateway is
+attached to provider egress only for GitHub API traffic and to `github-control`
+for authenticated internal RPC and normalized webhook delivery. It is not
+attached to database, object storage, management, or sandbox control.
 
 ## Future dependency network
 

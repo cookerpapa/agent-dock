@@ -246,6 +246,67 @@ describe("PostgreSQL workspace seed provisioning", () => {
     expect(importer.import).toHaveBeenCalledTimes(1);
   });
 
+  it("routes an allowlisted private source through the trusted GitHub Gateway importer", async () => {
+    const test = await fixture();
+    await test.database
+      .insertInto("github_app_installations")
+      .values({
+        tenant_id: IDS.tenant,
+        installation_id: 7,
+        account_id: 9,
+        account_login: "acme",
+        target_type: "Organization",
+        repository_selection: "selected",
+        status: "active",
+        permissions: { contents: "read" },
+      })
+      .execute();
+    await test.database
+      .insertInto("github_repositories")
+      .values({
+        tenant_id: IDS.tenant,
+        repository_id: 42,
+        installation_id: 7,
+        full_name: "acme/private-repo",
+        owner_login: "acme",
+        name: "private-repo",
+        private: true,
+        default_branch: "main",
+        enabled: true,
+      })
+      .execute();
+    await test.database
+      .updateTable("workspace_sources")
+      .set({
+        kind: "github_app",
+        repository: "acme/private-repo",
+        commit_sha: "c".repeat(40),
+        github_installation_id: 7,
+        github_repository_id: 42,
+      })
+      .where("tenant_id", "=", IDS.tenant)
+      .where("workspace_id", "=", IDS.workspace)
+      .execute();
+    const publicImporter = { import: vi.fn(async () => Uint8Array.from(SNAPSHOT)) };
+    const privateImporter = { import: vi.fn(async () => Uint8Array.from(SNAPSHOT)) };
+    const resolver = new PostgresWorkspaceSeedResolver({
+      database: test.database,
+      objectStore: test.objectStore,
+      importer: publicImporter,
+      privateImporter,
+      pollIntervalMs: 5,
+      maximumWaitMs: 2_000,
+    });
+    await expect(resolver.resolve(command(), new AbortController().signal)).resolves.toEqual(
+      Uint8Array.from(SNAPSHOT),
+    );
+    expect(publicImporter.import).not.toHaveBeenCalled();
+    expect(privateImporter.import).toHaveBeenCalledWith(
+      { installationId: 7, repositoryId: 42, commitSha: "c".repeat(40) },
+      expect.any(AbortSignal),
+    );
+  });
+
   it("reclaims an expired import lease", async () => {
     const test = await fixture();
     await test.database

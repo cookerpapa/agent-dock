@@ -2364,10 +2364,40 @@ describe.sequential("single-user durable turn intake API", () => {
           .orderBy("kind")
           .execute();
         expect(checkpointRows.map((row) => row.kind)).toEqual([
+          "patch",
           "pi_session_snapshot",
           "workspace_snapshot",
         ]);
         expect(checkpointRows.every((row) => /^[0-9a-f]{64}$/.test(row.sha256))).toBe(true);
+        const versionsResponse = await http.inject({
+          method: "GET",
+          url: `/v1/sessions/${dockerSession.sessionId}/workspace-versions`,
+        });
+        expect(versionsResponse.statusCode).toBe(200);
+        expect(versionsResponse.json()).toMatchObject({
+          currentVersionId: expect.any(String),
+          versions: [
+            {
+              runId: accepted.runId,
+              artifacts: expect.arrayContaining([
+                expect.objectContaining({ kind: "patch" }),
+                expect.objectContaining({ kind: "workspace_snapshot" }),
+              ]),
+            },
+          ],
+        });
+        const testResultsResponse = await http.inject({
+          method: "GET",
+          url: `/v1/runs/${accepted.runId}/test-results`,
+        });
+        expect(testResultsResponse.statusCode).toBe(200);
+        expect(testResultsResponse.json()).toMatchObject({
+          runId: accepted.runId,
+          results: [
+            expect.objectContaining({ status: "failed" }),
+            expect.objectContaining({ status: "passed" }),
+          ],
+        });
 
         const followUpResponse = await http.inject({
           method: "POST",
@@ -2414,7 +2444,7 @@ describe.sequential("single-user durable turn intake API", () => {
             .select((expression) => expression.fn.countAll<string>().as("count"))
             .where("session_id", "=", dockerSession.sessionId)
             .executeTakeFirstOrThrow(),
-        ).toEqual({ count: "4" });
+        ).toEqual({ count: "6" });
         expect(
           await database
             .selectFrom("session_event_cursors")

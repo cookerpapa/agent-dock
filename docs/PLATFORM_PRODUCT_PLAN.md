@@ -54,6 +54,8 @@ system must not claim exactly-once arbitrary shell execution.
 
 ### Milestone 3: versioned Workspace and GitHub-native delivery
 
+Status: complete for the optional GitHub App integration and Docker production topology under ADR-0032.
+
 - checkpoint history, compare, fork, rollback, archive, and patch download;
 - structured files/diff/test/artifact surfaces;
 - GitHub App installation and repository allowlist;
@@ -61,6 +63,14 @@ system must not claim exactly-once arbitrary shell execution.
 - trusted branch/commit/PR write-back without putting GitHub tokens in a Tool
   Sandbox;
 - webhook and Check Run/status integration.
+
+Implemented with immutable staged/settled/abandoned Workspace versions,
+CAS/idempotent fork/rollback/archive, trusted artifact transport, structured
+file/diff/test/artifact APIs, a separate credential-owning GitHub Gateway,
+installation/repository allowlists, exact private snapshots, reconciled
+branch/commit/PR/Check delivery, and HMAC-verified webhook ingestion. The
+default deployment is fail-closed until an operator supplies a real GitHub App;
+automated GitHub API contract tests are not described as a live installation.
 
 ### Milestone 4: context and model governance
 

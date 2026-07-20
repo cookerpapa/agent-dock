@@ -1,4 +1,5 @@
 import { Module, type DynamicModule } from "@nestjs/common";
+import type { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -15,6 +16,11 @@ import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
+import { GitHubIntegrationService } from "./github-integration-service.ts";
+import {
+  WorkspaceVersionService,
+  type TrustedArtifactReader,
+} from "./workspace-version-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -26,6 +32,8 @@ export type ControlPlaneModuleOptions = Omit<
   staticRequestIdentity?: TenantRequestIdentity;
   publicRegistration?: PublicTenantRegistrationConfiguration;
   modelCredentialVault?: TenantModelCredentialVault;
+  artifactReader?: TrustedArtifactReader;
+  githubGateway?: GitHubGatewayClient;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -50,6 +58,11 @@ export class ControlPlaneModule {
       options.sessionEventNotifications === undefined
         ? undefined
         : new SessionEventNotificationBridge(options.sessionEventNotifications, eventHub);
+    const workspaceVersions = new WorkspaceVersionService({
+      database: options.database,
+      ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
+      ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+    });
     return {
       module: ControlPlaneModule,
       controllers: [ControlPlaneController],
@@ -90,6 +103,19 @@ export class ControlPlaneModule {
               : { vault: options.modelCredentialVault }),
           }),
         },
+        {
+          provide: WorkspaceVersionService,
+          useValue: workspaceVersions,
+        },
+        {
+          provide: GitHubIntegrationService,
+          useValue: new GitHubIntegrationService({
+            database: options.database,
+            workspaceVersions,
+            ...(options.githubGateway === undefined ? {} : { gateway: options.githubGateway }),
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
         {
@@ -105,7 +131,13 @@ export class ControlPlaneModule {
               },
             ]),
       ],
-      exports: [DurableEventStore, SessionEventHub, SessionEventStream],
+      exports: [
+        DurableEventStore,
+        SessionEventHub,
+        SessionEventStream,
+        WorkspaceVersionService,
+        GitHubIntegrationService,
+      ],
     };
   }
 }

@@ -9,6 +9,7 @@ export {
   SUPERVISOR_HOST_LIVE_PATH,
   SUPERVISOR_HOST_READY_PATH,
   SUPERVISOR_MANAGEMENT_PATH,
+  SUPERVISOR_ARTIFACT_READ_PATH,
   SupervisorManagementServer,
   SupervisorManagementServerError,
   type SupervisorManagementServerOptions,
@@ -41,6 +42,8 @@ export {
 
 export {
   PostgresWorkspaceSeedResolver,
+  GatewayGitHubWorkspaceImporter,
   WorkspaceSeedError,
   type PostgresWorkspaceSeedResolverOptions,
+  type PrivateGitHubWorkspaceImporter,
 } from "./workspace-seed.ts";

@@ -16,6 +16,7 @@ import type {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MANAGEMENT_PATH = "/internal/v1/supervisor/manage";
+const DEFAULT_ARTIFACT_READ_PATH = "/internal/v1/artifacts/read";
 
 export type HttpSupervisorManagementClientOptions = {
   baseUrl: string;
@@ -102,6 +103,7 @@ function runtimeAssignment(value: SupervisorRuntimeAssignment): SandboxRuntimeAs
 
 export class HttpSupervisorManagementClient {
   readonly #url: string;
+  readonly #artifactUrl: string;
   readonly #authorization: string;
   readonly #requestTimeoutMs: number;
   readonly #fetch: typeof fetch;
@@ -110,6 +112,7 @@ export class HttpSupervisorManagementClient {
   constructor(options: HttpSupervisorManagementClientOptions) {
     const root = baseUrl(options.baseUrl, options.allowInsecureHttp === true);
     this.#url = new URL(DEFAULT_MANAGEMENT_PATH, root).toString();
+    this.#artifactUrl = new URL(DEFAULT_ARTIFACT_READ_PATH, root).toString();
     this.#authorization = `Bearer ${boundedToken(options.managementToken)}`;
     this.#requestTimeoutMs = positiveInteger(
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -175,6 +178,60 @@ export class HttpSupervisorManagementClient {
         false,
       );
     }
+  }
+
+  async readArtifact(objectKey: string): Promise<Uint8Array> {
+    let response: Response;
+    try {
+      response = await this.#fetch(this.#artifactUrl, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(this.#requestTimeoutMs),
+        headers: {
+          authorization: this.#authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ objectKey }),
+      });
+    } catch {
+      throw new HttpSupervisorManagementError(
+        "artifact_store_unavailable",
+        "Trusted artifact transport is unavailable",
+        true,
+      );
+    }
+    if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new HttpSupervisorManagementError(
+          "artifact_transport_invalid_response",
+          "Trusted artifact transport returned an invalid response",
+          false,
+        );
+      }
+      try {
+        const failure = parseInternalServiceError(body).error;
+        throw new HttpSupervisorManagementError(failure.code, failure.message, failure.retryable);
+      } catch (error: unknown) {
+        if (error instanceof HttpSupervisorManagementError) throw error;
+        throw new HttpSupervisorManagementError(
+          "artifact_transport_rejected",
+          "Trusted artifact transport rejected the request",
+          response.status >= 500,
+        );
+      }
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > 16 * 1024 * 1024) {
+      throw new HttpSupervisorManagementError(
+        "artifact_too_large",
+        "Trusted artifact transport exceeded its byte limit",
+        false,
+      );
+    }
+    return bytes;
   }
 }
 

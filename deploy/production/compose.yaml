@@ -27,6 +27,8 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
   AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR: ${AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR:-8}
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: http://supervisor-host:4100
+  AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
+  AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: ${AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED:-false}
   AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
@@ -62,6 +64,10 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
     target: /run/agent-dock-secrets/model-credential-master-key
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
+    target: /run/agent-dock-secrets/github-gateway-token
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
@@ -253,6 +259,7 @@ services:
       - api
       - database
       - management
+      - github-control
     healthcheck:
       test:
         [
@@ -319,6 +326,8 @@ services:
       AGENT_DOCK_PI_TURN_TIMEOUT_MS: "600000"
       AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS: "240000"
       AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "300000"
+      AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
+      AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
       AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
       AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
       AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
@@ -350,6 +359,10 @@ services:
         target: /run/agent-dock-secrets/model-credential-master-key
         read_only: true
       - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
+        target: /run/agent-dock-secrets/github-gateway-token
+        read_only: true
+      - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
         target: /run/agent-dock-secrets/aws-credentials
         read_only: true
@@ -359,6 +372,7 @@ services:
       - object-storage
       - sandbox-control
       - provider-egress
+      - github-control
     healthcheck:
       test:
         [
@@ -479,6 +493,59 @@ services:
     cpus: 0.1
     logging: *bounded-logging
 
+  github-gateway:
+    image: agent-dock/github-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/github-gateway/Dockerfile
+    restart: unless-stopped
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "4400"
+      AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
+      AGENT_DOCK_GITHUB_WEBHOOK_SECRET_FILE: /run/agent-dock-secrets/github-webhook-secret
+      AGENT_DOCK_GITHUB_APP_ID: ${AGENT_DOCK_GITHUB_APP_ID:-}
+      AGENT_DOCK_GITHUB_APP_PRIVATE_KEY_FILE: /run/agent-dock-secrets/github-app-private-key.pem
+      AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
+        target: /run/agent-dock-secrets/github-gateway-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-webhook-secret
+        target: /run/agent-dock-secrets/github-webhook-secret
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-app-private-key.pem
+        target: /run/agent-dock-secrets/github-app-private-key.pem
+        read_only: true
+    networks:
+      - github-control
+      - provider-egress
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4400/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.75
+    stop_grace_period: 15s
+    logging: *bounded-logging
+
   web:
     image: agent-dock/web-ui:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
@@ -496,6 +563,7 @@ services:
     networks:
       - edge
       - api
+      - github-control
     healthcheck:
       test: [CMD, wget, --quiet, --spider, http://127.0.0.1:8080/healthz]
       interval: 5s
@@ -533,6 +601,8 @@ networks:
   object-storage:
     internal: true
   sandbox-control:
+    internal: true
+  github-control:
     internal: true
   provider-egress: {}
   repository-egress:

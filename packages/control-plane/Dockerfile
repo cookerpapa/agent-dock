@@ -8,6 +8,7 @@ COPY packages/control-plane/tsconfig.json packages/control-plane/tsconfig.json
 COPY packages/database/package.json packages/database/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json
+COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
@@ -32,6 +33,8 @@ COPY packages/domain/package.json packages/domain/package.json
 COPY packages/domain/src packages/domain/src
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json
 COPY packages/fake-model-server/src packages/fake-model-server/src
+COPY packages/github-gateway/package.json packages/github-gateway/package.json
+COPY packages/github-gateway/src packages/github-gateway/src
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json

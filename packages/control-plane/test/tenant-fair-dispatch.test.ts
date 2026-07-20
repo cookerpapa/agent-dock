@@ -98,6 +98,18 @@ async function createQueuedTurns(
   return turns;
 }
 
+async function dispatchUntilWork(
+  dispatcher: OutboxDispatcher,
+  timeoutMs = 2_000,
+): Promise<Awaited<ReturnType<OutboxDispatcher["dispatchNext"]>>> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await dispatcher.dispatchNext();
+    if (result.status !== "idle" || Date.now() >= deadline) return result;
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+}
+
 beforeAll(async () => {
   pglite = await PGlite.create();
   socketServer = new PGLiteSocketServer({
@@ -237,6 +249,10 @@ describe.sequential("global tenant scheduling", () => {
       expect.objectContaining({ status: "completed" }),
       expect.objectContaining({ status: "completed" }),
     ]);
-    await expect(probeLane.dispatchNext()).resolves.toMatchObject({ status: "completed" });
+    // The production scheduler polls. Under a loaded PGlite socket, a claim
+    // transaction can briefly observe the just-completed lanes before their
+    // commits become visible on another connection, so exercise the same
+    // bounded poll behavior instead of assuming one immediate poll.
+    await expect(dispatchUntilWork(probeLane)).resolves.toMatchObject({ status: "completed" });
   });
 });

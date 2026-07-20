@@ -122,9 +122,20 @@ export const GitHubRepositorySourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const GitHubAppRepositorySourceSchema = Type.Object(
+  {
+    kind: Type.Literal("github_app"),
+    installationId: PositiveSafeIntegerSchema,
+    repositoryId: PositiveSafeIntegerSchema,
+    commitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+  },
+  { additionalProperties: false },
+);
+
 export const WorkspaceSourceRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("sample_java") }, { additionalProperties: false }),
   GitHubRepositorySourceSchema,
+  GitHubAppRepositorySourceSchema,
 ]);
 
 export const WorkspaceImportStatusSchema = Type.Union([
@@ -144,6 +155,21 @@ export const WorkspaceSourceResourceSchema = Type.Union([
       kind: Type.Literal("github_public"),
       repository: Type.String({ minLength: 3, maxLength: 140 }),
       commitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+      status: WorkspaceImportStatusSchema,
+      failureCode: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z][a-z0-9_]*$" }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("github_app"),
+      installationId: PositiveSafeIntegerSchema,
+      repositoryId: PositiveSafeIntegerSchema,
+      repository: Type.String({ minLength: 3, maxLength: 140 }),
+      commitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+      private: Type.Boolean(),
       status: WorkspaceImportStatusSchema,
       failureCode: Type.Optional(
         Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z][a-z0-9_]*$" }),
@@ -387,6 +413,248 @@ export const RunListResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const TestResultResourceSchema = Type.Object(
+  {
+    testResultId: UuidSchema,
+    runId: UuidSchema,
+    workspaceVersionId: Type.Optional(UuidSchema),
+    toolCallId: Type.String({ minLength: 1, maxLength: 256 }),
+    command: Type.String({ minLength: 1, maxLength: 4_096 }),
+    suite: Type.String({ minLength: 1, maxLength: 256 }),
+    status: Type.Union([Type.Literal("passed"), Type.Literal("failed"), Type.Literal("errored")]),
+    exitCode: Type.Optional(Type.Integer({ minimum: 0, maximum: 255 })),
+    durationMs: Type.Optional(NonNegativeSafeIntegerSchema),
+    summary: Type.Optional(Type.String({ maxLength: 2_000 })),
+    artifactId: Type.Optional(UuidSchema),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const TestResultListResourceSchema = Type.Object(
+  { runId: UuidSchema, results: Type.Array(TestResultResourceSchema, { maxItems: 100 }) },
+  { additionalProperties: false },
+);
+
+export const WorkspaceArtifactResourceSchema = Type.Object(
+  {
+    artifactId: UuidSchema,
+    kind: Type.Union([
+      Type.Literal("pi_session_snapshot"),
+      Type.Literal("workspace_snapshot"),
+      Type.Literal("tool_output"),
+      Type.Literal("patch"),
+      Type.Literal("report"),
+      Type.Literal("crash_bundle"),
+    ]),
+    fileName: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    sizeBytes: NonNegativeSafeIntegerSchema,
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceVersionResourceSchema = Type.Object(
+  {
+    versionId: UuidSchema,
+    workspaceId: UuidSchema,
+    sessionId: UuidSchema,
+    versionNumber: PositiveSafeIntegerSchema,
+    parentVersionId: Type.Optional(UuidSchema),
+    sourceVersionId: Type.Optional(UuidSchema),
+    origin: Type.Union([
+      Type.Literal("checkpoint"),
+      Type.Literal("fork"),
+      Type.Literal("migration"),
+    ]),
+    runId: Type.Optional(UuidSchema),
+    attemptId: Type.Optional(UuidSchema),
+    turnId: Type.Optional(UuidSchema),
+    revision: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    fileCount: NonNegativeSafeIntegerSchema,
+    createdAt: UtcTimestampSchema,
+    settledAt: UtcTimestampSchema,
+    artifacts: Type.Array(WorkspaceArtifactResourceSchema, { maxItems: 3 }),
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceVersionListResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    currentVersionId: Type.Optional(UuidSchema),
+    archived: Type.Boolean(),
+    versions: Type.Array(WorkspaceVersionResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceFileResourceSchema = Type.Object(
+  {
+    path: Type.String({ minLength: 1, maxLength: 512 }),
+    executable: Type.Boolean(),
+    sizeBytes: NonNegativeSafeIntegerSchema,
+    sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceFileListResourceSchema = Type.Object(
+  {
+    versionId: UuidSchema,
+    files: Type.Array(WorkspaceFileResourceSchema, { maxItems: 512 }),
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceVersionCompareResourceSchema = Type.Object(
+  {
+    baseVersionId: UuidSchema,
+    targetVersionId: UuidSchema,
+    summary: Type.Object(
+      {
+        added: NonNegativeSafeIntegerSchema,
+        modified: NonNegativeSafeIntegerSchema,
+        deleted: NonNegativeSafeIntegerSchema,
+        modeChanged: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    files: Type.Array(
+      Type.Object(
+        {
+          path: Type.String({ minLength: 1, maxLength: 512 }),
+          change: Type.Union([
+            Type.Literal("added"),
+            Type.Literal("modified"),
+            Type.Literal("deleted"),
+            Type.Literal("mode_changed"),
+          ]),
+          baseSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+          targetSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 1_024 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const ForkSessionRequestSchema = Type.Object(
+  { versionId: UuidSchema },
+  { additionalProperties: false },
+);
+
+export const RollbackWorkspaceRequestSchema = Type.Object(
+  {
+    versionId: UuidSchema,
+    expectedCurrentVersionId: UuidSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ArchiveSessionRequestSchema = Type.Object(
+  { archived: Type.Boolean() },
+  { additionalProperties: false },
+);
+
+export const WorkspaceOperationResourceSchema = Type.Object(
+  {
+    operationId: UuidSchema,
+    kind: Type.Union([
+      Type.Literal("fork"),
+      Type.Literal("rollback"),
+      Type.Literal("archive"),
+      Type.Literal("unarchive"),
+    ]),
+    sessionId: UuidSchema,
+    versionId: Type.Optional(UuidSchema),
+    forkedSessionId: Type.Optional(UuidSchema),
+    replayed: Type.Boolean(),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const GitHubInstallationResourceSchema = Type.Object(
+  {
+    installationId: PositiveSafeIntegerSchema,
+    accountId: PositiveSafeIntegerSchema,
+    accountLogin: Type.String({ minLength: 1, maxLength: 128 }),
+    targetType: Type.Union([Type.Literal("User"), Type.Literal("Organization")]),
+    repositorySelection: Type.Union([Type.Literal("all"), Type.Literal("selected")]),
+    status: Type.Union([
+      Type.Literal("active"),
+      Type.Literal("suspended"),
+      Type.Literal("removed"),
+    ]),
+    repositories: Type.Array(
+      Type.Object(
+        {
+          repositoryId: PositiveSafeIntegerSchema,
+          fullName: Type.String({ minLength: 3, maxLength: 140 }),
+          private: Type.Boolean(),
+          defaultBranch: Type.String({ minLength: 1, maxLength: 255 }),
+          enabled: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 500 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const RegisterGitHubInstallationRequestSchema = Type.Object(
+  { installationId: PositiveSafeIntegerSchema },
+  { additionalProperties: false },
+);
+
+export const SetGitHubRepositoryRequestSchema = Type.Object(
+  { enabled: Type.Boolean() },
+  { additionalProperties: false },
+);
+
+export const CreateGitHubPullRequestRequestSchema = Type.Object(
+  {
+    repositoryId: PositiveSafeIntegerSchema,
+    baseBranch: Type.String({ minLength: 1, maxLength: 255 }),
+    baseCommitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
+    headBranch: Type.String({ minLength: 1, maxLength: 255 }),
+    title: Type.String({ minLength: 1, maxLength: 256 }),
+    body: Type.String({ maxLength: 16_384 }),
+  },
+  { additionalProperties: false },
+);
+
+export const GitHubPullRequestDeliveryResourceSchema = Type.Object(
+  {
+    deliveryId: UuidSchema,
+    workspaceVersionId: UuidSchema,
+    repositoryId: PositiveSafeIntegerSchema,
+    state: Type.Union([
+      Type.Literal("pending"),
+      Type.Literal("delivering"),
+      Type.Literal("completed"),
+      Type.Literal("failed"),
+    ]),
+    headBranch: Type.String({ minLength: 1, maxLength: 255 }),
+    commitSha: Type.Optional(Type.String({ pattern: "^[0-9a-f]{40}$" })),
+    pullRequestNumber: Type.Optional(PositiveSafeIntegerSchema),
+    pullRequestUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
+    checkRunId: Type.Optional(PositiveSafeIntegerSchema),
+    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    replayed: Type.Boolean(),
+    createdAt: UtcTimestampSchema,
+    updatedAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const CreateTurnCancellationRequestSchema = Type.Object(
   {
     gracePeriodMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 30_000 })),
@@ -431,6 +699,7 @@ export type ModelConfigurationResource = Static<typeof ModelConfigurationResourc
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
 export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
 export type GitHubRepositorySource = Static<typeof GitHubRepositorySourceSchema>;
+export type GitHubAppRepositorySource = Static<typeof GitHubAppRepositorySourceSchema>;
 export type WorkspaceSourceRequest = Static<typeof WorkspaceSourceRequestSchema>;
 export type WorkspaceImportStatus = Static<typeof WorkspaceImportStatusSchema>;
 export type WorkspaceSourceResource = Static<typeof WorkspaceSourceResourceSchema>;
@@ -452,6 +721,27 @@ export type RunAttemptTransitionResource = Static<typeof RunAttemptTransitionRes
 export type RunAttemptResource = Static<typeof RunAttemptResourceSchema>;
 export type RunResource = Static<typeof RunResourceSchema>;
 export type RunListResource = Static<typeof RunListResourceSchema>;
+export type TestResultResource = Static<typeof TestResultResourceSchema>;
+export type TestResultListResource = Static<typeof TestResultListResourceSchema>;
+export type WorkspaceArtifactResource = Static<typeof WorkspaceArtifactResourceSchema>;
+export type WorkspaceVersionResource = Static<typeof WorkspaceVersionResourceSchema>;
+export type WorkspaceVersionListResource = Static<typeof WorkspaceVersionListResourceSchema>;
+export type WorkspaceFileResource = Static<typeof WorkspaceFileResourceSchema>;
+export type WorkspaceFileListResource = Static<typeof WorkspaceFileListResourceSchema>;
+export type WorkspaceVersionCompareResource = Static<typeof WorkspaceVersionCompareResourceSchema>;
+export type ForkSessionRequest = Static<typeof ForkSessionRequestSchema>;
+export type RollbackWorkspaceRequest = Static<typeof RollbackWorkspaceRequestSchema>;
+export type ArchiveSessionRequest = Static<typeof ArchiveSessionRequestSchema>;
+export type WorkspaceOperationResource = Static<typeof WorkspaceOperationResourceSchema>;
+export type GitHubInstallationResource = Static<typeof GitHubInstallationResourceSchema>;
+export type RegisterGitHubInstallationRequest = Static<
+  typeof RegisterGitHubInstallationRequestSchema
+>;
+export type SetGitHubRepositoryRequest = Static<typeof SetGitHubRepositoryRequestSchema>;
+export type CreateGitHubPullRequestRequest = Static<typeof CreateGitHubPullRequestRequestSchema>;
+export type GitHubPullRequestDeliveryResource = Static<
+  typeof GitHubPullRequestDeliveryResourceSchema
+>;
 export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellationRequestSchema>;
 export type AcceptedTurnCancellationResource = Static<
   typeof AcceptedTurnCancellationResourceSchema
@@ -490,6 +780,15 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
   }
   if (request.source === undefined || request.source.kind === "sample_java") {
     return { name, source: { kind: "sample_java" } };
+  }
+  if (request.source.kind === "github_app") {
+    return {
+      name,
+      source: {
+        ...request.source,
+        commitSha: request.source.commitSha.toLowerCase(),
+      },
+    };
   }
   const repository = request.source.repository.trim().toLowerCase();
   const commitSha = request.source.commitSha.toLowerCase();
@@ -605,6 +904,97 @@ export function parseRunListResource(value: unknown): RunListResource {
   return parseSchema(RunListResourceSchema, value, "run list resource");
 }
 
+export function parseTestResultListResource(value: unknown): TestResultListResource {
+  return parseSchema(TestResultListResourceSchema, value, "test-result-list resource");
+}
+
+export function parseForkSessionRequest(value: unknown): ForkSessionRequest {
+  return parseSchema(ForkSessionRequestSchema, value, "fork-session request");
+}
+
+export function parseRollbackWorkspaceRequest(value: unknown): RollbackWorkspaceRequest {
+  return parseSchema(RollbackWorkspaceRequestSchema, value, "rollback-workspace request");
+}
+
+export function parseArchiveSessionRequest(value: unknown): ArchiveSessionRequest {
+  return parseSchema(ArchiveSessionRequestSchema, value, "archive-session request");
+}
+
+export function parseRegisterGitHubInstallationRequest(
+  value: unknown,
+): RegisterGitHubInstallationRequest {
+  return parseSchema(
+    RegisterGitHubInstallationRequestSchema,
+    value,
+    "register-GitHub-installation request",
+  );
+}
+
+export function parseSetGitHubRepositoryRequest(value: unknown): SetGitHubRepositoryRequest {
+  return parseSchema(SetGitHubRepositoryRequestSchema, value, "set-GitHub-repository request");
+}
+
+export function parseCreateGitHubPullRequestRequest(
+  value: unknown,
+): CreateGitHubPullRequestRequest {
+  const request = parseSchema(
+    CreateGitHubPullRequestRequestSchema,
+    value,
+    "create-GitHub-pull-request request",
+  );
+  if (
+    request.baseBranch.startsWith("/") ||
+    request.headBranch.startsWith("/") ||
+    request.baseBranch.includes("..") ||
+    request.headBranch.includes("..") ||
+    /[~^:?*[\\\u0000-\u0020\u007f]/.test(request.baseBranch) ||
+    /[~^:?*[\\\u0000-\u0020\u007f]/.test(request.headBranch)
+  ) {
+    throw new ControlPlaneApiValidationError("GitHub branch name is invalid");
+  }
+  return request;
+}
+
+export function parseWorkspaceVersionResource(value: unknown): WorkspaceVersionResource {
+  return parseSchema(WorkspaceVersionResourceSchema, value, "workspace-version resource");
+}
+
+export function parseWorkspaceVersionListResource(value: unknown): WorkspaceVersionListResource {
+  return parseSchema(WorkspaceVersionListResourceSchema, value, "workspace-version-list resource");
+}
+
+export function parseWorkspaceFileListResource(value: unknown): WorkspaceFileListResource {
+  return parseSchema(WorkspaceFileListResourceSchema, value, "workspace-file-list resource");
+}
+
+export function parseWorkspaceVersionCompareResource(
+  value: unknown,
+): WorkspaceVersionCompareResource {
+  return parseSchema(
+    WorkspaceVersionCompareResourceSchema,
+    value,
+    "workspace-version-compare resource",
+  );
+}
+
+export function parseWorkspaceOperationResource(value: unknown): WorkspaceOperationResource {
+  return parseSchema(WorkspaceOperationResourceSchema, value, "workspace-operation resource");
+}
+
+export function parseGitHubInstallationResource(value: unknown): GitHubInstallationResource {
+  return parseSchema(GitHubInstallationResourceSchema, value, "GitHub-installation resource");
+}
+
+export function parseGitHubPullRequestDeliveryResource(
+  value: unknown,
+): GitHubPullRequestDeliveryResource {
+  return parseSchema(
+    GitHubPullRequestDeliveryResourceSchema,
+    value,
+    "GitHub-pull-request-delivery resource",
+  );
+}
+
 export function parseAcceptedTurnCancellationResource(
   value: unknown,
 ): AcceptedTurnCancellationResource {
@@ -625,6 +1015,11 @@ export function parseIdempotencyKey(value: unknown): string {
 
 export function parseUuidPathParameter(value: unknown, name: string): string {
   return parseSchema(UuidSchema, value, `${name} path parameter`);
+}
+
+export function parsePositiveIntegerPathParameter(value: unknown, name: string): number {
+  const normalized = typeof value === "string" && /^[1-9]\d*$/.test(value) ? Number(value) : value;
+  return parseSchema(PositiveSafeIntegerSchema, normalized, `${name} path parameter`);
 }
 
 export function parseLastEventIdHeader(value: unknown): number {

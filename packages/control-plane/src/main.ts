@@ -1,4 +1,5 @@
 import { createDatabase } from "@agent-dock/database";
+import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { sql } from "kysely";
@@ -17,6 +18,7 @@ import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
 import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
 import { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import { GitHubWebhookIngestGateway } from "./github-webhook-gateway.ts";
 import {
   createRemoteControlPlaneRuntime,
   type RemoteControlPlaneRuntime,
@@ -53,6 +55,14 @@ export async function startControlPlane(): Promise<void> {
       managementToken: config.supervisorManagementToken,
       allowInsecureHttp: config.allowInsecureInternalHttp,
     });
+    const githubGateway =
+      config.githubGatewayBaseUrl === undefined || config.githubGatewayServiceToken === undefined
+        ? undefined
+        : new GitHubGatewayClient({
+            baseUrl: config.githubGatewayBaseUrl,
+            serviceToken: config.githubGatewayServiceToken,
+            allowInsecureHttp: config.allowInsecureInternalHttp,
+          });
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorId: config.supervisorId,
@@ -81,6 +91,16 @@ export async function startControlPlane(): Promise<void> {
       productionHttpGateway: httpGateway,
       publicRegistration: config.publicRegistration,
       modelCredentialVault: new TenantModelCredentialVault(config.modelCredentialMasterKey),
+      artifactReader: { get: (objectKey) => managementClient.readArtifact(objectKey) },
+      ...(githubGateway === undefined ? {} : { githubGateway }),
+      ...(config.githubGatewayServiceToken === undefined
+        ? {}
+        : {
+            githubWebhookGateway: new GitHubWebhookIngestGateway({
+              database,
+              serviceToken: config.githubGatewayServiceToken,
+            }),
+          }),
       worker: { maxLanesPerConnection: config.maximumLanesPerSupervisor },
     });
     await runtime.listen(config.port, config.host);

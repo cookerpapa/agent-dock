@@ -218,6 +218,27 @@ overwrite a newer checkpoint or terminal state. The supported claim remains
 at-least-once scheduling with fenced/idempotent commits, not exactly-once model
 or shell execution.
 
+ADR-0032 makes a settled checkpoint an immutable, tenant-owned
+`WorkspaceVersion` instead of only advancing opaque Session object pointers.
+The current Attempt stages a version under its Run/lease/fence; the same
+transaction that settles the Run either publishes that version and advances the
+Session pointer or abandons it and restores the previous settled pointers.
+Tenant-scoped APIs expose bounded history, manifest-selected files, typed
+artifacts, structured comparisons and test results. Fork and rollback move or
+copy pointers with expected-version CAS and append an operation audit row; they
+never rewrite historical versions.
+
+The optional GitHub-native path is isolated behind a separate trusted GitHub
+Gateway. It alone holds the GitHub App private key and in-memory installation
+tokens, inspects an installation/repository allowlist, imports a private
+repository at an exact commit, and reconciles branch/commit/PR/Check delivery.
+Neither the Control Plane nor Tool Sandbox receives an installation token.
+Webhook signatures are checked over the raw bounded body at the Gateway; only a
+normalized, authenticated, delivery-ID-deduplicated event reaches the Control
+Plane. When no App ID/key is configured, the service remains live but all App
+operations fail closed; public exact-commit import continues through the
+credential-free importer.
+
 ### TypeScript sandbox supervisor
 
 Responsibilities:
@@ -271,20 +292,22 @@ policy does not grant object deletion.
 
 The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted Pi Runner, one
-socket-owning Sandbox Manager, static Web ingress, isolated networks, private
-secret-file mounts, health checks, bounded resources/logs, and four declared
-volumes. Only Web publishes a loopback port.
-This topology is complete for the bounded private multi-tenant fixture and
-controlled public GitHub commits with either a deterministic model or owner-
-configured DeepSeek; it does not imply arbitrary/private repository,
-arbitrary-provider/extension support, public SaaS,
-Kubernetes, or direct Internet hardening. The running control plane is
+socket-owning Sandbox Manager, one optional credential-owning GitHub Gateway,
+static Web ingress, isolated networks, private secret-file mounts, health
+checks, bounded resources/logs, and four declared volumes. Only Web publishes a
+loopback port. This topology is complete for the bounded private multi-tenant
+fixture and controlled public GitHub commits with either a deterministic model
+or owner-configured DeepSeek. Private GitHub import and PR delivery are present
+but require an operator-owned GitHub App and a separate live acceptance; the
+default deployment deliberately has no such authority. It does not imply
+arbitrary Git hosts/providers/extensions, public SaaS, Kubernetes, or direct
+Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
-See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, and the production
-runbook.
+See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, ADR-0030,
+ADR-0031, ADR-0032, and the production runbook.
 
 ### Model profiles and credentials
 

@@ -14,6 +14,7 @@
   "dependencies": {
     "@agent-dock/control-plane": "0.1.0",
     "@agent-dock/database": "0.1.0",
+    "@agent-dock/github-gateway": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/sandbox-manager": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",

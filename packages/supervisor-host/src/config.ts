@@ -34,6 +34,8 @@ export type SupervisorHostConfig = {
   piTurnTimeoutMs: number;
   repositoryImportLeaseMs: number;
   repositoryImportWaitMs: number;
+  githubGatewayBaseUrl?: string;
+  githubGatewayServiceToken?: string;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -182,6 +184,16 @@ async function secret(
   throw new TypeError(`Required secret file ${name}_FILE is missing`);
 }
 
+async function optionalSecret(
+  environment: SupervisorHostEnvironment,
+  name: string,
+  allowInline: boolean,
+): Promise<string | undefined> {
+  if (environment[`${name}_FILE`] === undefined && environment[name] === undefined)
+    return undefined;
+  return secret(environment, name, allowInline);
+}
+
 export async function loadSupervisorHostConfig(
   environment: SupervisorHostEnvironment = process.env,
 ): Promise<SupervisorHostConfig> {
@@ -194,6 +206,15 @@ export async function loadSupervisorHostConfig(
     required(environment, "AGENT_DOCK_CONTROL_PLANE_URL"),
     allowInsecureInternalHttp,
   );
+  const githubGatewayBaseUrl = environment.AGENT_DOCK_GITHUB_GATEWAY_URL;
+  const githubGatewayServiceToken = await optionalSecret(
+    environment,
+    "AGENT_DOCK_GITHUB_GATEWAY_TOKEN",
+    allowInlineSecrets,
+  );
+  if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
+    throw new TypeError("GitHub Gateway URL and service token must be configured together");
+  }
   return {
     supervisorId: bounded(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
@@ -313,5 +334,15 @@ export async function loadSupervisorHostConfig(
       1_000,
       15 * 60_000,
     ),
+    ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined
+      ? {}
+      : {
+          githubGatewayBaseUrl: internalServiceBaseUrl(
+            githubGatewayBaseUrl,
+            allowInsecureInternalHttp,
+            "AGENT_DOCK_GITHUB_GATEWAY_URL",
+          ),
+          githubGatewayServiceToken,
+        }),
   };
 }

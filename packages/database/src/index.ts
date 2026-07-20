@@ -31,6 +31,8 @@ export {
   downInitialControlPlane,
   downPrivateMultiTenantIdentity,
   downSupervisorConnectionHealth,
+  downSupervisorBootCredentials,
+  downVersionedWorkspacesAndGitHubDelivery,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -40,6 +42,8 @@ export {
   upInitialControlPlane,
   upPrivateMultiTenantIdentity,
   upSupervisorConnectionHealth,
+  upSupervisorBootCredentials,
+  upVersionedWorkspacesAndGitHubDelivery,
 } from "./migrations/index.ts";
 
 export {

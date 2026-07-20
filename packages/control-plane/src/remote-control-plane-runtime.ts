@@ -197,6 +197,9 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.productionHttpGateway === undefined
         ? {}
         : { productionHttpGateway: options.productionHttpGateway }),
+      ...(options.githubWebhookGateway === undefined
+        ? {}
+        : { githubWebhookGateway: options.githubWebhookGateway }),
       ...(options.publicRegistration === undefined
         ? {}
         : { publicRegistration: options.publicRegistration }),
@@ -210,6 +213,8 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.sessionEventStreamOptions === undefined
         ? {}
         : { sessionEventStreamOptions: options.sessionEventStreamOptions }),
+      ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
+      ...(options.githubGateway === undefined ? {} : { githubGateway: options.githubGateway }),
     });
   } catch (error: unknown) {
     gateway.shutdown();

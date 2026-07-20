@@ -4,6 +4,7 @@ import {
   type ExecuteTurnCommandMessage,
   type SandboxCheckpointBlob,
   type SandboxSettledCheckpoint,
+  type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
@@ -19,6 +20,7 @@ export type LoadedSandboxCheckpoint = {
 export type CapturedSandboxCheckpoint = {
   piSession: Uint8Array;
   workspace: Uint8Array;
+  workspacePatch?: WorkspacePatch;
 };
 
 export type SavedSandboxCheckpoint = {

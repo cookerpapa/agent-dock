@@ -91,6 +91,12 @@ async function harness() {
         }
       },
     },
+    artifactStore: {
+      async get(objectKey) {
+        if (objectKey !== "checkpoints/tenant/session/workspace.json") throw new Error("missing");
+        return Buffer.from("trusted-artifact");
+      },
+    },
   });
   const address = await server.listen();
   const client = new HttpSupervisorManagementClient({
@@ -189,5 +195,24 @@ describe("trusted Supervisor management boundary", () => {
           managementToken: TOKEN,
         }),
     ).toThrow("Plain HTTP Supervisor management requires explicit opt-in");
+  });
+
+  it("transports bounded artifacts only over the authenticated management boundary", async () => {
+    const value = await harness();
+    try {
+      const bytes = await value.client.readArtifact("checkpoints/tenant/session/workspace.json");
+      expect(Buffer.from(bytes)).toEqual(Buffer.from("trusted-artifact"));
+      const unauthorized = await fetch(`${value.address}/internal/v1/artifacts/read`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ objectKey: "checkpoints/tenant/session/workspace.json" }),
+      });
+      expect(unauthorized.status).toBe(401);
+      await expect(value.client.readArtifact("../../etc/passwd")).rejects.toMatchObject({
+        code: "checkpoint_object_key_invalid",
+      });
+    } finally {
+      await value.server.close();
+    }
   });
 });

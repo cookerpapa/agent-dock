@@ -13,6 +13,8 @@ export type ProductionControlPlaneConfig = {
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
+  githubGatewayBaseUrl?: string;
+  githubGatewayServiceToken?: string;
   supervisorId: string;
   supervisorMaximumCapacity: number;
   supervisorManagementBaseUrl: string;
@@ -138,6 +140,16 @@ async function secret(
   throw new TypeError(`Required secret file ${name}_FILE is missing`);
 }
 
+async function optionalSecret(
+  environment: ProductionControlPlaneEnvironment,
+  name: string,
+  allowInline: boolean,
+): Promise<string | undefined> {
+  if (environment[`${name}_FILE`] === undefined && environment[name] === undefined)
+    return undefined;
+  return secret(environment, name, allowInline);
+}
+
 export async function loadProductionControlPlaneConfig(
   environment: ProductionControlPlaneEnvironment = process.env,
 ): Promise<ProductionControlPlaneConfig> {
@@ -165,6 +177,15 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
     );
   }
+  const githubGatewayBaseUrl = environment.AGENT_DOCK_GITHUB_GATEWAY_URL;
+  const githubGatewayServiceToken = await optionalSecret(
+    environment,
+    "AGENT_DOCK_GITHUB_GATEWAY_TOKEN",
+    allowInlineSecrets,
+  );
+  if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
+    throw new TypeError("GitHub Gateway URL and service token must be configured together");
+  }
   return {
     databaseUrl: await loadProductionDatabaseUrl(environment),
     supervisorEnrollmentToken: await secret(
@@ -182,6 +203,12 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
       allowInlineSecrets,
     ),
+    ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined
+      ? {}
+      : {
+          githubGatewayBaseUrl: managementUrl(githubGatewayBaseUrl, allowInsecureInternalHttp),
+          githubGatewayServiceToken,
+        }),
     supervisorId: bounded(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
       "AGENT_DOCK_SUPERVISOR_ID",

@@ -8,23 +8,33 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Req,
   Res,
 } from "@nestjs/common";
 import {
   parseAcceptTurnRequest,
+  parseArchiveSessionRequest,
   parseCreateTenantRegistrationRequest,
+  parseCreateGitHubPullRequestRequest,
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
+  parseForkSessionRequest,
   parseLastEventIdHeader,
+  parsePositiveIntegerPathParameter,
+  parseRegisterGitHubInstallationRequest,
   parseReplaceModelConfigurationRequest,
+  parseRollbackWorkspaceRequest,
+  parseSetGitHubRepositoryRequest,
   parseUuidPathParameter,
   type AcceptedTurnResource,
   type AcceptedTurnCancellationResource,
   type ConversationDetailResource,
   type ConversationListResource,
+  type GitHubInstallationResource,
+  type GitHubPullRequestDeliveryResource,
   type ProjectResource,
   type ModelConfigurationResource,
   type RunListResource,
@@ -32,13 +42,21 @@ import {
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
+  type TestResultListResource,
+  type WorkspaceFileListResource,
+  type WorkspaceOperationResource,
+  type WorkspaceVersionCompareResource,
+  type WorkspaceVersionListResource,
+  type WorkspaceVersionResource,
 } from "@agent-dock/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+import { GitHubIntegrationService } from "./github-integration-service.ts";
 import { PublicTenantRegistrationService } from "./public-tenant-registration.ts";
 import { SessionEventStream } from "./session-event-stream.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
+import { WorkspaceVersionService } from "./workspace-version-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -50,6 +68,10 @@ export class ControlPlaneController {
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
     @Inject(TenantModelConfigurationService)
     private readonly tenantModelConfiguration: TenantModelConfigurationService,
+    @Inject(WorkspaceVersionService)
+    private readonly workspaceVersions: WorkspaceVersionService,
+    @Inject(GitHubIntegrationService)
+    private readonly githubIntegration: GitHubIntegrationService,
   ) {}
 
   @Post("registrations")
@@ -129,6 +151,205 @@ export class ControlPlaneController {
     const runId = parseUuidPathParameter(runIdValue, "runId");
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).getRun(runId);
+  }
+
+  @Get("runs/:runId/test-results")
+  async listRunTestResults(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+  ): Promise<TestResultListResource> {
+    const runId = parseUuidPathParameter(runIdValue, "runId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).listTestResults(runId);
+  }
+
+  @Get("sessions/:sessionId/workspace-versions")
+  async listWorkspaceVersions(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<WorkspaceVersionListResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.workspaceVersions.list(identity.tenantId, sessionId);
+  }
+
+  @Get("workspace-versions/:versionId")
+  async getWorkspaceVersion(
+    @Req() request: FastifyRequest,
+    @Param("versionId") versionIdValue: unknown,
+  ): Promise<WorkspaceVersionResource> {
+    const versionId = parseUuidPathParameter(versionIdValue, "versionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.workspaceVersions.get(identity.tenantId, versionId);
+  }
+
+  @Get("workspace-versions/:versionId/files")
+  async listWorkspaceFiles(
+    @Req() request: FastifyRequest,
+    @Param("versionId") versionIdValue: unknown,
+  ): Promise<WorkspaceFileListResource> {
+    const versionId = parseUuidPathParameter(versionIdValue, "versionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.workspaceVersions.files(identity.tenantId, versionId);
+  }
+
+  @Get("workspace-versions/:versionId/file")
+  async readWorkspaceFile(
+    @Req() request: FastifyRequest,
+    @Param("versionId") versionIdValue: unknown,
+    @Query("path") path: unknown,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const versionId = parseUuidPathParameter(versionIdValue, "versionId");
+    if (typeof path !== "string") throw new TypeError("Workspace file path is required");
+    const identity = this.tenantRequestContext.resolve(request);
+    const file = await this.workspaceVersions.file(identity.tenantId, versionId, path);
+    reply
+      .header("cache-control", "private, no-store")
+      .header("content-type", "application/octet-stream")
+      .header("etag", `"${file.sha256}"`)
+      .header("x-content-type-options", "nosniff")
+      .send(Buffer.from(file.bytes));
+  }
+
+  @Get("workspace-versions/:baseVersionId/compare/:targetVersionId")
+  async compareWorkspaceVersions(
+    @Req() request: FastifyRequest,
+    @Param("baseVersionId") baseVersionIdValue: unknown,
+    @Param("targetVersionId") targetVersionIdValue: unknown,
+  ): Promise<WorkspaceVersionCompareResource> {
+    const baseVersionId = parseUuidPathParameter(baseVersionIdValue, "baseVersionId");
+    const targetVersionId = parseUuidPathParameter(targetVersionIdValue, "targetVersionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.workspaceVersions.compare(identity.tenantId, baseVersionId, targetVersionId);
+  }
+
+  @Get("artifacts/:artifactId/content")
+  async readArtifact(
+    @Req() request: FastifyRequest,
+    @Param("artifactId") artifactIdValue: unknown,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const artifactId = parseUuidPathParameter(artifactIdValue, "artifactId");
+    const identity = this.tenantRequestContext.resolve(request);
+    const artifact = await this.workspaceVersions.artifact(identity.tenantId, artifactId);
+    reply
+      .header("cache-control", "private, no-store")
+      .header("content-type", artifact.resource.mediaType ?? "application/octet-stream")
+      .header("etag", `"${artifact.resource.sha256}"`)
+      .header("x-content-type-options", "nosniff")
+      .send(Buffer.from(artifact.bytes));
+  }
+
+  @Post("sessions/:sessionId/forks")
+  async forkSession(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<WorkspaceOperationResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.workspaceVersions.fork(
+      identity.tenantId,
+      idempotencyKey,
+      sessionId,
+      parseForkSessionRequest(body),
+    );
+  }
+
+  @Post("sessions/:sessionId/workspace-rollback")
+  async rollbackWorkspace(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<WorkspaceOperationResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.workspaceVersions.rollback(
+      identity.tenantId,
+      idempotencyKey,
+      sessionId,
+      parseRollbackWorkspaceRequest(body),
+    );
+  }
+
+  @Post("sessions/:sessionId/archive")
+  async archiveSession(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<WorkspaceOperationResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.workspaceVersions.archive(
+      identity.tenantId,
+      idempotencyKey,
+      sessionId,
+      parseArchiveSessionRequest(body),
+    );
+  }
+
+  @Post("github/installations")
+  async registerGitHubInstallation(
+    @Req() request: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<GitHubInstallationResource> {
+    const identity = this.tenantRequestContext.requireOwner(request);
+    const input = parseRegisterGitHubInstallationRequest(body);
+    return this.githubIntegration.registerInstallation(identity.tenantId, input.installationId);
+  }
+
+  @Get("github/installations/:installationId")
+  async getGitHubInstallation(
+    @Req() request: FastifyRequest,
+    @Param("installationId") installationIdValue: unknown,
+  ): Promise<GitHubInstallationResource> {
+    const identity = this.tenantRequestContext.resolve(request);
+    const installationId = parsePositiveIntegerPathParameter(installationIdValue, "installationId");
+    return this.githubIntegration.getInstallation(identity.tenantId, installationId);
+  }
+
+  @Put("github/installations/:installationId/repositories/:repositoryId")
+  async setGitHubRepository(
+    @Req() request: FastifyRequest,
+    @Param("installationId") installationIdValue: unknown,
+    @Param("repositoryId") repositoryIdValue: unknown,
+    @Body() body: unknown,
+  ): Promise<GitHubInstallationResource> {
+    const identity = this.tenantRequestContext.requireOwner(request);
+    const installationId = parsePositiveIntegerPathParameter(installationIdValue, "installationId");
+    const repositoryId = parsePositiveIntegerPathParameter(repositoryIdValue, "repositoryId");
+    const input = parseSetGitHubRepositoryRequest(body);
+    return this.githubIntegration.setRepositoryEnabled(
+      identity.tenantId,
+      installationId,
+      repositoryId,
+      input.enabled,
+    );
+  }
+
+  @Post("workspace-versions/:versionId/pull-requests")
+  async createGitHubPullRequest(
+    @Req() request: FastifyRequest,
+    @Param("versionId") versionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<GitHubPullRequestDeliveryResource> {
+    const identity = this.tenantRequestContext.requireMutation(request);
+    const versionId = parseUuidPathParameter(versionIdValue, "versionId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    return this.githubIntegration.deliverPullRequest(
+      identity.tenantId,
+      versionId,
+      idempotencyKey,
+      parseCreateGitHubPullRequestRequest(body),
+    );
   }
 
   @Post("projects/:projectId/sessions")

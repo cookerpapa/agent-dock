@@ -73,14 +73,23 @@ At `agent_settled`:
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
 4. Bytes are conditionally written to object storage.
-5. PostgreSQL advances the checkpoint pointer with session-version,
-   Run/Attempt, lease, and fence CAS; the Attempt records the committed revision.
-6. `turn.completed` is durably published as the commit marker.
-7. Manager revokes the capability and Provider confirms runtime absence.
+5. PostgreSQL stages an immutable Workspace version bound to the current
+   Run/Attempt, parent version, artifact hashes, lease, and fence.
+6. The terminal settlement transaction advances the checkpoint and current
+   Workspace-version pointers with session-version/Run/Attempt/lease/fence CAS,
+   settles the staged version, and records the Attempt revision. A failure
+   abandons the staged version and restores the previous settled pointers.
+7. `turn.completed` is durably published as the commit marker.
+8. Manager revokes the capability and Provider confirms runtime absence.
 
 If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not
 treated as current state.
+
+Rollback never edits a historical version. An idle Session moves its current
+pointer to an existing settled version under an expected-current-version CAS;
+the next activation restores that version. A fork creates a new cold Session
+from an immutable version. Both write tenant-scoped operation audit records.
 
 ## Cancellation
 

@@ -17,6 +17,9 @@ await access(environmentFile);
 const applicationSecretNames = [
   "api-token",
   "database-url",
+  "github-app-private-key.pem",
+  "github-gateway-token",
+  "github-webhook-secret",
   "model-credential-master-key",
   "sandbox-manager-token",
   "supervisor-enrollment-token",
@@ -45,7 +48,14 @@ const [command, ...commandArguments] = input;
 const profileArguments = command === "build" ? ["--profile", "image-only"] : [];
 const serviceArguments =
   command === "build" && commandArguments.length === 0
-    ? ["control-plane", "supervisor-host", "sandbox-manager", "web", "tool-sandbox-image"]
+    ? [
+        "control-plane",
+        "supervisor-host",
+        "sandbox-manager",
+        "github-gateway",
+        "web",
+        "tool-sandbox-image",
+      ]
     : commandArguments;
 const args = [
   "compose",

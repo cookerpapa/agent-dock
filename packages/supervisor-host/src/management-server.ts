@@ -4,6 +4,10 @@ import {
   type SupervisorManagementResponse,
   type SupervisorRuntimeAssignment,
 } from "@agent-dock/protocol";
+import {
+  validateCheckpointObjectKey,
+  type CheckpointObjectStore,
+} from "@agent-dock/control-plane/checkpoint-runtime";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -15,6 +19,7 @@ import {
 export const SUPERVISOR_MANAGEMENT_PATH = "/internal/v1/supervisor/manage";
 export const SUPERVISOR_HOST_LIVE_PATH = "/health/live";
 export const SUPERVISOR_HOST_READY_PATH = "/health/ready";
+export const SUPERVISOR_ARTIFACT_READ_PATH = "/internal/v1/artifacts/read";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 
@@ -27,6 +32,7 @@ export type SupervisorManagementServerOptions = {
   stopCurrentBoot: () => Promise<void>;
   readiness: () => boolean;
   assignmentInventory: SupervisorAssignmentInventory;
+  artifactStore?: Pick<CheckpointObjectStore, "get">;
   bodyLimit?: number;
 };
 
@@ -107,6 +113,7 @@ export class SupervisorManagementServer {
   readonly #stopCurrentBoot: () => Promise<void>;
   readonly #readiness: () => boolean;
   readonly #assignmentInventory: SupervisorAssignmentInventory;
+  readonly #artifactStore: Pick<CheckpointObjectStore, "get"> | undefined;
   #stopOperation: Promise<void> | undefined;
   #address: string | undefined;
 
@@ -123,6 +130,7 @@ export class SupervisorManagementServer {
     this.#stopCurrentBoot = options.stopCurrentBoot;
     this.#readiness = options.readiness;
     this.#assignmentInventory = options.assignmentInventory;
+    this.#artifactStore = options.artifactStore;
     this.#server = Fastify({
       logger: false,
       bodyLimit: positiveInteger(options.bodyLimit ?? DEFAULT_BODY_LIMIT, "bodyLimit", 1024 * 1024),
@@ -181,6 +189,63 @@ export class SupervisorManagementServer {
             message: failure.message,
             retryable: failure.retryable,
           },
+        } satisfies InternalServiceError);
+      }
+    });
+    this.#server.post(SUPERVISOR_ARTIFACT_READ_PATH, async (request, reply) => {
+      const token = bearerToken(request.headers.authorization);
+      const candidate = token === undefined ? Buffer.alloc(32) : digest(token);
+      if (token === undefined || !timingSafeEqual(this.#managementDigest, candidate)) {
+        await reply.code(401).send({
+          error: {
+            code: "invalid_management_credential",
+            message: "Artifact read is not authorized",
+            retryable: false,
+          },
+        } satisfies InternalServiceError);
+        return;
+      }
+      try {
+        if (
+          typeof request.body !== "object" ||
+          request.body === null ||
+          Array.isArray(request.body) ||
+          Object.keys(request.body).length !== 1 ||
+          !("objectKey" in request.body) ||
+          typeof request.body.objectKey !== "string"
+        ) {
+          throw new SupervisorManagementServerError(
+            "artifact_request_invalid",
+            "Artifact read request is invalid",
+            false,
+          );
+        }
+        if (this.#artifactStore === undefined) {
+          throw new SupervisorManagementServerError(
+            "artifact_store_unavailable",
+            "Artifact store is unavailable",
+            true,
+          );
+        }
+        const objectKey = validateCheckpointObjectKey(request.body.objectKey);
+        const bytes = await this.#artifactStore.get(objectKey);
+        if (bytes.byteLength > 16 * 1024 * 1024) {
+          throw new SupervisorManagementServerError(
+            "artifact_too_large",
+            "Artifact exceeds the trusted transport limit",
+            false,
+          );
+        }
+        await reply
+          .header("cache-control", "private, no-store")
+          .header("content-type", "application/octet-stream")
+          .header("x-content-type-options", "nosniff")
+          .code(200)
+          .send(Buffer.from(bytes));
+      } catch (error: unknown) {
+        const result = safeFailure(error);
+        await reply.code(result.retryable ? 503 : 409).send({
+          error: { code: result.code, message: result.message, retryable: result.retryable },
         } satisfies InternalServiceError);
       }
     });

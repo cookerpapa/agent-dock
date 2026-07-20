@@ -262,3 +262,19 @@ export {
   PostgresRunAttemptPhaseObserver,
   type PostgresRunAttemptPhaseObserverOptions,
 } from "./run-attempt-runtime.ts";
+export {
+  WorkspaceVersionError,
+  WorkspaceVersionService,
+  type TrustedArtifactReader,
+  type WorkspaceVersionErrorCode,
+  type WorkspaceVersionServiceOptions,
+} from "./workspace-version-service.ts";
+export {
+  GitHubIntegrationError,
+  GitHubIntegrationService,
+  type GitHubIntegrationServiceOptions,
+} from "./github-integration-service.ts";
+export {
+  CONTROL_PLANE_GITHUB_WEBHOOK_PATH,
+  GitHubWebhookIngestGateway,
+} from "./github-webhook-gateway.ts";

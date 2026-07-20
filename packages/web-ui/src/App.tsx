@@ -39,6 +39,9 @@ function shortId(value: string): string {
 
 function workspaceSourceLabel(source: WorkspaceSourceRequest | undefined): string {
   if (source === undefined || source.kind === "sample_java") return "sample/java-repair";
+  if (source.kind === "github_app") {
+    return `github-app:${String(source.repositoryId)}@${source.commitSha.slice(0, 8)}`;
+  }
   return `${source.repository}@${source.commitSha.slice(0, 8)}`;
 }
 
