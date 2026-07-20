@@ -1546,3 +1546,30 @@
   zero-model-call Pi spikes 和 high-level audit（0 vulnerabilities）。正式部署完成 migration 012，十个常驻/入口服务 healthy。
 - 下一步：实施 Milestone 6 的第二 Sandbox Provider。原因是共享内核 Docker 仍是公开恶意代码执行场景的最大剩余边界；
   只有第二 Provider 通过同一 contract、真实 Pi 和生产验收后，才能把 stronger isolation 写成已支持能力。
+
+## 2026-07-20 — Milestone 6：Docker Sandboxes microVM Provider
+
+- 选择依据：当前 Docker Desktop/WSL2 daemon 没有 `runsc`，也没有受支持的持久自定义 OCI runtime 安装路径，因此没有用
+  mock 冒充 gVisor。实际探测了本机 Docker Sandboxes v0.12.0；它为每个 Sandbox 创建独立 LinuxKit VM、kernel 和 VM 内
+  Docker Engine，最终选择为可真实验证的第二 Provider。调研与限制保存在
+  `docs/research/2026-07-20-strong-sandbox-provider-selection.md`。
+- 架构：新增 `DockerMicrovmSandboxProvider`。Manager 先解析 host Tool image ID，导出 private content-keyed tar，以每 activation
+  staging 只读传入 VM，加载后再次校验 image ID。outer shell 只执行可信 provisioning；在任何 Tool Worker/用户命令开始前把
+  proxy 切为 deny-all。真正的 bash/edit/git/test 仍在 VM 内的原 hardened Tool Worker 中执行，保持 non-root、read-only、
+  `network=none`、cap-drop、no-new-privileges、cgroup/PID/tmpfs/output/timeout 和 JSONL cancel/checkpoint 协议。
+- 生命周期：短 `admv-*` 名称规避 Windows AF_UNIX path 上限。private atomic manifest 将 VM、inner labeled container、tenant、
+  Attempt、lease 和 fence 绑定；fresh Manager 会重新检查 inner labels，能够列出并精确终止旧 assignment，未知无 manifest VM
+  fail closed。outer handle 仍是 Provider-neutral，不向 Runner 暴露 Sandbox 原生对象。
+- 真实排障：首次 boot image 拉取没有继承 Docker Engine proxy；改为在 sandbox daemon 启动环境配置 upstream。低于 4 GiB 可用
+  host memory 时 OpenVMM 返回 Windows 1450；回收 WSL page cache 后通过。guest kernel 实测为 `6.12.67-linuxkit`，host 为
+  `6.6.87.2-microsoft-standard-WSL2`。deny-all 后 `example.com` 与 host Docker endpoint 均被 network log 记录为 blocked。
+- 自动证据：Provider gate 完整通过 credential/env、独立 kernel、inner cgroup、network、file/path、取消、snapshot、fresh-Manager
+  reconciliation 和无残留 VM；随后 pinned Pi 通过同一 microVM Tool RPC 完成真实 `bash/edit/bash` Java repair 和最终 patch，
+  不调用外部模型、不消耗 token。独立两轮实测分别为 142.520 秒与 116.756 秒，包含每次临时 state 中的 263 MB image export/load，
+  不能当成稳态 SLO。
+- 产品边界：默认 Compose 仍使用共享内核 `docker`；`docker_microvm` 是需要 host Docker Sandboxes 的 opt-in Manager backend。
+  它显著加强 Tool kernel 边界，但没有自动补齐公网身份、滥用控制、dependency egress、容量治理或独立安全审计，因此项目仍不
+  声称 anonymous hostile public SaaS。
+- 下一步：Milestone 7 将把现有 Workspace/files/diff/tests/artifacts/Run/usage/audit API 完整呈现在 Web 产品中，并补齐
+  backup/restore drill、release/SBOM/image scan 和从 clean checkout 可复现的一键部署。原因是执行内核边界已经有第二条真实路径，
+  最后最大缺口是用户是否能完成完整工作流，以及运维人员是否能可靠升级和恢复。

@@ -26,8 +26,8 @@ Status: complete for the supported Docker/private-host claim.
   integration evidence;
 - threat model, network matrix, Provider and Run lifecycle documentation.
 
-gVisor and managed microVMs are intentionally deferred to Milestone 6; defining
-an interface does not make them supported.
+Stronger isolation was intentionally deferred to Milestone 6; defining an
+interface alone did not make it supported.
 
 ### Milestone 2: durable Run protocol
 
@@ -114,14 +114,23 @@ Only reproduced measurements belong in the résumé.
 
 ### Milestone 6: second Sandbox Provider
 
-Implement and test one stronger isolation path:
+Status: complete under ADR-0035 for the opt-in Docker Desktop host path.
 
-- `DockerGVisorSandboxProvider` for self-hosting; or
-- a managed Firecracker/microVM Provider.
+- `DockerMicrovmSandboxProvider` creates one LinuxKit VM per activation;
+- the pinned trusted shell is provisioning-only and switches to deny-all before
+  the untrusted worker starts;
+- the exact host Tool image is loaded and identity-verified in the VM;
+- the existing hardened worker runs nested with unchanged Tool RPC,
+  cancellation, limits, workspace snapshot, and label identity;
+- private manifests plus inner-label inspection support fresh-Manager
+  reconciliation and exact cleanup;
+- the security/lifecycle suite and pinned Pi Java repair pass through the
+  separate-kernel path.
 
-The Provider must pass the same security, lifecycle, checkpoint, real Pi, and
-production acceptance suite. Provider-specific limitations and cost/startup
-measurements must be published.
+The Provider is not the default Compose backend: Docker Sandboxes v0.12.0 is a
+host integration and has much higher cold-start/memory overhead. Its limitations
+and measurements are published with the gate. Full public-SaaS and arbitrary
+dependency-egress claims remain excluded.
 
 ### Milestone 7: product completion and public demonstration
 

@@ -5,6 +5,7 @@ import type {
   ToolSandboxCreateRequest,
 } from "@agent-dock/protocol";
 import {
+  DockerMicrovmSandboxProvider,
   DockerSandboxProvider,
   SandboxManagerClient,
   SandboxManagerServer,
@@ -18,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { RemoteToolSandboxTurnRunner, type ToolSandboxManagerBoundary } from "../src/index.ts";
 
 const enabled = process.env.AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST === "1";
+const microvmEnabled = process.env.AGENT_DOCK_REMOTE_TOOL_MICROVM_TEST === "1";
 const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
 const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
 const serviceToken = `integration-${"s".repeat(48)}`;
@@ -69,152 +71,185 @@ function inspect(reference: string): Promise<Record<string, any>> {
   });
 }
 
-describe.skipIf(!enabled)("trusted Pi Runner with remote Tool Sandbox", () => {
-  it("repairs code through RPC while the Docker worker stays offline and credential-free", async () => {
-    const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
-    const provider = new DockerSandboxProvider({
-      toolImage,
-      dockerCommand,
-      repositoryImportNetwork: "bridge",
-    });
-    const backend = new ToolSandboxManager({ provider });
-    const server = new SandboxManagerServer({
-      host: "127.0.0.1",
-      port: 0,
-      serviceToken,
-      manager: backend,
-    });
-    const address = await server.listen();
-    const client = new SandboxManagerClient({
-      baseUrl: address,
-      serviceToken,
-      allowInsecureHttp: true,
-    });
-    let inspectedRuntimeId: string | undefined;
-    const manager: ToolSandboxManagerBoundary = {
-      operationUrl: client.operationUrl,
-      async create(request: ToolSandboxCreateRequest) {
-        const created = await client.create(request);
-        inspectedRuntimeId = created.runtimeId;
-        const container = await inspect(created.runtimeId);
-        expect(container.Config.User).toBe("1000:1000");
-        expect(container.HostConfig.NetworkMode).toBe("none");
-        expect(container.HostConfig.ReadonlyRootfs).toBe(true);
-        expect(container.HostConfig.Binds ?? []).toHaveLength(0);
-        expect(container.Mounts ?? []).toHaveLength(0);
-        expect(container.Config.Env ?? []).not.toEqual(
-          expect.arrayContaining([
-            expect.stringMatching(/api[_-]?key|token|secret|password|credential|database_url/i),
-          ]),
-        );
-        const environmentProbe = await client.operation(created.capability, {
-          managerProtocolVersion: 1,
-          type: "tool_sandbox.operation",
-          activationId: created.activationId,
-          operationId: "10000000-0000-4000-8000-000000000009",
-          operation: "bash.exec",
-          command: "env",
-          cwd: "/workspace",
-          timeoutMs: 2_000,
-        });
-        expect(environmentProbe.type).toBe("tool_sandbox.operation_result");
-        if (
-          environmentProbe.type !== "tool_sandbox.operation_result" ||
-          environmentProbe.operation !== "bash.exec"
-        ) {
-          throw new Error("Expected a Bash environment probe");
-        }
-        const environment = Buffer.from(environmentProbe.output, "base64").toString("utf8");
-        expect(environment).not.toMatch(/AGENT_DOCK|DATABASE_URL|AWS_|admg_|adts_/);
-
-        await expect(
-          client.operation(`adts_${"x".repeat(43)}`, {
-            managerProtocolVersion: 1,
-            type: "tool_sandbox.operation",
-            activationId: created.activationId,
-            operationId: "10000000-0000-4000-8000-000000000010",
-            operation: "file.read",
-            path: "src/Calculator.java",
-          }),
-        ).rejects.toMatchObject({ code: "invalid_tool_capability", retryable: false });
-
-        const escapingRead = {
-          managerProtocolVersion: 1,
-          type: "tool_sandbox.operation",
-          activationId: created.activationId,
-          operationId: "10000000-0000-4000-8000-000000000011",
-          operation: "file.read",
-          path: "../etc/passwd",
-        } as const;
-        await expect(client.operation(created.capability, escapingRead)).resolves.toMatchObject({
-          type: "tool_sandbox.operation_failed",
-          code: "tool_path_escape",
-        });
-        await expect(client.operation(created.capability, escapingRead)).rejects.toMatchObject({
-          code: "tool_operation_replay",
-          retryable: false,
-        });
-
-        await expect(
-          client.operation(created.capability, {
-            managerProtocolVersion: 1,
-            type: "tool_sandbox.operation",
-            activationId: created.activationId,
-            operationId: "10000000-0000-4000-8000-000000000012",
-            operation: "bash.exec",
-            command: "trap '' TERM; while :; do :; done",
-            cwd: "/workspace",
-            timeoutMs: 100,
-          }),
-        ).resolves.toMatchObject({
-          type: "tool_sandbox.operation_failed",
-          code: "tool_timeout",
-          retryable: true,
-        });
-        return created;
-      },
-      capture: (activationId, assignment) => client.capture(activationId, assignment),
-      stop: (activationId, assignment) => client.stop(activationId, assignment),
-    };
-    const events: EventPublishMessage[] = [];
-    try {
-      const runner = new RemoteToolSandboxTurnRunner({
-        manager,
-        runtimeIdentity: {
-          supervisorId: "remote-tool-integration-supervisor",
-          bootId: "10000000-0000-4000-8000-000000000003",
-          sandboxId: "10000000-0000-4000-8000-000000000004",
-        },
-        trustedWorkspaceDirectory: trustedWorkspace,
-        scenario: "java_repair",
-        turnTimeoutMs: 60_000,
+describe.skipIf(!enabled && !microvmEnabled)("trusted Pi Runner with remote Tool Sandbox", () => {
+  it(
+    "repairs code through RPC while the Docker worker stays offline and credential-free",
+    async () => {
+      const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
+      const microvmState = microvmEnabled
+        ? await mkdtemp(join(tmpdir(), "agent-dock-pi-microvm-"))
+        : undefined;
+      const provider = microvmEnabled
+        ? new DockerMicrovmSandboxProvider({
+            toolImage,
+            dockerCommand,
+            repositoryImportNetwork: "bridge",
+            stateDirectory: microvmState!,
+            createTimeoutMs: 600_000,
+            operationTimeoutMs: 60_000,
+          })
+        : new DockerSandboxProvider({
+            toolImage,
+            dockerCommand,
+            repositoryImportNetwork: "bridge",
+          });
+      const backend = new ToolSandboxManager({ provider });
+      const server = new SandboxManagerServer({
+        host: "127.0.0.1",
+        port: 0,
+        serviceToken,
+        manager: backend,
       });
+      const address = await server.listen();
+      const client = new SandboxManagerClient({
+        baseUrl: address,
+        serviceToken,
+        allowInsecureHttp: true,
+      });
+      let inspectedRuntimeId: string | undefined;
+      const manager: ToolSandboxManagerBoundary = {
+        operationUrl: client.operationUrl,
+        async create(request: ToolSandboxCreateRequest) {
+          const created = await client.create(request);
+          inspectedRuntimeId = created.runtimeId;
+          await expect(
+            backend.inspect(created.activationId, request.assignment),
+          ).resolves.toMatchObject({
+            state: "running",
+            effectiveIsolation: {
+              isolationBoundary: microvmEnabled ? "microvm" : "shared_kernel_container",
+              user: "1000:1000",
+              networkMode: "none",
+              readOnlyRootFilesystem: true,
+              mountCount: 0,
+              hasDockerSocket: false,
+            },
+          });
+          const environmentProbe = await client.operation(created.capability, {
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.operation",
+            activationId: created.activationId,
+            operationId: "10000000-0000-4000-8000-000000000009",
+            operation: "bash.exec",
+            command: "env",
+            cwd: "/workspace",
+            timeoutMs: 2_000,
+          });
+          expect(environmentProbe.type).toBe("tool_sandbox.operation_result");
+          if (
+            environmentProbe.type !== "tool_sandbox.operation_result" ||
+            environmentProbe.operation !== "bash.exec"
+          ) {
+            throw new Error("Expected a Bash environment probe");
+          }
+          const environment = Buffer.from(environmentProbe.output, "base64").toString("utf8");
+          expect(environment).not.toMatch(/AGENT_DOCK|DATABASE_URL|AWS_|admg_|adts_/);
+
+          await expect(
+            client.operation(`adts_${"x".repeat(43)}`, {
+              managerProtocolVersion: 1,
+              type: "tool_sandbox.operation",
+              activationId: created.activationId,
+              operationId: "10000000-0000-4000-8000-000000000010",
+              operation: "file.read",
+              path: "src/Calculator.java",
+            }),
+          ).rejects.toMatchObject({ code: "invalid_tool_capability", retryable: false });
+
+          const escapingRead = {
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.operation",
+            activationId: created.activationId,
+            operationId: "10000000-0000-4000-8000-000000000011",
+            operation: "file.read",
+            path: "../etc/passwd",
+          } as const;
+          await expect(client.operation(created.capability, escapingRead)).resolves.toMatchObject({
+            type: "tool_sandbox.operation_failed",
+            code: "tool_path_escape",
+          });
+          await expect(client.operation(created.capability, escapingRead)).rejects.toMatchObject({
+            code: "tool_operation_replay",
+            retryable: false,
+          });
+
+          await expect(
+            client.operation(created.capability, {
+              managerProtocolVersion: 1,
+              type: "tool_sandbox.operation",
+              activationId: created.activationId,
+              operationId: "10000000-0000-4000-8000-000000000012",
+              operation: "bash.exec",
+              command: "trap '' TERM; while :; do :; done",
+              cwd: "/workspace",
+              timeoutMs: 100,
+            }),
+          ).resolves.toMatchObject({
+            type: "tool_sandbox.operation_failed",
+            code: "tool_timeout",
+            retryable: true,
+          });
+          return created;
+        },
+        capture: (activationId, assignment) => client.capture(activationId, assignment),
+        stop: (activationId, assignment) => client.stop(activationId, assignment),
+      };
+      const events: EventPublishMessage[] = [];
       try {
-        await runner.run(
-          command(),
-          (message) => {
-            events.push(message);
+        const runner = new RemoteToolSandboxTurnRunner({
+          manager,
+          runtimeIdentity: {
+            supervisorId: "remote-tool-integration-supervisor",
+            bootId: "10000000-0000-4000-8000-000000000003",
+            sandboxId: "10000000-0000-4000-8000-000000000004",
           },
-          new AbortController().signal,
-        );
-      } catch (error: unknown) {
-        throw new Error(
-          `Remote runner failed after events ${JSON.stringify(events.map((value) => value.payload.event))}`,
-          { cause: error },
-        );
+          trustedWorkspaceDirectory: trustedWorkspace,
+          scenario: "java_repair",
+          turnTimeoutMs: 60_000,
+        });
+        try {
+          await runner.run(
+            command(),
+            (message) => {
+              events.push(message);
+            },
+            new AbortController().signal,
+          );
+        } catch (error: unknown) {
+          throw new Error(
+            `Remote runner failed after events ${JSON.stringify(events.map((value) => value.payload.event))}`,
+            { cause: error },
+          );
+        }
+        const publicEvents: AgentDockEvent[] = events.map((message) => message.payload.event);
+        expect(publicEvents.filter((event) => event.type === "tool.started")).toHaveLength(3);
+        expect(publicEvents.filter((event) => event.type === "tool.completed")).toHaveLength(3);
+        const terminal = publicEvents.at(-1);
+        expect(terminal?.type).toBe("turn.completed");
+        if (terminal?.type !== "turn.completed") throw new Error("Expected a completed turn");
+        expect(terminal.payload.workspacePatch?.patch).toContain("return left + right");
+        expect(backend.activeCount).toBe(0);
+        if (microvmEnabled) {
+          const inventory = await new Promise<string>((resolvePromise, rejectPromise) => {
+            execFile(
+              dockerCommand,
+              ["sandbox", "ls", "--quiet"],
+              { encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1_024 },
+              (error, stdout) => (error ? rejectPromise(error) : resolvePromise(stdout)),
+            );
+          });
+          expect(inventory).not.toContain("admv-");
+        } else {
+          await expect(inspect(inspectedRuntimeId!)).rejects.toBeDefined();
+        }
+      } finally {
+        await server.close().catch(() => undefined);
+        await rm(trustedWorkspace, { recursive: true, force: true });
+        if (microvmState !== undefined) {
+          await rm(microvmState, { recursive: true, force: true });
+        }
       }
-      const publicEvents: AgentDockEvent[] = events.map((message) => message.payload.event);
-      expect(publicEvents.filter((event) => event.type === "tool.started")).toHaveLength(3);
-      expect(publicEvents.filter((event) => event.type === "tool.completed")).toHaveLength(3);
-      const terminal = publicEvents.at(-1);
-      expect(terminal?.type).toBe("turn.completed");
-      if (terminal?.type !== "turn.completed") throw new Error("Expected a completed turn");
-      expect(terminal.payload.workspacePatch?.patch).toContain("return left + right");
-      expect(backend.activeCount).toBe(0);
-      await expect(inspect(inspectedRuntimeId!)).rejects.toBeDefined();
-    } finally {
-      await server.close().catch(() => undefined);
-      await rm(trustedWorkspace, { recursive: true, force: true });
-    }
-  }, 120_000);
+    },
+    microvmEnabled ? 600_000 : 120_000,
+  );
 });

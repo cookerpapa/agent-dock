@@ -95,6 +95,7 @@ only after a measured requirement appears.
 - [Extension compatibility matrix](docs/EXTENSION_COMPATIBILITY.md)
 - [Web UI direction](docs/WEB_UI_DIRECTION.md)
 - [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
+- [Strong Sandbox Provider selection](docs/research/2026-07-20-strong-sandbox-provider-selection.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
@@ -125,6 +126,7 @@ only after a measured requirement appears.
 - [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
 - [ADR-0029: trusted Pi runner and remote tool sandbox](docs/adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md)
 - [ADR-0030: pluggable sandbox provider boundary](docs/adr/0030-pluggable-sandbox-provider-boundary.md)
+- [ADR-0035: Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
 
 ## Current executable spikes
 
@@ -204,6 +206,17 @@ real pinned-Pi remote-tool repair loop:
 npm run sandbox-provider:check
 ```
 
+An optional stronger gate runs the same hardened worker and pinned Pi repair
+inside a Docker Sandboxes LinuxKit microVM. It requires the host Docker
+Sandboxes plugin and several GiB of free memory:
+
+```bash
+npm run sandbox-microvm:check
+```
+
+The latest measured result is in
+[`docs/reports/microvm-sandbox-latest.md`](docs/reports/microvm-sandbox-latest.md).
+
 Portable settled-checkpoint storage is verified against a digest-pinned,
 loopback-only, disposable MinIO fixture. The test creates no volume, spends no
 model tokens, conditionally publishes immutable objects, destroys the writer,
@@ -260,11 +273,20 @@ Manager owns the Docker socket. Pi and the tenant model credential remain in the
 trusted Runner; `read/write/edit/bash` cross a narrow RPC boundary into a
 mount-free, credential-free Tool Sandbox with `network=none`. Only the Web
 ingress publishes a loopback port. The Manager now separates capability and
-identity enforcement from a provider-neutral `SandboxProvider`; Docker is the
-only implemented Provider, while gVisor and managed microVMs remain explicit,
-untested future backends. See the
+identity enforcement from a provider-neutral `SandboxProvider`; Docker remains
+the default production Provider, and the opt-in `docker_microvm` Provider has
+passed the same security/lifecycle and real Pi repair path behind a separate
+LinuxKit kernel. gVisor and external managed backends remain future work. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
 backup, upgrade, recovery, and the disposable full-topology acceptance command.
+
+The stronger Provider requires a host-side Docker Sandboxes client/server and
+is intentionally not selected by the default containerized Manager. Its
+reproducible gate is:
+
+```bash
+npm run sandbox-microvm:check
+```
 
 This is production-complete for the bounded private multi-tenant Java fixture
 and controlled small public GitHub repositories pinned to an exact commit,

@@ -120,6 +120,7 @@ extension-policy support would overstate the current boundary.
 - [x] Reconcile lost assignments by terminating the old Attempt before requeue/failure
 - [ ] Isolate and policy-gate user/project Pi extensions before enabling discovery in production
 - [ ] Replace shared-kernel Docker with gVisor/Kata/Firecracker or a managed sandbox before a hostile public-SaaS claim
+- [x] Add an opt-in Docker Sandboxes/LinuxKit microVM Provider and pass the shared security/lifecycle plus real Pi gate
 
 ## Controlled public GitHub workspace slice
 

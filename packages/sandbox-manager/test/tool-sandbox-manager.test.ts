@@ -3,6 +3,9 @@ import type {
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
 } from "@agent-dock/protocol";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   SandboxManagerError,
@@ -82,6 +85,7 @@ function providerFixture() {
         state: "running",
         handle,
         effectiveIsolation: {
+          isolationBoundary: "shared_kernel_container",
           user: "1000:1000",
           privileged: false,
           readOnlyRootFilesystem: true,
@@ -201,5 +205,40 @@ describe("provider-backed Tool Sandbox Manager", () => {
     await expect(
       loadSandboxManagerConfig({ AGENT_DOCK_SANDBOX_PROVIDER: "vercel" }),
     ).rejects.toThrow("not supported");
+  });
+
+  it("accepts only the closed host microVM deployment configuration", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
+    const tokenPath = join(directory, "manager-token");
+    try {
+      await writeFile(tokenPath, `${"t".repeat(48)}\n`, { mode: 0o600 });
+      await chmod(tokenPath, 0o600);
+      await expect(
+        loadSandboxManagerConfig({
+          AGENT_DOCK_SANDBOX_PROVIDER: "docker_microvm",
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
+          AGENT_DOCK_MICROVM_STATE_DIRECTORY: join(directory, "state"),
+          AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "never",
+        }),
+      ).resolves.toMatchObject({
+        sandboxProvider: "docker_microvm",
+        microvmStateDirectory: join(directory, "state"),
+        microvmTemplatePullPolicy: "never",
+        microvmTemplateImage: expect.stringMatching(/^docker\/sandbox-templates@sha256:/),
+      });
+      await expect(
+        loadSandboxManagerConfig({
+          AGENT_DOCK_SANDBOX_PROVIDER: "docker_microvm",
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
+          AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
+        }),
+      ).rejects.toThrow("pull policy");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

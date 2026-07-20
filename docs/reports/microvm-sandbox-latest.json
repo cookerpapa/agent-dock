@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-20T10:24:56.000Z",
+  "environment": {
+    "dockerEngine": "29.4.2",
+    "dockerSandboxesClient": "v0.12.0 f13b3c1a96a8be40b06473bb3db0c26dbfe1878c",
+    "dockerSandboxesServer": "v0.12.0 f13b3c1a96a8be40b06473bb3db0c26dbfe1878c",
+    "hostKernel": "6.6.87.2-microsoft-standard-WSL2",
+    "guestKernel": "6.12.67-linuxkit",
+    "template": "docker/sandbox-templates@sha256:bd90847e98720dde718fe95b24bd4c7d9d4de41966339eb8bf3ab2bb683259e5"
+  },
+  "gate": {
+    "command": "npm run sandbox-microvm:check",
+    "providerContract": {
+      "passed": 1,
+      "failed": 0,
+      "durationMs": 142714
+    },
+    "realPiRemoteToolRepair": {
+      "passed": 1,
+      "failed": 0,
+      "durationMs": 118752,
+      "externalModelCalls": 0
+    },
+    "managedMicrovmsRemaining": 0
+  },
+  "verified": [
+    "separate_guest_kernel",
+    "non_root_worker",
+    "read_only_worker_root",
+    "inner_network_none",
+    "outer_proxy_deny_all",
+    "no_worker_docker_socket",
+    "no_model_or_platform_credential",
+    "cpu_memory_pid_limits",
+    "path_traversal_denied",
+    "process_group_cancellation",
+    "workspace_snapshot",
+    "fresh_manager_inventory",
+    "fenced_exact_termination",
+    "real_pi_bash_edit_bash_repair",
+    "zero_residual_managed_microvms"
+  ],
+  "limitations": [
+    "Docker Sandboxes is an opt-in host integration, not the default Compose Provider",
+    "durations include per-test Tool-image export and import and are not a steady-state SLO",
+    "VM-level resource sizing is not exposed by the tested CLI; limits are enforced on the nested Tool Worker",
+    "the result does not establish a hostile anonymous public-SaaS security claim"
+  ]
+}

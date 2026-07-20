@@ -99,6 +99,7 @@ export type SandboxHandle = Readonly<{
 }>;
 
 export type SandboxEffectiveIsolation = Readonly<{
+  isolationBoundary: "shared_kernel_container" | "microvm";
   user: string;
   privileged: boolean;
   readOnlyRootFilesystem: boolean;
@@ -110,6 +111,8 @@ export type SandboxEffectiveIsolation = Readonly<{
   cpuNano: number | null;
   droppedCapabilities: readonly string[];
   securityOptions: readonly string[];
+  outerNetworkPolicy?: "deny_all";
+  guestKernelRelease?: string;
 }>;
 
 export type SandboxInspection =

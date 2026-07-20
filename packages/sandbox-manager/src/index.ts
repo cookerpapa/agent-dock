@@ -15,6 +15,11 @@ export {
   type DockerSandboxProviderOptions,
 } from "./docker-sandbox-provider.ts";
 export {
+  DEFAULT_DOCKER_SANDBOX_TEMPLATE,
+  DockerMicrovmSandboxProvider,
+  type DockerMicrovmSandboxProviderOptions,
+} from "./docker-microvm-sandbox-provider.ts";
+export {
   DEFAULT_TOOL_SANDBOX_POLICY,
   SANDBOX_PROVIDER_API_VERSION,
   SandboxManagerError,

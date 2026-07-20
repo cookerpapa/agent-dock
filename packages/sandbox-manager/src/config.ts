@@ -1,16 +1,21 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { DEFAULT_DOCKER_SANDBOX_TEMPLATE } from "./docker-microvm-sandbox-provider.ts";
 
 export type SandboxManagerConfig = {
   host: string;
   port: number;
   serviceToken: string;
-  sandboxProvider: "docker";
+  sandboxProvider: "docker" | "docker_microvm";
   toolImage: string;
   dockerCommand: string;
   repositoryImportNetwork: string;
   repositoryImportTimeoutMs: number;
+  microvmStateDirectory: string;
+  microvmTemplateImage: string;
+  microvmTemplatePullPolicy: "always" | "missing" | "never";
+  microvmCreateTimeoutMs: number;
 };
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -70,8 +75,13 @@ export async function loadSandboxManagerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SandboxManagerConfig> {
   const sandboxProvider = environment.AGENT_DOCK_SANDBOX_PROVIDER ?? "docker";
-  if (sandboxProvider !== "docker") {
+  if (sandboxProvider !== "docker" && sandboxProvider !== "docker_microvm") {
     throw new TypeError("Configured Sandbox Provider is not supported by this build");
+  }
+  const microvmTemplatePullPolicy =
+    environment.AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY ?? "missing";
+  if (!(["always", "missing", "never"] as const).includes(microvmTemplatePullPolicy as never)) {
+    throw new TypeError("Docker microVM template pull policy is invalid");
   }
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
@@ -90,6 +100,23 @@ export async function loadSandboxManagerConfig(
       180_000,
       1_000,
       300_000,
+    ),
+    microvmStateDirectory: bounded(
+      environment.AGENT_DOCK_MICROVM_STATE_DIRECTORY ?? "/var/lib/agent-dock/microvm",
+      "microvmStateDirectory",
+      4_096,
+    ),
+    microvmTemplateImage: bounded(
+      environment.AGENT_DOCK_MICROVM_TEMPLATE_IMAGE ?? DEFAULT_DOCKER_SANDBOX_TEMPLATE,
+      "microvmTemplateImage",
+      1_024,
+    ),
+    microvmTemplatePullPolicy: microvmTemplatePullPolicy as "always" | "missing" | "never",
+    microvmCreateTimeoutMs: integer(
+      environment.AGENT_DOCK_MICROVM_CREATE_TIMEOUT_MS,
+      600_000,
+      30_000,
+      1_800_000,
     ),
   };
 }

@@ -12,6 +12,12 @@ The current Docker Provider reduces accidental and prompt-driven access to the
 platform, but it shares the host kernel. It is not a sufficient boundary for a
 hostile public code-execution SaaS.
 
+The opt-in Docker microVM Provider adds a separate LinuxKit kernel around the
+same hardened Tool Worker and passes the Provider/real-Pi gate. It materially
+reduces the shared-kernel escape surface, but public identity, abuse controls,
+dependency egress, capacity admission, patch operations, and independent review
+still remain outside the current private-deployment claim.
+
 ## Assets
 
 - tenant identity and authorization;
@@ -94,6 +100,7 @@ Assumed trusted or out of scope for the current claim:
 | Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 | Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
+| Shared host kernel exposes a larger escape surface | optional `docker_microvm` Provider nests the unchanged hardened worker behind a separate LinuxKit kernel | guest/host kernel comparison, deny-all probe, lifecycle/reconciliation and real Pi tests |
 
 ## Credential flow
 
@@ -116,8 +123,9 @@ ships without a usable App private key and fails App operations closed.
 
 Before exposing arbitrary untrusted repositories to the public Internet:
 
-1. replace or augment shared-kernel Docker with an integration-tested gVisor,
-   Kata, Firecracker, or managed microVM Provider;
+1. deploy the integration-tested microVM Provider (or another equally tested
+   gVisor/Kata/Firecracker backend) and complete a production capacity/security
+   review rather than relying on the default shared-kernel Provider;
 2. put repository and dependency egress behind a DNS-aware allowlisting proxy;
 3. add public identity recovery, broader abuse/rate controls, audit retention,
    and incident response around the existing tenant model budgets;
@@ -134,9 +142,11 @@ platform secret, database network, Docker socket, or Tool Sandbox authority.
 
 ```bash
 npm run sandbox-provider:check
+npm run sandbox-microvm:check
 npm run production:check
 ```
 
-The first command builds the Tool image and runs the Provider plus real Pi
-isolation suites without model tokens. The second creates and removes a complete
-disposable production topology and tests multi-tenant recovery behavior.
+The first command checks the default shared-kernel Provider. The second repeats
+the security/lifecycle and real Pi repair path through a separate-kernel
+microVM. The third creates and removes a complete disposable production
+topology and tests multi-tenant recovery behavior.

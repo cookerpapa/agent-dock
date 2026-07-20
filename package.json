@@ -18,6 +18,7 @@
     "container:check": "node scripts/run-container-check.mjs",
     "sandbox:check": "node scripts/run-docker-sandbox-check.mjs",
     "sandbox-provider:check": "node scripts/run-sandbox-provider-check.mjs",
+    "sandbox-microvm:check": "node scripts/run-microvm-sandbox-check.mjs",
     "object-store:check": "node scripts/run-minio-check.mjs",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",

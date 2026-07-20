@@ -197,11 +197,13 @@ runtime implementation. `ToolSandboxManager` owns activation capabilities,
 replay checks, exact assignment authorization, and the fixed deployment policy.
 It passes an immutable, provider-neutral handle to `SandboxProvider`; that
 handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
-identity without exposing a Docker client or provider SDK. The current
-`DockerSandboxProvider` implements creation, worker transport, read/write/exec,
-snapshot, effective inspection, stop/destroy, inventory, and confirmed orphan
-cleanup. Unknown configured providers fail startup. `docker_gvisor` and managed
-microVM providers remain planned until they pass the same executable contract.
+identity without exposing a Docker client or provider SDK.
+`DockerSandboxProvider` implements the default shared-kernel path. ADR-0035 adds
+the opt-in `DockerMicrovmSandboxProvider`: Docker Sandboxes creates a LinuxKit
+VM, a trusted bridge loads the exact host Tool image, outer egress becomes
+deny-all, and the unchanged hardened Tool Worker runs as a nested container
+without the microVM-local Docker socket. Unknown configured providers fail
+startup. `docker_gvisor` and externally managed Providers remain planned.
 
 ADR-0031 adds the durable execution vocabulary above those boundaries. Public
 tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
@@ -398,9 +400,10 @@ sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 
 ### Sandbox
 
-The sandbox is the security and workspace boundary. The initial implementation
-uses Docker; the target implementation supports Kubernetes pods and optional
-stronger runtimes such as gVisor or Kata.
+The sandbox is the security and workspace boundary. The default implementation
+uses Docker. An opt-in Docker Sandboxes Provider adds a distinct LinuxKit kernel
+around the same Tool Worker; Kubernetes, gVisor, Kata, and external managed
+backends remain possible future Providers.
 
 The runtime is selected only by trusted deployment configuration, never by a
 prompt, tenant request, or Tool RPC. The Provider contract reserves deny-all,
@@ -408,6 +411,13 @@ GitHub, package-registry, and explicit-host network policy shapes, but the
 current Docker Tool implementation accepts only deny-all. GitHub import remains
 a separate credential-free workload on its dedicated egress bridge. See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
+
+The microVM Provider deliberately preserves two layers. The outer shell is
+trusted provisioning code with only a private Tool-image archive mounted; it
+applies deny-all before starting the inner worker. The inner worker retains the
+same read-only root, cgroups, tmpfs, safe environment, path validation,
+process-group cancellation, and snapshot protocol as Docker. Agent-generated
+commands never execute in the bridge and never see its microVM-local socket.
 
 Minimum controls:
 

@@ -186,14 +186,38 @@ The separate `sandbox-manager` is the only root-equivalent application service
 because it owns `/var/run/docker.sock`. It has no database, S3, provider,
 enrollment, or tenant credential and exposes only authenticated bounded
 lifecycle/tool/inventory operations. It fixes
-`AGENT_DOCK_SANDBOX_PROVIDER=docker`; an unknown or not-yet-implemented Provider
-fails startup rather than silently falling back. Capability authorization and
+`AGENT_DOCK_SANDBOX_PROVIDER=docker`; an unknown Provider fails startup rather
+than silently falling back. The implemented `docker_microvm` backend is an
+explicit host-Manager mode because Docker Sandboxes is a Docker Desktop host
+integration; it is not silently enabled inside this Compose service.
+Capability authorization and
 identity fencing remain above the Provider implementation. Tool Sandboxes are created per active turn,
 not per conversation: they run as UID/GID `1000:1000`, with `--network none`, no
 host bind mount, inherited environment credential, published port, Docker
 socket, or writable root filesystem, and are removed after completion or
 cancellation. Cold sessions consume no Pi process, Tool Sandbox, socket, timer,
 or dedicated thread.
+
+### Optional separate-kernel Provider
+
+`docker_microvm` requires Docker Sandboxes client/server v0.12.0 or a compatible
+version on the trusted Manager host, a digest-pinned shell template, a private
+state directory, and several GiB of free memory per active VM. Validate that
+host before wiring it to a deployment:
+
+```bash
+npm run sandbox-microvm:check
+```
+
+The Provider runs the normal hardened Tool Worker inside a LinuxKit microVM and
+does not change the Runner or Tool RPC protocol. The default Compose topology
+continues to use `docker`; do not set `AGENT_DOCK_SANDBOX_PROVIDER=docker_microvm`
+inside the existing Manager container and assume the host integration is
+available. A host Manager must be given the same private service-token file,
+must bind only on a firewall-restricted interface reachable by the trusted
+Runner, and must use a durable `AGENT_DOCK_MICROVM_STATE_DIRECTORY`. If the
+sandbox daemon needs an upstream proxy, configure it where that daemon starts;
+never forward proxy credentials to Tool execution.
 
 Persistent state is split into four declared volumes:
 

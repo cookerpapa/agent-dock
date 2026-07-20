@@ -52,6 +52,12 @@ export type DockerSandboxProviderOptions = {
   toolImage: string;
   repositoryImportNetwork: string;
   dockerCommand?: string;
+  /**
+   * Trusted argv inserted before every Docker Engine command. This is used by
+   * the microVM provider to address the Docker Engine inside one Docker
+   * Sandbox without exposing that native transport above the Provider layer.
+   */
+  dockerArgumentsPrefix?: readonly string[];
   readyTimeoutMs?: number;
   cleanupTimeoutMs?: number;
   repositoryImportTimeoutMs?: number;
@@ -407,6 +413,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   readonly #toolImage: string;
   readonly #repositoryImportNetwork: string;
   readonly #dockerCommand: string;
+  readonly #dockerArgumentsPrefix: readonly string[];
   readonly #readyTimeoutMs: number;
   readonly #cleanupTimeoutMs: number;
   readonly #repositoryImportTimeoutMs: number;
@@ -417,6 +424,11 @@ export class DockerSandboxProvider implements SandboxProvider {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image");
     this.#repositoryImportNetwork = dockerNetwork(options.repositoryImportNetwork);
     this.#dockerCommand = bounded(options.dockerCommand ?? "docker", "Docker command");
+    this.#dockerArgumentsPrefix = Object.freeze(
+      (options.dockerArgumentsPrefix ?? []).map((value) =>
+        bounded(value, "Docker argument prefix", 4_096),
+      ),
+    );
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       "readyTimeoutMs",
@@ -438,7 +450,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   async checkHealth(): Promise<void> {
     const result = await dockerExec(
       this.#dockerCommand,
-      ["version", "--format", "{{.Server.Version}}"],
+      this.#dockerArguments(["version", "--format", "{{.Server.Version}}"]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
@@ -466,12 +478,14 @@ export class DockerSandboxProvider implements SandboxProvider {
     const name = runtimeName(activationId);
     const child = spawn(
       this.#dockerCommand,
-      buildToolSandboxDockerArguments(
-        this.#toolImage,
-        name,
-        activationId,
-        spec.assignment,
-        spec.policy,
+      this.#dockerArguments(
+        buildToolSandboxDockerArguments(
+          this.#toolImage,
+          name,
+          activationId,
+          spec.assignment,
+          spec.policy,
+        ),
       ),
       { stdio: ["pipe", "pipe", "pipe"] },
     );
@@ -746,7 +760,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
     const result = await dockerExec(
       this.#dockerCommand,
-      [
+      this.#dockerArguments([
         "ps",
         "--all",
         "--no-trunc",
@@ -756,7 +770,7 @@ export class DockerSandboxProvider implements SandboxProvider {
         `label=${TOOL_SANDBOX_LABELS.sandboxId}=${sandboxId}`,
         "--format",
         "{{.ID}}",
-      ],
+      ]),
       this.#cleanupTimeoutMs,
     );
     if (result.code !== 0) {
@@ -814,7 +828,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const removed = await dockerExec(
       this.#dockerCommand,
-      ["rm", "--force", assignment.containerId],
+      this.#dockerArguments(["rm", "--force", assignment.containerId]),
       this.#cleanupTimeoutMs,
     );
     if (removed.code !== 0 && !notFound(removed.stderr)) {
@@ -855,7 +869,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     const name = `agent-dock-import-${importId}`.slice(0, 63);
     const child = spawn(
       this.#dockerCommand,
-      [
+      this.#dockerArguments([
         "run",
         "--rm",
         "--interactive",
@@ -895,7 +909,7 @@ export class DockerSandboxProvider implements SandboxProvider {
         "node",
         this.#toolImage,
         "/app/packages/tool-sandbox/src/github-import-worker.ts",
-      ],
+      ]),
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     let stdout = Buffer.alloc(0);
@@ -1160,7 +1174,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   async #inspectRuntimeId(name: string): Promise<string> {
     const result = await dockerExec(
       this.#dockerCommand,
-      ["inspect", "--format", "{{.Id}}", name],
+      this.#dockerArguments(["inspect", "--format", "{{.Id}}", name]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
@@ -1181,7 +1195,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const result = await dockerExec(
       this.#dockerCommand,
-      ["inspect", reference],
+      this.#dockerArguments(["inspect", reference]),
       this.#cleanupTimeoutMs,
     );
     if (result.code !== 0) {
@@ -1248,7 +1262,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   }> {
     const result = await dockerExec(
       this.#dockerCommand,
-      ["inspect", reference],
+      this.#dockerArguments(["inspect", reference]),
       this.#cleanupTimeoutMs,
     );
     if (result.code !== 0) {
@@ -1318,6 +1332,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     return {
       running: value.State.Running,
       effectiveIsolation: {
+        isolationBoundary: "shared_kernel_container",
         user: value.Config.User,
         privileged: host.Privileged,
         readOnlyRootFilesystem: host.ReadonlyRootfs,
@@ -1369,7 +1384,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   async #removeContainer(reference: string): Promise<void> {
     const inspected = await dockerExec(
       this.#dockerCommand,
-      ["inspect", "--format", "{{.Id}}", reference],
+      this.#dockerArguments(["inspect", "--format", "{{.Id}}", reference]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
@@ -1383,7 +1398,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const removed = await dockerExec(
       this.#dockerCommand,
-      ["rm", "--force", reference],
+      this.#dockerArguments(["rm", "--force", reference]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
@@ -1396,7 +1411,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const remaining = await dockerExec(
       this.#dockerCommand,
-      ["inspect", "--format", "{{.Id}}", reference],
+      this.#dockerArguments(["inspect", "--format", "{{.Id}}", reference]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
@@ -1434,5 +1449,9 @@ export class DockerSandboxProvider implements SandboxProvider {
       );
     }
     await this.#removeContainer(current.containerId);
+  }
+
+  #dockerArguments(argumentsValue: readonly string[]): string[] {
+    return [...this.#dockerArgumentsPrefix, ...argumentsValue];
   }
 }

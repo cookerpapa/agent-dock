@@ -155,9 +155,10 @@ networkless, non-root Tool Sandbox. Production acceptance proves remote
 `bash/edit`, checkpoint/diff capture, cancellation, exact cleanup, socket
 ownership, and secret absence. The old whole-Pi Docker runner remains only as a
 legacy adapter/test path. User/project extensions, interactive approvals,
-stronger-than-shared-kernel isolation, and mutually hostile public tenants are
-still outside the claim. The owner explicitly deferred extension and approval
-work, so those items are not represented as silently complete.
+mutually hostile public tenants are still outside the claim. The owner
+explicitly deferred extension and approval work, so those items are not
+represented as silently complete. ADR-0035 subsequently added an opt-in,
+separate-kernel Docker microVM Provider without changing the default topology.
 
 ADR-0030 now adds the long-term Provider seam: one provider-neutral Manager owns
 capabilities and identity while `DockerSandboxProvider` owns only runtime
@@ -165,8 +166,8 @@ operations. Handles bind tenant/session/turn/attempt/lease/fence, deployment
 policy is fixed above the Provider, and effective inspection plus a dedicated
 zero-token Docker gate prove cgroups, network denial, `/proc` and credential
 isolation, cross-tenant workspace isolation, bounded output, cancellation, and
-cleanup. gVisor and managed microVM Providers remain planned rather than
-claimed.
+cleanup. `docker_microvm` now passes the same worker security/lifecycle and real
+Pi repair gates; gVisor and external managed Providers remain planned.
 
 This bounded tool-sandbox slice is resume-ready.
 
