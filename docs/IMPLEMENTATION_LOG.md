@@ -1625,3 +1625,12 @@
   register → cookie identity → empty Project/Session → conversation isolation → logout/re-login → model write denial → production bundle
   断言，并继续执行原有 Run/Attempt、Tool Sandbox、恢复和备份闭环。正式部署仍只监听 `127.0.0.1`；账户便利性不扩大为公网
   身份、找回、MFA、distributed rate limit 或 hostile SaaS 声明。
+- 真实部署：commit `3a20d42` 已滚动部署到保留原 PostgreSQL/MinIO/观测数据的本机 production topology；migration
+  `013_product_auth_and_empty_workspaces` 已落库，十个常驻/入口服务正常运行，Control Plane、GitHub Gateway、Sandbox Manager、
+  Supervisor、Web 与内部存储均通过健康检查。对 `127.0.0.1:8080` 的黑盒与真实浏览器验收确认：匿名首页稳定显示登录/注册，
+  旧 operator/model 表单不再进入产品路径，匿名 identity 被拒绝，错误登录不泄露账户是否存在，production bundle 包含会话侧栏、
+  对话 composer 和无需配置模型的注册说明。平台模型仍由可信后台以 `real/deepseek/deepseek-v4-flash` 提供，凭据未进入页面或验收输出。
+- 发布门禁：全仓 `npm run ci`、production container smoke、真实 Docker Sandbox Provider/Pi remote-tool gate 和 disposable
+  production backup/restore acceptance 均通过；后者覆盖四 tenant 隔离、Control Plane 扩缩/重启、Supervisor fresh boot、取消、
+  durable event replay、Workspace version 延续、观测目标、加密备份恢复和恢复后继续执行。该结果证明本次入口改造没有绕过或删除
+  Milestone 1–7 的执行、安全、耐久化和运维能力。
