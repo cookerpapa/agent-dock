@@ -1521,3 +1521,28 @@
   compaction privacy、large-output capture/persistence/event reference、tenant/role 隔离均有 deterministic tests；正式门禁结果在
   本里程碑 commit 前以仓库 CI 复核。最终 `npm run ci` 通过 production Web build、所有 workspace typecheck、330 passed/
   9 environment-conditional skipped tests、两个 zero-model-call Pi spikes 和 high-level audit（0 vulnerabilities）。
+
+## 2026-07-20 — Milestone 5：Observability 与可复现评测
+
+- 目标与原因：把异步 Run 的排队、Runner、模型、Tool Sandbox、checkpoint 和清理串成可定位的执行链，并用互不混淆的实验
+  分别证明平台正确性、安全隔离和 HTTP 容量；不把 deterministic fake model 的结果包装成模型智力，也不把 100 个并发 API
+  请求包装成 100 个并发 Agent Run。
+- Trace：migration 012 为每个 Run 固化非零 128-bit `trace_id`。Control Plane 以 Attempt 构造 W3C parent，跨远程 Supervisor、
+  trusted Runner、Pi provider hook、Model Gateway、Tool RPC 和 Sandbox Manager 传播；外部 DeepSeek upstream 不接收平台内部
+  trace header。Jaeger 实测可按相同 durable trace ID 查询，每条 coding eval trace 包含 11 个跨服务 span。
+- Metrics/日志：新增独立 observability workspace，三个可信服务各自暴露 bearer-protected Prometheus endpoint，label 只使用
+  closed low-cardinality outcome/provider/model/tool 集合，不含 tenant/Run/path/content；JSON 日志附带 trace/span 并递归脱敏。
+  owner-only `/v1/operations/summary` 从 PostgreSQL 返回 tenant-scoped 24 小时 Run、usage、tool/test、sandbox 和失败聚合。
+- 部署：正式 Compose 增加持久 Prometheus、Badger Jaeger 和自动 provision 的 Grafana dashboard。三者留在 internal network，
+  由无凭据、read-only、cap-drop 的独立 Caddy 只向 `127.0.0.1:9090/16686/3001` 代理；实测三条 scrape target 全部 up、
+  三个 Jaeger service 可见、Grafana `AgentDock Platform` dashboard 已加载。
+- Eval：10 个 Java repair 全部通过完整 durable Pi/tool/checkpoint 流程（并发 2，p50 9.168 秒、p95 10.224 秒）；10 类
+  ACK 丢失、旧 fence、object-store outage、checkpoint corruption/CAS、cancel/complete race、orphan runtime 等注入故障全部
+  守住不变量。`sandbox-provider:check` 再次通过真实 Docker security contract 与 Pi remote-tool repair。
+- Load：loopback 10/50/100 simultaneous Session create/read 共 320 requests、0 error。100 并发时 create 114.20 req/s、p95
+  831 ms，read 236.81 req/s、p95 408 ms；采样 RSS 为 Control Plane 200,962,048、Runner 167,043,072、Manager 119,164,928
+  bytes。报告明确限定为本机 Docker Desktop，不是公网 SLO。
+- 门禁：Milestone 5 代码进入生产镜像前，全仓门禁通过 337 passed/9 environment-conditional skipped tests、两个
+  zero-model-call Pi spikes 和 high-level audit（0 vulnerabilities）。正式部署完成 migration 012，十个常驻/入口服务 healthy。
+- 下一步：实施 Milestone 6 的第二 Sandbox Provider。原因是共享内核 Docker 仍是公开恶意代码执行场景的最大剩余边界；
+  只有第二 Provider 通过同一 contract、真实 Pi 和生产验收后，才能把 stronger isolation 写成已支持能力。

@@ -209,6 +209,46 @@ describe("pinned Pi OpenAI adapter contract", () => {
     expect(completion.content).toEqual([{ type: "text", text: "Java repair verified." }]);
   });
 
+  it("drives a prompt-selected coding evaluation without model nondeterminism", async () => {
+    const messages: Context["messages"] = [
+      {
+        role: "user",
+        content: "agent-dock-eval://factorial\nRepair factorial and run its focused test.",
+        timestamp: 1_700_000_000_000,
+      },
+    ];
+    for (const expected of ["bash", "edit", "bash"]) {
+      const assistant = await completeScenario("coding_eval", {
+        messages,
+        tools: javaRepairTools,
+      });
+      const call = assistant.content[0];
+      expect(call).toMatchObject({ type: "toolCall", name: expected });
+      if (call === undefined || call.type !== "toolCall") throw new Error("Expected tool call");
+      if (expected === "edit") {
+        expect(call.arguments).toMatchObject({
+          path: "src/Calculator.java",
+          edits: [{ oldText: expect.stringContaining("factorial") }],
+        });
+      }
+      messages.push(assistant, {
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: "text", text: "deterministic result" }],
+        isError: false,
+        timestamp: 1_700_000_001_000,
+      });
+    }
+    const completion = await completeScenario("coding_eval", {
+      messages,
+      tools: javaRepairTools,
+    });
+    expect(completion.content).toEqual([
+      { type: "text", text: "Coding evaluation task factorial repaired and verified." },
+    ]);
+  });
+
   it("uses prior conversation context before verifying a cold-restored Java workspace", async () => {
     const messages: Context["messages"] = [...userContext.messages];
     for (let index = 0; index < 3; index += 1) {

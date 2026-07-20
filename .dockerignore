@@ -22,6 +22,10 @@
 !packages/domain/package.json
 !packages/domain/src/
 !packages/domain/src/**
+!packages/observability/
+!packages/observability/package.json
+!packages/observability/src/
+!packages/observability/src/**
 !packages/protocol/
 !packages/protocol/package.json
 !packages/protocol/src/

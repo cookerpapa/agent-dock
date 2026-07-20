@@ -12,6 +12,9 @@ import {
 } from "@agent-dock/domain";
 import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
 import type { CancelTurnCommandMessage, TurnBudgetSnapshot } from "@agent-dock/protocol";
+import type { TraceContext } from "@agent-dock/protocol";
+import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import {
@@ -49,6 +52,7 @@ export type TurnExecutionRequest = {
     credentialBindingVersion: string;
   };
   budgets?: TurnBudgetSnapshot;
+  traceContext?: TraceContext;
 };
 
 export type TurnExecutionAcknowledgement = {
@@ -178,12 +182,14 @@ export type OutboxDispatcherOptions = {
   idGenerator?: () => string;
   leaseManager?: TurnExecutionLeaseManager;
   supervisorAffinity?: SupervisorDispatchAffinity;
+  metrics?: AgentDockMetrics;
 };
 
 type ClaimedTurn = {
   outboxId: string;
   attempt: number;
   request: TurnExecutionRequest;
+  queuedAt: Date;
 };
 
 type LifecycleRows = {
@@ -292,6 +298,7 @@ export class OutboxDispatcher {
   readonly #idGenerator: () => string;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
+  readonly #metrics: AgentDockMetrics | undefined;
 
   constructor(options: OutboxDispatcherOptions) {
     this.#database = options.database;
@@ -321,99 +328,135 @@ export class OutboxDispatcher {
       options.supervisorAffinity === undefined
         ? undefined
         : validateSupervisorDispatchAffinity(options.supervisorAffinity);
+    this.#metrics = options.metrics;
   }
 
   async dispatchNext(): Promise<DispatchNextResult> {
     const claim = await this.#claimNext();
     if (!claim) return { status: "idle" };
 
-    let started = false;
-    let acknowledgement: TurnExecutionAcknowledgement | undefined;
-    let startedPromise: Promise<void> | undefined;
-    let startFailure: unknown;
-    const lifecycle: TurnExecutionLifecycle = {
-      started: (candidate) => {
-        if (this.#leaseManager !== undefined && candidate === undefined) {
-          return Promise.reject(
-            new OutboxDispatcherInvariantError(
-              "A fenced execution acknowledgement is required by the configured lease manager",
-            ),
-          );
-        }
-        if (
-          startedPromise !== undefined &&
-          (candidate?.leaseId !== acknowledgement?.leaseId ||
-            candidate?.fencingToken !== acknowledgement?.fencingToken)
-        ) {
-          return Promise.reject(
-            new OutboxDispatcherInvariantError("Execution acknowledgement changed after start"),
-          );
-        }
-        acknowledgement = candidate;
-        startedPromise ??= this.#markStarted(claim, candidate).then(
-          () => {
-            started = true;
-          },
-          (error: unknown) => {
-            startFailure = error;
-            throw error;
-          },
-        );
-        return startedPromise;
-      },
-    };
-
-    let executionResult: TurnExecutionResult;
+    const observedAt = safeDate(this.#clock).valueOf();
+    this.#metrics?.queueWait.observe(Math.max(0, observedAt - claim.queuedAt.valueOf()) / 1_000);
+    this.#metrics?.activeRuns.inc();
+    const executionStartedAt = performance.now();
     try {
-      executionResult = await this.#backend.execute(claim.request, lifecycle);
-      if (startedPromise) await startedPromise;
-      if (!started) {
-        throw new TurnExecutionBackendError(
-          "backend_protocol_violation",
-          "Execution backend returned before acknowledging the command",
-          false,
-        );
-      }
-      if (
-        typeof executionResult.stopReason !== "string" ||
-        executionResult.stopReason.trim().length === 0 ||
-        executionResult.stopReason.length > 256
-      ) {
-        throw new TurnExecutionBackendError(
-          "backend_protocol_violation",
-          "Execution backend returned an invalid stop reason",
-          false,
-        );
-      }
-    } catch (error) {
-      if (startedPromise && !started && startFailure === undefined) {
-        try {
-          await startedPromise;
-        } catch {
-          // The persistence error is rethrown below instead of being recorded as an agent failure.
-        }
-      }
-      if (startFailure !== undefined) throw startFailure;
-      if (started) {
-        const externallySettled = await this.#observeCancellation(claim);
-        if (externallySettled !== undefined) return externallySettled;
-        if (error instanceof TurnExecutionCancelledError) {
-          throw new OutboxDispatcherInvariantError(
-            "Cancellation confirmation arrived before its durable lifecycle",
-          );
-        }
-      }
-      return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
-    }
+      const result = await withSpan<DispatchNextResult>({
+        serviceName: "agent-dock-control-plane",
+        name: "run.dispatch",
+        ...(claim.request.traceContext === undefined ? {} : { parent: claim.request.traceContext }),
+        attributes: {
+          "agent_dock.run.id": claim.request.runId,
+          "agent_dock.attempt.id": claim.request.attemptId,
+          "agent_dock.session.id": claim.request.sessionId,
+        },
+        run: async () => {
+          let started = false;
+          let acknowledgement: TurnExecutionAcknowledgement | undefined;
+          let startedPromise: Promise<void> | undefined;
+          let startFailure: unknown;
+          const lifecycle: TurnExecutionLifecycle = {
+            started: (candidate) => {
+              if (this.#leaseManager !== undefined && candidate === undefined) {
+                return Promise.reject(
+                  new OutboxDispatcherInvariantError(
+                    "A fenced execution acknowledgement is required by the configured lease manager",
+                  ),
+                );
+              }
+              if (
+                startedPromise !== undefined &&
+                (candidate?.leaseId !== acknowledgement?.leaseId ||
+                  candidate?.fencingToken !== acknowledgement?.fencingToken)
+              ) {
+                return Promise.reject(
+                  new OutboxDispatcherInvariantError(
+                    "Execution acknowledgement changed after start",
+                  ),
+                );
+              }
+              acknowledgement = candidate;
+              startedPromise ??= this.#markStarted(claim, candidate).then(
+                () => {
+                  started = true;
+                },
+                (error: unknown) => {
+                  startFailure = error;
+                  throw error;
+                },
+              );
+              return startedPromise;
+            },
+          };
 
-    await this.#complete(claim, executionResult.stopReason, acknowledgement);
-    return {
-      status: "completed",
-      commandId: claim.request.commandId,
-      sessionId: claim.request.sessionId,
-      turnId: claim.request.turnId,
-      attempt: claim.attempt,
-    };
+          let executionResult: TurnExecutionResult;
+          try {
+            executionResult = await this.#backend.execute(claim.request, lifecycle);
+            if (startedPromise) await startedPromise;
+            if (!started) {
+              throw new TurnExecutionBackendError(
+                "backend_protocol_violation",
+                "Execution backend returned before acknowledging the command",
+                false,
+              );
+            }
+            if (
+              typeof executionResult.stopReason !== "string" ||
+              executionResult.stopReason.trim().length === 0 ||
+              executionResult.stopReason.length > 256
+            ) {
+              throw new TurnExecutionBackendError(
+                "backend_protocol_violation",
+                "Execution backend returned an invalid stop reason",
+                false,
+              );
+            }
+          } catch (error) {
+            if (startedPromise && !started && startFailure === undefined) {
+              try {
+                await startedPromise;
+              } catch {
+                // The persistence error is rethrown below instead of being recorded as an agent failure.
+              }
+            }
+            if (startFailure !== undefined) throw startFailure;
+            if (started) {
+              const externallySettled = await this.#observeCancellation(claim);
+              if (externallySettled !== undefined) return externallySettled;
+              if (error instanceof TurnExecutionCancelledError) {
+                throw new OutboxDispatcherInvariantError(
+                  "Cancellation confirmation arrived before its durable lifecycle",
+                );
+              }
+            }
+            return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
+          }
+
+          await this.#complete(claim, executionResult.stopReason, acknowledgement);
+          return {
+            status: "completed",
+            commandId: claim.request.commandId,
+            sessionId: claim.request.sessionId,
+            turnId: claim.request.turnId,
+            attempt: claim.attempt,
+          };
+        },
+      });
+      this.#metrics?.runs.inc({ outcome: result.status });
+      this.#metrics?.runDuration.observe(
+        { outcome: result.status },
+        (performance.now() - executionStartedAt) / 1_000,
+      );
+      return result;
+    } catch (error: unknown) {
+      this.#metrics?.runs.inc({ outcome: "dispatcher_error" });
+      this.#metrics?.runDuration.observe(
+        { outcome: "dispatcher_error" },
+        (performance.now() - executionStartedAt) / 1_000,
+      );
+      throw error;
+    } finally {
+      this.#metrics?.activeRuns.dec();
+    }
   }
 
   async #observeCancellation(claim: ClaimedTurn): Promise<DispatchNextResult | undefined> {
@@ -525,6 +568,8 @@ export class OutboxDispatcher {
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
           "run.id as runId",
+          "run.trace_id as traceId",
+          "run.queued_at as runQueuedAt",
           "run.state as runState",
           "run.current_attempt_id as currentAttemptId",
           "run.attempt_count as runAttemptCount",
@@ -819,6 +864,7 @@ export class OutboxDispatcher {
       return {
         outboxId: row.outboxId,
         attempt: attemptNumber,
+        queuedAt: new Date(row.runQueuedAt),
         request: {
           tenantId: row.tenantId,
           projectId: row.projectId,
@@ -871,6 +917,10 @@ export class OutboxDispatcher {
               "compaction recent context",
             ),
           },
+          traceContext: virtualRunTraceCarrier(
+            row.traceId,
+            attemptId.replaceAll("-", "").slice(0, 16),
+          ),
         },
       };
     });

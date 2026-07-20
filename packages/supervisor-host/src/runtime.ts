@@ -9,6 +9,7 @@ import {
 import { PostgresRunAttemptPhaseObserver } from "@agent-dock/control-plane/run-attempt-runtime";
 import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
@@ -41,6 +42,7 @@ export type SupervisorHostRuntimeOptions = {
   sandboxManager?: SupervisorSandboxManager;
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
+  metrics?: AgentDockMetrics;
 };
 
 export type SupervisorSandboxManager = Pick<
@@ -65,6 +67,12 @@ export function resolveProductionSandboxScenario({
   restoring,
 }: DockerSandboxScenarioContext): DockerSandboxScenario {
   if (restoring) return "java_followup";
+  if (
+    command.payload.input.kind === "prompt" &&
+    command.payload.input.text.startsWith("agent-dock-eval://")
+  ) {
+    return "coding_eval";
+  }
   if (
     command.payload.input.kind === "prompt" &&
     command.payload.input.text === PRODUCTION_CANCELLATION_PROBE_PROMPT
@@ -105,6 +113,7 @@ export class SupervisorHostRuntime {
   readonly #sandboxManager: SupervisorSandboxManager;
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
+  readonly #metrics: AgentDockMetrics | undefined;
   readonly #ownerStoppedPromise: Promise<void>;
   readonly #resolveOwnerStopped: () => void;
   readonly #terminalPromise: Promise<SupervisorHostTerminalReason>;
@@ -146,6 +155,7 @@ export class SupervisorHostRuntime {
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#connectionSecretGenerator =
       options.connectionSecretGenerator ?? (() => randomBytes(32).toString("base64url"));
+    this.#metrics = options.metrics;
     let resolveOwnerStopped!: () => void;
     this.#ownerStoppedPromise = new Promise((resolvePromise) => {
       resolveOwnerStopped = resolvePromise;
@@ -281,6 +291,7 @@ export class SupervisorHostRuntime {
         upstreamRequestTimeoutMs: this.#config.modelGatewayUpstreamRequestTimeoutMs,
         piRequestTimeoutMs: this.#config.piModelRequestTimeoutMs,
         piTurnTimeoutMs: this.#config.piTurnTimeoutMs,
+        ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
       await modelGateway.start();
       this.#modelGateway = modelGateway;
@@ -296,6 +307,7 @@ export class SupervisorHostRuntime {
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
         workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),
         turnTimeoutMs: this.#config.piTurnTimeoutMs,
+        ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
       const spoolStore = new FileEventSpoolStore({
         rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),

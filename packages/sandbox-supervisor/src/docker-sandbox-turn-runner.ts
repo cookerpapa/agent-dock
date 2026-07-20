@@ -37,7 +37,7 @@ const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
 const MAX_STDOUT_BUFFER_BYTES = 8 * 1_024 * 1_024;
 const MAX_STDERR_BYTES = 4_096;
 
-export type DockerSandboxScenario = "java_repair" | "java_followup" | "timeout";
+export type DockerSandboxScenario = "java_repair" | "java_followup" | "coding_eval" | "timeout";
 
 export type DockerSandboxScenarioContext = {
   command: ExecuteTurnCommandMessage;

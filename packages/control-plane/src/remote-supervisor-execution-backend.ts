@@ -424,6 +424,7 @@ export class RemoteSupervisorExecutionBackend
           ),
         },
         ...(request.budgets === undefined ? {} : { budgets: request.budgets }),
+        ...(request.traceContext === undefined ? {} : { traceContext: request.traceContext }),
       },
     });
     if (parsed.type !== "command.turn.execute") {

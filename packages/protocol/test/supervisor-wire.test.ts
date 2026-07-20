@@ -155,6 +155,9 @@ describe("supervisor/control-plane wire protocol", () => {
         nextEventSeq: 11,
         input: { kind: "prompt", text: "Fix the failing test" },
         model: modelSnapshot(),
+        traceContext: {
+          traceparent: "00-11111111111111111111111111111111-2222222222222222-01",
+        },
       },
     } as const;
     const cancel = {
@@ -180,6 +183,22 @@ describe("supervisor/control-plane wire protocol", () => {
     expect(
       [execute, cancel, resolve].map((message) => parseControlToSupervisorMessage(message).type),
     ).toEqual(["command.turn.execute", "command.turn.cancel", "command.approval.resolve"]);
+    const parsedExecute = parseControlToSupervisorMessage(execute);
+    if (parsedExecute.type !== "command.turn.execute") throw new Error("Expected execute command");
+    expect(parsedExecute.payload.traceContext?.traceparent).toContain(
+      "11111111111111111111111111111111",
+    );
+    expect(() =>
+      parseControlToSupervisorMessage({
+        ...execute,
+        payload: {
+          ...execute.payload,
+          traceContext: {
+            traceparent: "00-00000000000000000000000000000000-2222222222222222-01",
+          },
+        },
+      }),
+    ).toThrow(AgentDockWireProtocolError);
     expect(() =>
       parseControlToSupervisorMessage({
         ...execute,

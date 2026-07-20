@@ -28,6 +28,7 @@ export const DockerSandboxModelRuntimeSchema = Type.Union([
       scenario: Type.Union([
         Type.Literal("java_repair"),
         Type.Literal("java_followup"),
+        Type.Literal("coding_eval"),
         Type.Literal("timeout"),
       ]),
     },

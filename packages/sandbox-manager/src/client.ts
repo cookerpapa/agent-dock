@@ -17,6 +17,7 @@ import {
   type ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
+import { activeTraceCarrier } from "@agent-dock/observability";
 import { randomUUID } from "node:crypto";
 
 export const SANDBOX_MANAGER_SERVICE_PATH = "/internal/v1/sandbox-manager";
@@ -325,11 +326,14 @@ export class SandboxManagerClient {
       signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
     let response: Response;
     try {
+      const trace = activeTraceCarrier();
       response = await fetch(new URL(path, this.#baseUrl), {
         method: "POST",
         headers: {
           authorization: `Bearer ${bearer}`,
           "content-type": "application/json",
+          ...(trace === undefined ? {} : { traceparent: trace.traceparent }),
+          ...(trace?.tracestate === undefined ? {} : { tracestate: trace.tracestate }),
         },
         body: JSON.stringify(body),
         signal: combinedSignal,

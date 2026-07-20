@@ -150,6 +150,7 @@ describe("control-plane public API schemas", () => {
     expect(
       parseRunResource({
         runId: "50000000-0000-4000-8000-000000000010",
+        traceId: "11111111111111111111111111111111",
         projectId: "10000000-0000-4000-8000-000000000001",
         workspaceId: "20000000-0000-4000-8000-000000000001",
         sessionId: "30000000-0000-4000-8000-000000000001",

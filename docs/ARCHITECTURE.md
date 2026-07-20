@@ -815,10 +815,32 @@ browser requests same-origin without enabling permissive CORS. The local demo
 starts ephemeral PGlite and independent execution/cancellation polling loops.
 The production Web build requires the public bearer login, is served by a
 non-root read-only Caddy container, proxies only `/v1`, rejects private internal
-and health paths, and publishes the deployment's only loopback host port. Its
+and health paths, and publishes the product's loopback HTTP port. Its
 login card can request an opt-in self-service tenant, verify the returned
 one-time owner token, and then list only that tenant's conversations. Token
 change/logout clears transcript, conversation list, pending operations, SSE
 cursor, and stream before another security context is rendered. Historical
 selection loads bounded prompt metadata and then resumes the matching durable
 SSE suffix; the token remains in memory rather than Web Storage or the URL.
+
+## 11. Observability and evaluation
+
+Migration 012 assigns every durable Run a stable W3C trace ID. The dispatch
+Attempt becomes a virtual parent, and trace context crosses the Control Plane,
+trusted Runner, Pi provider hook, Model Gateway, Tool RPC, and Sandbox Manager.
+The internal header is not forwarded to the external model provider. Service
+spans contain opaque execution identity and closed operation metadata, never
+prompt, source, tool output, or credentials.
+
+Each trusted service owns a low-cardinality Prometheus registry and a separate
+bearer-protected metrics listener. Prometheus, Jaeger, and Grafana remain on an
+internal observability network. A credential-free, read-only Caddy proxy joins
+only that network and a separate edge network and publishes the three operator
+UIs on host loopback. Product users do not read global telemetry: owners receive
+a tenant-filtered 24-hour operational summary calculated from PostgreSQL.
+
+ADR-0034 separates four evidence scopes: fixed fake-model coding tasks prove the
+full Agent Loop; targeted injected faults prove protocol invariants; the Docker
+Provider gate proves the isolation contract with real Pi; and 10/50/100
+simultaneous HTTP requests measure Control Plane Session admission/read latency.
+No result is relabelled as model-intelligence quality or 100-active-Run capacity.

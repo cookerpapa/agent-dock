@@ -5,8 +5,9 @@ import {
   type InternalServiceError,
   type SupervisorManagementResponse,
 } from "@agent-dock/protocol";
+import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
 import { createHash, timingSafeEqual } from "node:crypto";
-import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   SANDBOX_MANAGER_INVENTORY_PATH,
   SANDBOX_MANAGER_LIVE_PATH,
@@ -25,6 +26,7 @@ export type SandboxManagerServerOptions = {
   serviceToken: string;
   manager: SandboxManagerBackend;
   bodyLimit?: number;
+  metrics?: AgentDockMetrics;
 };
 
 export type SandboxManagerBackend = Pick<
@@ -85,6 +87,7 @@ export class SandboxManagerServer {
   readonly #serviceDigest: Buffer;
   readonly #manager: SandboxManagerBackend;
   readonly #server: FastifyInstance;
+  readonly #metrics: AgentDockMetrics | undefined;
   #address: string | undefined;
   #ready = false;
 
@@ -97,6 +100,7 @@ export class SandboxManagerServer {
     this.#port = options.port;
     this.#serviceDigest = digest(validServiceToken(options.serviceToken));
     this.#manager = options.manager;
+    this.#metrics = options.metrics;
     this.#server = Fastify({
       logger: false,
       bodyLimit: options.bodyLimit ?? DEFAULT_BODY_LIMIT,
@@ -144,6 +148,58 @@ export class SandboxManagerServer {
     } satisfies InternalServiceError);
   }
 
+  #observed<T>(options: {
+    request: FastifyRequest;
+    spanName: string;
+    operation: string;
+    kind: "sandbox" | "tool";
+    run: () => Promise<T>;
+  }): Promise<T> {
+    const parent = parseTraceCarrier({
+      traceparent: options.request.headers.traceparent,
+      tracestate: options.request.headers.tracestate,
+    });
+    const startedAt = performance.now();
+    return withSpan({
+      serviceName: "agent-dock-sandbox-manager",
+      name: options.spanName,
+      ...(parent === undefined ? {} : { parent }),
+      attributes: { "agent_dock.sandbox.operation": options.operation },
+      run: async () => {
+        try {
+          const result = await options.run();
+          const duration = (performance.now() - startedAt) / 1_000;
+          if (options.kind === "sandbox") {
+            this.#metrics?.sandboxDuration.observe(
+              { operation: options.operation, outcome: "completed" },
+              duration,
+            );
+          } else {
+            this.#metrics?.toolDuration.observe(
+              { tool: options.operation, outcome: "completed" },
+              duration,
+            );
+          }
+          return result;
+        } catch (error: unknown) {
+          const duration = (performance.now() - startedAt) / 1_000;
+          if (options.kind === "sandbox") {
+            this.#metrics?.sandboxDuration.observe(
+              { operation: options.operation, outcome: "failed" },
+              duration,
+            );
+          } else {
+            this.#metrics?.toolDuration.observe(
+              { tool: options.operation, outcome: "failed" },
+              duration,
+            );
+          }
+          throw error;
+        }
+      },
+    });
+  }
+
   #installRoutes(): void {
     this.#server.get(SANDBOX_MANAGER_LIVE_PATH, async (_request, reply) => {
       await reply.code(200).send({ status: "ok" });
@@ -168,23 +224,39 @@ export class SandboxManagerServer {
       try {
         const message = parseSandboxManagerRequest(request.body);
         if (message.type === "tool_sandbox.create") {
-          await reply.code(200).send(await this.#manager.create(message));
+          const created = await this.#observed({
+            request,
+            spanName: "sandbox.create",
+            operation: "create",
+            kind: "sandbox",
+            run: () => this.#manager.create(message),
+          });
+          this.#metrics?.sandboxActive.inc({ provider: "docker" });
+          await reply.code(200).send(created);
           return;
         }
         if (message.type === "tool_sandbox.capture") {
-          await reply
-            .code(200)
-            .send(
-              await this.#manager.capture(
-                message.activationId,
-                message.assignment,
-                message.requestId,
-              ),
-            );
+          await reply.code(200).send(
+            await this.#observed({
+              request,
+              spanName: "sandbox.capture",
+              operation: "capture",
+              kind: "sandbox",
+              run: () =>
+                this.#manager.capture(message.activationId, message.assignment, message.requestId),
+            }),
+          );
           return;
         }
         if (message.type === "tool_sandbox.stop") {
-          await this.#manager.stop(message.activationId, message.assignment);
+          await this.#observed({
+            request,
+            spanName: "sandbox.stop",
+            operation: "stop",
+            kind: "sandbox",
+            run: () => this.#manager.stop(message.activationId, message.assignment),
+          });
+          this.#metrics?.sandboxActive.dec({ provider: "docker" });
           await reply.code(200).send({
             managerProtocolVersion: 1,
             type: "tool_sandbox.stopped",
@@ -195,7 +267,13 @@ export class SandboxManagerServer {
         }
         const controller = new AbortController();
         request.raw.once("aborted", () => controller.abort());
-        const snapshot = await this.#manager.importGitHub(message.source, controller.signal);
+        const snapshot = await this.#observed({
+          request,
+          spanName: "sandbox.import_github",
+          operation: "import_github",
+          kind: "sandbox",
+          run: () => this.#manager.importGitHub(message.source, controller.signal),
+        });
         const { encodeWorkspaceSnapshotBlob } = await import("@agent-dock/workspace-runtime");
         await reply.code(200).send({
           managerProtocolVersion: 1,
@@ -224,7 +302,13 @@ export class SandboxManagerServer {
       request.raw.once("aborted", () => controller.abort());
       try {
         const message = parseToolSandboxOperationRequest(request.body);
-        const response = await this.#manager.execute(capability, message, controller.signal);
+        const response = await this.#observed({
+          request,
+          spanName: `tool.${message.operation}`,
+          operation: message.operation,
+          kind: "tool",
+          run: () => this.#manager.execute(capability, message, controller.signal),
+        });
         await reply.code(200).send(response);
       } catch (error: unknown) {
         await this.#failure(reply, error);

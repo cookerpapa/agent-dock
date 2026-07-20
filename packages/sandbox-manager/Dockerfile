@@ -4,6 +4,7 @@ FROM node:24.12.0-bookworm-slim@sha256:7326fb2dbdce998edd72140946851be64ef4a643e
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
@@ -18,6 +19,8 @@ COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY packages/observability/package.json packages/observability/package.json
+COPY packages/observability/src packages/observability/src
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json

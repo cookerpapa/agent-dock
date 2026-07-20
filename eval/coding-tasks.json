@@ -1,0 +1,76 @@
+{
+  "format": "agent-dock.coding-eval.v1",
+  "description": "Deterministic infrastructure evaluation. It validates the full Agent Loop and tool plane; it is not a benchmark of model intelligence.",
+  "tasks": [
+    {
+      "id": "add",
+      "prompt": "agent-dock-eval://add\nRepair Calculator.add and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return left + right;",
+      "testCommand": "bash eval/test.sh add"
+    },
+    {
+      "id": "subtract",
+      "prompt": "agent-dock-eval://subtract\nRepair Calculator.subtract and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return left - right;",
+      "testCommand": "bash eval/test.sh subtract"
+    },
+    {
+      "id": "multiply",
+      "prompt": "agent-dock-eval://multiply\nRepair Calculator.multiply and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return left * right;",
+      "testCommand": "bash eval/test.sh multiply"
+    },
+    {
+      "id": "divide",
+      "prompt": "agent-dock-eval://divide\nRepair Calculator.divide and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return left / right;",
+      "testCommand": "bash eval/test.sh divide"
+    },
+    {
+      "id": "maximum",
+      "prompt": "agent-dock-eval://maximum\nRepair Calculator.maximum and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return left > right ? left : right;",
+      "testCommand": "bash eval/test.sh maximum"
+    },
+    {
+      "id": "clamp",
+      "prompt": "agent-dock-eval://clamp\nRepair Calculator.clamp and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "Math.max(minimum, Math.min(maximum, value))",
+      "testCommand": "bash eval/test.sh clamp"
+    },
+    {
+      "id": "even",
+      "prompt": "agent-dock-eval://even\nRepair Calculator.isEven and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return value % 2 == 0;",
+      "testCommand": "bash eval/test.sh even"
+    },
+    {
+      "id": "average",
+      "prompt": "agent-dock-eval://average\nRepair Calculator.average and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return (left + right) / 2.0;",
+      "testCommand": "bash eval/test.sh average"
+    },
+    {
+      "id": "factorial",
+      "prompt": "agent-dock-eval://factorial\nRepair Calculator.factorial and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "for (int factor = 2; factor <= value; factor++)",
+      "testCommand": "bash eval/test.sh factorial"
+    },
+    {
+      "id": "square",
+      "prompt": "agent-dock-eval://square\nRepair Calculator.square and run only its focused test.",
+      "expectedFile": "src/Calculator.java",
+      "expectedText": "return value * value;",
+      "testCommand": "bash eval/test.sh square"
+    }
+  ]
+}

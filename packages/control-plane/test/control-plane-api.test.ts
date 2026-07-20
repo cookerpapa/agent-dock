@@ -841,6 +841,18 @@ describe.sequential("single-user durable turn intake API", () => {
       state: "queued",
       attemptCount: 0,
     });
+    const operations = await http.inject({ method: "GET", url: "/v1/operations/summary" });
+    expect(operations.statusCode).toBe(200);
+    expect(operations.json()).toMatchObject({
+      runs: {
+        queued: expect.any(Number),
+        active: expect.any(Number),
+        queueWait: { sampleCount: expect.any(Number), p50Ms: expect.any(Number) },
+      },
+      model: { requests: expect.any(Number), costMicrousd: expect.any(Number) },
+      tools: { calls: expect.any(Number), failures: expect.any(Number) },
+      failures: expect.any(Array),
+    });
     expect(JSON.stringify(durable.outboxPayload)).not.toContain("fix the failing test");
   });
 

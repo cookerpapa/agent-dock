@@ -58,7 +58,7 @@ describe("private multi-tenant identity migration", () => {
     await applyCompiledQueries(postgres, await compileMigration(upPrivateMultiTenantIdentity));
     await seedTenant(IDS.tenantA, "tenant-a", IDS.userA, IDS.bindingA, IDS.profileA);
     await seedTenant(IDS.tenantB, "tenant-b", IDS.userB, IDS.bindingB, IDS.profileB);
-  });
+  }, 30_000);
 
   afterAll(async () => {
     await postgres.close();

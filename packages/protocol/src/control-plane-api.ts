@@ -178,6 +178,76 @@ export const UsageSummaryResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const DurationQuantilesResourceSchema = Type.Object(
+  {
+    sampleCount: NonNegativeSafeIntegerSchema,
+    p50Ms: NonNegativeSafeIntegerSchema,
+    p95Ms: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const OperationalInsightsResourceSchema = Type.Object(
+  {
+    generatedAt: UtcTimestampSchema,
+    windowStartedAt: UtcTimestampSchema,
+    runs: Type.Object(
+      {
+        queued: NonNegativeSafeIntegerSchema,
+        active: NonNegativeSafeIntegerSchema,
+        completed: NonNegativeSafeIntegerSchema,
+        failed: NonNegativeSafeIntegerSchema,
+        cancelled: NonNegativeSafeIntegerSchema,
+        timedOut: NonNegativeSafeIntegerSchema,
+        retriedAttempts: NonNegativeSafeIntegerSchema,
+        successRateBasisPoints: Type.Integer({ minimum: 0, maximum: 10_000 }),
+        queueWait: DurationQuantilesResourceSchema,
+        execution: DurationQuantilesResourceSchema,
+      },
+      { additionalProperties: false },
+    ),
+    model: Type.Object(
+      {
+        requests: NonNegativeSafeIntegerSchema,
+        failures: NonNegativeSafeIntegerSchema,
+        inputTokens: NonNegativeSafeIntegerSchema,
+        outputTokens: NonNegativeSafeIntegerSchema,
+        cacheReadTokens: NonNegativeSafeIntegerSchema,
+        cacheWriteTokens: NonNegativeSafeIntegerSchema,
+        costMicrousd: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    tools: Type.Object(
+      {
+        calls: NonNegativeSafeIntegerSchema,
+        failures: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    quality: Type.Object(
+      {
+        testsPassed: NonNegativeSafeIntegerSchema,
+        testsFailed: NonNegativeSafeIntegerSchema,
+        testsErrored: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    activeSandboxAssignments: NonNegativeSafeIntegerSchema,
+    failures: Type.Array(
+      Type.Object(
+        {
+          code: Type.String({ minLength: 1, maxLength: 128 }),
+          count: PositiveSafeIntegerSchema,
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 20 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const ModelRequestAuditResourceSchema = Type.Object(
   {
     requestId: UuidSchema,
@@ -602,6 +672,7 @@ export const RunAttemptResourceSchema = Type.Object(
 export const RunResourceSchema = Type.Object(
   {
     runId: UuidSchema,
+    traceId: Type.String({ pattern: "^[0-9a-f]{32}$" }),
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     sessionId: UuidSchema,
@@ -915,6 +986,7 @@ export type ModelConfigurationResource = Static<typeof ModelConfigurationResourc
 export type ReplaceModelGovernanceRequest = Static<typeof ReplaceModelGovernanceRequestSchema>;
 export type ModelGovernanceResource = Static<typeof ModelGovernanceResourceSchema>;
 export type UsageSummaryResource = Static<typeof UsageSummaryResourceSchema>;
+export type OperationalInsightsResource = Static<typeof OperationalInsightsResourceSchema>;
 export type RunUsageResource = Static<typeof RunUsageResourceSchema>;
 export type SessionContextResource = Static<typeof SessionContextResourceSchema>;
 export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistrationRequestSchema>;
@@ -1091,6 +1163,10 @@ export function parseModelGovernanceResource(value: unknown): ModelGovernanceRes
 
 export function parseUsageSummaryResource(value: unknown): UsageSummaryResource {
   return parseSchema(UsageSummaryResourceSchema, value, "usage-summary resource");
+}
+
+export function parseOperationalInsightsResource(value: unknown): OperationalInsightsResource {
+  return parseSchema(OperationalInsightsResourceSchema, value, "operational-insights resource");
 }
 
 export function parseRunUsageResource(value: unknown): RunUsageResource {

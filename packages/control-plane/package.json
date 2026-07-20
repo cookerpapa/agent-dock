@@ -21,6 +21,7 @@
     "@agent-dock/database": "0.1.0",
     "@agent-dock/domain": "0.1.0",
     "@agent-dock/github-gateway": "0.1.0",
+    "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",

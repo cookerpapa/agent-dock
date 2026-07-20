@@ -154,6 +154,26 @@ async function ensureSandboxManagerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureObservabilitySecrets(runtimeDirectory) {
+  const application = applicationIdentity();
+  const created = [];
+  for (const name of ["metrics-token", "grafana-admin-password"]) {
+    const path = resolve(runtimeDirectory, "secrets", name);
+    try {
+      const existing = (await readPrivateFile(path)).trim();
+      if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+        throw new Error(`Production ${name} is invalid`);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await writePrivateFile(path, `${randomSecret()}\n`);
+      if (application.changeOwnership) await chown(path, application.uid, application.gid);
+      created.push(name);
+    }
+  }
+  return created;
+}
+
 async function ensureGitHubGatewaySecrets(runtimeDirectory) {
   const application = applicationIdentity();
   const specs = [
@@ -297,6 +317,7 @@ if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
+  const observabilitySecretsCreated = await ensureObservabilitySecrets(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
   process.stdout.write(
@@ -306,6 +327,7 @@ if (await validateExisting(runtimeDirectory)) {
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
       githubGatewaySecretsCreated,
+      observabilitySecretsCreated,
       objectStoreCredentialMigrated,
       runtimeDirectory,
     })}\n`,
@@ -419,6 +441,8 @@ await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${ra
 await writePrivateFile(resolve(secretsDirectory, "github-gateway-token"), `${randomSecret()}\n`);
 await writePrivateFile(resolve(secretsDirectory, "github-webhook-secret"), `${randomSecret()}\n`);
 await writePrivateFile(resolve(secretsDirectory, "github-app-private-key.pem"), "not-configured\n");
+await writePrivateFile(resolve(secretsDirectory, "metrics-token"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "grafana-admin-password"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "aws-credentials"),
   `[default]\naws_access_key_id = ${minioApplicationUser}\naws_secret_access_key = ${minioApplicationPassword}\n`,
@@ -455,6 +479,9 @@ const environment = [
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
   "AGENT_DOCK_CHECKPOINT_BUCKET=agent-dock-checkpoints",
   "AGENT_DOCK_CHECKPOINT_REGION=us-east-1",
+  "AGENT_DOCK_PROMETHEUS_PORT=9090",
+  "AGENT_DOCK_GRAFANA_PORT=3001",
+  "AGENT_DOCK_JAEGER_PORT=16686",
   "",
 ].join("\n");
 await writePrivateFile(resolve(runtimeDirectory, ".env"), environment);

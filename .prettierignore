@@ -10,3 +10,5 @@ sessions/
 snapshots/
 tmp/
 workspaces/
+packages/web-ui/Caddyfile
+deploy/observability/Caddyfile

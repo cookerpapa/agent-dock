@@ -1,0 +1,73 @@
+{
+  "format": "agent-dock.fault-eval-report.v1",
+  "generatedAt": "2026-07-20T08:52:18.272Z",
+  "methodology": "deterministic_targeted_fault_injection",
+  "liveChaosExperiment": false,
+  "caseCount": 10,
+  "successful": 10,
+  "successRate": 1,
+  "p50DurationMs": 2529,
+  "p95DurationMs": 5762,
+  "results": [
+    {
+      "id": "checkpoint-commit-failure",
+      "success": true,
+      "invariant": "A Run cannot become completed before its settled checkpoint commits.",
+      "durationMs": 3115
+    },
+    {
+      "id": "duplicate-command",
+      "success": true,
+      "invariant": "At-least-once delivery does not execute the same command twice.",
+      "durationMs": 2175
+    },
+    {
+      "id": "stale-fencing-token",
+      "success": true,
+      "invariant": "A released or recovered old worker cannot reacquire an obsolete fence.",
+      "durationMs": 2345
+    },
+    {
+      "id": "event-ack-loss",
+      "success": true,
+      "invariant": "A lost acknowledgement causes safe replay rather than event loss.",
+      "durationMs": 2314
+    },
+    {
+      "id": "corrupt-event-spool",
+      "success": true,
+      "invariant": "Corrupt durable events are rejected rather than silently skipped.",
+      "durationMs": 2312
+    },
+    {
+      "id": "object-store-outage",
+      "success": true,
+      "invariant": "A temporary object-store outage remains retryable and does not expose credentials.",
+      "durationMs": 2529
+    },
+    {
+      "id": "checkpoint-corruption-and-cas",
+      "success": true,
+      "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery.",
+      "durationMs": 5587
+    },
+    {
+      "id": "cancel-complete-race",
+      "success": true,
+      "invariant": "Exactly one terminal Run outcome wins a cancel/complete race.",
+      "durationMs": 5554
+    },
+    {
+      "id": "stale-dispatch-claim",
+      "success": true,
+      "invariant": "A superseded dispatcher cannot start external work.",
+      "durationMs": 5762
+    },
+    {
+      "id": "orphan-runtime-cleanup",
+      "success": true,
+      "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated.",
+      "durationMs": 5494
+    }
+  ]
+}

@@ -11,6 +11,7 @@ export const fakeModelScenarios = [
   "tool_call",
   "java_repair",
   "java_followup",
+  "coding_eval",
   "rate_limit",
   "timeout",
   "malformed",
@@ -264,6 +265,95 @@ function hasPriorJavaRepair(messages: readonly unknown[]): boolean {
     const content = JSON.stringify(message.content);
     return typeof content === "string" && content.includes("Java repair verified.");
   });
+}
+
+type CodingEvalTask = Readonly<{
+  id: string;
+  path: string;
+  oldText: string;
+  newText: string;
+}>;
+
+const codingEvalTasks: readonly CodingEvalTask[] = [
+  {
+    id: "add",
+    path: "src/Calculator.java",
+    oldText: "return left - right;",
+    newText: "return left + right;",
+  },
+  {
+    id: "subtract",
+    path: "src/Calculator.java",
+    oldText: "return left + right; // BUG: subtract",
+    newText: "return left - right;",
+  },
+  {
+    id: "multiply",
+    path: "src/Calculator.java",
+    oldText: "return left + right; // BUG: multiply",
+    newText: "return left * right;",
+  },
+  {
+    id: "divide",
+    path: "src/Calculator.java",
+    oldText: "return left * right; // BUG: divide",
+    newText: "return left / right;",
+  },
+  {
+    id: "maximum",
+    path: "src/Calculator.java",
+    oldText: "return left < right ? left : right;",
+    newText: "return left > right ? left : right;",
+  },
+  {
+    id: "clamp",
+    path: "src/Calculator.java",
+    oldText: "return value; // BUG: clamp",
+    newText: "return Math.max(minimum, Math.min(maximum, value));",
+  },
+  {
+    id: "even",
+    path: "src/Calculator.java",
+    oldText: "return value % 2 != 0;",
+    newText: "return value % 2 == 0;",
+  },
+  {
+    id: "average",
+    path: "src/Calculator.java",
+    oldText: "return left + right; // BUG: average",
+    newText: "return (left + right) / 2.0;",
+  },
+  {
+    id: "factorial",
+    path: "src/Calculator.java",
+    oldText: "return value; // BUG: factorial",
+    newText:
+      "int result = 1;\n        for (int factor = 2; factor <= value; factor++) result *= factor;\n        return result;",
+  },
+  {
+    id: "square",
+    path: "src/Calculator.java",
+    oldText: "return value + value; // BUG: square",
+    newText: "return value * value;",
+  },
+];
+
+function latestUserText(messages: readonly unknown[]): string | undefined {
+  const index = latestUserMessageIndex(messages);
+  if (index < 0) return undefined;
+  const message = messages[index];
+  if (!isRecord(message)) return undefined;
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return undefined;
+  return message.content
+    .filter((part) => isRecord(part) && part.type === "text" && typeof part.text === "string")
+    .map((part) => (part as Record<string, unknown>).text as string)
+    .join("\n");
+}
+
+function codingEvalTask(messages: readonly unknown[]): CodingEvalTask | undefined {
+  const taskId = /^agent-dock-eval:\/\/([a-z0-9-]+)/.exec(latestUserText(messages) ?? "")?.[1];
+  return codingEvalTasks.find((task) => task.id === taskId);
 }
 
 export class FakeModelServer {
@@ -538,6 +628,69 @@ export class FakeModelServer {
         restoredConversation
           ? "Prior conversation and Java repair restored after cold activation."
           : "Prior conversation was missing after cold activation.",
+      );
+      return;
+    }
+    if (scenario === "coding_eval") {
+      const task = codingEvalTask(payload.messages);
+      if (task === undefined) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_eval_invalid",
+          "bash",
+          { command: "printf 'unknown coding eval task\\n' >&2; exit 2" },
+        );
+        return;
+      }
+      const completedTools = currentTurnToolResultCount(payload.messages);
+      if (completedTools === 0) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          `call_agentdock_eval_${task.id}_before`,
+          "bash",
+          { command: `bash eval/test.sh ${task.id}` },
+        );
+        return;
+      }
+      if (completedTools === 1) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          `call_agentdock_eval_${task.id}_edit`,
+          "edit",
+          {
+            path: task.path,
+            edits: [{ oldText: task.oldText, newText: task.newText }],
+          },
+        );
+        return;
+      }
+      if (completedTools === 2) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          `call_agentdock_eval_${task.id}_after`,
+          "bash",
+          { command: `bash eval/test.sh ${task.id}` },
+        );
+        return;
+      }
+      await this.#streamText(
+        response,
+        requestId,
+        sequence,
+        payload.model,
+        `Coding evaluation task ${task.id} repaired and verified.`,
       );
       return;
     }

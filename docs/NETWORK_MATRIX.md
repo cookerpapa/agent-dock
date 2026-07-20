@@ -8,22 +8,30 @@ does not replace application authentication.
 
 ## Production networks
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Provider egress | Repository egress | Public ports |
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | Repository egress | Public ports |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Web ingress | yes | no | no | no | no | yes (webhook proxy only) | no | no | loopback `8080` |
-| Control Plane | API | yes | yes | no | no | yes | no | no | none |
-| Trusted Pi Runner | no | yes | yes | yes | yes | yes | yes | no | none |
-| Sandbox Manager | no | no | no | no | yes | no | no | no | none |
-| GitHub Gateway | no | no | no | no | no | yes | yes | no | none |
-| Tool Sandbox | no | no | no | no | no | no | no | no | none |
-| Repository importer | no | no | no | no | no | no | no | yes | none |
-| PostgreSQL | no | no | yes | no | no | no | no | no | none |
-| MinIO | no | no | no | yes | no | no | no | no | none |
+| Web ingress | yes | no | no | no | no | yes (webhook proxy only) | no | no | no | loopback `8080` |
+| Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | none |
+| Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | yes | no | none |
+| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | none |
+| GitHub Gateway | no | no | no | no | no | yes | no | yes | no | none |
+| Tool Sandbox | no | no | no | no | no | no | no | no | no | none |
+| Repository importer | no | no | no | no | no | no | no | no | yes | none |
+| PostgreSQL | no | no | yes | no | no | no | no | no | no | none |
+| MinIO | no | no | no | yes | no | no | no | no | no | none |
+| Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | none |
+| Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | loopback `9090`, `16686`, `3001` |
 
 The repository-network bootstrap is a credential-free one-shot container used
 only to make Compose create the otherwise dynamic egress bridge. It exits before
 normal service and importer work. The Manager controls importer lifecycle but
 does not join repository egress itself.
+
+The observability ingress is the only component joining the non-internal
+`observability-edge` network. The three backends remain internal and are not
+joined to `edge`, API, database, model/provider, GitHub, or sandbox-control
+networks. Prometheus receives only its own scrape token; the proxy receives no
+secret.
 
 ## Credential and authority matrix
 

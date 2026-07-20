@@ -9,7 +9,7 @@ import type {
   SessionState,
   TurnState,
 } from "@agent-dock/domain";
-import type { ColumnType, JSONColumnType } from "kysely";
+import type { ColumnType, Generated, JSONColumnType } from "kysely";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
@@ -243,6 +243,7 @@ export interface RunTable {
   turn_id: string;
   command_id: string;
   idempotency_key: string;
+  trace_id: Generated<string>;
   state: RunState;
   current_attempt_id: string | null;
   attempt_count: GeneratedInteger;

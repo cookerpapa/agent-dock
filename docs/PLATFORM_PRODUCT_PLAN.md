@@ -92,6 +92,8 @@ them; no external provider price is inferred.
 
 ### Milestone 5: observability and evaluation
 
+Status: complete under ADR-0034 for the private single-host topology.
+
 - OpenTelemetry trace propagation across Control Plane, Runner, Gateway,
   Manager, and Provider;
 - metrics and dashboards for queue, run, sandbox, model, tool, checkpoint,
@@ -99,6 +101,14 @@ them; no external provider price is inferred.
 - fixed coding-agent task set with test/patch/cost/latency results;
 - infrastructure fake-model suite, security evaluation, fault injection, and
   measured 10/50/100-session load reports.
+
+Implemented with durable Run trace identities, W3C propagation across every
+trusted HTTP/process boundary, bearer-protected low-cardinality Prometheus
+metrics, redacted JSON logs, a tenant-scoped owner operations API, persisted
+Jaeger, and a provisioned Grafana dashboard. Reproducible reports cover ten
+full-loop coding repairs, ten fault invariants, the Docker/Pi security gate, and
+10/50/100 simultaneous Session/API load. Reports explicitly separate
+infrastructure correctness from model intelligence and active-Run capacity.
 
 Only reproduced measurements belong in the résumé.
 

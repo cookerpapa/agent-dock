@@ -44,7 +44,10 @@
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
     "demo": "node scripts/run-local-demo.mjs",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
-    "security:audit": "npm audit --audit-level=high"
+    "security:audit": "npm audit --audit-level=high",
+    "eval:coding": "node scripts/run-coding-eval.mjs",
+    "eval:faults": "node scripts/run-fault-eval.mjs",
+    "eval:load": "node scripts/run-control-plane-load.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

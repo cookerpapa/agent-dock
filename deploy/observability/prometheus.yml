@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: agent-dock-control-plane
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [control-plane:9464]
+  - job_name: agent-dock-trusted-runner
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [supervisor-host:9465]
+  - job_name: agent-dock-sandbox-manager
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [sandbox-manager:9466]

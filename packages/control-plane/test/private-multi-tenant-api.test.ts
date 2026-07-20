@@ -323,6 +323,31 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
     expect(newTurn.json()).toMatchObject({ error: { code: "tenant_quota_exceeded" } });
   });
 
+  it("restricts operational insights to owners and keeps them tenant scoped", async () => {
+    const denied = await http.inject({
+      method: "GET",
+      url: "/v1/operations/summary",
+      headers: authorization(memberAToken),
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: { code: "authorization_denied" } });
+
+    const bravo = await http.inject({
+      method: "GET",
+      url: "/v1/operations/summary",
+      headers: authorization(tenantB.credential.token),
+    });
+    expect(bravo.statusCode).toBe(200);
+    expect(bravo.json()).toMatchObject({
+      runs: { queued: 0, active: 0 },
+      model: { requests: 0, costMicrousd: 0 },
+      tools: { calls: 0, failures: 0 },
+      activeSandboxAssignments: 0,
+      failures: [],
+    });
+    expect(bravo.body).not.toContain(tenantA.tenantId);
+  });
+
   it("invalidates a revoked tenant credential without affecting another tenant", async () => {
     await expect(
       revokePrivateTenantCredential(database, {

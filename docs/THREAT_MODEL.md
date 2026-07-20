@@ -93,6 +93,7 @@ Assumed trusted or out of scope for the current claim:
 | Secret leaks through output | closed public schemas, bounded previews, tenant-scoped full-output Artifacts, no raw Pi payloads, repository secret scan | artifact/event tests, production secret audit, Gitleaks workflow |
 | Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
+| Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
 
 ## Credential flow
 
@@ -123,6 +124,11 @@ Before exposing arbitrary untrusted repositories to the public Internet:
 4. isolate project/user extension code from Pi and model credentials;
 5. publish image provenance, SBOM, vulnerability scanning, and patch policy;
 6. run an independent penetration review of the Manager and host configuration.
+
+The observability backends remain on an internal Docker network. A separate
+read-only Caddy process joins that network and its own non-platform edge network,
+publishing Prometheus, Jaeger, and Grafana only on host loopback. It has no
+platform secret, database network, Docker socket, or Tool Sandbox authority.
 
 ## Reproduction
 

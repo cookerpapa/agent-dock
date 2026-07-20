@@ -3,7 +3,16 @@ import type {
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
 } from "@agent-dock/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  AgentDockMetrics,
+  activeTraceCarrier,
+  initializeTelemetry,
+  virtualRunTraceCarrier,
+  withSpan,
+  type TelemetryRuntime,
+  type TraceCarrier,
+} from "@agent-dock/observability";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   SANDBOX_MANAGER_SERVICE_PATH,
   SandboxManagerClient,
@@ -28,6 +37,16 @@ const assignment: ToolSandboxAssignment = {
 };
 
 const servers: SandboxManagerServer[] = [];
+let telemetry: TelemetryRuntime;
+let observedServerTrace: TraceCarrier | undefined;
+
+beforeAll(async () => {
+  telemetry = await initializeTelemetry({ serviceName: "sandbox-manager-rpc-test" });
+});
+
+afterAll(async () => {
+  await telemetry.shutdown();
+});
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
@@ -37,6 +56,7 @@ function backend(): SandboxManagerBackend {
   return {
     async checkHealth() {},
     async create(request) {
+      observedServerTrace = activeTraceCarrier();
       return {
         managerProtocolVersion: 1,
         type: "tool_sandbox.created",
@@ -78,11 +98,13 @@ function backend(): SandboxManagerBackend {
 
 describe("Sandbox Manager authenticated RPC", () => {
   it("separates the service credential from the per-activation tool capability", async () => {
+    const metrics = new AgentDockMetrics("sandbox-manager-test");
     const server = new SandboxManagerServer({
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
       manager: backend(),
+      metrics,
     });
     servers.push(server);
     const address = await server.listen();
@@ -100,10 +122,18 @@ describe("Sandbox Manager authenticated RPC", () => {
       assignment,
       workspaceSeed: { kind: "sample_java" },
     };
-    await expect(client.create(request)).resolves.toMatchObject({
-      activationId: ACTIVATION_ID,
-      capability: CAPABILITY,
+    await withSpan({
+      serviceName: "trusted-runner-test",
+      name: "run.execute",
+      parent: virtualRunTraceCarrier("1".repeat(32), "2".repeat(16)),
+      run: async () => {
+        await expect(client.create(request)).resolves.toMatchObject({
+          activationId: ACTIVATION_ID,
+          capability: CAPABILITY,
+        });
+      },
     });
+    expect(observedServerTrace?.traceparent).toContain("1".repeat(32));
 
     const operation: ToolSandboxOperationRequest = {
       managerProtocolVersion: 1,
@@ -136,5 +166,12 @@ describe("Sandbox Manager authenticated RPC", () => {
       body: JSON.stringify(request),
     });
     expect(unauthorized.status).toBe(401);
+    const exportedMetrics = await metrics.registry.metrics();
+    expect(exportedMetrics).toContain(
+      'agent_dock_sandbox_operation_seconds_count{service="sandbox-manager-test",operation="create",outcome="completed"} 1',
+    );
+    expect(exportedMetrics).toContain(
+      'agent_dock_tool_duration_seconds_count{service="sandbox-manager-test",tool="bash.exec",outcome="completed"} 1',
+    );
   });
 });

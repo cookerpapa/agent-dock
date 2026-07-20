@@ -1,4 +1,5 @@
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
+import { activeTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
 import {
   type ExecuteTurnCommandMessage,
   type ToolSandboxAssignment,
@@ -69,6 +70,7 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   idGenerator?: () => string;
+  metrics?: AgentDockMetrics;
 };
 
 function assignment(
@@ -129,6 +131,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
   readonly #idGenerator: () => string;
+  readonly #metrics: AgentDockMetrics | undefined;
 
   constructor(options: RemoteToolSandboxTurnRunnerOptions) {
     this.#manager = options.manager;
@@ -145,6 +148,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#turnTimeoutMs = options.turnTimeoutMs;
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+    this.#metrics = options.metrics;
   }
 
   async run(
@@ -152,6 +156,44 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     publishEvent: PiRpcEventPublisher,
     signal: AbortSignal,
   ): Promise<PiRpcTurnResult> {
+    this.#metrics?.activeRuns.inc();
+    const startedAt = performance.now();
+    try {
+      const result = await withSpan({
+        serviceName: "agent-dock-trusted-runner",
+        name: "run.execute",
+        ...(command.payload.traceContext === undefined
+          ? {}
+          : { parent: command.payload.traceContext }),
+        attributes: {
+          "agent_dock.run.id": command.payload.runId,
+          "agent_dock.attempt.id": command.payload.attemptId,
+          "agent_dock.session.id": command.payload.sessionId,
+        },
+        run: () => this.#run(command, publishEvent, signal),
+      });
+      this.#metrics?.runDuration.observe(
+        { outcome: "completed" },
+        (performance.now() - startedAt) / 1_000,
+      );
+      return result;
+    } catch (error: unknown) {
+      this.#metrics?.runDuration.observe(
+        { outcome: signal.aborted ? "cancelled" : "failed" },
+        (performance.now() - startedAt) / 1_000,
+      );
+      throw error;
+    } finally {
+      this.#metrics?.activeRuns.dec();
+    }
+  }
+
+  async #run(
+    command: ExecuteTurnCommandMessage,
+    publishEvent: PiRpcEventPublisher,
+    signal: AbortSignal,
+  ): Promise<PiRpcTurnResult> {
+    const downstreamTrace = activeTraceCarrier() ?? command.payload.traceContext;
     const trustedWorkspace = await stat(this.#trustedWorkspaceDirectory).catch(() => undefined);
     if (!trustedWorkspace?.isDirectory()) {
       throw new PiRpcTurnError(
@@ -235,7 +277,25 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     let stopPromise: Promise<void> | undefined;
     const stopSandbox = (): Promise<void> => {
       if (activation === undefined) return Promise.resolve();
-      stopPromise ??= this.#manager.stop(activation.activationId, toolAssignment);
+      if (stopPromise === undefined) {
+        const startedAt = performance.now();
+        stopPromise = this.#manager.stop(activation.activationId, toolAssignment).then(
+          () => {
+            this.#metrics?.sandboxDuration.observe(
+              { operation: "stop", outcome: "completed" },
+              (performance.now() - startedAt) / 1_000,
+            );
+            this.#metrics?.sandboxActive.dec({ provider: "remote" });
+          },
+          (error: unknown) => {
+            this.#metrics?.sandboxDuration.observe(
+              { operation: "stop", outcome: "failed" },
+              (performance.now() - startedAt) / 1_000,
+            );
+            throw error;
+          },
+        );
+      }
       return stopPromise;
     };
     const abortSandbox = (): void => {
@@ -256,7 +316,21 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           ? {}
           : { workspaceRestore: encodeWorkspaceSnapshotBlob(loadedCheckpoint.workspace) }),
       };
-      activation = await this.#manager.create(createRequest);
+      const createStartedAt = performance.now();
+      try {
+        activation = await this.#manager.create(createRequest);
+        this.#metrics?.sandboxDuration.observe(
+          { operation: "create", outcome: "completed" },
+          (performance.now() - createStartedAt) / 1_000,
+        );
+        this.#metrics?.sandboxActive.inc({ provider: "remote" });
+      } catch (error: unknown) {
+        this.#metrics?.sandboxDuration.observe(
+          { operation: "create", outcome: "failed" },
+          (performance.now() - createStartedAt) / 1_000,
+        );
+        throw error;
+      }
       signal.addEventListener("abort", abortSandbox, { once: true });
       if (signal.aborted) abortSandbox();
 
@@ -315,6 +389,16 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
             command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
           ),
+          ...(downstreamTrace === undefined
+            ? {}
+            : {
+                AGENT_DOCK_TRUSTED_TRACEPARENT: downstreamTrace.traceparent,
+                ...(downstreamTrace.tracestate === undefined
+                  ? {}
+                  : {
+                      AGENT_DOCK_TRUSTED_TRACESTATE: downstreamTrace.tracestate,
+                    }),
+              }),
         },
         collectWorkspacePatch: () => capturedPatch,
         ...(this.#checkpointStore?.saveToolOutput === undefined
@@ -343,6 +427,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               );
             }
           }
+          const checkpointStartedAt = performance.now();
           const captured = await this.#manager.capture(activation.activationId, toolAssignment);
           const workspace = decodeWorkspaceSnapshotBlob(captured.workspace);
           capturedPatch = captured.workspacePatch;
@@ -358,7 +443,15 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 },
               );
               await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
+              this.#metrics?.checkpointDuration.observe(
+                { outcome: "completed" },
+                (performance.now() - checkpointStartedAt) / 1_000,
+              );
             } catch (error: unknown) {
+              this.#metrics?.checkpointDuration.observe(
+                { outcome: "failed" },
+                (performance.now() - checkpointStartedAt) / 1_000,
+              );
               throw safePiError(
                 error,
                 "checkpoint_save_failed",

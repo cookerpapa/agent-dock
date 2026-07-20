@@ -15,6 +15,12 @@ const supervisorId = `agent-dock-check-supervisor-${suffix}`;
 const runtimeDirectory = await mkdtemp(join(tmpdir(), `agent-dock-production-${suffix}-`));
 const environmentFile = resolve(runtimeDirectory, ".env");
 const httpPort = await availablePort();
+const allocatedPorts = new Set([httpPort]);
+const prometheusPort = await distinctAvailablePort(allocatedPorts);
+allocatedPorts.add(prometheusPort);
+const jaegerPort = await distinctAvailablePort(allocatedPorts);
+allocatedPorts.add(jaegerPort);
+const grafanaPort = await distinctAvailablePort(allocatedPorts);
 const baseUrl = `http://127.0.0.1:${String(httpPort)}`;
 const keepDeployment = process.env.AGENT_DOCK_PRODUCTION_CHECK_KEEP === "1";
 const skipBuild = process.env.AGENT_DOCK_PRODUCTION_CHECK_SKIP_BUILD === "1";
@@ -23,6 +29,9 @@ const processEnvironment = {
   AGENT_DOCK_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENT_DOCK_HTTP_BIND_ADDRESS: "127.0.0.1",
   AGENT_DOCK_HTTP_PORT: String(httpPort),
+  AGENT_DOCK_PROMETHEUS_PORT: String(prometheusPort),
+  AGENT_DOCK_JAEGER_PORT: String(jaegerPort),
+  AGENT_DOCK_GRAFANA_PORT: String(grafanaPort),
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: "true",
   AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: "3",
   AGENT_DOCK_SUPERVISOR_ID: supervisorId,
@@ -135,6 +144,14 @@ async function availablePort() {
     server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
   });
   return address.port;
+}
+
+async function distinctAvailablePort(excluded) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const candidate = await availablePort();
+    if (!excluded.has(candidate)) return candidate;
+  }
+  throw new Error("Could not allocate a distinct loopback port");
 }
 
 async function waitFor(predicate, description, timeoutMs = 90_000) {
@@ -492,7 +509,7 @@ async function containerStartedAt(containerId) {
   return capture("docker", ["inspect", "--format", "{{.State.StartedAt}}", containerId]);
 }
 
-async function assertOnlyWebPublished() {
+async function assertOnlyExpectedLoopbackPortsPublished() {
   const output = await capture("docker", [
     "ps",
     "--all",
@@ -506,14 +523,24 @@ async function assertOnlyWebPublished() {
     const inspected = JSON.parse(await capture("docker", ["inspect", id]))[0];
     const service = inspected.Config.Labels["com.docker.compose.service"];
     const bindings = inspected.HostConfig.PortBindings ?? {};
-    if (service !== "web") {
+    if (service !== "web" && service !== "observability-ingress") {
       assert.deepEqual(bindings, {}, `${service} unexpectedly publishes a host port`);
       continue;
     }
-    assert.deepEqual(Object.keys(bindings), ["8080/tcp"]);
-    assert.equal(bindings["8080/tcp"].length, 1);
-    assert.equal(bindings["8080/tcp"][0].HostIp, "127.0.0.1");
-    assert.equal(bindings["8080/tcp"][0].HostPort, String(httpPort));
+    const expected =
+      service === "web"
+        ? { "8080/tcp": httpPort }
+        : {
+            "3001/tcp": grafanaPort,
+            "9090/tcp": prometheusPort,
+            "16686/tcp": jaegerPort,
+          };
+    assert.deepEqual(Object.keys(bindings).sort(), Object.keys(expected).sort());
+    for (const [containerPort, hostPort] of Object.entries(expected)) {
+      assert.equal(bindings[containerPort].length, 1);
+      assert.equal(bindings[containerPort][0].HostIp, "127.0.0.1");
+      assert.equal(bindings[containerPort][0].HostPort, String(hostPort));
+    }
   }
 }
 
@@ -602,7 +629,10 @@ async function assertExecutionBoundary() {
     supervisorNetworks.some((name) => name.endsWith("_repository-egress")),
     false,
   );
-  assert.deepEqual(managerNetworks, [`${projectName}_sandbox-control`]);
+  assert.deepEqual(
+    managerNetworks.sort(),
+    [`${projectName}_observability`, `${projectName}_sandbox-control`].sort(),
+  );
   assert.deepEqual(
     githubGatewayNetworks.sort(),
     [`${projectName}_github-control`, `${projectName}_provider-egress`].sort(),
@@ -647,9 +677,11 @@ async function readSecretValues() {
     "database-url",
     "github-gateway-token",
     "github-webhook-secret",
+    "grafana-admin-password",
     "minio-root-password",
     "minio-root-user",
     "model-credential-master-key",
+    "metrics-token",
     "postgres-password",
     "sandbox-manager-token",
     "supervisor-enrollment-token",
@@ -710,9 +742,11 @@ async function assertPrivateRuntimeFiles() {
       "github-app-private-key.pem",
       "github-gateway-token",
       "github-webhook-secret",
+      "grafana-admin-password",
       "minio-root-password",
       "minio-root-user",
       "model-credential-master-key",
+      "metrics-token",
       "postgres-password",
       "sandbox-manager-token",
       "supervisor-enrollment-token",
@@ -736,7 +770,14 @@ async function assertNoSecretsInDeployment(secretValues, events) {
 }
 
 async function main() {
-  report("initialize", { projectName, runtimeDirectory, httpPort });
+  report("initialize", {
+    projectName,
+    runtimeDirectory,
+    httpPort,
+    prometheusPort,
+    jaegerPort,
+    grafanaPort,
+  });
   await run(process.execPath, ["scripts/init-production.mjs", "--runtime-dir", runtimeDirectory], {
     stdio: "inherit",
   });
@@ -810,11 +851,12 @@ async function main() {
     waitForHealthyService("sandbox-manager"),
     waitForHealthyService("github-gateway"),
     waitForHealthyService("web"),
+    waitForHealthyService("observability-ingress"),
   ]);
   report("repeat_bootstrap");
   await composeRun(["run", "--rm", "--no-deps", "minio-bootstrap"]);
   await composeRun(["run", "--rm", "--no-deps", "database-bootstrap"]);
-  await assertOnlyWebPublished();
+  await assertOnlyExpectedLoopbackPortsPublished();
   await assertApplicationIdentity();
   await assertExecutionBoundary();
   await assertTenantNeutralControlPlaneRuntime();
@@ -822,6 +864,23 @@ async function main() {
 
   const health = await http("/healthz", {}, 200);
   assert.equal(health.text.trim(), "ok");
+  await waitFor(
+    async () => {
+      const response = await fetch(`http://127.0.0.1:${String(prometheusPort)}/api/v1/targets`);
+      if (!response.ok) return false;
+      const body = await response.json();
+      const targets = body?.data?.activeTargets;
+      return Array.isArray(targets) &&
+        targets.length === 3 &&
+        targets.every((target) => target.health === "up")
+        ? targets
+        : false;
+    },
+    "three healthy Prometheus scrape targets",
+    60_000,
+  );
+  const grafanaHealth = await fetch(`http://127.0.0.1:${String(grafanaPort)}/api/health`);
+  assert.equal(grafanaHealth.status, 200);
   await http("/health/ready", {}, 404);
   await http(
     "/internal/v1/supervisor/boots",
@@ -1440,7 +1499,17 @@ async function main() {
     ...cancellationStarted.events,
     ...cancellationTerminal.events,
   ]);
-  await assertOnlyWebPublished();
+  await assertOnlyExpectedLoopbackPortsPublished();
+  const jaegerServices = await waitFor(
+    async () => {
+      const response = await fetch(`http://127.0.0.1:${String(jaegerPort)}/api/services`);
+      if (!response.ok) return false;
+      const body = await response.json();
+      return Array.isArray(body.data) && body.data.length >= 3 ? body.data : false;
+    },
+    "cross-service Jaeger traces",
+    60_000,
+  );
   report("production_check_passed", {
     projectName,
     repairedSessionId: session.sessionId,
@@ -1449,6 +1518,8 @@ async function main() {
     freshBootId: freshBoot.bootId,
     durableEvents: 22,
     registeredTenants: 3,
+    prometheusTargets: 3,
+    jaegerServices: jaegerServices.length,
   });
 }
 

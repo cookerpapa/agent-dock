@@ -1,4 +1,5 @@
 import type { Database } from "@agent-dock/database";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { Kysely } from "kysely";
 
 import { CancellationDispatcher } from "./cancellation-dispatcher.ts";
@@ -67,6 +68,7 @@ export type RemoteSupervisorWorkerRuntimeOptions = {
   maintenanceConnectionLimit?: number;
   maintenanceRetirementLimit?: number;
   onActivity?: (activity: RemoteSupervisorWorkerActivity) => void;
+  metrics?: AgentDockMetrics;
 };
 
 export type RemoteSupervisorWorkerRuntimeState = "idle" | "running" | "stopping" | "stopped";
@@ -137,6 +139,7 @@ export class RemoteSupervisorWorkerRuntime {
   readonly #maintenanceConnectionLimit: number;
   readonly #maintenanceRetirementLimit: number;
   readonly #onActivity: ((activity: RemoteSupervisorWorkerActivity) => void) | undefined;
+  readonly #metrics: AgentDockMetrics | undefined;
   readonly #bindings = new Map<string, BindingWorker>();
   readonly #retiringWorkers = new Set<Promise<void>>();
   #state: RemoteSupervisorWorkerRuntimeState = "idle";
@@ -173,6 +176,7 @@ export class RemoteSupervisorWorkerRuntime {
       "maintenanceRetirementLimit",
     );
     this.#onActivity = options.onActivity;
+    this.#metrics = options.metrics;
   }
 
   get state(): RemoteSupervisorWorkerRuntimeState {
@@ -219,6 +223,12 @@ export class RemoteSupervisorWorkerRuntime {
         let delayMs = this.#bindingDiscoveryIntervalMs;
         try {
           const bindings = await this.#bindingSource.listRemoteDispatchBindings();
+          const queued = await this.#database
+            .selectFrom("runs")
+            .select((expression) => expression.fn.countAll<string>().as("count"))
+            .where("state", "=", "queued")
+            .executeTakeFirstOrThrow();
+          this.#metrics?.queuedRuns.set(Number(queued.count));
           if (signal.aborted) break;
           this.#synchronizeBindings(bindings);
         } catch (error: unknown) {
@@ -303,6 +313,7 @@ export class RemoteSupervisorWorkerRuntime {
         backend: binding.backend,
         leaseManager: binding.leaseCoordinator,
         supervisorAffinity: binding.supervisorAffinity,
+        ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
       const cancellationDispatcher = new CancellationDispatcher({
         database: this.#database,

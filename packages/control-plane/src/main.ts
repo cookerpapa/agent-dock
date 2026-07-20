@@ -1,5 +1,6 @@
 import { createDatabase } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
+import { operationalLog, startServiceObservability } from "@agent-dock/observability";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { sql } from "kysely";
@@ -43,6 +44,10 @@ async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Pro
 
 export async function startControlPlane(): Promise<void> {
   const config = await loadProductionControlPlaneConfig();
+  const observability = await startServiceObservability({
+    serviceName: "agent-dock-control-plane",
+    defaultMetricsPort: 9464,
+  });
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
   const notifications = new PostgresSessionEventNotifications({
     connectionString: config.databaseUrl,
@@ -101,7 +106,17 @@ export async function startControlPlane(): Promise<void> {
               serviceToken: config.githubGatewayServiceToken,
             }),
           }),
-      worker: { maxLanesPerConnection: config.maximumLanesPerSupervisor },
+      worker: {
+        maxLanesPerConnection: config.maximumLanesPerSupervisor,
+        metrics: observability.metrics,
+        onActivity: (activity) =>
+          operationalLog({
+            service: "agent-dock-control-plane",
+            level: activity.type === "runtime.failure" ? "error" : "info",
+            event: activity.type,
+            attributes: { ...activity },
+          }),
+      },
     });
     await runtime.listen(config.port, config.host);
     process.stdout.write(
@@ -114,6 +129,7 @@ export async function startControlPlane(): Promise<void> {
       closing = true;
       await runtime?.close();
       await database.destroy();
+      await observability.close();
     };
     const closeAfterSignal = (): void => {
       void close().catch(() => {
@@ -126,6 +142,7 @@ export async function startControlPlane(): Promise<void> {
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);
     await database.destroy();
+    await observability.close().catch(() => undefined);
     throw error;
   }
 }

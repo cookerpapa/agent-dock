@@ -39,6 +39,7 @@ import {
   type ProjectResource,
   type ModelConfigurationResource,
   type ModelGovernanceResource,
+  type OperationalInsightsResource,
   type RunUsageResource,
   type SessionContextResource,
   type UsageSummaryResource,
@@ -63,6 +64,7 @@ import { TenantRequestContext } from "./tenant-request-context.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import { WorkspaceVersionService } from "./workspace-version-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";
+import { OperationalInsightsService } from "./operational-insights-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -76,6 +78,8 @@ export class ControlPlaneController {
     private readonly tenantModelConfiguration: TenantModelConfigurationService,
     @Inject(ModelGovernanceService)
     private readonly modelGovernance: ModelGovernanceService,
+    @Inject(OperationalInsightsService)
+    private readonly operationalInsights: OperationalInsightsService,
     @Inject(WorkspaceVersionService)
     private readonly workspaceVersions: WorkspaceVersionService,
     @Inject(GitHubIntegrationService)
@@ -134,6 +138,13 @@ export class ControlPlaneController {
   @Get("usage")
   async getUsage(@Req() request: FastifyRequest): Promise<UsageSummaryResource> {
     return this.modelGovernance.usage(this.tenantRequestContext.resolve(request));
+  }
+
+  @Get("operations/summary")
+  async getOperationalInsights(
+    @Req() request: FastifyRequest,
+  ): Promise<OperationalInsightsResource> {
+    return this.operationalInsights.get(this.tenantRequestContext.requireOwner(request));
   }
 
   @Get("runs/:runId/usage")

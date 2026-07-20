@@ -9,6 +9,7 @@ import {
   NonNegativeSafeIntegerSchema,
   OpaqueIdSchema,
   PositiveSafeIntegerSchema,
+  TraceContextSchema,
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
@@ -198,6 +199,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
         model: TurnModelSnapshotSchema,
         budgets: Type.Optional(TurnBudgetSnapshotSchema),
+        traceContext: Type.Optional(TraceContextSchema),
       },
       { additionalProperties: false },
     ),

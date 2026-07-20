@@ -856,6 +856,7 @@ export class ControlPlaneStore {
       turnId: run.turn_id,
       commandId: run.command_id,
       state: run.state,
+      traceId: run.trace_id,
       attemptCount: nonNegativeSafeInteger(run.attempt_count, "Run attempt count"),
       ...(run.current_attempt_id === null ? {} : { currentAttemptId: run.current_attempt_id }),
       ...(run.stop_reason === null ? {} : { stopReason: run.stop_reason }),
@@ -1093,6 +1094,11 @@ export class ControlPlaneStore {
         .insertInto("runs")
         .values({
           id: runId,
+          trace_id: createHash("sha256")
+            .update("agent-dock.run-trace.v1\0", "utf8")
+            .update(runId, "utf8")
+            .digest("hex")
+            .slice(0, 32),
           tenant_id: this.#tenantId,
           project_id: session.project_id,
           workspace_id: session.workspace_id,

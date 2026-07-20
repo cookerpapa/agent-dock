@@ -5,6 +5,7 @@ import {
 import type { Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
 import type { TrustedModelRuntimeLease } from "@agent-dock/sandbox-supervisor";
+import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -78,6 +79,7 @@ export type TenantModelGatewayOptions = {
   clock?: () => Date;
   randomBytes?: (size: number) => Buffer;
   idGenerator?: () => string;
+  metrics?: AgentDockMetrics;
 };
 
 export class TenantModelGatewayError extends Error {
@@ -346,6 +348,7 @@ export class TenantModelGateway {
   readonly #clock: () => Date;
   readonly #randomBytes: (size: number) => Buffer;
   readonly #idGenerator: () => string;
+  readonly #metrics: AgentDockMetrics | undefined;
   readonly #server: Server;
   readonly #capabilities = new Map<string, ActiveCapability>();
   #started = false;
@@ -389,16 +392,62 @@ export class TenantModelGateway {
     this.#clock = options.clock ?? (() => new Date());
     this.#randomBytes = options.randomBytes ?? randomBytes;
     this.#idGenerator = options.idGenerator ?? randomUUID;
+    this.#metrics = options.metrics;
     this.#server = createServer((request, response) => {
-      void this.#handle(request, response).catch((error: unknown) => {
-        if (error instanceof SafeGatewayHttpError) {
-          sendJson(response, error.status, { error: { code: error.code, message: error.message } });
-          return;
-        }
-        sendJson(response, 502, {
-          error: { code: "model_gateway_error", message: "Model gateway request failed" },
-        });
+      const startedAt = performance.now();
+      const token = bearerCapability(request.headers.authorization);
+      const active =
+        token === undefined ? undefined : this.#capabilities.get(capabilityDigest(token));
+      const parent = parseTraceCarrier({
+        traceparent: request.headers.traceparent,
+        tracestate: request.headers.tracestate,
       });
+      void withSpan({
+        serviceName: "agent-dock-model-gateway",
+        name: "model.request",
+        ...(parent === undefined ? {} : { parent }),
+        attributes: {
+          ...(active === undefined
+            ? {}
+            : {
+                "agent_dock.run.id": active.runId,
+                "agent_dock.attempt.id": active.attemptId,
+                "gen_ai.system": active.provider,
+                "gen_ai.request.model": active.modelId,
+              }),
+        },
+        run: () => this.#handle(request, response),
+      }).then(
+        () => {
+          if (active !== undefined) {
+            this.#metrics?.modelDuration.observe(
+              {
+                provider: active.provider,
+                model: active.modelId,
+                outcome: response.statusCode < 400 ? "completed" : "rejected",
+              },
+              (performance.now() - startedAt) / 1_000,
+            );
+          }
+        },
+        (error: unknown) => {
+          if (active !== undefined) {
+            this.#metrics?.modelDuration.observe(
+              { provider: active.provider, model: active.modelId, outcome: "failed" },
+              (performance.now() - startedAt) / 1_000,
+            );
+          }
+          if (error instanceof SafeGatewayHttpError) {
+            sendJson(response, error.status, {
+              error: { code: error.code, message: error.message },
+            });
+            return;
+          }
+          sendJson(response, 502, {
+            error: { code: "model_gateway_error", message: "Model gateway request failed" },
+          });
+        },
+      );
     });
   }
 
@@ -1100,6 +1149,26 @@ export class TenantModelGateway {
         })
         .executeTakeFirstOrThrow();
     });
+    this.#metrics?.modelTokens.inc(
+      { provider: active.provider, model: modelId, kind: "input" },
+      usage.inputTokens,
+    );
+    this.#metrics?.modelTokens.inc(
+      { provider: active.provider, model: modelId, kind: "output" },
+      usage.outputTokens,
+    );
+    this.#metrics?.modelTokens.inc(
+      { provider: active.provider, model: modelId, kind: "cache_read" },
+      usage.cacheReadTokens,
+    );
+    this.#metrics?.modelTokens.inc(
+      { provider: active.provider, model: modelId, kind: "cache_write" },
+      usage.cacheWriteTokens,
+    );
+    this.#metrics?.modelCostMicrousd.inc(
+      { provider: active.provider, model: modelId },
+      Number(cost),
+    );
   }
 
   async #failReservation(

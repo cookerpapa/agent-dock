@@ -1,9 +1,14 @@
 import { loadSandboxManagerConfig } from "./config.ts";
+import { startServiceObservability } from "@agent-dock/observability";
 import { DockerSandboxProvider } from "./docker-sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 
 const config = await loadSandboxManagerConfig();
+const observability = await startServiceObservability({
+  serviceName: "agent-dock-sandbox-manager",
+  defaultMetricsPort: 9466,
+});
 const provider = new DockerSandboxProvider({
   toolImage: config.toolImage,
   repositoryImportNetwork: config.repositoryImportNetwork,
@@ -16,6 +21,7 @@ const server = new SandboxManagerServer({
   port: config.port,
   serviceToken: config.serviceToken,
   manager,
+  metrics: observability.metrics,
 });
 
 await server.listen();
@@ -23,7 +29,7 @@ process.stdout.write("AgentDock Sandbox Manager ready\n");
 
 let closing: Promise<void> | undefined;
 const close = (): Promise<void> => {
-  closing ??= server.close();
+  closing ??= server.close().finally(() => observability.close());
   return closing;
 };
 process.once("SIGTERM", () => void close());

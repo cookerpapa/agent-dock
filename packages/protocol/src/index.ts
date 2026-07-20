@@ -114,8 +114,10 @@ export {
   NonNegativeSafeIntegerSchema,
   OpaqueIdSchema,
   PositiveSafeIntegerSchema,
+  TraceContextSchema,
   UtcTimestampSchema,
   UuidSchema,
+  type TraceContext,
 } from "./protocol-primitives.ts";
 
 export {
@@ -153,6 +155,7 @@ export {
   RunUsageResourceSchema,
   SessionContextResourceSchema,
   UsageSummaryResourceSchema,
+  OperationalInsightsResourceSchema,
   ReplaceModelConfigurationRequestSchema,
   RunAttemptResourceSchema,
   RunAttemptStateSchema,
@@ -194,6 +197,7 @@ export {
   parseRunUsageResource,
   parseSessionContextResource,
   parseUsageSummaryResource,
+  parseOperationalInsightsResource,
   parseReplaceModelConfigurationRequest,
   parseRunListResource,
   parseRunResource,
@@ -249,6 +253,7 @@ export {
   type RunUsageResource,
   type SessionContextResource,
   type UsageSummaryResource,
+  type OperationalInsightsResource,
   type ProjectResource,
   type ReplaceModelConfigurationRequest,
   type RunAttemptResource,

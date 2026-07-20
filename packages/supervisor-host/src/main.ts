@@ -1,4 +1,5 @@
 import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/control-plane/checkpoint-runtime";
+import { startServiceObservability } from "@agent-dock/observability";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadSupervisorHostConfig } from "./config.ts";
@@ -29,8 +30,16 @@ function signalPromise(): Promise<"sigint" | "sigterm"> {
 
 export async function startSupervisorHost(): Promise<void> {
   const config = await loadSupervisorHostConfig();
+  const observability = await startServiceObservability({
+    serviceName: "agent-dock-trusted-runner",
+    defaultMetricsPort: 9465,
+  });
   const objectStore = createS3CheckpointObjectStoreFromEnvironment();
-  const runtime = new SupervisorHostRuntime({ config, objectStore });
+  const runtime = new SupervisorHostRuntime({
+    config,
+    objectStore,
+    metrics: observability.metrics,
+  });
   try {
     await runtime.start();
     const identity = runtime.identity!;
@@ -44,6 +53,7 @@ export async function startSupervisorHost(): Promise<void> {
       await delay(250);
     }
     await runtime.close();
+    await observability.close();
     if (reason === "connection_failed") {
       process.stderr.write(
         `AgentDock Supervisor host failed code=${runtime.terminalFailureCode ?? "supervisor_connection_failed"}\n`,
@@ -52,6 +62,7 @@ export async function startSupervisorHost(): Promise<void> {
     }
   } catch (error: unknown) {
     await runtime.close().catch(() => undefined);
+    await observability.close().catch(() => undefined);
     throw error;
   }
 }

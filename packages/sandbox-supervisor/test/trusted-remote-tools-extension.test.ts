@@ -13,6 +13,7 @@ const ENVIRONMENT = {
   AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: "0",
   AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: "1024",
   AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY: "/tmp/agent-dock-tool-output-test",
+  AGENT_DOCK_TRUSTED_TRACEPARENT: "00-11111111111111111111111111111111-2222222222222222-01",
 } as const;
 
 const original = new Map<string, string | undefined>();
@@ -76,6 +77,9 @@ describe("trusted remote tools extension governance", () => {
         },
       } as unknown as ExtensionAPI;
       vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        expect(new Headers(init.headers).get("traceparent")).toBe(
+          ENVIRONMENT.AGENT_DOCK_TRUSTED_TRACEPARENT,
+        );
         const request = JSON.parse(String(init.body)) as {
           activationId: string;
           operationId: string;
@@ -114,6 +118,14 @@ describe("trusted remote tools extension governance", () => {
       } as never)) as { systemPrompt: string };
       expect(context.systemPrompt).toContain("Current working directory: /workspace");
       expect(context.systemPrompt).toContain("Prefer deterministic tests.");
+      const beforeProviderHeaders = handlers.get("before_provider_headers");
+      expect(beforeProviderHeaders).toBeDefined();
+      const providerHeaders: Record<string, string | null> = {};
+      await beforeProviderHeaders!({
+        type: "before_provider_headers",
+        headers: providerHeaders,
+      } as never);
+      expect(providerHeaders.traceparent).toBe(ENVIRONMENT.AGENT_DOCK_TRUSTED_TRACEPARENT);
 
       await registered
         .find((tool) => tool.name === "read")!

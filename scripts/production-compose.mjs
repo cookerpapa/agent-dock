@@ -20,6 +20,8 @@ const applicationSecretNames = [
   "github-app-private-key.pem",
   "github-gateway-token",
   "github-webhook-secret",
+  "grafana-admin-password",
+  "metrics-token",
   "model-credential-master-key",
   "sandbox-manager-token",
   "supervisor-enrollment-token",

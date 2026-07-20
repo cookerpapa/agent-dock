@@ -35,6 +35,10 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS:-100}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS:-10}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS:-1}
+  AGENT_DOCK_METRICS_HOST: 0.0.0.0
+  AGENT_DOCK_METRICS_PORT: "9464"
+  AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
+  AGENT_DOCK_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
 
 x-bootstrap-environment: &bootstrap-environment
   NODE_ENV: production
@@ -68,6 +72,10 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
     target: /run/agent-dock-secrets/github-gateway-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+    target: /run/agent-dock-secrets/metrics-token
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
@@ -260,6 +268,7 @@ services:
       - database
       - management
       - github-control
+      - observability
     healthcheck:
       test:
         [
@@ -335,6 +344,10 @@ services:
       AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
       AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
       AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
+      AGENT_DOCK_METRICS_HOST: 0.0.0.0
+      AGENT_DOCK_METRICS_PORT: "9465"
+      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
+      AGENT_DOCK_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     volumes:
       - supervisor-boot:/var/lib/agent-dock/boot-volume
       - supervisor-spool:/var/lib/agent-dock/spool-volume
@@ -366,6 +379,10 @@ services:
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
         target: /run/agent-dock-secrets/aws-credentials
         read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/agent-dock-secrets/metrics-token
+        read_only: true
     networks:
       - management
       - database
@@ -373,6 +390,7 @@ services:
       - sandbox-control
       - provider-egress
       - github-control
+      - observability
     healthcheck:
       test:
         [
@@ -444,14 +462,23 @@ services:
       AGENT_DOCK_DOCKER_COMMAND: docker
       AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
       AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
+      AGENT_DOCK_METRICS_HOST: 0.0.0.0
+      AGENT_DOCK_METRICS_PORT: "9466"
+      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
+      AGENT_DOCK_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
         target: /run/agent-dock-secrets/sandbox-manager-token
         read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/agent-dock-secrets/metrics-token
+        read_only: true
     networks:
       - sandbox-control
+      - observability
     healthcheck:
       test:
         [
@@ -581,6 +608,184 @@ services:
     stop_grace_period: 15s
     logging: *bounded-logging
 
+  observability-volume-bootstrap:
+    image: busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
+    restart: "no"
+    entrypoint: [/bin/sh, -eu, -c]
+    command:
+      - |
+        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
+        chown -R "$${owner}" /prometheus /grafana /jaeger
+        chmod 0700 /prometheus /grafana /jaeger
+    user: "0:0"
+    volumes:
+      - prometheus-data:/prometheus
+      - grafana-data:/grafana
+      - jaeger-data:/jaeger
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 16
+    mem_limit: 32m
+    cpus: 0.1
+    logging: *bounded-logging
+
+  prometheus:
+    image: prom/prometheus@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    restart: unless-stopped
+    depends_on:
+      observability-volume-bootstrap:
+        condition: service_completed_successfully
+      control-plane:
+        condition: service_healthy
+      supervisor-host:
+        condition: service_healthy
+      sandbox-manager:
+        condition: service_healthy
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - prometheus-data:/prometheus
+      - type: bind
+        source: ../observability/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/agent-dock-secrets/metrics-token
+        read_only: true
+    networks: [observability]
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 0.75
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  jaeger:
+    image: jaegertracing/all-in-one@sha256:836e9b69c88afbedf7683ea7162e179de63b1f981662e83f5ebb68badadc710f
+    restart: unless-stopped
+    depends_on:
+      observability-volume-bootstrap:
+        condition: service_completed_successfully
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_VALUE: /jaeger/data
+      BADGER_DIRECTORY_KEY: /jaeger/key
+    volumes:
+      - jaeger-data:/jaeger
+    networks: [observability]
+    read_only: true
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 0.75
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  grafana:
+    image: grafana/grafana@sha256:a1701c2180249361737a99a01bc770db39381640e4d631825d38ff4535efa47d
+    restart: unless-stopped
+    depends_on:
+      observability-volume-bootstrap:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    environment:
+      GF_SECURITY_ADMIN_USER: agent-dock-admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/agent-dock-secrets/grafana-admin-password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_PATHS_DATA: /grafana
+    volumes:
+      - grafana-data:/grafana
+      - type: bind
+        source: ../observability/grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+      - type: bind
+        source: ../observability/grafana/dashboards
+        target: /var/lib/grafana/dashboards
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/grafana-admin-password
+        target: /run/agent-dock-secrets/grafana-admin-password
+        read_only: true
+    networks: [observability]
+    read_only: true
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  observability-ingress:
+    image: agent-dock/web-ui:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+      grafana:
+        condition: service_started
+    environment:
+      XDG_CONFIG_HOME: /config
+      XDG_DATA_HOME: /data
+    command: [caddy, run, --config, /etc/caddy/Caddyfile]
+    volumes:
+      - type: bind
+        source: ../observability/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+    ports:
+      - 127.0.0.1:${AGENT_DOCK_PROMETHEUS_PORT:-9090}:9090
+      - 127.0.0.1:${AGENT_DOCK_JAEGER_PORT:-16686}:16686
+      - 127.0.0.1:${AGENT_DOCK_GRAFANA_PORT:-3001}:3001
+    networks:
+      - observability
+      - observability-edge
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, http://127.0.0.1:9090/-/healthy]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=1000,gid=1000
+      - /config:rw,noexec,nosuid,nodev,size=8m,mode=0700,uid=1000,gid=1000
+      - /data:rw,noexec,nosuid,nodev,size=8m,mode=0700,uid=1000,gid=1000
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 15s
+    logging: *bounded-logging
+
   tool-sandbox-image:
     profiles: [image-only]
     image: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
@@ -607,9 +812,15 @@ networks:
   provider-egress: {}
   repository-egress:
     name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
+  observability:
+    internal: true
+  observability-edge: {}
 
 volumes:
   postgres-data: {}
   minio-data: {}
   supervisor-boot: {}
   supervisor-spool: {}
+  prometheus-data: {}
+  grafana-data: {}
+  jaeger-data: {}

@@ -18,6 +18,7 @@ import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import { GitHubIntegrationService } from "./github-integration-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";
+import { OperationalInsightsService } from "./operational-insights-service.ts";
 import {
   WorkspaceVersionService,
   type TrustedArtifactReader,
@@ -107,6 +108,10 @@ export class ControlPlaneModule {
         {
           provide: ModelGovernanceService,
           useValue: new ModelGovernanceService({ database: options.database }),
+        },
+        {
+          provide: OperationalInsightsService,
+          useValue: new OperationalInsightsService({ database: options.database }),
         },
         {
           provide: WorkspaceVersionService,

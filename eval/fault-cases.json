@@ -1,0 +1,79 @@
+{
+  "format": "agent-dock.fault-eval.v1",
+  "description": "Deterministic infrastructure fault injections. Each case must prove the named failure is contained or recovered without relying on an external model.",
+  "cases": [
+    {
+      "id": "checkpoint-commit-failure",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/pi-rpc-turn-runner.integration.test.ts",
+      "test": "does not publish completion when settled checkpoint commit fails",
+      "invariant": "A Run cannot become completed before its settled checkpoint commits."
+    },
+    {
+      "id": "duplicate-command",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/local-sandbox-supervisor.test.ts",
+      "test": "deduplicates the same command and reuses one execution promise",
+      "invariant": "At-least-once delivery does not execute the same command twice."
+    },
+    {
+      "id": "stale-fencing-token",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/local-sandbox-supervisor.test.ts",
+      "test": "retains the high-water fence after a pre-start release",
+      "invariant": "A released or recovered old worker cannot reacquire an obsolete fence."
+    },
+    {
+      "id": "event-ack-loss",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/file-event-spool.test.ts",
+      "test": "replays the exact event after a simulated commit-with-lost-ACK window",
+      "invariant": "A lost acknowledgement causes safe replay rather than event loss."
+    },
+    {
+      "id": "corrupt-event-spool",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/file-event-spool.test.ts",
+      "test": "fails closed when a persisted event is corrupted or a sequence file is missing",
+      "invariant": "Corrupt durable events are rejected rather than silently skipped."
+    },
+    {
+      "id": "object-store-outage",
+      "workspace": "@agent-dock/control-plane",
+      "file": "test/s3-checkpoint-object-store.test.ts",
+      "test": "maps transport failures to a retryable error without leaking configuration",
+      "invariant": "A temporary object-store outage remains retryable and does not expose credentials."
+    },
+    {
+      "id": "checkpoint-corruption-and-cas",
+      "workspace": "@agent-dock/control-plane",
+      "file": "test/checkpoint-store.test.ts",
+      "test": "commits artifacts under a lease, cold-loads them, and rejects stale or corrupt state",
+      "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery."
+    },
+    {
+      "id": "cancel-complete-race",
+      "workspace": "@agent-dock/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "records cancellation as too late when natural completion wins before its ACK",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "Exactly one terminal Run outcome wins a cancel/complete race."
+    },
+    {
+      "id": "stale-dispatch-claim",
+      "workspace": "@agent-dock/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "fences a dispatcher whose pre-ACK claim lease was superseded",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "A superseded dispatcher cannot start external work."
+    },
+    {
+      "id": "orphan-runtime-cleanup",
+      "workspace": "@agent-dock/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "terminates expired and orphan runtimes before settling a lost assignment",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated."
+    }
+  ]
+}

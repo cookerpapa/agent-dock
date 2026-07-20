@@ -27,6 +27,8 @@ const CAPABILITY_ENV = "AGENT_DOCK_TRUSTED_TOOL_CAPABILITY";
 const REMAINING_TOOL_CALLS_ENV = "AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS";
 const MAXIMUM_TOOL_OUTPUT_BYTES_ENV = "AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES";
 const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
+const TRACEPARENT_ENV = "AGENT_DOCK_TRUSTED_TRACEPARENT";
+const TRACESTATE_ENV = "AGENT_DOCK_TRUSTED_TRACESTATE";
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024;
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -61,6 +63,8 @@ function runtimeConfiguration(): {
   remainingToolCalls: number;
   maximumToolOutputBytes: number;
   toolOutputDirectory: string;
+  traceparent?: string;
+  tracestate?: string;
 } {
   const operationUrl = requiredEnvironment(OPERATION_URL_ENV);
   const parsed = new URL(operationUrl);
@@ -78,6 +82,8 @@ function runtimeConfiguration(): {
   const remainingToolCalls = Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV));
   const maximumToolOutputBytes = Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV));
   const configuredToolOutputDirectory = requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV);
+  const traceparent = process.env[TRACEPARENT_ENV];
+  const tracestate = process.env[TRACESTATE_ENV];
   const toolOutputDirectory = resolve(configuredToolOutputDirectory);
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -96,6 +102,18 @@ function runtimeConfiguration(): {
   ) {
     throw new Error("Trusted Tool Sandbox identity is invalid");
   }
+  if (
+    traceparent !== undefined &&
+    !/^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-0[01]$/.test(traceparent)
+  ) {
+    throw new Error("Trusted trace context is invalid");
+  }
+  if (
+    tracestate !== undefined &&
+    (traceparent === undefined || tracestate.length < 1 || tracestate.length > 512)
+  ) {
+    throw new Error("Trusted trace state is invalid");
+  }
   return {
     operationUrl: parsed.toString(),
     activationId,
@@ -103,6 +121,8 @@ function runtimeConfiguration(): {
     remainingToolCalls,
     maximumToolOutputBytes,
     toolOutputDirectory,
+    ...(traceparent === undefined ? {} : { traceparent }),
+    ...(tracestate === undefined ? {} : { tracestate }),
   };
 }
 
@@ -185,6 +205,8 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
         headers: {
           authorization: `Bearer ${runtime.capability}`,
           "content-type": "application/json",
+          ...(runtime.traceparent === undefined ? {} : { traceparent: runtime.traceparent }),
+          ...(runtime.tracestate === undefined ? {} : { tracestate: runtime.tracestate }),
         },
         body: JSON.stringify(candidate),
         ...(signal === undefined ? {} : { signal }),
@@ -369,6 +391,11 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     return {
       systemPrompt: `${basePrompt}\n\n${platformContext}\n\n## Project instructions (repository-controlled)\n${projectInstructions}`,
     };
+  });
+
+  pi.on("before_provider_headers", async (event) => {
+    if (runtime.traceparent !== undefined) event.headers.traceparent = runtime.traceparent;
+    if (runtime.tracestate !== undefined) event.headers.tracestate = runtime.tracestate;
   });
 
   const readTool = createReadTool(WORKSPACE_ROOT);
