@@ -14,6 +14,8 @@ import {
 } from "@nestjs/common";
 import {
   parseAcceptTurnRequest,
+  parseLoginAccountRequest,
+  parseRegisterAccountRequest,
   parseArchiveSessionRequest,
   parseCreateTenantRegistrationRequest,
   parseCreateGitHubPullRequestRequest,
@@ -31,6 +33,7 @@ import {
   parseSetGitHubRepositoryRequest,
   parseUuidPathParameter,
   type AcceptedTurnResource,
+  type AuthSessionResource,
   type AcceptedTurnCancellationResource,
   type ConversationDetailResource,
   type ConversationListResource,
@@ -49,6 +52,7 @@ import {
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
+  type LogoutResource,
   type TestResultListResource,
   type WorkspaceFileListResource,
   type WorkspaceOperationResource,
@@ -66,6 +70,7 @@ import { TenantModelConfigurationService } from "./tenant-model-configuration.ts
 import { WorkspaceVersionService } from "./workspace-version-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";
 import { OperationalInsightsService } from "./operational-insights-service.ts";
+import { readWebSessionCookie, WebAuthenticationService } from "./web-authentication.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -85,7 +90,41 @@ export class ControlPlaneController {
     private readonly workspaceVersions: WorkspaceVersionService,
     @Inject(GitHubIntegrationService)
     private readonly githubIntegration: GitHubIntegrationService,
+    @Inject(WebAuthenticationService)
+    private readonly webAuthentication: WebAuthenticationService,
   ) {}
+
+  @Post("auth/register")
+  async registerAccount(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<AuthSessionResource> {
+    const issued = await this.webAuthentication.register(parseRegisterAccountRequest(body));
+    reply.header("set-cookie", this.webAuthentication.cookie(issued));
+    return issued.resource;
+  }
+
+  @Post("auth/login")
+  @HttpCode(200)
+  async loginAccount(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<AuthSessionResource> {
+    const issued = await this.webAuthentication.login(parseLoginAccountRequest(body));
+    reply.header("set-cookie", this.webAuthentication.cookie(issued));
+    return issued.resource;
+  }
+
+  @Post("auth/logout")
+  @HttpCode(200)
+  async logoutAccount(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<LogoutResource> {
+    await this.webAuthentication.logout(readWebSessionCookie(request.headers.cookie));
+    reply.header("set-cookie", this.webAuthentication.clearCookie());
+    return { loggedOut: true };
+  }
 
   @Post("registrations")
   async registerTenant(@Body() body: unknown): Promise<TenantRegistrationResource> {

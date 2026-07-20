@@ -22,6 +22,9 @@ export type ProductionControlPlaneConfig = {
   host: string;
   port: number;
   maximumLanesPerSupervisor: number;
+  platformModelSourceTenantId: string;
+  webSessionCookieSecure: boolean;
+  webSessionTtlMs: number;
   publicRegistration: {
     enabled: boolean;
     maximumTenants: number;
@@ -233,6 +236,18 @@ export async function loadProductionControlPlaneConfig(
       8,
       1,
       256,
+    ),
+    platformModelSourceTenantId: parseUuidPathParameter(
+      required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),
+      "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID",
+    ),
+    webSessionCookieSecure: booleanValue(environment, "AGENT_DOCK_WEB_SESSION_COOKIE_SECURE"),
+    webSessionTtlMs: integerValue(
+      environment,
+      "AGENT_DOCK_WEB_SESSION_TTL_MS",
+      30 * 24 * 60 * 60 * 1_000,
+      60_000,
+      365 * 24 * 60 * 60 * 1_000,
     ),
     publicRegistration: {
       enabled: booleanValue(environment, "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED"),

@@ -152,6 +152,12 @@ does not execute repository content. The owner-only activity feed is derived
 from immutable execution rows and is explicitly not represented as a complete
 human-actor audit.
 
+ADR-0037 completes the normal browser entry: optional public registration now
+creates a password account and persistent HttpOnly session, the default shell
+is conversation-list plus chat, the first message starts from an empty
+Workspace, and model selection/credentials are platform-managed rather than
+presented to the user. Existing bearer APIs remain an operator surface.
+
 The cold recovery command authenticates and encrypts the runtime plus all seven
 durable volumes, binds a manifest to exact image IDs/revision/hashes, and
 restores only into a new empty project. Production acceptance now executes that

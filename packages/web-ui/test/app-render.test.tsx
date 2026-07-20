@@ -1,19 +1,31 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App from "../src/App.tsx";
+import ChatApp, { AuthScreen } from "../src/ChatApp.tsx";
 import { AgentDockApi } from "../src/api.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
 
-describe("Pi-export-inspired session page", () => {
-  it("renders the runtime boundary, durable cursor, and usable composer without browser globals", () => {
-    const markup = renderToStaticMarkup(<App />);
+describe("product chat experience", () => {
+  it("restores a durable login without rendering the old operator console", () => {
+    const markup = renderToStaticMarkup(<ChatApp />);
     expect(markup).toContain("AgentDock");
-    expect(markup).toContain("PostgreSQL outbox");
-    expect(markup).toContain("resumable SSE");
-    expect(markup).toContain("networkless sandbox");
-    expect(markup).toContain("durable through: #0");
-    expect(markup).toContain("Run the tests, repair the Java bug");
-    expect(markup).toContain("new workspace");
+    expect(markup).toContain("正在恢复登录状态");
+    expect(markup).not.toContain("PostgreSQL outbox");
+    expect(markup).not.toContain("Configure tenant model credential");
+  });
+
+  it("renders familiar username/password login and registration without API-token fields", () => {
+    const markup = renderToStaticMarkup(
+      <AuthScreen
+        api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
+        onAuthenticated={() => undefined}
+      />,
+    );
+    expect(markup).toContain("登录");
+    expect(markup).toContain("注册");
+    expect(markup).toContain("用户名");
+    expect(markup).toContain("密码");
+    expect(markup).not.toContain("API token");
+    expect(markup).not.toContain("配置模型");
   });
 
   it("renders the product inspector navigation without executing browser effects", () => {

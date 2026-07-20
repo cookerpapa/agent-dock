@@ -19,6 +19,8 @@ import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
 import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
 import { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
+import { WebAuthenticationService } from "./web-authentication.ts";
 import { GitHubWebhookIngestGateway } from "./github-webhook-gateway.ts";
 import {
   createRemoteControlPlaneRuntime,
@@ -55,6 +57,28 @@ export async function startControlPlane(): Promise<void> {
   let runtime: RemoteControlPlaneRuntime | undefined;
   try {
     await verifyBootstrap(database);
+    const modelCredentialVault = new TenantModelCredentialVault(config.modelCredentialMasterKey);
+    const platformInitialModel = await resolvePlatformInitialModel(
+      database,
+      modelCredentialVault,
+      config.platformModelSourceTenantId,
+    );
+    const registrationConfiguration = {
+      ...config.publicRegistration,
+      ...(platformInitialModel === undefined ? {} : { initialModel: platformInitialModel }),
+    };
+    const webAuthentication = new WebAuthenticationService({
+      database,
+      ...registrationConfiguration,
+      initialModel: () =>
+        resolvePlatformInitialModel(
+          database,
+          modelCredentialVault,
+          config.platformModelSourceTenantId,
+        ),
+      secureCookie: config.webSessionCookieSecure,
+      sessionTtlMs: config.webSessionTtlMs,
+    });
     const managementClient = new HttpSupervisorManagementClient({
       baseUrl: config.supervisorManagementBaseUrl,
       managementToken: config.supervisorManagementToken,
@@ -78,6 +102,7 @@ export async function startControlPlane(): Promise<void> {
     const httpGateway = new ProductionHttpGateway({
       authenticator: new PostgresTenantApiAuthenticator({ database }),
       publicRegistrationEnabled: config.publicRegistration.enabled,
+      webSessionAuthenticator: webAuthentication,
       readiness: async () => {
         if (runtime?.state !== "running") return false;
         await sql`select 1`.execute(database);
@@ -94,8 +119,10 @@ export async function startControlPlane(): Promise<void> {
         new HttpSandboxAssignmentInventory(managementClient, identity.sandboxId),
       supervisorProvisioningGateway: provisioningGateway,
       productionHttpGateway: httpGateway,
-      publicRegistration: config.publicRegistration,
-      modelCredentialVault: new TenantModelCredentialVault(config.modelCredentialMasterKey),
+      publicRegistration: registrationConfiguration,
+      webAuthentication,
+      modelCredentialVault,
+      platformOperatorTenantId: config.platformModelSourceTenantId,
       artifactReader: { get: (objectKey) => managementClient.readArtifact(objectKey) },
       ...(githubGateway === undefined ? {} : { githubGateway }),
       ...(config.githubGatewayServiceToken === undefined

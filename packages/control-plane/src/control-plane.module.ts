@@ -23,6 +23,7 @@ import {
   WorkspaceVersionService,
   type TrustedArtifactReader,
 } from "./workspace-version-service.ts";
+import { WebAuthenticationService } from "./web-authentication.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -36,6 +37,8 @@ export type ControlPlaneModuleOptions = Omit<
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
   githubGateway?: GitHubGatewayClient;
+  webAuthentication?: WebAuthenticationService;
+  platformOperatorTenantId?: string;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -93,6 +96,22 @@ export class ControlPlaneModule {
           }),
         },
         {
+          provide: WebAuthenticationService,
+          useValue:
+            options.webAuthentication ??
+            new WebAuthenticationService({
+              database: options.database,
+              enabled: false,
+              maximumTenants: 2,
+              tenantQuotas: {
+                maximumProjects: 10,
+                maximumSessions: 100,
+                maximumUnsettledTurns: 10,
+                maximumConcurrentTurns: 1,
+              },
+            }),
+        },
+        {
           provide: TenantRequestContext,
           useValue: new TenantRequestContext(options.staticRequestIdentity),
         },
@@ -103,6 +122,9 @@ export class ControlPlaneModule {
             ...(options.modelCredentialVault === undefined
               ? {}
               : { vault: options.modelCredentialVault }),
+            ...(options.platformOperatorTenantId === undefined
+              ? {}
+              : { platformOperatorTenantId: options.platformOperatorTenantId }),
           }),
         },
         {

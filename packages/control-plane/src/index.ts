@@ -50,7 +50,25 @@ export {
   type CreatedPrivateTenant,
   type TenantCredentialMetadata,
   type TenantQuotaConfiguration,
+  type PrivateTenantInitialModel,
 } from "./tenant-administration.ts";
+
+export {
+  PlatformModelConfigurationError,
+  resolvePlatformInitialModel,
+} from "./platform-model-configuration.ts";
+
+export {
+  WEB_SESSION_COOKIE_NAME,
+  WebAuthenticationError,
+  WebAuthenticationService,
+  clearWebSessionCookie,
+  createWebSessionCookie,
+  readWebSessionCookie,
+  type IssuedWebSession,
+  type WebAuthenticationConfiguration,
+  type WebAuthenticationOptions,
+} from "./web-authentication.ts";
 
 export {
   createControlPlaneApplication,
@@ -207,6 +225,8 @@ export {
 export {
   CONTROL_PLANE_LIVE_PATH,
   CONTROL_PLANE_READY_PATH,
+  ACCOUNT_LOGIN_PATH,
+  ACCOUNT_REGISTRATION_PATH,
   TENANT_REGISTRATION_PATH,
   ProductionHttpGateway,
   type ProductionHttpGatewayOptions,

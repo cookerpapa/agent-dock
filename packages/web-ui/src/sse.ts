@@ -205,6 +205,7 @@ export async function streamSessionEvents(options: StreamSessionEventsOptions): 
         `/v1/sessions/${encodeURIComponent(options.sessionId)}/events`,
         {
           method: "GET",
+          credentials: "same-origin",
           headers: {
             accept: "text/event-stream",
             "last-event-id": String(lastSequence),

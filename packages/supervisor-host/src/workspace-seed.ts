@@ -17,13 +17,14 @@ import {
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
+import { createWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
 
 type GitHubWorkspaceImporter = {
   import(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array>;
 };
 
 type WorkspaceSourceRow = {
-  kind: "sample_java" | "github_public" | "github_app";
+  kind: "empty" | "sample_java" | "github_public" | "github_app";
   repository: string | null;
   commitSha: string | null;
   status: "pending" | "importing" | "ready" | "failed";
@@ -212,6 +213,7 @@ export class PostgresWorkspaceSeedResolver {
     const deadline = validDate(this.#clock).valueOf() + this.#maximumWaitMs;
     while (validDate(this.#clock).valueOf() < deadline) {
       const source = await this.#load(command);
+      if (source.kind === "empty") return createWorkspaceSnapshot([]);
       if (source.kind === "sample_java") return undefined;
       if (source.status === "ready") return this.#loadReady(source);
       const leaseId = this.#idGenerator();

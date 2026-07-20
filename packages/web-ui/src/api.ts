@@ -1,6 +1,7 @@
 import {
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseAuthSessionResource,
   parseArchiveSessionRequest,
   parseConversationDetailResource,
   parseConversationListResource,
@@ -10,6 +11,7 @@ import {
   parseGitHubPullRequestDeliveryResource,
   parseModelConfigurationResource,
   parseModelGovernanceResource,
+  parseLogoutResource,
   parseOperationalAuditLogResource,
   parseOperationalInsightsResource,
   parseProjectResource,
@@ -29,6 +31,7 @@ import {
   parseWorkspaceVersionListResource,
   parseWorkspaceVersionResource,
   type ConversationDetailResource,
+  type AuthSessionResource,
   type ConversationListResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
@@ -38,6 +41,7 @@ import {
   type GitHubPullRequestDeliveryResource,
   type ModelConfigurationResource,
   type ModelGovernanceResource,
+  type LogoutResource,
   type OperationalAuditLogResource,
   type OperationalInsightsResource,
   type RunListResource,
@@ -93,6 +97,7 @@ async function request(
   let response: Response;
   try {
     response = await fetchImplementation(path, {
+      credentials: "same-origin",
       ...init,
       headers: {
         ...Object.fromEntries(new Headers(init.headers).entries()),
@@ -130,6 +135,7 @@ async function requestBytes(
   try {
     response = await fetchImplementation(path, {
       method: "GET",
+      credentials: "same-origin",
       ...(authorizationToken === undefined
         ? {}
         : { headers: { authorization: `Bearer ${authorizationToken}` } }),
@@ -195,6 +201,30 @@ export class AgentDockApi {
     return parseTenantIdentityResource(
       await request(this.#fetch, "/v1/identity", { method: "GET" }, this.#authorizationToken),
     );
+  }
+
+  async registerAccount(
+    username: string,
+    displayName: string,
+    password: string,
+  ): Promise<AuthSessionResource> {
+    return parseAuthSessionResource(
+      await request(
+        this.#fetch,
+        "/v1/auth/register",
+        jsonRequest({ username, displayName, password }),
+      ),
+    );
+  }
+
+  async loginAccount(username: string, password: string): Promise<AuthSessionResource> {
+    return parseAuthSessionResource(
+      await request(this.#fetch, "/v1/auth/login", jsonRequest({ username, password })),
+    );
+  }
+
+  async logout(): Promise<LogoutResource> {
+    return parseLogoutResource(await request(this.#fetch, "/v1/auth/logout", jsonRequest({})));
   }
 
   async getModelConfiguration(): Promise<ModelConfigurationResource> {

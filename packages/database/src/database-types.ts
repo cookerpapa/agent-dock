@@ -57,7 +57,7 @@ export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout
 export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementState = "pending" | "claimed" | "blocked" | "completed";
 export type TenantApiCredentialRole = "owner" | "member" | "viewer";
-export type WorkspaceSourceKind = "sample_java" | "github_public" | "github_app";
+export type WorkspaceSourceKind = "empty" | "sample_java" | "github_public" | "github_app";
 export type WorkspaceImportStatus = "pending" | "importing" | "ready" | "failed";
 export type WorkspaceVersionOrigin = "checkpoint" | "fork" | "migration";
 export type WorkspaceOperationKind = "fork" | "rollback" | "archive" | "unarchive";
@@ -112,6 +112,32 @@ export interface TenantApiCredentialTable {
   secret_sha256: string;
   created_at: GeneratedTimestamp;
   expires_at: NullableTimestamp;
+  revoked_at: NullableTimestamp;
+  last_used_at: NullableTimestamp;
+}
+
+export interface UserPasswordCredentialTable {
+  username: string;
+  tenant_id: string;
+  user_id: string;
+  role: TenantApiCredentialRole;
+  password_salt: string;
+  password_hash: string;
+  scrypt_n: number;
+  scrypt_r: number;
+  scrypt_p: number;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface WebSessionTable {
+  session_id: string;
+  tenant_id: string;
+  user_id: string;
+  role: TenantApiCredentialRole;
+  secret_sha256: string;
+  created_at: GeneratedTimestamp;
+  expires_at: Timestamp;
   revoked_at: NullableTimestamp;
   last_used_at: NullableTimestamp;
 }
@@ -708,6 +734,8 @@ export interface Database {
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;
   tenant_api_credentials: TenantApiCredentialTable;
+  user_password_credentials: UserPasswordCredentialTable;
+  web_sessions: WebSessionTable;
   projects: ProjectTable;
   workspaces: WorkspaceTable;
   workspace_sources: WorkspaceSourceTable;

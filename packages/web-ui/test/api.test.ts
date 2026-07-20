@@ -3,6 +3,40 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDockApi } from "../src/api.ts";
 
 describe("tenant-aware browser API", () => {
+  it("uses same-origin cookie sessions for product registration, login, and logout", async () => {
+    const identity = {
+      tenantId: "10000000-0000-4000-8000-000000000002",
+      tenantSlug: "u-alice-12345678",
+      userId: "10000000-0000-4000-8000-000000000003",
+      displayName: "Alice",
+      role: "owner" as const,
+    };
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(init?.credentials).toBe("same-origin");
+      expect(new Headers(init?.headers).get("authorization")).toBeNull();
+      const path = String(input);
+      if (path === "/v1/auth/logout") {
+        return new Response(JSON.stringify({ loggedOut: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ identity, expiresAt: "2026-08-19T00:00:00.000Z" }), {
+        status: path.endsWith("register") ? 201 : 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const api = new AgentDockApi(fetchImplementation);
+    await expect(api.registerAccount("alice", "Alice", "long password 123")).resolves.toMatchObject(
+      { identity },
+    );
+    await expect(api.loginAccount("alice", "long password 123")).resolves.toMatchObject({
+      identity,
+    });
+    await expect(api.logout()).resolves.toEqual({ loggedOut: true });
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+
   it("creates a project from a normalized exact-commit GitHub source", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const commitSha = "b".repeat(40);

@@ -34,7 +34,7 @@ const processEnvironment = {
   AGENT_DOCK_JAEGER_PORT: String(jaegerPort),
   AGENT_DOCK_GRAFANA_PORT: String(grafanaPort),
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: "true",
-  AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: "3",
+  AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: "4",
   AGENT_DOCK_SUPERVISOR_ID: supervisorId,
   COMPOSE_PROJECT_NAME: projectName,
 };
@@ -249,6 +249,57 @@ async function http(path, options = {}, expectedStatus) {
 
 function authenticatedHeaders(extra = {}, token = apiToken) {
   return { authorization: `Bearer ${token}`, ...extra };
+}
+
+function cookieHeaders(cookie, extra = {}) {
+  return { cookie, ...extra };
+}
+
+function sessionCookie(response) {
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  assert.match(setCookie, /^agent_dock_session=ads_[^;]+;/);
+  assert.match(setCookie, /; HttpOnly(?:;|$)/);
+  assert.match(setCookie, /; SameSite=Strict(?:;|$)/);
+  return setCookie.split(";", 1)[0];
+}
+
+async function registerAccount(username, displayName, password, expectedStatus) {
+  return http(
+    "/v1/auth/register",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, displayName, password }),
+    },
+    expectedStatus,
+  );
+}
+
+async function loginAccount(username, password, expectedStatus) {
+  return http(
+    "/v1/auth/login",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    },
+    expectedStatus,
+  );
+}
+
+async function postWithCookie(cookie, path, body, expectedStatus, idempotencyKey) {
+  return http(
+    path,
+    {
+      method: "POST",
+      headers: cookieHeaders(cookie, {
+        "content-type": "application/json",
+        ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
+      }),
+      body: JSON.stringify(body),
+    },
+    expectedStatus,
+  );
 }
 
 async function postAs(token, path, body, expectedStatus, idempotencyKey) {
@@ -973,9 +1024,14 @@ async function assertProductSurface({ sessionId, runIds }) {
   assert(auditAfterOperations.body.events.some((event) => event.category === "workspace"));
 
   const document = await http("/", {}, 200);
+  assert.match(document.text, /<title>AgentDock<\/title>/);
   const scriptPath = document.text.match(/<script[^>]+src="([^"]+)"/)?.[1];
   assert.equal(typeof scriptPath, "string");
   const bundle = await http(scriptPath, {}, 200);
+  assert.match(bundle.text, /登录后继续你的对话/);
+  assert.match(bundle.text, /注册后即可开始使用，无需配置模型/);
+  assert.match(bundle.text, /最近对话/);
+  assert.match(bundle.text, /给 AgentDock 发送消息/);
   assert.match(bundle.text, /Session inspector/);
   assert.match(bundle.text, /GitHub PR delivery/);
   return {
@@ -1237,9 +1293,95 @@ async function main() {
     401,
   );
 
+  report("validate_product_account_flow");
+  const accountUsername = `product-${suffix}`;
+  const accountPassword = `acceptance-${suffix}-password`;
+  const accountRegistration = await registerAccount(
+    accountUsername,
+    "Product User",
+    accountPassword,
+    201,
+  );
+  assert.equal(Object.hasOwn(accountRegistration.body, "apiToken"), false);
+  assert.equal(Object.hasOwn(accountRegistration.body, "modelConfiguration"), false);
+  assert.equal(accountRegistration.body.identity.displayName, "Product User");
+  const initialProductCookie = sessionCookie(accountRegistration.response);
+  secretValues.push(
+    accountPassword,
+    initialProductCookie.slice(initialProductCookie.indexOf("=") + 1),
+  );
+  const productIdentity = await http(
+    "/v1/identity",
+    { headers: cookieHeaders(initialProductCookie) },
+    200,
+  );
+  assert.equal(productIdentity.body.tenantId, accountRegistration.body.identity.tenantId);
+  const inheritedModel = await http(
+    "/v1/model-configuration",
+    { headers: cookieHeaders(initialProductCookie) },
+    200,
+  );
+  assert.deepEqual(inheritedModel.body, {
+    mode: "deterministic",
+    provider: "agent-dock-fake",
+    modelId: "agent-dock-fake",
+    configured: false,
+    credentialVersion: 1,
+    updatedAt: inheritedModel.body.updatedAt,
+  });
+  const rejectedModelKey = `sk-${"m".repeat(48)}`;
+  secretValues.push(rejectedModelKey);
+  await http(
+    "/v1/model-configuration",
+    {
+      method: "PUT",
+      headers: cookieHeaders(initialProductCookie, { "content-type": "application/json" }),
+      body: JSON.stringify({
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: rejectedModelKey,
+      }),
+    },
+    403,
+  );
+  const productProject = (
+    await postWithCookie(
+      initialProductCookie,
+      "/v1/projects",
+      { name: `Product conversation ${suffix}`, source: { kind: "empty" } },
+      201,
+    )
+  ).body;
+  assert.equal(productProject.source.kind, "empty");
+  const productSession = (
+    await postWithCookie(
+      initialProductCookie,
+      `/v1/projects/${productProject.projectId}/sessions`,
+      { workspaceId: productProject.workspaceId },
+      201,
+    )
+  ).body;
+  const productConversations = await http(
+    "/v1/conversations",
+    { headers: cookieHeaders(initialProductCookie) },
+    200,
+  );
+  assert.deepEqual(
+    productConversations.body.conversations.map((conversation) => conversation.sessionId),
+    [productSession.sessionId],
+  );
+  const logout = await postWithCookie(initialProductCookie, "/v1/auth/logout", {}, 200);
+  assert.deepEqual(logout.body, { loggedOut: true });
+  assert.match(logout.response.headers.get("set-cookie") ?? "", /Max-Age=0/);
+  await http("/v1/identity", { headers: cookieHeaders(initialProductCookie) }, 401);
+  const accountLogin = await loginAccount(accountUsername.toUpperCase(), accountPassword, 200);
+  const productCookie = sessionCookie(accountLogin.response);
+  assert.notEqual(productCookie, initialProductCookie);
+  secretValues.push(productCookie.slice(productCookie.indexOf("=") + 1));
+
   report("validate_public_registration");
   await registerTenant("INVALID SLUG", "Invalid tenant", 400);
-  assert.equal(await psql("select count(*) from tenants"), "1");
+  assert.equal(await psql("select count(*) from tenants"), "2");
   const createdTenantB = (await registerTenant(`tenant-${suffix}`, "Production Tenant B", 201))
     .body;
   assert.equal(Object.hasOwn(createdTenantB, "secretSha256"), false);
@@ -1261,7 +1403,7 @@ async function main() {
   const capacityTenant = capacityAttempts.find(({ response }) => response.status === 201)?.body;
   assert.equal(typeof capacityTenant?.apiToken, "string");
   secretValues.push(capacityTenant.apiToken);
-  assert.equal(await psql("select count(*) from tenants"), "3");
+  assert.equal(await psql("select count(*) from tenants"), "4");
 
   const issuedViewerB = await tenantAdmin([
     "issue",
@@ -1359,6 +1501,22 @@ async function main() {
   );
   assert.equal(conversationListB.body.conversations[0].turnCount, 1);
   assert.deepEqual(viewerConversationListB.body, conversationListB.body);
+  const productConversationListAfterTenantB = await http(
+    "/v1/conversations",
+    { headers: cookieHeaders(productCookie) },
+    200,
+  );
+  assert.deepEqual(
+    productConversationListAfterTenantB.body.conversations.map(
+      (conversation) => conversation.sessionId,
+    ),
+    [productSession.sessionId],
+  );
+  await http(
+    `/v1/conversations/${sessionB.sessionId}`,
+    { headers: cookieHeaders(productCookie) },
+    404,
+  );
 
   const [conversationB, viewerConversationB] = await Promise.all([
     http(
@@ -1864,7 +2022,7 @@ async function main() {
     oldBootId: bootBeforeReconnect.bootId,
     freshBootId: freshBoot.bootId,
     durableEvents: 22,
-    registeredTenants: 3,
+    registeredTenants: 4,
     prometheusTargets: 3,
     jaegerServices: jaegerServices.length,
     productWorkspaceVersion: productEvidence.currentVersion.versionNumber,

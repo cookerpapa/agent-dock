@@ -21,6 +21,7 @@ still remain outside the current private-deployment claim.
 ## Assets
 
 - tenant identity and authorization;
+- browser password verifiers and revocable Web-session digests;
 - long-lived model-provider credentials and turn-scoped gateway capabilities;
 - Supervisor enrollment/management and Sandbox Manager credentials;
 - PostgreSQL control state and tenant usage records;
@@ -84,6 +85,8 @@ Assumed trusted or out of scope for the current claim:
 
 | Threat | Control | Executable evidence |
 | --- | --- | --- |
+| Password or browser session disclosure | Per-account salted scrypt verifier; opaque HttpOnly/SameSite session; digest-only persistence; bounded lifetime and immediate revocation | PostgreSQL account/login/logout and cookie-auth integration tests |
+| Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
 | Tool controls Docker host | Socket exists only in Manager; Tool and Runner have no socket | production topology inspection |
 | Tool reaches internal services or Internet | Tool Sandbox uses `network=none`; Manager is not attached to platform/provider/repository egress | six-target TCP denial probe and network matrix |
@@ -131,8 +134,9 @@ Before exposing arbitrary untrusted repositories to the public Internet:
    gVisor/Kata/Firecracker backend) and complete a production capacity/security
    review rather than relying on the default shared-kernel Provider;
 2. put repository and dependency egress behind a DNS-aware allowlisting proxy;
-3. add public identity recovery, broader abuse/rate controls, audit retention,
-   and incident response around the existing tenant model budgets;
+3. add verified identity, password recovery/MFA, distributed login and
+   registration abuse/rate controls, audit retention, and incident response
+   around the existing tenant model budgets;
 4. isolate project/user extension code from Pi and model credentials;
 5. add signed provenance attestations and automated patch cadence on top of the
    current OCI labels, CycloneDX SBOMs, and vulnerability gate;

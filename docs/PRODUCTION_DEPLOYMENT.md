@@ -6,8 +6,9 @@ service with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral
 remote control plane, one shared trusted Pi Agent Runner, separate one-shot Tool
 Sandboxes, and a static Web UI. Multiple tenants can share this runtime without
 sharing their API resources, event streams, quotas, or checkpoint namespaces.
-An operator may explicitly enable capacity-bounded anonymous registration to
-make that isolation easy to test from two browser contexts.
+The loopback product enables capacity-bounded browser account registration so
+the isolation can be exercised from separate browser contexts; an operator can
+disable new registration without invalidating existing accounts.
 
 The word _production_ here means that this bounded slice has explicit
 configuration, durable storage, health checks, restart behavior, security
@@ -16,9 +17,10 @@ service into a general coding-agent SaaS. A workspace may use the image-owned
 Java repair fixture or a small public GitHub repository pinned to an exact
 commit. An operator-configured GitHub App may additionally expose allowlisted
 private repositories and trusted Pull Request delivery without giving GitHub
-credentials to repository code. A tenant owner may keep the default
-deterministic model or configure an allowlisted DeepSeek model and encrypted API
-key. It does not support arbitrary Git URLs, arbitrary provider URLs,
+credentials to repository code. The platform operator configures the backend
+model once; new browser tenants inherit that allowlisted model through a
+separately encrypted tenant binding and never receive its API key. It does not
+support arbitrary Git URLs, arbitrary provider URLs,
 policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
 direct Internet exposure.
 The optional registration route is not verified
@@ -44,6 +46,7 @@ The provider-neutral runtime boundary is recorded in
 [ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). Product operations,
 recovery, and release evidence are recorded in
 [ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
+[browser account and platform-model decision](adr/0037-browser-accounts-and-platform-managed-model.md),
 [threat model](THREAT_MODEL.md), [network matrix](NETWORK_MATRIX.md), and
 [Sandbox Provider contract](SANDBOX_PROVIDER.md).
 
@@ -76,12 +79,12 @@ npm ci --ignore-scripts
 npm run production:deploy
 ```
 
-Registration is disabled by default. For a new loopback deployment that should
-allow browser-created tenants, set the bounded values before the first command;
-initialization validates and persists them in the private runtime `.env`:
+Browser registration is enabled by default because the supported ingress is
+loopback-only. To choose a smaller capacity before the first command, set the
+bounded value; initialization validates and persists it in the private runtime
+`.env`:
 
 ```bash
-AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true \
 AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32 \
 npm run production:deploy
 ```
@@ -93,24 +96,26 @@ and waits for every long-running service to become healthy. A completed runtime
 directory is reused on later invocations. A non-empty partial directory is
 rejected rather than silently replacing credentials.
 
-The default ingress is `http://127.0.0.1:8080`. Obtain the initial bootstrap
-owner token only on the trusted host:
+The default ingress is `http://127.0.0.1:8080`. Open it, create a username and
+password, and continue directly to the conversation product. Login persists in
+an HttpOnly cookie, so a reload does not require another credential prompt. The
+first message lazily creates an empty Workspace; the left sidebar lists only
+that account tenant's conversations and the right side streams the selected
+conversation.
+
+The initial bootstrap owner token remains an operator/automation credential and
+is not part of the normal Web login. Obtain it only on the trusted host when an
+API or administration task needs it:
 
 ```bash
 npm run production:token
 ```
 
-Open the ingress URL, paste the token into the login card, and submit the
-supported Java-repair prompt. New tenants start on the deterministic zero-token
-profile. To use a real model, an owner opens `model`, selects an allowlisted
-DeepSeek model, pastes that tenant's API key, and saves it before creating the
-turn. Future turns for that tenant then spend its provider quota until the model
-configuration is replaced. The browser first resolves `/v1/identity`, shows
-the tenant, user, and role, and keeps the token only in JavaScript memory—not in
-Web Storage, a URL, or a durable server-side session. Reloading or logging out
-therefore requires the token again. The token command intentionally
-writes a secret to stdout, so do not run it in CI logs, shell tracing, a screen
-recording, or an untrusted terminal multiplexer.
+Configure or rotate the platform backend model with that trusted operator
+identity, not in the user-facing page. New accounts inherit the active platform
+model; existing accepted Turns keep their immutable model snapshot. The token
+command intentionally writes a secret to stdout, so do not run it in CI logs,
+shell tracing, a screen recording, or an untrusted terminal multiplexer.
 
 After opening a Session, `inspect` opens the product evidence surface:
 Workspace versions/files/structured comparisons, bounded escaped Artifact
@@ -274,21 +279,27 @@ Container logs use Docker's bounded `json-file` policy: three files of at most
 identifiers, but operators should still grant log access as privileged
 operational access.
 
-## Opt-in self-service tenant registration
+## Browser accounts and bounded registration
 
-The only unauthenticated API exception is exact
-`POST /v1/registrations`, and it exists only when
-`AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true`. The Web login card's
-`create tenant` tab submits a bounded slug and owner display name. A successful
-transaction creates the tenant-local owner, deterministic model profile,
-runtime policy, and indexed owner credential together, then shows the plaintext
-token once. Save it immediately: PostgreSQL stores only its SHA-256 digest, and
-there is no self-service password, email, or token-recovery flow.
+`POST /v1/auth/register` and `POST /v1/auth/login` are the normal product entry.
+Registration accepts a normalized username, display name, and password. One
+transaction creates the tenant-local owner, quota policy, inherited platform
+model binding, salted scrypt password verifier, and first Web session. The
+response contains identity and expiry metadata only. The browser receives an
+opaque `HttpOnly`, `SameSite=Strict` cookie; PostgreSQL stores only its SHA-256
+digest. `POST /v1/auth/logout` revokes it immediately. Existing login sessions
+survive Control Plane/Web restarts because they are database-backed.
+
+The legacy `POST /v1/registrations` route remains for API compatibility and
+returns an owner bearer token once. It is not used by the default Web
+application. Both registration routes exist only when
+`AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true` and share the same total-tenant
+admission cap.
 
 The defaults written for a new runtime are:
 
 ```text
-AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=false
+AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true
 AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32
 AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS=10
 AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS=100
@@ -298,27 +309,31 @@ AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=1
 
 The total-tenant cap includes the bootstrap tenant and any offline-created
 tenants. Concurrent registrations serialize inside PostgreSQL, so successful
-requests cannot race beyond it. A duplicate slug returns `409`; a full runtime
-returns `429`; disabled registration returns `404`. Failed registration does
-not retain a partial tenant or reveal a generated token.
+requests cannot race beyond it. A duplicate username/slug returns `409`; a full
+runtime returns `429`; disabled registration returns `404`. Failed browser
+registration retains no partial tenant, password verifier, session, or model
+binding.
 
 For an existing deployment, edit
 `deploy/production/runtime/.env` (or the selected external runtime's `.env`),
 change only these bounded non-secret settings, then run
 `npm run production:deploy`. Disabling it later prevents new self-service
-tenants but does not delete or disable existing tenants. The registration form
-may still be visible and will report the server's disabled response.
+tenants but does not delete or disable existing tenants. Existing accounts can
+still log in. The registration tab remains visible and reports the bounded
+server response when admission is disabled.
 
 After login, `GET /v1/conversations` lists at most the newest 100 sessions for
 the verified tenant, and `GET /v1/conversations/:sessionId` loads at most the
 newest 200 prompt turns before the Web resumes that session's durable SSE
-suffix. There is no tenant selector. A token from another tenant receives the
-same `404` for that exact session UUID as it would for a nonexistent UUID.
+suffix. There is no tenant selector. A cookie or token from another tenant
+receives the same `404` for that exact session UUID as it would for a
+nonexistent UUID.
 
 This option is suitable for loopback/private functional validation. It has no
-distributed rate limiter, CAPTCHA, verified identity, recovery, billing, or
-hostile-public-customer sandbox claim. Do not treat enabling it as authorization
-to publish the bundled HTTP endpoint on the Internet.
+distributed login limiter, CAPTCHA, verified email, password recovery/MFA,
+billing, or hostile-public-customer sandbox claim. Do not treat the convenient
+account screen as authorization to publish the bundled HTTP endpoint on the
+Internet.
 
 ## Privileged tenant administration
 
@@ -362,32 +377,37 @@ npm run production:tenant -- revoke \
   --credential-id CREDENTIAL_UUID
 ```
 
-Switching tenants in the Web UI means logging out and presenting a credential
-for the other tenant. There is no client-supplied tenant selector. The running
-control plane does not mount the bootstrap/API-token file and has no configured
-default tenant; it derives every public request scope from the verified token.
+Switching browser accounts means logging out and logging in with the other
+username. There is no client-supplied tenant selector. The running control plane
+does not mount the bootstrap/API-token file and has no configured default
+request tenant; it derives every public request scope from the verified cookie
+or Bearer credential.
 
 ## Tenant model configuration
 
-Every new tenant starts with the deterministic profile, so normal setup and
-acceptance do not call a paid provider. After authenticating, any role may read
-the safe `GET /v1/model-configuration` resource; only `owner` may replace it via
-the Web model panel or `PUT /v1/model-configuration`. The replacement accepts
-only `deepseek` plus the server allowlist shown by the UI. It does not accept a
-provider URL or expose the key, ciphertext, digest, or gateway capability.
+The bootstrap operator tenant is the platform model source. In a deterministic
+acceptance deployment, new accounts inherit that zero-token profile. When the
+operator source uses an allowlisted DeepSeek model, registration decrypts the
+source key only inside the trusted Control Plane and re-seals it with the new
+tenant/binding/version as AES-GCM associated data. No user response or browser
+asset contains the key.
 
-Saving a new key creates an immutable credential-binding version and switches
-the tenant's default profile in one transaction. Repeating the same key/model is
-content-idempotent. Already accepted turns keep their snapshotted version;
-future turns use the replacement. The database stores AES-256-GCM ciphertext
-whose associated data includes tenant, binding, version, provider, and master
-key version. Provider-reported input, output, cache-read, and cache-write tokens
-are written to `usage_ledger` for each model call. Monetary cost uses immutable
-integer micro-USD snapshots from the tenant owner's model-governance rates.
-Bootstrap rates are deliberately zero; AgentDock never guesses current provider
-pricing.
+Normal product accounts may read safe `GET /v1/model-configuration` metadata
+for diagnostics but cannot replace it. The default Web application has no model
+panel. In production, only the configured platform operator tenant may call
+`PUT /v1/model-configuration`; the endpoint accepts only `deepseek` plus the
+server model allowlist and never accepts a provider URL.
 
-The Web clears the key field after submit and does not place it in Web Storage.
+Operator replacement creates immutable credential-binding versions for the
+platform source and every browser-account tenant in one transaction. Repeating
+the same key/model is content-idempotent. Already accepted Turns keep their
+snapshotted version; future Turns and newly registered accounts use the current
+source. Manually provisioned API-only tenants remain independent.
+Provider-reported input, output, cache-read, and cache-write tokens are written
+to `usage_ledger` for each model call. Monetary cost uses immutable integer
+micro-USD rate snapshots. Bootstrap rates are deliberately zero; AgentDock
+never guesses current provider pricing.
+
 The trusted Supervisor decrypts the exact snapshotted version and gives its
 in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
 capability. The capability is revoked when the activation settles and never
@@ -398,8 +418,9 @@ hostile public-SaaS sandbox.
 
 ## Controlled GitHub workspaces
 
-After login, open the `new workspace` panel. Keep `sample Java` for the bundled
-fixture, or choose `public GitHub` and provide only:
+Sending a first message without importing a repository creates an empty
+Workspace. To work on existing code, open `导入项目`; choose the explicit Java
+fixture for acceptance or `公开 GitHub 仓库` and provide only:
 
 - a lowercase `owner/repository` coordinate such as
   `mathewjonas/java-calculator-junit`; and
@@ -455,6 +476,8 @@ not an Internet ingress.
 
 For remote access, keep AgentDock bound to loopback or a private network and put
 a separately managed TLS reverse proxy or authenticated tunnel in front of it.
+Set `AGENT_DOCK_WEB_SESSION_COOKIE_SECURE=true` before redeploying so browsers
+send account cookies only over HTTPS.
 Preserve the `Authorization` header, disable proxy buffering for
 `text/event-stream`, allow long-lived SSE reads, and keep `/internal/*`,
 `/health/*`, PostgreSQL, MinIO, Supervisor management, and the Docker daemon
@@ -462,10 +485,10 @@ unreachable. Add host firewall rules and an identity-aware access layer if more
 than the trusted operator can reach the endpoint. Binding
 `AGENT_DOCK_HTTP_BIND_ADDRESS=0.0.0.0` without those controls is unsupported.
 
-The included bearer credentials provide private tenant identity and three
-coarse roles. The optional anonymous admission route does not turn them into
-public account login, OIDC, CSRF-resistant cookie authentication, per-route
-enterprise RBAC, rate limiting, billing, or abuse protection.
+The included browser session is HttpOnly and SameSite Strict, and bearer
+credentials still provide private tenant automation with three coarse roles.
+These controls do not constitute verified public identity, password recovery,
+MFA, distributed rate limiting, enterprise RBAC, billing, or abuse protection.
 
 ## Health and operations
 
@@ -589,10 +612,13 @@ window, with a coordinated backup and no active turns:
   `secrets/api-token` remains bootstrap identity material and is not mounted by
   the running control plane; revoking its database credential does not make a
   later idempotent deployment recreate or re-enable it.
-- Tenant provider API keys: the tenant owner saves the replacement through the
-  model panel. This creates a new immutable binding version; accepted turns keep
-  their old snapshot. Retained old versions are deliberate recovery state and
-  need a future reference-aware retention job before deletion.
+- Platform provider API key: the platform operator replaces the source binding
+  through the authenticated API. One transaction creates immutable binding
+  versions for the source and every browser-account tenant; accepted Turns keep
+  their old snapshot and future Turns use the new version. Retained old versions
+  are deliberate recovery state and need a future reference-aware retention job
+  before deletion. Manually managed API-only tenants are not silently enrolled
+  in this propagation set.
 - Model-credential master key: do not replace this file independently. Current
   ciphertext is bound to key version 1 and no online re-encryption procedure is
   implemented. Rotate only through a separately tested decrypt/re-encrypt

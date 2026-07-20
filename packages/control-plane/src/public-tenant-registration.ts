@@ -8,6 +8,7 @@ import {
   createPrivateTenant,
   TenantAdministrationError,
   type TenantQuotaConfiguration,
+  type PrivateTenantInitialModel,
 } from "./tenant-administration.ts";
 
 export type PublicTenantRegistrationOptions = {
@@ -18,6 +19,7 @@ export type PublicTenantRegistrationOptions = {
   idGenerator?: () => string;
   randomSecret?: () => string;
   clock?: () => Date;
+  initialModel?: PrivateTenantInitialModel;
 };
 
 export type PublicTenantRegistrationConfiguration = Omit<
@@ -66,6 +68,9 @@ export class PublicTenantRegistrationService {
           ? {}
           : { randomSecret: this.#options.randomSecret }),
         ...(this.#options.clock === undefined ? {} : { clock: this.#options.clock }),
+        ...(this.#options.initialModel === undefined
+          ? {}
+          : { initialModel: this.#options.initialModel }),
       });
       return {
         tenantId: created.tenantId,

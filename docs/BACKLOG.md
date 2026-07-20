@@ -181,4 +181,8 @@ extension-policy support would overstate the current boundary.
 - [x] Prove restored tenant isolation, events, Workspace state, and continued execution in the disposable production gate
 - [x] Add OCI revision labels, root/image CycloneDX SBOMs, complete HIGH/CRITICAL reports, and a fixable-HIGH/CRITICAL release gate
 - [x] Pin third-party supply-chain Actions by immutable commit and publish a reproducible release-evidence command
+- [x] Replace the operator-token landing page with persistent browser login/register and a conversation-first shell
+- [x] Add an empty Workspace source for ordinary first-message conversation creation
+- [x] Inherit and re-seal the platform default model for new accounts without exposing model controls or credentials
+- [x] Restrict production model replacement to the platform operator tenant
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

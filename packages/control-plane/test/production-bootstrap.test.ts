@@ -195,6 +195,7 @@ describe.sequential("production bootstrap and configuration", () => {
         Buffer.alloc(32, 5).toString("base64url"),
       ),
       AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
+      AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: "http://supervisor-host:4100",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
       HOST: "0.0.0.0",
@@ -204,6 +205,9 @@ describe.sequential("production bootstrap and configuration", () => {
       supervisorManagementBaseUrl: "http://supervisor-host:4100/",
       host: "0.0.0.0",
       port: 3000,
+      platformModelSourceTenantId: CONFIG.tenantId,
+      webSessionCookieSecure: false,
+      webSessionTtlMs: 2_592_000_000,
       publicRegistration: {
         enabled: false,
         maximumTenants: 32,

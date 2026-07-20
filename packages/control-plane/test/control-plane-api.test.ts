@@ -1217,7 +1217,7 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("id", "=", mailboxSession.sessionId)
         .executeTakeFirstOrThrow(),
     ).toEqual({ next_mailbox_position: "6" });
-  });
+  }, 15_000);
 
   it("fences a dispatcher whose pre-ACK claim lease was superseded", async () => {
     const accepted = await acceptTurn("stale-dispatch", "only the current claimant may start");

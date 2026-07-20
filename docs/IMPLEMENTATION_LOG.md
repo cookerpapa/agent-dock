@@ -1605,3 +1605,23 @@
 - 产品边界：Milestone 1–7 对应的私有/loopback 单主机产品闭环已完成，但这仍不是 anonymous hostile public SaaS。公开注册只在
   显式容量上限下启用；默认 Docker Provider 共享 host kernel，microVM Provider 依赖 Docker Sandboxes；registry signing、
   Kubernetes、多地域、完整 actor audit 和公网 abuse defense 仍属于未来部署决策，未伪装成当前能力。
+
+## 2026-07-20 — 产品入口修正：账户、对话壳与平台模型
+
+- 问题：原 Milestone 7 页面仍以开发/运维验收为中心，首次进入要求粘贴 API token，模型配置占据用户流程，并默认把 Java repair
+  fixture 当成产品起点。这些能力作为诊断面是有效的，但不是普通用户理解的 Cloud Coding Agent 产品。
+- 账户：migration 013 新增全局规范化用户名、salted scrypt password verifier 和持久 Web session。浏览器只收到
+  `HttpOnly`、`SameSite=Strict` 的 opaque cookie；数据库只存 session SHA-256，支持过期、最多 10 条 active session、即时
+  logout revoke。旧 Bearer token 路径保留给自动化和离线运维，不再出现在默认 Web 页面。
+- 模型：production bootstrap tenant 成为 platform model source。新账户创建时，Control Plane 在可信边界解密当前 allowlisted
+  DeepSeek credential，并按新 tenant/binding/version 重新 AES-GCM seal；deterministic 环境则继承 fake profile。普通 tenant
+  即使绕过 UI 调用写接口也会被拒绝，只有配置的 platform operator tenant 可以 replace model；一次 replacement 会在同一事务
+  为所有 browser-account tenant 生成新 binding version，后续注册也动态读取当前 source。浏览器不再请求/展示 model picker
+  或 API key。
+- 产品：新增 ChatGPT 风格的产品壳——未登录先看到登录/注册，登录后左侧为 tenant-scoped conversation list，右侧为对话和固定
+  composer；首次发送消息会懒创建 `empty` Workspace，而不是 Java 示例。tool output、patch 和原 Session inspector 继续作为
+  可折叠详情/工作区按钮保留；窄屏侧栏变为 overlay。
+- 验证：协议、数据库、Control Plane、Web 都增加对应 schema/type/integration/render/API tests；production gate 增加真实
+  register → cookie identity → empty Project/Session → conversation isolation → logout/re-login → model write denial → production bundle
+  断言，并继续执行原有 Run/Attempt、Tool Sandbox、恢复和备份闭环。正式部署仍只监听 `127.0.0.1`；账户便利性不扩大为公网
+  身份、找回、MFA、distributed rate limit 或 hostile SaaS 声明。

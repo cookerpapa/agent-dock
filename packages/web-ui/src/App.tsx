@@ -42,6 +42,7 @@ function shortId(value: string): string {
 
 function workspaceSourceLabel(source: WorkspaceSourceRequest | undefined): string {
   if (source === undefined || source.kind === "sample_java") return "sample/java-repair";
+  if (source.kind === "empty") return "empty workspace";
   if (source.kind === "github_app") {
     return `github-app:${String(source.repositoryId)}@${source.commitSha.slice(0, 8)}`;
   }
@@ -611,20 +612,22 @@ export default function App() {
       return;
     }
     const source: WorkspaceSourceRequest =
-      workspaceSourceKind === "sample_java"
-        ? { kind: "sample_java" }
-        : workspaceSourceKind === "github_public"
-          ? {
-              kind: "github_public",
-              repository: workspaceRepository.trim(),
-              commitSha: workspaceCommitSha.trim(),
-            }
-          : {
-              kind: "github_app",
-              installationId: Number(workspaceInstallationId),
-              repositoryId: Number(workspaceRepositoryId),
-              commitSha: workspaceCommitSha.trim(),
-            };
+      workspaceSourceKind === "empty"
+        ? { kind: "empty" }
+        : workspaceSourceKind === "sample_java"
+          ? { kind: "sample_java" }
+          : workspaceSourceKind === "github_public"
+            ? {
+                kind: "github_public",
+                repository: workspaceRepository.trim(),
+                commitSha: workspaceCommitSha.trim(),
+              }
+            : {
+                kind: "github_app",
+                installationId: Number(workspaceInstallationId),
+                repositoryId: Number(workspaceRepositoryId),
+                commitSha: workspaceCommitSha.trim(),
+              };
     const session = await provisionSession(name, source);
     if (session !== undefined) {
       setWorkspacePanelOpen(false);

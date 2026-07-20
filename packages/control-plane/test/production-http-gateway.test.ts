@@ -39,7 +39,7 @@ describe("ProductionHttpGateway", () => {
       await expect(unauthorized.json()).resolves.toEqual({
         error: {
           code: "authentication_required",
-          message: "A valid AgentDock API credential is required",
+          message: "A valid AgentDock login session or API credential is required",
         },
       });
       const authenticated = await fetch(`${address}/v1/test`, {

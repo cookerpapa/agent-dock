@@ -11,6 +11,7 @@ import * as durableRunsAndAttempts from "./009_durable_runs_and_attempts.ts";
 import * as versionedWorkspacesAndGitHubDelivery from "./010_versioned_workspaces_and_github_delivery.ts";
 import * as contextAndModelGovernance from "./011_context_and_model_governance.ts";
 import * as observabilityTraceIdentity from "./012_observability_trace_identity.ts";
+import * as productAuthAndEmptyWorkspaces from "./013_product_auth_and_empty_workspaces.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -27,6 +28,7 @@ export const migrationProvider: MigrationProvider = {
       "010_versioned_workspaces_and_github_delivery": versionedWorkspacesAndGitHubDelivery,
       "011_context_and_model_governance": contextAndModelGovernance,
       "012_observability_trace_identity": observabilityTraceIdentity,
+      "013_product_auth_and_empty_workspaces": productAuthAndEmptyWorkspaces,
     };
   },
 };
@@ -90,3 +92,8 @@ export {
   down as downObservabilityTraceIdentity,
   up as upObservabilityTraceIdentity,
 } from "./012_observability_trace_identity.ts";
+
+export {
+  down as downProductAuthAndEmptyWorkspaces,
+  up as upProductAuthAndEmptyWorkspaces,
+} from "./013_product_auth_and_empty_workspaces.ts";

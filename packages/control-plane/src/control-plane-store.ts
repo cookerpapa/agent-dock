@@ -100,6 +100,9 @@ type WorkspaceSourceRow = {
 };
 
 function workspaceSourceResource(row: WorkspaceSourceRow): WorkspaceSourceResource {
+  if (row.sourceKind === "empty" && row.sourceStatus === "ready") {
+    return { kind: "empty", status: "ready" };
+  }
   if (row.sourceKind === "sample_java" && row.sourceStatus === "ready") {
     return { kind: "sample_java", status: "ready" };
   }
@@ -391,8 +394,9 @@ export class ControlPlaneStore {
                 : source.kind === "github_app"
                   ? appRepository!.full_name
                   : null,
-            commit_sha: source.kind === "sample_java" ? null : source.commitSha,
-            status: source.kind === "sample_java" ? "ready" : "pending",
+            commit_sha:
+              source.kind === "empty" || source.kind === "sample_java" ? null : source.commitSha,
+            status: source.kind === "empty" || source.kind === "sample_java" ? "ready" : "pending",
             object_key: null,
             sha256: null,
             size_bytes: null,
@@ -426,7 +430,9 @@ export class ControlPlaneStore {
                     private: appRepository!.private,
                     status: "pending",
                   }
-                : { kind: "sample_java", status: "ready" },
+                : source.kind === "empty"
+                  ? { kind: "empty", status: "ready" }
+                  : { kind: "sample_java", status: "ready" },
         };
       });
     } catch (error) {

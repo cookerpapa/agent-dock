@@ -3,7 +3,7 @@ import type {
   ModelConfigurationResource,
   ReplaceModelConfigurationRequest,
 } from "@agent-dock/protocol";
-import type { Kysely } from "kysely";
+import type { Kysely, Transaction } from "kysely";
 import {
   TenantModelCredentialVault,
   tenantModelCredentialDigest,
@@ -24,6 +24,7 @@ export type TenantModelConfigurationServiceOptions = {
   database: Kysely<Database>;
   vault?: TenantModelCredentialVault;
   clock?: () => Date;
+  platformOperatorTenantId?: string;
 };
 
 function positiveVersion(value: string | number | bigint): number {
@@ -60,11 +61,13 @@ export class TenantModelConfigurationService {
   readonly #database: Kysely<Database>;
   readonly #vault: TenantModelCredentialVault | undefined;
   readonly #clock: () => Date;
+  readonly #platformOperatorTenantId: string | undefined;
 
   constructor(options: TenantModelConfigurationServiceOptions) {
     this.#database = options.database;
     this.#vault = options.vault;
     this.#clock = options.clock ?? (() => new Date());
+    this.#platformOperatorTenantId = options.platformOperatorTenantId;
   }
 
   async get(identity: TenantRequestIdentity): Promise<ModelConfigurationResource> {
@@ -138,172 +141,101 @@ export class TenantModelConfigurationService {
         "Only a tenant owner can replace model credentials",
       );
     }
+    if (
+      this.#platformOperatorTenantId !== undefined &&
+      identity.tenantId !== this.#platformOperatorTenantId
+    ) {
+      throw new TenantModelConfigurationError(
+        "authorization_denied",
+        "Model configuration is managed by the platform operator",
+      );
+    }
     const now = validClock(this.#clock);
-    const digest = tenantModelCredentialDigest(request.apiKey);
     return this.#database.transaction().execute(async (transaction) => {
-      const policy = await transaction
-        .selectFrom("tenant_runtime_policies")
-        .select(["default_model_profile_id as profileId", "enabled"])
-        .where("tenant_id", "=", identity.tenantId)
-        .forUpdate()
-        .executeTakeFirst();
-      if (policy === undefined || !policy.enabled) {
-        throw new TenantModelConfigurationError(
-          "model_configuration_unavailable",
-          "Tenant model configuration is unavailable",
-        );
-      }
-      const profile = await transaction
-        .selectFrom("model_profiles")
-        .select([
-          "id",
-          "provider",
-          "model_id as modelId",
-          "credential_binding_id as credentialBindingId",
-          "credential_binding_version as credentialVersion",
-          "updated_at as updatedAt",
-          "enabled",
-        ])
-        .where("tenant_id", "=", identity.tenantId)
-        .where("id", "=", policy.profileId)
-        .executeTakeFirst();
-      if (profile === undefined || !profile.enabled) {
-        throw new TenantModelConfigurationError(
-          "model_configuration_unavailable",
-          "Tenant model configuration is unavailable",
-        );
-      }
-      const currentVersion = positiveVersion(profile.credentialVersion);
-      const currentSecret =
-        profile.provider === "deepseek"
-          ? await transaction
-              .selectFrom("tenant_model_credentials")
-              .select("secret_sha256 as secretSha256")
-              .where("tenant_id", "=", identity.tenantId)
-              .where("credential_binding_id", "=", profile.credentialBindingId)
-              .where("credential_binding_version", "=", String(currentVersion))
-              .executeTakeFirst()
-          : undefined;
-
-      if (currentSecret?.secretSha256 === digest) {
-        const changedModel = profile.modelId !== request.modelId;
-        if (changedModel) {
-          await transaction
-            .updateTable("model_profiles")
-            .set({ model_id: request.modelId, updated_at: now })
-            .where("tenant_id", "=", identity.tenantId)
-            .where("id", "=", profile.id)
-            .executeTakeFirstOrThrow();
-        }
-        await transaction
-          .insertInto("model_rates")
-          .values({
-            tenant_id: identity.tenantId,
-            provider: "deepseek",
-            model_id: request.modelId,
-            created_at: now,
-            updated_at: now,
-          })
-          .onConflict((conflict) => conflict.doNothing())
+      const result = await this.#replaceForTenant(transaction, identity.tenantId, request, now);
+      if (this.#platformOperatorTenantId !== undefined) {
+        const managedTenants = await transaction
+          .selectFrom("user_password_credentials")
+          .select("tenant_id as tenantId")
+          .distinct()
+          .where("tenant_id", "!=", identity.tenantId)
+          .orderBy("tenant_id", "asc")
           .execute();
-        return {
-          mode: "real",
-          provider: "deepseek",
-          modelId: request.modelId,
-          configured: true,
-          credentialVersion: currentVersion,
-          updatedAt: changedModel ? now.toISOString() : timestamp(profile.updatedAt),
-        };
+        for (const managedTenant of managedTenants) {
+          await this.#replaceForTenant(transaction, managedTenant.tenantId, request, now);
+        }
       }
+      return result;
+    });
+  }
 
-      const maximum = await transaction
-        .selectFrom("credential_bindings")
-        .select((expression) => expression.fn.max("version").as("maximumVersion"))
-        .where("tenant_id", "=", identity.tenantId)
-        .where("id", "=", profile.credentialBindingId)
-        .executeTakeFirstOrThrow();
-      const nextVersion = positiveVersion(maximum.maximumVersion ?? currentVersion) + 1;
-      if (!Number.isSafeInteger(nextVersion)) {
-        throw new TenantModelConfigurationError(
-          "model_configuration_unavailable",
-          "Model credential version capacity is exhausted",
-        );
+  async #replaceForTenant(
+    transaction: Transaction<Database>,
+    tenantId: string,
+    request: ReplaceModelConfigurationRequest,
+    now: Date,
+  ): Promise<ModelConfigurationResource> {
+    const digest = tenantModelCredentialDigest(request.apiKey);
+    const policy = await transaction
+      .selectFrom("tenant_runtime_policies")
+      .select(["default_model_profile_id as profileId", "enabled"])
+      .where("tenant_id", "=", tenantId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (policy === undefined || !policy.enabled) {
+      throw new TenantModelConfigurationError(
+        "model_configuration_unavailable",
+        "Tenant model configuration is unavailable",
+      );
+    }
+    const profile = await transaction
+      .selectFrom("model_profiles")
+      .select([
+        "id",
+        "provider",
+        "model_id as modelId",
+        "credential_binding_id as credentialBindingId",
+        "credential_binding_version as credentialVersion",
+        "updated_at as updatedAt",
+        "enabled",
+      ])
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", policy.profileId)
+      .executeTakeFirst();
+    if (profile === undefined || !profile.enabled) {
+      throw new TenantModelConfigurationError(
+        "model_configuration_unavailable",
+        "Tenant model configuration is unavailable",
+      );
+    }
+    const currentVersion = positiveVersion(profile.credentialVersion);
+    const currentSecret =
+      profile.provider === "deepseek"
+        ? await transaction
+            .selectFrom("tenant_model_credentials")
+            .select("secret_sha256 as secretSha256")
+            .where("tenant_id", "=", tenantId)
+            .where("credential_binding_id", "=", profile.credentialBindingId)
+            .where("credential_binding_version", "=", String(currentVersion))
+            .executeTakeFirst()
+        : undefined;
+
+    if (currentSecret?.secretSha256 === digest) {
+      const changedModel = profile.modelId !== request.modelId;
+      if (changedModel) {
+        await transaction
+          .updateTable("model_profiles")
+          .set({ model_id: request.modelId, updated_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", profile.id)
+          .executeTakeFirstOrThrow();
       }
-      const credentialIdentity = {
-        tenantId: identity.tenantId,
-        credentialBindingId: profile.credentialBindingId,
-        credentialBindingVersion: nextVersion,
-        provider: "deepseek",
-      } as const;
-      if (this.#vault === undefined) {
-        throw new TenantModelConfigurationError(
-          "model_configuration_unavailable",
-          "Encrypted model credential storage is unavailable",
-        );
-      }
-      const sealed = this.#vault.seal(credentialIdentity, request.apiKey);
-      await transaction
-        .insertInto("credential_bindings")
-        .values({
-          id: profile.credentialBindingId,
-          tenant_id: identity.tenantId,
-          provider: "deepseek",
-          kind: "api_key",
-          secret_ref: `sealed://tenant-model-credentials/${identity.tenantId}/${profile.credentialBindingId}/${String(nextVersion)}`,
-          version: nextVersion,
-          status: "active",
-          created_at: now,
-          updated_at: now,
-        })
-        .executeTakeFirstOrThrow();
-      await transaction
-        .insertInto("tenant_model_credentials")
-        .values({
-          tenant_id: identity.tenantId,
-          credential_binding_id: profile.credentialBindingId,
-          credential_binding_version: nextVersion,
-          key_version: sealed.keyVersion,
-          nonce: sealed.nonce,
-          ciphertext: sealed.ciphertext,
-          auth_tag: sealed.authTag,
-          secret_sha256: sealed.secretSha256,
-          created_at: now,
-        })
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("model_profiles")
-        .set({
-          provider: "deepseek",
-          model_id: request.modelId,
-          default_thinking_level: "off",
-          allowed_thinking_levels: ["off"],
-          credential_binding_id: profile.credentialBindingId,
-          credential_binding_version: nextVersion,
-          enabled: true,
-          updated_at: now,
-        })
-        .where("tenant_id", "=", identity.tenantId)
-        .where("id", "=", profile.id)
-        .executeTakeFirstOrThrow();
       await transaction
         .insertInto("model_rates")
         .values({
-          tenant_id: identity.tenantId,
+          tenant_id: tenantId,
           provider: "deepseek",
           model_id: request.modelId,
-          created_at: now,
-          updated_at: now,
-        })
-        .onConflict((conflict) => conflict.doNothing())
-        .execute();
-      await transaction
-        .insertInto("model_routing_policies")
-        .values({
-          tenant_id: identity.tenantId,
-          model_profile_id: profile.id,
-          fallback_provider: null,
-          fallback_model_id: null,
-          enabled: false,
           created_at: now,
           updated_at: now,
         })
@@ -314,9 +246,111 @@ export class TenantModelConfigurationService {
         provider: "deepseek",
         modelId: request.modelId,
         configured: true,
-        credentialVersion: nextVersion,
-        updatedAt: now.toISOString(),
+        credentialVersion: currentVersion,
+        updatedAt: changedModel ? now.toISOString() : timestamp(profile.updatedAt),
       };
-    });
+    }
+
+    const maximum = await transaction
+      .selectFrom("credential_bindings")
+      .select((expression) => expression.fn.max("version").as("maximumVersion"))
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", profile.credentialBindingId)
+      .executeTakeFirstOrThrow();
+    const nextVersion = positiveVersion(maximum.maximumVersion ?? currentVersion) + 1;
+    if (!Number.isSafeInteger(nextVersion)) {
+      throw new TenantModelConfigurationError(
+        "model_configuration_unavailable",
+        "Model credential version capacity is exhausted",
+      );
+    }
+    const credentialIdentity = {
+      tenantId,
+      credentialBindingId: profile.credentialBindingId,
+      credentialBindingVersion: nextVersion,
+      provider: "deepseek",
+    } as const;
+    if (this.#vault === undefined) {
+      throw new TenantModelConfigurationError(
+        "model_configuration_unavailable",
+        "Encrypted model credential storage is unavailable",
+      );
+    }
+    const sealed = this.#vault.seal(credentialIdentity, request.apiKey);
+    await transaction
+      .insertInto("credential_bindings")
+      .values({
+        id: profile.credentialBindingId,
+        tenant_id: tenantId,
+        provider: "deepseek",
+        kind: "api_key",
+        secret_ref: `sealed://tenant-model-credentials/${tenantId}/${profile.credentialBindingId}/${String(nextVersion)}`,
+        version: nextVersion,
+        status: "active",
+        created_at: now,
+        updated_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("tenant_model_credentials")
+      .values({
+        tenant_id: tenantId,
+        credential_binding_id: profile.credentialBindingId,
+        credential_binding_version: nextVersion,
+        key_version: sealed.keyVersion,
+        nonce: sealed.nonce,
+        ciphertext: sealed.ciphertext,
+        auth_tag: sealed.authTag,
+        secret_sha256: sealed.secretSha256,
+        created_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("model_profiles")
+      .set({
+        provider: "deepseek",
+        model_id: request.modelId,
+        default_thinking_level: "off",
+        allowed_thinking_levels: ["off"],
+        credential_binding_id: profile.credentialBindingId,
+        credential_binding_version: nextVersion,
+        enabled: true,
+        updated_at: now,
+      })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", profile.id)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("model_rates")
+      .values({
+        tenant_id: tenantId,
+        provider: "deepseek",
+        model_id: request.modelId,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .execute();
+    await transaction
+      .insertInto("model_routing_policies")
+      .values({
+        tenant_id: tenantId,
+        model_profile_id: profile.id,
+        fallback_provider: null,
+        fallback_model_id: null,
+        enabled: false,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((conflict) => conflict.doNothing())
+      .execute();
+    return {
+      mode: "real",
+      provider: "deepseek",
+      modelId: request.modelId,
+      configured: true,
+      credentialVersion: nextVersion,
+      updatedAt: now.toISOString(),
+    };
   }
 }

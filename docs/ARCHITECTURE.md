@@ -57,11 +57,24 @@ The multi-tenant HTTP surface also has `GET /v1/identity`,
 resolves the tenant before a store is constructed; clients never select a
 tenant. Lists are bounded to the newest 100 sessions, details to the newest 200
 prompt turns, and foreign exact UUIDs return the same `404` as absent rows.
-`POST /v1/registrations` is the sole optional anonymous route. It is disabled
-by default and, when explicitly enabled for loopback validation, atomically
-creates one bounded tenant/owner/profile/policy and returns an indexed owner
-token once. Concurrent admission serializes on a stable tenant row so the
-configured total count cannot be exceeded.
+The loopback product exposes anonymous `POST /v1/auth/register` and
+`POST /v1/auth/login`; the legacy automation surface also retains
+`POST /v1/registrations`. Browser registration atomically creates one bounded
+tenant/owner/profile/policy/password credential and returns identity metadata
+plus an opaque session cookie—never an API or model token. Passwords use scrypt
+with per-account random salts; only derived keys are stored. Session secrets
+are `HttpOnly`, `SameSite=Strict`, expire and revoke durably, and are stored only
+as SHA-256 digests. The gateway accepts the cookie for same-origin REST/SSE and
+retains indexed Bearer credentials for trusted automation. Concurrent admission
+serializes on a stable tenant row so both registration paths share the same
+configured total count.
+
+The platform operator's active allowlisted model is the registration template.
+A real provider credential is decrypted only in the trusted Control Plane and
+re-sealed with the new tenant and binding as authenticated encryption context.
+Product accounts cannot replace this backend model; only the configured
+platform operator tenant can use the production replacement API. The browser
+does not render a model picker or credential form.
 
 The second Phase 1 slice adds an explicit transactional-outbox dispatcher. It
 claims one due command using `FOR UPDATE SKIP LOCKED`, locks the owning session,

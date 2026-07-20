@@ -133,6 +133,7 @@ only after a measured requirement appears.
 - [ADR-0034: observability and reproducible evaluation](docs/adr/0034-observability-and-reproducible-evaluation.md)
 - [ADR-0035: Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
 - [ADR-0036: product operations and release evidence](docs/adr/0036-product-operations-and-release-evidence.md)
+- [ADR-0037: browser accounts and a platform-managed model](docs/adr/0037-browser-accounts-and-platform-managed-model.md)
 
 ## Current executable spikes
 
@@ -531,10 +532,13 @@ now adds private multi-tenant credentials (`owner`, `member`, `viewer`),
 request-scoped stores and SSE, transactional admission quotas, tenant-prefixed
 checkpoints, and least-recently-served global dispatch. The running control
 plane has no configured tenant and does not mount a tenant API token. ADR-0026
-adds an explicitly enabled, capacity-bounded anonymous registration route for
-the loopback deployment plus authenticated recent-conversation discovery. It
-does not claim password/OIDC recovery, billing, abuse controls, or a public-SaaS
-threat model; a frontend model picker also remains deliberately deferred.
+adds explicitly enabled, capacity-bounded registration for the loopback
+deployment plus authenticated recent-conversation discovery. ADR-0037 adds
+username/password browser accounts with revocable persistent cookies and makes
+the platform operator's encrypted model the inherited backend default. The
+product UI has no model picker or bearer-token prompt. It does not claim email
+verification, password recovery, OIDC, billing, abuse controls, or a public-SaaS
+threat model.
 
 Phase 1 is complete: from a clean checkout, `npm run demo` lets a user submit the
 Java repair, watch all ten durable events and three tool calls, inspect the

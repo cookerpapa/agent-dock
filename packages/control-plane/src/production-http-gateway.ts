@@ -1,14 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { bindTenantRequestIdentity, type TenantApiAuthenticator } from "./tenant-identity.ts";
+import { readWebSessionCookie } from "./web-authentication.ts";
 
 export const CONTROL_PLANE_LIVE_PATH = "/health/live";
 export const CONTROL_PLANE_READY_PATH = "/health/ready";
 export const TENANT_REGISTRATION_PATH = "/v1/registrations";
+export const ACCOUNT_REGISTRATION_PATH = "/v1/auth/register";
+export const ACCOUNT_LOGIN_PATH = "/v1/auth/login";
 
 export type ProductionHttpGatewayOptions = {
   authenticator: TenantApiAuthenticator;
   readiness: () => boolean | Promise<boolean>;
   publicRegistrationEnabled?: boolean;
+  webSessionAuthenticator?: TenantApiAuthenticator;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
@@ -20,12 +24,14 @@ export class ProductionHttpGateway {
   readonly #authenticator: TenantApiAuthenticator;
   readonly #readiness: () => boolean | Promise<boolean>;
   readonly #publicRegistrationEnabled: boolean;
+  readonly #webSessionAuthenticator: TenantApiAuthenticator | undefined;
   #installed = false;
 
   constructor(options: ProductionHttpGatewayOptions) {
     this.#authenticator = options.authenticator;
     this.#readiness = options.readiness;
     this.#publicRegistrationEnabled = options.publicRegistrationEnabled ?? false;
+    this.#webSessionAuthenticator = options.webSessionAuthenticator;
   }
 
   install(fastify: FastifyInstance): void {
@@ -44,10 +50,33 @@ export class ProductionHttpGateway {
         });
         return;
       }
+      if (request.method === "POST" && path === ACCOUNT_REGISTRATION_PATH) {
+        if (this.#publicRegistrationEnabled && this.#webSessionAuthenticator !== undefined) return;
+        await reply.code(404).send({
+          error: {
+            code: "route_not_found",
+            message: "The requested API route was not found",
+          },
+        });
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        path === ACCOUNT_LOGIN_PATH &&
+        this.#webSessionAuthenticator !== undefined
+      ) {
+        return;
+      }
       const token = bearerToken(request.headers.authorization);
+      const webSessionToken = readWebSessionCookie(request.headers.cookie);
       let identity;
       try {
-        identity = token === undefined ? undefined : await this.#authenticator.authenticate(token);
+        identity =
+          token !== undefined
+            ? await this.#authenticator.authenticate(token)
+            : webSessionToken === undefined || this.#webSessionAuthenticator === undefined
+              ? undefined
+              : await this.#webSessionAuthenticator.authenticate(webSessionToken);
       } catch {
         await reply.code(503).send({
           error: {
@@ -67,7 +96,7 @@ export class ProductionHttpGateway {
         .send({
           error: {
             code: "authentication_required",
-            message: "A valid AgentDock API credential is required",
+            message: "A valid AgentDock login session or API credential is required",
           },
         });
     });

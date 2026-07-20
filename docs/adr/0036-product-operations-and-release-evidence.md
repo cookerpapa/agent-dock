@@ -2,6 +2,10 @@
 
 Status: accepted, 2026-07-20.
 
+Amended by ADR-0037, which replaces the operator-oriented landing flow with
+browser accounts and a conversation-first product shell. The inspector and
+release evidence defined here remain unchanged.
+
 ## Context
 
 The platform already exposes immutable Workspace versions, Run Attempts, test

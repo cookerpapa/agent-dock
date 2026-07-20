@@ -3,6 +3,8 @@
 - Status: accepted
 - Date: 2026-07-19
 - Extends: ADR-0006's credential-broker target and ADR-0025's tenant boundary
+- Amended by: ADR-0037 makes the production model platform-managed for browser
+  accounts; the encrypted tenant binding and gateway boundary remain unchanged
 
 ## Context
 

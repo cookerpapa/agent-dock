@@ -379,7 +379,7 @@ const supervisorId = boundedEnvironmentValue(
 );
 const publicRegistrationEnabled = booleanEnvironmentValue(
   "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED",
-  "false",
+  "true",
 );
 const publicRegistrationMaximumTenants = integerEnvironmentValue(
   "AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",

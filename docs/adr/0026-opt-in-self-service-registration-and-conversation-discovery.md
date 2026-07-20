@@ -4,6 +4,8 @@
 - Date: 2026-07-19
 - Amends: ADR-0025's private Web boundary by adding a deliberately bounded,
   opt-in anonymous registration route
+- Amended by: ADR-0037 replaces the default token handoff with password accounts
+  and persistent browser sessions while retaining this legacy API route
 
 ## Context
 

@@ -7,12 +7,21 @@ import {
   revokeTenantApiCredential,
   type GeneratedTenantApiCredential,
 } from "./tenant-identity.ts";
+import type { DeepSeekModelId } from "@agent-dock/protocol";
+import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
 
 export type TenantQuotaConfiguration = Readonly<{
   maximumProjects: number;
   maximumSessions: number;
   maximumUnsettledTurns: number;
   maximumConcurrentTurns: number;
+}>;
+
+export type PrivateTenantInitialModel = Readonly<{
+  provider: "deepseek";
+  modelId: DeepSeekModelId;
+  apiKey: string;
+  vault: TenantModelCredentialVault;
 }>;
 
 export type CreatePrivateTenantOptions = {
@@ -24,6 +33,16 @@ export type CreatePrivateTenantOptions = {
   idGenerator?: () => string;
   randomSecret?: () => string;
   clock?: () => Date;
+  initialModel?: PrivateTenantInitialModel;
+  webAccount?: {
+    username: string;
+    role: TenantApiCredentialRole;
+    passwordSalt: string;
+    passwordHash: string;
+    scryptN: number;
+    scryptR: number;
+    scryptP: number;
+  };
 };
 
 export type CreatedPrivateTenant = Readonly<{
@@ -181,6 +200,19 @@ export async function createPrivateTenant(
   if (!(now instanceof Date) || Number.isNaN(now.valueOf())) {
     throw new TypeError("tenant administration clock must return a valid Date");
   }
+  const initialModel = options.initialModel;
+  const sealedModelCredential =
+    initialModel === undefined
+      ? undefined
+      : initialModel.vault.seal(
+          {
+            tenantId,
+            credentialBindingId,
+            credentialBindingVersion: 1,
+            provider: initialModel.provider,
+          },
+          initialModel.apiKey,
+        );
 
   const existing = await database
     .selectFrom("tenants")
@@ -240,9 +272,12 @@ export async function createPrivateTenant(
         .values({
           id: credentialBindingId,
           tenant_id: tenantId,
-          provider: "agent-dock-fake",
-          kind: "brokered",
-          secret_ref: `broker://self-hosted/${tenantId}/deterministic-java-repair`,
+          provider: initialModel?.provider ?? "agent-dock-fake",
+          kind: initialModel === undefined ? "brokered" : "api_key",
+          secret_ref:
+            initialModel === undefined
+              ? `broker://self-hosted/${tenantId}/deterministic-java-repair`
+              : `sealed://tenant-model-credentials/${tenantId}/${credentialBindingId}/1`,
           version: 1,
           status: "active",
           created_at: now,
@@ -254,9 +289,9 @@ export async function createPrivateTenant(
         .values({
           id: defaultModelProfileId,
           tenant_id: tenantId,
-          name: "deterministic-java-repair",
-          provider: "agent-dock-fake",
-          model_id: "agent-dock-fake",
+          name: initialModel === undefined ? "deterministic-java-repair" : "platform-default",
+          provider: initialModel?.provider ?? "agent-dock-fake",
+          model_id: initialModel?.modelId ?? "agent-dock-fake",
           default_thinking_level: "off",
           allowed_thinking_levels: ["off"],
           credential_binding_id: credentialBindingId,
@@ -266,12 +301,28 @@ export async function createPrivateTenant(
           updated_at: now,
         })
         .executeTakeFirstOrThrow();
+      if (initialModel !== undefined && sealedModelCredential !== undefined) {
+        await transaction
+          .insertInto("tenant_model_credentials")
+          .values({
+            tenant_id: tenantId,
+            credential_binding_id: credentialBindingId,
+            credential_binding_version: 1,
+            key_version: sealedModelCredential.keyVersion,
+            nonce: sealedModelCredential.nonce,
+            ciphertext: sealedModelCredential.ciphertext,
+            auth_tag: sealedModelCredential.authTag,
+            secret_sha256: sealedModelCredential.secretSha256,
+            created_at: now,
+          })
+          .executeTakeFirstOrThrow();
+      }
       await transaction
         .insertInto("model_rates")
         .values({
           tenant_id: tenantId,
-          provider: "agent-dock-fake",
-          model_id: "agent-dock-fake",
+          provider: initialModel?.provider ?? "agent-dock-fake",
+          model_id: initialModel?.modelId ?? "agent-dock-fake",
           created_at: now,
           updated_at: now,
         })
@@ -314,6 +365,24 @@ export async function createPrivateTenant(
           created_at: now,
         })
         .executeTakeFirstOrThrow();
+      if (options.webAccount !== undefined) {
+        await transaction
+          .insertInto("user_password_credentials")
+          .values({
+            username: options.webAccount.username,
+            tenant_id: tenantId,
+            user_id: ownerUserId,
+            role: options.webAccount.role,
+            password_salt: options.webAccount.passwordSalt,
+            password_hash: options.webAccount.passwordHash,
+            scrypt_n: options.webAccount.scryptN,
+            scrypt_r: options.webAccount.scryptR,
+            scrypt_p: options.webAccount.scryptP,
+            created_at: now,
+            updated_at: now,
+          })
+          .executeTakeFirstOrThrow();
+      }
     });
   } catch (error: unknown) {
     const code = (error as { code?: unknown })?.code;

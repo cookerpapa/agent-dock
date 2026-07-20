@@ -9,6 +9,7 @@ import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";
 import { WorkspaceVersionError } from "./workspace-version-service.ts";
 import { GitHubIntegrationError } from "./github-integration-service.ts";
 import { ModelGovernanceError } from "./model-governance-service.ts";
+import { WebAuthenticationError } from "./web-authentication.ts";
 
 type ErrorResponse = {
   status: number;
@@ -52,6 +53,19 @@ function mappedError(error: unknown): ErrorResponse {
         : error.code === "tenant_slug_unavailable"
           ? 409
           : 429;
+    return { status, body: { error: { code: error.code, message: error.message } } };
+  }
+  if (error instanceof WebAuthenticationError) {
+    const status =
+      error.code === "registration_disabled"
+        ? 404
+        : error.code === "username_unavailable"
+          ? 409
+          : error.code === "registration_capacity_reached"
+            ? 429
+            : error.code === "invalid_credentials"
+              ? 401
+              : 503;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof ControlPlaneStoreError) {

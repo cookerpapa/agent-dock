@@ -397,6 +397,44 @@ export const TenantIdentityResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const AccountUsernameSchema = Type.String({
+  minLength: 3,
+  maxLength: 48,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,47}$",
+});
+
+const AccountPasswordSchema = Type.String({ minLength: 10, maxLength: 128 });
+
+export const RegisterAccountRequestSchema = Type.Object(
+  {
+    username: AccountUsernameSchema,
+    displayName: Type.String({ minLength: 1, maxLength: 256 }),
+    password: AccountPasswordSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const LoginAccountRequestSchema = Type.Object(
+  {
+    username: AccountUsernameSchema,
+    password: AccountPasswordSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const AuthSessionResourceSchema = Type.Object(
+  {
+    identity: TenantIdentityResourceSchema,
+    expiresAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const LogoutResourceSchema = Type.Object(
+  { loggedOut: Type.Literal(true) },
+  { additionalProperties: false },
+);
+
 export const CreateTenantRegistrationRequestSchema = Type.Object(
   {
     tenantSlug: Type.String({ minLength: 1, maxLength: 128 }),
@@ -446,6 +484,7 @@ export const GitHubAppRepositorySourceSchema = Type.Object(
 );
 
 export const WorkspaceSourceRequestSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("empty") }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("sample_java") }, { additionalProperties: false }),
   GitHubRepositorySourceSchema,
   GitHubAppRepositorySourceSchema,
@@ -459,6 +498,10 @@ export const WorkspaceImportStatusSchema = Type.Union([
 ]);
 
 export const WorkspaceSourceResourceSchema = Type.Union([
+  Type.Object(
+    { kind: Type.Literal("empty"), status: Type.Literal("ready") },
+    { additionalProperties: false },
+  ),
   Type.Object(
     { kind: Type.Literal("sample_java"), status: Type.Literal("ready") },
     { additionalProperties: false },
@@ -1005,6 +1048,10 @@ export const ControlPlaneApiErrorSchema = Type.Object(
 export type TurnThinkingLevel = Static<typeof TurnThinkingLevelSchema>;
 export type TenantApiRole = Static<typeof TenantApiRoleSchema>;
 export type TenantIdentityResource = Static<typeof TenantIdentityResourceSchema>;
+export type RegisterAccountRequest = Static<typeof RegisterAccountRequestSchema>;
+export type LoginAccountRequest = Static<typeof LoginAccountRequestSchema>;
+export type AuthSessionResource = Static<typeof AuthSessionResourceSchema>;
+export type LogoutResource = Static<typeof LogoutResourceSchema>;
 export type DeepSeekModelId = Static<typeof DeepSeekModelIdSchema>;
 export type ReplaceModelConfigurationRequest = Static<
   typeof ReplaceModelConfigurationRequestSchema
@@ -1103,6 +1150,9 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
   if (request.source === undefined || request.source.kind === "sample_java") {
     return { name, source: { kind: "sample_java" } };
   }
+  if (request.source.kind === "empty") {
+    return { name, source: { kind: "empty" } };
+  }
   if (request.source.kind === "github_app") {
     return {
       name,
@@ -1133,6 +1183,51 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
 
 export function parseTenantIdentityResource(value: unknown): TenantIdentityResource {
   return parseSchema(TenantIdentityResourceSchema, value, "tenant identity resource");
+}
+
+function normalizedAccountPassword(value: string): string {
+  const byteLength = new TextEncoder().encode(value).length;
+  if (byteLength < 10 || byteLength > 256 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new ControlPlaneApiValidationError(
+      "Password must contain 10-128 characters and at most 256 safe UTF-8 bytes",
+    );
+  }
+  return value;
+}
+
+export function parseRegisterAccountRequest(value: unknown): RegisterAccountRequest {
+  const request = parseSchema(RegisterAccountRequestSchema, value, "account registration request");
+  const username = request.username.trim().toLowerCase();
+  const displayName = request.displayName.trim();
+  if (!/^[a-z0-9][a-z0-9._-]{2,47}$/.test(username)) {
+    throw new ControlPlaneApiValidationError(
+      "Username must contain 3-48 lowercase letters, digits, dots, underscores, or hyphens",
+    );
+  }
+  if (
+    displayName.length === 0 ||
+    new TextEncoder().encode(displayName).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(displayName)
+  ) {
+    throw new ControlPlaneApiValidationError("Display name must contain 1-256 safe UTF-8 bytes");
+  }
+  return { username, displayName, password: normalizedAccountPassword(request.password) };
+}
+
+export function parseLoginAccountRequest(value: unknown): LoginAccountRequest {
+  const request = parseSchema(LoginAccountRequestSchema, value, "account login request");
+  return {
+    username: request.username.trim().toLowerCase(),
+    password: normalizedAccountPassword(request.password),
+  };
+}
+
+export function parseAuthSessionResource(value: unknown): AuthSessionResource {
+  return parseSchema(AuthSessionResourceSchema, value, "authenticated web session resource");
+}
+
+export function parseLogoutResource(value: unknown): LogoutResource {
+  return parseSchema(LogoutResourceSchema, value, "logout resource");
 }
 
 export function parseReplaceModelConfigurationRequest(

@@ -507,16 +507,20 @@ export function WorkspaceInspector({
               <div className="source-card">
                 <span>project source</span>
                 <strong>
-                  {source.kind === "sample_java"
-                    ? "sample/java-repair"
-                    : source.kind === "github_public"
-                      ? source.repository
-                      : `${source.repository} · installation ${String(source.installationId)}`}
+                  {source.kind === "empty"
+                    ? "empty workspace"
+                    : source.kind === "sample_java"
+                      ? "sample/java-repair"
+                      : source.kind === "github_public"
+                        ? source.repository
+                        : `${source.repository} · installation ${String(source.installationId)}`}
                 </strong>
                 <small>
-                  {source.kind === "sample_java"
-                    ? "built-in immutable seed"
-                    : `${shortId(source.commitSha)} · ${source.status}`}
+                  {source.kind === "empty"
+                    ? "clean git baseline"
+                    : source.kind === "sample_java"
+                      ? "built-in immutable seed"
+                      : `${shortId(source.commitSha)} · ${source.status}`}
                 </small>
               </div>
             ) : null}
