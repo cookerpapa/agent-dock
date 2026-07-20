@@ -1648,3 +1648,8 @@
   reducer 新增 pre-event failure 测试；production gate 现在用 HttpOnly 浏览器 Cookie 在空 Workspace 中真实跑完 Pi、Tool Sandbox、
   assistant delta、checkpoint 和 Run settlement。全仓 CI、真实 Docker/Pi gate 及四 tenant backup/restore production gate 均通过。
   同时将高成本 PGlite migration 包限制为两个 worker，29 个数据库测试稳定通过，避免宿主资源竞争造成的成批假超时。
+- 真实回归：commit `a18654d` 已滚动部署到保留用户数据的 production topology，十个常驻/入口服务全部 healthy。随后为发生故障的
+  浏览器账户签发 15 分钟、只用于验收的临时凭据，在原 Session 中以 `real/deepseek/deepseek-v4-flash` 重新提交“你好”；Run 完成、
+  44 条 durable event 可重放、assistant 文本已持久化、Workspace checkpoint 已提交，usage ledger 记录 1,326 input / 59 output
+  tokens。验收凭据随即撤销并实测返回 401，受管 Tool Sandbox 容器无残留；这次验证实际消耗模型 token，不是 fake model 或 health
+  probe。
