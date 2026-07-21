@@ -1680,6 +1680,9 @@
 - 协议：新增只包含 `toolCallId/toolName/delta` 的 `tool.input.delta` 公开事件。Adapter 从 Pi partial 中只提取已审查的调用身份和原始
   JSON fragment，不转发 provider/Pi 原对象；缺少调用身份的兼容 Provider delta 被安全忽略，最终 `tool_execution_start` 仍是执行
   权威边界。事件与 assistant text 一样进入 durable spool、PostgreSQL 和可重放 SSE。
+- 流控：第一次真实 DeepSeek 验收发现 2,849-byte 参数被 Provider 切为 777 个极小 delta；若逐条持久化会把视觉优化变成数据库写放大。
+  Adapter 现在按至少 128 UTF-8 bytes 合并同一 toolCall 的真实 fragment，并在 `toolcall_end` 强制冲刷尾部；最多只缓存不足 128 bytes，
+  不缓存完整工具输入，也不延迟最终执行边界。短命令仍由 authoritative `tool.started` 立即显示，长 write 则保持多阶段真实流式预览。
 - Web：Reducer 以 toolCallId 合并增量 JSON，并在 `tool.started` 到来时把同一条记录从“正在生成”切换为“执行中”，不创建重复卡片。
   `partial-json` 只用于浏览器渐进恢复 `path/content/command`；执行端始终使用 Pi 最终验证后的参数。`write` 源码带真实增量光标，完成后
   仍保留相同内容。
@@ -1689,3 +1692,8 @@
 - 验证：协议覆盖新增事件，Pi Adapter 覆盖脱敏后的 tool delta，Web reducer 覆盖两个 delta → 一个 preparing item → authoritative
   tool start 的重放，SSR 覆盖流式状态/光标，独立高亮测试覆盖 Python token 和 HTML 转义。全仓 build/typecheck、格式检查和允许本机
   临时端口后的全仓测试通过；首次受限运行出现的 `listen EPERM` 已确认是执行沙箱禁止测试 server bind，并非产品断言失败。
+- 真实发布：`394073c` 的协议/Control Plane/Web 与首版 Runner 上线后，真实 DeepSeek write 已证明 preview seq=2、tool start seq=779，
+  但也暴露 777-delta 写放大；随后 `04068ee` 的合并 Runner 单独滚动上线。第二个独立空 Workspace 任务生成 2,084-char Python 文件，
+  2,245-byte JSON 被合并为 18 条 durable write delta，仍从 seq=2 开始并在 seq=20 的 `tool.started` 前完整到达；Run completed，两个
+  model call 实耗 165 input / 882 output tokens。最终 Control Plane、Supervisor 和 Web image revision 与预期提交一致且全部 healthy，
+  线上主 bundle、90.27 kB 高亮 chunk、流式光标和 token CSS 均可读取。
