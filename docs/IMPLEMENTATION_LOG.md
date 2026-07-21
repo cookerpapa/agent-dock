@@ -1668,3 +1668,6 @@
   `protobufjs@7.6.4` moderate。当前 Pi 已是 registry 最新版，root override 和 `npm audit fix` 都不能覆盖发布包内部 shrinkwrap；
   没有伪造修复或降低 audit level，已单独进入 Backlog 等待 upstream repack 或经过验证的 vendoring 方案。本次 Web-only image 不包含
   Pi runtime，部署不会把这两个包新增到浏览器镜像或重建 Trusted Runner。
+- 实际发布：commit `9b5adda` 已构建为 `agent-dock/web-ui:production`，OCI revision 与提交一致。Compose 只重建 Web 和复用同一静态
+  镜像的 observability ingress；Control Plane 与 Supervisor 容器保持原启动时间和原 image ID。上线后 Web、内部服务和入口均
+  healthy，`8080/healthz` 返回 `ok`，实际静态 bundle 包含阶段文本、命令、可展开输出和 `Took` 样式标记。
