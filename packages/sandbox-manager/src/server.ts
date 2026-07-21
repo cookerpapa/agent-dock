@@ -34,6 +34,7 @@ export type SandboxManagerBackend = Pick<
   | "checkHealth"
   | "create"
   | "capture"
+  | "release"
   | "stop"
   | "execute"
   | "importGitHub"
@@ -41,6 +42,7 @@ export type SandboxManagerBackend = Pick<
   | "terminateAndConfirmAbsent"
   | "confirmAbsent"
   | "close"
+  | "activeCount"
 >;
 
 function digest(value: string): Buffer {
@@ -224,15 +226,15 @@ export class SandboxManagerServer {
       try {
         const message = parseSandboxManagerRequest(request.body);
         if (message.type === "tool_sandbox.create") {
-          const created = await this.#observed({
+          const reserved = await this.#observed({
             request,
-            spanName: "sandbox.create",
-            operation: "create",
+            spanName: "sandbox.reserve",
+            operation: "reserve",
             kind: "sandbox",
             run: () => this.#manager.create(message),
           });
-          this.#metrics?.sandboxActive.inc({ provider: "gvisor" });
-          await reply.code(200).send(created);
+          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          await reply.code(200).send(reserved);
           return;
         }
         if (message.type === "tool_sandbox.capture") {
@@ -248,6 +250,18 @@ export class SandboxManagerServer {
           );
           return;
         }
+        if (message.type === "tool_sandbox.release") {
+          const released = await this.#observed({
+            request,
+            spanName: "sandbox.release",
+            operation: "release",
+            kind: "sandbox",
+            run: () => this.#manager.release(message),
+          });
+          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          await reply.code(200).send(released);
+          return;
+        }
         if (message.type === "tool_sandbox.stop") {
           await this.#observed({
             request,
@@ -256,7 +270,7 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.stop(message.activationId, message.assignment),
           });
-          this.#metrics?.sandboxActive.dec({ provider: "gvisor" });
+          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
           await reply.code(200).send({
             managerProtocolVersion: 1,
             type: "tool_sandbox.stopped",
@@ -309,6 +323,7 @@ export class SandboxManagerServer {
           kind: "tool",
           run: () => this.#manager.execute(capability, message, controller.signal),
         });
+        this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
         await reply.code(200).send(response);
       } catch (error: unknown) {
         await this.#failure(reply, error);

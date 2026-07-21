@@ -20,7 +20,11 @@ const provider = new KubernetesGvisorSandboxProvider({
   imagePullPolicy: config.imagePullPolicy,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
 });
-const manager = new ToolSandboxManager({ provider });
+const manager = new ToolSandboxManager({
+  provider,
+  warmTtlMs: config.warmTtlMs,
+  maximumWarmActivations: config.maximumWarmActivations,
+});
 const server = new SandboxManagerServer({
   host: config.host,
   port: config.port,

@@ -31,6 +31,8 @@ const Base64Schema = Type.String({
 export const ToolSandboxAssignmentSchema = Type.Object(
   {
     tenantId: OpaqueIdSchema,
+    projectId: OpaqueIdSchema,
+    workspaceId: OpaqueIdSchema,
     supervisorId: OpaqueIdSchema,
     bootId: UuidSchema,
     sandboxId: UuidSchema,
@@ -52,6 +54,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     assignment: ToolSandboxAssignmentSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
+    workspaceRevision: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
   },
   { additionalProperties: false },
 );
@@ -59,12 +62,10 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
 export const ToolSandboxCreateResponseSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
-    type: Type.Literal("tool_sandbox.created"),
+    type: Type.Literal("tool_sandbox.reserved"),
     requestId: UuidSchema,
     activationId: UuidSchema,
     capability: Type.String({ pattern: "^adts_[A-Za-z0-9_-]{43}$" }),
-    runtimeId: UuidSchema,
-    runtimeName: Type.String({ minLength: 1, maxLength: 128 }),
     workspaceRoot: Type.Literal("/workspace"),
   },
   { additionalProperties: false },
@@ -81,14 +82,62 @@ export const ToolSandboxCaptureRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const ToolSandboxCaptureResponseSchema = Type.Object(
+export const ToolSandboxCaptureResponseSchema = Type.Union([
+  Type.Object(
+    {
+      ...ToolSandboxEnvelope,
+      type: Type.Literal("tool_sandbox.captured"),
+      requestId: UuidSchema,
+      activationId: UuidSchema,
+      workspace: SandboxCheckpointBlobSchema,
+      workspacePatch: Type.Optional(WorkspacePatchSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ToolSandboxEnvelope,
+      type: Type.Literal("tool_sandbox.unused"),
+      requestId: UuidSchema,
+      activationId: UuidSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const ToolSandboxReleaseRequestSchema = Type.Union([
+  Type.Object(
+    {
+      ...ToolSandboxEnvelope,
+      type: Type.Literal("tool_sandbox.release"),
+      requestId: UuidSchema,
+      activationId: UuidSchema,
+      assignment: ToolSandboxAssignmentSchema,
+      disposition: Type.Literal("keep_warm"),
+      workspaceRevision: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ToolSandboxEnvelope,
+      type: Type.Literal("tool_sandbox.release"),
+      requestId: UuidSchema,
+      activationId: UuidSchema,
+      assignment: ToolSandboxAssignmentSchema,
+      disposition: Type.Literal("destroy"),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const ToolSandboxReleaseResponseSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
-    type: Type.Literal("tool_sandbox.captured"),
+    type: Type.Literal("tool_sandbox.released"),
     requestId: UuidSchema,
     activationId: UuidSchema,
-    workspace: SandboxCheckpointBlobSchema,
-    workspacePatch: Type.Optional(WorkspacePatchSchema),
+    retained: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -137,6 +186,7 @@ export const SandboxManagerGitHubImportResponseSchema = Type.Object(
 export const SandboxManagerRequestSchema = Type.Union([
   ToolSandboxCreateRequestSchema,
   ToolSandboxCaptureRequestSchema,
+  ToolSandboxReleaseRequestSchema,
   ToolSandboxStopRequestSchema,
   SandboxManagerGitHubImportRequestSchema,
 ]);
@@ -144,6 +194,7 @@ export const SandboxManagerRequestSchema = Type.Union([
 export const SandboxManagerResponseSchema = Type.Union([
   ToolSandboxCreateResponseSchema,
   ToolSandboxCaptureResponseSchema,
+  ToolSandboxReleaseResponseSchema,
   ToolSandboxStopResponseSchema,
   SandboxManagerGitHubImportResponseSchema,
 ]);
@@ -350,6 +401,8 @@ export type ToolSandboxCreateRequest = Static<typeof ToolSandboxCreateRequestSch
 export type ToolSandboxCreateResponse = Static<typeof ToolSandboxCreateResponseSchema>;
 export type ToolSandboxCaptureRequest = Static<typeof ToolSandboxCaptureRequestSchema>;
 export type ToolSandboxCaptureResponse = Static<typeof ToolSandboxCaptureResponseSchema>;
+export type ToolSandboxReleaseRequest = Static<typeof ToolSandboxReleaseRequestSchema>;
+export type ToolSandboxReleaseResponse = Static<typeof ToolSandboxReleaseResponseSchema>;
 export type ToolSandboxStopRequest = Static<typeof ToolSandboxStopRequestSchema>;
 export type ToolSandboxStopResponse = Static<typeof ToolSandboxStopResponseSchema>;
 export type SandboxManagerGitHubImportRequest = Static<

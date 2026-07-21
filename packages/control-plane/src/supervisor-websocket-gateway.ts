@@ -2,6 +2,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
+  type EventPublishBatchMessage,
   type EventPublishMessage,
   type EventRejectedMessage,
 } from "@agent-dock/protocol";
@@ -532,7 +533,7 @@ export class SupervisorWebSocketGateway {
         if (await this.#commandRouter.receive(context.commandConnection, message)) return;
       } catch (error: unknown) {
         if (
-          message.type === "event.publish" &&
+          (message.type === "event.publish" || message.type === "event.publish_batch") &&
           error instanceof SupervisorConnectionManagerError &&
           error.code === "stale_fence" &&
           !error.retryable
@@ -546,17 +547,19 @@ export class SupervisorWebSocketGateway {
     this.#close(context, 1_003, "message type unsupported");
   }
 
-  #eventRejection(message: EventPublishMessage): EventRejectedMessage {
+  #eventRejection(message: EventPublishMessage | EventPublishBatchMessage): EventRejectedMessage {
+    const event =
+      message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
     const parsed = parseControlToSupervisorMessage({
       protocolVersion: 1,
       messageId: requireUuid(this.#idGenerator(), "generated event rejection messageId"),
       sentAt: validDate(this.#clock).toISOString(),
       type: "event.rejected",
       payload: {
-        sessionId: message.payload.event.sessionId,
+        sessionId: event.sessionId,
         leaseId: message.payload.leaseId,
         fencingToken: message.payload.fencingToken,
-        rejectedSeq: message.payload.event.seq,
+        rejectedSeq: event.seq,
         code: "stale_fence",
         retryable: false,
       },

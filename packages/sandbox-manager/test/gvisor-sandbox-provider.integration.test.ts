@@ -35,6 +35,8 @@ function assignment(index: number): ToolSandboxAssignment {
   const attemptId = `20000000-0000-4000-8000-000000000${suffix}`;
   return {
     tenantId: `tenant-provider-${String(index)}`,
+    projectId: `project-provider-${String(index)}`,
+    workspaceId: `workspace-provider-${String(index)}`,
     supervisorId: "supervisor-provider-integration",
     bootId: "30000000-0000-4000-8000-000000000001",
     sandboxId: "30000000-0000-4000-8000-000000000002",
@@ -130,6 +132,7 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
     let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
     let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
     let empty: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    let invalid: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
     try {
       first = await manager.create(createRequest(1));
       second = await manager.create(createRequest(2));
@@ -344,13 +347,19 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
             cancellation[0].value.code === "tool_cancelled"),
       ).toBe(true);
       expect(
-        await runtimeClient.readPod("agent-dock-sandboxes", second.runtimeName),
+        await runtimeClient.readPod(
+          "agent-dock-sandboxes",
+          `agent-dock-tool-${second.activationId}`.slice(0, 63),
+        ),
       ).toBeUndefined();
       second = undefined;
 
       await manager.stop(first.activationId, firstAssignment);
       expect(
-        await runtimeClient.readPod("agent-dock-sandboxes", first.runtimeName),
+        await runtimeClient.readPod(
+          "agent-dock-sandboxes",
+          `agent-dock-tool-${first.activationId}`.slice(0, 63),
+        ),
       ).toBeUndefined();
       first = undefined;
 
@@ -375,27 +384,34 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
       ).toBe("fixture baseline\n");
       await manager.stop(empty.activationId, emptyAssignment);
       expect(
-        await runtimeClient.readPod("agent-dock-sandboxes", empty.runtimeName),
+        await runtimeClient.readPod(
+          "agent-dock-sandboxes",
+          `agent-dock-tool-${empty.activationId}`.slice(0, 63),
+        ),
       ).toBeUndefined();
       empty = undefined;
 
       const invalidSnapshot = Buffer.from('{"format":"invalid","files":[]}\n', "utf8");
-      await expect(
-        manager.create({
-          ...createRequest(4),
-          workspaceSeed: {
-            kind: "snapshot",
-            snapshot: {
-              encoding: "base64",
-              sha256: createHash("sha256").update(invalidSnapshot).digest("hex"),
-              sizeBytes: invalidSnapshot.byteLength,
-              data: invalidSnapshot.toString("base64"),
-            },
+      invalid = await manager.create({
+        ...createRequest(4),
+        workspaceSeed: {
+          kind: "snapshot",
+          snapshot: {
+            encoding: "base64",
+            sha256: createHash("sha256").update(invalidSnapshot).digest("hex"),
+            sizeBytes: invalidSnapshot.byteLength,
+            data: invalidSnapshot.toString("base64"),
           },
-        }),
-      ).rejects.toMatchObject({ code: "tool_worker_failed" });
+        },
+      });
+      await expect(manager.inspect(invalid.activationId, assignment(4))).rejects.toMatchObject({
+        code: "tool_worker_failed",
+      });
       await expect(provider.listAssignments(firstAssignment.sandboxId)).resolves.toEqual([]);
     } finally {
+      if (invalid !== undefined) {
+        await manager.stop(invalid.activationId, assignment(4)).catch(() => undefined);
+      }
       if (empty !== undefined) {
         await manager.stop(empty.activationId, emptyAssignment).catch(() => undefined);
       }
@@ -404,6 +420,93 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
       }
       if (first !== undefined) {
         await manager.stop(first.activationId, firstAssignment).catch(() => undefined);
+      }
+      await manager.close().catch(() => undefined);
+    }
+  }, 120_000);
+
+  it("rebinds one exact-session warm Pod to a higher fenced attempt", async () => {
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({ toolImage, runtimeClient });
+    const manager = new ToolSandboxManager({ provider });
+    const firstAssignment = assignment(10);
+    let currentAssignment = firstAssignment;
+    let activationId: string | undefined;
+    try {
+      const first = await manager.create({
+        ...createRequest(10),
+        assignment: firstAssignment,
+      });
+      activationId = first.activationId;
+      await manager.execute(
+        first.capability,
+        operation(
+          first.activationId,
+          "50000000-0000-4000-8000-000000000101",
+          "printf warm-reuse > warm-reuse.txt",
+        ),
+      );
+      const captured = await manager.capture(
+        first.activationId,
+        firstAssignment,
+        "50000000-0000-4000-8000-000000000102",
+      );
+      if (captured.type !== "tool_sandbox.captured") {
+        throw new Error("Expected a materialized Tool Sandbox capture");
+      }
+      const podName = `agent-dock-tool-${first.activationId}`.slice(0, 63);
+      const originalPod = await runtimeClient.readPod("agent-dock-sandboxes", podName);
+      const originalUid = originalPod?.metadata?.uid;
+      expect(originalUid).toBeDefined();
+      await manager.release({
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.release",
+        requestId: "50000000-0000-4000-8000-000000000103",
+        activationId: first.activationId,
+        assignment: firstAssignment,
+        disposition: "keep_warm",
+        workspaceRevision: captured.workspace.sha256,
+      });
+
+      currentAssignment = {
+        ...firstAssignment,
+        commandId: "command-provider-rebound",
+        turnId: "turn-provider-rebound",
+        attemptId: "50000000-0000-4000-8000-000000000104",
+        leaseId: "50000000-0000-4000-8000-000000000104",
+        fencingToken: firstAssignment.fencingToken + 1,
+      };
+      const rebound = await manager.create({
+        ...createRequest(11),
+        assignment: currentAssignment,
+        workspaceRevision: captured.workspace.sha256,
+      });
+      expect(rebound.activationId).toBe(first.activationId);
+      expect(
+        bashOutput(
+          await manager.execute(
+            rebound.capability,
+            operation(
+              rebound.activationId,
+              "50000000-0000-4000-8000-000000000105",
+              "cat warm-reuse.txt",
+            ),
+          ),
+        ),
+      ).toBe("warm-reuse");
+      const reboundPod = await runtimeClient.readPod("agent-dock-sandboxes", podName);
+      expect(reboundPod?.metadata?.uid).toBe(originalUid);
+      expect(reboundPod?.metadata?.annotations).toMatchObject({
+        "agent-dock.io/turn-id": currentAssignment.turnId,
+        "agent-dock.io/attempt-id": currentAssignment.attemptId,
+        "agent-dock.io/fencing-token": String(currentAssignment.fencingToken),
+      });
+      await manager.stop(rebound.activationId, currentAssignment);
+      activationId = undefined;
+      await expect(runtimeClient.readPod("agent-dock-sandboxes", podName)).resolves.toBeUndefined();
+    } finally {
+      if (activationId !== undefined) {
+        await manager.stop(activationId, currentAssignment).catch(() => undefined);
       }
       await manager.close().catch(() => undefined);
     }

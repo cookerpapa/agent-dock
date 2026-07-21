@@ -112,11 +112,12 @@ the control-plane process; those remain behind the outbound Supervisor socket.
 
 ## Durable event boundary
 
-`DurableEventStore` accepts only the closed `event.publish` wire message. A
-transaction locks the session/cursor, validates turn/command ownership and the
-current unexpired lease/fence, rejects sequence gaps, inserts the complete event
-identity, and advances both cursor and `sessions.next_event_seq`. Only after
-commit does it wake the local hub and return `event.ack`. When the PostgreSQL
+`DurableEventStore` accepts the closed single-event and bounded
+`event.publish_batch` wire messages. One transaction locks the session/cursor,
+validates turn/command ownership and the current unexpired lease/fence, rejects
+sequence gaps, inserts the complete contiguous batch, and advances both cursor
+and `sessions.next_event_seq`. Only after commit does it wake the local hub and
+return one cumulative `event.ack`. When the PostgreSQL
 notification transport is configured, the same transaction emits a versioned
 tenant/session/sequence high-water hint. Exact redelivery is idempotent—even
 just after lease release when an ACK packet was lost—while a changed event at
@@ -134,11 +135,13 @@ and browser reconnect still resumes from `Last-Event-ID`.
 ## Kubernetes gVisor workspace integration
 
 The supported Runner keeps pinned Pi in the trusted Supervisor while its
-`read`/`write`/`edit`/`bash` tools cross an authenticated RPC boundary into one
-networkless gVisor Pod per active Turn. The Sandbox Manager creates the fixed
-Pod through a least-privilege Kubernetes client, forwards each public event
-through the same durable ACK path, and requires the Pod to disappear after
-completion or cancellation. The sample image initializes a Java fixture in
+`read`/`write`/`edit`/`bash` tools cross an authenticated RPC boundary. The
+Sandbox Manager initially issues a logical reservation; pure chat creates no
+Pod, while the first Tool Call materializes a fixed networkless gVisor Pod. A
+healthy Pod is bound to one exact Session and may be reused across Runs under a
+new fencing token until idle TTL/LRU eviction. The Manager uses a least-
+privilege Kubernetes client and requires exact cleanup after failure,
+cancellation, eviction, or shutdown. The sample image initializes a Java fixture in
 workspace `emptyDir` and attaches its bounded unified diff to
 `turn.completed`.
 

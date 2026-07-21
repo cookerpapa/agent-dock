@@ -51,6 +51,7 @@ export type SupervisorSandboxManager = Pick<
   | "checkHealth"
   | "create"
   | "capture"
+  | "release"
   | "stop"
   | "importGitHub"
   | "listAssignments"

@@ -20,6 +20,8 @@ const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-provider-test",
+  projectId: "project-provider-test",
+  workspaceId: "workspace-provider-test",
   supervisorId: "supervisor-provider-test",
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",
@@ -51,6 +53,10 @@ function providerFixture() {
     exitCode: 0,
     output: Buffer.from("ok\n").toString("base64"),
   }));
+  const rebind = vi.fn<SandboxProvider["rebind"]>(async (handle, nextAssignment) => ({
+    ...handle,
+    assignment: nextAssignment,
+  }));
   const provider: SandboxProvider = {
     providerId: "gvisor",
     async checkHealth() {},
@@ -66,6 +72,7 @@ function providerFixture() {
         assignment: spec.assignment,
       };
     },
+    rebind,
     exec,
     async readFile() {
       return Buffer.alloc(0);
@@ -117,6 +124,7 @@ function providerFixture() {
   return {
     provider,
     exec,
+    rebind,
     get createSpec() {
       return createSpec;
     },
@@ -150,6 +158,16 @@ describe("provider-backed Tool Sandbox Manager", () => {
 
     const created = await manager.create(createRequest);
     expect(created).toMatchObject({ activationId: ACTIVATION_ID, capability: CAPABILITY });
+    expect(fixture.createSpec).toBeUndefined();
+    await expect(
+      manager.capture(ACTIVATION_ID, assignment, "10000000-0000-4000-8000-000000000017"),
+    ).resolves.toMatchObject({ type: "tool_sandbox.unused" });
+
+    await expect(
+      manager.execute(`adts_${"x".repeat(43)}`, operation("10000000-0000-4000-8000-000000000012")),
+    ).rejects.toMatchObject({ code: "invalid_tool_capability" });
+    const request = operation("10000000-0000-4000-8000-000000000013");
+    await expect(manager.execute(CAPABILITY, request)).resolves.toMatchObject({ exitCode: 0 });
     expect(fixture.createSpec).toMatchObject({
       activationId: ACTIVATION_ID,
       assignment: {
@@ -161,12 +179,6 @@ describe("provider-backed Tool Sandbox Manager", () => {
       policy: { network: { mode: "deny_all" } },
     });
     expect(fixture.createSpec).not.toHaveProperty("capability");
-
-    await expect(
-      manager.execute(`adts_${"x".repeat(43)}`, operation("10000000-0000-4000-8000-000000000012")),
-    ).rejects.toMatchObject({ code: "invalid_tool_capability" });
-    const request = operation("10000000-0000-4000-8000-000000000013");
-    await expect(manager.execute(CAPABILITY, request)).resolves.toMatchObject({ exitCode: 0 });
     await expect(manager.execute(CAPABILITY, request)).rejects.toMatchObject({
       code: "tool_operation_replay",
     });
@@ -184,6 +196,49 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
   });
 
+  it("reuses one exact-session runtime across fenced attempts without reprovisioning", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const first = await manager.create(createRequest);
+    await manager.execute(first.capability, operation("10000000-0000-4000-8000-000000000018"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "10000000-0000-4000-8000-000000000019",
+      activationId: first.activationId,
+      assignment,
+      disposition: "keep_warm",
+      workspaceRevision: "a".repeat(64),
+    });
+
+    const nextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-next",
+      turnId: "turn-provider-test-next",
+      attemptId: "10000000-0000-4000-8000-000000000020",
+      leaseId: "10000000-0000-4000-8000-000000000020",
+      fencingToken: 6,
+    };
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "10000000-0000-4000-8000-000000000021",
+      assignment: nextAssignment,
+      workspaceRevision: "a".repeat(64),
+    });
+    expect(second.activationId).toBe(first.activationId);
+    await manager.execute(second.capability, {
+      ...operation("10000000-0000-4000-8000-000000000022"),
+      activationId: second.activationId,
+    });
+    expect(fixture.rebind).toHaveBeenCalledTimes(1);
+    expect(fixture.exec).toHaveBeenCalledTimes(2);
+    await manager.stop(second.activationId, nextAssignment);
+  });
+
   it("revokes the capability before a provider stop failure escapes", async () => {
     const fixture = providerFixture();
     fixture.provider.stop = async () => {
@@ -195,6 +250,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       capabilityGenerator: () => CAPABILITY,
     });
     await manager.create(createRequest);
+    await manager.execute(CAPABILITY, operation("10000000-0000-4000-8000-000000000016"));
     await expect(manager.stop(ACTIVATION_ID, assignment)).rejects.toMatchObject({
       code: "cleanup_failed",
     });

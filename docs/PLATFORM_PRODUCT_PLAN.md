@@ -17,7 +17,8 @@ workspaces, code-review delivery, usage tracking, and automated evaluation.
 ### Milestone 1: trusted Runner and Sandbox Provider
 
 Status: complete for the supported single-node Kubernetes + gVisor/KVM
-private-host claim under ADR-0039.
+private-host claim under ADR-0039, with demand activation, exact Session warm
+reuse, split checkpoints, and batched event delivery under ADR-0040.
 
 - trusted Pi Runner and model boundary;
 - least-privilege Kubernetes Sandbox Manager with no runtime socket;
@@ -31,6 +32,12 @@ private-host claim under ADR-0039.
 The original ordinary-Docker implementation was removed under ADR-0038, and
 ADR-0039 then removed direct-Docker lifecycle ownership. The Provider interface
 alone is not treated as runtime evidence.
+
+ADR-0040 removes Pod provisioning from pure-chat Runs, materializes the Pod on
+the first Tool Call, rebinds only an exact Session/revision under a newer fence,
+and evicts warm Pods by idle TTL and bounded LRU. It also separates Pi and
+Workspace checkpoints and decouples Pi event production from PostgreSQL through
+a bounded asynchronous batch publisher with cumulative ACK.
 
 ### Milestone 2: durable Run protocol
 

@@ -4,6 +4,7 @@ import {
   type CommandAckMessage,
   type CancelTurnCommandMessage,
   type EventAckMessage,
+  type EventPublishBatchMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
@@ -24,6 +25,10 @@ import {
   type PiRpcEventPublisher,
   type PiRpcTurnResult,
 } from "./pi-rpc-turn-runner.ts";
+import {
+  BatchedEventPublisher,
+  type SupervisorEventPublication,
+} from "./batched-event-publisher.ts";
 
 export interface SupervisorTurnRunner {
   run(
@@ -83,7 +88,7 @@ type AssignmentState =
 
 type Assignment = {
   command: ExecuteTurnCommandMessage;
-  publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage;
+  publishEvent: (message: SupervisorEventPublication) => Promise<EventAckMessage> | EventAckMessage;
   eventSpool?: SupervisorEventSpool;
   abortController: AbortController;
   state: AssignmentState;
@@ -322,7 +327,9 @@ export class LocalSandboxSupervisor {
 
   prepare(
     value: unknown,
-    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
+    publishEvent: (
+      message: EventPublishMessage | EventPublishBatchMessage,
+    ) => Promise<EventAckMessage> | EventAckMessage,
   ): PreparedTurnExecution {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.execute") {
@@ -582,50 +589,68 @@ export class LocalSandboxSupervisor {
     eventSpool: SupervisorEventSpool,
   ): Promise<PiRpcTurnResult> {
     assignment.eventSpool = eventSpool;
-    return this.#runner.run(
-      assignment.command,
-      async (message) => {
-        const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
-        if (
-          latest !== assignment ||
-          (assignment.state !== "running" && assignment.state !== "cancelling")
-        ) {
-          throw new LocalSandboxSupervisorError(
-            "stale_fence",
-            "Stale assignment cannot publish events",
-          );
-        }
-        if (
-          message.payload.leaseId !== assignment.command.payload.leaseId ||
-          message.payload.fencingToken !== assignment.command.payload.fencingToken ||
-          message.payload.commandId !== assignment.command.payload.commandId
-        ) {
-          throw new LocalSandboxSupervisorError(
-            "invalid_event",
-            "Runner event identity does not match its assignment",
-          );
-        }
+    const publisher = new BatchedEventPublisher({
+      publish: assignment.publishEvent,
+      spool: eventSpool,
+      clock: this.#clock,
+      idGenerator: this.#idGenerator,
+    });
+    return (async () => {
+      try {
+        return await this.#runner.run(
+          assignment.command,
+          async (message) => {
+            const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
+            if (
+              latest !== assignment ||
+              (assignment.state !== "running" && assignment.state !== "cancelling")
+            ) {
+              throw new LocalSandboxSupervisorError(
+                "stale_fence",
+                "Stale assignment cannot publish events",
+              );
+            }
+            if (
+              message.payload.leaseId !== assignment.command.payload.leaseId ||
+              message.payload.fencingToken !== assignment.command.payload.fencingToken ||
+              message.payload.commandId !== assignment.command.payload.commandId
+            ) {
+              throw new LocalSandboxSupervisorError(
+                "invalid_event",
+                "Runner event identity does not match its assignment",
+              );
+            }
+            try {
+              await eventSpool.append(message);
+            } catch (error: unknown) {
+              if (!(error instanceof EventSpoolError)) throw error;
+              throw new LocalSandboxSupervisorError(
+                "invalid_event_delivery",
+                "Supervisor event delivery contract was violated",
+              );
+            }
+            try {
+              await publisher.enqueue(message);
+            } catch {
+              throw new LocalSandboxSupervisorError(
+                "invalid_event_delivery",
+                "Supervisor event publisher rejected a queued event",
+              );
+            }
+          },
+          assignment.abortController.signal,
+        );
+      } finally {
         try {
-          await eventSpool.append(message);
-        } catch (error: unknown) {
-          if (!(error instanceof EventSpoolError)) throw error;
-          throw new LocalSandboxSupervisorError(
-            "invalid_event_delivery",
-            "Supervisor event delivery contract was violated",
-          );
-        }
-        const acknowledgement = await assignment.publishEvent(message);
-        try {
-          await eventSpool.acknowledge(acknowledgement);
+          await publisher.drain();
         } catch {
           throw new LocalSandboxSupervisorError(
             "invalid_event_delivery",
-            "Supervisor event acknowledgement was invalid",
+            "Supervisor batched event delivery could not be drained",
           );
         }
-      },
-      assignment.abortController.signal,
-    );
+      }
+    })();
   }
 
   #spoolOpenError(error: unknown): Error {

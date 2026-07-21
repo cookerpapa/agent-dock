@@ -20,6 +20,13 @@ export interface KubernetesRuntimeClient {
   createPod(namespace: string, pod: V1Pod): Promise<V1Pod>;
   readPod(namespace: string, name: string): Promise<V1Pod | undefined>;
   listPods(namespace: string, labelSelector: string): Promise<readonly V1Pod[]>;
+  patchPodAnnotations(
+    namespace: string,
+    name: string,
+    uid: string,
+    resourceVersion: string,
+    annotations: Readonly<Record<string, string>>,
+  ): Promise<V1Pod>;
   deletePod(
     namespace: string,
     name: string,
@@ -179,6 +186,36 @@ export class OfficialKubernetesRuntimeClient implements KubernetesRuntimeClient 
     } catch (error: unknown) {
       if (error instanceof SandboxManagerError) throw error;
       throw kubernetesFailure(error, "Pod inventory");
+    }
+  }
+
+  async patchPodAnnotations(
+    namespace: string,
+    name: string,
+    uid: string,
+    resourceVersion: string,
+    annotations: Readonly<Record<string, string>>,
+  ): Promise<V1Pod> {
+    try {
+      return await this.#core.patchNamespacedPod({
+        namespace,
+        name,
+        fieldManager: "agent-dock-sandbox-manager",
+        body: [
+          { op: "test", path: "/metadata/uid", value: uid },
+          { op: "test", path: "/metadata/resourceVersion", value: resourceVersion },
+          { op: "replace", path: "/metadata/annotations", value: annotations },
+        ],
+      });
+    } catch (error: unknown) {
+      if (apiStatus(error) === 409 || apiStatus(error) === 422) {
+        throw new SandboxManagerError(
+          "kubernetes_pod_identity_mismatch",
+          "Kubernetes rejected a stale Pod annotation precondition",
+          false,
+        );
+      }
+      throw kubernetesFailure(error, "Pod annotation update");
     }
   }
 

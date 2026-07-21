@@ -93,7 +93,7 @@ Assumed trusted or out of scope for the current claim:
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
 | Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool Pod has no ServiceAccount token; Manager RBAC is namespace-scoped except read-only access to the one named RuntimeClass | production topology, RBAC and Pod-spec inspection |
 | Tool reaches internal services or Internet | Tool namespace has default-deny ingress/egress and DNS disabled | cluster/service/node/public TCP denial probe and network matrix |
-| Cross-tenant workspace read | one memory-backed workspace volume per active Turn; immutable identity-bound handle and Pod UID fencing | simultaneous two-tenant integration test |
+| Cross-tenant workspace read | one memory-backed workspace per exact tenant/project/workspace/session activation; warm reuse never crosses that key; immutable handle, rotating capability and Pod UID/fence checks | simultaneous two-tenant and warm-rebind integration tests |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
 | Stale worker commits state | lease ID, attempt ID, fencing token, checkpoint revision CAS, fenced event commit | PostgreSQL and production recovery tests |

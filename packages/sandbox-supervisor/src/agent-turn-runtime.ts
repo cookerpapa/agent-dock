@@ -1,6 +1,7 @@
 import type { AgentModelRuntime, ExecuteTurnCommandMessage } from "@agent-dock/protocol";
 
-export type AgentTurnScenario = "java_repair" | "java_followup" | "coding_eval" | "timeout";
+export type AgentTurnScenario =
+  "text" | "java_repair" | "java_followup" | "coding_eval" | "timeout";
 
 export type AgentTurnScenarioContext = {
   command: ExecuteTurnCommandMessage;

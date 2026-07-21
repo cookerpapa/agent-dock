@@ -2,11 +2,12 @@
 
 This file preserves the original aspirational phase roadmap, including optional
 subagents and a future multi-node/Helm release. The single-node Kubernetes +
-gVisor execution plane is now implemented under ADR-0039. The
+gVisor execution plane and demand-activated warm-Sandbox/event-batching upgrade
+are now implemented under ADR-0039 and ADR-0040. The
 dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
 private single-host product are tracked in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and are complete through
-ADR-0039. Do not interpret completion of that product plan as a claim that the
+ADR-0040. Do not interpret completion of that product plan as a claim that the
 optional Phase 5 subagent tree or a multi-node Helm release exists.
 
 The dependency-ordered long-term product direction is maintained in
@@ -161,8 +162,10 @@ Current status: the tool-execution boundary is complete for the supported
 single-host slice. ADR-0029 splits the trusted Pi Runner from the Sandbox
 Manager; Pi's built-ins are disabled and replaced through public operation
 APIs. ADR-0039 moves lifecycle ownership behind a least-privilege Kubernetes
-client, with no application-held Docker or containerd socket. Each active Turn
-receives a credential-free, networkless, non-root gVisor Pod. Production
+client, with no application-held Docker or containerd socket. ADR-0040 adds a
+logical reservation so pure chat receives no Pod; the first Tool Call activates
+a credential-free, networkless, non-root gVisor Pod that is warm-reused only by
+the exact Session under newer fencing authority. Production
 acceptance proves remote `bash/edit`, checkpoint/diff capture, cancellation,
 exact cleanup, scoped Kubernetes authority, and secret absence. The old
 whole-Pi ordinary-Docker runner and its demo/test protocol have been removed.
@@ -178,6 +181,11 @@ ADR-0039 supersedes the direct-Docker lifecycle with
 Manager. The gate proves guest identity, resources, default-deny networking,
 `/proc` and credential isolation, cross-tenant workspaces, bounded output,
 cancellation, cleanup and the real Pi repair path.
+
+ADR-0040 removes eager per-Run Pod creation and per-event remote ACK blocking.
+It separates conversation and Workspace checkpoints, uses exact Session-scoped
+warm reuse with revision/fence/UID verification, and publishes coalesced events
+through a bounded asynchronous batch pipeline with cumulative ACK.
 
 This bounded tool-sandbox slice is resume-ready.
 

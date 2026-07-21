@@ -15,6 +15,7 @@ import {
   type ToolSandboxCreateResponse,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
+  type ToolSandboxReleaseResponse,
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import { activeTraceCarrier } from "@agent-dock/observability";
@@ -142,7 +143,7 @@ export class SandboxManagerClient {
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
     const response = await this.#service(request);
-    if (response.type !== "tool_sandbox.created" || response.requestId !== request.requestId) {
+    if (response.type !== "tool_sandbox.reserved" || response.requestId !== request.requestId) {
       throw new SandboxManagerClientError(
         "sandbox_manager_protocol_error",
         "Sandbox Manager create response did not match",
@@ -165,13 +166,53 @@ export class SandboxManagerClient {
       assignment,
     });
     if (
-      response.type !== "tool_sandbox.captured" ||
+      (response.type !== "tool_sandbox.captured" && response.type !== "tool_sandbox.unused") ||
       response.requestId !== requestId ||
       response.activationId !== activationId
     ) {
       throw new SandboxManagerClientError(
         "sandbox_manager_protocol_error",
         "Sandbox Manager capture response did not match",
+        false,
+      );
+    }
+    return response;
+  }
+
+  async release(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+  ): Promise<ToolSandboxReleaseResponse> {
+    const requestId = this.#idGenerator();
+    const response = await this.#service(
+      disposition.kind === "keep_warm"
+        ? {
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.release",
+            requestId,
+            activationId,
+            assignment,
+            disposition: "keep_warm",
+            workspaceRevision: disposition.workspaceRevision,
+          }
+        : {
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.release",
+            requestId,
+            activationId,
+            assignment,
+            disposition: "destroy",
+          },
+    );
+    if (
+      response.type !== "tool_sandbox.released" ||
+      response.requestId !== requestId ||
+      response.activationId !== activationId
+    ) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_protocol_error",
+        "Sandbox Manager release response did not match",
         false,
       );
     }

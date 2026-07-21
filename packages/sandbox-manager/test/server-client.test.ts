@@ -25,6 +25,8 @@ const CAPABILITY = `adts_${"c".repeat(43)}`;
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-manager-test",
+  projectId: "project-manager-test",
+  workspaceId: "workspace-manager-test",
   supervisorId: "supervisor-manager-test",
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",
@@ -59,18 +61,26 @@ function backend(): SandboxManagerBackend {
       observedServerTrace = activeTraceCarrier();
       return {
         managerProtocolVersion: 1,
-        type: "tool_sandbox.created",
+        type: "tool_sandbox.reserved",
         requestId: request.requestId,
         activationId: ACTIVATION_ID,
         capability: CAPABILITY,
-        runtimeId: "66666666-6666-4666-8666-666666666666",
-        runtimeName: "agent-dock-tool-test",
         workspaceRoot: "/workspace",
       };
     },
     async capture() {
       throw new Error("unused");
     },
+    async release(request) {
+      return {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.released",
+        requestId: request.requestId,
+        activationId: request.activationId,
+        retained: false,
+      };
+    },
+    activeCount: 0,
     async stop() {},
     async execute(capability, request) {
       if (capability !== CAPABILITY) throw new Error("wrong capability");
@@ -168,7 +178,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     expect(unauthorized.status).toBe(401);
     const exportedMetrics = await metrics.registry.metrics();
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_operation_seconds_count{service="sandbox-manager-test",operation="create",outcome="completed"} 1',
+      'agent_dock_sandbox_operation_seconds_count{service="sandbox-manager-test",operation="reserve",outcome="completed"} 1',
     );
     expect(exportedMetrics).toContain(
       'agent_dock_tool_duration_seconds_count{service="sandbox-manager-test",tool="bash.exec",outcome="completed"} 1',

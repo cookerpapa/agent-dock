@@ -8,6 +8,7 @@ import {
   type CommandReleaseMessage,
   type CommandResultMessage,
   type EventPublishMessage,
+  type EventPublishBatchMessage,
   type ExecuteTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@agent-dock/protocol";
@@ -20,6 +21,7 @@ const DEFAULT_COMMAND_RESULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_PENDING_COMMANDS = 1_000;
 
 export type SupervisorRemoteCommand = ExecuteTurnCommandMessage | CancelTurnCommandMessage;
+export type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
 export type SupervisorCommandConnection = {
   supervisorId: string;
@@ -248,16 +250,35 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
       this.#acceptResult(state, message);
       return true;
     }
-    if (message.type === "event.publish") {
-      await connection.assertEventAuthority(message);
+    if (message.type === "event.publish" || message.type === "event.publish_batch") {
+      const publications: EventPublishMessage[] =
+        message.type === "event.publish"
+          ? [message]
+          : message.payload.events.map((event) => ({
+              protocolVersion: 1,
+              messageId: message.messageId,
+              sentAt: message.sentAt,
+              type: "event.publish",
+              payload: {
+                leaseId: message.payload.leaseId,
+                fencingToken: message.payload.fencingToken,
+                ...(message.payload.commandId === undefined
+                  ? {}
+                  : { commandId: message.payload.commandId }),
+                event,
+              },
+            }));
+      const lastEvent =
+        message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
+      await connection.assertEventAuthority(publications[0]!);
       const acknowledgement = await this.#eventIngestor.ingest(message);
       const parsed = parseControlToSupervisorMessage(acknowledgement);
       if (
         parsed.type !== "event.ack" ||
-        parsed.payload.sessionId !== message.payload.event.sessionId ||
+        parsed.payload.sessionId !== lastEvent.sessionId ||
         parsed.payload.leaseId !== message.payload.leaseId ||
         parsed.payload.fencingToken !== message.payload.fencingToken ||
-        parsed.payload.acknowledgedThroughSeq !== message.payload.event.seq
+        parsed.payload.acknowledgedThroughSeq !== lastEvent.seq
       ) {
         throw transportError(
           "event_ack_mismatch",
@@ -266,7 +287,9 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
           true,
         );
       }
-      await this.#onEvent?.(message, connection);
+      for (const publication of publications) {
+        await this.#onEvent?.(publication, connection);
+      }
       await connection.send(parsed);
       return true;
     }

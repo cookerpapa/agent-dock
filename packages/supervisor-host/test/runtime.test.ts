@@ -85,6 +85,9 @@ function sandboxManager(): SupervisorSandboxManager {
     async capture() {
       throw new Error("unused");
     },
+    async release() {
+      throw new Error("unused");
+    },
     async stop() {},
     async importGitHub() {
       throw new Error("unused");

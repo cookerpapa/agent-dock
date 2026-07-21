@@ -1,4 +1,10 @@
 export {
+  BatchedEventPublisher,
+  type BatchedEventPublisherOptions,
+  type SupervisorEventPublication,
+} from "./batched-event-publisher.ts";
+
+export {
   EventDeliveryRejectedError,
   EventSpoolError,
   InMemoryEventSpool,

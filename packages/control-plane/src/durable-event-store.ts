@@ -5,6 +5,7 @@ import {
   parseSupervisorToControlMessage,
   type AgentDockEvent,
   type EventAckMessage,
+  type EventPublishBatchMessage,
   type EventPublishMessage,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -183,26 +184,76 @@ export class DurableEventStore implements DurableEventIngestor {
 
   async ingest(value: unknown): Promise<EventAckMessage> {
     const parsed = parseSupervisorToControlMessage(value);
-    if (parsed.type !== "event.publish") {
+    if (parsed.type !== "event.publish" && parsed.type !== "event.publish_batch") {
       throw new DurableEventStoreError("invalid_event", "Expected an event publication");
+    }
+    const publications = this.#publications(parsed);
+    const first = publications[0];
+    const last = publications.at(-1);
+    if (first === undefined || last === undefined) {
+      throw new DurableEventStoreError("invalid_event", "Event batch was empty");
     }
     const now = validDate(this.#clock);
     const result = await this.#database.transaction().execute(async (transaction) => {
-      const ingested = await this.#ingestTransaction(transaction, parsed, now);
+      let ingested: { tenantId: string; acknowledgedThroughSeq: number } | undefined;
+      for (const publication of publications) {
+        ingested = await this.#ingestTransaction(transaction, publication, now);
+      }
+      if (ingested === undefined) {
+        throw new DurableEventStoreError("invalid_event", "Event batch was empty");
+      }
       await this.#eventNotificationPublisher?.publish(transaction, {
         schemaVersion: 1,
         tenantId: ingested.tenantId,
-        sessionId: parsed.payload.event.sessionId,
+        sessionId: last.payload.event.sessionId,
         throughSequence: ingested.acknowledgedThroughSeq,
       });
       return ingested;
     });
     this.#eventHub?.notifyThrough(
       result.tenantId,
-      parsed.payload.event.sessionId,
+      last.payload.event.sessionId,
       result.acknowledgedThroughSeq,
     );
-    return this.#acknowledgement(parsed, result.acknowledgedThroughSeq, now);
+    return this.#acknowledgement(last, result.acknowledgedThroughSeq, now);
+  }
+
+  #publications(
+    message: EventPublishMessage | EventPublishBatchMessage,
+  ): readonly EventPublishMessage[] {
+    if (message.type === "event.publish") return [message];
+    const events = message.payload.events;
+    const first = events[0];
+    if (first === undefined) {
+      throw new DurableEventStoreError("invalid_event", "Event batch was empty");
+    }
+    for (const [index, event] of events.entries()) {
+      if (
+        event.sessionId !== first.sessionId ||
+        event.turnId !== first.turnId ||
+        event.agentId !== first.agentId ||
+        event.seq !== first.seq + index
+      ) {
+        throw new DurableEventStoreError(
+          "invalid_event",
+          "Event batch identity or sequence was not contiguous",
+        );
+      }
+    }
+    return events.map((event) => ({
+      protocolVersion: 1,
+      messageId: message.messageId,
+      sentAt: message.sentAt,
+      type: "event.publish",
+      payload: {
+        leaseId: message.payload.leaseId,
+        fencingToken: message.payload.fencingToken,
+        ...(message.payload.commandId === undefined
+          ? {}
+          : { commandId: message.payload.commandId }),
+        event,
+      },
+    }));
   }
 
   async openReplayWindow(

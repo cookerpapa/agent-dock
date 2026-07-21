@@ -57,6 +57,8 @@ export const KUBERNETES_SANDBOX_LABELS = {
 export const KUBERNETES_SANDBOX_ANNOTATIONS = {
   activationId: "agent-dock.io/activation-id",
   tenantId: "agent-dock.io/tenant-id",
+  projectId: "agent-dock.io/project-id",
+  workspaceId: "agent-dock.io/workspace-id",
   supervisorId: "agent-dock.io/supervisor-id",
   bootId: "agent-dock.io/boot-id",
   sandboxId: "agent-dock.io/sandbox-id",
@@ -99,6 +101,8 @@ type Deferred<T> = {
 type ManagedPodRuntime = SupervisorRuntimeAssignment & {
   activationId: string;
   tenantId: string;
+  projectId: string;
+  workspaceId: string;
   attemptId: string;
 };
 
@@ -206,6 +210,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 function sameAssignment(left: ToolSandboxAssignment, right: ToolSandboxAssignment): boolean {
   return (
     left.tenantId === right.tenantId &&
+    left.projectId === right.projectId &&
+    left.workspaceId === right.workspaceId &&
     left.supervisorId === right.supervisorId &&
     left.bootId === right.bootId &&
     left.sandboxId === right.sandboxId &&
@@ -271,6 +277,8 @@ function assignmentAnnotations(
   return {
     [KUBERNETES_SANDBOX_ANNOTATIONS.activationId]: activationId,
     [KUBERNETES_SANDBOX_ANNOTATIONS.tenantId]: assignment.tenantId,
+    [KUBERNETES_SANDBOX_ANNOTATIONS.projectId]: assignment.projectId,
+    [KUBERNETES_SANDBOX_ANNOTATIONS.workspaceId]: assignment.workspaceId,
     [KUBERNETES_SANDBOX_ANNOTATIONS.supervisorId]: assignment.supervisorId,
     [KUBERNETES_SANDBOX_ANNOTATIONS.bootId]: assignment.bootId,
     [KUBERNETES_SANDBOX_ANNOTATIONS.sandboxId]: assignment.sandboxId,
@@ -630,6 +638,8 @@ function podToAssignment(pod: V1Pod): ManagedPodRuntime {
     containerName: name,
     activationId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.activationId),
     tenantId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.tenantId),
+    projectId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.projectId),
+    workspaceId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.workspaceId),
     supervisorId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.supervisorId),
     bootId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.bootId),
     sandboxId: requiredAnnotation(annotations, KUBERNETES_SANDBOX_ANNOTATIONS.sandboxId),
@@ -892,6 +902,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       if (
         currentAssignment.activationId !== activationId ||
         currentAssignment.tenantId !== spec.assignment.tenantId ||
+        currentAssignment.projectId !== spec.assignment.projectId ||
+        currentAssignment.workspaceId !== spec.assignment.workspaceId ||
         currentAssignment.attemptId !== spec.assignment.attemptId ||
         !assignmentMatchesRuntime(spec.assignment, currentAssignment)
       ) {
@@ -959,6 +971,84 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       }
       throw error;
     }
+  }
+
+  async rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle> {
+    const activation = this.#ownedHandle(handle);
+    if (
+      activation.stopping ||
+      activation.failed !== undefined ||
+      activation.operations.size > 0 ||
+      activation.captures.size > 0
+    ) {
+      throw new SandboxManagerError(
+        "tool_sandbox_busy",
+        "Tool Sandbox cannot transfer ownership while work is active",
+        true,
+      );
+    }
+    if (
+      assignment.tenantId !== handle.assignment.tenantId ||
+      assignment.projectId !== handle.assignment.projectId ||
+      assignment.workspaceId !== handle.assignment.workspaceId ||
+      assignment.sessionId !== handle.assignment.sessionId ||
+      assignment.supervisorId !== handle.assignment.supervisorId ||
+      assignment.bootId !== handle.assignment.bootId ||
+      assignment.sandboxId !== handle.assignment.sandboxId ||
+      assignment.fencingToken <= handle.assignment.fencingToken
+    ) {
+      throw new SandboxManagerError(
+        "tool_sandbox_identity_mismatch",
+        "Tool Sandbox ownership transfer was outside its session or fence",
+        false,
+      );
+    }
+    const pod = await this.#client.readPod(this.#sandboxNamespace, handle.runtimeName);
+    const resourceVersion = pod?.metadata?.resourceVersion;
+    if (
+      pod === undefined ||
+      pod.metadata?.uid !== handle.runtimeId ||
+      typeof resourceVersion !== "string" ||
+      resourceVersion.length < 1 ||
+      !this.#managedRuntimeMatchesHandle(podToAssignment(pod), handle)
+    ) {
+      throw new SandboxManagerError(
+        "tool_sandbox_identity_mismatch",
+        "Tool Sandbox ownership transfer identity did not match",
+        false,
+      );
+    }
+    const updated = await this.#client.patchPodAnnotations(
+      this.#sandboxNamespace,
+      handle.runtimeName,
+      handle.runtimeId,
+      resourceVersion,
+      {
+        ...(pod.metadata?.annotations ?? {}),
+        ...assignmentAnnotations(handle.activationId, assignment, DEFAULT_TOOL_SANDBOX_POLICY),
+      },
+    );
+    const current = podToAssignment(updated);
+    if (
+      current.containerId !== handle.runtimeId ||
+      current.activationId !== handle.activationId ||
+      current.tenantId !== assignment.tenantId ||
+      current.projectId !== assignment.projectId ||
+      current.workspaceId !== assignment.workspaceId ||
+      current.attemptId !== assignment.attemptId ||
+      !assignmentMatchesRuntime(assignment, current)
+    ) {
+      throw new SandboxManagerError(
+        "tool_sandbox_identity_mismatch",
+        "Rebound Kubernetes Tool Sandbox identity did not match",
+        false,
+      );
+    }
+    const rebound: SandboxHandle = { ...handle, assignment };
+    activation.assignment = assignment;
+    activation.handle = rebound;
+    activation.seenOperationIds.clear();
+    return rebound;
   }
 
   async exec(
@@ -1165,6 +1255,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     if (
       current.activationId !== activationId ||
       current.tenantId !== assignment.tenantId ||
+      current.projectId !== assignment.projectId ||
+      current.workspaceId !== assignment.workspaceId ||
       current.attemptId !== assignment.attemptId ||
       !assignmentMatchesRuntime(assignment, current)
     ) {
@@ -1681,6 +1773,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       current.containerName === handle.runtimeName &&
       current.activationId === handle.activationId &&
       current.tenantId === handle.assignment.tenantId &&
+      current.projectId === handle.assignment.projectId &&
+      current.workspaceId === handle.assignment.workspaceId &&
       current.attemptId === handle.assignment.attemptId &&
       assignmentMatchesRuntime(handle.assignment, current)
     );

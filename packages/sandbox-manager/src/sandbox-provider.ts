@@ -152,6 +152,7 @@ export interface SandboxProvider {
 
   checkHealth(): Promise<void>;
   create(spec: SandboxCreateSpec): Promise<SandboxHandle>;
+  rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle>;
   exec(
     handle: SandboxHandle,
     request: ToolSandboxOperationRequest,

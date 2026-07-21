@@ -313,13 +313,35 @@ export class LocalSupervisorExecutionBackend
       const command = parsed;
       prepared = this.#supervisor.prepare(command, async (message) => {
         const eventMessage = parseSupervisorToControlMessage(message);
+        const publications =
+          eventMessage.type === "event.publish"
+            ? [eventMessage]
+            : eventMessage.type === "event.publish_batch"
+              ? eventMessage.payload.events.map((event) => ({
+                  protocolVersion: 1 as const,
+                  messageId: eventMessage.messageId,
+                  sentAt: eventMessage.sentAt,
+                  type: "event.publish" as const,
+                  payload: {
+                    leaseId: eventMessage.payload.leaseId,
+                    fencingToken: eventMessage.payload.fencingToken,
+                    ...(eventMessage.payload.commandId === undefined
+                      ? {}
+                      : { commandId: eventMessage.payload.commandId }),
+                    event,
+                  },
+                }))
+              : [];
         if (
-          eventMessage.type !== "event.publish" ||
-          eventMessage.payload.commandId !== request.commandId ||
-          eventMessage.payload.leaseId !== acknowledgement?.leaseId ||
-          eventMessage.payload.fencingToken !== acknowledgement.fencingToken ||
-          eventMessage.payload.event.sessionId !== request.sessionId ||
-          eventMessage.payload.event.turnId !== request.turnId
+          publications.length === 0 ||
+          publications.some(
+            (publication) =>
+              publication.payload.commandId !== request.commandId ||
+              publication.payload.leaseId !== acknowledgement?.leaseId ||
+              publication.payload.fencingToken !== acknowledgement.fencingToken ||
+              publication.payload.event.sessionId !== request.sessionId ||
+              publication.payload.event.turnId !== request.turnId,
+          )
         ) {
           throw new TurnExecutionBackendError(
             "backend_protocol_violation",
@@ -327,11 +349,9 @@ export class LocalSupervisorExecutionBackend
             false,
           );
         }
-        const eventAck = validateEventAck(
-          eventMessage,
-          await this.#eventIngestor.ingest(eventMessage),
-        );
-        await this.#onEvent?.(eventMessage);
+        const last = publications.at(-1)!;
+        const eventAck = validateEventAck(last, await this.#eventIngestor.ingest(eventMessage));
+        for (const publication of publications) await this.#onEvent?.(publication);
         return eventAck;
       });
       const ack = validateAck(request, command, prepared.ack);

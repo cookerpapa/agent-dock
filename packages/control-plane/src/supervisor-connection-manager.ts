@@ -629,12 +629,13 @@ export class SupervisorConnectionManager {
         false,
       );
     }
+    const event = message.payload.event;
     await this.#currentConnection(connectionId, authority);
     const now = validDate(this.#clock);
     const lease = await this.#database
       .selectFrom("session_leases")
       .select(["sandbox_id", "lease_id", "fencing_token", "valid_until"])
-      .where("session_id", "=", message.payload.event.sessionId)
+      .where("session_id", "=", event.sessionId)
       .executeTakeFirst();
     if (
       lease === undefined ||

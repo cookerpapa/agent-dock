@@ -62,21 +62,36 @@ The browser, prompt, repository and model cannot supply a PodSpec, image,
 RuntimeClass, ServiceAccount, volume, node selector, command wrapper, security
 context or network policy.
 
-## Active-Turn lifecycle
+## Demand-activated Session lifecycle
 
-One active Turn receives one Pod. Every `read`, `write`, `edit`, `bash`, Git and
-test call in that Turn uses the same image-owned worker and `/workspace`.
+A Run first receives only a logical capability reservation. No Pod is created
+until the first authenticated `read`, `write`, `edit` or `bash` operation.
+`AGENTS.md` is read from the already validated committed Workspace snapshot in
+the trusted Runner, so loading repository instructions does not accidentally
+activate a Pod. Every Tool call in that Run uses the same image-owned worker and
+`/workspace`.
 
 ```text
-create Pod -> restore checkpoint -> attach Tool Worker
-           -> many tool calls -> capture snapshot/patch
-           -> delete Pod -> commit terminal state
+chat: reserve -> Pi/model -> save Pi JSONL -> release unused reservation
+
+code: reserve -> first Tool -> create/restore/attach gVisor Pod
+      -> many Tools -> capture Workspace/Pi -> retain exact-session warm Pod
+      -> later Run rebinds higher fence on same Pod UID
+      -> idle TTL/revision mismatch/failure/cancel/shutdown -> delete Pod
 ```
 
-Completion, failure, cancellation and timeout all delete the Pod. A later Turn
-creates a different Pod UID and restores the immutable Pi/workspace checkpoint.
-Cold conversations therefore consume no Pod or Pi process; Pod survival is not
-a durability mechanism.
+Successful tool-using Runs retain at most the configured number of exact
+tenant/project/workspace/session Pods for the configured idle TTL. Reuse
+requires an exact committed Workspace content revision. Capability rotation,
+higher writer fence, and UID/resourceVersion-preconditioned annotation patching
+bind the existing Pod to the new Attempt. Revision mismatch, failure,
+cancellation and timeout delete it. Cold conversations consume no Pod or Pi
+process, and Pod survival is never a durability mechanism.
+
+Production defaults retain at most four warm Pods for 15 minutes
+(`AGENT_DOCK_MAXIMUM_WARM_SANDBOXES=4`,
+`AGENT_DOCK_SANDBOX_WARM_TTL_MS=900000`). Eviction destroys the Pod; recovery
+always uses the committed object-store checkpoint.
 
 ## Fixed Tool policy
 
@@ -133,7 +148,8 @@ gVisor. It does not trust configuration text or an Agent's description of its
 environment.
 
 The dedicated Manager ServiceAccount can create/get/list/watch/delete Pods and
-use logs/attach/exec only in the Tool and importer namespaces. It cannot read
+use logs/attach/exec in both execution namespaces; only the Tool namespace also
+allows Pod metadata `patch` for fenced warm rebinding. It cannot read
 Secrets, mutate NetworkPolicies/RBAC/ServiceAccounts, inspect nodes, use host
 namespaces, or create workloads elsewhere. Tool/import Pods use a separate
 ServiceAccount with no RBAC authority.

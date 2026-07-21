@@ -27,6 +27,7 @@ const CAPABILITY_ENV = "AGENT_DOCK_TRUSTED_TOOL_CAPABILITY";
 const REMAINING_TOOL_CALLS_ENV = "AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS";
 const MAXIMUM_TOOL_OUTPUT_BYTES_ENV = "AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES";
 const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
+const PROJECT_INSTRUCTIONS_BASE64_ENV = "AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64";
 const TRACEPARENT_ENV = "AGENT_DOCK_TRUSTED_TRACEPARENT";
 const TRACESTATE_ENV = "AGENT_DOCK_TRUSTED_TRACESTATE";
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024;
@@ -63,6 +64,7 @@ function runtimeConfiguration(): {
   remainingToolCalls: number;
   maximumToolOutputBytes: number;
   toolOutputDirectory: string;
+  projectInstructions?: string;
   traceparent?: string;
   tracestate?: string;
 } {
@@ -82,6 +84,7 @@ function runtimeConfiguration(): {
   const remainingToolCalls = Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV));
   const maximumToolOutputBytes = Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV));
   const configuredToolOutputDirectory = requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV);
+  const encodedProjectInstructions = process.env[PROJECT_INSTRUCTIONS_BASE64_ENV];
   const traceparent = process.env[TRACEPARENT_ENV];
   const tracestate = process.env[TRACESTATE_ENV];
   const toolOutputDirectory = resolve(configuredToolOutputDirectory);
@@ -102,6 +105,25 @@ function runtimeConfiguration(): {
   ) {
     throw new Error("Trusted Tool Sandbox identity is invalid");
   }
+  let projectInstructions: string | undefined;
+  if (encodedProjectInstructions !== undefined) {
+    const decoded = Buffer.from(encodedProjectInstructions, "base64");
+    if (
+      encodedProjectInstructions.length > 24_000 ||
+      decoded.toString("base64") !== encodedProjectInstructions ||
+      decoded.byteLength > MAX_PROJECT_INSTRUCTIONS_BYTES + 64
+    ) {
+      throw new Error("Trusted project instructions are invalid");
+    }
+    try {
+      projectInstructions = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+    } catch {
+      throw new Error("Trusted project instructions are invalid");
+    }
+    if (projectInstructions.includes("\0") || projectInstructions.trim().length === 0) {
+      throw new Error("Trusted project instructions are invalid");
+    }
+  }
   if (
     traceparent !== undefined &&
     !/^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-0[01]$/.test(traceparent)
@@ -121,6 +143,7 @@ function runtimeConfiguration(): {
     remainingToolCalls,
     maximumToolOutputBytes,
     toolOutputDirectory,
+    ...(projectInstructions === undefined ? {} : { projectInstructions }),
     ...(traceparent === undefined ? {} : { traceparent }),
     ...(tracestate === undefined ? {} : { tracestate }),
   };
@@ -261,30 +284,6 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     await writeFile(target, value, { flag: "wx", mode: 0o600 });
   };
 
-  const loadProjectInstructions = async (): Promise<string | undefined> => {
-    let response: ToolSandboxOperationResponse;
-    try {
-      response = await operation({ operation: "file.read", path: "AGENTS.md" });
-    } catch (error: unknown) {
-      if (error instanceof RemoteToolError && error.code === "tool_file_unavailable") {
-        return undefined;
-      }
-      throw error;
-    }
-    if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
-    if (response.operation !== "file.read") throw new Error("Tool response kind changed");
-    const bytes = canonicalBase64(response.content);
-    const bounded = bytes.subarray(0, MAX_PROJECT_INSTRUCTIONS_BYTES);
-    let content: string;
-    try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bounded);
-    } catch {
-      return undefined;
-    }
-    if (content.includes("\0") || content.trim().length === 0) return undefined;
-    return `${content}${bytes.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by AgentDock]" : ""}`;
-  };
-
   const readOperations = (toolCallId?: string): ReadOperations => ({
     readFile: async (path) => {
       try {
@@ -379,17 +378,16 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     const basePrompt = cwdLine.test(event.systemPrompt)
       ? event.systemPrompt.replace(cwdLine, sandboxLine)
       : `${event.systemPrompt}\n\n${sandboxLine}`;
-    const projectInstructions = await loadProjectInstructions();
     const platformContext = [
       "## AgentDock execution context",
       "All file and command tools operate in the isolated /workspace Tool Sandbox.",
       "Large tool results are bounded in model context and preserved as tenant-scoped artifacts.",
     ].join("\n");
-    if (projectInstructions === undefined) {
+    if (runtime.projectInstructions === undefined) {
       return { systemPrompt: `${basePrompt}\n\n${platformContext}` };
     }
     return {
-      systemPrompt: `${basePrompt}\n\n${platformContext}\n\n## Project instructions (repository-controlled)\n${projectInstructions}`,
+      systemPrompt: `${basePrompt}\n\n${platformContext}\n\n## Project instructions (repository-controlled)\n${runtime.projectInstructions}`,
     };
   });
 

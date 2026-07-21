@@ -1905,9 +1905,29 @@ describe.sequential("single-user durable turn intake API", () => {
         eventIngestor: {
           async ingest(value) {
             const message = parseSupervisorToControlMessage(value);
-            if (message.type !== "event.publish") throw new Error("Expected event publication");
-            if (message.payload.event.seq === 1) {
-              const gap = structuredClone(message);
+            if (message.type !== "event.publish" && message.type !== "event.publish_batch") {
+              throw new Error("Expected event publication");
+            }
+            const publications =
+              message.type === "event.publish"
+                ? [message]
+                : message.payload.events.map((event) => ({
+                    protocolVersion: 1 as const,
+                    messageId: message.messageId,
+                    sentAt: message.sentAt,
+                    type: "event.publish" as const,
+                    payload: {
+                      leaseId: message.payload.leaseId,
+                      fencingToken: message.payload.fencingToken,
+                      ...(message.payload.commandId === undefined
+                        ? {}
+                        : { commandId: message.payload.commandId }),
+                      event,
+                    },
+                  }));
+            const first = publications.find((publication) => publication.payload.event.seq === 1);
+            if (first !== undefined) {
+              const gap = structuredClone(first);
               gap.messageId = globalThis.crypto.randomUUID();
               gap.payload.event.eventId = globalThis.crypto.randomUUID();
               gap.payload.event.seq = 2;
@@ -1916,7 +1936,7 @@ describe.sequential("single-user durable turn intake API", () => {
               });
               rejectedGap = true;
 
-              const stale = structuredClone(message);
+              const stale = structuredClone(first);
               stale.messageId = globalThis.crypto.randomUUID();
               stale.payload.fencingToken += 1;
               await expect(durableEventStore.ingest(stale)).rejects.toMatchObject({
@@ -1925,14 +1945,16 @@ describe.sequential("single-user durable turn intake API", () => {
               rejectedStaleFence = true;
             }
             const acknowledgement = await durableEventStore.ingest(message);
-            const persisted = await database
-              .selectFrom("session_events")
-              .select(["event_id", "seq"])
-              .where("session_id", "=", message.payload.event.sessionId)
-              .where("seq", "=", String(message.payload.event.seq))
-              .executeTakeFirstOrThrow();
-            expect(persisted.event_id).toBe(message.payload.event.eventId);
-            persistedSequencesBeforeAck.push(Number(persisted.seq));
+            for (const publication of publications) {
+              const persisted = await database
+                .selectFrom("session_events")
+                .select(["event_id", "seq"])
+                .where("session_id", "=", publication.payload.event.sessionId)
+                .where("seq", "=", String(publication.payload.event.seq))
+                .executeTakeFirstOrThrow();
+              expect(persisted.event_id).toBe(publication.payload.event.eventId);
+              persistedSequencesBeforeAck.push(Number(persisted.seq));
+            }
             acknowledgedSequences.push(acknowledgement.payload.acknowledgedThroughSeq);
             return acknowledgement;
           },
@@ -1980,7 +2002,8 @@ describe.sequential("single-user durable turn intake API", () => {
         "turn.completed",
       ]);
       expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3, 4]);
-      expect(acknowledgedSequences).toEqual([1, 2, 3, 4]);
+      expect(acknowledgedSequences.at(-1)).toBe(4);
+      expect(acknowledgedSequences.length).toBeLessThan(4);
       expect(persistedSequencesBeforeAck).toEqual([1, 2, 3, 4]);
       expect(rejectedGap).toBe(true);
       expect(rejectedStaleFence).toBe(true);
@@ -2375,18 +2398,32 @@ describe.sequential("single-user durable turn intake API", () => {
         eventIngestor: {
           async ingest(value) {
             const message = parseSupervisorToControlMessage(value);
+            const cancelledEvent =
+              message.type === "event.publish"
+                ? message.payload.event.type === "turn.cancelled"
+                  ? message.payload.event
+                  : undefined
+                : message.type === "event.publish_batch"
+                  ? message.payload.events.find((event) => event.type === "turn.cancelled")
+                  : undefined;
             if (
-              message.type === "event.publish" &&
-              message.payload.event.type === "turn.cancelled"
+              cancelledEvent !== undefined &&
+              (message.type === "event.publish" || message.type === "event.publish_batch")
             ) {
               await expect(
                 durableEventStore.ingest({
-                  ...message,
+                  protocolVersion: 1,
                   messageId: globalThis.crypto.randomUUID(),
+                  sentAt: message.sentAt,
+                  type: "event.publish",
                   payload: {
-                    ...message.payload,
+                    leaseId: message.payload.leaseId,
+                    fencingToken: message.payload.fencingToken,
+                    ...(message.payload.commandId === undefined
+                      ? {}
+                      : { commandId: message.payload.commandId }),
                     event: {
-                      ...message.payload.event,
+                      ...cancelledEvent,
                       eventId: globalThis.crypto.randomUUID(),
                       type: "turn.completed",
                       payload: { stopReason: "late_completion" },
@@ -3176,7 +3213,7 @@ describe.sequential("single-user durable turn intake API", () => {
         status: "failed",
         commandId: accepted.commandId,
         phase: "after_start",
-        failureCode: "local_supervisor_error",
+        failureCode: "invalid_event_delivery",
       });
       const persistedBeforeReplay = await database
         .selectFrom("session_events")

@@ -255,12 +255,12 @@ export async function transitionCurrentRunAttempt(
           "version.id",
           "session_row.current_workspace_version_id",
         )
-        .leftJoin("artifacts as pi", "pi.id", "version.pi_artifact_id")
+        .leftJoin("artifacts as version_pi", "version_pi.id", "version.pi_artifact_id")
         .leftJoin("artifacts as workspace", "workspace.id", "version.workspace_artifact_id")
         .select([
           "session_row.id",
           "session_row.current_workspace_version_id as currentVersionId",
-          "pi.object_key as piKey",
+          "version_pi.object_key as versionPiKey",
           "workspace.object_key as workspaceKey",
         ])
         .where("session_row.tenant_id", "=", identity.tenantId)
@@ -271,19 +271,33 @@ export async function transitionCurrentRunAttempt(
         )
         .executeTakeFirst();
       if (session !== undefined) {
-        if (
-          session.currentVersionId !== null &&
-          (session.piKey === null || session.workspaceKey === null)
-        ) {
+        if (session.currentVersionId !== null && session.workspaceKey === null) {
           throw new RunAttemptLifecycleError(
             "workspace_version_corrupt",
-            "Current Workspace version artifacts are missing",
+            "Current Workspace version artifact is missing",
           );
         }
+        const priorPi = await transaction
+          .selectFrom("artifacts as artifact")
+          .innerJoin("turns as turn", (join) =>
+            join
+              .onRef("turn.tenant_id", "=", "artifact.tenant_id")
+              .onRef("turn.session_id", "=", "artifact.session_id")
+              .onRef("turn.id", "=", "artifact.turn_id"),
+          )
+          .select("artifact.object_key as objectKey")
+          .where("artifact.tenant_id", "=", identity.tenantId)
+          .where("artifact.session_id", "=", session.id)
+          .where("artifact.kind", "=", "pi_session_snapshot")
+          .where("artifact.run_id", "!=", identity.runId)
+          .where("turn.state", "=", "completed")
+          .orderBy("turn.settled_at", "desc")
+          .orderBy("artifact.created_at", "desc")
+          .executeTakeFirst();
         await transaction
           .updateTable("sessions")
           .set({
-            pi_session_snapshot_key: session.piKey,
+            pi_session_snapshot_key: priorPi?.objectKey ?? session.versionPiKey,
             workspace_snapshot_key: session.workspaceKey,
             row_version: sql<string>`${sql.ref("row_version")} + 1`,
             updated_at: now,

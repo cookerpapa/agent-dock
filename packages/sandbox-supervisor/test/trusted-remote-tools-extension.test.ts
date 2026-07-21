@@ -62,6 +62,9 @@ describe("trusted remote tools extension governance", () => {
         ...ENVIRONMENT,
         AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: "1",
         AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY: directory,
+        AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
+          "Prefer deterministic tests.",
+        ).toString("base64"),
       })) {
         original.set(name, process.env[name]);
         process.env[name] = value;
@@ -97,9 +100,7 @@ describe("trusted remote tools extension governance", () => {
           request.operation === "file.read"
             ? {
                 ...common,
-                content: Buffer.from(
-                  request.path === "AGENTS.md" ? "Prefer deterministic tests." : "x".repeat(2_048),
-                ).toString("base64"),
+                content: Buffer.from("x".repeat(2_048)).toString("base64"),
               }
             : common;
         return new Response(JSON.stringify(body), {

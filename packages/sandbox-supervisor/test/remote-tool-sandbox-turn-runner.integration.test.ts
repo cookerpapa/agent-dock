@@ -58,6 +58,60 @@ function command(): ExecuteTurnCommandMessage {
 }
 
 describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool Sandbox", () => {
+  it("completes a text-only turn without creating a Kubernetes Tool Pod", async () => {
+    const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-chat-runner-"));
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
+      toolImage,
+      runtimeClient,
+    });
+    const backend = new ToolSandboxManager({ provider });
+    const server = new SandboxManagerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken,
+      manager: backend,
+    });
+    const address = await server.listen();
+    const client = new SandboxManagerClient({
+      baseUrl: address,
+      serviceToken,
+      allowInsecureHttp: true,
+    });
+    try {
+      const runner = new RemoteToolSandboxTurnRunner({
+        manager: client,
+        runtimeIdentity: {
+          supervisorId: "remote-tool-integration-supervisor",
+          bootId: "10000000-0000-4000-8000-000000000003",
+          sandboxId: "10000000-0000-4000-8000-000000000004",
+        },
+        trustedWorkspaceDirectory: trustedWorkspace,
+        scenario: "text",
+      });
+      const events: EventPublishMessage[] = [];
+      await runner.run(
+        command(),
+        (message) => {
+          events.push(message);
+        },
+        new AbortController().signal,
+      );
+
+      expect(events.at(-1)?.payload.event.type).toBe("turn.completed");
+      expect(events.some((message) => message.payload.event.type === "tool.started")).toBe(false);
+      expect({
+        reservedCount: backend.reservedCount,
+        activeCount: backend.activeCount,
+        warmCount: backend.warmCount,
+        assignments: await provider.listAssignments("10000000-0000-4000-8000-000000000004"),
+      }).toEqual({ reservedCount: 0, activeCount: 0, warmCount: 0, assignments: [] });
+    } finally {
+      await server.close().catch(() => undefined);
+      await rm(trustedWorkspace, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("repairs code through RPC while the Kubernetes Pod stays offline and credential-free", async () => {
     const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
@@ -83,7 +137,7 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
       operationUrl: client.operationUrl,
       async create(request: ToolSandboxCreateRequest) {
         const created = await client.create(request);
-        inspectedRuntimeName = created.runtimeName;
+        inspectedRuntimeName = `agent-dock-tool-${created.activationId}`.slice(0, 63);
         await expect(
           backend.inspect(created.activationId, request.assignment),
         ).resolves.toMatchObject({
@@ -166,9 +220,12 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
         return created;
       },
       capture: (activationId, assignment) => client.capture(activationId, assignment),
+      release: (activationId, assignment, disposition) =>
+        client.release(activationId, assignment, disposition),
       stop: (activationId, assignment) => client.stop(activationId, assignment),
     };
     const events: EventPublishMessage[] = [];
+    let serverClosed = false;
     try {
       const runner = new RemoteToolSandboxTurnRunner({
         manager,
@@ -202,12 +259,18 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
       expect(terminal?.type).toBe("turn.completed");
       if (terminal?.type !== "turn.completed") throw new Error("Expected a completed turn");
       expect(terminal.payload.workspacePatch?.patch).toContain("return left + right");
-      expect(backend.activeCount).toBe(0);
+      expect(backend.activeCount).toBe(1);
+      expect(backend.warmCount).toBe(1);
+      await expect(
+        runtimeClient.readPod("agent-dock-sandboxes", inspectedRuntimeName!),
+      ).resolves.toBeDefined();
+      await server.close();
+      serverClosed = true;
       await expect(
         runtimeClient.readPod("agent-dock-sandboxes", inspectedRuntimeName!),
       ).resolves.toBeUndefined();
     } finally {
-      await server.close().catch(() => undefined);
+      if (!serverClosed) await server.close().catch(() => undefined);
       await rm(trustedWorkspace, { recursive: true, force: true });
     }
   }, 180_000);

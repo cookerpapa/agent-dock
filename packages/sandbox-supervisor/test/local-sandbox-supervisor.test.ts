@@ -1,5 +1,6 @@
 import type {
   EventAckMessage,
+  EventPublishBatchMessage,
   EventPublishMessage,
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
@@ -256,14 +257,17 @@ describe("LocalSandboxSupervisor", () => {
       sentAt: "2026-07-18T08:00:00.000Z",
       type: "event.ack",
       payload: {
-        sessionId: message.payload.event.sessionId,
+        sessionId:
+          message.type === "event.publish"
+            ? message.payload.event.sessionId
+            : message.payload.events.at(-1)!.sessionId,
         leaseId: message.payload.leaseId,
         fencingToken: message.payload.fencingToken,
         acknowledgedThroughSeq: 2,
       },
     }));
 
-    await expect(prepared.run()).rejects.toThrow("acknowledgement was invalid");
+    await expect(prepared.run()).rejects.toThrow("batched event delivery could not be drained");
   });
 
   it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
@@ -298,7 +302,7 @@ describe("LocalSandboxSupervisor", () => {
           return { stopReason: "stop" };
         },
       };
-      let committed: EventPublishMessage | undefined;
+      let committed: EventPublishMessage | EventPublishBatchMessage | undefined;
       const supervisor = new LocalSandboxSupervisor({
         runner: publishingRunner,
         eventSpoolFactory: (options) => durableStore.open(options),
@@ -308,8 +312,11 @@ describe("LocalSandboxSupervisor", () => {
         throw new Error("simulated connection loss after durable commit");
       });
 
-      await expect(prepared.run()).rejects.toThrow("simulated connection loss");
-      expect(committed).toEqual(event);
+      await expect(prepared.run()).rejects.toThrow("batched event delivery could not be drained");
+      expect(committed).toMatchObject({
+        type: "event.publish_batch",
+        payload: { events: [event.payload.event] },
+      });
 
       const replayed: EventPublishMessage[] = [];
       const restartedStore = new FileEventSpoolStore({ rootDirectory: root });

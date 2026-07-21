@@ -47,9 +47,11 @@ instead of blindly replaying commands.
 4. Control Plane sends `command.commit`.
 5. Trusted Runner durably advances the Attempt through restore/run/checkpoint
    phases while resolving model and workspace state.
-6. `ToolSandboxManager` creates one Provider handle and capability.
-7. Provider waits for Tool worker readiness and inspected runtime identity.
-8. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
+6. `ToolSandboxManager` reserves one logical activation and rotating capability;
+   it does not create a Pod.
+7. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
+8. The first actual Tool operation makes the Provider create/restore/attest the
+   gVisor Pod. A chat-only Run skips this step entirely.
 
 Cold or queued sessions own no Pi process, Tool Sandbox, socket, thread, or
 per-session timer.
@@ -74,22 +76,35 @@ One shared Supervisor heartbeat reports all active assignments. PostgreSQL
 renews only the exact current lease/fence, current RunAttempt, boot, command
 lifecycle, and event cursor. Lease loss revokes execution authority.
 
+Pi's first text delta is emitted immediately. Later adjacent text deltas for the
+same content block are coalesced for at most 50 ms or 2 KiB. Every public event
+is fsynced to the bounded local spool before an asynchronous publisher sends up
+to 64 contiguous events in one envelope. The Control Plane commits a batch in
+one PostgreSQL transaction and returns one cumulative ACK. Pi therefore does
+not wait for a database transaction after every provider token, while terminal
+Run completion still waits for the durable ACK cursor to reach its final
+sequence.
+
 ## Checkpoint commit
 
 At `agent_settled`:
 
-1. Provider snapshots regular workspace files and the cumulative Git patch.
+1. If a Tool was used, Provider snapshots regular workspace files and the
+   cumulative Git patch. Otherwise no Workspace capture/version is created.
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
 4. Bytes are conditionally written to object storage.
-5. PostgreSQL stages an immutable Workspace version bound to the current
+5. PostgreSQL always stages the new Pi conversation pointer. A Tool-using Run
+   additionally stages an immutable Workspace version bound to the current
    Run/Attempt, parent version, artifact hashes, lease, and fence.
 6. The terminal settlement transaction advances the checkpoint and current
    Workspace-version pointers with session-version/Run/Attempt/lease/fence CAS,
    settles the staged version, and records the Attempt revision. A failure
    abandons the staged version and restores the previous settled pointers.
 7. `turn.completed` is durably published as the commit marker.
-8. Manager revokes the capability and Provider confirms runtime absence.
+8. Manager revokes the capability. A successful exact-revision coding Session
+   may retain the Pod as a bounded warm cache; every failure/cancel/mismatch
+   path confirms runtime absence.
 
 If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not
@@ -122,13 +137,16 @@ reconciliation.
 | Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
 | Tool Sandbox exit | active operation fails; capability is revoked; runtime is removed |
-| Event ACK loss | Supervisor file spool redelivers the identical event |
+| Event ACK loss | Supervisor file spool redelivers the identical event/batch; cumulative sequence ACK deduplicates it |
 | Checkpoint upload interruption | previous settled revision remains authoritative |
 | Old Attempt resumes late | current-attempt/lease/fence checks reject its phase, checkpoint, and terminal writes |
 
 ## Terminal invariant
 
-Every `completed`, `failed`, `cancelled`, `timed_out`, lease-revoked, or shutdown
-path ends in capability revocation plus exact Provider absence. Orphan cleanup
-matches Supervisor, boot, sandbox, command, session, turn, lease, fence, and
+Every terminal path revokes the per-Attempt capability. Failed, cancelled,
+timed-out, lease-revoked and shutdown paths additionally prove exact Provider
+absence. A successful coding Run may instead transfer the same exact-session
+Pod to the bounded warm cache; the next Attempt must present the committed
+Workspace revision and a higher fence before use. Orphan cleanup matches
+Supervisor, boot, sandbox, command, session, turn, lease, fence, Pod UID and
 runtime identity before destruction.

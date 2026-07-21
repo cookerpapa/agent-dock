@@ -101,7 +101,11 @@ extension-policy support would overstate the current boundary.
 - [x] Extract bounded workspace snapshot and Git-patch logic into a shared runtime package
 - [x] Disable Pi built-in local tools and register remote read/write/edit/bash through Pi's public operations APIs
 - [x] Give only the Sandbox Manager two namespace-scoped Roles plus one named RuntimeClass read; no application owns a Docker/containerd socket
-- [x] Run one non-root, read-only, host-mount-free, default-deny gVisor Tool Pod per active Turn
+- [x] Reserve tools logically, create no Pod for pure chat, and demand-activate one non-root, read-only, host-mount-free, default-deny gVisor Tool Pod on first use
+- [x] Reuse a healthy Pod only for the exact tenant/project/workspace/session under a newer fence, with revision validation, Pod UID preconditions, idle TTL and bounded LRU eviction
+- [x] Keep trusted root `AGENTS.md` instructions in the committed Workspace snapshot so Pi startup never performs an eager remote read
+- [x] Separate settled Pi conversation checkpoints from Tool-triggered Workspace checkpoints
+- [x] Coalesce adjacent text deltas and publish a bounded asynchronous event batch with cumulative durable ACK
 - [x] Use a fixed credential-free subprocess environment and never forward Pi/model environment to bash
 - [x] Keep the model gateway loopback-local to the trusted Runner and revoke turn capabilities on settlement
 - [x] Route controlled GitHub imports through the Manager without giving the Manager repository-network membership

@@ -50,7 +50,7 @@ Trusted Sandbox Manager (least-privilege Kubernetes client)
 K3s -> containerd -> RuntimeClass: agent-dock-gvisor -> runsc/KVM
     |
     v
-Untrusted per-Turn Tool Pod
+Untrusted demand-activated Tool Pod
     |-- isolated workspace, shell, compiler and tests
     `-- no platform credential/network; bounded CPU/memory/process/disk/time
 ```
@@ -286,11 +286,14 @@ trusted Runner; `read/write/edit/bash` cross a narrow RPC boundary into a
 host-mount-free, credential-free Tool Pod protected by default-deny networking. Only the Web
 ingress publishes a loopback port. The Manager now separates capability and
 identity enforcement from a provider-neutral `SandboxProvider`; its sole
-implementation is `KubernetesGvisorSandboxProvider`. Every active Turn gets one
-Pod with `runtimeClassName: agent-dock-gvisor`; K3s/containerd maps that class
-to `runsc` fixed to KVM. Manager readiness and activation inspection attest a
-real gVisor workload and fail closed without the RuntimeClass, policy, image or
-scoped API authority. See the
+implementation is `KubernetesGvisorSandboxProvider`. A Run receives a logical
+Tool capability without creating a Pod; the first real Tool call activates one
+Pod with `runtimeClassName: agent-dock-gvisor`. Successful coding Runs may reuse
+that exact tenant/workspace/session Pod across later Turns until its bounded
+idle TTL, while chat-only Runs never touch Kubernetes. K3s/containerd maps the
+class to `runsc` fixed to KVM. Manager readiness and activation inspection
+attest a real gVisor workload and fail closed without the RuntimeClass, policy,
+image or scoped API authority. See the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for host setup, secrets,
 health, backup, upgrade, recovery, and the disposable full-topology acceptance
 command.
@@ -431,7 +434,8 @@ withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
 containment are also deferred.
 
 Supervisor event delivery now has a replaceable crash-safe file spool. The demo
-uses it to atomically persist each closed `event.publish` before transport and
+uses it to atomically persist each closed event before enqueue, coalesce adjacent
+text deltas, publish bounded `event.publish_batch` messages asynchronously, and
 advance a synced cumulative cursor before deleting ACKed files. A fresh store
 instance can scan and redeliver the pending suffix; a PostgreSQL integration
 test proves that an event committed before its ACK connection fails is

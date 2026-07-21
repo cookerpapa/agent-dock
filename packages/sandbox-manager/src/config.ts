@@ -15,6 +15,8 @@ export type SandboxManagerConfig = {
   importerServiceAccountName: string;
   imagePullPolicy: "Always" | "IfNotPresent" | "Never";
   repositoryImportTimeoutMs: number;
+  warmTtlMs: number;
+  maximumWarmActivations: number;
 };
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -129,5 +131,12 @@ export async function loadSandboxManagerConfig(
       1_000,
       300_000,
     ),
+    warmTtlMs: integer(
+      environment.AGENT_DOCK_SANDBOX_WARM_TTL_MS,
+      15 * 60_000,
+      1_000,
+      24 * 60 * 60_000,
+    ),
+    maximumWarmActivations: integer(environment.AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, 4, 1, 1_000),
   };
 }

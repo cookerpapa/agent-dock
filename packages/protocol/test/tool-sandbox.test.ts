@@ -8,6 +8,8 @@ import {
 
 const assignment = {
   tenantId: "tenant-tool-protocol",
+  projectId: "project-tool-protocol",
+  workspaceId: "workspace-tool-protocol",
   supervisorId: "supervisor-tool-protocol",
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",

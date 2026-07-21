@@ -96,6 +96,8 @@ const DEFAULT_TURN_TIMEOUT_MS = 30_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const MAX_STDOUT_BUFFER_BYTES = 8 * 1_024 * 1_024;
 const MAX_STDERR_BYTES = 4_096;
+const TEXT_DELTA_COALESCE_WINDOW_MS = 50;
+const TEXT_DELTA_COALESCE_BYTES = 2 * 1_024;
 const RUNTIME_API_KEY_ENV = "AGENT_DOCK_RUNTIME_API_KEY";
 const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
 const PI_BUILTIN_TOOL_NAMES = new Set<PiBuiltinToolName>([
@@ -134,6 +136,21 @@ export class PiRpcTurnCancelledError extends PiRpcTurnError {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function streamedTextDelta(
+  value: JsonRecord,
+): { streamEvent: JsonRecord; delta: string; contentIndex: number | undefined } | undefined {
+  if (value.type !== "message_update" || !isRecord(value.assistantMessageEvent)) return undefined;
+  const streamEvent = value.assistantMessageEvent;
+  if (streamEvent.type !== "text_delta" || typeof streamEvent.delta !== "string") return undefined;
+  return {
+    streamEvent,
+    delta: streamEvent.delta,
+    contentIndex: Number.isSafeInteger(streamEvent.contentIndex)
+      ? (streamEvent.contentIndex as number)
+      : undefined,
+  };
 }
 
 function positiveInteger(value: number, name: string): number {
@@ -611,6 +628,10 @@ export class PiRpcTurnRunner {
     let stdoutBuffer = Buffer.alloc(0);
     let stderr = "";
     let messageChain = Promise.resolve();
+    let pendingTextMessage: JsonRecord | undefined;
+    let pendingTextBytes = 0;
+    let pendingTextTimer: NodeJS.Timeout | undefined;
+    let emitNextTextImmediately = true;
     let fatalError: Error | undefined;
     let cancellationEvent: EventPublishMessage | undefined;
     let cancellationError: PiRpcTurnCancelledError | undefined;
@@ -623,6 +644,68 @@ export class PiRpcTurnRunner {
       terminal.reject(error);
       for (const pending of pendingRequests.values()) pending.reject(error);
       pendingRequests.clear();
+    };
+
+    const enqueueMessage = (message: JsonRecord): void => {
+      messageChain = messageChain
+        .then(() => publish(message))
+        .catch((error: unknown) => {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        });
+    };
+
+    const flushPendingText = (): void => {
+      if (pendingTextTimer !== undefined) {
+        clearTimeout(pendingTextTimer);
+        pendingTextTimer = undefined;
+      }
+      if (pendingTextMessage === undefined) return;
+      const message = pendingTextMessage;
+      pendingTextMessage = undefined;
+      pendingTextBytes = 0;
+      enqueueMessage(message);
+    };
+
+    const scheduleTextFlush = (): void => {
+      if (pendingTextTimer !== undefined) return;
+      pendingTextTimer = setTimeout(() => {
+        pendingTextTimer = undefined;
+        flushPendingText();
+      }, TEXT_DELTA_COALESCE_WINDOW_MS);
+      pendingTextTimer.unref();
+    };
+
+    const queueMessage = (message: JsonRecord): void => {
+      const text = streamedTextDelta(message);
+      if (text === undefined) {
+        flushPendingText();
+        emitNextTextImmediately = true;
+        enqueueMessage(message);
+        return;
+      }
+      if (emitNextTextImmediately) {
+        emitNextTextImmediately = false;
+        enqueueMessage(message);
+        return;
+      }
+      const pending = pendingTextMessage && streamedTextDelta(pendingTextMessage);
+      if (pending !== undefined && pending.contentIndex === text.contentIndex) {
+        const combined = `${pending.delta}${text.delta}`;
+        pendingTextMessage = {
+          ...message,
+          assistantMessageEvent: { ...text.streamEvent, delta: combined },
+        };
+        pendingTextBytes = Buffer.byteLength(combined, "utf8");
+      } else {
+        flushPendingText();
+        pendingTextMessage = message;
+        pendingTextBytes = Buffer.byteLength(text.delta, "utf8");
+      }
+      if (pendingTextBytes >= TEXT_DELTA_COALESCE_BYTES) {
+        flushPendingText();
+      } else {
+        scheduleTextFlush();
+      }
     };
 
     const eventMessage = (event: AgentDockEvent): EventPublishMessage => {
@@ -789,30 +872,20 @@ export class PiRpcTurnRunner {
         const line = stdoutBuffer.subarray(0, newline).toString("utf8").trim();
         stdoutBuffer = stdoutBuffer.subarray(newline + 1);
         if (line.length > 0) {
-          messageChain = messageChain
-            .then(async () => {
-              let message: unknown;
-              try {
-                message = JSON.parse(line) as unknown;
-              } catch {
-                throw new PiRpcTurnError(
-                  "pi_protocol_error",
-                  "Pi RPC emitted malformed JSONL",
-                  false,
-                );
-              }
-              if (!isRecord(message)) {
-                throw new PiRpcTurnError(
-                  "pi_protocol_error",
-                  "Pi RPC output was not a JSON object",
-                  false,
-                );
-              }
-              await publish(message);
-            })
-            .catch((error: unknown) => {
-              fail(error instanceof Error ? error : new Error(String(error)));
-            });
+          let message: unknown;
+          try {
+            message = JSON.parse(line) as unknown;
+          } catch {
+            fail(new PiRpcTurnError("pi_protocol_error", "Pi RPC emitted malformed JSONL", false));
+            return;
+          }
+          if (!isRecord(message)) {
+            fail(
+              new PiRpcTurnError("pi_protocol_error", "Pi RPC output was not a JSON object", false),
+            );
+            return;
+          }
+          queueMessage(message);
         }
         newline = stdoutBuffer.indexOf(0x0a);
       }
@@ -931,6 +1004,7 @@ export class PiRpcTurnRunner {
       } else {
         await stopChild(child, exitPromise, this.#shutdownTimeoutMs).catch(() => undefined);
       }
+      flushPendingText();
       await messageChain.catch(() => undefined);
       if (cancellationEvent !== undefined && terminationError === undefined) {
         try {

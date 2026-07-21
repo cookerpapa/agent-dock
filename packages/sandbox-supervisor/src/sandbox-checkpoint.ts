@@ -14,7 +14,8 @@ import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 export type LoadedSandboxCheckpoint = {
   revision: string;
   piSession: Uint8Array;
-  workspace: Uint8Array;
+  workspace?: Uint8Array;
+  workspaceRevision?: string;
 };
 
 export type CapturedSandboxCheckpoint = {
@@ -25,6 +26,7 @@ export type CapturedSandboxCheckpoint = {
 
 export type SavedSandboxCheckpoint = {
   revision: string;
+  workspaceRevision?: string;
 };
 
 export type CapturedToolOutput = {
@@ -40,6 +42,11 @@ export type SavedToolOutputArtifact = {
 
 export interface SandboxCheckpointStore {
   load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined>;
+  saveConversation(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    piSession: Uint8Array,
+  ): Promise<SavedSandboxCheckpoint>;
   save(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
@@ -212,6 +219,18 @@ export function validateLoadedCheckpoint(
     throw checkpointError("Checkpoint revision is invalid");
   }
   validatePiSessionSnapshot(checkpoint.piSession);
-  validateWorkspaceSnapshot(checkpoint.workspace);
+  if (checkpoint.workspace !== undefined) validateWorkspaceSnapshot(checkpoint.workspace);
+  if (
+    checkpoint.workspaceRevision !== undefined &&
+    !/^[0-9a-f]{64}$/.test(checkpoint.workspaceRevision)
+  ) {
+    throw checkpointError("Workspace checkpoint revision is invalid");
+  }
+  if (checkpoint.workspace === undefined && checkpoint.workspaceRevision !== undefined) {
+    throw checkpointError("Workspace checkpoint metadata is incomplete");
+  }
+  if (checkpoint.workspace !== undefined && checkpoint.workspaceRevision === undefined) {
+    return { ...checkpoint, workspaceRevision: sha256(checkpoint.workspace) };
+  }
   return checkpoint;
 }

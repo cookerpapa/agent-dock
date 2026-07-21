@@ -8,6 +8,7 @@ import {
   type CommandReleaseMessage,
   type CommandResultMessage,
   type EventAckMessage,
+  type EventPublishBatchMessage,
   type EventPublishMessage,
   type EventRejectedMessage,
   type ExecuteTurnCommandMessage,
@@ -49,7 +50,9 @@ export interface SupervisorHeartbeatRuntime {
 export interface SupervisorCommandRuntime extends SupervisorHeartbeatRuntime {
   prepare(
     value: unknown,
-    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
+    publishEvent: (
+      message: EventPublishMessage | EventPublishBatchMessage,
+    ) => Promise<EventAckMessage>,
   ): PreparedTurnExecution;
   prepareCancellation(value: unknown): PreparedTurnCancellation;
   revokeAllAssignments(): unknown;
@@ -113,7 +116,7 @@ type PendingHeartbeat = {
 };
 
 type PendingEventAcknowledgement = {
-  message: EventPublishMessage;
+  message: EventPublishMessage | EventPublishBatchMessage;
   resolve: (acknowledgement: EventAckMessage) => void;
   reject: (error: SupervisorWebSocketClientError | EventDeliveryRejectedError) => void;
   timeout: NodeJS.Timeout;
@@ -890,9 +893,11 @@ export class SupervisorWebSocketClient {
     this.#preparedCommands.delete(release.payload.commandId);
   }
 
-  async #publishEvent(value: EventPublishMessage): Promise<EventAckMessage> {
+  async #publishEvent(
+    value: EventPublishMessage | EventPublishBatchMessage,
+  ): Promise<EventAckMessage> {
     const message = parseSupervisorToControlMessage(value);
-    if (message.type !== "event.publish") {
+    if (message.type !== "event.publish" && message.type !== "event.publish_batch") {
       throw new SupervisorWebSocketClientError(
         "invalid_event",
         "Supervisor runtime produced an invalid event publication",
@@ -906,7 +911,9 @@ export class SupervisorWebSocketClient {
         true,
       );
     }
-    const sessionId = message.payload.event.sessionId;
+    const lastEvent =
+      message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
+    const sessionId = lastEvent.sessionId;
     if (this.#pendingEventAcknowledgements.has(sessionId)) {
       throw new SupervisorWebSocketClientError(
         "event_ack_overlap",
@@ -958,11 +965,16 @@ export class SupervisorWebSocketClient {
 
   #acceptEventAcknowledgement(message: EventAckMessage): void {
     const pending = this.#pendingEventAcknowledgements.get(message.payload.sessionId);
+    const lastEvent =
+      pending?.message.type === "event.publish"
+        ? pending.message.payload.event
+        : pending?.message.payload.events.at(-1);
     if (
       pending === undefined ||
+      lastEvent === undefined ||
       message.payload.leaseId !== pending.message.payload.leaseId ||
       message.payload.fencingToken !== pending.message.payload.fencingToken ||
-      message.payload.acknowledgedThroughSeq !== pending.message.payload.event.seq
+      message.payload.acknowledgedThroughSeq !== lastEvent.seq
     ) {
       throw new SupervisorWebSocketClientError(
         "event_ack_mismatch",
@@ -977,11 +989,16 @@ export class SupervisorWebSocketClient {
 
   #acceptEventRejection(message: EventRejectedMessage): void {
     const pending = this.#pendingEventAcknowledgements.get(message.payload.sessionId);
+    const lastEvent =
+      pending?.message.type === "event.publish"
+        ? pending.message.payload.event
+        : pending?.message.payload.events.at(-1);
     if (
       pending === undefined ||
+      lastEvent === undefined ||
       message.payload.leaseId !== pending.message.payload.leaseId ||
       message.payload.fencingToken !== pending.message.payload.fencingToken ||
-      message.payload.rejectedSeq !== pending.message.payload.event.seq
+      message.payload.rejectedSeq !== lastEvent.seq
     ) {
       throw new SupervisorWebSocketClientError(
         "event_rejection_mismatch",

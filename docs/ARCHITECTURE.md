@@ -185,7 +185,8 @@ persistence, cumulative ACK, SSE replay, cross-replica high-water notification,
 and Kubernetes/gVisor execution are executable. Each production control-plane replica owns
 one dedicated PostgreSQL listener; notifications wake a process-local hub, while
 event bodies are always read from the durable table. The trusted Supervisor host
-uses a private, crash-safe file spool that syncs every event before transport and
+uses a private, crash-safe file spool that syncs every event before enqueue,
+coalesces adjacent text deltas, publishes bounded batches asynchronously, and
 replays an unacknowledged suffix after reconnect. Controlled small public GitHub
 repositories are accepted only as a normalized coordinate plus exact commit and
 are provisioned as immutable seeds before Pi starts. Arbitrary/private Git
@@ -200,10 +201,14 @@ deployment, pinned Pi RPC and the model
 gateway run in the trusted Agent Runner. Pi's built-in local tools are disabled;
 one fixed image-owned extension implements `read`, `write`, `edit`, and `bash`
 with Pi's public operation interfaces and sends a narrow authenticated RPC to a
-separate Sandbox Manager. The Manager creates one credential-free Kubernetes
-gVisor Pod per active Turn. All tool calls in that Turn reuse the Pod; settlement
-captures the workspace snapshot and bounded Git patch before deleting the Pod
-and publishing the terminal event.
+separate Sandbox Manager. The Manager first creates only a logical reservation.
+The first actual Tool Call materializes a credential-free Kubernetes gVisor Pod;
+pure-chat Runs never touch Kubernetes. A materialized Pod is bound to one exact
+tenant/project/workspace/session and may be rebound, under a strictly newer
+fence, across later Runs in that Session. Settlement captures only dirty
+Workspace state and keeps a healthy Pod warm until its idle TTL, LRU pressure,
+failure, cancellation, revision mismatch, or process shutdown requires
+deletion. See ADR-0040.
 
 ADR-0030 splits the Manager's stable authorization/lifecycle contract from the
 runtime implementation. `ToolSandboxManager` owns activation capabilities,
@@ -329,7 +334,7 @@ profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
 See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, ADR-0030,
-ADR-0031, ADR-0032, ADR-0039, and the production runbook.
+ADR-0031, ADR-0032, ADR-0039, ADR-0040, and the production runbook.
 
 ### Model profiles and credentials
 
@@ -537,26 +542,32 @@ recovery. See ADR-0024.
 5. The scheduler assigns or creates a sandbox runner.
 6. The supervisor validates the fencing token, resolves and reverifies the
    immutable workspace seed, and loads settled session/workspace state.
-7. The selected execution backend activates Pi with the fixed remote-tool
-   extension, creates a Tool Sandbox through the Manager and configured
-   SandboxProvider, and executes the agent loop.
-8. The supervisor translates and emits sequenced events; the control plane persists and ACKs them.
-9. On `agent_settled`, the runner creates stable snapshots.
+7. The selected execution backend reserves Tool authority, activates Pi with the
+   fixed remote-tool extension, and executes the agent loop. The first Tool Call
+   atomically materializes or rebinds the exact Session's warm gVisor Pod.
+8. The supervisor spools sequenced events locally, coalesces adjacent text
+   deltas, and publishes bounded batches without blocking Pi on each database
+   transaction; the control plane persists each batch and returns one cumulative
+   ACK.
+9. On `agent_settled`, the runner always saves Pi conversation state but captures
+   a Workspace snapshot only when a materialized Tool Sandbox may have changed it.
 10. The control plane completes the turn and schedules the next mailbox command.
 
 Steps 1-10 are executable for the bounded sample or controlled-GitHub workspace
 path through the local integration boundary: the control plane acquires a real PostgreSQL
 lease/fence, persists ACK before run,
-activates an ephemeral hardened Kubernetes/gVisor workspace, and receives public text,
-tool, and terminal events from pinned Pi. Step 8 stores each complete event plus
-command/lease/fence identity, advances the session cursor and next sequence
-atomically, and returns the cumulative ACK only after commit. The same durable
+activates a hardened Kubernetes/gVisor workspace only on the first Tool Call,
+and receives public text, tool, and terminal events from pinned Pi. Step 8 stores
+each contiguous batch plus command/lease/fence identity, advances the session
+cursor and next sequence atomically, and returns the cumulative ACK only after
+commit. The same durable
 log, including the bounded final patch, is available through SSE and resumes
-after a browser reconnect with `Last-Event-ID`. Step 9 uses a private
-checkpoint-before-terminal ACK: Pi JSONL and a safe regular-file workspace
-manifest are content-hashed, stored outside the Tool Sandbox, recorded as
-artifact metadata under the current fence, and restored into the next fresh Pi
-activation and Tool Sandbox.
+after a browser reconnect with `Last-Event-ID`. Step 9 separates Pi and Workspace
+checkpoints: Pi JSONL is saved at every settled Run, while a safe regular-file
+Workspace manifest is captured only after Tool execution. Both are content-
+hashed and stored outside the Tool Sandbox under the current fence. A compatible
+healthy Tool Pod may remain warm; a cold activation restores the committed
+Workspace revision.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
 Runner or Tool Sandbox failure after upload but before terminal publication
 falls back to the previous settled pair. The demo adapter uses a private host directory. The
@@ -704,8 +715,10 @@ second command broker. See ADR-0019.
   Pi/workspace checkpoint. It never injects text into the active model loop.
   Steer requires a future explicit command/API and capability check.
 - Events use contiguous per-session sequence numbers and at-least-once delivery.
-  ACK is cumulative and means durably persisted, so an ACK lost in transit can
-  safely cause replay.
+  Adjacent compatible text deltas may be coalesced before they receive sequence
+  numbers. The Supervisor publishes ordered batches from its durable spool; a
+  cumulative ACK means the entire contiguous prefix is durably persisted, so an
+  ACK lost in transit can safely cause replay.
 - Duplicate current ACKs are idempotent. Regressing ACKs, ACKs beyond the highest
   publication, sequence gaps, and stale lease/fencing metadata are rejected.
 - A permanent `stale_fence` event rejection is not an ACK. It preserves the

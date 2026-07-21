@@ -46,7 +46,9 @@ The provider-neutral runtime boundary is recorded in
 [ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md), the gVisor-only
 decision in [ADR-0038](adr/0038-gvisor-only-tool-execution.md), and the current
 Kubernetes-managed execution plane in
-[ADR-0039](adr/0039-kubernetes-gvisor-execution-plane.md). Product operations,
+[ADR-0039](adr/0039-kubernetes-gvisor-execution-plane.md) and
+[ADR-0040](adr/0040-demand-activated-warm-sandboxes-and-batched-events.md).
+Product operations,
 recovery, and release evidence are recorded in
 [ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
 [browser account and platform-model decision](adr/0037-browser-accounts-and-platform-managed-model.md),
@@ -202,7 +204,7 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                                    |
                                       K3s -> containerd -> runsc/KVM
                                                    |
-                                      per-Turn Tool Pod (default-deny)
+                               demand-activated warm Tool Pod (default-deny)
 ```
 
 The optional `github-gateway` is the only service that reads the GitHub App
@@ -236,11 +238,14 @@ internal-network service TCP reachability to the host API without receiving the
 kubeconfig. Readiness starts a real gVisor Pod and every activation is
 re-inspected for RuntimeClass, Pod UID and guest-kernel identity. Capability
 authorization and assignment fencing remain above the Provider implementation.
-Tool Pods are created per active Turn, not per conversation: they run as UID/GID
-`1000:1000`, with `runtimeClassName: agent-dock-gvisor`, default-deny network,
+Tool Pods are demand-activated on the first Tool Call, not for pure chat. A
+healthy Pod is dedicated to one exact tenant/project/workspace/session and may
+remain warm across later Runs under a fresh fence until idle TTL/LRU eviction.
+They run as UID/GID `1000:1000`, with
+`runtimeClassName: agent-dock-gvisor`, default-deny network,
 no ServiceAccount token, host namespace/path/device/socket, inherited
 credential, published port or writable root filesystem, and are removed after
-completion, failure, cancellation or timeout.
+failure, cancellation, timeout, revision mismatch, eviction, or shutdown.
 Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
 thread.
 

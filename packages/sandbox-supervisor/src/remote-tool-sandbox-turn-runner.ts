@@ -11,6 +11,7 @@ import {
 import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
+  parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -39,12 +40,34 @@ import type {
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 
+const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
+
+function projectInstructionsFromSnapshot(snapshot: Uint8Array | undefined): string | undefined {
+  if (snapshot === undefined) return undefined;
+  const file = parseWorkspaceSnapshot(snapshot).find((entry) => entry.path === "AGENTS.md");
+  if (file === undefined) return undefined;
+  const bounded = file.content.subarray(0, MAX_PROJECT_INSTRUCTIONS_BYTES);
+  let content: string;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(bounded);
+  } catch {
+    return undefined;
+  }
+  if (content.includes("\0") || content.trim().length === 0) return undefined;
+  return `${content}${file.content.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by AgentDock]" : ""}`;
+}
+
 export interface ToolSandboxManagerBoundary {
   create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse>;
   capture(
     activationId: string,
     assignment: ToolSandboxAssignment,
   ): Promise<ToolSandboxCaptureResponse>;
+  release(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+  ): Promise<{ retained: boolean }>;
   stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;
   readonly operationUrl: string;
 }
@@ -71,6 +94,8 @@ function assignment(
 ): ToolSandboxAssignment {
   return {
     tenantId: command.payload.tenantId,
+    projectId: command.payload.projectId,
+    workspaceId: command.payload.workspaceId,
     ...runtimeIdentity,
     commandId: command.payload.commandId,
     sessionId: command.payload.sessionId,
@@ -231,6 +256,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         );
       }
     }
+    const projectInstructions = projectInstructionsFromSnapshot(
+      loadedCheckpoint?.workspace ?? workspaceSeed,
+    );
 
     const usesEmbeddedFake =
       command.payload.model.provider === "agent-dock-fake" &&
@@ -266,6 +294,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     let activation: ToolSandboxCreateResponse | undefined;
     let fakeModel: FakeModelServer | undefined;
     let capturedPatch: WorkspacePatch | undefined;
+    let retainedWorkspaceRevision: string | undefined;
+    let completedSuccessfully = false;
     let stopPromise: Promise<void> | undefined;
     const stopSandbox = (): Promise<void> => {
       if (activation === undefined) return Promise.resolve();
@@ -277,7 +307,6 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               { operation: "stop", outcome: "completed" },
               (performance.now() - startedAt) / 1_000,
             );
-            this.#metrics?.sandboxActive.dec({ provider: "remote" });
           },
           (error: unknown) => {
             this.#metrics?.sandboxDuration.observe(
@@ -306,19 +335,25 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             : { kind: "snapshot", snapshot: encodeWorkspaceSnapshotBlob(workspaceSeed) },
         ...(loadedCheckpoint === undefined
           ? {}
-          : { workspaceRestore: encodeWorkspaceSnapshotBlob(loadedCheckpoint.workspace) }),
+          : {
+              ...(loadedCheckpoint.workspace === undefined
+                ? {}
+                : { workspaceRestore: encodeWorkspaceSnapshotBlob(loadedCheckpoint.workspace) }),
+              ...(loadedCheckpoint.workspaceRevision === undefined
+                ? {}
+                : { workspaceRevision: loadedCheckpoint.workspaceRevision }),
+            }),
       };
       const createStartedAt = performance.now();
       try {
         activation = await this.#manager.create(createRequest);
         this.#metrics?.sandboxDuration.observe(
-          { operation: "create", outcome: "completed" },
+          { operation: "reserve", outcome: "completed" },
           (performance.now() - createStartedAt) / 1_000,
         );
-        this.#metrics?.sandboxActive.inc({ provider: "remote" });
       } catch (error: unknown) {
         this.#metrics?.sandboxDuration.observe(
-          { operation: "create", outcome: "failed" },
+          { operation: "reserve", outcome: "failed" },
           (performance.now() - createStartedAt) / 1_000,
         );
         throw error;
@@ -381,6 +416,14 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
             command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
           ),
+          ...(projectInstructions === undefined
+            ? {}
+            : {
+                AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
+                  projectInstructions,
+                  "utf8",
+                ).toString("base64"),
+              }),
           ...(downstreamTrace === undefined
             ? {}
             : {
@@ -421,19 +464,25 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           }
           const checkpointStartedAt = performance.now();
           const captured = await this.#manager.capture(activation.activationId, toolAssignment);
-          const workspace = decodeWorkspaceSnapshotBlob(captured.workspace);
-          capturedPatch = captured.workspacePatch;
           if (this.#checkpointStore !== undefined) {
             try {
-              const saved = await this.#checkpointStore.save(
-                command,
-                loadedCheckpoint?.revision ?? null,
-                {
-                  piSession,
-                  workspace,
-                  ...(capturedPatch === undefined ? {} : { workspacePatch: capturedPatch }),
-                },
-              );
+              const saved =
+                captured.type === "tool_sandbox.unused"
+                  ? await this.#checkpointStore.saveConversation(
+                      command,
+                      loadedCheckpoint?.revision ?? null,
+                      piSession,
+                    )
+                  : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
+                      piSession,
+                      workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
+                      ...(captured.workspacePatch === undefined
+                        ? {}
+                        : { workspacePatch: captured.workspacePatch }),
+                    });
+              capturedPatch =
+                captured.type === "tool_sandbox.captured" ? captured.workspacePatch : undefined;
+              retainedWorkspaceRevision = saved.workspaceRevision;
               await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
               this.#metrics?.checkpointDuration.observe(
                 { outcome: "completed" },
@@ -450,6 +499,11 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 "The settled checkpoint could not be committed",
               );
             }
+          } else if (captured.type === "tool_sandbox.captured") {
+            capturedPatch = captured.workspacePatch;
+            retainedWorkspaceRevision = captured.workspace.sha256;
+          } else {
+            retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
           }
         },
         ...(this.#requestTimeoutMs === undefined
@@ -473,14 +527,30 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               ),
             }),
       });
-      return await runner.run(command, publishEvent, signal);
+      const result = await runner.run(command, publishEvent, signal);
+      completedSuccessfully = true;
+      return result;
     } finally {
       signal.removeEventListener("abort", abortSandbox);
       await fakeModel?.stop().catch(() => undefined);
       let cleanupError: unknown;
-      await stopSandbox().catch((error: unknown) => {
-        cleanupError = error;
-      });
+      if (activation !== undefined && completedSuccessfully && !signal.aborted) {
+        await this.#manager
+          .release(
+            activation.activationId,
+            toolAssignment,
+            retainedWorkspaceRevision === undefined
+              ? { kind: "destroy" }
+              : { kind: "keep_warm", workspaceRevision: retainedWorkspaceRevision },
+          )
+          .catch((error: unknown) => {
+            cleanupError = error;
+          });
+      } else {
+        await stopSandbox().catch((error: unknown) => {
+          cleanupError = error;
+        });
+      }
       await releaseModelRuntimeLease(modelRuntimeLease).catch((error: unknown) => {
         cleanupError ??= error;
       });

@@ -7,6 +7,8 @@ import type {
   ToolSandboxCreateResponse,
   ToolSandboxOperationRequest,
   ToolSandboxOperationResponse,
+  ToolSandboxReleaseRequest,
+  ToolSandboxReleaseResponse,
 } from "@agent-dock/protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
@@ -21,14 +23,50 @@ export type ToolSandboxManagerOptions = {
   provider: SandboxProvider;
   idGenerator?: () => string;
   capabilityGenerator?: () => string;
+  warmTtlMs?: number;
+  maximumWarmActivations?: number;
+  clock?: () => number;
 };
 
 type ManagedActivation = {
+  assignment: ToolSandboxAssignment;
   capabilityDigest: Buffer;
-  handle: SandboxHandle;
+  spec: Parameters<SandboxProvider["create"]>[0];
+  handle?: SandboxHandle;
+  materializing?: Promise<SandboxHandle>;
+  materializedForCurrentAssignment: boolean;
   seenOperationIds: Set<string>;
   seenCaptureIds: Set<string>;
 };
+
+type WarmActivation = {
+  handle: SandboxHandle;
+  workspaceRevision: string;
+  expiresAt: number;
+  lastUsedAt: number;
+};
+
+const DEFAULT_WARM_TTL_MS = 15 * 60_000;
+const DEFAULT_MAXIMUM_WARM_ACTIVATIONS = 4;
+
+function positiveInteger(value: number, name: string, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new TypeError(`${name} must be a bounded positive integer`);
+  }
+  return value;
+}
+
+function workspaceKey(assignment: ToolSandboxAssignment): string {
+  return [
+    assignment.tenantId,
+    assignment.projectId,
+    assignment.workspaceId,
+    assignment.sessionId,
+    assignment.supervisorId,
+    assignment.bootId,
+    assignment.sandboxId,
+  ].join("\0");
+}
 
 function capabilityDigest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -51,6 +89,8 @@ function validActivationId(value: string): string {
 function sameAssignment(left: ToolSandboxAssignment, right: ToolSandboxAssignment): boolean {
   return (
     left.tenantId === right.tenantId &&
+    left.projectId === right.projectId &&
+    left.workspaceId === right.workspaceId &&
     left.supervisorId === right.supervisorId &&
     left.bootId === right.bootId &&
     left.sandboxId === right.sandboxId &&
@@ -102,7 +142,12 @@ export class ToolSandboxManager {
   readonly #provider: SandboxProvider;
   readonly #idGenerator: () => string;
   readonly #capabilityGenerator: () => string;
+  readonly #warmTtlMs: number;
+  readonly #maximumWarmActivations: number;
+  readonly #clock: () => number;
   readonly #activations = new Map<string, ManagedActivation>();
+  readonly #warm = new Map<string, WarmActivation>();
+  readonly #reaper: NodeJS.Timeout;
 
   constructor(options: ToolSandboxManagerOptions) {
     if (!/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(options.provider.providerId)) {
@@ -112,6 +157,19 @@ export class ToolSandboxManager {
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#capabilityGenerator =
       options.capabilityGenerator ?? (() => `adts_${randomBytes(32).toString("base64url")}`);
+    this.#warmTtlMs = positiveInteger(
+      options.warmTtlMs ?? DEFAULT_WARM_TTL_MS,
+      "warmTtlMs",
+      24 * 60 * 60_000,
+    );
+    this.#maximumWarmActivations = positiveInteger(
+      options.maximumWarmActivations ?? DEFAULT_MAXIMUM_WARM_ACTIVATIONS,
+      "maximumWarmActivations",
+      1_000,
+    );
+    this.#clock = options.clock ?? Date.now;
+    this.#reaper = setInterval(() => void this.reapWarm().catch(() => undefined), 30_000);
+    this.#reaper.unref();
   }
 
   get providerId(): string {
@@ -119,7 +177,18 @@ export class ToolSandboxManager {
   }
 
   get activeCount(): number {
+    const activeHandles = [...this.#activations.values()].filter(
+      (activation) => activation.handle !== undefined || activation.materializing !== undefined,
+    ).length;
+    return activeHandles + this.#warm.size;
+  }
+
+  get reservedCount(): number {
     return this.#activations.size;
+  }
+
+  get warmCount(): number {
+    return this.#warm.size;
   }
 
   async checkHealth(): Promise<void> {
@@ -127,7 +196,29 @@ export class ToolSandboxManager {
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    const activationId = validActivationId(this.#idGenerator());
+    await this.reapWarm();
+    const key = workspaceKey(request.assignment);
+    if ([...this.#activations.values()].some((entry) => workspaceKey(entry.assignment) === key)) {
+      throw new SandboxManagerError(
+        "tool_sandbox_session_busy",
+        "Workspace session already has a Tool Sandbox reservation",
+        true,
+      );
+    }
+
+    let inherited = this.#warm.get(key);
+    if (
+      inherited !== undefined &&
+      (request.workspaceRevision === undefined ||
+        request.workspaceRevision !== inherited.workspaceRevision)
+    ) {
+      this.#warm.delete(key);
+      await this.#provider.stop(inherited.handle);
+      inherited = undefined;
+    }
+    if (inherited !== undefined) this.#warm.delete(key);
+
+    const activationId = validActivationId(inherited?.handle.activationId ?? this.#idGenerator());
     if (this.#activations.has(activationId)) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_collision",
@@ -136,7 +227,7 @@ export class ToolSandboxManager {
       );
     }
     const capability = validCapability(this.#capabilityGenerator());
-    const handle = await this.#provider.create({
+    const spec = {
       activationId,
       assignment: request.assignment,
       workspaceSeed: request.workspaceSeed,
@@ -144,30 +235,23 @@ export class ToolSandboxManager {
         ? {}
         : { workspaceRestore: request.workspaceRestore }),
       policy: DEFAULT_TOOL_SANDBOX_POLICY,
-    });
-    if (!handleMatches(handle, this.#provider, activationId, request.assignment)) {
-      await this.#provider.destroy(handle).catch(() => undefined);
-      throw new SandboxManagerError(
-        "sandbox_provider_protocol_error",
-        "Sandbox Provider returned a mismatched handle",
-        false,
-      );
-    }
+    } as const;
     this.#activations.set(activationId, {
+      assignment: request.assignment,
       capabilityDigest: capabilityDigest(capability),
-      handle,
+      spec,
+      ...(inherited === undefined ? {} : { handle: inherited.handle }),
+      materializedForCurrentAssignment: false,
       seenOperationIds: new Set(),
       seenCaptureIds: new Set(),
     });
     return {
       managerProtocolVersion: 1,
-      type: "tool_sandbox.created",
+      type: "tool_sandbox.reserved",
       requestId: request.requestId,
       activationId,
       capability,
-      runtimeId: handle.runtimeId,
-      runtimeName: handle.runtimeName,
-      workspaceRoot: handle.workspaceRoot,
+      workspaceRoot: "/workspace",
     };
   }
 
@@ -185,7 +269,8 @@ export class ToolSandboxManager {
       );
     }
     activation.seenOperationIds.add(request.operationId);
-    return this.#provider.exec(activation.handle, request, signal);
+    const handle = await this.#materialize(request.activationId, activation);
+    return this.#provider.exec(handle, request, signal);
   }
 
   async capture(
@@ -202,14 +287,58 @@ export class ToolSandboxManager {
       );
     }
     activation.seenCaptureIds.add(requestId);
-    return this.#provider.snapshot(activation.handle, requestId);
+    if (!activation.materializedForCurrentAssignment) {
+      return {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.unused",
+        requestId,
+        activationId,
+      };
+    }
+    return this.#provider.snapshot(await this.#materialize(activationId, activation), requestId);
+  }
+
+  async release(request: ToolSandboxReleaseRequest): Promise<ToolSandboxReleaseResponse> {
+    const activation = this.#owned(request.activationId, request.assignment);
+    this.#revoke(request.activationId, activation);
+    let retained = false;
+    let handle = activation.handle;
+    if (activation.materializing !== undefined) {
+      handle = await activation.materializing;
+    }
+    if (request.disposition === "keep_warm" && handle !== undefined) {
+      const key = workspaceKey(request.assignment);
+      const previous = this.#warm.get(key);
+      if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {
+        await this.#provider.stop(previous.handle);
+      }
+      const now = this.#now();
+      this.#warm.set(key, {
+        handle,
+        workspaceRevision: request.workspaceRevision,
+        lastUsedAt: now,
+        expiresAt: now + this.#warmTtlMs,
+      });
+      retained = true;
+      await this.#enforceWarmLimit();
+    } else if (handle !== undefined) {
+      await this.#provider.stop(handle);
+    }
+    return {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.released",
+      requestId: request.requestId,
+      activationId: request.activationId,
+      retained,
+    };
   }
 
   async inspect(
     activationId: string,
     assignment: ToolSandboxAssignment,
   ): Promise<SandboxInspection> {
-    return this.#provider.inspect(this.#owned(activationId, assignment).handle);
+    const activation = this.#owned(activationId, assignment);
+    return this.#provider.inspect(await this.#materialize(activationId, activation));
   }
 
   async stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
@@ -218,7 +347,7 @@ export class ToolSandboxManager {
       await this.#provider.destroyActivation(activationId, assignment);
       return;
     }
-    if (!sameAssignment(activation.handle.assignment, assignment)) {
+    if (!sameAssignment(activation.assignment, assignment)) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
         "Tool Sandbox assignment identity did not match",
@@ -226,7 +355,11 @@ export class ToolSandboxManager {
       );
     }
     this.#revoke(activationId, activation);
-    await this.#provider.stop(activation.handle);
+    const handle =
+      activation.materializing === undefined
+        ? activation.handle
+        : await activation.materializing.catch(() => undefined);
+    if (handle !== undefined) await this.#provider.stop(handle);
   }
 
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
@@ -235,9 +368,14 @@ export class ToolSandboxManager {
 
   async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
     const managed = [...this.#activations.entries()].find(([, activation]) =>
-      sameRuntimeAssignment(activation.handle, assignment),
+      activation.handle === undefined
+        ? false
+        : sameRuntimeAssignment(activation.handle, assignment),
     );
     if (managed !== undefined) this.#revoke(managed[0], managed[1]);
+    for (const [key, warm] of this.#warm) {
+      if (sameRuntimeAssignment(warm.handle, assignment)) this.#warm.delete(key);
+    }
     await this.#provider.terminateAndConfirmAbsent(assignment);
   }
 
@@ -250,10 +388,22 @@ export class ToolSandboxManager {
   }
 
   async close(): Promise<void> {
+    clearInterval(this.#reaper);
     for (const [activationId, activation] of this.#activations) {
       this.#revoke(activationId, activation);
     }
+    this.#warm.clear();
     await this.#provider.close();
+  }
+
+  async reapWarm(): Promise<void> {
+    const now = this.#now();
+    const expired = [...this.#warm.entries()].filter(([, warm]) => warm.expiresAt <= now);
+    for (const [key, warm] of expired) {
+      if (this.#warm.get(key) !== warm) continue;
+      this.#warm.delete(key);
+      await this.#provider.stop(warm.handle);
+    }
   }
 
   #authorized(activationId: string, capability: string): ManagedActivation {
@@ -276,7 +426,7 @@ export class ToolSandboxManager {
 
   #owned(activationId: string, assignment: ToolSandboxAssignment): ManagedActivation {
     const activation = this.#activations.get(activationId);
-    if (activation === undefined || !sameAssignment(activation.handle.assignment, assignment)) {
+    if (activation === undefined || !sameAssignment(activation.assignment, assignment)) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
         "Tool Sandbox assignment identity did not match",
@@ -289,5 +439,61 @@ export class ToolSandboxManager {
   #revoke(activationId: string, activation: ManagedActivation): void {
     activation.capabilityDigest.fill(0);
     this.#activations.delete(activationId);
+  }
+
+  async #materialize(activationId: string, activation: ManagedActivation): Promise<SandboxHandle> {
+    if (activation.materializedForCurrentAssignment && activation.handle !== undefined) {
+      return activation.handle;
+    }
+    if (activation.materializing !== undefined) return activation.materializing;
+    const materializing = (async (): Promise<SandboxHandle> => {
+      let handle = activation.handle;
+      if (handle !== undefined) {
+        try {
+          handle = await this.#provider.rebind(handle, activation.assignment);
+        } catch (error: unknown) {
+          await this.#provider.stop(handle);
+          handle = undefined;
+          if (error instanceof SandboxManagerError && !error.retryable) throw error;
+        }
+      }
+      if (handle === undefined) handle = await this.#provider.create(activation.spec);
+      if (!handleMatches(handle, this.#provider, activationId, activation.assignment)) {
+        await this.#provider.destroy(handle).catch(() => undefined);
+        throw new SandboxManagerError(
+          "sandbox_provider_protocol_error",
+          "Sandbox Provider returned a mismatched handle",
+          false,
+        );
+      }
+      activation.handle = handle;
+      activation.materializedForCurrentAssignment = true;
+      return handle;
+    })();
+    activation.materializing = materializing;
+    try {
+      return await materializing;
+    } finally {
+      delete activation.materializing;
+    }
+  }
+
+  async #enforceWarmLimit(): Promise<void> {
+    while (this.#warm.size > this.#maximumWarmActivations) {
+      const oldest = [...this.#warm.entries()].sort(
+        (left, right) => left[1].lastUsedAt - right[1].lastUsedAt,
+      )[0];
+      if (oldest === undefined) return;
+      this.#warm.delete(oldest[0]);
+      await this.#provider.stop(oldest[1].handle);
+    }
+  }
+
+  #now(): number {
+    const value = this.#clock();
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new TypeError("Sandbox Manager clock returned an invalid timestamp");
+    }
+    return value;
   }
 }

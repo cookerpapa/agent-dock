@@ -503,6 +503,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       revision: first.revision,
       piSession: piSession("first"),
       workspace: workspace("first"),
+      workspaceRevision: createHash("sha256").update(workspace("first")).digest("hex"),
     });
     const second = await freshStore.save(command(2), first.revision, {
       piSession: piSession("second"),
