@@ -32,6 +32,7 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
 ]);
 
 const DEFAULT_MAXIMUM_TOOL_OUTPUT_BYTES = 65_536;
+const MINIMUM_TOOL_INPUT_DELTA_BYTES = 128;
 
 function nonNegativeInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
@@ -79,24 +80,28 @@ function assistantStopReason(value: unknown): AssistantStopReason | undefined {
   }
 }
 
-function streamedToolCallIdentity(
-  streamEvent: JsonRecord,
-): { toolCallId: string; toolName: string } | undefined {
+type StreamedToolCallIdentity = { toolCallId: string; toolName: string };
+
+function toolCallIdentity(value: unknown): StreamedToolCallIdentity | undefined {
+  if (!isRecord(value) || value.type !== "toolCall") return undefined;
+  if (
+    typeof value.id !== "string" ||
+    value.id.length === 0 ||
+    typeof value.name !== "string" ||
+    value.name.length === 0
+  ) {
+    return undefined;
+  }
+  return { toolCallId: value.id, toolName: value.name };
+}
+
+function streamedToolCallIdentity(streamEvent: JsonRecord): StreamedToolCallIdentity | undefined {
   const contentIndex = nonNegativeInteger(streamEvent.contentIndex);
   const partial = isRecord(streamEvent.partial) ? streamEvent.partial : undefined;
   const content =
     partial !== undefined && Array.isArray(partial.content) ? partial.content : undefined;
   const toolCall = contentIndex === undefined ? undefined : content?.[contentIndex];
-  if (!isRecord(toolCall) || toolCall.type !== "toolCall") return undefined;
-  if (
-    typeof toolCall.id !== "string" ||
-    toolCall.id.length === 0 ||
-    typeof toolCall.name !== "string" ||
-    toolCall.name.length === 0
-  ) {
-    return undefined;
-  }
-  return { toolCallId: toolCall.id, toolName: toolCall.name };
+  return toolCallIdentity(toolCall) ?? toolCallIdentity(streamEvent.toolCall);
 }
 
 /**
@@ -111,6 +116,7 @@ export class PiRpcAgentEventAdapter {
   #lastAssistantStopReason: AssistantStopReason | undefined;
   #cancellationReason: TurnCancellationReason | undefined;
   #compactionActive = false;
+  readonly #pendingToolInputDeltas = new Map<string, { toolName: string; delta: string }>();
   readonly #maximumToolOutputBytes: number;
 
   constructor(
@@ -140,6 +146,41 @@ export class PiRpcAgentEventAdapter {
     this.requestCancellation(reason);
     this.#settled = true;
     return this.#cancelled(reason, true);
+  }
+
+  #toolInputDelta(
+    identity: StreamedToolCallIdentity,
+    delta: string,
+    flush: boolean,
+  ): PiRpcAgentEventAdapterOutcome {
+    const pending = this.#pendingToolInputDeltas.get(identity.toolCallId);
+    if (pending !== undefined && pending.toolName !== identity.toolName) {
+      return {
+        kind: "invalid",
+        sourceType: "message_update.toolcall_delta",
+        reason: "Pi changed a streamed tool name for one call ID",
+      };
+    }
+    const combined = `${pending?.delta ?? ""}${delta}`;
+    if (!flush && Buffer.byteLength(combined, "utf8") < MINIMUM_TOOL_INPUT_DELTA_BYTES) {
+      this.#pendingToolInputDeltas.set(identity.toolCallId, {
+        toolName: identity.toolName,
+        delta: combined,
+      });
+      return { kind: "ignored", sourceType: "message_update.toolcall_delta.buffered" };
+    }
+    this.#pendingToolInputDeltas.delete(identity.toolCallId);
+    if (combined.length === 0) {
+      return { kind: "ignored", sourceType: "message_update.toolcall_delta.empty" };
+    }
+    return {
+      kind: "mapped",
+      terminal: false,
+      event: this.#eventFactory.next({
+        type: "tool.input.delta",
+        payload: { ...identity, delta: combined },
+      }),
+    };
   }
 
   adapt(value: unknown): PiRpcAgentEventAdapterOutcome {
@@ -201,14 +242,14 @@ export class PiRpcAgentEventAdapter {
           // so a missing optional preview identity must not fail the run.
           return { kind: "ignored", sourceType: "message_update.toolcall_delta.unidentified" };
         }
-        return {
-          kind: "mapped",
-          terminal: false,
-          event: this.#eventFactory.next({
-            type: "tool.input.delta",
-            payload: { ...identity, delta: streamEvent.delta },
-          }),
-        };
+        return this.#toolInputDelta(identity, streamEvent.delta, false);
+      }
+      if (streamEvent.type === "toolcall_end") {
+        const identity = streamedToolCallIdentity(streamEvent);
+        if (identity === undefined) {
+          return { kind: "ignored", sourceType: "message_update.toolcall_end.unidentified" };
+        }
+        return this.#toolInputDelta(identity, "", true);
       }
       if (streamEvent.type !== "text_delta") {
         return { kind: "ignored", sourceType: `message_update.${streamEvent.type}` };
@@ -243,6 +284,7 @@ export class PiRpcAgentEventAdapter {
           reason: "Pi tool start is missing its call ID or tool name",
         };
       }
+      this.#pendingToolInputDeltas.delete(value.toolCallId);
       return {
         kind: "mapped",
         terminal: false,
