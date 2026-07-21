@@ -1717,7 +1717,7 @@
   输出、timeout、CPU/memory/process、cancel/descendant 和 orphan cleanup；随后 pinned Pi 通过远程 `bash/edit/bash` 完成确定性修复。
   安全 gate 约 14.1 秒、Pi gate 约 9.1 秒，结束后 managed runtime 为 0。全量 production acceptance 又通过四租户、22 条 durable
   events、Control Plane 扩缩/重启、Supervisor fresh boot、取消、Workspace version 3、三个 Prometheus targets、三个 Jaeger services、
-  31 条 product audit，以及 7,360,075-byte 加密冷备在新 project 恢复到 event cursor 34。
+  31 条 product audit；最终重跑生成 7,355,988-byte 加密冷备，并在新 project 恢复到 event cursor 34。
 - 供应链：Pi 0.80.10 发布包内部 shrinkwrap 锁住的 `brace-expansion@5.0.6` 和 `protobufjs@7.6.4` 无法被 root override 控制。
   当前使用两个精确 npm alias 作为已验证补丁源，安装后只原子替换对应目录为 5.0.7/7.6.5；本地、CI 和 Trusted production images 都
   校验实际 package version，并在任何未来 Pi 版本上 fail closed。安全审计只调和这两个精确 stale-metadata path，其他 high/critical
@@ -1731,5 +1731,10 @@
   因此删除可配置 repository network、Compose network bootstrap 和专用 bridge，固定 importer 使用 `bridge`。AgentDock 常驻服务
   均不加入该 bridge；importer 没有凭据、prompt、mount、port、hook 或用户命令，只执行由代码构造的 GitHub exact-commit fetch。
   普通 Pi/Tool activation 仍严格为 `network=none`，没有把这一修正变成 Agent 的通用网络能力。
+- 真实闭环验收：修正后从 `mathewjonas/java-calculator-junit` 精确 commit 导入成功，在同一 Session 连续完成两个
+  `deepseek-v4-flash` turn；分别产生 628/379 events、25/9 次工具调用和 3,007/4,103-byte cumulative patch，第二轮复用同一个
+  13,904-byte immutable source snapshot。usage ledger 记录 27 次真实 model call、8,266 input、5,977 output、192,384 cache-read、
+  0 cache-write tokens。运行中抽查 Tool 为 `runsc`、`network=none`、`4.19.0-gvisor`、UID 1000、read-only、零 mount/socket；
+  完成后 importer 与 managed Tool 容器均为 0。
 - 能力边界：当前交付仍是 loopback/self-hosted 多租户产品，不声称已经完成 hostile public-Internet SaaS 的身份恢复、滥用治理、计费或
   独立渗透测试。这个限制不再来自 Tool kernel fallback；所有可达的用户代码执行路径现在都必须通过 gVisor/KVM attestation。

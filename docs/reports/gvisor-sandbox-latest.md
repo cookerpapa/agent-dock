@@ -5,6 +5,7 @@ Measured on 2026-07-21 with:
 ```bash
 npm run sandbox:check
 npm run production:check
+AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
 ```
 
 ## Environment
@@ -16,7 +17,7 @@ npm run production:check
 | Docker Compose | `5.1.3` |
 | gVisor | `runsc release-20260714.0`, OCI spec `1.2.1` |
 | gVisor platform | KVM, fixed in Docker runtime arguments |
-| Tool gate image | `sha256:4acafbc5ec77e5750316f9e6fe83a96bfa3d2596fa06ff36c0492bd1349ba65b` |
+| Tool gate image | `sha256:63724a8911bff690dc90c8c56ed0fa075929461c9e1cda31be8ab23b3642db63` |
 | Guest-visible kernel | `4.19.0-gvisor` |
 
 ## Results
@@ -34,17 +35,29 @@ npm run production:check
 | CPU/memory/disk configuration | pass | inspected limits match the immutable policy |
 | Cancellation and cleanup | pass | foreground/background descendants and managed container removed |
 | Real Pi remote tools | pass | pinned Pi completed deterministic `bash/edit/bash`, capture and checkpoint flow |
+| Real GitHub + model flow | pass | exact commit imported, two DeepSeek turns restored one Workspace, ran tools and persisted usage |
 | Production topology | pass | multi-tenant UI/API, restart/fencing, cancellation, observability and encrypted restore drill |
 | Managed runtimes after gates | `0` | no labeled Tool or repository-import container remained |
 
-The isolated security contract took approximately 14.1 seconds and the real Pi
-remote-tool repair approximately 9 seconds on this host. These timings are
+The isolated security contract took approximately 15.8 seconds and the real Pi
+remote-tool repair approximately 8.7 seconds on this host. These timings are
 single-run engineering evidence, not a capacity benchmark.
 
 The production acceptance completed with 22 durable test events, four
 registered tenants, three Prometheus targets, three Jaeger services, workspace
-version 3, 31 product audit events, a 7,360,075-byte encrypted backup and a
+version 3, 31 product audit events, a 7,355,988-byte encrypted backup and a
 successful restore through event cursor 34.
+
+The opt-in live gate imported
+`mathewjonas/java-calculator-junit@0b7314b2f25b83794bf0d52f13f4f750eb0f4bdb`,
+then completed two turns in one Session. The turns emitted 628/379 events,
+started 25/9 tools and produced cumulative patches of 3,007/4,103 bytes. The
+immutable 13,904-byte source snapshot was reused without a second import. The
+ledger recorded 27 real `deepseek-v4-flash` calls, 8,266 input tokens, 5,977
+output tokens, 192,384 cache-read tokens and zero cache-write tokens. A live
+Tool inspection reported `runtime=runsc`, `network=none`, non-root UID 1000,
+read-only root, no mounts or Docker socket, and guest kernel `4.19.0-gvisor`;
+all managed containers were absent after settlement.
 
 ## Boundary statement
 

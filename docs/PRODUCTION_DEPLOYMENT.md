@@ -497,6 +497,11 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 - no container with `agent-dock.managed=true` remains after a turn settles;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.
 
+`production:up` includes Compose orphan cleanup. An upgrade from the former
+repository-egress topology therefore removes its exited network-bootstrap
+container; after its empty obsolete network is removed once, no compatibility
+service or network remains.
+
 The Supervisor is ready only after the authenticated Sandbox Manager,
 PostgreSQL, MinIO, provisioning, spool recovery, and its current outbound
 WebSocket are ready. A transient

@@ -28,7 +28,7 @@
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:build": "node scripts/production-compose.mjs build",
-    "production:up": "node scripts/production-compose.mjs up --detach --wait",
+    "production:up": "node scripts/production-compose.mjs up --detach --wait --remove-orphans",
     "production:deploy": "node scripts/run-production-deploy.mjs",
     "production:ps": "node scripts/production-compose.mjs ps",
     "production:logs": "node scripts/production-compose.mjs logs --follow",
