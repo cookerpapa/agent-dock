@@ -171,13 +171,15 @@ extension-policy support would overstate the current boundary.
 - [x] Run pinned Pi against a real provider, preserve checkpoints/diffs, and persist per-call tenant token usage
 - [ ] Add public identity federation, billing, abuse controls, and a separate mutually hostile SaaS threat model
 - [ ] Add measured warm-pool eviction if cold-start data justifies it
-- [x] Add owner-priced cost accounting, model/tool/token/time budgets, and quota enforcement
+- [x] Add owner-priced cost accounting, per-Run request/tool/cost/time budgets,
+  tenant-period token/cost quotas, and enforcement
 
 ## Cloud platform milestones 3–7
 
 - [x] Add immutable Workspace history, compare, fork, rollback, archive, structured files/diff/tests/artifacts
 - [x] Add trusted GitHub App Gateway contracts for private import and branch/commit/PR/Check delivery
-- [x] Add context layers, Pi-native compaction audit, large-output artifacts, and model/tool/token/cost budgets
+- [x] Add context layers, Pi-native compaction audit, large-output artifacts,
+  per-Run request/tool/cost budgets, and tenant-period token/cost quotas
 - [x] Assign durable Run trace identities and propagate W3C context across trusted services
 - [x] Export bearer-protected low-cardinality Prometheus metrics and redacted structured logs
 - [x] Deploy persisted Prometheus, Jaeger, and provisioned Grafana behind loopback-only ingress

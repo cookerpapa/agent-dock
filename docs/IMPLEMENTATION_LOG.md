@@ -1790,3 +1790,23 @@
   发出 300 秒 Bash、等待 gVisor workspace container Ready 后真实取消；目标 Pod/Lease 被删除，其他 Session 热 Pod 不受影响，随后通过
   fresh Boot retirement 清零。完整 disposable production acceptance 通过四租户、Control Plane 重连/扩缩、22 条事件重放、31 条审计、
   7,382,120-byte 加密备份与 cursor 34 的恢复后继续执行，结束时受管 Pod 为 0。
+
+## 2026-07-22 — 移除单次 Run 累计 Token 上限
+
+- 根因：计数排序 Run `d4237ce4-7e2a-4a41-9061-a8c00d4cfa83` 的前五次 DeepSeek 请求均返回 HTTP 200，五次 Tool Call
+  也全部成功；实际累计用量为 173,623 tokens，其中大部分是后续 Agent Loop 重复上报的 cache-read context。第六次请求在
+  Provider 出站前按 47,817 input + 8,192 output 预留时超过旧 200,000 单 Run 上限，被 `run_token_budget` 拒绝。故障与
+  DeepSeek 网络、Kubernetes 或 gVisor 无关。
+- 决策：ADR-0041 删除累计单 Run Token 限制，而不是简单调高默认值。模型请求次数、单 Run 成本、Tool Call/输出、Run wall-clock、
+  tenant daily tokens 和 monthly cost 仍保留；input/output/cache token 仍完整进入 `model_requests`、usage ledger、成本计算和
+  tenant daily quota。
+- 实现：migration 014 删除 `maximum_tokens_per_run` 及其 compaction 联动约束；公开 governance schema、Supervisor budget snapshot、
+  Outbox、Model Gateway capability/聚合检查和 Web governance 卡片同步删除该字段。旧客户端继续发送 `maximumTokensPerRun` 会因闭合
+  schema 明确失败，不会被静默忽略。历史 request/usage 与既有 `run_token_budget` 审计行不删除。
+- 回归：新增迁移 up/down 测试，证明删除字段后 compaction 配置独立生效、其他治理约束仍有效，回滚时可为现有配置恢复足够大的兼容列；
+  Model Gateway 测试把同一 Run 的已完成 cache-read usage 提高到 250,000 后仍成功完成新的上游请求，同时 request-count exhaustion
+  仍在出站前被拒绝。协议测试证明旧字段被拒绝，Control Plane/API/Web 对应测试均通过。
+- 门禁：干净依赖树上的全仓 format/build/typecheck/test、两个零 Token Pi spike、备份密码学和 high-level security audit 全部通过；
+  真实 `sandbox:check` 再次通过 RuntimeClass → runsc/KVM、跨租户/凭据/网络/资源隔离、warm rebind、纯聊天零 Pod 以及 pinned Pi
+  remote-tool 修复闭环。门禁期间 npm 新发布的 `fast-uri` high advisory 被直接升级到修复版本 3.1.4/4.1.1，没有降低审计等级；最终
+  remaining high/critical vulnerabilities 为 0。

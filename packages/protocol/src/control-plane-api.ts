@@ -76,7 +76,6 @@ export const ModelConfigurationResourceSchema = Type.Union([
 const ModelGovernanceLimitsSchema = Type.Object(
   {
     maximumModelRequestsPerRun: Type.Integer({ minimum: 1, maximum: 1_024 }),
-    maximumTokensPerRun: Type.Integer({ minimum: 2_048, maximum: 1_000_000_000 }),
     maximumCostMicrousdPerRun: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
     dailyTokenBudget: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
     monthlyCostMicrousdBudget: Type.Integer({
@@ -1250,14 +1249,6 @@ export function parseReplaceModelGovernanceRequest(value: unknown): ReplaceModel
     value,
     "replace-model-governance request",
   );
-  if (
-    request.limits.compactionReserveTokens + request.limits.compactionKeepRecentTokens >
-    request.limits.maximumTokensPerRun
-  ) {
-    throw new ControlPlaneApiValidationError(
-      "Compaction reserve and recent-context tokens must fit the run token budget",
-    );
-  }
   if (
     new Set(request.rates.map((rate) => `${rate.provider}/${rate.modelId}`)).size !==
     request.rates.length

@@ -292,7 +292,6 @@ describe.sequential("model governance and context audit", () => {
         {
           limits: {
             maximumModelRequestsPerRun: 32,
-            maximumTokensPerRun: 200_000,
             maximumCostMicrousdPerRun: 5_000_000,
             dailyTokenBudget: 2_000_000,
             monthlyCostMicrousdBudget: 50_000_000,

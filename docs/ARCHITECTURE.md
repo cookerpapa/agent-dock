@@ -360,13 +360,16 @@ See ADR-0006, ADR-0027 and ADR-0033.
 
 ### Context and model governance
 
-The trusted Model Gateway reserves request, token and cost capacity in a
-PostgreSQL transaction before provider egress. It aggregates completed usage
+The trusted Model Gateway reserves per-Run request/cost capacity and tenant
+daily-token/monthly-cost capacity in a PostgreSQL transaction before provider
+egress. It deliberately has no cumulative per-Run token cap: repeated Agent
+Loop requests can report the same cached context again, so request count, cost
+and wall-clock are the per-Run bounds. The Gateway aggregates completed usage
 with unexpired reservations under a tenant-policy lock, verifies the current
 RunAttempt, and audits both admissions and denials. A configured single fallback
 is limited to selected 429/5xx/timeout classes and remains inside the original
 reservation. Actual provider/model, four rate components, tokens and integer
-cost are settled atomically with the linked usage record.
+cost are settled atomically with the linked usage record. See ADR-0041.
 
 Pi remains the context owner. Each activation uses an ordered context stack:
 the Pi/platform system prompt, a bounded `AGENTS.md` read through Tool RPC when

@@ -37,7 +37,6 @@ type ActiveCapability = {
   providerSecret: string;
   expiresAt: number;
   maximumRequestsPerRun: number;
-  maximumTokensPerRun: number | undefined;
   maximumCostMicrousdPerRun: number | undefined;
   revoked: boolean;
   requestControllers: Set<AbortController>;
@@ -536,7 +535,6 @@ export class TenantModelGateway {
         this.#maximumRequestsPerTurn,
         command.payload.budgets?.maximumModelRequests ?? this.#maximumRequestsPerTurn,
       ),
-      maximumTokensPerRun: command.payload.budgets?.maximumTokens,
       maximumCostMicrousdPerRun: command.payload.budgets?.maximumCostMicrousd,
       revoked: false,
       requestControllers: new Set(),
@@ -834,7 +832,6 @@ export class TenantModelGateway {
         .selectFrom("tenant_runtime_policies")
         .select([
           "maximum_model_requests_per_run",
-          "maximum_tokens_per_run",
           "maximum_cost_microusd_per_run",
           "daily_token_budget",
           "monthly_cost_microusd_budget",
@@ -939,7 +936,6 @@ export class TenantModelGateway {
 
       const aggregate = await sql<{
         request_count: string;
-        run_tokens: string;
         run_cost: string;
         daily_tokens: string;
         monthly_cost: string;
@@ -947,13 +943,6 @@ export class TenantModelGateway {
       }>`
         select
           count(*) filter (where run_id = ${active.runId} and state <> 'budget_denied') as request_count,
-          coalesce(sum(case when run_id = ${active.runId} then
-            case when state = 'completed' then
-              coalesce(actual_input_tokens, 0) + coalesce(actual_output_tokens, 0)
-              + coalesce(actual_cache_read_tokens, 0) + coalesce(actual_cache_write_tokens, 0)
-            when state = 'reserved' and reservation_expires_at > ${now} then
-              reserved_input_tokens + reserved_output_tokens else 0 end
-          else 0 end), 0) as run_tokens,
           coalesce(sum(case when run_id = ${active.runId} then
             case when state = 'completed' then coalesce(actual_cost_microusd, 0)
             when state = 'reserved' and reservation_expires_at > ${now} then reserved_cost_microusd
@@ -985,10 +974,6 @@ export class TenantModelGateway {
         integer(policy.maximum_model_requests_per_run, "model request limit"),
         active.maximumRequestsPerRun,
       );
-      const runTokenLimit = Math.min(
-        integer(policy.maximum_tokens_per_run, "run token limit"),
-        active.maximumTokensPerRun ?? Number.MAX_SAFE_INTEGER,
-      );
       const runCostLimit = Math.min(
         integer(policy.maximum_cost_microusd_per_run, "run cost limit"),
         active.maximumCostMicrousdPerRun ?? Number.MAX_SAFE_INTEGER,
@@ -997,11 +982,6 @@ export class TenantModelGateway {
         [
           integer(totals.request_count, "model request count") >= requestLimit,
           "model_request_limit",
-        ],
-        [
-          bigInteger(totals.run_tokens, "run token usage") + BigInt(inputTokens + outputTokens) >
-            BigInt(runTokenLimit),
-          "run_token_budget",
         ],
         [
           bigInteger(totals.run_cost, "run cost usage") + reservedCost > BigInt(runCostLimit),

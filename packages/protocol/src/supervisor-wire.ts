@@ -93,7 +93,6 @@ const TurnModelSnapshotSchema = Type.Object(
 export const TurnBudgetSnapshotSchema = Type.Object(
   {
     maximumModelRequests: Type.Integer({ minimum: 1, maximum: 1_024 }),
-    maximumTokens: Type.Integer({ minimum: 1, maximum: 1_000_000_000 }),
     maximumCostMicrousd: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
     dailyTokenBudget: Type.Integer({ minimum: 1, maximum: 1_000_000_000_000 }),
     monthlyCostMicrousdBudget: Type.Integer({

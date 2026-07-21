@@ -3,6 +3,8 @@
 - Status: accepted
 - Date: 2026-07-20
 - Extends: ADR-0006, ADR-0027, ADR-0031, ADR-0032
+- Amended by: ADR-0041 (the cumulative per-Run token budget is removed; usage,
+  tenant daily tokens and per-Run cost/request governance remain)
 
 ## Context
 

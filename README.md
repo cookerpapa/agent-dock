@@ -143,6 +143,7 @@ only after a measured requirement appears.
 - [ADR-0036: product operations and release evidence](docs/adr/0036-product-operations-and-release-evidence.md)
 - [ADR-0037: browser accounts and a platform-managed model](docs/adr/0037-browser-accounts-and-platform-managed-model.md)
 - [ADR-0038: gVisor-only untrusted tool execution](docs/adr/0038-gvisor-only-tool-execution.md)
+- [ADR-0041: remove the cumulative per-Run token budget](docs/adr/0041-remove-per-run-token-budget.md)
 
 ## Current executable spikes
 

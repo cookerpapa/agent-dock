@@ -362,7 +362,7 @@ describe.sequential("tenant model gateway", () => {
     await lease.release();
   });
 
-  it("denies an exhausted run budget before provider egress and audits the decision", async () => {
+  it("denies an exhausted model-request limit before provider egress and audits it", async () => {
     await database
       .updateTable("tenant_runtime_policies")
       .set({ maximum_model_requests_per_run: 1 })
@@ -470,6 +470,37 @@ describe.sequential("tenant model gateway", () => {
       .where("fallback_reason", "=", "rate_limit")
       .executeTakeFirstOrThrow();
     expect(audit).toEqual({ actualModelId: "deepseek-v4-pro", fallbackReason: "rate_limit" });
+    await lease.release();
+  });
+
+  it("allows cumulative Run usage above the former token cap", async () => {
+    await database
+      .updateTable("model_requests")
+      .set({ actual_cache_read_tokens: 250_000 })
+      .where("tenant_id", "=", command.payload.tenantId)
+      .where("run_id", "=", command.payload.runId)
+      .where("request_sequence", "=", 1)
+      .executeTakeFirstOrThrow();
+    const callsBefore = upstreamFetch.mock.calls.length;
+    const lease = await gateway.issue(command);
+    const response = await fetch(
+      `http://127.0.0.1:${String(gateway.listeningPort)}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${lease.runtime.capability}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-v4-flash",
+          stream: true,
+          messages: [{ role: "user", content: "continue after substantial cached context" }],
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("chatcmpl-test");
+    expect(upstreamFetch).toHaveBeenCalledTimes(callsBefore + 1);
     await lease.release();
   });
 });

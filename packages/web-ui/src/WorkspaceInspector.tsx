@@ -883,8 +883,8 @@ export function WorkspaceInspector({
             <div className="inspector-subheading">governance</div>
             <div className="inspector-metrics">
               <Metric
-                label="run tokens"
-                value={String(governance?.limits.maximumTokensPerRun ?? 0)}
+                label="model requests"
+                value={String(governance?.limits.maximumModelRequestsPerRun ?? 0)}
               />
               <Metric
                 label="tool calls"

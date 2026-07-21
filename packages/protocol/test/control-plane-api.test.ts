@@ -14,6 +14,7 @@ import {
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseModelConfigurationResource,
+  parseReplaceModelGovernanceRequest,
   parseProjectResource,
   parseReplaceModelConfigurationRequest,
   parseRunResource,
@@ -305,6 +306,45 @@ describe("control-plane public API schemas", () => {
         credentialVersion: 2,
         updatedAt: "2026-07-19T00:00:00.000Z",
         apiKey: "must-not-cross",
+      }),
+    ).toThrow(ControlPlaneApiValidationError);
+  });
+
+  it("removes the obsolete cumulative per-Run token setting from governance", () => {
+    const governance = {
+      limits: {
+        maximumModelRequestsPerRun: 32,
+        maximumCostMicrousdPerRun: 5_000_000,
+        dailyTokenBudget: 2_000_000,
+        monthlyCostMicrousdBudget: 50_000_000,
+        maximumToolCallsPerRun: 128,
+        maximumToolOutputBytes: 65_536,
+        maximumRunDurationMs: 900_000,
+        compactionReserveTokens: 16_384,
+        compactionKeepRecentTokens: 20_000,
+      },
+      rates: [
+        {
+          provider: "deepseek" as const,
+          modelId: "deepseek-v4-flash" as const,
+          inputMicrousdPerMillion: 0,
+          outputMicrousdPerMillion: 0,
+          cacheReadMicrousdPerMillion: 0,
+          cacheWriteMicrousdPerMillion: 0,
+        },
+      ],
+      fallback: {
+        enabled: false,
+        onRateLimit: true,
+        onServerError: true,
+        onTimeout: true,
+      },
+    };
+    expect(parseReplaceModelGovernanceRequest(governance)).toEqual(governance);
+    expect(() =>
+      parseReplaceModelGovernanceRequest({
+        ...governance,
+        limits: { ...governance.limits, maximumTokensPerRun: 200_000 },
       }),
     ).toThrow(ControlPlaneApiValidationError);
   });

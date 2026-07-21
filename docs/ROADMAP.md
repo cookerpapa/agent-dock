@@ -216,9 +216,10 @@ registration route now atomically creates a bounded tenant/owner/profile/policy
 and returns an indexed token once; real-PostgreSQL acceptance proves concurrent
 requests cannot exceed the total-tenant cap. Tenant-scoped recent-conversation
 list/detail APIs and Web history switching make that isolation inspectable.
-Per-Run/tenant token, tool, wall-clock, and owner-priced cost governance plus
-durable usage now exist under ADR-0033; operational metrics exist under
-ADR-0034. Warm-pool eviction, public identity federation/recovery, and a
+Per-Run request/tool/cost/wall-clock governance, tenant-period token/cost
+governance and durable usage now exist under ADR-0033/ADR-0041; operational
+metrics exist under ADR-0034. Warm-pool eviction, public identity
+federation/recovery, and a
 mutually hostile/public SaaS threat model remain open.
 
 ## Phase 5: cloud-aware subagents (3 weeks)

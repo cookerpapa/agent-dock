@@ -561,7 +561,6 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(governance.json()).toMatchObject({
       limits: {
         maximumModelRequestsPerRun: 32,
-        maximumTokensPerRun: 200_000,
         maximumToolCallsPerRun: 128,
       },
       fallback: { enabled: false },
@@ -572,7 +571,6 @@ describe.sequential("single-user durable turn intake API", () => {
       payload: {
         limits: {
           maximumModelRequestsPerRun: 40,
-          maximumTokensPerRun: 240_000,
           maximumCostMicrousdPerRun: 6_000_000,
           dailyTokenBudget: 3_000_000,
           monthlyCostMicrousdBudget: 60_000_000,
@@ -602,7 +600,7 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     expect(replaced.statusCode).toBe(200);
     expect(replaced.json()).toMatchObject({
-      limits: { maximumModelRequestsPerRun: 40, maximumTokensPerRun: 240_000 },
+      limits: { maximumModelRequestsPerRun: 40 },
       rates: [
         expect.objectContaining({
           modelId: "deepseek-v4-flash",

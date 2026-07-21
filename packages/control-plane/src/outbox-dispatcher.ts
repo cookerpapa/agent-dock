@@ -575,7 +575,6 @@ export class OutboxDispatcher {
           "run.attempt_count as runAttemptCount",
           "run.row_version as runVersion",
           "policy.maximum_model_requests_per_run as maximumModelRequests",
-          "policy.maximum_tokens_per_run as maximumTokens",
           "policy.maximum_cost_microusd_per_run as maximumCostMicrousd",
           "policy.daily_token_budget as dailyTokenBudget",
           "policy.monthly_cost_microusd_budget as monthlyCostMicrousdBudget",
@@ -891,7 +890,6 @@ export class OutboxDispatcher {
               row.maximumModelRequests,
               "model-request budget",
             ),
-            maximumTokens: safeNonNegativeInteger(row.maximumTokens, "run token budget"),
             maximumCostMicrousd: safeNonNegativeInteger(row.maximumCostMicrousd, "run cost budget"),
             dailyTokenBudget: safeNonNegativeInteger(row.dailyTokenBudget, "daily token budget"),
             monthlyCostMicrousdBudget: safeNonNegativeInteger(

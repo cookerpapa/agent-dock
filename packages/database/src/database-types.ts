@@ -89,7 +89,6 @@ export interface TenantRuntimePolicyTable {
   maximum_unsettled_turns: GeneratedInteger;
   maximum_concurrent_turns: GeneratedInteger;
   maximum_model_requests_per_run: GeneratedInteger;
-  maximum_tokens_per_run: GeneratedInt8;
   maximum_cost_microusd_per_run: GeneratedInt8;
   daily_token_budget: GeneratedInt8;
   monthly_cost_microusd_budget: GeneratedInt8;

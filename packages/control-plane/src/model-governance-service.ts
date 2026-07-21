@@ -95,7 +95,6 @@ export class ModelGovernanceService {
       )
       .select([
         "policy.maximum_model_requests_per_run",
-        "policy.maximum_tokens_per_run",
         "policy.maximum_cost_microusd_per_run",
         "policy.daily_token_budget",
         "policy.monthly_cost_microusd_budget",
@@ -132,7 +131,6 @@ export class ModelGovernanceService {
           policy.maximum_model_requests_per_run,
           "model request limit",
         ),
-        maximumTokensPerRun: safeInteger(policy.maximum_tokens_per_run, "run token limit"),
         maximumCostMicrousdPerRun: safeInteger(
           policy.maximum_cost_microusd_per_run,
           "run cost limit",
@@ -230,7 +228,6 @@ export class ModelGovernanceService {
         .updateTable("tenant_runtime_policies")
         .set({
           maximum_model_requests_per_run: request.limits.maximumModelRequestsPerRun,
-          maximum_tokens_per_run: request.limits.maximumTokensPerRun,
           maximum_cost_microusd_per_run: request.limits.maximumCostMicrousdPerRun,
           daily_token_budget: request.limits.dailyTokenBudget,
           monthly_cost_microusd_budget: request.limits.monthlyCostMicrousdBudget,
