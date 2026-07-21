@@ -120,6 +120,7 @@ describe("Phase 0 container topology", () => {
       expect.arrayContaining([
         "!package.json",
         "!package-lock.json",
+        "!scripts/harden-pi-dependencies.mjs",
         "!packages/protocol/src/**",
         "!packages/sandbox-supervisor/src/**",
         "!spikes/pi-extension-compat/src/**",

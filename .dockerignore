@@ -4,6 +4,9 @@
 !package-lock.json
 !tsconfig.base.json
 
+!scripts/
+!scripts/harden-pi-dependencies.mjs
+
 !packages/
 !packages/fake-model-server/
 !packages/fake-model-server/package.json
