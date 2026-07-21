@@ -36,6 +36,7 @@ Run these commands from the repository root:
 
 ```bash
 npm ci --ignore-scripts
+npm run dependencies:harden
 npm run ci
 ```
 

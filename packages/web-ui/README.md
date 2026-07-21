@@ -41,11 +41,14 @@ events, tokens, or credential references to the console.
 
 ## Run and verify
 
-From the repository root, the complete zero-token flow is:
+From the repository root, start the supported persistent loopback product:
 
 ```bash
 npm run demo
 ```
+
+This is an alias for `npm run production:deploy`; it does not start a separate
+ordinary-Docker Agent runtime.
 
 For frontend-only work, start a compatible API on `127.0.0.1:3100` and run:
 

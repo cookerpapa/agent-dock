@@ -1,5 +1,9 @@
 # ADR-0029: Trusted Pi runner and remote tool sandbox
 
+Runtime update: ADR-0038 retains this trust split, replaces the historical
+shared-kernel implementation with mandatory gVisor/runsc KVM, and removes the
+legacy whole-Pi Docker adapter.
+
 - Status: accepted
 - Date: 2026-07-20
 - Supersedes: ADR-0010's whole-Pi activation boundary and ADR-0027 section 9

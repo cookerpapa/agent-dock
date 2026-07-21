@@ -17,8 +17,8 @@ import {
   LocalSandboxSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
-  type DockerSandboxScenario,
-  type DockerSandboxScenarioContext,
+  type AgentTurnScenario,
+  type AgentTurnScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -65,7 +65,7 @@ export const PRODUCTION_CANCELLATION_PROBE_PROMPT = "agent-dock://acceptance/can
 export function resolveProductionSandboxScenario({
   command,
   restoring,
-}: DockerSandboxScenarioContext): DockerSandboxScenario {
+}: AgentTurnScenarioContext): AgentTurnScenario {
   if (restoring) return "java_followup";
   if (
     command.payload.input.kind === "prompt" &&

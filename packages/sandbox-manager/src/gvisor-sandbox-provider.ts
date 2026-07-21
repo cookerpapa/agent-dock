@@ -32,6 +32,8 @@ const DEFAULT_READY_TIMEOUT_MS = 15_000;
 const DEFAULT_OPERATION_GRACE_MS = 5_000;
 const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
 const MAX_IMPORT_STDOUT_BYTES = 3 * 1_024 * 1_024;
+export const GVISOR_RUNTIME_NAME = "runsc" as const;
+const GVISOR_KERNEL_PATTERN = /(?:^|[-_.])gvisor(?:$|[-_.])/i;
 
 export const TOOL_SANDBOX_LABELS = {
   managed: "agent-dock.managed",
@@ -48,16 +50,10 @@ export const TOOL_SANDBOX_LABELS = {
   fencingToken: "agent-dock.fencing-token",
 } as const;
 
-export type DockerSandboxProviderOptions = {
+export type GvisorSandboxProviderOptions = {
   toolImage: string;
   repositoryImportNetwork: string;
   dockerCommand?: string;
-  /**
-   * Trusted argv inserted before every Docker Engine command. This is used by
-   * the microVM provider to address the Docker Engine inside one Docker
-   * Sandbox without exposing that native transport above the Provider layer.
-   */
-  dockerArgumentsPrefix?: readonly string[];
   readyTimeoutMs?: number;
   cleanupTimeoutMs?: number;
   repositoryImportTimeoutMs?: number;
@@ -198,7 +194,7 @@ function runtimeName(activationId: string): string {
   return `agent-dock-tool-${activationId}`.slice(0, 63);
 }
 
-function dockerArgs(
+function gvisorDockerArgs(
   image: string,
   name: string,
   activationId: string,
@@ -222,7 +218,7 @@ function dockerArgs(
   ) {
     throw new SandboxManagerError(
       "unsupported_sandbox_policy",
-      "Docker Sandbox Provider does not support the requested policy",
+      "gVisor Sandbox Provider does not support the requested policy",
       false,
     );
   }
@@ -236,6 +232,8 @@ function dockerArgs(
     "run",
     "--rm",
     "--interactive",
+    "--runtime",
+    GVISOR_RUNTIME_NAME,
     "--name",
     name,
     "--label",
@@ -274,6 +272,11 @@ function dockerArgs(
     "no-new-privileges:true",
     "--pids-limit",
     String(resources.pids),
+    // runsc virtualizes the guest PID cgroup and currently reports pids.max=max
+    // inside the sandbox. RLIMIT_NPROC is therefore the in-sandbox enforcement
+    // boundary, while Docker's PidsLimit remains a defense-in-depth host limit.
+    "--ulimit",
+    `nproc=${String(resources.pids)}:${String(resources.pids)}`,
     "--memory",
     String(resources.memoryBytes),
     "--cpus",
@@ -391,7 +394,7 @@ function labelsToAssignment(
   };
 }
 
-export function buildToolSandboxDockerArguments(
+export function buildGvisorToolSandboxArguments(
   image: string,
   name: string,
   activationId: string,
@@ -405,30 +408,82 @@ export function buildToolSandboxDockerArguments(
   if (!/^[0-9a-f-]{36}$/.test(activationId)) {
     throw new TypeError("Tool Sandbox activation ID is invalid");
   }
-  return dockerArgs(image, name, activationId, assignment, policy);
+  return gvisorDockerArgs(image, name, activationId, assignment, policy);
 }
 
-export class DockerSandboxProvider implements SandboxProvider {
-  readonly providerId = "docker";
+export function buildGvisorRepositoryImportArguments(
+  image: string,
+  network: string,
+  name: string,
+  importId: string,
+): readonly string[] {
+  bounded(image, "Repository importer image", 512);
+  bounded(name, "Repository importer name", 63);
+  bounded(importId, "Repository import id", 128);
+  return [
+    "run",
+    "--rm",
+    "--interactive",
+    "--runtime",
+    GVISOR_RUNTIME_NAME,
+    "--name",
+    name,
+    "--label",
+    "agent-dock.workspace-import=true",
+    "--label",
+    `agent-dock.workspace-import-id=${importId}`,
+    "--user",
+    "1000:1000",
+    "--read-only",
+    "--network",
+    dockerNetwork(network),
+    "--init",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--pids-limit",
+    "96",
+    "--ulimit",
+    "nproc=96:96",
+    "--memory",
+    "384m",
+    "--cpus",
+    "0.75",
+    "--ulimit",
+    "nofile=512:512",
+    "--tmpfs",
+    "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=1000,gid=1000",
+    "--tmpfs",
+    "/workspace:rw,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700",
+    "--workdir",
+    "/workspace",
+    "--stop-timeout",
+    "5",
+    "--entrypoint",
+    "node",
+    image,
+    "/app/packages/tool-sandbox/src/github-import-worker.ts",
+  ];
+}
+
+export class GvisorSandboxProvider implements SandboxProvider {
+  readonly providerId = "gvisor";
   readonly #toolImage: string;
   readonly #repositoryImportNetwork: string;
   readonly #dockerCommand: string;
-  readonly #dockerArgumentsPrefix: readonly string[];
   readonly #readyTimeoutMs: number;
   readonly #cleanupTimeoutMs: number;
   readonly #repositoryImportTimeoutMs: number;
   readonly #idGenerator: () => string;
   readonly #activations = new Map<string, Activation>();
 
-  constructor(options: DockerSandboxProviderOptions) {
+  #runtimeProbe: Promise<void> | undefined;
+
+  constructor(options: GvisorSandboxProviderOptions) {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image");
     this.#repositoryImportNetwork = dockerNetwork(options.repositoryImportNetwork);
     this.#dockerCommand = bounded(options.dockerCommand ?? "docker", "Docker command");
-    this.#dockerArgumentsPrefix = Object.freeze(
-      (options.dockerArgumentsPrefix ?? []).map((value) =>
-        bounded(value, "Docker argument prefix", 4_096),
-      ),
-    );
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       "readyTimeoutMs",
@@ -448,14 +503,121 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async checkHealth(): Promise<void> {
-    const result = await dockerExec(
+    const version = await dockerExec(
       this.#dockerCommand,
-      this.#dockerArguments(["version", "--format", "{{.Server.Version}}"]),
+      this.#dockerArguments([
+        "version",
+        "--format",
+        "{{.Server.Os}} {{.Server.Arch}} {{.Server.Version}}",
+      ]),
       this.#cleanupTimeoutMs,
       64 * 1_024,
     );
-    if (result.code !== 0 || !/^\d+\.\d+(?:\.\d+)?\s*$/.test(result.stdout)) {
+    if (
+      version.code !== 0 ||
+      !/^linux\s+[a-z0-9_-]+\s+\d+\.\d+(?:\.\d+)?\s*$/i.test(version.stdout)
+    ) {
       throw new SandboxManagerError("docker_unavailable", "Docker service is unavailable", true);
+    }
+    const runtime = await dockerExec(
+      this.#dockerCommand,
+      this.#dockerArguments(["info", "--format", `{{json .Runtimes.${GVISOR_RUNTIME_NAME}}}`]),
+      this.#cleanupTimeoutMs,
+      256 * 1_024,
+    );
+    let runtimeConfig: unknown;
+    try {
+      runtimeConfig = runtime.code === 0 ? (JSON.parse(runtime.stdout) as unknown) : undefined;
+    } catch {
+      runtimeConfig = undefined;
+    }
+    const candidate = runtimeConfig as { path?: unknown; runtimeArgs?: unknown } | null | undefined;
+    if (
+      candidate === null ||
+      candidate === undefined ||
+      typeof candidate.path !== "string" ||
+      !/(?:^|\/)runsc$/.test(candidate.path) ||
+      !Array.isArray(candidate.runtimeArgs) ||
+      !candidate.runtimeArgs.includes("--platform=kvm")
+    ) {
+      throw new SandboxManagerError(
+        "gvisor_runtime_unavailable",
+        "Docker Engine does not expose the required runsc KVM runtime",
+        false,
+      );
+    }
+    const image = await dockerExec(
+      this.#dockerCommand,
+      this.#dockerArguments(["image", "inspect", "--format", "{{.Id}}", this.#toolImage]),
+      this.#cleanupTimeoutMs,
+      64 * 1_024,
+    );
+    if (image.code !== 0 || !/^sha256:[a-f0-9]{64}\s*$/.test(image.stdout)) {
+      throw new SandboxManagerError(
+        "tool_image_unavailable",
+        "The configured Tool Sandbox image is unavailable",
+        false,
+      );
+    }
+    if (this.#runtimeProbe === undefined) {
+      this.#runtimeProbe = this.#probeGvisorRuntime();
+    }
+    try {
+      await this.#runtimeProbe;
+    } catch (error: unknown) {
+      this.#runtimeProbe = undefined;
+      throw error;
+    }
+  }
+
+  async #probeGvisorRuntime(): Promise<void> {
+    const probeName = `agent-dock-gvisor-probe-${this.#idGenerator()}`.slice(0, 63);
+    try {
+      const result = await dockerExec(
+        this.#dockerCommand,
+        this.#dockerArguments([
+          "run",
+          "--rm",
+          "--name",
+          probeName,
+          "--runtime",
+          GVISOR_RUNTIME_NAME,
+          "--user",
+          "1000:1000",
+          "--read-only",
+          "--network",
+          "none",
+          "--cap-drop",
+          "ALL",
+          "--security-opt",
+          "no-new-privileges:true",
+          "--pids-limit",
+          "128",
+          "--ulimit",
+          "nproc=128:128",
+          "--memory",
+          "128m",
+          "--cpus",
+          "0.25",
+          "--entrypoint",
+          "/bin/sh",
+          this.#toolImage,
+          "-c",
+          "uname -r",
+        ]),
+        this.#readyTimeoutMs,
+        64 * 1_024,
+      );
+      const kernel = result.stdout.trim();
+      if (result.code !== 0 || !GVISOR_KERNEL_PATTERN.test(kernel)) {
+        throw new SandboxManagerError(
+          "gvisor_runtime_probe_failed",
+          "The runsc runtime could not execute the trusted gVisor probe",
+          false,
+        );
+      }
+    } finally {
+      await this.#removeContainer(probeName).catch(() => undefined);
     }
   }
 
@@ -479,7 +641,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     const child = spawn(
       this.#dockerCommand,
       this.#dockerArguments(
-        buildToolSandboxDockerArguments(
+        buildGvisorToolSandboxArguments(
           this.#toolImage,
           name,
           activationId,
@@ -519,6 +681,8 @@ export class DockerSandboxProvider implements SandboxProvider {
       });
       await withTimeout(ready.promise, this.#readyTimeoutMs, "Tool Sandbox readiness");
       activation.runtimeId = await this.#inspectRuntimeId(name);
+      const isolation = await this.#inspectEffectiveIsolation(activation.runtimeId);
+      this.#assertEffectiveIsolation(isolation, spec.policy);
       const handle: SandboxHandle = {
         providerApiVersion: 1,
         providerId: this.providerId,
@@ -624,7 +788,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (response.operation !== "file.read") {
       throw new SandboxManagerError(
         "sandbox_provider_protocol_error",
-        "Docker Sandbox Provider returned the wrong file operation",
+        "gVisor Sandbox Provider returned the wrong file operation",
         false,
       );
     }
@@ -655,7 +819,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (response.operation !== "file.write") {
       throw new SandboxManagerError(
         "sandbox_provider_protocol_error",
-        "Docker Sandbox Provider returned the wrong file operation",
+        "gVisor Sandbox Provider returned the wrong file operation",
         false,
       );
     }
@@ -869,47 +1033,14 @@ export class DockerSandboxProvider implements SandboxProvider {
     const name = `agent-dock-import-${importId}`.slice(0, 63);
     const child = spawn(
       this.#dockerCommand,
-      this.#dockerArguments([
-        "run",
-        "--rm",
-        "--interactive",
-        "--name",
-        name,
-        "--label",
-        "agent-dock.workspace-import=true",
-        "--label",
-        `agent-dock.workspace-import-id=${importId}`,
-        "--user",
-        "1000:1000",
-        "--read-only",
-        "--network",
-        this.#repositoryImportNetwork,
-        "--init",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges:true",
-        "--pids-limit",
-        "96",
-        "--memory",
-        "384m",
-        "--cpus",
-        "0.75",
-        "--ulimit",
-        "nofile=512:512",
-        "--tmpfs",
-        "/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=1000,gid=1000",
-        "--tmpfs",
-        "/workspace:rw,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700",
-        "--workdir",
-        "/workspace",
-        "--stop-timeout",
-        "5",
-        "--entrypoint",
-        "node",
-        this.#toolImage,
-        "/app/packages/tool-sandbox/src/github-import-worker.ts",
-      ]),
+      this.#dockerArguments(
+        buildGvisorRepositoryImportArguments(
+          this.#toolImage,
+          this.#repositoryImportNetwork,
+          name,
+          importId,
+        ),
+      ),
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     let stdout = Buffer.alloc(0);
@@ -1015,7 +1146,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (results.some((result) => result.status === "rejected")) {
       throw new SandboxManagerError(
         "sandbox_provider_cleanup_unverified",
-        "Docker Sandbox Provider shutdown could not confirm complete cleanup",
+        "gVisor Sandbox Provider shutdown could not confirm complete cleanup",
         true,
       );
     }
@@ -1310,6 +1441,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       Config?: { User?: unknown };
       State?: { Running?: unknown };
       HostConfig?: {
+        Runtime?: unknown;
         Privileged?: unknown;
         ReadonlyRootfs?: unknown;
         NetworkMode?: unknown;
@@ -1318,6 +1450,7 @@ export class DockerSandboxProvider implements SandboxProvider {
         NanoCpus?: unknown;
         CapDrop?: unknown;
         SecurityOpt?: unknown;
+        Ulimits?: unknown;
       };
       Mounts?: unknown;
     };
@@ -1326,6 +1459,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       typeof value.Config?.User !== "string" ||
       typeof value.State?.Running !== "boolean" ||
       typeof host?.Privileged !== "boolean" ||
+      host.Runtime !== GVISOR_RUNTIME_NAME ||
       typeof host.ReadonlyRootfs !== "boolean" ||
       typeof host.NetworkMode !== "string" ||
       !Array.isArray(value.Mounts)
@@ -1341,10 +1475,35 @@ export class DockerSandboxProvider implements SandboxProvider {
       Array.isArray(input) && input.every((entry) => typeof entry === "string") ? input : [];
     const numberOrNull = (input: unknown): number | null =>
       typeof input === "number" && Number.isSafeInteger(input) && input > 0 ? input : null;
+    const ulimits = Array.isArray(host.Ulimits)
+      ? (host.Ulimits as Array<{ Name?: unknown; Soft?: unknown; Hard?: unknown }>)
+      : [];
+    const nproc = ulimits.find((limit) => limit.Name === "nproc");
+    const nprocSoft = numberOrNull(nproc?.Soft);
+    const nprocHard = numberOrNull(nproc?.Hard);
+    const processLimit = nprocSoft !== null && nprocSoft === nprocHard ? nprocSoft : null;
+    let sandboxKernelRelease: string | undefined;
+    if (value.State.Running) {
+      const kernel = await dockerExec(
+        this.#dockerCommand,
+        this.#dockerArguments(["exec", reference, "uname", "-r"]),
+        this.#cleanupTimeoutMs,
+        64 * 1_024,
+      );
+      sandboxKernelRelease = kernel.stdout.trim();
+      if (kernel.code !== 0 || !GVISOR_KERNEL_PATTERN.test(sandboxKernelRelease)) {
+        throw new SandboxManagerError(
+          "gvisor_runtime_mismatch",
+          "Tool Sandbox did not execute behind the required gVisor kernel",
+          false,
+        );
+      }
+    }
     return {
       running: value.State.Running,
       effectiveIsolation: {
-        isolationBoundary: "shared_kernel_container",
+        isolationBoundary: "gvisor",
+        runtime: GVISOR_RUNTIME_NAME,
         user: value.Config.User,
         privileged: host.Privileged,
         readOnlyRootFilesystem: host.ReadonlyRootfs,
@@ -1355,12 +1514,47 @@ export class DockerSandboxProvider implements SandboxProvider {
             mount.Source === "/var/run/docker.sock" || mount.Destination === "/var/run/docker.sock",
         ),
         pidLimit: numberOrNull(host.PidsLimit),
+        processLimit,
         memoryBytes: numberOrNull(host.Memory),
         cpuNano: numberOrNull(host.NanoCpus),
         droppedCapabilities: strings(host.CapDrop),
         securityOptions: strings(host.SecurityOpt),
+        ...(sandboxKernelRelease === undefined ? {} : { sandboxKernelRelease }),
       },
     };
+  }
+
+  #assertEffectiveIsolation(
+    inspected: { running: boolean; effectiveIsolation: SandboxEffectiveIsolation },
+    policy: SandboxPolicy,
+  ): void {
+    const isolation = inspected.effectiveIsolation;
+    const expected = policy.resources;
+    if (
+      !inspected.running ||
+      isolation.isolationBoundary !== "gvisor" ||
+      isolation.runtime !== GVISOR_RUNTIME_NAME ||
+      isolation.user !== policy.user ||
+      isolation.privileged ||
+      !isolation.readOnlyRootFilesystem ||
+      isolation.networkMode !== "none" ||
+      isolation.mountCount !== 0 ||
+      isolation.hasDockerSocket ||
+      isolation.pidLimit !== expected.pids ||
+      isolation.processLimit !== expected.pids ||
+      isolation.memoryBytes !== expected.memoryBytes ||
+      isolation.cpuNano !== expected.cpuNano ||
+      !isolation.droppedCapabilities.includes("ALL") ||
+      !isolation.securityOptions.some((value) => value.startsWith("no-new-privileges")) ||
+      isolation.sandboxKernelRelease === undefined ||
+      !GVISOR_KERNEL_PATTERN.test(isolation.sandboxKernelRelease)
+    ) {
+      throw new SandboxManagerError(
+        "gvisor_isolation_mismatch",
+        "Tool Sandbox effective isolation did not match the required gVisor policy",
+        false,
+      );
+    }
   }
 
   async #stopActivation(activation: Activation): Promise<void> {
@@ -1464,6 +1658,6 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   #dockerArguments(argumentsValue: readonly string[]): string[] {
-    return [...this.#dockerArgumentsPrefix, ...argumentsValue];
+    return [...argumentsValue];
   }
 }

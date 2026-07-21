@@ -16,18 +16,19 @@ workspaces, code-review delivery, usage tracking, and automated evaluation.
 
 ### Milestone 1: trusted Runner and Sandbox Provider
 
-Status: complete for the supported Docker/private-host claim.
+Status: complete for the supported gVisor/KVM private-host claim.
 
 - trusted Pi Runner and model boundary;
 - socket-owning Sandbox Manager;
 - provider-neutral handles, policy, lifecycle, inspection, and cleanup;
-- Docker Provider with offline Tool Sandbox;
+- sole gVisor `runsc`/KVM Provider with offline Tool Sandbox and fail-closed
+  runtime attestation;
 - credential, namespace, cgroup, filesystem, network, cancellation, and Pi
   integration evidence;
 - threat model, network matrix, Provider and Run lifecycle documentation.
 
-Stronger isolation was intentionally deferred to Milestone 6; defining an
-interface alone did not make it supported.
+The original ordinary-Docker implementation was later removed under ADR-0038;
+the Provider interface alone is not treated as runtime evidence.
 
 ### Milestone 2: durable Run protocol
 
@@ -54,7 +55,7 @@ system must not claim exactly-once arbitrary shell execution.
 
 ### Milestone 3: versioned Workspace and GitHub-native delivery
 
-Status: complete for the optional GitHub App integration and Docker production topology under ADR-0032.
+Status: complete for the optional GitHub App integration and gVisor production topology under ADR-0032/ADR-0038.
 
 - checkpoint history, compare, fork, rollback, archive, and patch download;
 - structured files/diff/test/artifact surfaces;
@@ -106,31 +107,29 @@ Implemented with durable Run trace identities, W3C propagation across every
 trusted HTTP/process boundary, bearer-protected low-cardinality Prometheus
 metrics, redacted JSON logs, a tenant-scoped owner operations API, persisted
 Jaeger, and a provisioned Grafana dashboard. Reproducible reports cover ten
-full-loop coding repairs, ten fault invariants, the Docker/Pi security gate, and
+full-loop coding repairs, ten fault invariants, the gVisor/Pi security gate, and
 10/50/100 simultaneous Session/API load. Reports explicitly separate
 infrastructure correctness from model intelligence and active-Run capacity.
 
 Only reproduced measurements belong in the résumé.
 
-### Milestone 6: second Sandbox Provider
+### Milestone 6: stronger Sandbox boundary
 
-Status: complete under ADR-0035 for the opt-in Docker Desktop host path.
+Status: complete under ADR-0038.
 
-- `DockerMicrovmSandboxProvider` creates one LinuxKit VM per activation;
-- the pinned trusted shell is provisioning-only and switches to deny-all before
-  the untrusted worker starts;
-- the exact host Tool image is loaded and identity-verified in the VM;
-- the existing hardened worker runs nested with unchanged Tool RPC,
-  cancellation, limits, workspace snapshot, and label identity;
-- private manifests plus inner-label inspection support fresh-Manager
-  reconciliation and exact cleanup;
-- the security/lifecycle suite and pinned Pi Java repair pass through the
-  separate-kernel path.
+- `GvisorSandboxProvider` is the only concrete implementation;
+- Docker registers `runsc` with the KVM platform and no fallback;
+- Manager readiness executes a live gVisor probe and each activation is
+  re-attested;
+- Tool and public-import workloads both specify `runtime=runsc`;
+- actual guest process exhaustion supplements outer cgroup inspection;
+- the security/lifecycle suite, checkpoint path, pinned Pi repair and complete
+  production topology pass through gVisor;
+- ordinary-Docker, Docker Desktop/LinuxKit, provider selectors and legacy
+  whole-Pi container execution were deleted.
 
-The Provider is not the default Compose backend: Docker Sandboxes v0.12.0 is a
-host integration and has much higher cold-start/memory overhead. Its limitations
-and measurements are published with the gate. Full public-SaaS and arbitrary
-dependency-egress claims remain excluded.
+ADR-0035 remains only as historical decision evidence and is superseded. Full
+public-SaaS and arbitrary dependency-egress claims remain excluded.
 
 ### Milestone 7: product completion and public demonstration
 

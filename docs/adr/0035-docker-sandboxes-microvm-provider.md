@@ -1,6 +1,8 @@
 # ADR-0035: Docker Sandboxes microVM Provider
 
-Status: accepted, 2026-07-20.
+Status: Superseded by ADR-0038 on 2026-07-21. The implementation, configuration
+and executable gate described below were removed; this file is historical
+decision evidence only.
 
 ## Context
 

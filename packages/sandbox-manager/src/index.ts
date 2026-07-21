@@ -9,16 +9,13 @@ export {
   type SandboxManagerClientOptions,
 } from "./client.ts";
 export {
+  GVISOR_RUNTIME_NAME,
   TOOL_SANDBOX_LABELS,
-  DockerSandboxProvider,
-  buildToolSandboxDockerArguments,
-  type DockerSandboxProviderOptions,
-} from "./docker-sandbox-provider.ts";
-export {
-  DEFAULT_DOCKER_SANDBOX_TEMPLATE,
-  DockerMicrovmSandboxProvider,
-  type DockerMicrovmSandboxProviderOptions,
-} from "./docker-microvm-sandbox-provider.ts";
+  GvisorSandboxProvider,
+  buildGvisorRepositoryImportArguments,
+  buildGvisorToolSandboxArguments,
+  type GvisorSandboxProviderOptions,
+} from "./gvisor-sandbox-provider.ts";
 export {
   DEFAULT_TOOL_SANDBOX_POLICY,
   SANDBOX_PROVIDER_API_VERSION,

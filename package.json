@@ -11,14 +11,19 @@
     "packages/*",
     "spikes/*"
   ],
+  "dependencies": {
+    "pi-security-brace-expansion": "npm:brace-expansion@5.0.7",
+    "pi-security-protobufjs": "npm:protobufjs@7.6.5"
+  },
   "scripts": {
-    "ci": "npm run format:check && npm run build && npm run check && npm run backup:crypto-check && npm run security:audit",
+    "postinstall": "node scripts/harden-pi-dependencies.mjs",
+    "dependencies:harden": "node scripts/harden-pi-dependencies.mjs",
+    "dependencies:check": "node scripts/harden-pi-dependencies.mjs --check",
+    "ci": "npm run dependencies:harden && npm run format:check && npm run build && npm run check && npm run backup:crypto-check && npm run security:audit",
     "build": "npm run build --workspaces --if-present",
     "container:config": "docker compose config --quiet",
     "container:check": "node scripts/run-container-check.mjs",
-    "sandbox:check": "node scripts/run-docker-sandbox-check.mjs",
-    "sandbox-provider:check": "node scripts/run-sandbox-provider-check.mjs",
-    "sandbox-microvm:check": "node scripts/run-microvm-sandbox-check.mjs",
+    "sandbox:check": "node scripts/run-gvisor-sandbox-check.mjs",
     "object-store:check": "node scripts/run-minio-check.mjs",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
@@ -47,9 +52,9 @@
     "fake-model:start": "npm run start --workspace @agent-dock/fake-model-server",
     "db:migrate": "npm run migrate --workspace @agent-dock/database",
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
-    "demo": "node scripts/run-local-demo.mjs",
+    "demo": "npm run production:deploy",
     "check": "npm run typecheck && npm test && npm run spike:pi && npm run spike:embedded",
-    "security:audit": "npm audit --audit-level=high",
+    "security:audit": "node scripts/run-security-audit.mjs",
     "eval:coding": "node scripts/run-coding-eval.mjs",
     "eval:faults": "node scripts/run-fault-eval.mjs",
     "eval:load": "node scripts/run-control-plane-load.mjs"

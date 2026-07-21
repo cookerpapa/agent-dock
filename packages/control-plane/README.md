@@ -192,24 +192,15 @@ through another. It also proves no-overwrite publication, database-hash
 corruption detection, and hard object-size rejection. The fixture is not a
 production deployment recommendation.
 
-## Local browser demo
+## Browser demo
 
-The repository-level `npm run demo` command builds the same sandbox image and
-the `@agent-dock/web-ui` production bundle, then starts `src/demo.ts` on
-loopback. That entry point creates an ephemeral PGlite database, applies the real
-migrations, seeds one fixed zero-token model profile and sandbox capacity row,
-and runs execution and cancellation dispatch loops independently. Vite preview
-serves the page and proxies only `/v1` to this API.
-
-This is explicit demonstration wiring, not hidden production behavior. The
-database and development checkpoint directory disappear on shutdown. Within
-that runtime, successful turns persist Pi JSONL and a bounded workspace manifest
-before `turn.completed`, so the same session can continue in a fresh container.
-`src/main.ts` still requires operator-owned PostgreSQL/profile bootstrap and
-does not start a local Docker supervisor or opt into the remote worker
-composition. The explicit factory is available to a deployment that can supply
-the required trusted adapters. The S3 factory is exported for the Supervisor
-host rather than silently changing the HTTP-only entry point.
+The repository-level `npm run demo` command is an alias for the supported
+persistent `production:deploy` topology. The former ephemeral control-plane
+entry point and whole-Pi ordinary-Docker worker were removed, so an interactive
+demo cannot bypass the Trusted Runner, Sandbox Manager or gVisor/KVM boundary.
+The product is served on loopback at `http://127.0.0.1:8080` and uses the normal
+PostgreSQL, object storage, authentication, remote Supervisor and checkpoint
+paths.
 
 ## Verification boundary
 
@@ -230,9 +221,9 @@ FIFO/no-overlap plus idempotent replay without a mailbox gap. Cancellation
 coverage includes queued rejection,
 idempotency, competing requests, natural-completion races, post-ACK failure
 quarantine semantics, native Pi abort, forced POSIX descendant termination, and
-SSE terminal delivery. Its default end-to-end path starts pinned Pi against the
-loopback fake model without provider tokens. The opt-in Docker case additionally
-persists and streams the ten-event Java repair and final patch.
+SSE terminal delivery. The cross-boundary pinned-Pi and Tool Sandbox path lives
+in the gVisor integration and production acceptance gates rather than a second
+control-plane-local worker.
 
 The remote composition test starts a real Nest/Fastify listener and outbound
 WebSocket Supervisor without manually invoking a dispatcher. It proves
@@ -245,8 +236,8 @@ The local supervisor also has a crash-safe file event spool. A PostgreSQL
 integration test commits an event, drops the returning ACK path, releases the
 lease during terminal failure handling, constructs a fresh spool store, and
 redelivers the exact event. PostgreSQL returns a duplicate-safe ACK and retains
-one row. The ephemeral browser demo uses the same file-spool implementation;
-its PGlite database and spool directory are deliberately temporary.
+one row. The production Supervisor uses the same file-spool implementation on
+its persistent private volume.
 
 `PGlite` is test-only. `src/main.ts` uses the production `pg`/Kysely client and
 requires the database plus Supervisor enrollment/management configuration; it

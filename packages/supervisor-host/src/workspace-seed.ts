@@ -10,11 +10,7 @@ import {
   type ExecuteTurnCommandMessage,
   type GitHubRepositorySource,
 } from "@agent-dock/protocol";
-import {
-  GitHubWorkspaceImporterError,
-  PiRpcTurnError,
-  validateWorkspaceSnapshot,
-} from "@agent-dock/sandbox-supervisor";
+import { PiRpcTurnError, validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
 import { createWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
@@ -22,6 +18,18 @@ import { createWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
 type GitHubWorkspaceImporter = {
   import(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array>;
 };
+
+function isWorkspaceImporterFailure(
+  value: unknown,
+): value is Error & { code: string; retryable: boolean } {
+  return (
+    value instanceof Error &&
+    "code" in value &&
+    typeof value.code === "string" &&
+    "retryable" in value &&
+    typeof value.retryable === "boolean"
+  );
+}
 
 type WorkspaceSourceRow = {
   kind: "empty" | "sample_java" | "github_public" | "github_app";
@@ -456,7 +464,7 @@ export class PostgresWorkspaceSeedResolver {
       const translated =
         error instanceof WorkspaceSeedError
           ? error
-          : error instanceof GitHubWorkspaceImporterError
+          : isWorkspaceImporterFailure(error)
             ? new WorkspaceSeedError(error.code, error.message, error.retryable)
             : error instanceof GitHubGatewayError
               ? new WorkspaceSeedError(error.code, error.message, error.retryable)

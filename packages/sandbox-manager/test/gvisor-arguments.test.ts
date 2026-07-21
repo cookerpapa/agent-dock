@@ -2,7 +2,8 @@ import type { ToolSandboxAssignment } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TOOL_SANDBOX_POLICY,
-  buildToolSandboxDockerArguments,
+  buildGvisorRepositoryImportArguments,
+  buildGvisorToolSandboxArguments,
   type SandboxPolicy,
 } from "../src/index.ts";
 
@@ -19,9 +20,9 @@ const assignment: ToolSandboxAssignment = {
   fencingToken: 7,
 };
 
-describe("Tool Sandbox Docker boundary", () => {
+describe("Tool Sandbox gVisor boundary", () => {
   it("creates an offline, unprivileged, immutable and mount-free worker", () => {
-    const args = buildToolSandboxDockerArguments(
+    const args = buildGvisorToolSandboxArguments(
       "agent-dock/tool-sandbox:test",
       "agent-dock-tool-security-test",
       "10000000-0000-4000-8000-000000000004",
@@ -40,6 +41,10 @@ describe("Tool Sandbox Docker boundary", () => {
         "no-new-privileges:true",
         "--pids-limit",
         "128",
+        "--ulimit",
+        "nproc=128:128",
+        "--runtime",
+        "runsc",
       ]),
     );
     expect(args.at(-1)).toBe("agent-dock/tool-sandbox:test");
@@ -59,7 +64,7 @@ describe("Tool Sandbox Docker boundary", () => {
       network: { mode: "github" },
     } as SandboxPolicy;
     expect(() =>
-      buildToolSandboxDockerArguments(
+      buildGvisorToolSandboxArguments(
         "agent-dock/tool-sandbox:test",
         "agent-dock-tool-security-test",
         "10000000-0000-4000-8000-000000000004",
@@ -67,5 +72,35 @@ describe("Tool Sandbox Docker boundary", () => {
         unsupported,
       ),
     ).toThrow("does not support");
+  });
+
+  it("runs the bounded public repository importer behind runsc", () => {
+    const args = buildGvisorRepositoryImportArguments(
+      "agent-dock/tool-sandbox:test",
+      "agent-dock-repository-import",
+      "agent-dock-import-security-test",
+      "10000000-0000-4000-8000-000000000005",
+    );
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "--runtime",
+        "runsc",
+        "--network",
+        "agent-dock-repository-import",
+        "--user",
+        "1000:1000",
+        "--read-only",
+        "--pids-limit",
+        "96",
+        "--ulimit",
+        "nproc=96:96",
+        "--cap-drop",
+        "ALL",
+      ]),
+    );
+    expect(args).not.toContain("--privileged");
+    expect(args).not.toContain("--volume");
+    expect(args).not.toContain("--mount");
+    expect(args).not.toContain("--env");
   });
 });

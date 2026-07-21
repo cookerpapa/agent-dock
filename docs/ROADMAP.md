@@ -55,11 +55,12 @@ Deliverables:
 Exit criteria: from a clean checkout, a user can ask Pi to fix a test in a
 sample Java repository and observe the complete event flow.
 
-Current status: complete. `npm run sandbox:check` proves the backend path, and
-`npm run demo` exposes the same zero-token Java repair through the minimal React
-session page. The page can submit, stream, reconnect without duplicate events,
-cancel, and inspect the final diff. The one-turn limitation was removed by the
-first Phase 2 settled-checkpoint slice described below.
+Current status: complete. `npm run sandbox:check` proves the zero-token backend
+path through runsc/KVM, and `npm run demo` starts the persistent Web product
+using the same supported production topology. The page can submit, stream,
+reconnect without duplicate events, cancel, and inspect the final diff. The
+one-turn limitation was removed by the first Phase 2 settled-checkpoint slice
+described below.
 
 ## Phase 2: durable sessions and mailbox (2 weeks)
 
@@ -161,21 +162,19 @@ Docker-owning Sandbox Manager; Pi's built-ins are disabled and replaced through
 public operation APIs; each active turn receives a credential-free,
 networkless, non-root Tool Sandbox. Production acceptance proves remote
 `bash/edit`, checkpoint/diff capture, cancellation, exact cleanup, socket
-ownership, and secret absence. The old whole-Pi Docker runner remains only as a
-legacy adapter/test path. User/project extensions, interactive approvals,
+ownership, and secret absence. The old whole-Pi ordinary-Docker runner and its
+demo/test protocol have been removed. User/project extensions, interactive approvals,
 mutually hostile public tenants are still outside the claim. The owner
 explicitly deferred extension and approval work, so those items are not
-represented as silently complete. ADR-0035 subsequently added an opt-in,
-separate-kernel Docker microVM Provider without changing the default topology.
+represented as silently complete.
 
-ADR-0030 now adds the long-term Provider seam: one provider-neutral Manager owns
-capabilities and identity while `DockerSandboxProvider` owns only runtime
-operations. Handles bind tenant/session/turn/attempt/lease/fence, deployment
-policy is fixed above the Provider, and effective inspection plus a dedicated
-zero-token Docker gate prove cgroups, network denial, `/proc` and credential
-isolation, cross-tenant workspace isolation, bounded output, cancellation, and
-cleanup. `docker_microvm` now passes the same worker security/lifecycle and real
-Pi repair gates; gVisor and external managed Providers remain planned.
+ADR-0030 adds the long-term Provider seam: one provider-neutral Manager owns
+capabilities and identity while the concrete Provider owns runtime operations.
+ADR-0038 then makes `GvisorSandboxProvider` the sole implementation, fixes
+runsc to KVM, removes the whole-Pi ordinary-Docker adapter and all provider
+fallbacks, and proves guest identity, resources, network denial, `/proc` and
+credential isolation, cross-tenant workspaces, bounded output, cancellation,
+cleanup and the real Pi repair path.
 
 This bounded tool-sandbox slice is resume-ready.
 

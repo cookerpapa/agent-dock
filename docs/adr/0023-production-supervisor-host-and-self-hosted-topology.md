@@ -1,5 +1,9 @@
 # ADR-0023: Production Supervisor host and self-hosted topology
 
+Implementation update: ADR-0029 moved Pi into the Trusted Runner, and ADR-0038
+removed the historical whole-Pi Docker runner/inventory implementation named
+below. Current Tool execution is exclusively remote gVisor/runsc KVM.
+
 - Status: accepted
 - Date: 2026-07-19
 - Amended by: ADR-0025 replaces the single-user public-token/runtime-tenant

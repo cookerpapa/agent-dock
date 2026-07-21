@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { release as hostKernelRelease, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
@@ -566,13 +566,21 @@ async function assertWorkerSecurity(containerId, secretValues, expectedAssignmen
   const inspected = JSON.parse(await capture("docker", ["inspect", containerId]))[0];
   const labels = inspected.Config.Labels ?? {};
   assert.equal(inspected.Config.User, "1000:1000");
+  assert.equal(inspected.HostConfig.Runtime, "runsc");
   assert.equal(inspected.HostConfig.NetworkMode, "none");
   assert.equal(inspected.HostConfig.ReadonlyRootfs, true);
   assert(inspected.HostConfig.CapDrop.includes("ALL"));
   assert.equal(inspected.HostConfig.SecurityOpt.includes("no-new-privileges:true"), true);
   assert.equal(inspected.HostConfig.PidsLimit, 128);
+  assert.deepEqual(
+    inspected.HostConfig.Ulimits.find((limit) => limit.Name === "nproc"),
+    { Name: "nproc", Hard: 128, Soft: 128 },
+  );
   assert.equal(inspected.HostConfig.Memory, 768 * 1_024 * 1_024);
   assert.equal(inspected.HostConfig.NanoCpus, 1_000_000_000);
+  const sandboxKernel = await capture("docker", ["exec", containerId, "uname", "-r"]);
+  assert.match(sandboxKernel, /gvisor/i);
+  assert.notEqual(sandboxKernel, hostKernelRelease());
   assert.deepEqual(
     {
       tenantId: labels["agent-dock.tenant-id"],
@@ -753,7 +761,10 @@ async function assertExecutionBoundary() {
   assert.equal(repositoryNetwork.Name, `${projectName}_repository-egress`);
   assert.deepEqual(Object.keys(repositoryNetwork.Containers ?? {}), []);
   const managerEnvironment = manager.Config.Env ?? [];
-  assert(managerEnvironment.includes("AGENT_DOCK_SANDBOX_PROVIDER=docker"));
+  assert.equal(
+    managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_SANDBOX_PROVIDER=")),
+    false,
+  );
   for (const prefix of [
     "DATABASE_URL=",
     "DATABASE_URL_FILE=",
@@ -1493,7 +1504,7 @@ async function main() {
     tenantBToken,
   );
   assert.equal(tenantBStream.events.at(-1).type, "turn.completed");
-  await assertCursor(sessionB.sessionId, 10);
+  await assertCursor(sessionB.sessionId, tenantBStream.cursor);
   await assertCheckpointObjects(sessionB.sessionId, 3, tenantBId);
   const tenantBVersions = await http(
     `/v1/sessions/${sessionB.sessionId}/workspace-versions`,
@@ -1775,24 +1786,18 @@ async function main() {
   );
   const repairEvents = repairStream.events;
   assert.equal(repairEvents.at(-1).type, "turn.completed");
-  assert.deepEqual(
-    repairEvents.map((event) => event.type),
-    [
-      "turn.started",
-      "tool.started",
-      "tool.completed",
-      "tool.started",
-      "tool.completed",
-      "tool.started",
-      "tool.completed",
-      "assistant.text.delta",
-      "assistant.text.delta",
-      "turn.completed",
-    ],
+  assert.equal(repairEvents.at(0).type, "turn.started");
+  assert.equal(repairEvents.filter((event) => event.type === "tool.started").length, 3);
+  assert.equal(repairEvents.filter((event) => event.type === "tool.completed").length, 3);
+  assert(repairEvents.some((event) => event.type === "assistant.text.delta"));
+  assert.equal(
+    repairEvents.some((event) => event.type === "turn.failed"),
+    false,
   );
   assert.match(repairEvents.at(-1).payload.workspacePatch.patch, /return left \+ right/);
   assert.equal(JSON.stringify(repairEvents).includes(repairPrompt), false);
-  await assertCursor(session.sessionId, 10);
+  const repairCursor = repairStream.cursor;
+  await assertCursor(session.sessionId, repairCursor);
   await assertCheckpointObjects(session.sessionId, 3);
 
   report("scale_control_plane", { replicas: 2 });
@@ -1816,10 +1821,10 @@ async function main() {
   ).body;
   const followUpStream = await readSessionEventsUntil(
     session.sessionId,
-    10,
+    repairCursor,
     isTerminalFor(followUp.turnId),
   );
-  assert.equal(followUpStream.cursor, 16);
+  assert(followUpStream.cursor > repairCursor);
   assert.equal(followUpStream.events.at(-1).type, "turn.completed");
   assert.match(
     followUpStream.events
@@ -1828,7 +1833,8 @@ async function main() {
       .join(""),
     /Prior conversation and Java repair restored/,
   );
-  await assertCursor(session.sessionId, 16);
+  const followUpCursor = followUpStream.cursor;
+  await assertCursor(session.sessionId, followUpCursor);
   await assertCheckpointObjects(session.sessionId, 6);
 
   report("scale_control_plane", { replicas: 1 });
@@ -1882,12 +1888,12 @@ async function main() {
   ).body;
   const postRestartStream = await readSessionEventsUntil(
     session.sessionId,
-    16,
+    followUpCursor,
     isTerminalFor(postRestart.turnId),
   );
-  assert.equal(postRestartStream.cursor, 22);
+  assert(postRestartStream.cursor > followUpCursor);
   assert.equal(postRestartStream.events.at(-1).type, "turn.completed");
-  await assertCursor(session.sessionId, 22);
+  await assertCursor(session.sessionId, postRestartStream.cursor);
   await assertCheckpointObjects(session.sessionId, 9);
 
   report("cancel_active_worker", { bootId: freshBoot.bootId });

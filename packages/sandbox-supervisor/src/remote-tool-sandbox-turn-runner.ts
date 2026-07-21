@@ -7,7 +7,6 @@ import {
   type ToolSandboxCreateRequest,
   type ToolSandboxCreateResponse,
   type WorkspacePatch,
-  type DockerSandboxModelRuntime,
 } from "@agent-dock/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
@@ -27,15 +26,17 @@ import {
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
 } from "./sandbox-checkpoint.ts";
-import type {
-  DockerSandboxScenario,
-  DockerSandboxScenarioResolver,
-  DockerSandboxWorkspaceSeedResolver,
-} from "./docker-sandbox-turn-runner.ts";
 import {
   validateSandboxRuntimeIdentity,
   type SandboxRuntimeIdentity,
-} from "./docker-sandbox-assignment-inventory.ts";
+} from "./sandbox-assignment-inventory.ts";
+import type {
+  AgentTurnScenario,
+  AgentTurnScenarioResolver,
+  AgentWorkspaceSeedResolver,
+  TrustedModelRuntimeLease,
+  TrustedModelRuntimeLeaseResolver,
+} from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 
 export interface ToolSandboxManagerBoundary {
@@ -48,22 +49,13 @@ export interface ToolSandboxManagerBoundary {
   readonly operationUrl: string;
 }
 
-export type TrustedModelRuntimeLease = Readonly<{
-  runtime: Extract<DockerSandboxModelRuntime, { kind: "openai_compatible_gateway" }>;
-  release(): Promise<void> | void;
-}>;
-
-export type TrustedModelRuntimeLeaseResolver = (
-  command: ExecuteTurnCommandMessage,
-) => Promise<TrustedModelRuntimeLease> | TrustedModelRuntimeLease;
-
 export type RemoteToolSandboxTurnRunnerOptions = {
   manager: ToolSandboxManagerBoundary;
   runtimeIdentity: SandboxRuntimeIdentity;
   trustedWorkspaceDirectory: string;
-  scenario?: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  scenario?: AgentTurnScenario | AgentTurnScenarioResolver;
   modelRuntimeLeaseResolver?: TrustedModelRuntimeLeaseResolver;
-  workspaceSeedResolver?: DockerSandboxWorkspaceSeedResolver;
+  workspaceSeedResolver?: AgentWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
   runAttemptPhaseObserver?: RunAttemptPhaseObserver;
   trustedExtensionPath?: string;
@@ -122,9 +114,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #manager: ToolSandboxManagerBoundary;
   readonly #runtimeIdentity: SandboxRuntimeIdentity;
   readonly #trustedWorkspaceDirectory: string;
-  readonly #scenario: DockerSandboxScenario | DockerSandboxScenarioResolver;
+  readonly #scenario: AgentTurnScenario | AgentTurnScenarioResolver;
   readonly #modelRuntimeLeaseResolver: TrustedModelRuntimeLeaseResolver | undefined;
-  readonly #workspaceSeedResolver: DockerSandboxWorkspaceSeedResolver | undefined;
+  readonly #workspaceSeedResolver: AgentWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #runAttemptPhaseObserver: RunAttemptPhaseObserver | undefined;
   readonly #trustedExtensionPath: string;

@@ -1,7 +1,6 @@
 import { loadSandboxManagerConfig } from "./config.ts";
 import { startServiceObservability } from "@agent-dock/observability";
-import { DockerSandboxProvider } from "./docker-sandbox-provider.ts";
-import { DockerMicrovmSandboxProvider } from "./docker-microvm-sandbox-provider.ts";
+import { GvisorSandboxProvider } from "./gvisor-sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 
@@ -10,24 +9,12 @@ const observability = await startServiceObservability({
   serviceName: "agent-dock-sandbox-manager",
   defaultMetricsPort: 9466,
 });
-const provider =
-  config.sandboxProvider === "docker_microvm"
-    ? new DockerMicrovmSandboxProvider({
-        toolImage: config.toolImage,
-        repositoryImportNetwork: config.repositoryImportNetwork,
-        dockerCommand: config.dockerCommand,
-        repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
-        stateDirectory: config.microvmStateDirectory,
-        templateImage: config.microvmTemplateImage,
-        templatePullPolicy: config.microvmTemplatePullPolicy,
-        createTimeoutMs: config.microvmCreateTimeoutMs,
-      })
-    : new DockerSandboxProvider({
-        toolImage: config.toolImage,
-        repositoryImportNetwork: config.repositoryImportNetwork,
-        dockerCommand: config.dockerCommand,
-        repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
-      });
+const provider = new GvisorSandboxProvider({
+  toolImage: config.toolImage,
+  repositoryImportNetwork: config.repositoryImportNetwork,
+  dockerCommand: config.dockerCommand,
+  repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
+});
 const manager = new ToolSandboxManager({ provider });
 const server = new SandboxManagerServer({
   host: config.host,

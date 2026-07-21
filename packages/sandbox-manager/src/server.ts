@@ -231,7 +231,7 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.create(message),
           });
-          this.#metrics?.sandboxActive.inc({ provider: "docker" });
+          this.#metrics?.sandboxActive.inc({ provider: "gvisor" });
           await reply.code(200).send(created);
           return;
         }
@@ -256,7 +256,7 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.stop(message.activationId, message.assignment),
           });
-          this.#metrics?.sandboxActive.dec({ provider: "docker" });
+          this.#metrics?.sandboxActive.dec({ provider: "gvisor" });
           await reply.code(200).send({
             managerProtocolVersion: 1,
             type: "tool_sandbox.stopped",

@@ -207,13 +207,6 @@ async function rebindRuntime(path) {
     return `AGENT_DOCK_RUNTIME_DIRECTORY=${path}`;
   });
   if (!replaced) throw new Error("Restored runtime environment has no runtime-directory binding");
-  await writeFile(environmentPath, rebound.join("\n"), { mode: 0o600 });
-  const deploymentPath = resolve(path, "deployment.json");
-  const deployment = JSON.parse(await readFile(deploymentPath, "utf8"));
-  if (deployment?.formatVersion !== 1) throw new Error("Restored deployment manifest is invalid");
-  deployment.runtimeDirectory = path;
-  deployment.restoredAt = new Date().toISOString();
-  await writeFile(deploymentPath, `${JSON.stringify(deployment, null, 2)}\n`, { mode: 0o600 });
   const environment = Object.fromEntries(
     rebound.filter(Boolean).map((line) => {
       const separator = line.indexOf("=");
@@ -221,11 +214,39 @@ async function rebindRuntime(path) {
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
   );
-  const uid = Number(environment.AGENT_DOCK_APPLICATION_UID);
-  const gid = Number(environment.AGENT_DOCK_APPLICATION_GID);
-  if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) {
-    throw new Error("Restored application identity is invalid");
+  let uid = Number(environment.AGENT_DOCK_APPLICATION_UID);
+  let gid = Number(environment.AGENT_DOCK_APPLICATION_GID);
+  if (!Number.isSafeInteger(uid) || uid < 1 || !Number.isSafeInteger(gid) || gid < 0) {
+    const applicationSecret = await lstat(resolve(path, "secrets", "api-token"));
+    if (
+      !applicationSecret.isFile() ||
+      applicationSecret.isSymbolicLink() ||
+      applicationSecret.uid < 1 ||
+      applicationSecret.gid < 0
+    ) {
+      throw new Error("Restored application identity is invalid");
+    }
+    uid = applicationSecret.uid;
+    gid = applicationSecret.gid;
   }
+  const normalizedEnvironment = rebound.filter(
+    (line) =>
+      !line.startsWith("AGENT_DOCK_APPLICATION_UID=") &&
+      !line.startsWith("AGENT_DOCK_APPLICATION_GID=") &&
+      line.length > 0,
+  );
+  normalizedEnvironment.push(
+    `AGENT_DOCK_APPLICATION_UID=${String(uid)}`,
+    `AGENT_DOCK_APPLICATION_GID=${String(gid)}`,
+    "",
+  );
+  await writeFile(environmentPath, normalizedEnvironment.join("\n"), { mode: 0o600 });
+  const deploymentPath = resolve(path, "deployment.json");
+  const deployment = JSON.parse(await readFile(deploymentPath, "utf8"));
+  if (deployment?.formatVersion !== 1) throw new Error("Restored deployment manifest is invalid");
+  deployment.runtimeDirectory = path;
+  deployment.restoredAt = new Date().toISOString();
+  await writeFile(deploymentPath, `${JSON.stringify(deployment, null, 2)}\n`, { mode: 0o600 });
   await hardenRuntimeTree(path, uid, gid);
 }
 

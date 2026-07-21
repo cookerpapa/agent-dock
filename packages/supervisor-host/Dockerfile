@@ -3,6 +3,7 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY scripts/harden-pi-dependencies.mjs scripts/harden-pi-dependencies.mjs
 COPY packages/control-plane/package.json packages/control-plane/package.json
 COPY packages/control-plane/tsconfig.json packages/control-plane/tsconfig.json
 COPY packages/database/package.json packages/database/package.json
@@ -16,7 +17,10 @@ COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/packag
 COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
 COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts \
+    && node scripts/harden-pi-dependencies.mjs \
+    && node scripts/harden-pi-dependencies.mjs --check \
+    && npm cache clean --force
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 

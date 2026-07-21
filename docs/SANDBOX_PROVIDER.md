@@ -1,91 +1,62 @@
-# Sandbox Provider contract
+# gVisor Sandbox Provider
 
-## Purpose
+## Supported boundary
 
-`SandboxProvider` separates stable AgentDock execution semantics from a concrete
-container or microVM API. Pi and the Control Plane never receive a Docker client,
-socket, container-create options, host path, or provider SDK object.
+AgentDock has exactly one untrusted execution provider:
+`GvisorSandboxProvider`. Docker Engine supplies trusted lifecycle operations,
+but every Tool Worker and public-repository importer is started explicitly with
+the OCI runtime `runsc`. The host config fixes `runsc` to `--platform=kvm`.
 
-The implementation lives in
-`packages/sandbox-manager/src/sandbox-provider.ts`. ADR-0030 records the
-boundary and ADR-0035 records the stronger Docker microVM implementation.
+There is no provider selector, runc fallback, Docker Desktop fallback, systrap
+fallback, LinuxKit microVM path, or managed-provider compatibility branch. A
+host that cannot execute a real `runsc` KVM probe is unhealthy and receives no
+turns.
+
+ADR-0030 defines the provider-neutral Manager boundary. ADR-0038 supersedes its
+original concrete provider and is the current runtime decision.
 
 ## Layering
 
 ```text
-Trusted Pi extension
-        |
-        | Manager HTTP + activation capability
-        v
+Trusted Pi Runner
+    | authenticated Tool RPC + activation capability
+    v
 ToolSandboxManager
-  - capability digest and revocation
-  - assignment identity and replay checks
-  - fixed deployment policy
-        |
-        | immutable SandboxHandle
-        v
-SandboxProvider
-  - runtime lifecycle and inspection
-  - worker transport
-  - snapshot and exact cleanup
+    | authorization, assignment fencing, policy, revocation
+    v
+GvisorSandboxProvider
+    | trusted Docker lifecycle API; explicit runtime=runsc
+    v
+runsc/KVM Tool Sandbox
+    | /workspace, bash/edit/git/test; no platform credential/network
 ```
 
-The Manager owns authorization once for every Provider. A Provider never sees
-the service credential or bearer capability.
+Only the Sandbox Manager owns the Docker socket. Pi, the Control Plane and the
+Tool Sandbox never receive it or a Docker SDK object. The provider never sees a
+Manager bearer credential.
 
-## Contract
+## Provider contract
 
-The provider-neutral interface contains:
+The interface contains:
 
-- `create(spec)`;
-- `exec(handle, request, signal)`;
-- `readFile(handle, input, signal)`;
-- `writeFile(handle, input, signal)`;
-- `snapshot(handle, requestId)`;
-- `stop(handle)`;
-- `destroy(handle)`;
-- `inspect(handle)`;
-- orphan inventory and exact termination operations;
-- controlled public-GitHub import;
-- `checkHealth()` and `close()`.
+- `create`, `exec`, `readFile`, `writeFile` and `snapshot`;
+- `stop`, forceful idempotent `destroy`, and `inspect`;
+- exact orphan inventory and termination;
+- credential-free exact-commit public GitHub import;
+- `checkHealth` and `close`.
 
-`stop` is graceful but still ends with confirmed absence. `destroy` is the
-forceful idempotent primitive. Provider shutdown must clean all tracked
-activations.
+An immutable handle binds provider API version, activation/runtime identity,
+tenant, session, turn, attempt, Supervisor boot, command, lease and fencing
+token. The provider duplicates that identity into Docker labels and re-inspects
+the labels before destructive operations. Cross-assignment handles fail closed.
 
-## Immutable handle identity
+## Fixed Tool policy
 
-A handle binds all of the following:
+The browser, prompt and tenant cannot choose this policy:
 
 ```text
-providerId / providerApiVersion
-activationId / opaque runtimeId / runtimeName
-tenantId / sessionId / turnId / attemptId
-supervisorId / bootId / sandboxId
-commandId / leaseId / fencingToken
-```
-
-The current attempt ID is the execution lease UUID. This is explicit rather
-than inferred from a container name. A future `RunAttempt` table can provide a
-different UUID while retaining the same Provider contract.
-
-The Docker Provider duplicates the critical identity into labels, then
-re-inspects those labels immediately before destructive operations. A caller
-cannot stop a runtime through a handle for another tenant, turn, attempt, lease,
-or fence.
-
-The Docker microVM Provider retains those labels on the nested Tool Worker and
-adds an atomic private host manifest that binds the same identity to the owning
-VM. A fresh Manager re-inspects both manifest and inner labels. A VM without a
-valid manifest is never guessed from its name or destroyed automatically.
-
-## Policy
-
-The caller does not submit a policy. `ToolSandboxManager` supplies the immutable
-deployment policy:
-
-```text
-network: deny_all
+runtime: runsc, platform: KVM
+network: deny-all
 user: 1000:1000
 root filesystem: read-only
 privileged: false
@@ -94,7 +65,8 @@ no-new-privileges: true
 host mounts / Docker socket: forbidden
 CPU: 1 core
 memory: 768 MiB
-PIDs: 128
+container PID limit: 128
+guest RLIMIT_NPROC: 128
 open files: 1024
 /tmp: 64 MiB tmpfs
 /workspace: 128 MiB tmpfs
@@ -103,74 +75,56 @@ command timeout: at most 300 seconds
 turn wall clock: 900 seconds
 ```
 
-The network-policy type reserves `github`, `package_registries`, and
-`explicit_hosts`, but the Docker Tool Provider currently supports only
-`deny_all`. Passing any other policy fails closed. Repository import is a
-separate one-shot workload on a dedicated egress bridge; it does not weaken the
-Tool Sandbox policy.
+The guest `RLIMIT_NPROC` is intentional: on the tested gVisor version Docker's
+outer cgroup PID value alone did not bound guest-created processes. The live
+gate therefore proves actual fork exhaustion rather than only inspecting
+configuration.
 
-## Supported Providers
+## Runtime attestation
 
-| Provider | Status | Isolation | Notes |
-| --- | --- | --- | --- |
-| `docker` | implemented and production-tested | Linux namespaces/cgroups, shared host kernel | supported private single-host deployment |
-| `docker_microvm` | implemented and integration-tested | separate LinuxKit microVM kernel plus nested hardened Tool Worker | opt-in Docker Desktop host Manager; higher cold-start/memory cost |
-| `docker_gvisor` | planned | OCI `runsc` user-space application kernel | requires compatibility and performance suite |
-| `vercel` | planned | Firecracker microVM | outbound network is allowed by default and must be firewalled |
+Manager readiness requires:
 
-An interface is not evidence that a Provider works. Only implementations that
-pass the same lifecycle, security, Pi repair, checkpoint, and production tests
-may move to `supported`.
+1. a native Linux Docker Engine;
+2. a registered `runsc` runtime whose arguments contain `--platform=kvm`;
+3. the exact Tool image locally present;
+4. a real networkless probe whose guest kernel identifies as gVisor.
 
-## Adding a Provider
+Every activation is then inspected again. `HostConfig.Runtime` must equal
+`runsc`, identity labels must match the handle, no forbidden mount may exist,
+and `uname -r` from inside the runtime must identify the gVisor kernel. A config
+string without a successful workload is not accepted as evidence.
 
-1. Implement the interface without exposing the native SDK in `SandboxHandle`.
-2. Map the fixed policy to effective runtime controls and reject unsupported
-   fields.
-3. Prove tenant/turn/attempt identity on inspect and destroy.
-4. Prove cancellation removes descendants and `close()` removes all runtimes.
-5. Prove deny-all network behavior from inside the runtime.
-6. Run the real Pi remote-tool repair and two-turn checkpoint restore.
-7. Add provider-specific failure classification without leaking diagnostics or
-   credentials.
-8. Add a closed deployment configuration value and production acceptance.
+## Host installation
 
-Provider choice is deployment policy. It is not accepted from a prompt, browser
-request, tenant setting, or Tool RPC.
-
-## `docker_microvm` mechanics
-
-```text
-Sandbox Manager on trusted host
-  -> docker sandbox create (pinned shell template)
-  -> apply outer proxy policy deny
-  -> load exact trusted Tool image archive
-  -> inner docker run with the normal hardened arguments
-  -> existing Tool Worker JSONL protocol
-```
-
-The outer shell is not a user shell. It is a trusted bridge used only for
-`docker load`, inner lifecycle, and guest-kernel inspection. The untrusted Tool
-Worker has `network=none`, no mount, and no Docker socket. The host staging
-directory contains only the trusted image archive and is unlinked immediately
-after its image ID is verified inside the VM.
-
-Select it only when the Manager runs on a host with a working Docker Sandboxes
-client/server:
+On supported Ubuntu/WSL2 hosts with nested KVM:
 
 ```bash
-AGENT_DOCK_SANDBOX_PROVIDER=docker_microvm
-AGENT_DOCK_MICROVM_STATE_DIRECTORY=/var/lib/agent-dock/microvm
-AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY=missing
+sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-gvisor-host.sh
+newgrp docker
+npm run sandbox:check
 ```
 
-The default template is digest-pinned. `always`, `missing`, and `never` are the
-only accepted pull policies. If the host needs an upstream proxy, configure it
-for the Docker Sandbox daemon before starting the Manager. Proxy values are not
-forwarded to the Tool Worker.
+See [`deploy/host/README.md`](../deploy/host/README.md). The installer uses the
+official Docker and gVisor package repositories, requires `/dev/kvm`, registers
+`runsc` with KVM, and executes a direct probe. It never selects a weaker
+runtime.
 
-Reproduce the complete stronger-provider gate with:
+## Acceptance gate
 
 ```bash
-npm run sandbox-microvm:check
+npm run sandbox:check
 ```
+
+The gate builds the real Tool image and proves gVisor identity, non-root and
+read-only execution, credential and host `/proc` isolation, network denial,
+cross-tenant workspace isolation, traversal/symlink rejection, bounded output,
+real process/memory/resource limits, cancellation, exact cleanup, checkpoint
+capture and a pinned Pi remote-tool repair. The production gate additionally
+proves restart, fencing, multi-tenancy and backup recovery:
+
+```bash
+npm run production:check
+```
+
+The latest measured gVisor result is recorded in
+[`reports/gvisor-sandbox-latest.md`](reports/gvisor-sandbox-latest.md).

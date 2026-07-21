@@ -100,6 +100,8 @@ describe("Phase 0 container topology", () => {
       const firstInstruction = contents.split("\n").find((line) => line.trim().length > 0);
       expect(firstInstruction).toBe(`FROM ${pinnedNodeImage}`);
       expect(contents).toContain("npm ci --omit=dev --ignore-scripts");
+      expect(contents).toContain("node scripts/harden-pi-dependencies.mjs");
+      expect(contents).toContain("node scripts/harden-pi-dependencies.mjs --check");
       expect(contents).toMatch(/^ENV NODE_ENV=production/m);
       expect(contents).toContain("AGENT_DOCK_REQUIRE_NON_ROOT=1");
       expect(contents).toMatch(/^USER 1000:1000$/m);

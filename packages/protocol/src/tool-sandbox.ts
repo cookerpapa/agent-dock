@@ -2,10 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspacePatchSchema } from "./event-envelope.ts";
 import { GitHubRepositorySourceSchema } from "./control-plane-api.ts";
-import {
-  DockerSandboxWorkspaceSeedSchema,
-  SandboxCheckpointBlobSchema,
-} from "./docker-sandbox-worker.ts";
+import { AgentWorkspaceSeedSchema, SandboxCheckpointBlobSchema } from "./agent-runtime.ts";
 import { OpaqueIdSchema, PositiveSafeIntegerSchema, UuidSchema } from "./protocol-primitives.ts";
 
 export const MAX_TOOL_COMMAND_BYTES = 64 * 1_024;
@@ -53,7 +50,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     type: Type.Literal("tool_sandbox.create"),
     requestId: UuidSchema,
     assignment: ToolSandboxAssignmentSchema,
-    workspaceSeed: DockerSandboxWorkspaceSeedSchema,
+    workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
   },
   { additionalProperties: false },
@@ -264,7 +261,7 @@ export const ToolWorkerInputSchema = Type.Union([
       ...WorkerEnvelope,
       type: Type.Literal("worker.initialize"),
       activationId: UuidSchema,
-      workspaceSeed: DockerSandboxWorkspaceSeedSchema,
+      workspaceSeed: AgentWorkspaceSeedSchema,
       workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
     },
     { additionalProperties: false },

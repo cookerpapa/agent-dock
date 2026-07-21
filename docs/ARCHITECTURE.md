@@ -195,8 +195,9 @@ and Windows Job Object containment remain later slices. A crash after durable
 command ACK is treated as ambiguous and failed rather than replaying possible
 tool side effects.
 
-ADR-0029 supersedes that original production placement without deleting its
-legacy adapter/tests. In the supported deployment, pinned Pi RPC and the model
+ADR-0029 supersedes that original production placement. The legacy whole-Pi
+ordinary-Docker adapter and demo have now been removed. In the supported
+deployment, pinned Pi RPC and the model
 gateway run in the trusted Agent Runner. Pi's built-in local tools are disabled;
 one fixed image-owned extension implements `read`, `write`, `edit`, and `bash`
 with Pi's public operation interfaces and sends a narrow authenticated RPC to a
@@ -211,12 +212,13 @@ replay checks, exact assignment authorization, and the fixed deployment policy.
 It passes an immutable, provider-neutral handle to `SandboxProvider`; that
 handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
 identity without exposing a Docker client or provider SDK.
-`DockerSandboxProvider` implements the default shared-kernel path. ADR-0035 adds
-the opt-in `DockerMicrovmSandboxProvider`: Docker Sandboxes creates a LinuxKit
-VM, a trusted bridge loads the exact host Tool image, outer egress becomes
-deny-all, and the unchanged hardened Tool Worker runs as a nested container
-without the microVM-local Docker socket. Unknown configured providers fail
-startup. `docker_gvisor` and externally managed Providers remain planned.
+ADR-0038 makes `GvisorSandboxProvider` the sole concrete implementation. Docker
+Engine is only the trusted lifecycle mechanism: all untrusted workers and
+repository importers specify OCI runtime `runsc`, whose host registration is
+fixed to the KVM platform. Manager readiness executes a real gVisor probe and
+each activation is re-inspected for both `HostConfig.Runtime=runsc` and the
+gVisor guest kernel. The former runc and LinuxKit implementations, selection
+fields and fallback paths were removed.
 
 ADR-0031 adds the durable execution vocabulary above those boundaries. Public
 tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
@@ -413,24 +415,16 @@ sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 
 ### Sandbox
 
-The sandbox is the security and workspace boundary. The default implementation
-uses Docker. An opt-in Docker Sandboxes Provider adds a distinct LinuxKit kernel
-around the same Tool Worker; Kubernetes, gVisor, Kata, and external managed
-backends remain possible future Providers.
+The sandbox is the security and workspace boundary. The only implementation is
+gVisor `runsc` with its KVM platform. Docker Engine remains trusted and owns
+lifecycle/cgroup integration, but untrusted syscalls are handled by gVisor's
+userspace application kernel instead of directly by the host kernel.
 
-The runtime is selected only by trusted deployment configuration, never by a
-prompt, tenant request, or Tool RPC. The Provider contract reserves deny-all,
-GitHub, package-registry, and explicit-host network policy shapes, but the
-current Docker Tool implementation accepts only deny-all. GitHub import remains
-a separate credential-free workload on its dedicated egress bridge. See
+There is no runtime selector. The Provider contract reserves deny-all, GitHub,
+package-registry, and explicit-host network policy shapes, but current Tool
+execution accepts only deny-all. GitHub import remains a separate
+credential-free `runsc` workload on its dedicated egress bridge. See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
-
-The microVM Provider deliberately preserves two layers. The outer shell is
-trusted provisioning code with only a private Tool-image archive mounted; it
-applies deny-all before starting the inner worker. The inner worker retains the
-same read-only root, cgroups, tmpfs, safe environment, path validation,
-process-group cancellation, and snapshot protocol as Docker. Agent-generated
-commands never execute in the bridge and never see its microVM-local socket.
 
 Minimum controls:
 
@@ -833,10 +827,10 @@ The implemented client uses fetch-based SSE rather than native `EventSource` so
 an explicit reconnect can send the last rendered sequence in `Last-Event-ID`.
 It validates the shared event schema plus SSE `id`/`event` identity before
 updating a pure transcript reducer; replayed sequences are idempotent and gaps
-fail visibly. Vite proxies only `/v1` to the loopback demo control plane, keeping
-browser requests same-origin without enabling permissive CORS. The local demo
-starts ephemeral PGlite and independent execution/cancellation polling loops.
-The production Web build requires the public bearer login, is served by a
+fail visibly. Vite's development server can proxy `/v1` for frontend work, but
+the supported `npm run demo` command now starts the same persistent production
+topology rather than a separate local execution adapter. The production Web
+build requires the public bearer login, is served by a
 non-root read-only Caddy container, proxies only `/v1`, rejects private internal
 and health paths, and publishes the product's loopback HTTP port. Its
 login card can request an opt-in self-service tenant, verify the returned

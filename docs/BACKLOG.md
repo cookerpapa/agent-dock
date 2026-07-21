@@ -109,9 +109,9 @@ extension-policy support would overstate the current boundary.
 - [x] Prove real Pi `bash/edit` RPC, final diff/checkpoint, cancellation, cleanup, socket ownership, and secret absence
 - [x] ADR-0030: separate Manager authorization/lifecycle from a provider-neutral SandboxProvider
 - [x] Bind Provider handles to tenant, session, turn, attempt, lease, fence, and opaque runtime identity
-- [x] Implement DockerSandboxProvider create/exec/read/write/snapshot/inspect/stop/destroy and orphan cleanup
-- [x] Reject unimplemented Provider selection and unsupported non-deny-all Tool network policies
-- [x] Add a source-built Provider gate for cgroups, `/proc`/credential isolation, cross-tenant workspaces, network denial, symlink/output bounds, cancellation, and exact cleanup
+- [x] Implement sole GvisorSandboxProvider create/exec/read/write/snapshot/inspect/stop/destroy and orphan cleanup
+- [x] Remove Provider selection/fallback and reject unsupported non-deny-all Tool network policies
+- [x] Add a source-built gVisor/KVM gate for guest identity, resources, `/proc`/credential isolation, cross-tenant workspaces, network denial, symlink/output bounds, cancellation, and exact cleanup
 - [x] Publish the threat model, Provider contract, network matrix, and Run lifecycle
 - [x] Add explicit tenant-scoped Run and immutable-numbered RunAttempt resources
 - [x] Carry independent run/attempt identity through Supervisor and Provider boundaries
@@ -119,8 +119,8 @@ extension-policy support would overstate the current boundary.
 - [x] Fence checkpoint and terminal writes by the current Attempt plus lease authority
 - [x] Reconcile lost assignments by terminating the old Attempt before requeue/failure
 - [ ] Isolate and policy-gate user/project Pi extensions before enabling discovery in production
-- [ ] Replace shared-kernel Docker with gVisor/Kata/Firecracker or a managed sandbox before a hostile public-SaaS claim
-- [x] Add an opt-in Docker Sandboxes/LinuxKit microVM Provider and pass the shared security/lifecycle plus real Pi gate
+- [x] Replace shared-kernel Docker with mandatory gVisor/runsc KVM and remove all lower-security fallbacks
+- [x] Remove the superseded Docker Sandboxes/LinuxKit Provider and legacy whole-Pi Docker execution path
 
 ## Controlled public GitHub workspace slice
 
@@ -174,7 +174,7 @@ extension-policy support would overstate the current boundary.
 - [x] Deploy persisted Prometheus, Jaeger, and provisioned Grafana behind loopback-only ingress
 - [x] Expose an owner-only tenant operational summary without global metric access
 - [x] Publish reproducible coding, fault, Sandbox security, and 10/50/100 HTTP load evaluations
-- [x] Add and validate the opt-in Docker Sandboxes/LinuxKit microVM Provider
+- [x] Make gVisor/runsc KVM the sole validated Sandbox Provider and publish measured evidence
 - [x] Expose Workspace files/history/compare/Artifacts, Runs/Attempts, tests, usage/context, and owner activity in the authenticated Web product
 - [x] Expose fork/rollback/archive, retry-as-new-Run, GitHub App repository selection, and explicit PR delivery in the Web product
 - [x] Add authenticated encrypted cold backup/restore for the runtime and all seven durable volumes
@@ -185,5 +185,5 @@ extension-policy support would overstate the current boundary.
 - [x] Add an empty Workspace source for ordinary first-message conversation creation
 - [x] Inherit and re-seal the platform default model for new accounts without exposing model controls or credentials
 - [x] Restrict production model replacement to the platform operator tenant
-- [ ] Move off Pi 0.80.10's shrinkwrap-pinned `brace-expansion@5.0.6` and `protobufjs@7.6.4` as soon as upstream republishes fixed transitive dependencies, or adopt a separately verified vendoring strategy
+- [x] Remediate Pi 0.80.10's shrinkwrap-pinned `brace-expansion@5.0.6` and `protobufjs@7.6.4` with exact reviewed package aliases, post-install replacement, actual-version checks in CI/production images, and an audit reconciler limited to the two exact advisory paths; keep the hardening fail-closed on any future Pi version until upstream republishes fixed metadata
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

@@ -10,7 +10,6 @@
     "./run-attempt-runtime": "./src/run-attempt-runtime.ts"
   },
   "scripts": {
-    "demo": "tsx src/demo.ts",
     "bootstrap": "tsx src/bootstrap-main.ts",
     "tenant-admin": "tsx src/tenant-admin.ts",
     "start": "tsx src/main.ts",

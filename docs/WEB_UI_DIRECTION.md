@@ -87,10 +87,10 @@ duplicates, and reconnects with bounded backoff. Public REST resources are also
 validated before they enter React state. No raw Pi object, credential reference,
 provider token, or API body is logged.
 
-The one-command local demo can still use a deterministic model and image-owned
-Java fixture. After each successful turn, the trusted host stores Pi JSONL and a
-bounded workspace manifest before completion is published. A follow-up on the
-same session restores both into a new disposable container, so the composer can
+The one-command demo uses the supported persistent production topology. After
+each successful turn, the trusted host stores Pi JSONL and a bounded workspace
+manifest before completion is published. A follow-up on the same session
+restores both into a new disposable gVisor Sandbox, so the composer can
 honestly remain available after settlement. The composer now also remains
 available during an active turn: another prompt is visibly queued as a separate
 follow-up, receives and displays its durable mailbox position, and never implies

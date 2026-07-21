@@ -1697,3 +1697,34 @@
   2,245-byte JSON 被合并为 18 条 durable write delta，仍从 seq=2 开始并在 seq=20 的 `tool.started` 前完整到达；Run completed，两个
   model call 实耗 165 input / 882 output tokens。最终 Control Plane、Supervisor 和 Web image revision 与预期提交一致且全部 healthy，
   线上主 bundle、90.27 kB 高亮 chunk、流式光标和 token CSS 均可读取。
+
+## 2026-07-21 — gVisor/KVM 成为唯一 Tool 执行内核
+
+- 决策：共享宿主内核的普通 Docker 不能作为本项目最终的不可信代码边界；Docker Sandboxes microVM 路径又依赖 Desktop、启动慢且保留
+  双 Provider 兼容面。ADR-0038 因此把 `runsc --platform=kvm` 定为唯一受支持的 Tool/Repository Import runtime。旧普通 Docker、
+  Docker microVM Provider、旧 whole-Pi 容器 Worker、选择器、脚本和对应兼容测试已经删除；旧环境变量会 fail closed，不存在 runc、
+  systrap 或 Desktop fallback。
+- Host：在 Ubuntu 24.04 WSL2 中安装原生 Docker Engine 29.6.2、Compose 5.1.3 与官方 gVisor
+  `runsc release-20260714.0`，daemon 只注册 `/usr/bin/runsc --platform=kvm`。安装脚本会验证 Linux daemon、KVM、runtime args 和真实
+  guest kernel；Sandbox Manager readiness 还会启动一次 live probe。实测 guest 为 `4.19.0-gvisor`，不再暴露 WSL kernel release 或
+  AMD 物理 CPU model。
+- 执行边界：Trusted Supervisor/Pi 只持有 Model Gateway 身份并通过窄 Tool RPC 工作；只有 Sandbox Manager 持有原生 Docker socket。
+  每个 activation 都检查 `HostConfig.Runtime=runsc` 和 guest kernel，再启用无网络、非 root、read-only rootfs、cap-drop ALL、
+  no-new-privileges、独立 tmpfs Workspace、CPU/memory/pids/disk/output/command/turn timeout。Docker 的 PidsLimit 在本机 runsc 下不能单独
+  约束 guest，最终增加 `RLIMIT_NPROC=128`；耗尽实验启动 121 个子进程并拒绝后续 135 个。Tool image 同时补齐 Python 3、pip 和 venv，
+  Java/Node/Python 都在同一 gVisor 边界内可执行。
+- 自动证据：真实 gVisor gate 通过 runtime/host concealment、credential 与 `/proc`、内网/host gateway/公网、跨租户、路径与 symlink、
+  输出、timeout、CPU/memory/process、cancel/descendant 和 orphan cleanup；随后 pinned Pi 通过远程 `bash/edit/bash` 完成确定性修复。
+  安全 gate 约 14.1 秒、Pi gate 约 9.1 秒，结束后 managed runtime 为 0。全量 production acceptance 又通过四租户、22 条 durable
+  events、Control Plane 扩缩/重启、Supervisor fresh boot、取消、Workspace version 3、三个 Prometheus targets、三个 Jaeger services、
+  31 条 product audit，以及 7,360,075-byte 加密冷备在新 project 恢复到 event cursor 34。
+- 供应链：Pi 0.80.10 发布包内部 shrinkwrap 锁住的 `brace-expansion@5.0.6` 和 `protobufjs@7.6.4` 无法被 root override 控制。
+  当前使用两个精确 npm alias 作为已验证补丁源，安装后只原子替换对应目录为 5.0.7/7.6.5；本地、CI 和 Trusted production images 都
+  校验实际 package version，并在任何未来 Pi 版本上 fail closed。安全审计只调和这两个精确 stale-metadata path，其他 high/critical
+  仍照常阻断。全新 `npm ci --ignore-scripts` 后的 hardening、全仓 build/type/test、两个 zero-token Pi spike、备份密码学和审计全部通过。
+- 数据迁移：先记录 Desktop 旧库 `users=4`、`tenants=4`、`sessions=336`、`session_events=4655`、`tenant_model_credentials=2`，停掉旧
+  Compose 但保留其七个 volume；随后生成 `/home/rayn/agent-dock-pre-gvisor-20260721.adbackup` 加密冷备，把精确旧 image ID 流式导入原生
+  daemon，并恢复为同名 `agent-dock-production` volumes/runtime。旧 Desktop runtime 可恢复地保存在
+  `deploy/production/runtime-desktop-pre-gvisor/` 且已被 Git 忽略，没有删除用户对话或凭据。
+- 能力边界：当前交付仍是 loopback/self-hosted 多租户产品，不声称已经完成 hostile public-Internet SaaS 的身份恢复、滥用治理、计费或
+  独立渗透测试。这个限制不再来自 Tool kernel fallback；所有可达的用户代码执行路径现在都必须通过 gVisor/KVM attestation。

@@ -52,13 +52,13 @@ function providerFixture() {
     output: Buffer.from("ok\n").toString("base64"),
   }));
   const provider: SandboxProvider = {
-    providerId: "docker",
+    providerId: "gvisor",
     async checkHealth() {},
     async create(spec) {
       createSpec = spec;
       return {
         providerApiVersion: 1,
-        providerId: "docker",
+        providerId: "gvisor",
         activationId: spec.activationId,
         runtimeId: "a".repeat(64),
         runtimeName: `agent-dock-tool-${spec.activationId}`.slice(0, 63),
@@ -81,11 +81,12 @@ function providerFixture() {
     async inspect(handle) {
       return {
         providerApiVersion: 1,
-        providerId: "docker",
+        providerId: "gvisor",
         state: "running",
         handle,
         effectiveIsolation: {
-          isolationBoundary: "shared_kernel_container",
+          isolationBoundary: "gvisor",
+          runtime: "runsc",
           user: "1000:1000",
           privileged: false,
           readOnlyRootFilesystem: true,
@@ -93,10 +94,12 @@ function providerFixture() {
           mountCount: 0,
           hasDockerSocket: false,
           pidLimit: 128,
+          processLimit: 128,
           memoryBytes: 768 * 1_024 * 1_024,
           cpuNano: 1_000_000_000,
           droppedCapabilities: ["ALL"],
           securityOptions: ["no-new-privileges"],
+          sandboxKernelRelease: "4.19.0-gvisor",
         },
       };
     },
@@ -201,13 +204,13 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
   });
 
-  it("fails startup configuration closed for an unimplemented provider", async () => {
+  it("rejects removed runtime selectors instead of accepting a lower-security fallback", async () => {
     await expect(
       loadSandboxManagerConfig({ AGENT_DOCK_SANDBOX_PROVIDER: "vercel" }),
-    ).rejects.toThrow("not supported");
+    ).rejects.toThrow("was removed");
   });
 
-  it("accepts only the closed host microVM deployment configuration", async () => {
+  it("loads only the fixed gVisor deployment configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
     const tokenPath = join(directory, "manager-token");
     try {
@@ -215,28 +218,23 @@ describe("provider-backed Tool Sandbox Manager", () => {
       await chmod(tokenPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_PROVIDER: "docker_microvm",
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
-          AGENT_DOCK_MICROVM_STATE_DIRECTORY: join(directory, "state"),
-          AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "never",
         }),
       ).resolves.toMatchObject({
-        sandboxProvider: "docker_microvm",
-        microvmStateDirectory: join(directory, "state"),
-        microvmTemplatePullPolicy: "never",
-        microvmTemplateImage: expect.stringMatching(/^docker\/sandbox-templates@sha256:/),
+        toolImage: "agent-dock/tool-sandbox:test",
+        repositoryImportNetwork: "repository-egress",
+        dockerCommand: "docker",
       });
       await expect(
         loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_PROVIDER: "docker_microvm",
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
           AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
         }),
-      ).rejects.toThrow("pull policy");
+      ).rejects.toThrow("was removed");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

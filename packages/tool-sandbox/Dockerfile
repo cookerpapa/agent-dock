@@ -11,8 +11,8 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get -o Acquire::Retries=5 update \
-    && (apt-get install --fix-missing --yes --no-install-recommends bash git openjdk-17-jdk-headless \
-        || apt-get install --fix-missing --yes --no-install-recommends bash git openjdk-17-jdk-headless) \
+    && (apt-get install --fix-missing --yes --no-install-recommends bash git openjdk-17-jdk-headless python3 python3-pip python3-venv \
+        || apt-get install --fix-missing --yes --no-install-recommends bash git openjdk-17-jdk-headless python3 python3-pip python3-venv) \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

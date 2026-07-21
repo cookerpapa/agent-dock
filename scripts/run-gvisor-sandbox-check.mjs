@@ -42,11 +42,10 @@ function run(command, args, environment = process.env) {
 
 async function resolveDockerCommand() {
   const configured = process.env.AGENT_DOCK_DOCKER_COMMAND;
-  const candidates = configured
-    ? [configured]
-    : process.platform === "win32"
-      ? ["docker.exe"]
-      : ["docker", "docker.exe"];
+  if (process.platform !== "linux") {
+    throw new Error("The gVisor gate requires a native Linux Docker Engine.");
+  }
+  const candidates = [configured ?? "docker"];
   for (const candidate of candidates) {
     try {
       const version = await capture(candidate, ["version", "--format", "{{.Server.Version}}"]);
@@ -56,17 +55,49 @@ async function resolveDockerCommand() {
     }
   }
   throw new Error(
-    "Docker Engine is unavailable. Start Docker Desktop or set AGENT_DOCK_DOCKER_COMMAND.",
+    "The native Linux Docker Engine is unavailable. Install the AgentDock gVisor host runtime.",
   );
 }
 
 const docker = await resolveDockerCommand();
-process.stdout.write(
-  `${JSON.stringify({ dockerCommand: docker.command, engineVersion: docker.version, image })}\n`,
+const runtime = JSON.parse(
+  await capture(docker.command, ["info", "--format", "{{json .Runtimes.runsc}}"]),
 );
+if (
+  runtime === null ||
+  typeof runtime !== "object" ||
+  !/(?:^|\/)runsc$/.test(runtime.path ?? "") ||
+  !Array.isArray(runtime.runtimeArgs) ||
+  !runtime.runtimeArgs.includes("--platform=kvm")
+) {
+  throw new Error("Docker Engine does not expose the required runsc KVM runtime.");
+}
+process.stdout.write(
+  `${JSON.stringify({
+    dockerCommand: docker.command,
+    engineVersion: docker.version,
+    runtime: { path: runtime.path, runtimeArgs: runtime.runtimeArgs },
+    image,
+  })}\n`,
+);
+const proxyBuildArguments = [];
+for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]) {
+  const value = process.env[name];
+  if (value !== undefined) {
+    if (value.length > 2_048 || /[\r\n\0]/.test(value)) {
+      throw new Error(`${name} is not a bounded build proxy value.`);
+    }
+    proxyBuildArguments.push("--build-arg", `${name}=${value}`);
+  }
+}
 
 await run(docker.command, [
   "build",
+  // The host proxy is intentionally bound to loopback. This is a trusted image build,
+  // so host networking lets BuildKit reach it without exposing the proxy to sandboxes.
+  "--network",
+  "host",
+  ...proxyBuildArguments,
   "--file",
   "packages/tool-sandbox/Dockerfile",
   "--tag",
@@ -89,9 +120,9 @@ await run(
     "--",
     "vitest",
     "--run",
-    "test/docker-sandbox-provider.integration.test.ts",
+    "test/gvisor-sandbox-provider.integration.test.ts",
   ],
-  { ...testEnvironment, AGENT_DOCK_SANDBOX_PROVIDER_TEST: "1" },
+  { ...testEnvironment, AGENT_DOCK_GVISOR_SANDBOX_TEST: "1" },
 );
 
 await run(
@@ -107,3 +138,15 @@ await run(
   ],
   { ...testEnvironment, AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST: "1" },
 );
+
+const remaining = await capture(docker.command, [
+  "ps",
+  "--all",
+  "--quiet",
+  "--filter",
+  "label=agent-dock.managed=true",
+]);
+if (remaining.length > 0) {
+  throw new Error("The gVisor gate left a managed Tool Sandbox behind.");
+}
+process.stdout.write("gvisor_sandbox_check_passed\n");

@@ -67,43 +67,26 @@ export {
 } from "./local-sandbox-supervisor.ts";
 
 export {
-  DOCKER_SANDBOX_LABELS,
-  DockerSandboxAssignmentInventory,
   SandboxAssignmentInventoryError,
   validateSandboxRuntimeIdentity,
-  type DockerSandboxAssignmentInventoryOptions,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
   type SandboxRuntimeIdentity,
-} from "./docker-sandbox-assignment-inventory.ts";
+} from "./sandbox-assignment-inventory.ts";
 
 export {
-  buildDockerGitHubWorkspaceImportArguments,
-  DockerGitHubWorkspaceImporter,
-  GitHubWorkspaceImporterError,
-  isMissingDockerObjectDiagnostic,
-  type DockerGitHubWorkspaceImporterOptions,
-} from "./docker-github-workspace-importer.ts";
-
-export {
-  DockerSandboxTurnRunner,
-  buildDockerSandboxRunArguments,
-  type DockerSandboxContainerIdentity,
-  type DockerSandboxModelRuntimeLease,
-  type DockerSandboxModelRuntimeLeaseResolver,
-  type DockerSandboxScenario,
-  type DockerSandboxScenarioContext,
-  type DockerSandboxScenarioResolver,
-  type DockerSandboxTurnRunnerOptions,
-  type DockerSandboxWorkspaceSeedResolver,
-} from "./docker-sandbox-turn-runner.ts";
+  type AgentTurnScenario,
+  type AgentTurnScenarioContext,
+  type AgentTurnScenarioResolver,
+  type AgentWorkspaceSeedResolver,
+  type TrustedModelRuntimeLease,
+  type TrustedModelRuntimeLeaseResolver,
+} from "./agent-turn-runtime.ts";
 
 export {
   RemoteToolSandboxTurnRunner,
   type RemoteToolSandboxTurnRunnerOptions,
   type ToolSandboxManagerBoundary,
-  type TrustedModelRuntimeLease,
-  type TrustedModelRuntimeLeaseResolver,
 } from "./remote-tool-sandbox-turn-runner.ts";
 export {
   type RunAttemptExecutionPhase,

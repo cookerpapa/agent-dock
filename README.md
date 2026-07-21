@@ -36,16 +36,20 @@ TypeScript Control Plane (NestJS)
     |
     | versioned command/event protocol
     v
-TypeScript Sandbox Supervisor
-    |-- pinned Pi RPC child process
+Trusted TypeScript Agent Runner
+    |-- pinned Pi RPC child process and model capability
     |-- event spool and session snapshots
-    |-- extension Web-UI bridge
-    |-- sandbox lifecycle and heartbeats
+    |-- no Docker socket and no local untrusted tools
+    |
+    | authenticated narrow Tool RPC
     v
-Docker / Kubernetes Sandbox
-    |-- isolated workspace
-    |-- shell, compiler, tests, Git worktrees
-    `-- CPU, memory, PID, disk, time, and network limits
+Trusted Sandbox Manager (only Docker-socket owner)
+    |
+    | explicit OCI runtime=runsc, platform=KVM
+    v
+Untrusted gVisor Tool Sandbox
+    |-- isolated workspace, shell, compiler and tests
+    `-- no platform credential/network; bounded CPU/memory/process/disk/time
 ```
 
 ## Initial technology choices
@@ -57,7 +61,8 @@ Docker / Kubernetes Sandbox
 - Metadata and durable commands: PostgreSQL with Kysely
 - Session/workspace artifacts: S3-compatible object storage, with MinIO used as
   the disposable compatibility fixture and a private file adapter for the demo
-- Sandbox: Docker first, Kubernetes later
+- Sandbox: gVisor `runsc`/KVM only, with Docker Engine used as the trusted
+  lifecycle mechanism
 - Frontend: React, kept deliberately small
 - Observability: OpenTelemetry, Prometheus, Grafana, Loki, Tempo
 - Tests: Vitest, Testcontainers, k6, Toxiproxy
@@ -131,9 +136,10 @@ only after a measured requirement appears.
 - [ADR-0032: versioned Workspaces and GitHub Gateway](docs/adr/0032-versioned-workspaces-and-github-gateway.md)
 - [ADR-0033: context and model governance](docs/adr/0033-context-and-model-governance.md)
 - [ADR-0034: observability and reproducible evaluation](docs/adr/0034-observability-and-reproducible-evaluation.md)
-- [ADR-0035: Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
+- [ADR-0035: superseded Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
 - [ADR-0036: product operations and release evidence](docs/adr/0036-product-operations-and-release-evidence.md)
 - [ADR-0037: browser accounts and a platform-managed model](docs/adr/0037-browser-accounts-and-platform-managed-model.md)
+- [ADR-0038: gVisor-only untrusted tool execution](docs/adr/0038-gvisor-only-tool-execution.md)
 
 ## Current executable spikes
 
@@ -178,8 +184,17 @@ checkout:
 
 ```bash
 npm ci --ignore-scripts
+npm run dependencies:harden
 npm run ci
 ```
+
+Pi 0.80.10 publishes an internal `npm-shrinkwrap.json`, so npm root overrides
+cannot update two vulnerable transitive packages even though compatible patch
+releases exist. `dependencies:harden` replaces only those two installed package
+directories from exact npm aliases, verifies their actual versions, and fails
+closed on a different Pi version. Production images run the same replacement
+and check; the security audit reconciles only the two exact stale shrinkwrap
+paths and still blocks every other high/critical finding.
 
 It checks Prettier formatting, the production frontend build, TypeScript types,
 the complete unit/contract suite, authenticated-backup cryptography, the two
@@ -196,35 +211,20 @@ The hardened Phase 0 runner topology, including its effective Docker
 npm run container:check
 ```
 
-The complete zero-token Java workspace path builds the Phase 1 sandbox image,
-inspects its effective isolation, runs Pi's `bash/edit/bash` repair loop, checks
-outer-container cancellation, and then repeats the run through PostgreSQL and
-SSE:
+The authoritative execution-plane gate builds the Tool image and refuses any
+runtime except `runsc` with the KVM platform. It verifies the live gVisor guest
+kernel, resource enforcement, credential and host `/proc` isolation,
+cross-tenant workspaces, network denial, path/symlink escape, bounded output,
+cancellation, exact cleanup, checkpoint capture, and a real pinned-Pi
+remote-tool repair loop:
 
 ```bash
 npm run sandbox:check
 ```
 
-The current trusted-Runner boundary and provider-neutral Manager are exercised
-separately with a source-built Tool image. This command verifies effective
-cgroups/namespaces, credential and `/proc` isolation, cross-tenant workspaces,
-network denial, path/symlink escape, output limits, cancellation, cleanup, and a
-real pinned-Pi remote-tool repair loop:
-
-```bash
-npm run sandbox-provider:check
-```
-
-An optional stronger gate runs the same hardened worker and pinned Pi repair
-inside a Docker Sandboxes LinuxKit microVM. It requires the host Docker
-Sandboxes plugin and several GiB of free memory:
-
-```bash
-npm run sandbox-microvm:check
-```
-
-The latest measured result is in
-[`docs/reports/microvm-sandbox-latest.md`](docs/reports/microvm-sandbox-latest.md).
+Host installation and fail-closed prerequisites are documented in
+[`deploy/host/README.md`](deploy/host/README.md). The latest measured result is
+in [`docs/reports/gvisor-sandbox-latest.md`](docs/reports/gvisor-sandbox-latest.md).
 
 Portable settled-checkpoint storage is verified against a digest-pinned,
 loopback-only, disposable MinIO fixture. The test creates no volume, spends no
@@ -239,20 +239,17 @@ npm run object-store:check
 The fixture proves S3 API compatibility; it is not a production MinIO version
 or deployment recommendation.
 
-The complete Phase 1 user flow is available as a one-command local demo. It
-builds the sandbox image and production frontend bundle, starts an ephemeral
-PGlite-backed control plane plus independent execution/cancellation dispatchers,
-and serves the Pi-export-inspired page at `http://127.0.0.1:4173`:
+The one-command demo now uses the supported persistent production topology; the
+old whole-Pi ordinary-Docker demo was removed so there is no lower-security
+execution path. It serves the product at `http://127.0.0.1:8080`:
 
 ```bash
 npm run demo
 ```
 
-The demo uses the embedded deterministic model and sample Java fixture, so it
-consumes no provider tokens or local Pi login. Its database is intentionally
-ephemeral; press `Ctrl+C` to stop both loopback servers. The production
-`src/main.ts` remains separately configured and does not silently start local
-Docker workers.
+`npm run demo` is an alias for `npm run production:deploy`. Public registration
+and the platform model are controlled by the persisted production runtime
+configuration described below.
 
 ## Self-hosted production deployment
 
@@ -261,6 +258,7 @@ checkout:
 
 ```bash
 npm ci --ignore-scripts
+npm run dependencies:harden
 npm run production:deploy
 npm run production:token
 ```
@@ -282,20 +280,14 @@ Manager owns the Docker socket. Pi and the tenant model credential remain in the
 trusted Runner; `read/write/edit/bash` cross a narrow RPC boundary into a
 mount-free, credential-free Tool Sandbox with `network=none`. Only the Web
 ingress publishes a loopback port. The Manager now separates capability and
-identity enforcement from a provider-neutral `SandboxProvider`; Docker remains
-the default production Provider, and the opt-in `docker_microvm` Provider has
-passed the same security/lifecycle and real Pi repair path behind a separate
-LinuxKit kernel. gVisor and external managed backends remain future work. See the
-[production runbook](docs/PRODUCTION_DEPLOYMENT.md) for TLS, secrets, health,
-backup, upgrade, recovery, and the disposable full-topology acceptance command.
-
-The stronger Provider requires a host-side Docker Sandboxes client/server and
-is intentionally not selected by the default containerized Manager. Its
-reproducible gate is:
-
-```bash
-npm run sandbox-microvm:check
-```
+identity enforcement from a provider-neutral `SandboxProvider`; its sole
+implementation is `GvisorSandboxProvider`. Every untrusted worker is explicitly
+created with Docker `HostConfig.Runtime=runsc`, while Docker config fixes runsc
+to KVM. Manager readiness and per-activation inspection attest a real gVisor
+guest and fail closed without it. See the
+[production runbook](docs/PRODUCTION_DEPLOYMENT.md) for host setup, secrets,
+health, backup, upgrade, recovery, and the disposable full-topology acceptance
+command.
 
 This is production-complete for the bounded private multi-tenant Java fixture
 and controlled GitHub repositories pinned to an exact commit (public by
@@ -540,9 +532,12 @@ product UI has no model picker or bearer-token prompt. It does not claim email
 verification, password recovery, OIDC, billing, abuse controls, or a public-SaaS
 threat model.
 
-Phase 1 is complete: from a clean checkout, `npm run demo` lets a user submit the
-Java repair, watch all ten durable events and three tool calls, inspect the
-bounded Git patch, or cancel a second run and observe confirmed sandbox teardown.
+Phase 1 is complete: the persistent Web product accepts a turn, streams durable
+events and remote tool calls, exposes the bounded Git patch, and confirms gVisor
+Sandbox teardown after completion or cancellation. The disposable
+`npm run production:check` reproduces this path with a deterministic model from
+a clean checkout; `npm run demo` starts the same supported deployment for
+interactive use.
 The first Phase 2 slice now adds cold Pi/workspace rehydration: a follow-up runs
 in another container, sees the previous assistant message, verifies the
 previous Java edit, continues event sequence numbers, and replaces the settled

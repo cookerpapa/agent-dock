@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-07-21",
+  "commands": ["npm run sandbox:check", "npm run production:check"],
+  "environment": {
+    "hostKernel": "6.6.87.2-microsoft-standard-WSL2",
+    "dockerEngine": "29.6.2",
+    "dockerCompose": "5.1.3",
+    "runsc": "release-20260714.0",
+    "runscPlatform": "kvm",
+    "guestKernel": "4.19.0-gvisor",
+    "toolImage": "sha256:4acafbc5ec77e5750316f9e6fe83a96bfa3d2596fa06ff36c0492bd1349ba65b"
+  },
+  "checks": {
+    "runtimeAttestation": "passed",
+    "hostIdentityConcealment": "passed",
+    "credentialAndProcIsolation": "passed",
+    "networkIsolation": "passed",
+    "crossTenantIsolation": "passed",
+    "pathConfinement": "passed",
+    "outputAndTimeoutLimits": "passed",
+    "processLimit": {
+      "status": "passed",
+      "limit": 128,
+      "started": 121,
+      "rejected": 135
+    },
+    "cancellationAndCleanup": "passed",
+    "realPiRemoteTools": "passed",
+    "productionTopology": "passed",
+    "managedRuntimesRemaining": 0
+  },
+  "productionEvidence": {
+    "durableEvents": 22,
+    "registeredTenants": 4,
+    "prometheusTargets": 3,
+    "jaegerServices": 3,
+    "productWorkspaceVersion": 3,
+    "productAuditEvents": 31,
+    "backupSizeBytes": 7360075,
+    "restoredCursor": 34
+  }
+}

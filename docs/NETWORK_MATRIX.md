@@ -15,9 +15,8 @@ does not replace application authentication.
 | Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | yes | no | none |
 | Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | none |
 | GitHub Gateway | no | no | no | no | no | yes | no | yes | no | none |
-| Tool Sandbox | no | no | no | no | no | no | no | no | no | none |
-| Docker microVM trusted bridge (optional) | no | no | no | no | microVM-local only | no | no | bootstrap only, then deny-all | no | none |
-| Repository importer | no | no | no | no | no | no | no | no | yes | none |
+| gVisor Tool Sandbox | no | no | no | no | no | no | no | no | no | none |
+| gVisor repository importer | no | no | no | no | no | no | no | no | yes | none |
 | PostgreSQL | no | no | yes | no | no | no | no | no | no | none |
 | MinIO | no | no | no | yes | no | no | no | no | no | none |
 | Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | none |
@@ -63,11 +62,10 @@ All must be unreachable. It also inspects `env`, `/proc/self/environ`,
 `/proc/1/environ`, PID 1's command line, cgroup limits, mounts, capabilities,
 and Docker socket absence.
 
-For `docker_microvm`, the same Tool Worker remains `network=none` inside the
-VM. In addition, the outer Docker Sandbox proxy is switched to deny-all before
-the trusted Tool image is loaded or the worker starts. The bridge's
-microVM-local Docker socket is never mounted into the Tool Worker. A possible
-template pull occurs earlier, with no tenant content or agent command present.
+Both workloads are explicitly launched with Docker runtime `runsc`; Tool
+execution uses `network=none`. The repository importer is a separate,
+credential-free one-shot workload and never receives model, database, object
+store, GitHub App or Manager credentials.
 
 The Tool Sandbox is not attached to `github-control`, so enabling a GitHub App
 does not give agent-generated commands a path to the Gateway. The Gateway is

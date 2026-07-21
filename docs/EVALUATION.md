@@ -33,13 +33,15 @@ restart/reconnect evidence.
 ## Sandbox security
 
 ```bash
-npm run sandbox-provider:check
+npm run sandbox:check
 ```
 
-This source-build gate runs the Provider contract and a real Pi remote-tool
-repair. It validates cgroups, namespaces, offline networking, `/proc` and
-credential isolation, tenant-separated workspaces, traversal/symlink denial,
-output bounds, cancellation, and exact resource cleanup.
+This source-build gate attests runsc/KVM and the live gVisor kernel, then runs
+the Provider contract and a real Pi remote-tool repair. It validates resources,
+offline networking, `/proc` and credential isolation, tenant-separated
+workspaces, traversal/symlink denial, output bounds, cancellation, and exact
+resource cleanup. The latest result is
+`docs/reports/gvisor-sandbox-latest.json`.
 
 ## Control Plane load
 

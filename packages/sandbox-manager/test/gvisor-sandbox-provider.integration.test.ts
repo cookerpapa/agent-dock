@@ -10,10 +10,11 @@ import {
 } from "@agent-dock/workspace-runtime";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
-import { DockerSandboxProvider, ToolSandboxManager } from "../src/index.ts";
+import { GvisorSandboxProvider, ToolSandboxManager } from "../src/index.ts";
 
-const enabled = process.env.AGENT_DOCK_SANDBOX_PROVIDER_TEST === "1";
+const enabled = process.env.AGENT_DOCK_GVISOR_SANDBOX_TEST === "1";
 const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
 const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
 const ids = [
@@ -86,10 +87,10 @@ function dockerContainerExists(reference: string): Promise<boolean> {
   });
 }
 
-describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
+describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
   it("enforces identity, cgroups, namespace isolation, bounded output and exact cleanup", async () => {
     let nextId = 0;
-    const provider = new DockerSandboxProvider({
+    const provider = new GvisorSandboxProvider({
       toolImage,
       dockerCommand,
       repositoryImportNetwork: "bridge",
@@ -112,7 +113,7 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
       await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
         state: "running",
         handle: {
-          providerId: "docker",
+          providerId: "gvisor",
           assignment: {
             tenantId: firstAssignment.tenantId,
             sessionId: firstAssignment.sessionId,
@@ -121,6 +122,9 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
           },
         },
         effectiveIsolation: {
+          isolationBoundary: "gvisor",
+          runtime: "runsc",
+          sandboxKernelRelease: expect.stringMatching(/gvisor/i),
           user: "1000:1000",
           privileged: false,
           readOnlyRootFilesystem: true,
@@ -128,11 +132,39 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
           mountCount: 0,
           hasDockerSocket: false,
           pidLimit: 128,
+          processLimit: 128,
           memoryBytes: 768 * 1_024 * 1_024,
           cpuNano: 1_000_000_000,
           droppedCapabilities: ["ALL"],
         },
       });
+
+      const kernelIdentity = bashOutput(
+        await manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000011",
+            "uname -r; head -1 /proc/version; grep -m1 'model name' /proc/cpuinfo || true; ulimit -n",
+          ),
+        ),
+      );
+      expect(kernelIdentity).toMatch(/gvisor/i);
+      expect(kernelIdentity).not.toContain(hostKernelRelease());
+      expect(kernelIdentity).not.toMatch(/microsoft-standard-WSL2|AMD Ryzen|Intel\(R\)/i);
+      expect(kernelIdentity.trimEnd().endsWith("1024")).toBe(true);
+
+      const python = bashOutput(
+        await manager.execute(
+          first.capability,
+          operation(
+            first.activationId,
+            "50000000-0000-4000-8000-000000000013",
+            "python3 -c 'print(sum([1, 2, 3]))'",
+          ),
+        ),
+      );
+      expect(python).toBe("6\n");
 
       const environment = bashOutput(
         await manager.execute(
@@ -155,16 +187,35 @@ describe.skipIf(!enabled)("Docker Sandbox Provider security contract", () => {
           operation(
             first.activationId,
             "50000000-0000-4000-8000-000000000002",
-            "printf 'memory='; cat /sys/fs/cgroup/memory.max; printf 'pids='; cat /sys/fs/cgroup/pids.max; printf 'cpu='; cat /sys/fs/cgroup/cpu.max; printf 'workspace='; df -B1 --output=size /workspace | tail -1",
+            "printf 'memory='; (cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || cat /sys/fs/cgroup/memory.max); printf 'pids='; (cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids.max); printf 'cpu='; if test -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us; then cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us; cat /sys/fs/cgroup/cpu/cpu.cfs_period_us; else cat /sys/fs/cgroup/cpu.max; fi; printf 'workspace='; df -B1 --output=size /workspace | tail -1",
           ),
         ),
       );
       expect(cgroups).toContain(`memory=${String(768 * 1_024 * 1_024)}`);
-      expect(cgroups).toContain("pids=128");
-      expect(cgroups).toMatch(/cpu=100000\s+100000/);
+      // runsc exposes a virtual guest cgroup hierarchy and currently reports
+      // pids.max=max. The effective Docker configuration is checked above; this
+      // probe proves the matching RLIMIT_NPROC actually rejects excess children.
+      expect(cgroups).toContain("pids=max");
+      expect(cgroups).toMatch(/cpu=(?:100000\s+100000|100000\s+100000)/);
       const workspaceBytes = Number(/workspace=\s*(\d+)/.exec(cgroups)?.[1]);
       expect(workspaceBytes).toBeGreaterThan(0);
       expect(workspaceBytes).toBeLessThanOrEqual(128 * 1_024 * 1_024);
+
+      const processProbe = JSON.parse(
+        bashOutput(
+          await manager.execute(
+            first.capability,
+            operation(
+              first.activationId,
+              "50000000-0000-4000-8000-000000000012",
+              `node -e 'const{spawn}=require("node:child_process");let started=0,failed=0;for(let i=0;i<256;i++){const child=spawn("sleep",["1"]);child.once("spawn",()=>started++);child.once("error",()=>failed++)}setTimeout(()=>console.log(JSON.stringify({started,failed})),1500)'`,
+              10_000,
+            ),
+          ),
+        ),
+      ) as { started: number; failed: number };
+      expect(processProbe.started).toBeLessThan(128);
+      expect(processProbe.failed).toBeGreaterThan(0);
 
       const networkProbe = bashOutput(
         await manager.execute(

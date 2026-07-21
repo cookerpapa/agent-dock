@@ -1,5 +1,9 @@
 # ADR-0022: Remote control-plane worker lifecycle
 
+Implementation update: the historical `DockerSandboxTurnRunner` named below
+was removed by ADR-0038. The supported worker now composes
+`RemoteToolSandboxTurnRunner` through the gVisor-only Sandbox Manager.
+
 - Status: accepted
 - Date: 2026-07-19
 

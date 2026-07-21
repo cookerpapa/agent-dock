@@ -6,13 +6,17 @@ LABEL org.opencontainers.image.title="AgentDock Pi RPC compatibility spike" \
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY scripts/harden-pi-dependencies.mjs scripts/harden-pi-dependencies.mjs
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY spikes/pi-extension-compat/package.json spikes/pi-extension-compat/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts \
+    && node scripts/harden-pi-dependencies.mjs \
+    && node scripts/harden-pi-dependencies.mjs --check \
+    && npm cache clean --force
 
 COPY packages/fake-model-server/src packages/fake-model-server/src
 COPY packages/observability/src packages/observability/src

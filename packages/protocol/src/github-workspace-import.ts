@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { GitHubRepositorySourceSchema } from "./control-plane-api.ts";
-import { SandboxCheckpointBlobSchema } from "./docker-sandbox-worker.ts";
+import { SandboxCheckpointBlobSchema } from "./agent-runtime.ts";
 import { UuidSchema } from "./protocol-primitives.ts";
 
 const WorkspaceImportEnvelopeProperties = {

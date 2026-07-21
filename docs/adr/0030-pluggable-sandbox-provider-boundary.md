@@ -1,5 +1,9 @@
 # ADR-0030: Pluggable sandbox provider boundary
 
+Concrete runtime update: ADR-0038 retains this provider-neutral Manager
+boundary but removes the ordinary-Docker implementation and runtime selector
+described historically below. The product now has one gVisor/KVM Provider.
+
 - Status: accepted
 - Date: 2026-07-20
 - Extends: ADR-0029

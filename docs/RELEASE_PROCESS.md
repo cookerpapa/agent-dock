@@ -8,9 +8,13 @@ separate deployment decision.
 ## Preconditions
 
 - use a clean checkout at the intended release commit;
-- install only the lockfile with `npm ci --ignore-scripts`;
+- install only the lockfile with `npm ci --ignore-scripts`, then run
+  `npm run dependencies:harden` to apply and verify the reviewed Pi shrinkwrap
+  security patches;
 - run `npm run ci`, `npm run container:check`,
-  `npm run sandbox-provider:check`, and `npm run production:check`;
+  `npm run sandbox:check`, and `npm run production:check`;
+- verify the host runtime is `runsc` with KVM; the Sandbox gate fails closed
+  if a lower-security runtime is selected;
 - choose one immutable image version. Do not reuse a published version for a
   different commit.
 

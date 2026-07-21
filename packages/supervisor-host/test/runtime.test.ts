@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import type { DockerSandboxScenarioContext } from "@agent-dock/sandbox-supervisor";
+import type { AgentTurnScenarioContext } from "@agent-dock/sandbox-supervisor";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -105,7 +105,7 @@ describe("SupervisorHostRuntime", () => {
       ({
         restoring,
         command: { payload: { input: { kind: "prompt", text } } },
-      }) as DockerSandboxScenarioContext;
+      }) as AgentTurnScenarioContext;
 
     expect(resolveProductionSandboxScenario(context("repair the Java fixture"))).toBe(
       "java_repair",

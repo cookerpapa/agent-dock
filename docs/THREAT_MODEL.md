@@ -8,15 +8,13 @@ model-generated commands, repository files, build scripts, and tool output are
 untrusted. The host administrator, deployed images, Control Plane, Trusted Pi
 Runner, Model Gateway, Sandbox Manager, PostgreSQL, and object store are trusted.
 
-The current Docker Provider reduces accidental and prompt-driven access to the
-platform, but it shares the host kernel. It is not a sufficient boundary for a
-hostile public code-execution SaaS.
-
-The opt-in Docker microVM Provider adds a separate LinuxKit kernel around the
-same hardened Tool Worker and passes the Provider/real-Pi gate. It materially
-reduces the shared-kernel escape surface, but public identity, abuse controls,
-dependency egress, capacity admission, patch operations, and independent review
-still remain outside the current private-deployment claim.
+All untrusted tool and public-repository import workloads use gVisor `runsc`
+with the KVM platform. This interposes a userspace application kernel and
+materially reduces direct host-kernel syscall exposure compared with ordinary
+containers. It does not make the current loopback product a hostile public
+code-execution SaaS: public identity, abuse controls, dependency egress,
+capacity admission, patch operations and independent review remain outside the
+claim.
 
 ## Assets
 
@@ -75,7 +73,7 @@ In scope:
 Assumed trusted or out of scope for the current claim:
 
 - a malicious host administrator or compromised Docker daemon;
-- a Docker/kernel/container-runtime escape;
+- a gVisor, KVM, Docker daemon or host-kernel escape;
 - arbitrary user-supplied Pi extensions running beside model credentials;
 - public anonymous hostile tenants, billing abuse, and Internet-scale denial of
   service;
@@ -94,7 +92,7 @@ Assumed trusted or out of scope for the current claim:
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
 | Stale worker commits state | lease ID, attempt ID, fencing token, checkpoint revision CAS, fenced event commit | PostgreSQL and production recovery tests |
-| Runaway resource use | Docker cgroups, PID/file limits, tmpfs quotas, command/output/turn bounds | effective inspection and in-container cgroup probes |
+| Runaway resource use | Docker cgroups plus guest `RLIMIT_NPROC`, file limits, tmpfs quotas, command/output/turn bounds | effective inspection, actual fork exhaustion and in-guest probes |
 | Cancel leaves descendants | process-group abort followed by exact container destroy/absence confirmation | long background-process cancellation test |
 | Partial checkpoint becomes current | upload/hash/manifest validation followed by fenced pointer CAS; terminal event is commit marker | checkpoint corruption and two-turn restore tests |
 | Old/failed Attempt publishes a Workspace version | staged version is bound to Run/Attempt and settled in the fenced terminal transaction; failures abandon it and restore prior pointers | version consistency and stale-attempt tests |
@@ -104,7 +102,7 @@ Assumed trusted or out of scope for the current claim:
 | Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 | Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
-| Shared host kernel exposes a larger escape surface | optional `docker_microvm` Provider nests the unchanged hardened worker behind a separate LinuxKit kernel | guest/host kernel comparison, deny-all probe, lifecycle/reconciliation and real Pi tests |
+| Untrusted syscalls attack the host-kernel surface | sole Provider uses `runsc`/KVM; readiness and every activation attest a real gVisor guest; no runc fallback exists | guest/host identity comparison, deny-all probe, lifecycle/reconciliation and real Pi tests |
 | Backup is tampered with, partially restored, or overwrites live state | AES-GCM authenticated payload, scrypt key derivation, per-authority hashes, safe archive paths, exact image IDs, new empty project/runtime only | crypto tamper/wrong-key check and complete production restore drill |
 | Repository or Artifact preview executes active content in the browser | React-escaped bounded UTF-8 text only; binary is labelled; no HTML/script/live-preview embedding | Web component/API tests and production bundle/product flow |
 | Fixable severe image vulnerability ships unnoticed | immutable-pinned scanner, complete HIGH/CRITICAL report, CycloneDX SBOM, zero-fixable-HIGH/CRITICAL gate | CI image matrix and local release-evidence command |
@@ -130,9 +128,8 @@ ships without a usable App private key and fails App operations closed.
 
 Before exposing arbitrary untrusted repositories to the public Internet:
 
-1. deploy the integration-tested microVM Provider (or another equally tested
-   gVisor/Kata/Firecracker backend) and complete a production capacity/security
-   review rather than relying on the default shared-kernel Provider;
+1. complete a production gVisor/KVM capacity and security review on the actual
+   Linux host rather than relying on the validated WSL2 demonstration host;
 2. put repository and dependency egress behind a DNS-aware allowlisting proxy;
 3. add verified identity, password recovery/MFA, distributed login and
    registration abuse/rate controls, audit retention, and incident response
@@ -150,15 +147,13 @@ platform secret, database network, Docker socket, or Tool Sandbox authority.
 ## Reproduction
 
 ```bash
-npm run sandbox-provider:check
-npm run sandbox-microvm:check
+npm run sandbox:check
 npm run production:check
 npm run release:evidence
 ```
 
-The first command checks the default shared-kernel Provider. The second repeats
-the security/lifecycle and real Pi repair path through a separate-kernel
-microVM. The third creates and removes a complete disposable production
+The first command attests the gVisor/KVM boundary and runs the real Pi remote
+tool path. The second creates and removes a complete disposable production
 topology, tests multi-tenant behavior, and restores a coordinated encrypted
-backup before continuing a Run. The fourth produces checksummed SBOM and image
+backup before continuing a Run. The third produces checksummed SBOM and image
 vulnerability evidence from clean revision-labelled images.

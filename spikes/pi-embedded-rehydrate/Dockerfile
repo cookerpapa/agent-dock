@@ -6,8 +6,12 @@ LABEL org.opencontainers.image.title="AgentDock embedded rehydrate spike" \
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY scripts/harden-pi-dependencies.mjs scripts/harden-pi-dependencies.mjs
 COPY spikes/pi-embedded-rehydrate/package.json spikes/pi-embedded-rehydrate/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts \
+    && node scripts/harden-pi-dependencies.mjs \
+    && node scripts/harden-pi-dependencies.mjs --check \
+    && npm cache clean --force
 
 COPY spikes/pi-embedded-rehydrate/src spikes/pi-embedded-rehydrate/src
 

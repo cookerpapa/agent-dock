@@ -1,5 +1,5 @@
 import type {
-  DockerSandboxWorkspaceSeed,
+  AgentWorkspaceSeed,
   GitHubRepositorySource,
   SandboxCheckpointBlob,
   SupervisorRuntimeAssignment,
@@ -83,7 +83,7 @@ export const DEFAULT_TOOL_SANDBOX_POLICY: SandboxPolicy = Object.freeze({
 export type SandboxCreateSpec = Readonly<{
   activationId: string;
   assignment: ToolSandboxAssignment;
-  workspaceSeed: DockerSandboxWorkspaceSeed;
+  workspaceSeed: AgentWorkspaceSeed;
   workspaceRestore?: SandboxCheckpointBlob;
   policy: SandboxPolicy;
 }>;
@@ -99,7 +99,8 @@ export type SandboxHandle = Readonly<{
 }>;
 
 export type SandboxEffectiveIsolation = Readonly<{
-  isolationBoundary: "shared_kernel_container" | "microvm";
+  isolationBoundary: "gvisor";
+  runtime: "runsc";
   user: string;
   privileged: boolean;
   readOnlyRootFilesystem: boolean;
@@ -107,12 +108,12 @@ export type SandboxEffectiveIsolation = Readonly<{
   mountCount: number;
   hasDockerSocket: boolean;
   pidLimit: number | null;
+  processLimit: number | null;
   memoryBytes: number | null;
   cpuNano: number | null;
   droppedCapabilities: readonly string[];
   securityOptions: readonly string[];
-  outerNetworkPolicy?: "deny_all";
-  guestKernelRelease?: string;
+  sandboxKernelRelease?: string;
 }>;
 
 export type SandboxInspection =

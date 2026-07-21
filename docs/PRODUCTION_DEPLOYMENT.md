@@ -24,8 +24,8 @@ support arbitrary Git URLs, arbitrary provider URLs,
 policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
 direct Internet exposure.
 The optional registration route is not verified
-human identity, billing, OIDC, recovery, abuse prevention, or a mutually
-hostile Docker-host boundary. Those limits are part of the product contract,
+human identity, billing, OIDC, recovery, abuse prevention, or a hostile public
+code-execution SaaS boundary. Those limits are part of the product contract,
 not hidden deployment TODOs.
 
 The architecture and safety rationale are recorded in
@@ -43,7 +43,9 @@ Controlled public GitHub import and immutable workspace seeds are recorded in
 The trusted Pi Runner and remote Tool Sandbox split is recorded in
 [ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
 The provider-neutral runtime boundary is recorded in
-[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). Product operations,
+[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md), and the sole
+gVisor/KVM runtime is recorded in
+[ADR-0038](adr/0038-gvisor-only-tool-execution.md). Product operations,
 recovery, and release evidence are recorded in
 [ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
 [browser account and platform-model decision](adr/0037-browser-accounts-and-platform-managed-model.md),
@@ -52,10 +54,12 @@ recovery, and release evidence are recorded in
 
 ## Prerequisites
 
-- A Linux Docker host. The dedicated Sandbox Manager uses the Linux Docker
-  socket and Tool Sandboxes use POSIX process-group cancellation semantics.
-- Docker Engine with the Compose plugin. The acceptance topology is currently
-  exercised on Docker Engine `29.4.2` and Compose `5.1.3`.
+- A native Linux Docker Engine and working `/dev/kvm`. On WSL2, enable nested
+  virtualization and use the WSL Linux daemon rather than Docker Desktop.
+- Docker Engine with the Compose plugin and gVisor `runsc` registered with the
+  fixed `--platform=kvm` argument. The acceptance topology is currently
+  exercised on Docker Engine `29.6.2`, Compose `5.1.3`, and
+  `runsc release-20260714.0`.
 - Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
   application images pin their own Node and service image digests.
 - Enough local CPU, memory, and storage for PostgreSQL, MinIO, six application
@@ -65,9 +69,17 @@ recovery, and release evidence are recorded in
   generated runtime directory or access the Docker socket is inside the trusted
   computing base. Only the Sandbox Manager service receives that socket.
 
-Do not use a shared untrusted Docker socket or an unreviewed rootless/remote
-Docker context without separately validating its socket ownership, mount, and
-process-containment behavior.
+Install and attest the host first:
+
+```bash
+sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-gvisor-host.sh
+newgrp docker
+npm run sandbox:check
+```
+
+Do not use Docker Desktop, a shared untrusted Docker socket, an unreviewed
+rootless/remote context, or a runtime registration without KVM. The Manager
+fails readiness instead of falling back to runc or systrap.
 
 ## First deployment
 
@@ -76,6 +88,7 @@ the idempotent deployment entry point:
 
 ```bash
 npm ci --ignore-scripts
+npm run dependencies:harden
 npm run production:deploy
 ```
 
@@ -205,39 +218,17 @@ never forwarded to remote bash.
 The separate `sandbox-manager` is the only root-equivalent application service
 because it owns `/var/run/docker.sock`. It has no database, S3, provider,
 enrollment, or tenant credential and exposes only authenticated bounded
-lifecycle/tool/inventory operations. It fixes
-`AGENT_DOCK_SANDBOX_PROVIDER=docker`; an unknown Provider fails startup rather
-than silently falling back. The implemented `docker_microvm` backend is an
-explicit host-Manager mode because Docker Sandboxes is a Docker Desktop host
-integration; it is not silently enabled inside this Compose service.
-Capability authorization and
-identity fencing remain above the Provider implementation. Tool Sandboxes are created per active turn,
-not per conversation: they run as UID/GID `1000:1000`, with `--network none`, no
-host bind mount, inherited environment credential, published port, Docker
-socket, or writable root filesystem, and are removed after completion or
-cancellation. Cold sessions consume no Pi process, Tool Sandbox, socket, timer,
-or dedicated thread.
-
-### Optional separate-kernel Provider
-
-`docker_microvm` requires Docker Sandboxes client/server v0.12.0 or a compatible
-version on the trusted Manager host, a digest-pinned shell template, a private
-state directory, and several GiB of free memory per active VM. Validate that
-host before wiring it to a deployment:
-
-```bash
-npm run sandbox-microvm:check
-```
-
-The Provider runs the normal hardened Tool Worker inside a LinuxKit microVM and
-does not change the Runner or Tool RPC protocol. The default Compose topology
-continues to use `docker`; do not set `AGENT_DOCK_SANDBOX_PROVIDER=docker_microvm`
-inside the existing Manager container and assume the host integration is
-available. A host Manager must be given the same private service-token file,
-must bind only on a firewall-restricted interface reachable by the trusted
-Runner, and must use a durable `AGENT_DOCK_MICROVM_STATE_DIRECTORY`. If the
-sandbox daemon needs an upstream proxy, configure it where that daemon starts;
-never forward proxy credentials to Tool execution.
+lifecycle/tool/inventory operations. It constructs only
+`GvisorSandboxProvider`; the former provider selector and lower-security
+implementations do not exist. Readiness starts a real runsc workload and every
+activation is re-inspected for runtime and guest-kernel identity. Capability
+authorization and identity fencing remain above the Provider implementation.
+Tool Sandboxes are created per active turn, not per conversation: they run as
+UID/GID `1000:1000`, with `--runtime runsc`, `--network none`, no host bind
+mount, inherited environment credential, published port, Docker socket, or
+writable root filesystem, and are removed after completion or cancellation.
+Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
+thread.
 
 Persistent state is split into seven declared volumes:
 
@@ -587,6 +578,7 @@ above, and preserve the old images. Then:
 
 ```bash
 npm ci --ignore-scripts
+npm run dependencies:harden
 npm run production:deploy
 npm run production:ps
 ```
@@ -643,13 +635,13 @@ Before the full topology gate, the isolated execution plane can be reproduced
 without model tokens:
 
 ```bash
-npm run sandbox-provider:check
+npm run sandbox:check
 ```
 
-This source-builds the Tool image and checks effective cgroups, namespace and
-network isolation, `/proc`/credential absence, cross-tenant workspaces,
-path/symlink defense, bounded output, cancellation, cleanup, and the real Pi
-remote-tool repair loop.
+This source-builds the Tool image, attests runsc/KVM and the live gVisor kernel,
+and checks effective resource limits, network isolation, `/proc`/credential
+absence, cross-tenant workspaces, path/symlink defense, bounded output,
+cancellation, cleanup, and the real Pi remote-tool repair loop.
 
 Run the destructive acceptance topology separately from a real deployment:
 
