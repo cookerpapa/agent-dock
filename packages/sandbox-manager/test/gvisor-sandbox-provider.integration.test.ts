@@ -93,7 +93,6 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
     const provider = new GvisorSandboxProvider({
       toolImage,
       dockerCommand,
-      repositoryImportNetwork: "bridge",
     });
     const manager = new ToolSandboxManager({
       provider,

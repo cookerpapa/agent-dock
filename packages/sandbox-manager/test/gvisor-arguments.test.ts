@@ -77,7 +77,6 @@ describe("Tool Sandbox gVisor boundary", () => {
   it("runs the bounded public repository importer behind runsc", () => {
     const args = buildGvisorRepositoryImportArguments(
       "agent-dock/tool-sandbox:test",
-      "agent-dock-repository-import",
       "agent-dock-import-security-test",
       "10000000-0000-4000-8000-000000000005",
     );
@@ -86,7 +85,7 @@ describe("Tool Sandbox gVisor boundary", () => {
         "--runtime",
         "runsc",
         "--network",
-        "agent-dock-repository-import",
+        "bridge",
         "--user",
         "1000:1000",
         "--read-only",

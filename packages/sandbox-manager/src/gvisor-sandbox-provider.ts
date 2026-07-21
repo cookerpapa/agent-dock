@@ -52,7 +52,6 @@ export const TOOL_SANDBOX_LABELS = {
 
 export type GvisorSandboxProviderOptions = {
   toolImage: string;
-  repositoryImportNetwork: string;
   dockerCommand?: string;
   readyTimeoutMs?: number;
   cleanupTimeoutMs?: number;
@@ -112,13 +111,6 @@ function positiveInteger(value: number, name: string, maximum = Number.MAX_SAFE_
 function bounded(value: string, name: string, maximum = 1_024): string {
   if (value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new TypeError(`${name} is invalid`);
-  }
-  return value;
-}
-
-function dockerNetwork(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value === "none") {
-    throw new TypeError("Repository import network is invalid");
   }
   return value;
 }
@@ -413,7 +405,6 @@ export function buildGvisorToolSandboxArguments(
 
 export function buildGvisorRepositoryImportArguments(
   image: string,
-  network: string,
   name: string,
   importId: string,
 ): readonly string[] {
@@ -436,7 +427,7 @@ export function buildGvisorRepositoryImportArguments(
     "1000:1000",
     "--read-only",
     "--network",
-    dockerNetwork(network),
+    "bridge",
     "--init",
     "--cap-drop",
     "ALL",
@@ -470,7 +461,6 @@ export function buildGvisorRepositoryImportArguments(
 export class GvisorSandboxProvider implements SandboxProvider {
   readonly providerId = "gvisor";
   readonly #toolImage: string;
-  readonly #repositoryImportNetwork: string;
   readonly #dockerCommand: string;
   readonly #readyTimeoutMs: number;
   readonly #cleanupTimeoutMs: number;
@@ -482,7 +472,6 @@ export class GvisorSandboxProvider implements SandboxProvider {
 
   constructor(options: GvisorSandboxProviderOptions) {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image");
-    this.#repositoryImportNetwork = dockerNetwork(options.repositoryImportNetwork);
     this.#dockerCommand = bounded(options.dockerCommand ?? "docker", "Docker command");
     this.#readyTimeoutMs = positiveInteger(
       options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
@@ -1033,14 +1022,7 @@ export class GvisorSandboxProvider implements SandboxProvider {
     const name = `agent-dock-import-${importId}`.slice(0, 63);
     const child = spawn(
       this.#dockerCommand,
-      this.#dockerArguments(
-        buildGvisorRepositoryImportArguments(
-          this.#toolImage,
-          this.#repositoryImportNetwork,
-          name,
-          importId,
-        ),
-      ),
+      this.#dockerArguments(buildGvisorRepositoryImportArguments(this.#toolImage, name, importId)),
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     let stdout = Buffer.alloc(0);

@@ -429,11 +429,15 @@ session checkpoint; it does not clone again.
 
 The importer has no bind mount, Docker socket, prompt, provider/deployment
 credential, published port, or membership in the database, object-storage,
-management, sandbox-control, or provider-egress networks. It joins only the
-repository-egress bridge. Neither the trusted Supervisor nor the Sandbox
-Manager joins that bridge, so the importer has no direct path to their private
-HTTP surfaces. A fixed GitHub URL is still an application restriction, not a
-DNS firewall; do not claim this as a mutually hostile public-tenant boundary.
+management, sandbox-control, or provider-egress networks. It joins Docker's
+fixed legacy `bridge`; no AgentDock platform service joins that bridge. This is
+required because the validated WSL `runsc`/KVM path cannot reach Docker's
+embedded DNS at `127.0.0.11` on a user-defined bridge, while the legacy bridge
+injects the host resolver directly. The importer receives only a normalized
+GitHub coordinate and exact commit, disables hooks and redirects, and never
+executes repository code or a user-controlled command. A fixed GitHub URL is
+still an application restriction, not a DNS firewall; do not claim this as a
+mutually hostile public-tenant boundary.
 
 Current repository limits are at most 512 regular files, 512 KiB per file, and
 2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
@@ -487,8 +491,8 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 
 - `postgres`, `minio`, `control-plane`, `sandbox-manager`, `supervisor-host`,
   and `web` are healthy;
-- `database-bootstrap`, `minio-bootstrap`, `supervisor-volume-bootstrap`, and
-  the credential-free `repository-network-bootstrap` exited successfully;
+- `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
+  exited successfully;
 - no `tool-sandbox-image` service is running;
 - no container with `agent-dock.managed=true` remains after a turn settles;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.

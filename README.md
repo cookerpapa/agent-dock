@@ -410,8 +410,12 @@ depends on one Supervisor host directory. The production Compose topology now
 uses that adapter against persistent MinIO and keeps credentials only in the
 trusted Supervisor host. For a GitHub source, one expiring PostgreSQL lease
 elects a disposable, credential-free importer through the Sandbox Manager. It
-fetches only the pinned commit on a dedicated egress bridge, rejects unsupported
-files, removes Git metadata, and publishes a content-addressed immutable seed to MinIO. Every activation
+fetches only the pinned commit from Docker's fixed legacy `bridge`, rejects
+unsupported files, removes Git metadata, and publishes a content-addressed
+immutable seed to MinIO. The fixed bridge is required because `runsc`/KVM on
+the supported WSL host cannot reach Docker's embedded DNS on a user-defined
+bridge; no platform service joins the legacy bridge, and no user-controlled
+command or repository hook runs in the importer. Every activation
 reverifies that seed; the first Pi turn creates its Git baseline from it, and
 follow-ups overlay the settled checkpoint without cloning again. Private
 repositories, arbitrary URLs, submodules, LFS, branch refresh, pull-request

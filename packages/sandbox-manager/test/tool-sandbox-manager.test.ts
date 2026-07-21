@@ -220,19 +220,23 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
-          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),
       ).resolves.toMatchObject({
         toolImage: "agent-dock/tool-sandbox:test",
-        repositoryImportNetwork: "repository-egress",
         dockerCommand: "docker",
       });
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
-          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
           AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
+        }),
+      ).rejects.toThrow("was removed");
+      await expect(
+        loadSandboxManagerConfig({
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),
       ).rejects.toThrow("was removed");
     } finally {

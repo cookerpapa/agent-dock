@@ -75,7 +75,6 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote gVisor Tool Sandbox", (
     const provider = new GvisorSandboxProvider({
       toolImage,
       dockerCommand,
-      repositoryImportNetwork: "bridge",
     });
     const backend = new ToolSandboxManager({ provider });
     const server = new SandboxManagerServer({

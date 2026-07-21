@@ -45,6 +45,14 @@ The interface contains:
 - credential-free exact-commit public GitHub import;
 - `checkHealth` and `close`.
 
+The exact-commit public repository importer is not a Tool Sandbox. It is a
+fixed-purpose, credential-free `runsc` workload on Docker's legacy default
+`bridge`, used because the validated WSL/KVM path cannot reach Docker's embedded
+DNS on a user-defined bridge. The network name is not configurable. The worker
+constructs the GitHub URL itself, disables redirects and hooks, receives no
+prompt or platform credential, and never runs repository code. Tool execution
+remains strictly `network=none`.
+
 An immutable handle binds provider API version, activation/runtime identity,
 tenant, session, turn, attempt, Supervisor boot, command, lease and fencing
 token. The provider duplicates that identity into Docker labels and re-inspects

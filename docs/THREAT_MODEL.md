@@ -87,7 +87,7 @@ Assumed trusted or out of scope for the current claim:
 | Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
 | Tool controls Docker host | Socket exists only in Manager; Tool and Runner have no socket | production topology inspection |
-| Tool reaches internal services or Internet | Tool Sandbox uses `network=none`; Manager is not attached to platform/provider/repository egress | six-target TCP denial probe and network matrix |
+| Tool reaches internal services or Internet | Tool Sandbox uses `network=none`; Manager is attached only to sandbox control and observability | six-target TCP denial probe and network matrix |
 | Cross-tenant workspace read | One mount-free workspace tmpfs per active turn; immutable identity-bound handle | simultaneous two-tenant integration test |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
@@ -116,8 +116,11 @@ Tool capability authorizes one activation and is stored by the Manager only as
 a digest. The Tool Sandbox sees neither capability.
 
 The public repository importer receives no GitHub token. It can fetch only a
-normalized public `owner/repository` at an exact commit through its dedicated
-egress network. For the optional private path, the GitHub Gateway alone signs
+normalized public `owner/repository` at an exact commit through Docker's fixed
+legacy `bridge`. No platform service uses that bridge, and the importer has no
+mount, published port, prompt, user-controlled command, or enabled repository
+hook. The bridge supplies working DNS to `runsc`/KVM on the validated WSL host;
+it is not claimed as a DNS firewall. For the optional private path, the GitHub Gateway alone signs
 App JWTs and caches short-lived installation tokens in memory. The trusted
 Runner receives canonical repository bytes; the Control Plane submits a
 tenant/version-validated artifact for delivery. Neither component receives the

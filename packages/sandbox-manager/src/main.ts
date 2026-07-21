@@ -11,7 +11,6 @@ const observability = await startServiceObservability({
 });
 const provider = new GvisorSandboxProvider({
   toolImage: config.toolImage,
-  repositoryImportNetwork: config.repositoryImportNetwork,
   dockerCommand: config.dockerCommand,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
 });

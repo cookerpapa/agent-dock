@@ -1726,5 +1726,10 @@
   Compose 但保留其七个 volume；随后生成 `/home/rayn/agent-dock-pre-gvisor-20260721.adbackup` 加密冷备，把精确旧 image ID 流式导入原生
   daemon，并恢复为同名 `agent-dock-production` volumes/runtime。旧 Desktop runtime 可恢复地保存在
   `deploy/production/runtime-desktop-pre-gvisor/` 且已被 Git 忽略，没有删除用户对话或凭据。
+- 真实 GitHub 路径修正：首次真实 token gate 在模型调用前揭示 WSL 上的 `runsc`/KVM 无法访问用户自定义 Docker bridge 的
+  `127.0.0.11` embedded DNS；相同 workload 使用 legacy default `bridge` 时会直接获得 WSL resolver 并可验证 exact commit。
+  因此删除可配置 repository network、Compose network bootstrap 和专用 bridge，固定 importer 使用 `bridge`。AgentDock 常驻服务
+  均不加入该 bridge；importer 没有凭据、prompt、mount、port、hook 或用户命令，只执行由代码构造的 GitHub exact-commit fetch。
+  普通 Pi/Tool activation 仍严格为 `network=none`，没有把这一修正变成 Agent 的通用网络能力。
 - 能力边界：当前交付仍是 loopback/self-hosted 多租户产品，不声称已经完成 hostile public-Internet SaaS 的身份恢复、滥用治理、计费或
   独立渗透测试。这个限制不再来自 Tool kernel fallback；所有可达的用户代码执行路径现在都必须通过 gVisor/KVM attestation。

@@ -8,7 +8,6 @@ export type SandboxManagerConfig = {
   serviceToken: string;
   toolImage: string;
   dockerCommand: string;
-  repositoryImportNetwork: string;
   repositoryImportTimeoutMs: number;
 };
 
@@ -70,6 +69,7 @@ export async function loadSandboxManagerConfig(
 ): Promise<SandboxManagerConfig> {
   if (
     environment.AGENT_DOCK_SANDBOX_PROVIDER !== undefined ||
+    environment.AGENT_DOCK_REPOSITORY_IMPORT_NETWORK !== undefined ||
     Object.keys(environment).some((name) => name.startsWith("AGENT_DOCK_MICROVM_"))
   ) {
     throw new TypeError(
@@ -82,11 +82,6 @@ export async function loadSandboxManagerConfig(
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
     dockerCommand: bounded(environment.AGENT_DOCK_DOCKER_COMMAND ?? "docker", "dockerCommand"),
-    repositoryImportNetwork: bounded(
-      required(environment, "AGENT_DOCK_REPOSITORY_IMPORT_NETWORK"),
-      "repositoryImportNetwork",
-      128,
-    ),
     repositoryImportTimeoutMs: integer(
       environment.AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS,
       180_000,

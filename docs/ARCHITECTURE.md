@@ -297,8 +297,11 @@ networkless. Docker arguments contain no environment values. Its worker creates
 a fixed subprocess environment instead of inheriting the Manager or Runner
 environment. Therefore model-gateway capabilities, service tokens, database
 paths, and cloud credentials cannot enter `bash`, including through
-`/proc/*/environ`. The one-shot importer joins only repository egress and has no
-prompt or credentials; the Manager itself does not join that network.
+`/proc/*/environ`. The one-shot importer joins Docker's fixed legacy `bridge`
+and has no prompt, credentials, mounts, published ports, or user-controlled
+command surface; the Manager itself is not attached to that bridge. This is a
+fixed-purpose GitHub fetch worker, not an execution network granted to Pi or
+Tool Sandboxes.
 Every assignment inventory request is constrained again to a sandbox generation
 known by this host's ledger, and a terminate/absence request must match that
 generation's stable Supervisor and exact boot before Docker is inspected.
@@ -423,7 +426,11 @@ userspace application kernel instead of directly by the host kernel.
 There is no runtime selector. The Provider contract reserves deny-all, GitHub,
 package-registry, and explicit-host network policy shapes, but current Tool
 execution accepts only deny-all. GitHub import remains a separate
-credential-free `runsc` workload on its dedicated egress bridge. See
+credential-free `runsc` workload on Docker's fixed legacy `bridge`. That bridge
+supplies a directly reachable host resolver because the validated WSL
+`runsc`/KVM path cannot use Docker's embedded DNS on a user-defined bridge. No
+platform service uses the legacy bridge, and imported repository hooks or code
+are never executed. See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
 
 Minimum controls:

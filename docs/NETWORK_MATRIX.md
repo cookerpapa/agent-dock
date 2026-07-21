@@ -8,8 +8,8 @@ does not replace application authentication.
 
 ## Production networks
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | Repository egress | Public ports |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | Repository import egress | Public ports |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Web ingress | yes | no | no | no | no | yes (webhook proxy only) | no | no | no | loopback `8080` |
 | Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | none |
 | Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | yes | no | none |
@@ -22,10 +22,15 @@ does not replace application authentication.
 | Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | none |
 | Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | loopback `9090`, `16686`, `3001` |
 
-The repository-network bootstrap is a credential-free one-shot container used
-only to make Compose create the otherwise dynamic egress bridge. It exits before
-normal service and importer work. The Manager controls importer lifecycle but
-does not join repository egress itself.
+The repository importer is the only AgentDock workload placed on Docker's
+legacy default `bridge`; no platform service is attached to it. The bridge is
+fixed in code and is not a tenant-selectable network. It supplies a directly
+reachable resolver because Docker's embedded DNS at `127.0.0.11` is unreachable
+from `runsc`/KVM on the validated WSL host. The importer is a fixed-purpose,
+credential-free exact-commit GitHub fetch worker: it has no prompt, host mount,
+published port, user-controlled command, repository hook execution, or Tool
+authority. The Manager controls its lifecycle through the Docker socket but
+does not join the bridge.
 
 The observability ingress is the only component joining the non-internal
 `observability-edge` network. The three backends remain internal and are not
@@ -65,7 +70,8 @@ and Docker socket absence.
 Both workloads are explicitly launched with Docker runtime `runsc`; Tool
 execution uses `network=none`. The repository importer is a separate,
 credential-free one-shot workload and never receives model, database, object
-store, GitHub App or Manager credentials.
+store, GitHub App or Manager credentials. The import bridge is not a DNS-aware
+allowlist and is not granted to agent-generated commands.
 
 The Tool Sandbox is not attached to `github-control`, so enabling a GitHub App
 does not give agent-generated commands a path to the Gateway. The Gateway is

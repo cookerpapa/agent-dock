@@ -55,7 +55,16 @@ through the guest's normal `/proc` and `uname` views.
    dropped capabilities, no-new-privileges, no host mounts, no Docker socket,
    no network, bounded CPU/memory/PIDs/files/output/time, path confinement,
    fenced identity, cancellation and exact cleanup.
-7. The ordinary Docker Provider, Docker Sandboxes microVM Provider, their
+7. Public exact-commit import remains a separate fixed-purpose `runsc`
+   workload. On the supported WSL host, `runsc`/KVM cannot reach Docker's
+   embedded DNS at `127.0.0.11` on a user-defined bridge, so the importer uses
+   Docker's legacy default `bridge`, which injects the host resolver directly.
+   This choice is hard-coded and has no compatibility selector. No platform
+   service uses that bridge, and the importer receives no credential, prompt,
+   host mount, published port, repository hook, or user-controlled command.
+   Agent/Tool execution remains `network=none`; the import path is not claimed
+   as a DNS firewall.
+8. The ordinary Docker Provider, Docker Sandboxes microVM Provider, their
    configuration fields, integration gates and runtime-selection branches are
    removed. Historical ADRs and evidence may remain as superseded records, but
    they are not executable product paths.

@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Network detail amended by: ADR-0038
 - Extends: ADR-0021 checkpoint storage, ADR-0023 trusted Supervisor topology,
   and ADR-0027 brokered Pi execution
 
@@ -45,15 +46,16 @@ workspace provisioning primitive.
    tenant/project/workspace. Concurrent first turns wait for the winner's ready
    snapshot rather than cloning independently. An expired lease may be reclaimed;
    only its exact owner may publish success or failure.
-5. Git runs in a separate one-shot, non-root, read-only Docker container. It has
+5. Git runs in a separate one-shot, non-root, read-only `runsc` container. It has
    no bind mount, Docker socket, deployment/provider credential, published port,
    or membership in the database, object-storage, management, model-runtime, or
    provider-egress networks. Its only writable storage is bounded tmpfs, and its
-   only network is a dedicated repository-egress bridge. The trusted Supervisor
-   anchors that bridge in the bundled Compose topology; its reachable endpoints
-   remain authenticated, and the importer has neither management credentials nor
-   a model-gateway capability. The importer is not an agent and receives no
-   prompt or tool authority.
+   only network is Docker's fixed legacy default `bridge`. No AgentDock platform
+   service joins that bridge. ADR-0038 records why the validated WSL/KVM path
+   requires its direct resolver instead of Docker's embedded DNS on a
+   user-defined bridge. The importer has neither management credentials nor a
+   model-gateway capability. It is not an agent and receives no prompt, hook,
+   repository-code execution, user-controlled command, or tool authority.
 6. The import worker constructs exactly
    `https://github.com/<owner>/<repository>.git`, disables redirects, hooks,
    submodules, external/file protocols, credential helpers, interactive prompts,
@@ -82,8 +84,8 @@ workspace provisioning primitive.
    turns available when GitHub is down.
 10. Pi workers keep their existing network policy: fake turns use no network;
     real-model turns have only the internal model gateway. They never join the
-    repository-egress network. Imported repository files may influence the model
-    and tools, but cannot directly change the worker image or receive credentials.
+    legacy import bridge. Imported repository files may influence the model and
+    tools, but cannot directly change the worker image or receive credentials.
 
 ### Product and test boundary
 
@@ -106,7 +108,7 @@ The slice is complete only when tests and the live check prove:
    existing callers to the fixture;
 3. one import lease wins, expired leases are reclaimable, stale owners cannot
    publish, and ready snapshots are hash/size/manifest verified;
-4. importer Docker arguments contain the dedicated egress network and hardening
+4. importer Docker arguments contain the fixed legacy bridge and hardening
    limits but no tenant credential, provider key, host mount, or published port;
 5. redirects, submodules, symlinks, oversized paths/files/count/manifest, wrong
    commit, malformed protocol, timeout, cancellation, and dirty cleanup fail

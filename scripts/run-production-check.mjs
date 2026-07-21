@@ -698,6 +698,15 @@ async function assertApplicationIdentity() {
 }
 
 async function assertExecutionBoundary() {
+  const platformIds = (await composeCapture(["ps", "--all", "--quiet"]))
+    .split(/\r?\n/)
+    .filter(Boolean);
+  assert(platformIds.length > 0);
+  for (const id of platformIds) {
+    const platformContainer = JSON.parse(await capture("docker", ["inspect", id])).at(0);
+    assert.notEqual(platformContainer.HostConfig.NetworkMode, "bridge");
+    assert.equal(Object.hasOwn(platformContainer.NetworkSettings.Networks ?? {}, "bridge"), false);
+  }
   const supervisorId = (await serviceContainerIds("supervisor-host"))[0];
   const managerId = (await serviceContainerIds("sandbox-manager"))[0];
   const githubGatewayId = (await serviceContainerIds("github-gateway"))[0];
@@ -730,10 +739,6 @@ async function assertExecutionBoundary() {
   const managerNetworks = Object.keys(manager.NetworkSettings.Networks ?? {});
   const githubGatewayNetworks = Object.keys(githubGateway.NetworkSettings.Networks ?? {});
   assert(supervisorNetworks.some((name) => name.endsWith("_sandbox-control")));
-  assert.equal(
-    supervisorNetworks.some((name) => name.endsWith("_repository-egress")),
-    false,
-  );
   assert.deepEqual(
     managerNetworks.sort(),
     [`${projectName}_observability`, `${projectName}_sandbox-control`].sort(),
@@ -755,14 +760,13 @@ async function assertExecutionBoundary() {
       false,
     );
   }
-  const repositoryNetwork = JSON.parse(
-    await capture("docker", ["network", "inspect", `${projectName}_repository-egress`]),
-  ).at(0);
-  assert.equal(repositoryNetwork.Name, `${projectName}_repository-egress`);
-  assert.deepEqual(Object.keys(repositoryNetwork.Containers ?? {}), []);
   const managerEnvironment = manager.Config.Env ?? [];
   assert.equal(
     managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_SANDBOX_PROVIDER=")),
+    false,
+  );
+  assert.equal(
+    managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_REPOSITORY_IMPORT_NETWORK=")),
     false,
   );
   for (const prefix of [

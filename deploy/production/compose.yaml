@@ -467,9 +467,6 @@ services:
       args: *application-build-args
       network: host
     restart: unless-stopped
-    depends_on:
-      repository-network-bootstrap:
-        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
@@ -477,7 +474,6 @@ services:
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
       AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
       AGENT_DOCK_DOCKER_COMMAND: docker
-      AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
       AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9466"
@@ -517,24 +513,6 @@ services:
     mem_limit: 256m
     cpus: 1.0
     stop_grace_period: 30s
-    logging: *bounded-logging
-
-  repository-network-bootstrap:
-    image: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
-    restart: "no"
-    entrypoint: [/bin/true]
-    user: "1000:1000"
-    networks:
-      - repository-egress
-    read_only: true
-    init: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 16
-    mem_limit: 32m
-    cpus: 0.1
     logging: *bounded-logging
 
   github-gateway:
@@ -833,8 +811,6 @@ networks:
   github-control:
     internal: true
   provider-egress: {}
-  repository-egress:
-    name: ${COMPOSE_PROJECT_NAME:-agent-dock-production}_repository-egress
   observability:
     internal: true
   observability-edge: {}
