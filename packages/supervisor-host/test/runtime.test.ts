@@ -114,7 +114,7 @@ describe("SupervisorHostRuntime", () => {
       "java_repair",
     );
     expect(resolveProductionSandboxScenario(context(PRODUCTION_CANCELLATION_PROBE_PROMPT))).toBe(
-      "timeout",
+      "tool_hold",
     );
     expect(
       resolveProductionSandboxScenario(context(PRODUCTION_CANCELLATION_PROBE_PROMPT, true)),

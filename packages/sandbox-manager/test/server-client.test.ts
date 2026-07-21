@@ -1,4 +1,5 @@
 import type {
+  SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
@@ -36,6 +37,18 @@ const assignment: ToolSandboxAssignment = {
   attemptId: "10000000-0000-4000-8000-000000000003",
   leaseId: "10000000-0000-4000-8000-000000000003",
   fencingToken: 4,
+};
+const runtimeAssignment: SupervisorRuntimeAssignment = {
+  containerId: "10000000-0000-4000-8000-000000000020",
+  containerName: "agent-dock-tool-manager-test",
+  supervisorId: assignment.supervisorId,
+  bootId: assignment.bootId,
+  sandboxId: assignment.sandboxId,
+  commandId: assignment.commandId,
+  sessionId: assignment.sessionId,
+  turnId: assignment.turnId,
+  leaseId: assignment.leaseId,
+  fencingToken: assignment.fencingToken,
 };
 
 const servers: SandboxManagerServer[] = [];
@@ -97,8 +110,8 @@ function backend(): SandboxManagerBackend {
     async importGitHub() {
       return Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
     },
-    async listAssignments() {
-      return [];
+    async listAssignments(sandboxId) {
+      return sandboxId === runtimeAssignment.sandboxId ? [runtimeAssignment] : [];
     },
     async terminateAndConfirmAbsent() {},
     async confirmAbsent() {},
@@ -169,6 +182,10 @@ describe("Sandbox Manager authenticated RPC", () => {
         new AbortController().signal,
       ),
     ).resolves.toEqual(Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n'));
+    await expect(client.listAssignments(runtimeAssignment.sandboxId)).resolves.toEqual([
+      runtimeAssignment,
+    ]);
+    await expect(client.terminateAndConfirmAbsent(runtimeAssignment)).resolves.toBeUndefined();
 
     const unauthorized = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
       method: "POST",

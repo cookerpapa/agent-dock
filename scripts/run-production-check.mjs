@@ -587,10 +587,28 @@ async function waitForWorker(commandId) {
   return waitFor(
     async () => {
       const ids = await managedWorkerIds([`label=agent-dock.command-id=${commandId}`]);
-      return ids.length === 1 ? ids[0] : false;
+      if (ids.length !== 1) return false;
+      try {
+        const pod = JSON.parse(
+          await kubernetesCapture([
+            "get",
+            "pod",
+            ids[0],
+            "--namespace",
+            "agent-dock-sandboxes",
+            "--output=json",
+          ]),
+        );
+        const workspace = (pod.status?.containerStatuses ?? []).find(
+          (entry) => entry.name === "workspace",
+        );
+        return workspace?.ready === true && workspace.state?.running !== undefined ? ids[0] : false;
+      } catch {
+        return false;
+      }
     },
-    `managed worker for command ${commandId}`,
-    30_000,
+    `ready managed worker for command ${commandId}`,
+    60_000,
   );
 }
 
@@ -1289,6 +1307,13 @@ async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBT
   );
   assert.equal(restoredStream.events.at(-1).type, "turn.completed");
   assert(restoredStream.cursor > cursor);
+  const restoredWarmWorkerIds = await managedWorkerIds([
+    `label=agent-dock.command-id=${restoredFollowUp.commandId}`,
+  ]);
+  assert.deepEqual(await managedWorkerIds(), restoredWarmWorkerIds);
+  assert.equal(restoredWarmWorkerIds.length, 1);
+  await composeRunFor(restoredDeployment, ["restart", "supervisor-host"]);
+  await waitForHealthyServiceIn(restoredDeployment, "supervisor-host", 1, 120_000);
   await waitFor(async () => (await managedWorkerIds()).length === 0, "restored worker removal");
   report("recovery_drill_passed", {
     backupSizeBytes,
@@ -2095,6 +2120,16 @@ async function main() {
     ),
     "0",
   );
+  const retainedWarmWorkerIds = await managedWorkerIds([
+    `label=agent-dock.command-id=${postRestart.commandId}`,
+  ]);
+  assert.deepEqual(await managedWorkerIds(), retainedWarmWorkerIds);
+  assert.equal(retainedWarmWorkerIds.length, 1);
+
+  report("retire_retained_warm_worker", { bootId: freshBoot.bootId });
+  await composeRun(["restart", "supervisor-host"]);
+  await waitForHealthyService("supervisor-host");
+  await waitForLatestBootDifferent(freshBoot);
   await waitFor(async () => (await managedWorkerIds()).length === 0, "all worker removal");
 
   const replay = await readSessionEventsUntil(session.sessionId, 0, (event) => event.seq === 22);

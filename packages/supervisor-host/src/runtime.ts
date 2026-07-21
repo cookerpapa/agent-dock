@@ -78,7 +78,7 @@ export function resolveProductionSandboxScenario({
     command.payload.input.kind === "prompt" &&
     command.payload.input.text === PRODUCTION_CANCELLATION_PROBE_PROMPT
   ) {
-    return "timeout";
+    return "tool_hold";
   }
   return "java_repair";
 }

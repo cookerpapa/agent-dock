@@ -501,7 +501,39 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
         "agent-dock.io/attempt-id": currentAssignment.attemptId,
         "agent-dock.io/fencing-token": String(currentAssignment.fencingToken),
       });
-      await manager.stop(rebound.activationId, currentAssignment);
+      const reboundCapture = await manager.capture(
+        rebound.activationId,
+        currentAssignment,
+        "50000000-0000-4000-8000-000000000106",
+      );
+      if (reboundCapture.type !== "tool_sandbox.captured") {
+        throw new Error("Expected a rebound Tool Sandbox capture");
+      }
+      await manager.release({
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.release",
+        requestId: "50000000-0000-4000-8000-000000000107",
+        activationId: rebound.activationId,
+        assignment: currentAssignment,
+        disposition: "keep_warm",
+        workspaceRevision: reboundCapture.workspace.sha256,
+      });
+      const inventory = await provider.listAssignments(currentAssignment.sandboxId);
+      expect(inventory).toEqual([
+        {
+          containerId: originalUid,
+          containerName: podName,
+          supervisorId: currentAssignment.supervisorId,
+          bootId: currentAssignment.bootId,
+          sandboxId: currentAssignment.sandboxId,
+          commandId: currentAssignment.commandId,
+          sessionId: currentAssignment.sessionId,
+          turnId: currentAssignment.turnId,
+          leaseId: currentAssignment.leaseId,
+          fencingToken: currentAssignment.fencingToken,
+        },
+      ]);
+      await manager.terminateAndConfirmAbsent(inventory[0]!);
       activationId = undefined;
       await expect(runtimeClient.readPod("agent-dock-sandboxes", podName)).resolves.toBeUndefined();
     } finally {

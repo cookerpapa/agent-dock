@@ -652,6 +652,21 @@ function podToAssignment(pod: V1Pod): ManagedPodRuntime {
   };
 }
 
+function supervisorRuntimeAssignment(current: ManagedPodRuntime): SupervisorRuntimeAssignment {
+  return {
+    containerId: current.containerId,
+    containerName: current.containerName,
+    supervisorId: current.supervisorId,
+    bootId: current.bootId,
+    sandboxId: current.sandboxId,
+    commandId: current.commandId,
+    sessionId: current.sessionId,
+    turnId: current.turnId,
+    leaseId: current.leaseId,
+    fencingToken: current.fencingToken,
+  };
+}
+
 function networkPolicyIsDefaultDeny(policy: V1NetworkPolicy | undefined): boolean {
   const spec = policy?.spec;
   if (spec === undefined) return false;
@@ -1314,7 +1329,9 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     const assignments: SupervisorRuntimeAssignment[] = [];
     for (const pod of pods) {
       const current = podToAssignment(pod);
-      if (current.sandboxId === sandboxId) assignments.push(current);
+      if (current.sandboxId === sandboxId) {
+        assignments.push(supervisorRuntimeAssignment(current));
+      }
     }
     return assignments;
   }

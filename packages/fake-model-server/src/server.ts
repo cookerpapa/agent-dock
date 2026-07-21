@@ -12,6 +12,7 @@ export const fakeModelScenarios = [
   "java_repair",
   "java_followup",
   "coding_eval",
+  "tool_hold",
   "rate_limit",
   "timeout",
   "malformed",
@@ -694,12 +695,26 @@ export class FakeModelServer {
       );
       return;
     }
+    if (scenario === "tool_hold" && currentTurnToolResultCount(payload.messages) === 0) {
+      await this.#streamNamedToolCall(
+        response,
+        requestId,
+        sequence,
+        payload.model,
+        "call_agentdock_cancellation_hold",
+        "bash",
+        { command: "exec sleep 300", timeout: 300 },
+      );
+      return;
+    }
     const text =
       scenario === "tool_call"
         ? "Tool result accepted."
-        : scenario === "java_repair"
-          ? "Java repair verified."
-          : "AgentDock fake stream OK.";
+        : scenario === "tool_hold"
+          ? "Cancellation hold unexpectedly completed."
+          : scenario === "java_repair"
+            ? "Java repair verified."
+            : "AgentDock fake stream OK.";
     await this.#streamText(response, requestId, sequence, payload.model, text);
   }
 

@@ -1765,3 +1765,28 @@
   cache-read、0 cache-write tokens；13,904-byte immutable source snapshot 没有重复导入，终态后 Tool/Importer Pod 均为 0。
 - 边界：这是单节点、loopback/private self-hosted 的可部署与可复现结果，不是独立渗透测试或 hostile public SaaS 声明。Kubernetes
   负责调度/资源/策略，gVisor 负责缩小 syscall 攻击面；宿主管理员、K3s/containerd/runsc、KVM 与 host kernel 仍在可信计算基中。
+
+## 2026-07-21 — 按需激活、Session 热复用与异步批量事件
+
+- 根因测量：改造前一次无 Tool Call 的真实聊天仍同步支付约 4.1 秒 Pod 创建/Workspace 恢复，首字约 6.68 秒、总时长约 13.4 秒；152 个
+  text delta 又逐个执行 spool、WebSocket、PostgreSQL transaction、ACK，模型结束后约 3.9 秒才排空。ADR-0040 因此保留 gVisor
+  安全边界，修改的是生命周期和背压位置。
+- Sandbox：Manager 的 `create` 改为逻辑 reservation，第一次经过 capability 鉴权的 Tool operation 才 singleflight 创建 Pod。健康 Pod
+  仅能按 tenant/project/workspace/session 精确键热复用；复用要求 committed Workspace SHA 一致、严格递增 fence，并用 UID 与
+  `resourceVersion` 前置条件原子 patch/reverify Attempt/Turn 注解。capability 每 Run 轮换，失败、取消、revision mismatch、TTL、LRU
+  与 shutdown 均销毁。纯聊天的根 `AGENTS.md` 从可信侧已提交 snapshot 注入，Pi 启动不再为了读取说明文件而隐式激活 Pod。
+- Checkpoint：Pi JSONL 与 Workspace snapshot 分离。每个 settled Run 都提交 conversation checkpoint；只有 materialized Tool Sandbox 才
+  capture Workspace。失败回滚分别恢复最近 completed Pi 指针与 settled Workspace head，热 Pod 永远不替代 PostgreSQL/MinIO 权威状态。
+- Event：Pi 首个 text delta 立即输出，其后相邻同 content block delta 按 50 ms/2 KiB 聚合；每个公共事件仍先 fsync 本地 spool，随后由
+  有界异步 publisher 以最多 64 event/512 KiB 的 `event.publish_batch` 发送。Control Plane 单事务提交连续 batch 并返回 cumulative ACK，
+  terminal 返回前强制 drain；100-event 确定性测试验证 64+36 两批与 spool 清空。
+- 真实 DeepSeek/Kubernetes 验收：revision `db70dd6` 在同一 Session 连续执行 chat → cold coding → warm coding → chat。首次聊天 0 Pod、
+  0 Tool，首字 2.410 秒、terminal 3.174 秒；工具后聊天首字 2.029 秒、terminal 2.843 秒，Pod identity/fence 未变。首次 Tool 冷激活约
+  3.704 秒，下一 Run 首个 warm Bash 为 201 ms；两轮 Pod name/UID 完全相同，fence 2→3、Attempt/Turn 已更新，guest 仍为
+  `4.19.0-gvisor`。四轮 terminal event production→persistence/SSE 为 80–201 ms。详细原始身份与边界见
+  `docs/reports/demand-activated-sandbox-latency-2026-07-21.md`。
+- 最终生产门禁：热 Pod 首次进入 Supervisor inventory 后暴露了 strict protocol 边界中多返回内部字段的问题，现已显式投影为闭合的
+  `SupervisorRuntimeAssignment` 并增加 live rebind → inventory → retirement 测试。取消验收也不再依赖旧 eager Pod，而是让 fake model
+  发出 300 秒 Bash、等待 gVisor workspace container Ready 后真实取消；目标 Pod/Lease 被删除，其他 Session 热 Pod 不受影响，随后通过
+  fresh Boot retirement 清零。完整 disposable production acceptance 通过四租户、Control Plane 重连/扩缩、22 条事件重放、31 条审计、
+  7,382,120-byte 加密备份与 cursor 34 的恢复后继续执行，结束时受管 Pod 为 0。

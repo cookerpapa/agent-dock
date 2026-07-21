@@ -209,6 +209,22 @@ describe("pinned Pi OpenAI adapter contract", () => {
     expect(completion.content).toEqual([{ type: "text", text: "Java repair verified." }]);
   });
 
+  it("emits a long-running bash call for active-tool cancellation acceptance", async () => {
+    const assistant = await completeScenario("tool_hold", {
+      ...userContext,
+      tools: javaRepairTools,
+    });
+    expect(assistant.stopReason).toBe("toolUse");
+    expect(assistant.content).toEqual([
+      {
+        type: "toolCall",
+        id: "call_agentdock_cancellation_hold",
+        name: "bash",
+        arguments: { command: "exec sleep 300", timeout: 300 },
+      },
+    ]);
+  });
+
   it("drives a prompt-selected coding evaluation without model nondeterminism", async () => {
     const messages: Context["messages"] = [
       {
