@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@agent-dock/protocol": "0.1.0",
+    "highlight.js": "10.7.3",
+    "partial-json": "0.1.7",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "10.1.0",

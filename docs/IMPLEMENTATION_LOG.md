@@ -1671,3 +1671,21 @@
 - 实际发布：commit `9b5adda` 已构建为 `agent-dock/web-ui:production`，OCI revision 与提交一致。Compose 只重建 Web 和复用同一静态
   镜像的 observability ingress；Control Plane 与 Supervisor 容器保持原启动时间和原 image ID。上线后 Web、内部服务和入口均
   healthy，`8080/healthz` 返回 `ok`，实际静态 bundle 包含阶段文本、命令、可展开输出和 `Took` 样式标记。
+
+## 2026-07-21 — Pi Tool Call 真流式预览与源码高亮
+
+- 根因：上一版只能在 `tool_execution_start` 后展示 `write`。这时模型已经生成并解析完全部 JSON 参数，所以即使 SSE 正常，源码也会
+  一次性出现。Pi 在更早的 `message_update.toolcall_delta` 中实际提供了增量参数，只是 AgentDock v1 Adapter 先前将非文本 delta
+  明确忽略；因此不能靠前端动画解决。
+- 协议：新增只包含 `toolCallId/toolName/delta` 的 `tool.input.delta` 公开事件。Adapter 从 Pi partial 中只提取已审查的调用身份和原始
+  JSON fragment，不转发 provider/Pi 原对象；缺少调用身份的兼容 Provider delta 被安全忽略，最终 `tool_execution_start` 仍是执行
+  权威边界。事件与 assistant text 一样进入 durable spool、PostgreSQL 和可重放 SSE。
+- Web：Reducer 以 toolCallId 合并增量 JSON，并在 `tool.started` 到来时把同一条记录从“正在生成”切换为“执行中”，不创建重复卡片。
+  `partial-json` 只用于浏览器渐进恢复 `path/content/command`；执行端始终使用 Pi 最终验证后的参数。`write` 源码带真实增量光标，完成后
+  仍保留相同内容。
+- 高亮：使用 Pi 同系列的 Highlight.js core，根据文件扩展名显式选择 Python、Java、JavaScript/TypeScript、Shell、C/C++/C#、Go、
+  Kotlin、Rust、Ruby、PHP、SQL、JSON、HTML/CSS、Markdown、YAML 和 Diff；未知扩展名保持纯文本，不做不稳定的自动猜测。高亮器被拆成
+  90.27 kB 的按需 chunk，主 bundle 为 494.02 kB，避免把所有语言语法塞进首屏。Highlight.js 先转义不可信源码再产生 token span。
+- 验证：协议覆盖新增事件，Pi Adapter 覆盖脱敏后的 tool delta，Web reducer 覆盖两个 delta → 一个 preparing item → authoritative
+  tool start 的重放，SSR 覆盖流式状态/光标，独立高亮测试覆盖 Python token 和 HTML 转义。全仓 build/typecheck、格式检查和允许本机
+  临时端口后的全仓测试通过；首次受限运行出现的 `listen EPERM` 已确认是执行沙箱禁止测试 server bind，并非产品断言失败。

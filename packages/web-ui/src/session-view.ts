@@ -30,8 +30,9 @@ export type TranscriptItem =
       toolCallId: string;
       toolName: string;
       input: unknown;
+      inputJson?: string;
       output?: unknown;
-      status: "running" | "completed" | "failed";
+      status: "preparing" | "running" | "completed" | "failed";
       firstSequence: number;
       lastSequence?: number;
       startedAt: string;
@@ -205,23 +206,61 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
     if (event.type === "assistant.text.delta") {
       return appendText(turn, event.payload.text, event.seq);
     }
+    if (event.type === "tool.input.delta") {
+      let matched = false;
+      const items = turn.items.map((item): TranscriptItem => {
+        if (item.kind !== "tool" || item.toolCallId !== event.payload.toolCallId) return item;
+        matched = true;
+        return {
+          ...item,
+          toolName: event.payload.toolName,
+          inputJson: `${item.inputJson ?? ""}${event.payload.delta}`,
+        };
+      });
+      if (!matched) {
+        items.push({
+          kind: "tool",
+          key: `tool:${event.payload.toolCallId}`,
+          toolCallId: event.payload.toolCallId,
+          toolName: event.payload.toolName,
+          input: null,
+          inputJson: event.payload.delta,
+          status: "preparing",
+          firstSequence: event.seq,
+          startedAt: event.occurredAt,
+        });
+      }
+      return { ...turn, status: "running", items };
+    }
     if (event.type === "tool.started") {
+      let matched = false;
+      const items = turn.items.map((item): TranscriptItem => {
+        if (item.kind !== "tool" || item.toolCallId !== event.payload.toolCallId) return item;
+        matched = true;
+        return {
+          ...item,
+          toolName: event.payload.toolName,
+          input: event.payload.input,
+          status: "running",
+          startedAt: event.occurredAt,
+        };
+      });
+      if (!matched) {
+        items.push({
+          kind: "tool",
+          key: `tool:${event.payload.toolCallId}`,
+          toolCallId: event.payload.toolCallId,
+          toolName: event.payload.toolName,
+          input: event.payload.input,
+          status: "running",
+          firstSequence: event.seq,
+          startedAt: event.occurredAt,
+        });
+      }
       return {
         ...turn,
         status: "running",
-        items: [
-          ...turn.items,
-          {
-            kind: "tool",
-            key: `tool:${event.payload.toolCallId}`,
-            toolCallId: event.payload.toolCallId,
-            toolName: event.payload.toolName,
-            input: event.payload.input,
-            status: "running",
-            firstSequence: event.seq,
-            startedAt: event.occurredAt,
-          },
-        ],
+        items,
       };
     }
     if (event.type === "tool.completed") {

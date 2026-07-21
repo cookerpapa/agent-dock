@@ -79,6 +79,26 @@ function assistantStopReason(value: unknown): AssistantStopReason | undefined {
   }
 }
 
+function streamedToolCallIdentity(
+  streamEvent: JsonRecord,
+): { toolCallId: string; toolName: string } | undefined {
+  const contentIndex = nonNegativeInteger(streamEvent.contentIndex);
+  const partial = isRecord(streamEvent.partial) ? streamEvent.partial : undefined;
+  const content =
+    partial !== undefined && Array.isArray(partial.content) ? partial.content : undefined;
+  const toolCall = contentIndex === undefined ? undefined : content?.[contentIndex];
+  if (!isRecord(toolCall) || toolCall.type !== "toolCall") return undefined;
+  if (
+    typeof toolCall.id !== "string" ||
+    toolCall.id.length === 0 ||
+    typeof toolCall.name !== "string" ||
+    toolCall.name.length === 0
+  ) {
+    return undefined;
+  }
+  return { toolCallId: toolCall.id, toolName: toolCall.name };
+}
+
 /**
  * Converts the reviewed, public subset of Pi agent events into AgentDock v1
  * events. Pi event objects never leave this adapter.
@@ -161,6 +181,33 @@ export class PiRpcAgentEventAdapter {
           kind: "invalid",
           sourceType: value.type,
           reason: "Pi message_update is missing assistantMessageEvent",
+        };
+      }
+      if (streamEvent.type === "toolcall_delta") {
+        if (typeof streamEvent.delta !== "string") {
+          return {
+            kind: "invalid",
+            sourceType: "message_update.toolcall_delta",
+            reason: "Pi toolcall_delta is missing its JSON fragment",
+          };
+        }
+        if (streamEvent.delta.length === 0) {
+          return { kind: "ignored", sourceType: "message_update.toolcall_delta.empty" };
+        }
+        const identity = streamedToolCallIdentity(streamEvent);
+        if (identity === undefined) {
+          // Some compatible providers do not attach a tool-call ID until a
+          // later chunk. The final tool_execution_start remains authoritative,
+          // so a missing optional preview identity must not fail the run.
+          return { kind: "ignored", sourceType: "message_update.toolcall_delta.unidentified" };
+        }
+        return {
+          kind: "mapped",
+          terminal: false,
+          event: this.#eventFactory.next({
+            type: "tool.input.delta",
+            payload: { ...identity, delta: streamEvent.delta },
+          }),
         };
       }
       if (streamEvent.type !== "text_delta") {

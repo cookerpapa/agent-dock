@@ -152,6 +152,46 @@ describe("PiRpcAgentEventAdapter", () => {
     });
   });
 
+  it("maps only the reviewed tool-call JSON delta needed for a live input preview", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+
+    const outcome = adapter.adapt({
+      type: "message_update",
+      message: { providerSecret: "must-not-pass" },
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        contentIndex: 0,
+        delta: '{"path":"bubble_sort.py","content":"def bubble',
+        partial: {
+          providerSecret: "must-not-pass",
+          content: [
+            {
+              type: "toolCall",
+              id: "write-1",
+              name: "write",
+              arguments: { path: "bubble_sort.py", content: "def bubble" },
+              providerSecret: "must-not-pass",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "mapped",
+      event: {
+        type: "tool.input.delta",
+        payload: {
+          toolCallId: "write-1",
+          toolName: "write",
+          delta: '{"path":"bubble_sort.py","content":"def bubble',
+        },
+      },
+    });
+    expect(JSON.stringify(outcome)).not.toContain("must-not-pass");
+  });
+
   it("maps native Pi compaction without exposing its summary", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });

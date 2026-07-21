@@ -102,6 +102,22 @@ const AssistantTextDeltaEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ToolInputDeltaEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("tool.input.delta"),
+    payload: Type.Object(
+      {
+        toolCallId: OpaqueIdSchema,
+        toolName: OpaqueIdSchema,
+        delta: Type.String(),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const ToolStartedEventSchema = Type.Object(
   {
     ...TurnEnvelopeProperties,
@@ -333,6 +349,7 @@ export const AgentDockEventSchema = Type.Union([
   TurnStartedEventSchema,
   SessionStateChangedEventSchema,
   AssistantTextDeltaEventSchema,
+  ToolInputDeltaEventSchema,
   ToolStartedEventSchema,
   ToolCompletedEventSchema,
   ContextCompactionStartedEventSchema,
@@ -349,6 +366,7 @@ export type AgentDockEvent =
   | Static<typeof TurnStartedEventSchema>
   | Static<typeof SessionStateChangedEventSchema>
   | Static<typeof AssistantTextDeltaEventSchema>
+  | Static<typeof ToolInputDeltaEventSchema>
   | Static<typeof ToolStartedEventSchema>
   | Static<typeof ToolCompletedEventSchema>
   | Static<typeof ContextCompactionStartedEventSchema>

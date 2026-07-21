@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { parse as parsePartialJson } from "partial-json";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -17,6 +18,31 @@ import {
 } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
+
+type SourceHighlightModule = typeof import("./source-highlight.ts");
+type SourceHighlightResult = ReturnType<SourceHighlightModule["highlightSource"]>;
+
+let loadedSourceHighlighter: SourceHighlightModule | null = null;
+let sourceHighlighterPromise: Promise<SourceHighlightModule> | null = null;
+
+function useSourceHighlight(text: string, path: string | null): SourceHighlightResult {
+  const [ready, setReady] = useState(loadedSourceHighlighter !== null);
+  useEffect(() => {
+    if (path === null || ready) return;
+    sourceHighlighterPromise ??= import("./source-highlight.ts");
+    let active = true;
+    void sourceHighlighterPromise.then((module) => {
+      loadedSourceHighlighter = module;
+      if (active) setReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [path, ready]);
+  return ready && loadedSourceHighlighter !== null
+    ? loadedSourceHighlighter.highlightSource(text, path)
+    : null;
+}
 
 type AuthPhase = "checking" | "anonymous" | "authenticated";
 type AuthMode = "login" | "register";
@@ -74,10 +100,14 @@ function ExpandableToolText({
   text,
   direction,
   className,
+  sourcePath = null,
+  streaming = false,
 }: {
   text: string;
   direction: "head" | "tail";
   className: string;
+  sourcePath?: string | null;
+  streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const normalized = text.replace(/\n+$/, "");
@@ -91,6 +121,7 @@ function ExpandableToolText({
         ? lines.slice(0, maximumLines).join("\n")
         : lines.slice(-maximumLines).join("\n");
   const visible = expanded ? normalized : preview;
+  const highlighted = useSourceHighlight(visible, sourcePath);
   return (
     <div className="product-tool-text">
       {omitted > 0 && !expanded && direction === "tail" ? (
@@ -98,7 +129,17 @@ function ExpandableToolText({
           … {String(omitted)} earlier lines · 展开完整输出
         </button>
       ) : null}
-      <pre className={className}>{visible}</pre>
+      <pre className={className}>
+        {highlighted === null ? (
+          <code>{visible}</code>
+        ) : (
+          <code
+            className={`hljs language-${highlighted.language}`}
+            dangerouslySetInnerHTML={{ __html: highlighted.html }}
+          />
+        )}
+        {streaming ? <span aria-hidden="true" className="product-tool-stream-cursor" /> : null}
+      </pre>
       {omitted > 0 && direction === "head" && !expanded ? (
         <button type="button" onClick={() => setExpanded(true)}>
           … {String(omitted)} more lines · 展开
@@ -111,6 +152,15 @@ function ExpandableToolText({
       ) : null}
     </div>
   );
+}
+
+function displayedToolInput(item: Extract<TranscriptItem, { kind: "tool" }>): unknown {
+  if (item.status !== "preparing" || item.inputJson === undefined) return item.input;
+  try {
+    return parsePartialJson(item.inputJson);
+  } catch {
+    return item.input;
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -156,7 +206,7 @@ function Markdown({ children }: { children: string }) {
 }
 
 export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) {
-  const input = objectValue(item.input);
+  const input = objectValue(displayedToolInput(item));
   const command = stringValue(input?.command);
   const path = stringValue(input?.path);
   const content = stringValue(input?.content);
@@ -164,8 +214,19 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
   const duration = durationLabel(item.startedAt, item.completedAt);
   const conventionalWriteResult = /^Successfully wrote \d+ bytes to /u.test(output.trim());
   const statusLabel =
-    item.status === "running" ? "执行中" : item.status === "failed" ? "执行失败" : "执行完成";
-  const icon = item.status === "running" ? "◌" : item.status === "failed" ? "!" : "✓";
+    item.status === "preparing"
+      ? "正在生成"
+      : item.status === "running"
+        ? "执行中"
+        : item.status === "failed"
+          ? "执行失败"
+          : "执行完成";
+  const icon =
+    item.status === "preparing" || item.status === "running"
+      ? "◌"
+      : item.status === "failed"
+        ? "!"
+        : "✓";
   const heading =
     item.toolName === "bash" && command !== null ? (
       <div className="product-tool-command">
@@ -192,7 +253,13 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
       </div>
       <div className="product-tool-body">
         {item.toolName === "write" && content !== null ? (
-          <ExpandableToolText className="product-tool-source" direction="head" text={content} />
+          <ExpandableToolText
+            className="product-tool-source"
+            direction="head"
+            sourcePath={path}
+            streaming={item.status === "preparing"}
+            text={content}
+          />
         ) : item.toolName !== "bash" && path === null ? (
           <ExpandableToolText
             className="product-tool-source"

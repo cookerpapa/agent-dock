@@ -762,9 +762,18 @@
   animation: product-tool-spin 1.1s linear infinite;
   color: #a89bea;
 }
+.product-tool-preparing .product-tool-icon {
+  animation: product-tool-pulse 1s ease-in-out infinite;
+  color: #a89bea;
+}
 @keyframes product-tool-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@keyframes product-tool-pulse {
+  50% {
+    opacity: 0.35;
   }
 }
 .product-tool-body {
@@ -811,6 +820,65 @@
   border-left-color: #464646;
   background: #1b1b1b;
   color: #bfbfbf;
+}
+.product-tool-body .product-tool-source code,
+.product-tool-body .product-tool-terminal code,
+.product-tool-body .product-tool-output code {
+  font: inherit;
+}
+.product-tool-stream-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 1.05em;
+  margin-left: 2px;
+  animation: product-tool-cursor 0.8s steps(2, jump-none) infinite;
+  background: #aaa0e5;
+  vertical-align: -0.15em;
+}
+@keyframes product-tool-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+.product-tool-source .hljs-comment,
+.product-tool-source .hljs-quote {
+  color: #747d89;
+  font-style: italic;
+}
+.product-tool-source .hljs-keyword,
+.product-tool-source .hljs-selector-tag,
+.product-tool-source .hljs-literal,
+.product-tool-source .hljs-section,
+.product-tool-source .hljs-link {
+  color: #c792ea;
+}
+.product-tool-source .hljs-string,
+.product-tool-source .hljs-title,
+.product-tool-source .hljs-name,
+.product-tool-source .hljs-type,
+.product-tool-source .hljs-attribute,
+.product-tool-source .hljs-symbol,
+.product-tool-source .hljs-bullet,
+.product-tool-source .hljs-addition,
+.product-tool-source .hljs-variable,
+.product-tool-source .hljs-template-tag,
+.product-tool-source .hljs-template-variable {
+  color: #addb67;
+}
+.product-tool-source .hljs-number,
+.product-tool-source .hljs-meta,
+.product-tool-source .hljs-built_in,
+.product-tool-source .hljs-builtin-name,
+.product-tool-source .hljs-params {
+  color: #f78c6c;
+}
+.product-tool-source .hljs-function,
+.product-tool-source .hljs-class .hljs-title,
+.product-tool-source .hljs-title.function_ {
+  color: #82aaff;
+}
+.product-tool-source .hljs-deletion {
+  color: #ef8e8e;
 }
 .product-tool-failed .product-tool-terminal,
 .product-tool-failed .product-tool-output {

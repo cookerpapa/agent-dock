@@ -42,6 +42,14 @@ describe("AgentDockEventSchema", () => {
       { type: "session.state.changed", payload: { from: "idle", to: "running" } },
       { type: "assistant.text.delta", payload: { text: "partial" } },
       {
+        type: "tool.input.delta",
+        payload: {
+          toolCallId: "call-1",
+          toolName: "write",
+          delta: '{"path":"src/App.py","content":"def ',
+        },
+      },
+      {
         type: "tool.started",
         payload: { toolCallId: "call-1", toolName: "read", input: { path: "a" } },
       },
