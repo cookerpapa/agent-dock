@@ -21,8 +21,8 @@ credentials to repository code. The platform operator configures the backend
 model once; new browser tenants inherit that allowlisted model through a
 separately encrypted tenant binding and never receive its API key. It does not
 support arbitrary Git URLs, arbitrary provider URLs,
-policy-approved third-party extensions, public Internet SaaS, Kubernetes, or
-direct Internet exposure.
+policy-approved third-party extensions, hostile public Internet SaaS,
+multi-node Kubernetes, or direct Internet exposure.
 The optional registration route is not verified
 human identity, billing, OIDC, recovery, abuse prevention, or a hostile public
 code-execution SaaS boundary. Those limits are part of the product contract,
@@ -43,9 +43,10 @@ Controlled public GitHub import and immutable workspace seeds are recorded in
 The trusted Pi Runner and remote Tool Sandbox split is recorded in
 [ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
 The provider-neutral runtime boundary is recorded in
-[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md), and the sole
-gVisor/KVM runtime is recorded in
-[ADR-0038](adr/0038-gvisor-only-tool-execution.md). Product operations,
+[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md), the gVisor-only
+decision in [ADR-0038](adr/0038-gvisor-only-tool-execution.md), and the current
+Kubernetes-managed execution plane in
+[ADR-0039](adr/0039-kubernetes-gvisor-execution-plane.md). Product operations,
 recovery, and release evidence are recorded in
 [ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
 [browser account and platform-model decision](adr/0037-browser-accounts-and-platform-managed-model.md),
@@ -54,32 +55,38 @@ recovery, and release evidence are recorded in
 
 ## Prerequisites
 
-- A native Linux Docker Engine and working `/dev/kvm`. On WSL2, enable nested
-  virtualization and use the WSL Linux daemon rather than Docker Desktop.
-- Docker Engine with the Compose plugin and gVisor `runsc` registered with the
-  fixed `--platform=kvm` argument. The acceptance topology is currently
-  exercised on Docker Engine `29.6.2`, Compose `5.1.3`, and
-  `runsc release-20260714.0`.
+- Ubuntu amd64 with systemd and working `/dev/kvm`. On WSL2, enable nested
+  virtualization and use the native WSL services rather than Docker Desktop's
+  sandbox runtime.
+- Docker Engine/Compose for the trusted product plane, plus K3s/containerd and
+  gVisor `runsc`/KVM for the untrusted execution plane. The validated host uses
+  Docker Engine `29.6.2`, Compose `5.1.3`, K3s `v1.36.2+k3s1`, containerd
+  `2.3.2-k3s2`, and `runsc release-20260714.0`.
 - Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
   application images pin their own Node and service image digests.
 - Enough local CPU, memory, and storage for PostgreSQL, MinIO, six application
   images, and up to two concurrent workers. The Compose file declares explicit
   per-service limits; capacity should be measured against the intended host.
 - A private checkout and a trusted operator account. Anyone who can read the
-  generated runtime directory or access the Docker socket is inside the trusted
-  computing base. Only the Sandbox Manager service receives that socket.
+  generated runtime directory or administer Docker/K3s/containerd is inside the
+  trusted computing base. No application service receives a runtime socket.
 
 Install and attest the host first:
 
 ```bash
-sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-gvisor-host.sh
+sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-kubernetes-gvisor-host.sh
 newgrp docker
 npm run sandbox:check
 ```
 
-Do not use Docker Desktop, a shared untrusted Docker socket, an unreviewed
-rootless/remote context, or a runtime registration without KVM. The Manager
-fails readiness instead of falling back to runc or systrap.
+The installer is checksum/version pinned for K3s and runsc, creates the scoped
+RBAC/NetworkPolicy/RuntimeClass resources, and writes the private Manager
+kubeconfig. Do not expose Docker/containerd/Kubernetes credentials to an
+application or Tool Pod. The Manager fails readiness instead of falling back to
+runc or systrap. On the validated WSL2/K3s network path, the installed runsc
+configuration retains `network = "sandbox"` but disables host/software GSO;
+the public importer pins Git HTTP/1.1. `npm run sandbox:check` performs a real
+exact-commit import so this compatibility path cannot silently regress.
 
 ## First deployment
 
@@ -189,14 +196,18 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                       |
                                       +-> narrow authenticated tool RPC
                                                    |
-                                             Sandbox Manager -> Docker socket
+                                             Sandbox Manager
                                                    |
-                                             Tool Sandbox (`network=none`)
+                                            scoped Kubernetes API
+                                                   |
+                                      K3s -> containerd -> runsc/KVM
+                                                   |
+                                      per-Turn Tool Pod (default-deny)
 ```
 
 The optional `github-gateway` is the only service that reads the GitHub App
 private key or obtains installation tokens. It joins only `github-control` and
-provider egress; it has no database, MinIO, model, Manager, or Docker authority.
+provider egress; it has no database, MinIO, model, Manager, Kubernetes, or runtime authority.
 The Control Plane and trusted Runner call it with a service credential, while
 the Tool Sandbox is not attached to its network. With the default empty App ID
 and placeholder key, liveness remains healthy but private import, installation
@@ -209,24 +220,27 @@ proxies `/v1/*` and serves static assets. Liveness is exposed as `/healthz` and
 contains no dependency detail.
 
 The trusted `supervisor-host` runs as the deployment's non-root application UID
-and has no Docker socket. It runs pinned Pi with built-in local tools and
+and has no runtime socket or Kubernetes credential. It runs pinned Pi with built-in local tools and
 extension discovery disabled, then loads one fixed image-owned extension that
 routes `read/write/edit/bash` through the private `sandbox-control` network. Pi
 and the loopback Model Gateway receive a turn capability; that environment is
 never forwarded to remote bash.
 
-The separate `sandbox-manager` is the only root-equivalent application service
-because it owns `/var/run/docker.sock`. It has no database, S3, provider,
-enrollment, or tenant credential and exposes only authenticated bounded
+The separate `sandbox-manager` runs non-root with a private least-privilege
+kubeconfig. It has no Docker/containerd socket, database, S3, provider,
+enrollment, GitHub or tenant credential and exposes only authenticated bounded
 lifecycle/tool/inventory operations. It constructs only
-`GvisorSandboxProvider`; the former provider selector and lower-security
-implementations do not exist. Readiness starts a real runsc workload and every
-activation is re-inspected for runtime and guest-kernel identity. Capability
-authorization and identity fencing remain above the Provider implementation.
-Tool Sandboxes are created per active turn, not per conversation: they run as
-UID/GID `1000:1000`, with `--runtime runsc`, `--network none`, no host bind
-mount, inherited environment credential, published port, Docker socket, or
-writable root filesystem, and are removed after completion or cancellation.
+`KubernetesGvisorSandboxProvider`; the former provider selector and direct
+Docker implementations do not exist. A credential-free relay gives this
+internal-network service TCP reachability to the host API without receiving the
+kubeconfig. Readiness starts a real gVisor Pod and every activation is
+re-inspected for RuntimeClass, Pod UID and guest-kernel identity. Capability
+authorization and assignment fencing remain above the Provider implementation.
+Tool Pods are created per active Turn, not per conversation: they run as UID/GID
+`1000:1000`, with `runtimeClassName: agent-dock-gvisor`, default-deny network,
+no ServiceAccount token, host namespace/path/device/socket, inherited
+credential, published port or writable root filesystem, and are removed after
+completion, failure, cancellation or timeout.
 Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
 thread.
 
@@ -402,9 +416,9 @@ never guesses current provider pricing.
 The trusted Supervisor decrypts the exact snapshotted version and gives its
 in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
 capability. The capability is revoked when the activation settles and never
-crosses the remote-tool RPC boundary. Tool Sandboxes have no network at all.
+crosses the remote-tool RPC boundary. Tool Pods have no network at all.
 Treat the Supervisor, Sandbox Manager, PostgreSQL, private runtime directory,
-and Docker authority as the trusted computing base; this is not a mutually
+K3s/containerd/runsc and host authority as the trusted computing base; this is not a mutually
 hostile public-SaaS sandbox.
 
 ## Controlled GitHub workspaces
@@ -427,17 +441,15 @@ Concurrent first turns wait for that seed. Every later activation rechecks its
 object key, byte count, SHA-256, and manifest, then overlays the last settled
 session checkpoint; it does not clone again.
 
-The importer has no bind mount, Docker socket, prompt, provider/deployment
-credential, published port, or membership in the database, object-storage,
-management, sandbox-control, or provider-egress networks. It joins Docker's
-fixed legacy `bridge`; no AgentDock platform service joins that bridge. This is
-required because the validated WSL `runsc`/KVM path cannot reach Docker's
-embedded DNS at `127.0.0.11` on a user-defined bridge, while the legacy bridge
-injects the host resolver directly. The importer receives only a normalized
-GitHub coordinate and exact commit, disables hooks and redirects, and never
-executes repository code or a user-controlled command. A fixed GitHub URL is
-still an application restriction, not a DNS firewall; do not claim this as a
-mutually hostile public-tenant boundary.
+The importer has no host mount, ServiceAccount token, runtime socket, prompt,
+provider/deployment credential or published port. It is a separate gVisor Pod
+in `agent-dock-importers`; NetworkPolicy permits cluster DNS and public TCP/443
+while excluding loopback, private, link-local, Pod, Service and node ranges.
+The importer receives only a normalized GitHub coordinate and exact commit,
+disables hooks and redirects, and never executes repository code or a
+user-controlled command. Standard NetworkPolicy plus a fixed GitHub URL is not
+a DNS-aware firewall; do not claim this as a mutually hostile public-tenant
+boundary.
 
 Current repository limits are at most 512 regular files, 512 KiB per file, and
 2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
@@ -475,8 +487,8 @@ Set `AGENT_DOCK_WEB_SESSION_COOKIE_SECURE=true` before redeploying so browsers
 send account cookies only over HTTPS.
 Preserve the `Authorization` header, disable proxy buffering for
 `text/event-stream`, allow long-lived SSE reads, and keep `/internal/*`,
-`/health/*`, PostgreSQL, MinIO, Supervisor management, and the Docker daemon
-unreachable. Add host firewall rules and an identity-aware access layer if more
+`/health/*`, PostgreSQL, MinIO, Supervisor management, the Kubernetes API, and
+all Docker/containerd sockets unreachable. Add host firewall rules and an identity-aware access layer if more
 than the trusted operator can reach the endpoint. Binding
 `AGENT_DOCK_HTTP_BIND_ADDRESS=0.0.0.0` without those controls is unsupported.
 
@@ -494,7 +506,7 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 - `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
   exited successfully;
 - no `tool-sandbox-image` service is running;
-- no container with `agent-dock.managed=true` remains after a turn settles;
+- no Pod labelled `agent-dock.io/managed=true` remains after a Turn settles;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.
 
 `production:up` includes Compose orphan cleanup. An upgrade from the former
@@ -521,7 +533,7 @@ load-test before treating extra replicas as an availability SLA.
 Alert operationally on prolonged unhealthy/restarting services, a growing
 retirement queue, repeated `connection_closed` failures, non-empty active spool
 after recovery, quarantine growth, PostgreSQL/MinIO capacity, and managed Tool
-Sandbox containers that outlive their command deadline. Quarantine is retained
+Pods that outlive their command deadline. Quarantine is retained
 as audit evidence and has no automatic garbage collection in this slice.
 
 ## Backup and restore
@@ -647,8 +659,9 @@ without model tokens:
 npm run sandbox:check
 ```
 
-This source-builds the Tool image, attests runsc/KVM and the live gVisor kernel,
-and checks effective resource limits, network isolation, `/proc`/credential
+This builds and imports the Tool image, validates the RuntimeClass/containerd
+handler, attests runsc/KVM and the live gVisor kernel, and checks scoped RBAC,
+effective Pod/resource policy, network isolation, `/proc`/credential
 absence, cross-tenant workspaces, path/symlink defense, bounded output,
 cancellation, cleanup, and the real Pi remote-tool repair loop.
 
@@ -670,9 +683,10 @@ isolation, reruns both bootstrap jobs to prove idempotency and the bucket-scoped
 no-delete credential, repairs Java, interrupts and reconnects the control plane,
 verifies ambiguous-command failure and spool quarantine, scales the control plane from
 one to two and back, restores a follow-up from S3, restarts the Supervisor into
-a fresh boot, reconciles the old boot, cancels a live Tool Sandbox, audits the
-execution boundary (only the Manager owns the Docker socket; Tool Sandboxes are
-mount-free, credential-free, and networkless), verifies non-root host-UID
+a fresh boot, reconciles the old boot, cancels a live Tool Pod, audits the
+execution boundary (no application owns a runtime socket; the Manager has only
+scoped Kubernetes authority; Tool Pods are host-mount-free, credential-free,
+and networkless), verifies non-root host-UID
 portability and secret absence, and replays 22 durable ordered events. It then
 exercises the built Web/Session inspector API surface, safe file and patch
 reads, Run usage/tests/context, owner activity, and fork/archive/rollback. The
@@ -726,13 +740,15 @@ By default it imports the pinned tiny public repository recorded in the script,
 creates a session, runs two real Pi turns, requires completed tool calls and
 cumulative patches containing new files, confirms positive per-turn token
 usage, proves the source object's key/hash/size/update timestamp did not change
-between turns, and confirms no importer container survived. Override the source
+between turns, and confirms no importer Pod survived. Override the source
 only with both `AGENT_DOCK_LIVE_GITHUB_REPOSITORY=owner/repository` and
 `AGENT_DOCK_LIVE_GITHUB_COMMIT_SHA=<40-hex-sha>`. The check can consume provider
 quota and modify the configured tenant by adding a project/session; it is
 therefore guarded and excluded from routine CI. During release validation,
-confirm the Pi runtime remains inside the trusted non-root Supervisor, that only
-the Sandbox Manager owns the Docker socket, and that the transient Tool Sandbox
-has `network=none` and no credential-bearing environment or mount. Rotate or
+confirm the Pi runtime remains inside the trusted non-root Supervisor, that no
+application owns a Docker/containerd socket, that the Manager's Kubernetes
+credential remains limited to two execution namespaces plus one named
+RuntimeClass read, and that the transient Tool Pod has
+default-deny networking and no credential-bearing environment or mount. Rotate or
 revoke a temporary test key afterward. Any broader claim requires its own ADR,
 threat model, and acceptance evidence.

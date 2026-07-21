@@ -1,0 +1,263 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-dock-system
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: agent-dock-gvisor
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+  annotations:
+    agent-dock.io/runtime: runsc
+    agent-dock.io/platform: kvm
+handler: runsc
+overhead:
+  podFixed:
+    cpu: 25m
+    memory: 32Mi
+scheduling:
+  nodeSelector:
+    agent-dock.io/sandbox-runtime: gvisor
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-manager
+  namespace: agent-dock-system
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sandbox-manager-token
+  namespace: agent-dock-system
+  annotations:
+    kubernetes.io/service-account.name: sandbox-manager
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+type: kubernetes.io/service-account-token
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: untrusted-tool
+  namespace: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: repository-importer
+  namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-manager
+  namespace: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/attach", "pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-manager
+  namespace: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-manager
+    namespace: agent-dock-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-manager
+  namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/attach", "pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-manager
+  namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-manager
+    namespace: agent-dock-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-dock-sandbox-manager-runtimeclass-reader
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+rules:
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    resourceNames: ["agent-dock-gvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-dock-sandbox-manager-runtimeclass-reader
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-manager
+    namespace: agent-dock-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-dock-sandbox-manager-runtimeclass-reader
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-dock-default-deny-all
+  namespace: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-dock-default-deny-all
+  namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: repository-import-public-https
+  namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  podSelector:
+    matchLabels:
+      agent-dock.io/workload: repository-importer
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - protocol: TCP
+          port: 443

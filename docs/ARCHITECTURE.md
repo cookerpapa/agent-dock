@@ -118,13 +118,13 @@ Cold and queued sessions have neither a heartbeat timer nor a runtime.
 
 Restart reconciliation is host-side and deliberately separate from lease
 expiry. After the caller has fenced the old supervisor boot so it cannot create
-another runtime, the reconciler lists only Docker containers labelled for that
-sandbox, validates supervisor/boot/command/session/turn/lease/fence identity,
-re-inspects immediately before `docker rm --force`, and confirms absence. Only
+another runtime, the reconciler lists only Kubernetes Pods annotated for that
+sandbox, validates supervisor/boot/command/session/turn/Attempt/lease/fence
+identity, re-inspects immediately before UID-preconditioned deletion, and confirms absence. Only
 then may PostgreSQL settle an acknowledged ambiguous turn as `assignment_lost`,
 remove its lease, and recompute capacity. A pre-ACK command can return to the
-same mailbox position after absence is proven. Unknown containers, changed
-labels, failed termination, and inconsistent durable identity fail closed and
+same mailbox position after absence is proven. Unknown or replacement Pods,
+changed labels, failed termination, and inconsistent durable identity fail closed and
 leave the sandbox quarantined. A new supervisor boot never adopts the old
 process or claims exactly-once recovery of tool side effects.
 
@@ -165,25 +165,24 @@ settlement and exact capacity release. Failure after cancellation ACK instead
 fails the turn/session and retains the unconfirmed reservation for later
 reconciliation.
 
-The fifth Phase 1 slice connects the same `SupervisorTurnRunner` boundary to a
-real Docker activation. A trusted host-side manager starts one ephemeral
-container for an active turn; inactive sessions retain no process or container.
-The worker receives either the image-owned Java fixture or a trusted-host-
-resolved, bounded workspace seed through its typed private protocol, restores it
-into workspace tmpfs, creates a baseline Git commit, and starts pinned Pi with an explicit `bash/edit` tool
-allowlist, and embeds the loopback fake model so the container can remain
-networkless. Host and worker exchange a private, closed, versioned JSONL
-protocol over attached stdin/stdout. Each worker event waits for the existing
-durable control-plane ACK before Pi continues. A successful terminal event may
-include a validated unified diff bounded to 64 KiB. Cancellation propagates to
-Pi first and then requires exact-name outer-container removal confirmation.
+The execution slice connects the same `SupervisorTurnRunner` boundary to a real
+Kubernetes/gVisor activation. The trusted Manager starts one ephemeral Pod for
+an active Turn; inactive Sessions retain no process or Pod. The Tool Worker
+receives either the image-owned Java fixture or a trusted-host-resolved bounded
+workspace seed through its typed private protocol, restores it into a
+memory-backed workspace and creates a baseline Git commit. Pinned Pi remains in
+the trusted Runner with an explicit remote `bash/edit/read/write` allowlist.
+Manager and worker exchange a private, closed, versioned protocol over the
+Kubernetes attach stream. A successful terminal capture includes a bounded
+workspace snapshot and validated unified diff. Cancellation aborts Pi and the
+current Tool RPC, then requires process-group teardown and exact Pod absence.
 
 This is a real sandbox/workspace transport. The Web demo still chooses the local
 control-plane adapter; the production entry point composes the same boundary
 through a two-phase outbound WebSocket, authenticated boot provisioning, bounded
 remote dispatch lanes, and exact owner/inventory management. PostgreSQL event
 persistence, cumulative ACK, SSE replay, cross-replica high-water notification,
-and Docker execution are executable. Each production control-plane replica owns
+and Kubernetes/gVisor execution are executable. Each production control-plane replica owns
 one dedicated PostgreSQL listener; notifications wake a process-local hub, while
 event bodies are always read from the durable table. The trusted Supervisor host
 uses a private, crash-safe file spool that syncs every event before transport and
@@ -201,10 +200,10 @@ deployment, pinned Pi RPC and the model
 gateway run in the trusted Agent Runner. Pi's built-in local tools are disabled;
 one fixed image-owned extension implements `read`, `write`, `edit`, and `bash`
 with Pi's public operation interfaces and sends a narrow authenticated RPC to a
-separate Sandbox Manager. The Manager alone owns Docker and starts one
-credential-free, `--network none` Tool Sandbox per active turn. The Tool Sandbox
-contains only the workspace and toolchains. A settled capture returns the
-workspace snapshot and bounded Git patch before the terminal event is published.
+separate Sandbox Manager. The Manager creates one credential-free Kubernetes
+gVisor Pod per active Turn. All tool calls in that Turn reuse the Pod; settlement
+captures the workspace snapshot and bounded Git patch before deleting the Pod
+and publishing the terminal event.
 
 ADR-0030 splits the Manager's stable authorization/lifecycle contract from the
 runtime implementation. `ToolSandboxManager` owns activation capabilities,
@@ -212,13 +211,14 @@ replay checks, exact assignment authorization, and the fixed deployment policy.
 It passes an immutable, provider-neutral handle to `SandboxProvider`; that
 handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
 identity without exposing a Docker client or provider SDK.
-ADR-0038 makes `GvisorSandboxProvider` the sole concrete implementation. Docker
-Engine is only the trusted lifecycle mechanism: all untrusted workers and
-repository importers specify OCI runtime `runsc`, whose host registration is
-fixed to the KVM platform. Manager readiness executes a real gVisor probe and
-each activation is re-inspected for both `HostConfig.Runtime=runsc` and the
-gVisor guest kernel. The former runc and LinuxKit implementations, selection
-fields and fallback paths were removed.
+ADR-0039 supersedes ADR-0038's direct-Docker lifecycle. The sole implementation
+is now `KubernetesGvisorSandboxProvider`: K3s/containerd maps
+`RuntimeClass/agent-dock-gvisor` to `runsc`, fixed to the KVM platform. Manager
+readiness validates the RuntimeClass, immutable NetworkPolicies, image and a
+real gVisor Pod. The Manager uses scoped Pod/log/attach/exec and NetworkPolicy
+read authority in two namespaces plus `get` on the one named RuntimeClass; it
+has no Docker/containerd socket. Direct-Docker providers, selectors and
+fallback paths were removed.
 
 ADR-0031 adds the durable execution vocabulary above those boundaries. Public
 tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
@@ -282,52 +282,54 @@ event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
 
 The host receives S3/database credentials and fixed provider egress, but no
-Docker socket. It composes the pinned Pi Runner, PostgreSQL workspace-import
+container-runtime or Kubernetes credential. It composes the pinned Pi Runner, PostgreSQL workspace-import
 lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
 S3-compatible byte store, tenant model-credential resolver/loopback gateway,
 active/quarantine spool roots, reconnect client, and an authenticated private
-management endpoint. A separate `@agent-dock/sandbox-manager` service is the
-only application container with `/var/run/docker.sock`. Its authenticated API
-is limited to create/execute/capture/stop, exact assignment inventory, and a
-fixed public-GitHub importer. It receives no database, S3, provider, enrollment,
-or tenant credential.
+management endpoint. A separate `@agent-dock/sandbox-manager` service receives
+a least-privilege kubeconfig. Its authenticated API is limited to
+create/execute/capture/stop, exact assignment inventory, and a fixed public
+GitHub importer. It receives no Docker/containerd socket, database, S3,
+provider, enrollment, GitHub or tenant credential.
 
-Each Tool Sandbox is non-root, read-only, mount-free, capability-dropped, and
-networkless. Docker arguments contain no environment values. Its worker creates
+Each Tool Pod is non-root, read-only outside memory-backed volumes,
+capability-dropped, and networkless through default-deny NetworkPolicy. Its worker creates
 a fixed subprocess environment instead of inheriting the Manager or Runner
 environment. Therefore model-gateway capabilities, service tokens, database
 paths, and cloud credentials cannot enter `bash`, including through
-`/proc/*/environ`. The one-shot importer joins Docker's fixed legacy `bridge`
-and has no prompt, credentials, mounts, published ports, or user-controlled
-command surface; the Manager itself is not attached to that bridge. This is a
-fixed-purpose GitHub fetch worker, not an execution network granted to Pi or
-Tool Sandboxes.
+`/proc/*/environ`. The one-shot importer is a separate gVisor Pod in a namespace
+that permits DNS plus public TCP/443 while excluding private and cluster ranges.
+It has no prompt, credential, ServiceAccount token, host mount, published port,
+or user-controlled command surface. This is a fixed-purpose GitHub fetch worker,
+not execution egress granted to Pi or Tool Pods.
 Every assignment inventory request is constrained again to a sandbox generation
 known by this host's ledger, and a terminate/absence request must match that
-generation's stable Supervisor and exact boot before Docker is inspected.
+generation's stable Supervisor and exact boot before the Pod is inspected.
 In the bundled object store, MinIO root authority is restricted to the storage
 and idempotent bootstrap services. The host receives a distinct checkpoint
 identity limited to bucket location/list and object get/put for one bucket; its
 policy does not grant object deletion.
 
-The supported Compose deployment adds persistent PostgreSQL and MinIO, explicit
+The supported deployment adds a K3s/gVisor execution plane to a Compose-hosted
+trusted product plane with persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted Pi Runner, one
-socket-owning Sandbox Manager, one optional credential-owning GitHub Gateway,
-static Web ingress, isolated networks, private secret-file mounts, health
-checks, bounded resources/logs, and four declared volumes. Only Web publishes a
+scoped-kubeconfig Sandbox Manager, a credential-free Kubernetes API relay, one
+optional credential-owning GitHub Gateway, static Web ingress, isolated
+networks, private secret-file mounts, health checks, bounded resources/logs,
+and seven declared volumes. Only Web publishes a
 loopback port. This topology is complete for the bounded private multi-tenant
 fixture and controlled public GitHub commits with either a deterministic model
 or owner-configured DeepSeek. Private GitHub import and PR delivery are present
 but require an operator-owned GitHub App and a separate live acceptance; the
 default deployment deliberately has no such authority. It does not imply
-arbitrary Git hosts/providers/extensions, public SaaS, Kubernetes, or direct
+arbitrary Git hosts/providers/extensions, public SaaS, multi-node Kubernetes, or direct
 Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
 See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, ADR-0030,
-ADR-0031, ADR-0032, and the production runbook.
+ADR-0031, ADR-0032, ADR-0039, and the production runbook.
 
 ### Model profiles and credentials
 
@@ -344,7 +346,7 @@ with AES-256-GCM and binding-specific associated data; only the control plane an
 trusted Supervisor receive the deployment master-key file. The Supervisor
 resolves the exact snapshotted version and substitutes a random, expiring,
 request-limited per-turn gateway capability. Long-lived keys never enter Pi
-JSONL, workspace snapshots, Docker arguments/environment/labels, browser events,
+JSONL, workspace snapshots, Pod specs/annotations, browser events,
 logs, or the untrusted tool environment. Provider-reported token counts are
 persisted per tenant/Run/model request. Tenant owners configure integer
 micro-USD rates; each completed request snapshots the actual rate and cost,
@@ -419,37 +421,38 @@ sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 ### Sandbox
 
 The sandbox is the security and workspace boundary. The only implementation is
-gVisor `runsc` with its KVM platform. Docker Engine remains trusted and owns
-lifecycle/cgroup integration, but untrusted syscalls are handled by gVisor's
-userspace application kernel instead of directly by the host kernel.
+`KubernetesGvisorSandboxProvider`. K3s/containerd selects gVisor `runsc` through
+`RuntimeClass/agent-dock-gvisor`, with the KVM platform fixed on the node.
+Kubernetes owns placement, cgroup declarations, policy and Pod lifecycle;
+untrusted syscalls are handled by gVisor's userspace application kernel instead
+of directly by the host kernel.
 
 There is no runtime selector. The Provider contract reserves deny-all, GitHub,
 package-registry, and explicit-host network policy shapes, but current Tool
 execution accepts only deny-all. GitHub import remains a separate
-credential-free `runsc` workload on Docker's fixed legacy `bridge`. That bridge
-supplies a directly reachable host resolver because the validated WSL
-`runsc`/KVM path cannot use Docker's embedded DNS on a user-defined bridge. No
-platform service uses the legacy bridge, and imported repository hooks or code
-are never executed. See
+credential-free gVisor Pod in `agent-dock-importers`. Its fixed NetworkPolicy
+allows cluster DNS and public TCP/443 while excluding private, link-local,
+cluster and node ranges. Imported repository hooks or code are never executed.
+See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
 
 Minimum controls:
 
 - non-root user and read-only root filesystem;
 - isolated writable workspace;
-- dropped Linux capabilities and seccomp/AppArmor profile;
+- dropped Linux capabilities and `RuntimeDefault` seccomp;
 - CPU, memory, PID, disk, execution-time, and output limits;
-- no host Docker socket or host home-directory mount;
+- no hostPath, device, ServiceAccount token, runtime socket or host namespace;
 - restricted network egress;
 - no long-lived model/provider secrets exposed to the agent.
 
 The Phase 0 Compose topology remains a zero-token configuration probe. The
-production Java repair path activates a separate one-shot Tool Sandbox with UID/GID
-`1000:1000`, read-only rootfs, the engine's default seccomp policy, dropped
-capabilities, `no-new-privileges`, no ports/binds/devices, and bounded CPU,
-memory, PIDs, file descriptors, `/tmp`, and workspace tmpfs. It does not mount a
-host repository or Docker socket. Both fake and real Tool Sandboxes use
-`--network none`. Pinned Pi and the request-scoped model gateway stay together
+production Java repair path activates a separate Tool Pod with UID/GID
+`1000:1000`, read-only rootfs, `RuntimeDefault` seccomp, dropped capabilities,
+`no-new-privileges`, no host namespaces/ports/hostPath/devices, and bounded CPU,
+memory, ephemeral storage, PIDs, file descriptors, `/tmp`, and workspace
+memory-backed volumes. Default-deny policy and `dnsPolicy: None` make fake and
+real Tool Pods offline. Pinned Pi and the request-scoped model gateway stay together
 in the trusted Runner; the Runner alone joins provider egress and receives a
 short-lived model capability, while remote tools receive neither it nor the
 long-lived provider credential.
@@ -544,7 +547,7 @@ recovery. See ADR-0024.
 Steps 1-10 are executable for the bounded sample or controlled-GitHub workspace
 path through the local integration boundary: the control plane acquires a real PostgreSQL
 lease/fence, persists ACK before run,
-activates an ephemeral hardened Docker workspace, and receives public text,
+activates an ephemeral hardened Kubernetes/gVisor workspace, and receives public text,
 tool, and terminal events from pinned Pi. Step 8 stores each complete event plus
 command/lease/fence identity, advances the session cursor and next sequence
 atomically, and returns the cumulative ACK only after commit. The same durable
@@ -564,7 +567,7 @@ restores through a fresh client; declared and streamed size limits, S3 checksum,
 and the independent database hash fail closed on corruption. The supported
 production topology composes this S3 path with the trusted remote Supervisor.
 For a public GitHub source, PostgreSQL grants one expiring lease for the first
-activation. The Sandbox Manager starts a separate hardened Docker importer that
+activation. The Sandbox Manager starts a separate hardened gVisor importer Pod that
 fetches the exact 40-hex commit, removes `.git`, captures the existing safe
 manifest, and conditionally writes a content-addressed seed below a
 tenant/workspace prefix. Publishing ready state
@@ -590,7 +593,7 @@ late discovery result from starting new lanes, detaches remote command waiters,
 drains the lanes, and closes Nest in order. Production `main.ts` wires the
 PostgreSQL credential authorizer, allowlisted boot provisioner, fixed authenticated
 HTTP owner/inventory adapters, and explicit remote runtime. The separate
-Supervisor host entry point supplies fresh boot identity, exact Docker inventory,
+Supervisor host entry point supplies fresh boot identity, exact Provider assignment inventory,
 S3 checkpoint composition, and durable boot/spool volumes.
 
 ## 5. Delivery and recovery semantics
@@ -873,8 +876,8 @@ UIs on host loopback. Product users do not read global telemetry: owners receive
 a tenant-filtered 24-hour operational summary calculated from PostgreSQL.
 
 ADR-0034 separates four evidence scopes: fixed fake-model coding tasks prove the
-full Agent Loop; targeted injected faults prove protocol invariants; the Docker
-Provider gate proves the isolation contract with real Pi; and 10/50/100
+full Agent Loop; targeted injected faults prove protocol invariants; the
+Kubernetes/gVisor Provider gate proves the isolation contract with real Pi; and 10/50/100
 simultaneous HTTP requests measure Control Plane Session admission/read latency.
 No result is relabelled as model-intelligence quality or 100-active-Run capacity.
 

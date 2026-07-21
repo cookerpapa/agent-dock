@@ -2,7 +2,7 @@
 
 ## Scope and security claim
 
-AgentDock's supported security claim is a private, single-host, multi-tenant
+AgentDock's supported security claim is a private, single-node, multi-tenant
 deployment for repositories selected by the deployment owner. Prompts,
 model-generated commands, repository files, build scripts, and tool output are
 untrusted. The host administrator, deployed images, Control Plane, Trusted Pi
@@ -28,7 +28,7 @@ claim.
 - Pi JSONL conversation history;
 - tenant workspace contents and resulting patches;
 - encrypted coordinated backups and their independently stored passphrases;
-- the Docker host and its socket.
+- the Kubernetes node, K3s control plane/containerd, `runsc`, and host kernel.
 
 ## Trust zones
 
@@ -46,15 +46,20 @@ Untrusted browser input / repository / model output
                  v
        Sandbox Manager (trusted TCB)
                  |
-          SandboxProvider
+       scoped Kubernetes API
                  v
-      Tool Sandbox (untrusted, no GitHub-control network)
+       K3s/containerd/runsc
+                 |
+      Tool Pod (untrusted, default-deny network)
 ```
 
-The Sandbox Manager is deliberately small but highly privileged: compromise of
-the process that owns `/var/run/docker.sock` is equivalent to compromise of the
-single Docker host. The Trusted Runner does not receive that socket. The Tool
-Sandbox receives neither the socket nor any platform credential.
+The Sandbox Manager is deliberately small and holds a least-privilege
+Kubernetes credential. It can create/exec/delete restricted Pods and inspect
+NetworkPolicy in the two execution namespaces, plus read the one named gVisor
+RuntimeClass, but cannot read Secrets, mutate RBAC/NetworkPolicy, use host
+namespaces or manage nodes. No application service receives a Docker or
+containerd socket. Tool Pods receive neither a ServiceAccount token nor any
+platform credential.
 
 ## Adversaries and assumptions
 
@@ -67,13 +72,13 @@ In scope:
 - runaway output, process creation, memory use, CPU use, and long-running tools;
 - Runner, Manager, browser, or network interruption at lifecycle boundaries;
 - symlink and lexical path traversal inside a workspace;
-- accidental secret disclosure through environment, logs, events, Docker
+- accidental secret disclosure through environment, logs, events, Pod
   configuration, snapshots, or patches.
 
 Assumed trusted or out of scope for the current claim:
 
-- a malicious host administrator or compromised Docker daemon;
-- a gVisor, KVM, Docker daemon or host-kernel escape;
+- a malicious host administrator or compromised K3s/containerd control plane;
+- a gVisor, KVM, Kubernetes-node runtime or host-kernel escape;
 - arbitrary user-supplied Pi extensions running beside model credentials;
 - public anonymous hostile tenants, billing abuse, and Internet-scale denial of
   service;
@@ -86,14 +91,14 @@ Assumed trusted or out of scope for the current claim:
 | Password or browser session disclosure | Per-account salted scrypt verifier; opaque HttpOnly/SameSite session; digest-only persistence; bounded lifetime and immediate revocation | PostgreSQL account/login/logout and cookie-auth integration tests |
 | Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
-| Tool controls Docker host | Socket exists only in Manager; Tool and Runner have no socket | production topology inspection |
-| Tool reaches internal services or Internet | Tool Sandbox uses `network=none`; Manager is attached only to sandbox control and observability | six-target TCP denial probe and network matrix |
-| Cross-tenant workspace read | One mount-free workspace tmpfs per active turn; immutable identity-bound handle | simultaneous two-tenant integration test |
+| Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool Pod has no ServiceAccount token; Manager RBAC is namespace-scoped except read-only access to the one named RuntimeClass | production topology, RBAC and Pod-spec inspection |
+| Tool reaches internal services or Internet | Tool namespace has default-deny ingress/egress and DNS disabled | cluster/service/node/public TCP denial probe and network matrix |
+| Cross-tenant workspace read | one memory-backed workspace volume per active Turn; immutable identity-bound handle and Pod UID fencing | simultaneous two-tenant integration test |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
 | Stale worker commits state | lease ID, attempt ID, fencing token, checkpoint revision CAS, fenced event commit | PostgreSQL and production recovery tests |
-| Runaway resource use | Docker cgroups plus guest `RLIMIT_NPROC`, file limits, tmpfs quotas, command/output/turn bounds | effective inspection, actual fork exhaustion and in-guest probes |
-| Cancel leaves descendants | process-group abort followed by exact container destroy/absence confirmation | long background-process cancellation test |
+| Runaway resource use | Kubernetes resource limits/cgroups plus guest `RLIMIT_NPROC`, file limits, memory-backed volume quotas and command/output/Turn bounds | effective Pod inspection, actual fork exhaustion and in-guest probes |
+| Cancel leaves descendants | process-group abort followed by UID-preconditioned Pod deletion/absence confirmation | long background-process cancellation test |
 | Partial checkpoint becomes current | upload/hash/manifest validation followed by fenced pointer CAS; terminal event is commit marker | checkpoint corruption and two-turn restore tests |
 | Old/failed Attempt publishes a Workspace version | staged version is bound to Run/Attempt and settled in the fenced terminal transaction; failures abandon it and restore prior pointers | version consistency and stale-attempt tests |
 | GitHub token reaches repository code | only the Gateway owns App key/tokens; private import returns canonical bytes and write-back consumes a trusted artifact | Gateway contract and Tool-Sandbox environment/network tests |
@@ -102,7 +107,7 @@ Assumed trusted or out of scope for the current claim:
 | Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 | Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
-| Untrusted syscalls attack the host-kernel surface | sole Provider uses `runsc`/KVM; readiness and every activation attest a real gVisor guest; no runc fallback exists | guest/host identity comparison, deny-all probe, lifecycle/reconciliation and real Pi tests |
+| Untrusted syscalls attack the host-kernel surface | RuntimeClass maps every untrusted Pod to `runsc`/KVM; readiness and activations attest a real gVisor kernel; no fallback exists | RuntimeClass/handler check, guest/host identity comparison and real Pi tests |
 | Backup is tampered with, partially restored, or overwrites live state | AES-GCM authenticated payload, scrypt key derivation, per-authority hashes, safe archive paths, exact image IDs, new empty project/runtime only | crypto tamper/wrong-key check and complete production restore drill |
 | Repository or Artifact preview executes active content in the browser | React-escaped bounded UTF-8 text only; binary is labelled; no HTML/script/live-preview embedding | Web component/API tests and production bundle/product flow |
 | Fixable severe image vulnerability ships unnoticed | immutable-pinned scanner, complete HIGH/CRITICAL report, CycloneDX SBOM, zero-fixable-HIGH/CRITICAL gate | CI image matrix and local release-evidence command |
@@ -116,11 +121,12 @@ Tool capability authorizes one activation and is stored by the Manager only as
 a digest. The Tool Sandbox sees neither capability.
 
 The public repository importer receives no GitHub token. It can fetch only a
-normalized public `owner/repository` at an exact commit through Docker's fixed
-legacy `bridge`. No platform service uses that bridge, and the importer has no
-mount, published port, prompt, user-controlled command, or enabled repository
-hook. The bridge supplies working DNS to `runsc`/KVM on the validated WSL host;
-it is not claimed as a DNS firewall. For the optional private path, the GitHub Gateway alone signs
+normalized public `owner/repository` at an exact commit from a fixed-purpose
+gVisor Pod in `agent-dock-importers`. It has no host mount, ServiceAccount token,
+published port, prompt, user-controlled command, or enabled repository hook.
+NetworkPolicy permits cluster DNS and public TCP/443 while excluding private,
+link-local, Pod, Service and node ranges; it is not claimed as a DNS-aware
+domain firewall. For the optional private path, the GitHub Gateway alone signs
 App JWTs and caches short-lived installation tokens in memory. The trusted
 Runner receives canonical repository bytes; the Control Plane submits a
 tenant/version-validated artifact for delivery. Neither component receives the
@@ -142,10 +148,10 @@ Before exposing arbitrary untrusted repositories to the public Internet:
    current OCI labels, CycloneDX SBOMs, and vulnerability gate;
 6. run an independent penetration review of the Manager and host configuration.
 
-The observability backends remain on an internal Docker network. A separate
+The observability backends remain on an internal Compose network. A separate
 read-only Caddy process joins that network and its own non-platform edge network,
 publishing Prometheus, Jaeger, and Grafana only on host loopback. It has no
-platform secret, database network, Docker socket, or Tool Sandbox authority.
+platform secret, database network, Kubernetes credential, or Tool-Pod authority.
 
 ## Reproduction
 

@@ -61,6 +61,13 @@ export function safeToolEnvironment(): NodeJS.ProcessEnv {
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_NOSYSTEM: "1",
+    // Kubernetes emptyDir volumes are mounted with root ownership and the
+    // Pod's fsGroup, even though every process and repository entry is owned
+    // by uid 1000. Pin Git's trust exception to the one fixed workspace root;
+    // never accept a user-controlled path here.
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "safe.directory",
+    GIT_CONFIG_VALUE_0: TOOL_WORKSPACE_DIRECTORY,
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "/bin/false",
     GIT_LFS_SKIP_SMUDGE: "1",
@@ -401,6 +408,12 @@ export async function runToolWorker(): Promise<void> {
     error: unknown,
     identity?: { requestId?: string; operationId?: string },
   ): Promise<void> => {
+    // This stream is collected only by the trusted Sandbox Manager. Keep the
+    // protocol response deliberately generic, but retain an operator-facing
+    // diagnostic so startup failures can be distinguished without weakening
+    // the model-visible error boundary.
+    const diagnostic = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`[tool-worker] ${diagnostic}\n`);
     const failure =
       error instanceof ToolWorkerError
         ? error
@@ -481,7 +494,10 @@ export async function runToolWorker(): Promise<void> {
           workspace: encodeWorkspaceSnapshotBlob(
             await captureWorkspaceSnapshot(TOOL_WORKSPACE_DIRECTORY),
           ),
-          workspacePatch: await collectGitWorkspacePatch(TOOL_WORKSPACE_DIRECTORY),
+          workspacePatch: await collectGitWorkspacePatch(
+            TOOL_WORKSPACE_DIRECTORY,
+            safeToolEnvironment(),
+          ),
         });
         return;
       }

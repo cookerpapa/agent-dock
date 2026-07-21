@@ -1,5 +1,3 @@
-FROM docker@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144 AS docker-cli
-
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -14,12 +12,11 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 ARG AGENT_DOCK_VERSION=development
 ARG AGENT_DOCK_REVISION=unknown
 LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
-      org.opencontainers.image.description="Narrow Docker-owning lifecycle service for credential-free tool sandboxes" \
+      org.opencontainers.image.description="Narrow Kubernetes lifecycle service for credential-free gVisor tool sandboxes" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
@@ -35,6 +32,6 @@ COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 STOPSIGNAL SIGTERM
-USER 0:0
+USER 1000:1000
 ENTRYPOINT ["node", "/app/node_modules/tsx/dist/cli.mjs", "--tsconfig", "/app/packages/sandbox-manager/tsconfig.json"]
 CMD ["/app/packages/sandbox-manager/src/main.ts"]

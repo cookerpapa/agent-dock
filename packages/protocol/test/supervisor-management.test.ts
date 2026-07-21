@@ -50,7 +50,7 @@ describe("Supervisor internal management protocol", () => {
 
   it("round-trips exact assignment management identity", () => {
     const assignment = {
-      containerId: "a".repeat(64),
+      containerId: "66666666-6666-4666-8666-666666666666",
       containerName: "agent-dock-test",
       supervisorId: "supervisor-host-1",
       bootId: IDS.boot,

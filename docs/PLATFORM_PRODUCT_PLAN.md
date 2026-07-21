@@ -16,19 +16,21 @@ workspaces, code-review delivery, usage tracking, and automated evaluation.
 
 ### Milestone 1: trusted Runner and Sandbox Provider
 
-Status: complete for the supported gVisor/KVM private-host claim.
+Status: complete for the supported single-node Kubernetes + gVisor/KVM
+private-host claim under ADR-0039.
 
 - trusted Pi Runner and model boundary;
-- socket-owning Sandbox Manager;
+- least-privilege Kubernetes Sandbox Manager with no runtime socket;
 - provider-neutral handles, policy, lifecycle, inspection, and cleanup;
-- sole gVisor `runsc`/KVM Provider with offline Tool Sandbox and fail-closed
-  runtime attestation;
+- sole `KubernetesGvisorSandboxProvider` with offline Tool Pods and fail-closed
+  RuntimeClass/containerd/runsc attestation;
 - credential, namespace, cgroup, filesystem, network, cancellation, and Pi
   integration evidence;
 - threat model, network matrix, Provider and Run lifecycle documentation.
 
-The original ordinary-Docker implementation was later removed under ADR-0038;
-the Provider interface alone is not treated as runtime evidence.
+The original ordinary-Docker implementation was removed under ADR-0038, and
+ADR-0039 then removed direct-Docker lifecycle ownership. The Provider interface
+alone is not treated as runtime evidence.
 
 ### Milestone 2: durable Run protocol
 
@@ -55,7 +57,8 @@ system must not claim exactly-once arbitrary shell execution.
 
 ### Milestone 3: versioned Workspace and GitHub-native delivery
 
-Status: complete for the optional GitHub App integration and gVisor production topology under ADR-0032/ADR-0038.
+Status: complete for the optional GitHub App integration and Kubernetes/gVisor
+production topology under ADR-0032/ADR-0039.
 
 - checkpoint history, compare, fork, rollback, archive, and patch download;
 - structured files/diff/test/artifact surfaces;
@@ -115,21 +118,26 @@ Only reproduced measurements belong in the résumé.
 
 ### Milestone 6: stronger Sandbox boundary
 
-Status: complete under ADR-0038.
+Status: complete under ADR-0039; ADR-0038 remains historical evidence for the
+initial mandatory-gVisor decision.
 
-- `GvisorSandboxProvider` is the only concrete implementation;
-- Docker registers `runsc` with the KVM platform and no fallback;
-- Manager readiness executes a live gVisor probe and each activation is
-  re-attested;
-- Tool and public-import workloads both specify `runtime=runsc`;
+- `KubernetesGvisorSandboxProvider` is the only concrete implementation;
+- K3s/containerd maps `RuntimeClass/agent-dock-gvisor` only to `runsc` with the
+  KVM platform and no fallback;
+- the Manager has namespace-scoped Pod/log/attach/exec authority plus one named
+  RuntimeClass read, but no Docker or containerd socket;
+- Tool and public-import workloads use fixed, Manager-generated Pod templates;
+- Tool Pods have default-deny ingress/egress while the fixed-purpose importer
+  receives only the public HTTPS/DNS policy required for exact-commit import;
 - actual guest process exhaustion supplements outer cgroup inspection;
 - the security/lifecycle suite, checkpoint path, pinned Pi repair and complete
   production topology pass through gVisor;
-- ordinary-Docker, Docker Desktop/LinuxKit, provider selectors and legacy
-  whole-Pi container execution were deleted.
+- direct-Docker, Docker Desktop/LinuxKit, provider selectors and legacy whole-Pi
+  container execution were deleted.
 
-ADR-0035 remains only as historical decision evidence and is superseded. Full
-public-SaaS and arbitrary dependency-egress claims remain excluded.
+ADR-0035 and ADR-0038's direct-Docker mechanics remain only as historical
+decision evidence and are superseded. Full public-SaaS, multi-node Kubernetes
+and arbitrary dependency-egress claims remain excluded.
 
 ### Milestone 7: product completion and public demonstration
 
@@ -174,9 +182,11 @@ or claimed.
 
 ## Deliberate exclusions until justified
 
-Do not add Temporal, Kafka, Flink, Redis, Kubernetes, MCP, subagents, arbitrary
-extensions, or dozens of tools merely to make the architecture look larger.
-Each addition needs a measured requirement and an end-to-end acceptance test.
+Do not add Temporal, Kafka, Flink, Redis, MCP, subagents, arbitrary extensions,
+or dozens of tools merely to make the architecture look larger. Do not broaden
+the validated single-node Kubernetes execution plane into an untested Helm or
+multi-node claim. Each addition needs a measured requirement and an end-to-end
+acceptance test.
 
 Subagents can become a later product capability after the single-agent Run,
 Workspace, security, observability, and evaluation foundations are complete.

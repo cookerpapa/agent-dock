@@ -467,20 +467,32 @@ services:
       args: *application-build-args
       network: host
     restart: unless-stopped
+    depends_on:
+      kubernetes-api-relay:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
       AGENT_DOCK_SANDBOX_MANAGER_PORT: "4300"
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
       AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
-      AGENT_DOCK_DOCKER_COMMAND: docker
+      AGENT_DOCK_KUBECONFIG_PATH: /run/agent-dock-kubernetes/sandbox-manager.kubeconfig
+      AGENT_DOCK_KUBERNETES_SANDBOX_NAMESPACE: agent-dock-sandboxes
+      AGENT_DOCK_KUBERNETES_IMPORTER_NAMESPACE: agent-dock-importers
+      AGENT_DOCK_KUBERNETES_RUNTIME_CLASS: agent-dock-gvisor
+      AGENT_DOCK_KUBERNETES_TOOL_SERVICE_ACCOUNT: untrusted-tool
+      AGENT_DOCK_KUBERNETES_IMPORTER_SERVICE_ACCOUNT: repository-importer
+      AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY: Never
       AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9466"
       AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
       AGENT_DOCK_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/kubernetes/sandbox-manager.kubeconfig
+        target: /run/agent-dock-kubernetes/sandbox-manager.kubeconfig
+        read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
         target: /run/agent-dock-secrets/sandbox-manager-token
@@ -504,15 +516,49 @@ services:
       timeout: 3s
       retries: 30
       start_period: 10s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
     <<: *application-security
-    cap_add:
-      - DAC_READ_SEARCH
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
     pids_limit: 128
-    mem_limit: 256m
+    mem_limit: 384m
     cpus: 1.0
     stop_grace_period: 30s
+    logging: *bounded-logging
+
+  kubernetes-api-relay:
+    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    command: [/app/packages/sandbox-manager/src/kubernetes-api-relay.ts]
+    extra_hosts:
+      - agent-dock-kubernetes-host:host-gateway
+    networks:
+      sandbox-control:
+        aliases:
+          - agent-dock-kubernetes
+      kubernetes-host-egress: {}
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const s=require('node:net').connect(6443,'127.0.0.1');s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    # tsx uses a loader and an esbuild helper; leave enough headroom for the
+    # health-check process without allowing an unbounded process tree.
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 10s
     logging: *bounded-logging
 
   github-gateway:
@@ -808,6 +854,7 @@ networks:
     internal: true
   sandbox-control:
     internal: true
+  kubernetes-host-egress: {}
   github-control:
     internal: true
   provider-egress: {}

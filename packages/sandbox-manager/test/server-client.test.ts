@@ -63,7 +63,7 @@ function backend(): SandboxManagerBackend {
         requestId: request.requestId,
         activationId: ACTIVATION_ID,
         capability: CAPABILITY,
-        runtimeId: "a".repeat(64),
+        runtimeId: "66666666-6666-4666-8666-666666666666",
         runtimeName: "agent-dock-tool-test",
         workspaceRoot: "/workspace",
       };

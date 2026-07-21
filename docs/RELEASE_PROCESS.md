@@ -13,8 +13,9 @@ separate deployment decision.
   security patches;
 - run `npm run ci`, `npm run container:check`,
   `npm run sandbox:check`, and `npm run production:check`;
-- verify the host runtime is `runsc` with KVM; the Sandbox gate fails closed
-  if a lower-security runtime is selected;
+- verify K3s/containerd maps `RuntimeClass/agent-dock-gvisor` to `runsc` with
+  KVM; the Sandbox gate fails closed if the class, policy or live gVisor Pod is
+  unavailable;
 - choose one immutable image version. Do not reuse a published version for a
   different commit.
 

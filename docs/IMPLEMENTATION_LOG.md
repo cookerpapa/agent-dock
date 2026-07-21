@@ -1738,3 +1738,30 @@
   完成后 importer 与 managed Tool 容器均为 0。
 - 能力边界：当前交付仍是 loopback/self-hosted 多租户产品，不声称已经完成 hostile public-Internet SaaS 的身份恢复、滥用治理、计费或
   独立渗透测试。这个限制不再来自 Tool kernel fallback；所有可达的用户代码执行路径现在都必须通过 gVisor/KVM attestation。
+
+## 2026-07-21 — Kubernetes + gVisor 执行面升级
+
+- 架构：ADR-0039 用 `KubernetesGvisorSandboxProvider` 完整取代 Manager 直接持有 Docker socket 的生命周期实现。K3s embedded
+  containerd 通过 `RuntimeClass/agent-dock-gvisor -> io.containerd.runsc.v1 -> runsc/KVM` 启动每个 active Turn 的独立 Pod；同一
+  Turn 内所有工具复用该 Pod，任何终态都先 checkpoint 再 UID-fenced 删除，后续 Turn 从 PostgreSQL/MinIO 恢复到新 Pod，冷 Session
+  不占 Pod。Pi、模型能力与 transcript 仍在 trusted Runner，用户代码只在 credential-free Tool Pod 中执行。
+- 权限：Sandbox Manager 改用官方 Kubernetes JavaScript client，作为非 root Compose 服务运行且没有 Docker/containerd socket。
+  独立 kubeconfig 只允许两个 execution namespace 的 Pod/log/attach/exec、NetworkPolicy 读取，以及读取唯一命名 RuntimeClass；Tool 与
+  Importer ServiceAccount 不挂 token。Restricted Pod Security、固定 PodSpec、non-root/read-only/cap-drop/seccomp、memory-backed
+  workspace、cgroup/rlimit/output/timeout 和 default-deny NetworkPolicy 共同构成纵深边界。
+- 导入：public exact-commit import 独立到 `agent-dock-importers` gVisor Pod，只开放 DNS 与排除私网后的 TCP/443，不接收 prompt、凭据、
+  PodSpec 或任意命令，也不执行 hooks/submodule/LFS/repository code。真实排障发现 WSL2/K3s 路径的 GSO 会造成 HTTP/2 framing error 与
+  30 秒 TCP retransmission，因此保持 `network=sandbox`，显式关闭 host/software GSO，并固定 Git HTTP/1.1；Kubernetes `emptyDir` 的
+  root owner 则用命令级 `safe.directory=/workspace` 处理，没有关闭全局 Git ownership 防护。后续门禁又捕获一次公共网络瞬时 stall，
+  因此 exact-commit fetch 增加 20 秒 low-speed threshold、45 秒单次 deadline 与最多三次有界重试；一次 54.566 秒实测已证明首连接超时后
+  第二连接成功，紧接的正常路径为 8.311 秒，协议/身份/快照策略错误仍不重试。
+- 自动证据：`sandbox:check` 现会真实导入
+  `mathewjonas/java-calculator-junit@0b7314b2f25b83794bf0d52f13f4f750eb0f4bdb`，再验证 runsc/KVM、host identity concealment、
+  credential/`/proc`、内网/公网、cross-tenant workspace、path/symlink、CPU/memory/process/output/timeout、cancel descendants、
+  orphan cleanup 与真实 pinned-Pi remote tools；结束后两个 namespace 的 managed Pod 都为 0。
+- 真实产品验收：保留原多租户 PostgreSQL/MinIO/观测与 Web 产品面，滚动部署新 Manager/Tool image 后，从上述 exact commit 连续完成
+  两个 `deepseek-v4-flash` Turn。第一轮产生 413 events、23 tool calls、3,628-byte patch；第二轮恢复同一 Session/Workspace 后产生
+  254 events、7 tool calls、5,204-byte cumulative patch。ledger 记录 22 model calls、6,468 input、5,490 output、145,408
+  cache-read、0 cache-write tokens；13,904-byte immutable source snapshot 没有重复导入，终态后 Tool/Importer Pod 均为 0。
+- 边界：这是单节点、loopback/private self-hosted 的可部署与可复现结果，不是独立渗透测试或 hostile public SaaS 声明。Kubernetes
+  负责调度/资源/策略，gVisor 负责缩小 syscall 攻击面；宿主管理员、K3s/containerd/runsc、KVM 与 host kernel 仍在可信计算基中。

@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { release as hostKernelRelease, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -13,6 +13,11 @@ const suffix = randomBytes(5).toString("hex");
 const projectName = `agent-dock-check-${suffix}`;
 const supervisorId = `agent-dock-check-supervisor-${suffix}`;
 const runtimeDirectory = await mkdtemp(join(tmpdir(), `agent-dock-production-${suffix}-`));
+const hostKubeconfigPath = resolve(
+  repositoryRoot,
+  process.env.AGENT_DOCK_KUBECONFIG_PATH ??
+    "deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig",
+);
 const environmentFile = resolve(runtimeDirectory, ".env");
 const httpPort = await availablePort();
 const allocatedPorts = new Set([httpPort]);
@@ -27,6 +32,7 @@ const skipBuild = process.env.AGENT_DOCK_PRODUCTION_CHECK_SKIP_BUILD === "1";
 const restoredProjectName = `${projectName}-restore`;
 const processEnvironment = {
   ...process.env,
+  NO_PROXY: [process.env.NO_PROXY, "agent-dock-kubernetes", "127.0.0.1"].filter(Boolean).join(","),
   AGENT_DOCK_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENT_DOCK_HTTP_BIND_ADDRESS: "127.0.0.1",
   AGENT_DOCK_HTTP_PORT: String(httpPort),
@@ -132,6 +138,19 @@ function composeRunFor(deployment, args) {
       environment: deployment.environment,
     },
   );
+}
+
+async function installScopedKubeconfig(targetRuntimeDirectory) {
+  const directory = resolve(targetRuntimeDirectory, "kubernetes");
+  const target = resolve(directory, "sandbox-manager.kubeconfig");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700);
+  await copyFile(hostKubeconfigPath, target);
+  await chmod(target, 0o600);
+}
+
+function kubernetesCapture(args, timeoutMs = 120_000) {
+  return capture("kubectl", ["--kubeconfig", hostKubeconfigPath, ...args], { timeoutMs });
 }
 
 async function tenantAdmin(args) {
@@ -537,18 +556,31 @@ async function assertCursor(sessionId, expected) {
 }
 
 async function managedWorkerIds(filters = []) {
-  const args = [
-    "ps",
-    "--all",
-    "--quiet",
-    "--filter",
-    "label=agent-dock.managed=true",
-    "--filter",
-    `label=agent-dock.supervisor-id=${supervisorId}`,
-  ];
-  for (const filter of filters) args.push("--filter", filter);
-  const output = await capture("docker", args);
-  return output.length === 0 ? [] : output.split(/\r?\n/).filter(Boolean);
+  const output = JSON.parse(
+    await kubernetesCapture([
+      "get",
+      "pods",
+      "--namespace",
+      "agent-dock-sandboxes",
+      "--selector",
+      "agent-dock.io/managed=true",
+      "--output=json",
+    ]),
+  );
+  const requested = filters.map((filter) => {
+    const match = /^label=agent-dock\.([a-z-]+)=(.+)$/.exec(filter);
+    assert.notEqual(match, null, `unsupported managed Worker filter ${filter}`);
+    return [`agent-dock.io/${match[1]}`, match[2]];
+  });
+  return (output.items ?? [])
+    .filter((pod) => {
+      const annotations = pod.metadata?.annotations ?? {};
+      return (
+        annotations["agent-dock.io/supervisor-id"] === supervisorId &&
+        requested.every(([key, value]) => annotations[key] === value)
+      );
+    })
+    .map((pod) => pod.metadata.name);
 }
 
 async function waitForWorker(commandId) {
@@ -562,50 +594,79 @@ async function waitForWorker(commandId) {
   );
 }
 
-async function assertWorkerSecurity(containerId, secretValues, expectedAssignment) {
-  const inspected = JSON.parse(await capture("docker", ["inspect", containerId]))[0];
-  const labels = inspected.Config.Labels ?? {};
-  assert.equal(inspected.Config.User, "1000:1000");
-  assert.equal(inspected.HostConfig.Runtime, "runsc");
-  assert.equal(inspected.HostConfig.NetworkMode, "none");
-  assert.equal(inspected.HostConfig.ReadonlyRootfs, true);
-  assert(inspected.HostConfig.CapDrop.includes("ALL"));
-  assert.equal(inspected.HostConfig.SecurityOpt.includes("no-new-privileges:true"), true);
-  assert.equal(inspected.HostConfig.PidsLimit, 128);
-  assert.deepEqual(
-    inspected.HostConfig.Ulimits.find((limit) => limit.Name === "nproc"),
-    { Name: "nproc", Hard: 128, Soft: 128 },
+async function assertWorkerSecurity(podName, secretValues, expectedAssignment) {
+  const inspected = JSON.parse(
+    await kubernetesCapture([
+      "get",
+      "pod",
+      podName,
+      "--namespace",
+      "agent-dock-sandboxes",
+      "--output=json",
+    ]),
   );
-  assert.equal(inspected.HostConfig.Memory, 768 * 1_024 * 1_024);
-  assert.equal(inspected.HostConfig.NanoCpus, 1_000_000_000);
-  const sandboxKernel = await capture("docker", ["exec", containerId, "uname", "-r"]);
+  const spec = inspected.spec;
+  const container = spec.containers.find((entry) => entry.name === "workspace");
+  const annotations = inspected.metadata.annotations ?? {};
+  assert.equal(spec.runtimeClassName, "agent-dock-gvisor");
+  assert.equal(spec.automountServiceAccountToken, false);
+  assert.equal(spec.serviceAccountName, "untrusted-tool");
+  // The API server omits boolean fields whose secure value is the Kubernetes
+  // default (`false`), so reject only an explicitly enabled host namespace.
+  assert.notEqual(spec.hostNetwork, true);
+  assert.notEqual(spec.hostPID, true);
+  assert.notEqual(spec.hostIPC, true);
+  assert.equal(spec.dnsPolicy, "None");
+  assert.equal(container.securityContext.runAsUser, 1000);
+  assert.equal(container.securityContext.runAsGroup, 1000);
+  assert.equal(container.securityContext.privileged, false);
+  assert.equal(container.securityContext.allowPrivilegeEscalation, false);
+  assert.equal(container.securityContext.readOnlyRootFilesystem, true);
+  assert(container.securityContext.capabilities.drop.includes("ALL"));
+  assert.equal(container.securityContext.seccompProfile.type, "RuntimeDefault");
+  assert.match(container.args.join(" "), /ulimit -u 128/);
+  assert.match(container.args.join(" "), /ulimit -n 1024/);
+  assert.equal(container.resources.limits.memory, String(768 * 1_024 * 1_024));
+  // The API server canonicalizes one billion nanocores to one whole core.
+  assert.equal(container.resources.limits.cpu, "1");
+  const sandboxKernel = await kubernetesCapture([
+    "exec",
+    "--namespace",
+    "agent-dock-sandboxes",
+    podName,
+    "--container",
+    "workspace",
+    "--",
+    "uname",
+    "-r",
+  ]);
   assert.match(sandboxKernel, /gvisor/i);
   assert.notEqual(sandboxKernel, hostKernelRelease());
   assert.deepEqual(
     {
-      tenantId: labels["agent-dock.tenant-id"],
-      supervisorId: labels["agent-dock.supervisor-id"],
-      bootId: labels["agent-dock.boot-id"],
-      sandboxId: labels["agent-dock.sandbox-id"],
-      commandId: labels["agent-dock.command-id"],
-      sessionId: labels["agent-dock.session-id"],
-      turnId: labels["agent-dock.turn-id"],
-      attemptId: labels["agent-dock.attempt-id"],
-      leaseId: labels["agent-dock.lease-id"],
-      fencingToken: Number(labels["agent-dock.fencing-token"]),
+      tenantId: annotations["agent-dock.io/tenant-id"],
+      supervisorId: annotations["agent-dock.io/supervisor-id"],
+      bootId: annotations["agent-dock.io/boot-id"],
+      sandboxId: annotations["agent-dock.io/sandbox-id"],
+      commandId: annotations["agent-dock.io/command-id"],
+      sessionId: annotations["agent-dock.io/session-id"],
+      turnId: annotations["agent-dock.io/turn-id"],
+      attemptId: annotations["agent-dock.io/attempt-id"],
+      leaseId: annotations["agent-dock.io/lease-id"],
+      fencingToken: Number(annotations["agent-dock.io/fencing-token"]),
     },
     expectedAssignment,
   );
   assert.equal(
-    inspected.Mounts.some((mount) => mount.Type === "bind"),
+    (spec.volumes ?? []).some((volume) => volume.hostPath !== undefined),
     false,
   );
-  assert.equal(inspected.HostConfig.Binds?.length ?? 0, 0);
   const serialized = JSON.stringify({
-    environment: inspected.Config.Env,
-    command: inspected.Config.Cmd,
-    entrypoint: inspected.Config.Entrypoint,
-    mounts: inspected.Mounts,
+    environment: container.env,
+    command: container.command,
+    arguments: container.args,
+    mounts: container.volumeMounts,
+    volumes: spec.volumes,
   });
   for (const secret of secretValues) assert.equal(serialized.includes(secret), false);
 }
@@ -683,6 +744,8 @@ async function assertApplicationIdentity() {
     "database-bootstrap",
     "control-plane",
     "supervisor-host",
+    "sandbox-manager",
+    "kubernetes-api-relay",
     "github-gateway",
   ]) {
     const output = await composeCapture(["ps", "--all", "--quiet", service]);
@@ -709,39 +772,64 @@ async function assertExecutionBoundary() {
   }
   const supervisorId = (await serviceContainerIds("supervisor-host"))[0];
   const managerId = (await serviceContainerIds("sandbox-manager"))[0];
+  const relayId = (await serviceContainerIds("kubernetes-api-relay"))[0];
   const githubGatewayId = (await serviceContainerIds("github-gateway"))[0];
   assert(supervisorId);
   assert(managerId);
+  assert(relayId);
   assert(githubGatewayId);
-  const [supervisor, manager, githubGateway] = await Promise.all(
-    [supervisorId, managerId, githubGatewayId].map(async (id) =>
+  const [supervisor, manager, relay, githubGateway] = await Promise.all(
+    [supervisorId, managerId, relayId, githubGatewayId].map(async (id) =>
       JSON.parse(await capture("docker", ["inspect", id])).at(0),
     ),
   );
   const hasDockerSocket = (container) =>
     (container.Mounts ?? []).some((mount) => mount.Destination === "/var/run/docker.sock");
   assert.equal(hasDockerSocket(supervisor), false);
-  assert.equal(hasDockerSocket(manager), true);
+  assert.equal(hasDockerSocket(manager), false);
+  assert.equal(hasDockerSocket(relay), false);
   assert.equal(hasDockerSocket(githubGateway), false);
   assert.equal(supervisor.HostConfig.Privileged, false);
   assert.equal(manager.HostConfig.Privileged, false);
+  assert.equal(relay.HostConfig.Privileged, false);
   assert.equal(supervisor.HostConfig.ReadonlyRootfs, true);
   assert.equal(manager.HostConfig.ReadonlyRootfs, true);
+  assert.equal(relay.HostConfig.ReadonlyRootfs, true);
   assert.deepEqual(supervisor.HostConfig.CapDrop, ["ALL"]);
   assert.deepEqual(supervisor.HostConfig.CapAdd ?? [], []);
   assert(manager.HostConfig.CapDrop.includes("ALL"));
-  assert(
-    manager.HostConfig.CapAdd.some(
-      (capability) => capability === "DAC_READ_SEARCH" || capability === "CAP_DAC_READ_SEARCH",
+  assert.deepEqual(manager.HostConfig.CapAdd ?? [], []);
+  assert(relay.HostConfig.CapDrop.includes("ALL"));
+  assert.deepEqual(relay.HostConfig.CapAdd ?? [], []);
+  assert.equal(relay.Mounts?.length ?? 0, 0);
+  assert.equal(
+    (manager.Mounts ?? []).some((mount) =>
+      ["/run/k3s/containerd/containerd.sock", "/run/containerd/containerd.sock"].includes(
+        mount.Destination,
+      ),
     ),
+    false,
+  );
+  assert.equal(
+    (manager.Mounts ?? []).some(
+      (mount) =>
+        mount.Destination === "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig" &&
+        mount.RW === false,
+    ),
+    true,
   );
   const supervisorNetworks = Object.keys(supervisor.NetworkSettings.Networks ?? {});
   const managerNetworks = Object.keys(manager.NetworkSettings.Networks ?? {});
+  const relayNetworks = Object.keys(relay.NetworkSettings.Networks ?? {});
   const githubGatewayNetworks = Object.keys(githubGateway.NetworkSettings.Networks ?? {});
   assert(supervisorNetworks.some((name) => name.endsWith("_sandbox-control")));
   assert.deepEqual(
     managerNetworks.sort(),
     [`${projectName}_observability`, `${projectName}_sandbox-control`].sort(),
+  );
+  assert.deepEqual(
+    relayNetworks.sort(),
+    [`${projectName}_kubernetes-host-egress`, `${projectName}_sandbox-control`].sort(),
   );
   assert.deepEqual(
     githubGatewayNetworks.sort(),
@@ -761,6 +849,15 @@ async function assertExecutionBoundary() {
     );
   }
   const managerEnvironment = manager.Config.Env ?? [];
+  const relaySerialized = JSON.stringify({
+    environment: relay.Config.Env,
+    command: relay.Config.Cmd,
+    entrypoint: relay.Config.Entrypoint,
+    mounts: relay.Mounts,
+  });
+  for (const prefix of ["DATABASE_URL", "AWS_", "AGENT_DOCK_", "token", "secret", "credential"]) {
+    assert.equal(relaySerialized.toLowerCase().includes(prefix.toLowerCase()), false);
+  }
   assert.equal(
     managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_SANDBOX_PROVIDER=")),
     false,
@@ -768,6 +865,18 @@ async function assertExecutionBoundary() {
   assert.equal(
     managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_REPOSITORY_IMPORT_NETWORK=")),
     false,
+  );
+  assert.equal(
+    managerEnvironment.some((value) => value.startsWith("AGENT_DOCK_DOCKER_COMMAND=")),
+    false,
+  );
+  assert.equal(
+    managerEnvironment.some((value) =>
+      value.startsWith(
+        "AGENT_DOCK_KUBECONFIG_PATH=/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
+      ),
+    ),
+    true,
   );
   for (const prefix of [
     "DATABASE_URL=",
@@ -815,11 +924,17 @@ async function readSecretValues() {
   assert.notEqual(match, null);
   const applicationAccessKey = match[1];
   const applicationSecretKey = match[2];
+  const kubeconfig = await readFile(
+    resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig"),
+    "utf8",
+  );
+  const kubernetesToken = /^\s*token:\s*(\S+)\s*$/m.exec(kubeconfig)?.[1];
+  assert.equal(typeof kubernetesToken, "string");
   assert.notEqual(applicationAccessKey, values[names.indexOf("minio-root-user")]);
   assert.notEqual(applicationSecretKey, values[names.indexOf("minio-root-password")]);
   return {
     applicationAccessKey,
-    secretValues: [...values, applicationAccessKey, applicationSecretKey],
+    secretValues: [...values, applicationAccessKey, applicationSecretKey, kubernetesToken],
   };
 }
 
@@ -846,6 +961,8 @@ async function assertPrivateRuntimeFiles() {
   for (const path of [
     runtimeDirectory,
     resolve(runtimeDirectory, "secrets"),
+    resolve(runtimeDirectory, "kubernetes"),
+    resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig"),
     environmentFile,
     ...[
       "api-token",
@@ -1107,6 +1224,7 @@ async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBT
     ],
     { environment: processEnvironment },
   );
+  await installScopedKubeconfig(restoredRuntimeDirectory);
   const restoredEnvironmentFile = resolve(restoredRuntimeDirectory, ".env");
   const restoredEnvironment = {
     ...processEnvironment,
@@ -1126,6 +1244,7 @@ async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBT
       "control-plane",
       "supervisor-host",
       "sandbox-manager",
+      "kubernetes-api-relay",
       "github-gateway",
       "web",
       "observability-ingress",
@@ -1191,6 +1310,7 @@ async function main() {
   await run(process.execPath, ["scripts/init-production.mjs", "--runtime-dir", runtimeDirectory], {
     stdio: "inherit",
   });
+  await installScopedKubeconfig(runtimeDirectory);
   initialized = true;
   await assertPrivateRuntimeFiles();
   const initializedApiToken = await readFile(
@@ -1250,6 +1370,10 @@ async function main() {
       "tool-sandbox-image",
     ]);
   }
+  report("sync_kubernetes_tool_image");
+  await run(process.execPath, ["scripts/sync-kubernetes-tool-image.mjs"], {
+    environment: processEnvironment,
+  });
 
   report("start_topology");
   await composeRun(["up", "--detach", "--wait"]);
@@ -1259,6 +1383,7 @@ async function main() {
     waitForHealthyService("control-plane"),
     waitForHealthyService("supervisor-host"),
     waitForHealthyService("sandbox-manager"),
+    waitForHealthyService("kubernetes-api-relay"),
     waitForHealthyService("github-gateway"),
     waitForHealthyService("web"),
     waitForHealthyService("observability-ingress"),

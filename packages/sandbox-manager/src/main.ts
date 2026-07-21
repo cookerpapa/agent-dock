@@ -1,6 +1,6 @@
 import { loadSandboxManagerConfig } from "./config.ts";
 import { startServiceObservability } from "@agent-dock/observability";
-import { GvisorSandboxProvider } from "./gvisor-sandbox-provider.ts";
+import { KubernetesGvisorSandboxProvider } from "./kubernetes-gvisor-sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 
@@ -9,9 +9,15 @@ const observability = await startServiceObservability({
   serviceName: "agent-dock-sandbox-manager",
   defaultMetricsPort: 9466,
 });
-const provider = new GvisorSandboxProvider({
+const provider = new KubernetesGvisorSandboxProvider({
   toolImage: config.toolImage,
-  dockerCommand: config.dockerCommand,
+  kubeconfigPath: config.kubeconfigPath,
+  sandboxNamespace: config.sandboxNamespace,
+  importerNamespace: config.importerNamespace,
+  runtimeClassName: config.runtimeClassName,
+  toolServiceAccountName: config.toolServiceAccountName,
+  importerServiceAccountName: config.importerServiceAccountName,
+  imagePullPolicy: config.imagePullPolicy,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
 });
 const manager = new ToolSandboxManager({ provider });

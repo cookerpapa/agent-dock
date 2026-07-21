@@ -1,12 +1,13 @@
 # Implementation roadmap
 
 This file preserves the original aspirational phase roadmap, including optional
-subagents and Kubernetes work that the owner has not requested. The
+subagents and a future multi-node/Helm release. The single-node Kubernetes +
+gVisor execution plane is now implemented under ADR-0039. The
 dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
 private single-host product are tracked in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and are complete through
-ADR-0036. Do not interpret completion of that product plan as a claim that the
-optional Phase 5 subagent tree or Phase 7 Kubernetes release below exists.
+ADR-0039. Do not interpret completion of that product plan as a claim that the
+optional Phase 5 subagent tree or a multi-node Helm release exists.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -81,8 +82,8 @@ Current status: in progress. Durable intake, idempotency, session/turn state,
 leases/fencing, PostgreSQL event replay, cross-replica live notification, and
 sequential follow-up acceptance already exist. The first Phase 2 slice adds settled Pi JSONL plus bounded
 workspace checkpoint upload/validation, PostgreSQL artifact pointers, cold
-restore into a fresh Docker container, and a Web follow-up on the same session.
-Two-container tests prove that the second model request sees the prior Pi
+restore into a fresh Kubernetes gVisor Pod, and a Web follow-up on the same session.
+Two-Pod tests prove that the second model request sees the prior Pi
 conversation and that its tool sees the prior Java edit. A crash-safe local
 supervisor spool now persists event publications before transport and proves
 exact PostgreSQL redelivery after an ACK-loss restart. Prompt acceptance now
@@ -93,7 +94,7 @@ a counter gap; the Web page exposes queue positions and labels active-session
 submission as queued follow-up. Steer is specified as a separate future
 operation rather than an implicit prompt mode.
 Long-turn leases now renew through one shared supervisor heartbeat, while a
-host-side identity-fenced reconciler removes orphan/expired Docker assignments,
+host-side identity-fenced reconciler removes orphan/expired Provider assignments,
 fails acknowledged ambiguous work, safely requeues pre-ACK work, repairs
 capacity, and retires an old sandbox only after runtime absence is confirmed.
 A durable authenticated registration/health manager now owns connection
@@ -103,7 +104,7 @@ before reconciliation. Settled checkpoint bytes can now use an immutable
 S3-compatible adapter without changing the PostgreSQL pointer/CAS protocol. A
 disposable MinIO test discards the writer, restores with a fresh client, and
 detects collision, corruption, and oversize failures. A controlled public GitHub
-path now imports an exact commit through a disposable network-limited container,
+path now imports an exact commit through a disposable network-limited gVisor Pod,
 publishes one immutable S3 seed under an expiring PostgreSQL lease, and
 reverifies it before each activation. Explicit steer and arbitrary/private Git
 sources remain.
@@ -125,7 +126,7 @@ locally owned live connections, caps asynchronous execute/cancel lanes by
 provisioned capacity, runs maintenance independently, shares one event authority
 with REST/SSE, and drains sockets and in-flight dispatchers in order. The
 production entry point now uses provisioned per-boot credentials, exact
-owner-stop and Docker assignment inventory, a trusted Supervisor host, and
+owner-stop and Kubernetes assignment inventory, a trusted Supervisor host, and
 S3-backed checkpoints rather than no-op adapters. Event ingestion emits a transactional
 PostgreSQL high-water hint. Every production replica reconnects one dedicated
 listener, coalesces wakes without copying event bodies, and makes SSE read the
@@ -147,7 +148,7 @@ public GitHub repositories pinned to exact commits.
 
 Deliverables:
 
-- trusted Docker sandbox manager outside the agent container;
+- trusted sandbox manager outside the Agent Runner;
 - non-root image, resource limits, process-tree cancellation, and egress policy;
 - Pi tool-policy extension and asynchronous approval flow;
 - workspace snapshot and restoration;
@@ -157,24 +158,26 @@ Exit criteria: cross-tenant filesystem access, host credential access, runaway
 processes, and unapproved dangerous actions are blocked in repeatable tests.
 
 Current status: the tool-execution boundary is complete for the supported
-single-host slice. ADR-0029 splits the trusted Pi Runner from the only
-Docker-owning Sandbox Manager; Pi's built-ins are disabled and replaced through
-public operation APIs; each active turn receives a credential-free,
-networkless, non-root Tool Sandbox. Production acceptance proves remote
-`bash/edit`, checkpoint/diff capture, cancellation, exact cleanup, socket
-ownership, and secret absence. The old whole-Pi ordinary-Docker runner and its
-demo/test protocol have been removed. User/project extensions, interactive approvals,
-mutually hostile public tenants are still outside the claim. The owner
-explicitly deferred extension and approval work, so those items are not
-represented as silently complete.
+single-host slice. ADR-0029 splits the trusted Pi Runner from the Sandbox
+Manager; Pi's built-ins are disabled and replaced through public operation
+APIs. ADR-0039 moves lifecycle ownership behind a least-privilege Kubernetes
+client, with no application-held Docker or containerd socket. Each active Turn
+receives a credential-free, networkless, non-root gVisor Pod. Production
+acceptance proves remote `bash/edit`, checkpoint/diff capture, cancellation,
+exact cleanup, scoped Kubernetes authority, and secret absence. The old
+whole-Pi ordinary-Docker runner and its demo/test protocol have been removed.
+User/project extensions, interactive approvals, and mutually hostile public
+tenants are still outside the claim. The owner explicitly deferred extension
+and approval work, so those items are not represented as silently complete.
 
 ADR-0030 adds the long-term Provider seam: one provider-neutral Manager owns
 capabilities and identity while the concrete Provider owns runtime operations.
-ADR-0038 then makes `GvisorSandboxProvider` the sole implementation, fixes
-runsc to KVM, removes the whole-Pi ordinary-Docker adapter and all provider
-fallbacks, and proves guest identity, resources, network denial, `/proc` and
-credential isolation, cross-tenant workspaces, bounded output, cancellation,
-cleanup and the real Pi repair path.
+ADR-0039 supersedes the direct-Docker lifecycle with
+`KubernetesGvisorSandboxProvider`: K3s/containerd maps a fixed RuntimeClass to
+`runsc`/KVM, while namespace RBAC and immutable Pod templates constrain the
+Manager. The gate proves guest identity, resources, default-deny networking,
+`/proc` and credential isolation, cross-tenant workspaces, bounded output,
+cancellation, cleanup and the real Pi repair path.
 
 This bounded tool-sandbox slice is resume-ready.
 
@@ -245,7 +248,7 @@ measured results rather than architecture claims.
 
 Deliverables:
 
-- Helm chart and Kubernetes runner lifecycle;
+- single-node Kubernetes runner lifecycle and a future multi-node Helm chart;
 - NetworkPolicy and storage configuration;
 - CI, image scanning, SBOM, and reproducible releases;
 - one-command local demo;
@@ -253,6 +256,15 @@ Deliverables:
 
 Exit criteria: another developer can deploy the system and reproduce the main
 demo and failure tests from the documentation.
+
+Current status: the single-node deployment and evidence subset is complete.
+The host installer provisions K3s, containerd, `runsc`/KVM, RuntimeClass, scoped
+RBAC and NetworkPolicy; production deployment imports the pinned Tool image and
+runs the normal browser flow through Kubernetes Pods. CI, SBOM/image scanning,
+encrypted backup/restore, architecture/threat-model documentation and
+reproducible security/production gates exist. A multi-node cluster, Helm chart,
+external CSI/CNI operating profile and demo video remain future work and are
+not implied by the single-host release.
 
 ## Expected calendar time
 

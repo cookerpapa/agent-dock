@@ -270,8 +270,8 @@ function EmptyTranscript({ realModel }: { realModel: boolean }) {
       <h1>A cloud control plane around Pi, not a chat-page wrapper.</h1>
       <p>
         Submit the prepared task to create a durable session. AgentDock will claim the turn, acquire
-        a fenced lease, activate a hardened Docker workspace, run pinned Pi, and replay every
-        committed event here.
+        a fenced lease, activate a hardened Kubernetes gVisor workspace, run pinned Pi, and replay
+        every committed event here.
       </p>
       <div className="boundary-grid">
         <span>PostgreSQL outbox</span>

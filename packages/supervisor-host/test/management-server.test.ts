@@ -20,7 +20,7 @@ const IDENTITY: SupervisorHostBootIdentity = {
   bootId: "10000000-0000-4000-8000-000000000001",
   sandboxId: "10000000-0000-4000-8000-000000000002",
 };
-const RUNTIME_ID = "a".repeat(64);
+const RUNTIME_ID = "66666666-6666-4666-8666-666666666666";
 const ASSIGNMENT = {
   runtimeId: RUNTIME_ID,
   runtimeName: "agent-dock-runtime-1",

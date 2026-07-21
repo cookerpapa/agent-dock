@@ -7,7 +7,13 @@ export type SandboxManagerConfig = {
   port: number;
   serviceToken: string;
   toolImage: string;
-  dockerCommand: string;
+  kubeconfigPath: string;
+  sandboxNamespace: string;
+  importerNamespace: string;
+  runtimeClassName: string;
+  toolServiceAccountName: string;
+  importerServiceAccountName: string;
+  imagePullPolicy: "Always" | "IfNotPresent" | "Never";
   repositoryImportTimeoutMs: number;
 };
 
@@ -69,19 +75,54 @@ export async function loadSandboxManagerConfig(
 ): Promise<SandboxManagerConfig> {
   if (
     environment.AGENT_DOCK_SANDBOX_PROVIDER !== undefined ||
+    environment.AGENT_DOCK_DOCKER_COMMAND !== undefined ||
     environment.AGENT_DOCK_REPOSITORY_IMPORT_NETWORK !== undefined ||
     Object.keys(environment).some((name) => name.startsWith("AGENT_DOCK_MICROVM_"))
   ) {
     throw new TypeError(
-      "Legacy Sandbox Provider configuration was removed; this build requires gVisor/runsc",
+      "Legacy Sandbox Provider configuration was removed; this build requires Kubernetes/runsc",
     );
+  }
+  const kubeconfigPath = required(environment, "AGENT_DOCK_KUBECONFIG_PATH");
+  if (!isAbsolute(kubeconfigPath) || kubeconfigPath.includes("\0")) {
+    throw new TypeError("AGENT_DOCK_KUBECONFIG_PATH must be an absolute path");
+  }
+  const pullPolicy = environment.AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY ?? "Never";
+  if (pullPolicy !== "Always" && pullPolicy !== "IfNotPresent" && pullPolicy !== "Never") {
+    throw new TypeError("AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY is invalid");
   }
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
-    dockerCommand: bounded(environment.AGENT_DOCK_DOCKER_COMMAND ?? "docker", "dockerCommand"),
+    kubeconfigPath,
+    sandboxNamespace: bounded(
+      environment.AGENT_DOCK_KUBERNETES_SANDBOX_NAMESPACE ?? "agent-dock-sandboxes",
+      "sandboxNamespace",
+      63,
+    ),
+    importerNamespace: bounded(
+      environment.AGENT_DOCK_KUBERNETES_IMPORTER_NAMESPACE ?? "agent-dock-importers",
+      "importerNamespace",
+      63,
+    ),
+    runtimeClassName: bounded(
+      environment.AGENT_DOCK_KUBERNETES_RUNTIME_CLASS ?? "agent-dock-gvisor",
+      "runtimeClassName",
+      63,
+    ),
+    toolServiceAccountName: bounded(
+      environment.AGENT_DOCK_KUBERNETES_TOOL_SERVICE_ACCOUNT ?? "untrusted-tool",
+      "toolServiceAccountName",
+      63,
+    ),
+    importerServiceAccountName: bounded(
+      environment.AGENT_DOCK_KUBERNETES_IMPORTER_SERVICE_ACCOUNT ?? "repository-importer",
+      "importerServiceAccountName",
+      63,
+    ),
+    imagePullPolicy: pullPolicy,
     repositoryImportTimeoutMs: integer(
       environment.AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS,
       180_000,

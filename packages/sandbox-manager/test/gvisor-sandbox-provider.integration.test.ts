@@ -7,15 +7,21 @@ import type {
 import {
   createWorkspaceSnapshot,
   encodeWorkspaceSnapshotBlob,
+  parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
-import { GvisorSandboxProvider, ToolSandboxManager } from "../src/index.ts";
+import {
+  KubernetesGvisorSandboxProvider,
+  OfficialKubernetesRuntimeClient,
+  ToolSandboxManager,
+} from "../src/index.ts";
 
-const enabled = process.env.AGENT_DOCK_GVISOR_SANDBOX_TEST === "1";
-const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
+const enabled = process.env.AGENT_DOCK_KUBERNETES_GVISOR_TEST === "1";
+const kubeconfigPath =
+  process.env.AGENT_DOCK_KUBECONFIG_PATH ??
+  "/home/rayn/agent-dock/deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig";
 const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
 const ids = [
   "10000000-0000-4000-8000-000000000101",
@@ -76,23 +82,42 @@ function bashOutput(response: ToolSandboxOperationResponse): string {
   return Buffer.from(response.output, "base64").toString("utf8");
 }
 
-function dockerContainerExists(reference: string): Promise<boolean> {
-  return new Promise((resolvePromise) => {
-    execFile(
-      dockerCommand,
-      ["inspect", "--format", "{{.Id}}", reference],
-      { encoding: "utf8", timeout: 10_000, maxBuffer: 64 * 1_024 },
-      (error) => resolvePromise(error === null),
-    );
-  });
-}
+describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract", () => {
+  it("imports an exact public GitHub commit through the restricted importer plane", async () => {
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
+      toolImage,
+      runtimeClient,
+    });
+    try {
+      const snapshot = await provider.importGitHub(
+        {
+          kind: "github_public",
+          repository: "mathewjonas/java-calculator-junit",
+          commitSha: "0b7314b2f25b83794bf0d52f13f4f750eb0f4bdb",
+        },
+        new AbortController().signal,
+      );
+      const files = parseWorkspaceSnapshot(snapshot);
+      expect(files.length).toBeGreaterThan(0);
+      expect(files.some((file) => file.path === "pom.xml")).toBe(true);
+      expect(files.some((file) => file.path === ".git" || file.path.startsWith(".git/"))).toBe(
+        false,
+      );
+      await expect(
+        runtimeClient.listPods("agent-dock-importers", "agent-dock.io/managed=true"),
+      ).resolves.toEqual([]);
+    } finally {
+      await provider.close();
+    }
+  }, 120_000);
 
-describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
   it("enforces identity, cgroups, namespace isolation, bounded output and exact cleanup", async () => {
     let nextId = 0;
-    const provider = new GvisorSandboxProvider({
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
       toolImage,
-      dockerCommand,
+      runtimeClient,
     });
     const manager = new ToolSandboxManager({
       provider,
@@ -112,7 +137,7 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
       await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
         state: "running",
         handle: {
-          providerId: "gvisor",
+          providerId: "kubernetes-gvisor",
           assignment: {
             tenantId: firstAssignment.tenantId,
             sessionId: firstAssignment.sessionId,
@@ -127,7 +152,7 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
           user: "1000:1000",
           privileged: false,
           readOnlyRootFilesystem: true,
-          networkMode: "none",
+          networkMode: "kubernetes-network-policy/deny-all",
           mountCount: 0,
           hasDockerSocket: false,
           pidLimit: 128,
@@ -190,12 +215,21 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
           ),
         ),
       );
-      expect(cgroups).toContain(`memory=${String(768 * 1_024 * 1_024)}`);
-      // runsc exposes a virtual guest cgroup hierarchy and currently reports
-      // pids.max=max. The effective Docker configuration is checked above; this
-      // probe proves the matching RLIMIT_NPROC actually rejects excess children.
+      // runsc exposes an overhead-inclusive virtual sandbox cgroup rather than
+      // the Pod container's literal OCI values. On KVM it currently adds 32 MiB
+      // and a small CPU allowance for Sentry. The Kubernetes Pod contract is
+      // checked above; keep this guest-side check bounded instead of relying on
+      // those implementation-specific overhead constants.
+      const guestMemoryBytes = Number(/memory=(\d+)/.exec(cgroups)?.[1]);
+      expect(guestMemoryBytes).toBeGreaterThanOrEqual(768 * 1_024 * 1_024);
+      expect(guestMemoryBytes).toBeLessThanOrEqual(832 * 1_024 * 1_024);
+      // runsc's virtual cgroup currently reports pids.max=max. The matching
+      // RLIMIT_NPROC behavior is exercised by the process probe below.
       expect(cgroups).toContain("pids=max");
-      expect(cgroups).toMatch(/cpu=(?:100000\s+100000|100000\s+100000)/);
+      const guestCpu = /cpu=(\d+)\s+(\d+)/.exec(cgroups);
+      expect(Number(guestCpu?.[1])).toBeGreaterThanOrEqual(100_000);
+      expect(Number(guestCpu?.[1])).toBeLessThanOrEqual(110_000);
+      expect(Number(guestCpu?.[2])).toBe(100_000);
       const workspaceBytes = Number(/workspace=\s*(\d+)/.exec(cgroups)?.[1]);
       expect(workspaceBytes).toBeGreaterThan(0);
       expect(workspaceBytes).toBeLessThanOrEqual(128 * 1_024 * 1_024);
@@ -309,11 +343,15 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
             cancellation[0].value.type === "tool_sandbox.operation_failed" &&
             cancellation[0].value.code === "tool_cancelled"),
       ).toBe(true);
-      expect(await dockerContainerExists(second.runtimeId)).toBe(false);
+      expect(
+        await runtimeClient.readPod("agent-dock-sandboxes", second.runtimeName),
+      ).toBeUndefined();
       second = undefined;
 
       await manager.stop(first.activationId, firstAssignment);
-      expect(await dockerContainerExists(first.runtimeId)).toBe(false);
+      expect(
+        await runtimeClient.readPod("agent-dock-sandboxes", first.runtimeName),
+      ).toBeUndefined();
       first = undefined;
 
       empty = await manager.create({
@@ -336,7 +374,9 @@ describe.skipIf(!enabled)("gVisor Sandbox Provider security contract", () => {
         ),
       ).toBe("fixture baseline\n");
       await manager.stop(empty.activationId, emptyAssignment);
-      expect(await dockerContainerExists(empty.runtimeId)).toBe(false);
+      expect(
+        await runtimeClient.readPod("agent-dock-sandboxes", empty.runtimeName),
+      ).toBeUndefined();
       empty = undefined;
 
       const invalidSnapshot = Buffer.from('{"format":"invalid","files":[]}\n', "utf8");

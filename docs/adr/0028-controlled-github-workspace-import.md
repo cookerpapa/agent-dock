@@ -148,8 +148,8 @@ GitHub coordinate is easier to validate and explain.
 
 ### Clone in the Supervisor process
 
-Parsing attacker-selected packs and writing paths inside the Docker-owning,
-credential-bearing host needlessly enlarges the trusted process. A disposable
+Parsing attacker-selected packs and writing paths inside a credential-bearing
+trusted process needlessly enlarges that boundary. A disposable
 credential-free importer contains that parser and filesystem boundary.
 
 ### Re-clone on every turn

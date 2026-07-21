@@ -51,7 +51,7 @@ export const SupervisorBootProvisionResponseSchema = Type.Object(
 
 export const SupervisorRuntimeAssignmentSchema = Type.Object(
   {
-    containerId: Type.String({ minLength: 12, maxLength: 128, pattern: "^[a-f0-9]+$" }),
+    containerId: UuidSchema,
     containerName: Type.String({ minLength: 1, maxLength: 128 }),
     supervisorId: OpaqueIdSchema,
     bootId: UuidSchema,
@@ -132,7 +132,7 @@ export const SupervisorManagementResponseSchema = Type.Union([
       type: Type.Literal("assignment.absent"),
       requestId: UuidSchema,
       sandboxId: UuidSchema,
-      containerId: Type.String({ minLength: 12, maxLength: 128, pattern: "^[a-f0-9]+$" }),
+      containerId: UuidSchema,
     },
     { additionalProperties: false },
   ),

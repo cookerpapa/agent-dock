@@ -5,12 +5,12 @@ import type {
   ToolSandboxCreateRequest,
 } from "@agent-dock/protocol";
 import {
-  GvisorSandboxProvider,
+  KubernetesGvisorSandboxProvider,
+  OfficialKubernetesRuntimeClient,
   SandboxManagerClient,
   SandboxManagerServer,
   ToolSandboxManager,
 } from "@agent-dock/sandbox-manager";
-import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,9 @@ import { describe, expect, it } from "vitest";
 import { RemoteToolSandboxTurnRunner, type ToolSandboxManagerBoundary } from "../src/index.ts";
 
 const enabled = process.env.AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST === "1";
-const dockerCommand = process.env.AGENT_DOCK_DOCKER_COMMAND ?? "docker";
+const kubeconfigPath =
+  process.env.AGENT_DOCK_KUBECONFIG_PATH ??
+  "/home/rayn/agent-dock/deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig";
 const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
 const serviceToken = `integration-${"s".repeat(48)}`;
 
@@ -55,26 +57,13 @@ function command(): ExecuteTurnCommandMessage {
   };
 }
 
-function inspect(reference: string): Promise<Record<string, any>> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      dockerCommand,
-      ["inspect", reference],
-      { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 15_000 },
-      (error, stdout) => {
-        if (error) rejectPromise(error);
-        else resolvePromise((JSON.parse(stdout) as Record<string, any>[])[0]!);
-      },
-    );
-  });
-}
-
-describe.skipIf(!enabled)("trusted Pi Runner with remote gVisor Tool Sandbox", () => {
-  it("repairs code through RPC while the Docker worker stays offline and credential-free", async () => {
+describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool Sandbox", () => {
+  it("repairs code through RPC while the Kubernetes Pod stays offline and credential-free", async () => {
     const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
-    const provider = new GvisorSandboxProvider({
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
       toolImage,
-      dockerCommand,
+      runtimeClient,
     });
     const backend = new ToolSandboxManager({ provider });
     const server = new SandboxManagerServer({
@@ -89,12 +78,12 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote gVisor Tool Sandbox", (
       serviceToken,
       allowInsecureHttp: true,
     });
-    let inspectedRuntimeId: string | undefined;
+    let inspectedRuntimeName: string | undefined;
     const manager: ToolSandboxManagerBoundary = {
       operationUrl: client.operationUrl,
       async create(request: ToolSandboxCreateRequest) {
         const created = await client.create(request);
-        inspectedRuntimeId = created.runtimeId;
+        inspectedRuntimeName = created.runtimeName;
         await expect(
           backend.inspect(created.activationId, request.assignment),
         ).resolves.toMatchObject({
@@ -104,7 +93,7 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote gVisor Tool Sandbox", (
             runtime: "runsc",
             sandboxKernelRelease: expect.stringMatching(/gvisor/i),
             user: "1000:1000",
-            networkMode: "none",
+            networkMode: "kubernetes-network-policy/deny-all",
             readOnlyRootFilesystem: true,
             mountCount: 0,
             hasDockerSocket: false,
@@ -214,7 +203,9 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote gVisor Tool Sandbox", (
       if (terminal?.type !== "turn.completed") throw new Error("Expected a completed turn");
       expect(terminal.payload.workspacePatch?.patch).toContain("return left + right");
       expect(backend.activeCount).toBe(0);
-      await expect(inspect(inspectedRuntimeId!)).rejects.toBeDefined();
+      await expect(
+        runtimeClient.readPod("agent-dock-sandboxes", inspectedRuntimeName!),
+      ).resolves.toBeUndefined();
     } finally {
       await server.close().catch(() => undefined);
       await rm(trustedWorkspace, { recursive: true, force: true });

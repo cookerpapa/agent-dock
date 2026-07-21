@@ -16,6 +16,7 @@
     "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
+    "@kubernetes/client-node": "1.4.0",
     "fastify": "5.10.0",
     "tsx": "4.23.1"
   }

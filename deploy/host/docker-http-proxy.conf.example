@@ -1,5 +1,0 @@
-[Service]
-# Example for a host-local proxy. Change the port to match the host service.
-Environment="HTTP_PROXY=http://127.0.0.1:10808"
-Environment="HTTPS_PROXY=http://127.0.0.1:10808"
-Environment="NO_PROXY=127.0.0.1,localhost"

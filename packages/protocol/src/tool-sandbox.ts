@@ -63,7 +63,7 @@ export const ToolSandboxCreateResponseSchema = Type.Object(
     requestId: UuidSchema,
     activationId: UuidSchema,
     capability: Type.String({ pattern: "^adts_[A-Za-z0-9_-]{43}$" }),
-    runtimeId: Type.String({ minLength: 12, maxLength: 128, pattern: "^[a-f0-9]+$" }),
+    runtimeId: UuidSchema,
     runtimeName: Type.String({ minLength: 1, maxLength: 128 }),
     workspaceRoot: Type.Literal("/workspace"),
   },

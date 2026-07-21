@@ -2,7 +2,8 @@
 
 This workspace contains the Phase 1 Pi-`/export`-inspired React session page. It
 uses only the public control-plane REST and SSE contracts; it never reads Pi
-JSONL, launches a process, talks to Docker, or receives a provider credential.
+JSONL, launches a process, talks to Kubernetes/containerd, or receives a
+provider credential.
 
 ## Behavior
 
@@ -48,7 +49,7 @@ npm run demo
 ```
 
 This is an alias for `npm run production:deploy`; it does not start a separate
-ordinary-Docker Agent runtime.
+lower-security or browser-owned Agent runtime.
 
 For frontend-only work, start a compatible API on `127.0.0.1:3100` and run:
 

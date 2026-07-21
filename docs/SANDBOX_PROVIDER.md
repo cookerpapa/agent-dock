@@ -1,19 +1,22 @@
-# gVisor Sandbox Provider
+# Kubernetes gVisor Sandbox Provider
 
 ## Supported boundary
 
 AgentDock has exactly one untrusted execution provider:
-`GvisorSandboxProvider`. Docker Engine supplies trusted lifecycle operations,
-but every Tool Worker and public-repository importer is started explicitly with
-the OCI runtime `runsc`. The host config fixes `runsc` to `--platform=kvm`.
+`KubernetesGvisorSandboxProvider`. It creates Kubernetes Pods through the
+official JavaScript client. Every Tool Pod selects
+`runtimeClassName: agent-dock-gvisor`; K3s/containerd maps that class to the
+`io.containerd.runsc.v1` shim, whose configuration fixes `platform = "kvm"`,
+`network = "sandbox"`, and disables host/software GSO on the validated WSL2
+network path.
 
-There is no provider selector, runc fallback, Docker Desktop fallback, systrap
-fallback, LinuxKit microVM path, or managed-provider compatibility branch. A
-host that cannot execute a real `runsc` KVM probe is unhealthy and receives no
-turns.
+There is no runtime selector, runc/systrap fallback, direct-Docker provider,
+Docker Desktop sandbox path, or paid managed-provider branch. Missing KVM,
+RuntimeClass, network policy, image, RBAC, or live gVisor attestation makes the
+Manager unready.
 
-ADR-0030 defines the provider-neutral Manager boundary. ADR-0038 supersedes its
-original concrete provider and is the current runtime decision.
+ADR-0030 owns the provider-neutral contract and ADR-0039 is the current
+execution-plane decision.
 
 ## Layering
 
@@ -22,117 +25,136 @@ Trusted Pi Runner
     | authenticated Tool RPC + activation capability
     v
 ToolSandboxManager
-    | authorization, assignment fencing, policy, revocation
+    | authorization, replay control, assignment fencing
     v
-GvisorSandboxProvider
-    | trusted Docker lifecycle API; explicit runtime=runsc
+KubernetesGvisorSandboxProvider
+    | scoped Kubernetes API: Pod/log/attach/exec + one RuntimeClass read
     v
-runsc/KVM Tool Sandbox
-    | /workspace, bash/edit/git/test; no platform credential/network
+K3s -> containerd -> runsc/KVM
+    v
+Untrusted Tool Pod
+    | /workspace + /tmp; no platform credential or network
 ```
 
-Only the Sandbox Manager owns the Docker socket. Pi, the Control Plane and the
-Tool Sandbox never receive it or a Docker SDK object. The provider never sees a
-Manager bearer credential.
+The Manager has a private kubeconfig limited to Pod operations in two
+namespaces, NetworkPolicy inspection there, and `get` on one named
+RuntimeClass; it has no Docker or containerd socket. The Runner and Tool Pod
+receive neither. A credential-free
+TCP relay connects the Manager's internal Compose network to the host K3s API;
+the relay has no volume, secret, Kubernetes credential, or application API.
 
 ## Provider contract
 
-The interface contains:
+The provider implements:
 
-- `create`, `exec`, `readFile`, `writeFile` and `snapshot`;
-- `stop`, forceful idempotent `destroy`, and `inspect`;
-- exact orphan inventory and termination;
-- credential-free exact-commit public GitHub import;
+- `create`, `exec`, `readFile`, `writeFile`, `snapshot` and `inspect`;
+- idempotent `stop`/`destroy` with UID-preconditioned deletion;
+- exact assignment inventory and orphan reconciliation;
+- a separate credential-free exact-commit public GitHub importer;
 - `checkHealth` and `close`.
 
-The exact-commit public repository importer is not a Tool Sandbox. It is a
-fixed-purpose, credential-free `runsc` workload on Docker's legacy default
-`bridge`, used because the validated WSL/KVM path cannot reach Docker's embedded
-DNS on a user-defined bridge. The network name is not configurable. The worker
-constructs the GitHub URL itself, disables redirects and hooks, receives no
-prompt or platform credential, and never runs repository code. Tool execution
-remains strictly `network=none`.
+The immutable handle binds API version, tenant, session, turn, Run Attempt,
+Supervisor boot, command, lease, fence, Pod name and Pod UID. Identity is copied
+to Pod annotations. Every operation re-reads and compares that identity; a stale
+handle cannot exec into or delete a replacement Pod.
 
-An immutable handle binds provider API version, activation/runtime identity,
-tenant, session, turn, attempt, Supervisor boot, command, lease and fencing
-token. The provider duplicates that identity into Docker labels and re-inspects
-the labels before destructive operations. Cross-assignment handles fail closed.
+The browser, prompt, repository and model cannot supply a PodSpec, image,
+RuntimeClass, ServiceAccount, volume, node selector, command wrapper, security
+context or network policy.
+
+## Active-Turn lifecycle
+
+One active Turn receives one Pod. Every `read`, `write`, `edit`, `bash`, Git and
+test call in that Turn uses the same image-owned worker and `/workspace`.
+
+```text
+create Pod -> restore checkpoint -> attach Tool Worker
+           -> many tool calls -> capture snapshot/patch
+           -> delete Pod -> commit terminal state
+```
+
+Completion, failure, cancellation and timeout all delete the Pod. A later Turn
+creates a different Pod UID and restores the immutable Pi/workspace checkpoint.
+Cold conversations therefore consume no Pod or Pi process; Pod survival is not
+a durability mechanism.
 
 ## Fixed Tool policy
 
-The browser, prompt and tenant cannot choose this policy:
-
 ```text
-runtime: runsc, platform: KVM
-network: deny-all
-user: 1000:1000
+runtimeClass: agent-dock-gvisor (runsc/KVM)
+namespace: agent-dock-sandboxes
+network: default-deny ingress and egress; DNS disabled
+service account: untrusted-tool; token automount disabled
+user: 1000:1000, non-root
 root filesystem: read-only
-privileged: false
+privileged / host PID / IPC / network: false
 capabilities: drop ALL
-no-new-privileges: true
-host mounts / Docker socket: forbidden
+allowPrivilegeEscalation: false
+seccomp: RuntimeDefault
+hostPath / devices / sockets: forbidden
 CPU: 1 core
 memory: 768 MiB
-container PID limit: 128
+ephemeral storage: 256 MiB
 guest RLIMIT_NPROC: 128
 open files: 1024
-/tmp: 64 MiB tmpfs
-/workspace: 128 MiB tmpfs
+/tmp: 64 MiB memory-backed emptyDir
+/workspace: 128 MiB memory-backed emptyDir
 tool output: 1 MiB
 command timeout: at most 300 seconds
-turn wall clock: 900 seconds
+turn wall clock / Pod active deadline: 900 seconds
 ```
 
-The guest `RLIMIT_NPROC` is intentional: on the tested gVisor version Docker's
-outer cgroup PID value alone did not bound guest-created processes. The live
-gate therefore proves actual fork exhaustion rather than only inspecting
-configuration.
+Kubernetes API normalization may omit secure default booleans or canonicalize
+resource quantities. Acceptance inspects the effective Pod and also tests the
+limits from inside the gVisor workload.
 
-## Runtime attestation
+## Public exact-commit importer
 
-Manager readiness requires:
+Repository import is not Agent tool egress. A second fixed-purpose gVisor Pod
+runs in `agent-dock-importers`; it receives a normalized GitHub repository plus
+exact commit, no prompt and no credential, and never runs repository code. Its
+namespace permits DNS and public TCP/443 while excluding loopback, private,
+link-local, Pod, Service and node ranges. Redirects, hooks, credential helpers,
+submodules, LFS and interactive authentication are disabled. The importer is
+deleted after returning a bounded manifest. Git is pinned to HTTP/1.1 because
+HTTP/2 pack negotiation reproducibly failed through this host's gVisor/K3s
+path. Only `/workspace` is declared a safe Git directory to accommodate the
+root-owned, group-writable Kubernetes `emptyDir`; global trust is not disabled.
+The exact-commit fetch is safe to retry and uses a 20-second low-speed
+threshold, a 45-second attempt deadline and at most three attempts inside the
+180-second Pod lifetime; protocol, identity and snapshot-policy failures are
+not retried.
 
-1. a native Linux Docker Engine;
-2. a registered `runsc` runtime whose arguments contain `--platform=kvm`;
-3. the exact Tool image locally present;
-4. a real networkless probe whose guest kernel identifies as gVisor.
+## Runtime attestation and RBAC
 
-Every activation is then inspected again. `HostConfig.Runtime` must equal
-`runsc`, identity labels must match the handle, no forbidden mount may exist,
-and `uname -r` from inside the runtime must identify the gVisor kernel. A config
-string without a successful workload is not accepted as evidence.
+Readiness requires the expected RuntimeClass handler, both pre-created network
+policies, the exact Tool image, and a real Pod whose kernel identifies as
+gVisor. It does not trust configuration text or an Agent's description of its
+environment.
 
-## Host installation
+The dedicated Manager ServiceAccount can create/get/list/watch/delete Pods and
+use logs/attach/exec only in the Tool and importer namespaces. It cannot read
+Secrets, mutate NetworkPolicies/RBAC/ServiceAccounts, inspect nodes, use host
+namespaces, or create workloads elsewhere. Tool/import Pods use a separate
+ServiceAccount with no RBAC authority.
 
-On supported Ubuntu/WSL2 hosts with nested KVM:
+## Host installation and acceptance
 
 ```bash
-sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-gvisor-host.sh
+sudo AGENT_DOCK_HOST_USER="$USER" \
+  ./scripts/install-kubernetes-gvisor-host.sh
 newgrp docker
 npm run sandbox:check
-```
-
-See [`deploy/host/README.md`](../deploy/host/README.md). The installer uses the
-official Docker and gVisor package repositories, requires `/dev/kvm`, registers
-`runsc` with KVM, and executes a direct probe. It never selects a weaker
-runtime.
-
-## Acceptance gate
-
-```bash
-npm run sandbox:check
-```
-
-The gate builds the real Tool image and proves gVisor identity, non-root and
-read-only execution, credential and host `/proc` isolation, network denial,
-cross-tenant workspace isolation, traversal/symlink rejection, bounded output,
-real process/memory/resource limits, cancellation, exact cleanup, checkpoint
-capture and a pinned Pi remote-tool repair. The production gate additionally
-proves restart, fencing, multi-tenancy and backup recovery:
-
-```bash
 npm run production:check
 ```
 
-The latest measured gVisor result is recorded in
+The first gate proves real gVisor identity, host/process/credential/network and
+cross-tenant isolation, a real exact-commit public GitHub import,
+traversal/symlink rejection, resource/output/timeout bounds, cancellation,
+cleanup, checkpoint restore and a real Pi remote-tool repair. The production
+gate additionally proves registration isolation,
+restart/scale behavior, fencing, Run cancellation, Workspace versions,
+observability and encrypted backup/restore.
+
+See [`deploy/host/README.md`](../deploy/host/README.md) and
 [`reports/gvisor-sandbox-latest.md`](reports/gvisor-sandbox-latest.md).

@@ -60,7 +60,7 @@ function providerFixture() {
         providerApiVersion: 1,
         providerId: "gvisor",
         activationId: spec.activationId,
-        runtimeId: "a".repeat(64),
+        runtimeId: "66666666-6666-4666-8666-666666666666",
         runtimeName: `agent-dock-tool-${spec.activationId}`.slice(0, 63),
         workspaceRoot: "/workspace",
         assignment: spec.assignment,
@@ -210,7 +210,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).rejects.toThrow("was removed");
   });
 
-  it("loads only the fixed gVisor deployment configuration", async () => {
+  it("loads only the fixed Kubernetes gVisor deployment configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
     const tokenPath = join(directory, "manager-token");
     try {
@@ -220,15 +220,19 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
         }),
       ).resolves.toMatchObject({
         toolImage: "agent-dock/tool-sandbox:test",
-        dockerCommand: "docker",
+        kubeconfigPath: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
+        runtimeClassName: "agent-dock-gvisor",
+        imagePullPolicy: "Never",
       });
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
         }),
       ).rejects.toThrow("was removed");
@@ -236,6 +240,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),
       ).rejects.toThrow("was removed");

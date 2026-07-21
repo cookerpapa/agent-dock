@@ -54,13 +54,26 @@ const baseUrl = new URL(
 const token = (await readFile(resolve(runtimeDirectory, "secrets/api-token"), "utf8")).trim();
 const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
 const api = new AgentDockApi(fetchFromProduction, token);
+const kubeconfigPath = resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig");
+const executionEnvironment = {
+  ...process.env,
+  NO_PROXY: [process.env.NO_PROXY, "agent-dock-kubernetes", "127.0.0.1", "localhost"]
+    .filter(Boolean)
+    .join(","),
+};
 
 function capture(command, args, timeoutMs = 30_000) {
   return new Promise((resolvePromise, rejectPromise) => {
     execFile(
       command,
       args,
-      { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 1_024 * 1_024, timeout: timeoutMs },
+      {
+        cwd: repositoryRoot,
+        env: executionEnvironment,
+        encoding: "utf8",
+        maxBuffer: 1_024 * 1_024,
+        timeout: timeoutMs,
+      },
       (error, stdout) => {
         if (error) rejectPromise(error);
         else resolvePromise(stdout.trim());
@@ -93,16 +106,49 @@ async function psql(query) {
   ]);
 }
 
+function waitForPoll(delayMs, signal) {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(settle, delayMs);
+    timer.unref();
+    function settle() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", settle);
+      resolvePromise();
+    }
+    signal.addEventListener("abort", settle, { once: true });
+  });
+}
+
 async function runTurn(sessionId, prompt, afterSequence) {
   const accepted = await api.acceptTurn(sessionId, prompt, newIdempotencyKey("turn"), "off");
   const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new Error("Live GitHub turn timed out")),
-    600_000,
-  );
+  let timeoutFailure;
+  const timer = setTimeout(() => {
+    timeoutFailure = new Error("Live GitHub turn timed out");
+    controller.abort(timeoutFailure);
+  }, 600_000);
   timer.unref();
   const events = [];
   let terminal;
+  let failedRun;
+  let monitorFailure;
+  const monitor = (async () => {
+    try {
+      while (!controller.signal.aborted) {
+        const run = await api.getRun(accepted.runId);
+        if (["failed", "cancelled", "timed_out", "superseded"].includes(run.state)) {
+          failedRun = run;
+          controller.abort();
+          return;
+        }
+        await waitForPoll(250, controller.signal);
+      }
+    } catch (error) {
+      monitorFailure = error;
+      controller.abort();
+    }
+  })();
   try {
     const cursor = await streamSessionEvents({
       sessionId,
@@ -125,6 +171,19 @@ async function runTurn(sessionId, prompt, afterSequence) {
         }
       },
     });
+    await monitor;
+    if (monitorFailure !== undefined) throw monitorFailure;
+    if (timeoutFailure !== undefined) throw timeoutFailure;
+    if (failedRun !== undefined) {
+      const failure = failedRun.failure;
+      throw new Error(
+        `Run ${failedRun.runId} ended as ${failedRun.state}${
+          failure === undefined
+            ? ""
+            : ` (${failure.code}${failure.message === undefined ? "" : `: ${failure.message}`})`
+        }`,
+      );
+    }
     assert(terminal, "Turn did not publish a terminal event");
     assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal.payload));
     const patch = terminal.payload.workspacePatch?.patch;
@@ -149,6 +208,40 @@ async function runTurn(sessionId, prompt, afterSequence) {
   } finally {
     clearTimeout(timer);
     controller.abort();
+    await monitor;
+  }
+}
+
+async function assertNoManagedKubernetesPods() {
+  const namespaces = ["agent-dock-sandboxes", "agent-dock-importers"];
+  const deadline = Date.now() + 15_000;
+  while (true) {
+    const survivors = [];
+    for (const namespace of namespaces) {
+      const pods = await capture(
+        "kubectl",
+        [
+          "--kubeconfig",
+          kubeconfigPath,
+          "get",
+          "pods",
+          "--namespace",
+          namespace,
+          "--selector",
+          "agent-dock.io/managed=true",
+          "--output=name",
+        ],
+        60_000,
+      );
+      if (pods.length > 0) survivors.push(`${namespace}:${pods}`);
+    }
+    if (survivors.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Managed Kubernetes Pods survived the acceptance run: ${survivors.join(", ")}`,
+      );
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
   }
 }
 
@@ -220,15 +313,7 @@ const [modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens]
   .split("|")
   .map(Number);
 assert(modelCalls > 0 && outputTokens > 0, "Real model token usage was not persisted");
-const importers = await capture("docker", [
-  "ps",
-  "--all",
-  "--filter",
-  "label=agent-dock.workspace-import=true",
-  "--format",
-  "{{.ID}}",
-]);
-assert.equal(importers, "", "A repository importer container survived the acceptance run");
+await assertNoManagedKubernetesPods();
 
 process.stdout.write(
   `${JSON.stringify({

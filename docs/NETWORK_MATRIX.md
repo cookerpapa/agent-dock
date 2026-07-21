@@ -1,96 +1,86 @@
-# Network matrix
+# Network and credential matrix
 
 ## Rule
 
-No untrusted Tool Sandbox joins a platform network. Access is granted to a
-trusted component only when its responsibility requires it. Network membership
-does not replace application authentication.
+Untrusted Tool Pods never join a platform network and have default-deny ingress
+and egress. Network membership never replaces application authentication.
 
-## Production networks
+The trusted product plane currently runs in isolated Compose networks; the
+untrusted execution plane runs in K3s. A credential-free relay is the only
+bridge between the Manager's internal Compose network and the host Kubernetes
+API endpoint.
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | Repository import egress | Public ports |
+## Trusted product plane
+
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | K3s API relay | Public ports |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Web ingress | yes | no | no | no | no | yes (webhook proxy only) | no | no | no | loopback `8080` |
+| Web ingress | yes | no | no | no | no | webhook proxy only | no | no | no | loopback `8080` |
 | Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | none |
 | Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | yes | no | none |
-| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | none |
+| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | via relay | none |
+| Kubernetes API relay | no | no | no | no | yes | no | no | no | fixed host `6443` | none |
 | GitHub Gateway | no | no | no | no | no | yes | no | yes | no | none |
-| gVisor Tool Sandbox | no | no | no | no | no | no | no | no | no | none |
-| gVisor repository importer | no | no | no | no | no | no | no | no | yes | none |
 | PostgreSQL | no | no | yes | no | no | no | no | no | no | none |
 | MinIO | no | no | no | yes | no | no | no | no | no | none |
 | Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | none |
 | Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | loopback `9090`, `16686`, `3001` |
 
-The repository importer is the only AgentDock workload placed on Docker's
-legacy default `bridge`; no platform service is attached to it. The bridge is
-fixed in code and is not a tenant-selectable network. It supplies a directly
-reachable resolver because Docker's embedded DNS at `127.0.0.11` is unreachable
-from `runsc`/KVM on the validated WSL host. The importer is a fixed-purpose,
-credential-free exact-commit GitHub fetch worker: it has no prompt, host mount,
-published port, user-controlled command, repository hook execution, or Tool
-authority. The Manager controls its lifecycle through the Docker socket but
-does not join the bridge.
+The relay has no mount, secret, environment credential or application route. It
+accepts TCP only on the private `sandbox-control` network and forwards only to
+the fixed `agent-dock-kubernetes-host:6443` target. TLS authentication and
+authorization remain end-to-end between the Manager's scoped kubeconfig and
+the Kubernetes API server.
 
-The observability ingress is the only component joining the non-internal
-`observability-edge` network. The three backends remain internal and are not
-joined to `edge`, API, database, model/provider, GitHub, or sandbox-control
-networks. Prometheus receives only its own scrape token; the proxy receives no
-secret.
+## Kubernetes execution plane
+
+| Workload/namespace | Ingress | DNS | Public egress | Cluster/private/link-local | Platform networks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tool Pod / `agent-dock-sandboxes` | deny | deny | deny | deny | none |
+| Importer Pod / `agent-dock-importers` | deny | cluster DNS only | TCP/443 only | explicitly excluded | none |
+
+Both namespaces receive pre-created default-deny NetworkPolicies. The importer
+has an additional egress policy for DNS plus public HTTPS, excluding loopback,
+RFC1918, link-local, Pod, Service and node ranges. This is a bounded public
+GitHub bootstrap path, not dependency or Agent-command egress. Standard
+NetworkPolicy is L3/L4 policy, not a DNS-aware domain firewall; a future public
+SaaS claim still requires a controlled egress proxy.
+
+Tool Pods set `dnsPolicy: None`, publish no port, and are unreachable from the
+Manager except through Kubernetes attach/exec subresources. They cannot connect
+back to the Manager, Runner or relay.
 
 ## Credential and authority matrix
 
-| Component | Tenant API auth | Model secret | DB credential | Object-store credential | Manager token | GitHub App key/token | Docker socket |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Browser/Web | bearer token in browser memory | no | no | no | no | no | no |
-| Control Plane | digest verification | encrypted credential authority | yes | no | no | no (service RPC only) | no |
-| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped checkpoint identity | yes | no (service RPC only) | no |
-| Sandbox Manager | no | no | no | no | own service-token verifier | no | **yes** |
-| GitHub Gateway | no | no | no | no | no | **yes** | no |
-| Tool Sandbox | no | no | no | no | no | no | no |
-| Repository importer | no | no | no | no | no | no | no |
+| Component | Tenant API auth | Model secret | DB | Object store | Manager token | GitHub key/token | Kubernetes credential | Docker/containerd socket |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Browser/Web | cookie/bearer | no | no | no | no | no | no | no |
+| Control Plane | digest verification | encrypted credential authority | yes | no | no | service RPC only | no | no |
+| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped identity | yes | service RPC only | no | no |
+| Sandbox Manager | no | no | no | no | own verifier | no | two execution namespaces plus one named RuntimeClass read | no |
+| Kubernetes API relay | no | no | no | no | no | no | no | no |
+| GitHub Gateway | no | no | no | no | no | App key + memory-only token | no | no |
+| Tool Pod | no | no | no | no | no | no | no ServiceAccount token | no |
+| Importer Pod | no | no | no | no | no | no | no ServiceAccount token | no |
 
-## Tool Sandbox denial targets
+Only the trusted host operator uses Docker to build the product images and the
+K3s containerd socket to import the Tool image. Neither socket is mounted into
+an application container.
 
-The integration suite attempts all of these from inside a live Tool Sandbox:
+## Executable denial evidence
 
-```text
-control-plane:4100
-postgres:5432
-minio:9000
-sandbox-manager:4300
-host.docker.internal
-1.1.1.1:443
-```
+The live gate verifies from inside a real `runsc`/KVM Tool Pod that it cannot:
 
-All must be unreachable. It also inspects `env`, `/proc/self/environ`,
-`/proc/1/environ`, PID 1's command line, cgroup limits, mounts, capabilities,
-and Docker socket absence.
+- reach the Control Plane, Sandbox Manager, PostgreSQL, MinIO or Kubernetes API;
+- reach node/host gateways, loopback aliases, another Pod or public Internet;
+- read Runner/Manager environment, ServiceAccount credentials or host `/proc`;
+- find a Docker/containerd socket or another tenant's workspace.
 
-Both workloads are explicitly launched with Docker runtime `runsc`; Tool
-execution uses `network=none`. The repository importer is a separate,
-credential-free one-shot workload and never receives model, database, object
-store, GitHub App or Manager credentials. The import bridge is not a DNS-aware
-allowlist and is not granted to agent-generated commands.
-
-The Tool Sandbox is not attached to `github-control`, so enabling a GitHub App
-does not give agent-generated commands a path to the Gateway. The Gateway is
-attached to provider egress only for GitHub API traffic and to `github-control`
-for authenticated internal RPC and normalized webhook delivery. It is not
-attached to database, object storage, management, or sandbox control.
+It additionally verifies UID/GID, read-only root, mounts, capabilities, cgroup
+and rlimit behavior, bounded output, cancellation and complete Pod deletion.
 
 ## Future dependency network
 
-Dependency installation must not attach a Tool Sandbox to provider egress or a
-platform bridge. The planned shape is:
-
-```text
-Tool Sandbox
-    -> authenticated narrow egress proxy
-       -> DNS-resolved allowlist
-          -> selected Maven/npm/PyPI endpoints
-```
-
-The proxy must address DNS rebinding, redirects, IP literals, private/link-local
-ranges, request size, response size, method restrictions, logging redaction,
-and per-run budget. Until that slice exists, Tool execution remains offline.
+Dependency installation must use a separately authenticated egress proxy with
+DNS resolution, redirect/IP/private-range validation, size/method limits,
+redacted audit logs and per-Run budgets. Tool Pods must not be added to provider
+egress, the importer namespace, a host bridge, or a platform network.

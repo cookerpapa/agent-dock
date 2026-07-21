@@ -131,18 +131,20 @@ listener reconnect wakes all local streams, and an idle SSE heartbeat polls the
 durable cursor to recover a missed hint. PostgreSQL replay remains the authority
 and browser reconnect still resumes from `Last-Event-ID`.
 
-## Docker workspace integration
+## Kubernetes gVisor workspace integration
 
-The opt-in Phase 1 runner starts pinned Pi and its `bash`/`edit` tools inside a
-networkless ephemeral Docker container rather than in NestJS. The host manager
-passes a closed command over attached JSONL, forwards each public event through
-the same durable ACK path, and requires the container to disappear after
+The supported Runner keeps pinned Pi in the trusted Supervisor while its
+`read`/`write`/`edit`/`bash` tools cross an authenticated RPC boundary into one
+networkless gVisor Pod per active Turn. The Sandbox Manager creates the fixed
+Pod through a least-privilege Kubernetes client, forwards each public event
+through the same durable ACK path, and requires the Pod to disappear after
 completion or cancellation. The sample image initializes a Java fixture in
-workspace tmpfs and attaches its bounded unified diff to `turn.completed`.
+workspace `emptyDir` and attaches its bounded unified diff to
+`turn.completed`.
 
-This integration is intentionally zero-token: the model simulator runs on
-container loopback and no real credential enters Docker configuration. Run the
-full image, sandbox, PostgreSQL, and SSE proof with:
+The deterministic integration is intentionally zero-token: the model simulator
+runs in the trusted test boundary and no real credential enters a Tool Pod. Run
+the real K3s/containerd/runsc, remote-Pi and cleanup proof with:
 
 ```bash
 npm run sandbox:check

@@ -12,10 +12,13 @@ import {
 import { execFile } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 
 const WORKSPACE_DIRECTORY = "/workspace";
 const GIT_HOME = "/tmp/agent-dock-git-home";
 const GIT_TIMEOUT_MS = 90_000;
+const GIT_FETCH_TIMEOUT_MS = 45_000;
+const GIT_FETCH_MAXIMUM_ATTEMPTS = 3;
 
 class WorkspaceImportWorkerError extends Error {
   readonly code: string;
@@ -29,7 +32,7 @@ class WorkspaceImportWorkerError extends Error {
   }
 }
 
-function runGit(args: readonly string[]): Promise<string> {
+function runGit(args: readonly string[], timeoutMs = GIT_TIMEOUT_MS): Promise<string> {
   return new Promise<string>((resolvePromise, rejectPromise) => {
     execFile(
       "git",
@@ -37,7 +40,7 @@ function runGit(args: readonly string[]): Promise<string> {
       {
         cwd: WORKSPACE_DIRECTORY,
         encoding: "utf8",
-        timeout: GIT_TIMEOUT_MS,
+        timeout: timeoutMs,
         maxBuffer: 128 * 1_024,
         env: {
           PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -50,6 +53,14 @@ function runGit(args: readonly string[]): Promise<string> {
       },
       (error, stdout) => {
         if (error) {
+          process.stderr.write(
+            `${JSON.stringify({
+              event: "repository_git_failed",
+              code: typeof error.code === "number" ? error.code : null,
+              killed: error.killed === true,
+              signal: error.signal ?? null,
+            })}\n`,
+          );
           rejectPromise(
             new WorkspaceImportWorkerError(
               "repository_git_failed",
@@ -65,15 +76,40 @@ function runGit(args: readonly string[]): Promise<string> {
   });
 }
 
+async function fetchExactCommit(args: readonly string[]): Promise<void> {
+  let lastFailure: WorkspaceImportWorkerError | undefined;
+  for (let attempt = 1; attempt <= GIT_FETCH_MAXIMUM_ATTEMPTS; attempt += 1) {
+    try {
+      await runGit(args, GIT_FETCH_TIMEOUT_MS);
+      return;
+    } catch (error: unknown) {
+      if (!(error instanceof WorkspaceImportWorkerError) || !error.retryable) throw error;
+      lastFailure = error;
+      if (attempt < GIT_FETCH_MAXIMUM_ATTEMPTS) {
+        await delay(250 * attempt);
+      }
+    }
+  }
+  throw lastFailure!;
+}
+
 const SAFE_GIT_CONFIG = [
   "-c",
   "protocol.file.allow=never",
   "-c",
   "protocol.ext.allow=never",
   "-c",
+  "http.version=HTTP/1.1",
+  "-c",
+  "http.lowSpeedLimit=1024",
+  "-c",
+  "http.lowSpeedTime=20",
+  "-c",
   "http.followRedirects=false",
   "-c",
   "credential.helper=",
+  "-c",
+  "safe.directory=/workspace",
   "-c",
   "core.hooksPath=/dev/null",
   "-c",
@@ -94,7 +130,7 @@ async function importRepository(request: GitHubWorkspaceImportRequest): Promise<
   const url = `https://github.com/${request.source.repository}.git`;
   await mkdir(GIT_HOME, { recursive: true, mode: 0o700 });
   await runGit([...SAFE_GIT_CONFIG, "init", "--quiet", "."]);
-  await runGit([
+  await fetchExactCommit([
     ...SAFE_GIT_CONFIG,
     "fetch",
     "--depth=1",
@@ -142,13 +178,6 @@ async function main(): Promise<void> {
   try {
     for await (const line of lines) {
       if (line.trim().length === 0) continue;
-      if (request !== undefined) {
-        throw new WorkspaceImportWorkerError(
-          "repository_import_protocol_error",
-          "Repository importer received duplicate input",
-          false,
-        );
-      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(line) as unknown;
@@ -160,6 +189,12 @@ async function main(): Promise<void> {
         );
       }
       request = parseGitHubWorkspaceImportRequest(parsed);
+      // Kubernetes attach keeps the stdin channel open for the lifetime of the
+      // Pod. A complete first protocol frame is authoritative, so begin the
+      // bounded import immediately instead of waiting for EOF from the remote
+      // attach transport.
+      lines.close();
+      break;
     }
     if (request === undefined) {
       throw new WorkspaceImportWorkerError(
