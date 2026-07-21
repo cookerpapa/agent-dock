@@ -185,4 +185,5 @@ extension-policy support would overstate the current boundary.
 - [x] Add an empty Workspace source for ordinary first-message conversation creation
 - [x] Inherit and re-seal the platform default model for new accounts without exposing model controls or credentials
 - [x] Restrict production model replacement to the platform operator tenant
+- [ ] Move off Pi 0.80.10's shrinkwrap-pinned `brace-expansion@5.0.6` and `protobufjs@7.6.4` as soon as upstream republishes fixed transitive dependencies, or adopt a separately verified vendoring strategy
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

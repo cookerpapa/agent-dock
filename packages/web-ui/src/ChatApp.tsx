@@ -37,6 +37,82 @@ function safeDisplay(value: unknown): string {
   return rendered.length > 12_000 ? `${rendered.slice(0, 12_000)}\n…输出已截断` : rendered;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function toolOutputText(value: unknown): string {
+  if (typeof value === "string") return value;
+  const output = objectValue(value);
+  if (output === null || !Array.isArray(output.content)) return safeDisplay(value);
+  const content = output.content
+    .map((part) => {
+      const candidate = objectValue(part);
+      return candidate?.type === "text" ? stringValue(candidate.text) : null;
+    })
+    .filter((part): part is string => part !== null)
+    .join("\n");
+  return content.length > 0 ? content : safeDisplay(value);
+}
+
+function durationLabel(startedAt: string, completedAt: string | undefined): string | null {
+  if (completedAt === undefined) return null;
+  const milliseconds = new Date(completedAt).valueOf() - new Date(startedAt).valueOf();
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+  if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(1)}s`;
+  const minutes = Math.floor(milliseconds / 60_000);
+  return `${String(minutes)}m ${((milliseconds % 60_000) / 1_000).toFixed(1)}s`;
+}
+
+function ExpandableToolText({
+  text,
+  direction,
+  className,
+}: {
+  text: string;
+  direction: "head" | "tail";
+  className: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const normalized = text.replace(/\n+$/, "");
+  const lines = normalized.split("\n");
+  const maximumLines = direction === "head" ? 16 : 20;
+  const omitted = Math.max(0, lines.length - maximumLines);
+  const preview =
+    omitted === 0
+      ? normalized
+      : direction === "head"
+        ? lines.slice(0, maximumLines).join("\n")
+        : lines.slice(-maximumLines).join("\n");
+  const visible = expanded ? normalized : preview;
+  return (
+    <div className="product-tool-text">
+      {omitted > 0 && !expanded && direction === "tail" ? (
+        <button type="button" onClick={() => setExpanded(true)}>
+          … {String(omitted)} earlier lines · 展开完整输出
+        </button>
+      ) : null}
+      <pre className={className}>{visible}</pre>
+      {omitted > 0 && direction === "head" && !expanded ? (
+        <button type="button" onClick={() => setExpanded(true)}>
+          … {String(omitted)} more lines · 展开
+        </button>
+      ) : null}
+      {omitted > 0 && expanded ? (
+        <button type="button" onClick={() => setExpanded(false)}>
+          收起
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof AgentDockApiError) return error.message;
   return "请求没有完成，请稍后重试。";
@@ -79,33 +155,78 @@ function Markdown({ children }: { children: string }) {
   );
 }
 
-function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) {
-  const state = item.status === "running" ? "执行中" : item.status === "failed" ? "失败" : "完成";
-  return (
-    <details className={`product-tool product-tool-${item.status}`}>
-      <summary>
-        <span className="product-tool-icon" aria-hidden="true">
-          {item.status === "running" ? "◌" : item.status === "failed" ? "!" : "✓"}
-        </span>
-        <span>{item.toolName}</span>
-        <small>{state}</small>
-      </summary>
-      <div className="product-tool-body">
-        <span>输入</span>
-        <pre>{safeDisplay(item.input)}</pre>
-        {item.output === undefined ? null : (
-          <>
-            <span>输出</span>
-            <pre>{safeDisplay(item.output)}</pre>
-          </>
-        )}
+export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) {
+  const input = objectValue(item.input);
+  const command = stringValue(input?.command);
+  const path = stringValue(input?.path);
+  const content = stringValue(input?.content);
+  const output = item.output === undefined ? "" : toolOutputText(item.output);
+  const duration = durationLabel(item.startedAt, item.completedAt);
+  const conventionalWriteResult = /^Successfully wrote \d+ bytes to /u.test(output.trim());
+  const statusLabel =
+    item.status === "running" ? "执行中" : item.status === "failed" ? "执行失败" : "执行完成";
+  const icon = item.status === "running" ? "◌" : item.status === "failed" ? "!" : "✓";
+  const heading =
+    item.toolName === "bash" && command !== null ? (
+      <div className="product-tool-command">
+        <span aria-hidden="true">$</span>
+        <code>{command}</code>
       </div>
-    </details>
+    ) : (
+      <div className="product-tool-operation">
+        <strong>{item.toolName}</strong>
+        {path === null ? null : <code>{path}</code>}
+      </div>
+    );
+  return (
+    <section
+      aria-label={`${item.toolName} ${statusLabel}`}
+      className={`product-tool product-tool-${item.status}`}
+    >
+      <div className="product-tool-line">
+        <span className="product-tool-icon" aria-hidden="true">
+          {icon}
+        </span>
+        {heading}
+        <span className="product-tool-state">{statusLabel}</span>
+      </div>
+      <div className="product-tool-body">
+        {item.toolName === "write" && content !== null ? (
+          <ExpandableToolText className="product-tool-source" direction="head" text={content} />
+        ) : item.toolName !== "bash" && path === null ? (
+          <ExpandableToolText
+            className="product-tool-source"
+            direction="head"
+            text={safeDisplay(item.input)}
+          />
+        ) : null}
+        {output.length > 0 && !(item.toolName === "write" && conventionalWriteResult) ? (
+          <ExpandableToolText
+            className={item.toolName === "bash" ? "product-tool-terminal" : "product-tool-output"}
+            direction={item.toolName === "bash" ? "tail" : "head"}
+            text={output}
+          />
+        ) : null}
+        {duration === null ? null : <div className="product-tool-duration">Took {duration}</div>}
+      </div>
+    </section>
   );
 }
 
-function AssistantItem({ item }: { item: TranscriptItem }) {
-  if (item.kind === "text") return <Markdown>{item.text}</Markdown>;
+function AssistantItem({
+  item,
+  processNarration,
+}: {
+  item: TranscriptItem;
+  processNarration: boolean;
+}) {
+  if (item.kind === "text") {
+    return (
+      <div className={processNarration ? "product-agent-stage" : "product-agent-answer"}>
+        <Markdown>{item.text}</Markdown>
+      </div>
+    );
+  }
   if (item.kind === "tool") return <ToolActivity item={item} />;
   if (item.kind === "notification") {
     return (
@@ -126,6 +247,10 @@ function AssistantItem({ item }: { item: TranscriptItem }) {
 function ConversationTurn({ turn }: { turn: TurnView }) {
   const working =
     turn.status === "queued" || turn.status === "running" || turn.status === "cancelling";
+  const lastToolIndex = turn.items.reduce(
+    (lastIndex, item, index) => (item.kind === "tool" ? index : lastIndex),
+    -1,
+  );
   return (
     <section className="product-turn" id={`turn-${turn.turnId}`}>
       <div className="product-message product-user-message">
@@ -144,7 +269,13 @@ function ConversationTurn({ turn }: { turn: TurnView }) {
               <span>正在思考</span>
             </div>
           ) : (
-            turn.items.map((item) => <AssistantItem item={item} key={item.key} />)
+            turn.items.map((item, index) => (
+              <AssistantItem
+                item={item}
+                key={item.key}
+                processNarration={item.kind === "text" && index < lastToolIndex}
+              />
+            ))
           )}
           {turn.failure ? (
             <div className="product-turn-error">

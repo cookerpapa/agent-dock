@@ -193,6 +193,8 @@ describe("session transcript reducer", () => {
         status: "completed",
         firstSequence: 4,
         lastSequence: 5,
+        startedAt: CREATED_AT,
+        completedAt: CREATED_AT,
       }),
     ]);
     expect(

@@ -1653,3 +1653,18 @@
   44 条 durable event 可重放、assistant 文本已持久化、Workspace checkpoint 已提交，usage ledger 记录 1,326 input / 59 output
   tokens。验收凭据随即撤销并实测返回 401，受管 Tool Sandbox 容器无残留；这次验证实际消耗模型 token，不是 fake model 或 health
   probe。
+
+## 2026-07-21 — Pi TUI 风格的 Web 执行记录
+
+- 问题：产品页虽然已经按 durable event 保存完整 Tool 输入和输出，但默认只显示 `write 完成` / `bash 失败` 折叠卡片。真实冒泡排序
+  Run 中的命令、`command not found`、文件内容和 Node 测试结果都存在 PostgreSQL/SSE 中，却没有像 Pi TUI 那样形成可读的执行过程。
+- 展示：Web 现在把同一轮中的中间 assistant 文本识别为阶段说明；`bash` 直接显示 `$ command`、stdout/stderr 和失败原因，`write`
+  显示操作名、Workspace 路径和源代码预览，其他工具保留可读输入/输出。成功、失败、运行中使用 Pi 式 glyph；根据两个 durable event
+  的 `occurredAt` 展示 `Took` 耗时。长源码保留开头、长终端输出保留结尾，并可点击展开完整的 bounded event 内容。
+- 兼容：没有修改 Agent protocol、Sandbox 或历史持久化格式；Web reducer 只把已有 event 时间保存在 view model。新增 SSR tests
+  证明 Pi content block 会扁平为真实终端文本、失败命令不会显示 JSON、write acknowledgement 不重复显示，源码预览和耗时均可见。
+  Web typecheck、22 tests 和 production build 通过，全仓所有 build/type/function/spike/backup 门禁通过。
+- 已知发布门禁：2026-07-21 的 npm advisory 新增 Pi 0.80.10 内部 shrinkwrap 锁定的 `brace-expansion@5.0.6` high 与
+  `protobufjs@7.6.4` moderate。当前 Pi 已是 registry 最新版，root override 和 `npm audit fix` 都不能覆盖发布包内部 shrinkwrap；
+  没有伪造修复或降低 audit level，已单独进入 Backlog 等待 upstream repack 或经过验证的 vendoring 方案。本次 Web-only image 不包含
+  Pi runtime，部署不会把这两个包新增到浏览器镜像或重建 Trusted Runner。

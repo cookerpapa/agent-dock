@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import ChatApp, { AuthScreen } from "../src/ChatApp.tsx";
+import ChatApp, { AuthScreen, ToolActivity } from "../src/ChatApp.tsx";
 import { AgentDockApi } from "../src/api.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
 
@@ -51,5 +51,74 @@ describe("product chat experience", () => {
     expect(markup).toContain("usage");
     expect(markup).toContain("activity");
     expect(markup).toContain("Versioned workspace");
+  });
+
+  it("renders Pi-style command output instead of a collapsed JSON tool card", () => {
+    const markup = renderToStaticMarkup(
+      <ToolActivity
+        item={{
+          kind: "tool",
+          key: "tool:bash-1",
+          toolCallId: "bash-1",
+          toolName: "bash",
+          input: { command: "python3 bubble_sort.py" },
+          output: {
+            content: [
+              {
+                type: "text",
+                text: "/bin/bash: python3: command not found\n\nCommand exited with code 127",
+              },
+            ],
+            details: {},
+          },
+          status: "failed",
+          firstSequence: 4,
+          lastSequence: 5,
+          startedAt: "2026-07-21T00:00:00.000Z",
+          completedAt: "2026-07-21T00:00:01.240Z",
+        }}
+      />,
+    );
+    expect(markup).toContain("$</span><code>python3 bubble_sort.py</code>");
+    expect(markup).toContain("python3: command not found");
+    expect(markup).toContain("Command exited with code 127");
+    expect(markup).toContain("Took 1.2s");
+    expect(markup).not.toContain("&quot;content&quot;");
+    expect(markup).not.toContain("输入</span>");
+  });
+
+  it("renders write paths and a bounded source preview like Pi", () => {
+    const content = Array.from({ length: 20 }, (_, index) => `line ${String(index + 1)}`).join(
+      "\n",
+    );
+    const markup = renderToStaticMarkup(
+      <ToolActivity
+        item={{
+          kind: "tool",
+          key: "tool:write-1",
+          toolCallId: "write-1",
+          toolName: "write",
+          input: { path: "/workspace/bubble_sort.py", content },
+          output: {
+            content: [
+              {
+                type: "text",
+                text: "Successfully wrote 151 bytes to /workspace/bubble_sort.py",
+              },
+            ],
+          },
+          status: "completed",
+          firstSequence: 6,
+          lastSequence: 7,
+          startedAt: "2026-07-21T00:00:00.000Z",
+          completedAt: "2026-07-21T00:00:00.010Z",
+        }}
+      />,
+    );
+    expect(markup).toContain("<strong>write</strong><code>/workspace/bubble_sort.py</code>");
+    expect(markup).toContain("line 1");
+    expect(markup).toContain("4 more lines");
+    expect(markup).not.toContain("Successfully wrote");
+    expect(markup).toContain("Took 0.0s");
   });
 });

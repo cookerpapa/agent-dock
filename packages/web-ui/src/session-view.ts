@@ -34,6 +34,8 @@ export type TranscriptItem =
       status: "running" | "completed" | "failed";
       firstSequence: number;
       lastSequence?: number;
+      startedAt: string;
+      completedAt?: string;
     }
   | {
       kind: "approval";
@@ -217,6 +219,7 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
             input: event.payload.input,
             status: "running",
             firstSequence: event.seq,
+            startedAt: event.occurredAt,
           },
         ],
       };
@@ -231,6 +234,7 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
           ...(event.payload.output === undefined ? {} : { output: event.payload.output }),
           status: event.payload.isError ? "failed" : "completed",
           lastSequence: event.seq,
+          completedAt: event.occurredAt,
         };
       });
       if (!matched) {
@@ -244,6 +248,8 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
           status: event.payload.isError ? "failed" : "completed",
           firstSequence: event.seq,
           lastSequence: event.seq,
+          startedAt: event.occurredAt,
+          completedAt: event.occurredAt,
         });
       }
       return { ...turn, items };
