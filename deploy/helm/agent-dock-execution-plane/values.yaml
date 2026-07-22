@@ -1,0 +1,27 @@
+runtimeClass:
+  overhead:
+    cpu: 25m
+    memory: 32Mi
+
+dependencyEgressProxy:
+  replicas: 2
+  revisionHistoryLimit: 3
+  image:
+    repository: agent-dock/dependency-egress-proxy
+    tag: production
+    digest: ""
+    pullPolicy: Never
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+  disruptionBudget:
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 192Mi
+  nodeSelector: {}
+  tolerations: []

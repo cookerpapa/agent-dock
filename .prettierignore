@@ -12,3 +12,4 @@ tmp/
 workspaces/
 packages/web-ui/Caddyfile
 deploy/observability/Caddyfile
+deploy/helm/agent-dock-execution-plane/templates/

@@ -477,6 +477,15 @@ Kubernetes owns placement, cgroup declarations, policy and Pod lifecycle;
 untrusted syscalls are handled by gVisor's userspace application kernel instead
 of directly by the host kernel.
 
+The Kubernetes boundary is installed from the versioned
+`deploy/helm/agent-dock-execution-plane` chart. Its closed values contract keeps
+the `runsc` RuntimeClass, namespace identities, scoped RBAC, default-deny graph
+and internal-only proxy topology fixed while allowing bounded proxy image,
+resource and placement changes. The Runner is not deployed or exposed by this
+chart; it continues to connect outward through the authenticated Supervisor
+transport. Static rendering is checked in CI, while actual runsc/CNI behavior
+remains a live `sandbox:check` requirement.
+
 There is no runtime selector. Ordinary Tool execution accepts only deny-all.
 An environment recipe may request dependency access to an immutable list of
 exact HTTPS hosts. The Manager signs a short-lived activation-scoped Ed25519

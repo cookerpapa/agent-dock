@@ -101,5 +101,8 @@ enforcement service, lifecycle reconciliation and broader production tests.
   gVisor Pod restores and verifies the Workspace for Agent tools.
 - Single-consumption clean gVisor prewarming is complete under ADR-0045, with a
   measured same-image first-Tool comparison and no used-Pod recycling.
-- Attempt rewind/Review Bundles and Helm acceptance remain subsequent
-  dependency-ordered work.
+- Attempt-aware rewind, canonical/superseded reconnect projection and immutable
+  content-verified Review Bundles are complete under ADR-0047.
+- The static execution manifest has been replaced by the closed, versioned Helm
+  chart and policy gate under ADR-0048. Live upgrade and final production/model
+  acceptance remain release evidence rather than chart-render claims.

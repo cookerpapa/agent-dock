@@ -1,0 +1,22 @@
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: agent-dock-gvisor
+  labels:
+    {{- include "agent-dock-execution-plane.labels" . | nindent 4 }}
+  annotations:
+    agent-dock.io/runtime: runsc
+    agent-dock.io/platform: kvm
+handler: runsc
+overhead:
+  podFixed:
+    cpu: {{ .Values.runtimeClass.overhead.cpu | quote }}
+    memory: {{ .Values.runtimeClass.overhead.memory | quote }}
+scheduling:
+  nodeSelector:
+    agent-dock.io/sandbox-runtime: gvisor
+  tolerations:
+    - key: agent-dock.io/sandbox-runtime
+      operator: Equal
+      value: gvisor
+      effect: NoSchedule

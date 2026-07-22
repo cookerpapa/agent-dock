@@ -1,0 +1,10 @@
+apiVersion: v2
+name: agent-dock-execution-plane
+description: Security boundary and controlled egress for AgentDock gVisor sandboxes
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+annotations:
+  agent-dock.io/runtime-boundary: "gvisor-runsc-kvm"
+  agent-dock.io/topology: "outbound-only-runner"

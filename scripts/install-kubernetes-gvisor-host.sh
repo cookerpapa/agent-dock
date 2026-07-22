@@ -6,6 +6,9 @@ K3S_INSTALL_SHA256="46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152f
 K3S_BINARY_SHA256="65a55ec56c24eab44383086166ec620a491952b7e23941a49ddca6e8a4c4b4de"
 EXPECTED_RUNSC_VERSION="release-20260714.0"
 RUNSC_PACKAGE_VERSION="20260714.0"
+HELM_VERSION="v3.18.6"
+HELM_BUILD="v3.18.6+gb76a950"
+HELM_ARCHIVE_SHA256="3f43c0aa57243852dd542493a0f54f1396c0bc8ec7296bbb2c01e802010819ce"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run this installer as root (for example: sudo ./scripts/install-kubernetes-gvisor-host.sh)." >&2
@@ -141,9 +144,22 @@ chmod 0644 /etc/containerd/runsc.toml
 
 TEMPORARY_DIRECTORY="$(mktemp -d)"
 cleanup() {
-  rm -rf -- "${TEMPORARY_DIRECTORY}"
+  if [[ "${TEMPORARY_DIRECTORY}" == /tmp/* && -d "${TEMPORARY_DIRECTORY}" ]]; then
+    rm -rf -- "${TEMPORARY_DIRECTORY}"
+  fi
 }
 trap cleanup EXIT
+HELM_ARCHIVE="${TEMPORARY_DIRECTORY}/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+curl --fail --silent --show-error --location \
+  "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+  --output "${HELM_ARCHIVE}"
+printf '%s  %s\n' "${HELM_ARCHIVE_SHA256}" "${HELM_ARCHIVE}" | sha256sum --check --status
+tar -xzf "${HELM_ARCHIVE}" -C "${TEMPORARY_DIRECTORY}"
+install -m 0755 "${TEMPORARY_DIRECTORY}/linux-amd64/helm" /usr/local/bin/helm
+if [[ "$(/usr/local/bin/helm version --short)" != "${HELM_BUILD}" ]]; then
+  echo "Expected Helm ${HELM_BUILD} after installation." >&2
+  exit 1
+fi
 INSTALL_SCRIPT="${TEMPORARY_DIRECTORY}/install-k3s.sh"
 curl --fail --silent --show-error --location \
   "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh" \
@@ -237,8 +253,15 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=120s >/dev/null
-/usr/local/bin/k3s kubectl apply --server-side --field-manager=agent-dock-installer \
-  --filename "${REPOSITORY_ROOT}/deploy/kubernetes/execution-plane.yaml" >/dev/null
+/usr/local/bin/helm upgrade --install agent-dock-execution-plane \
+  "${REPOSITORY_ROOT}/deploy/helm/agent-dock-execution-plane" \
+  --namespace default \
+  --take-ownership \
+  --history-max 10 \
+  --timeout 2m >/dev/null
+/usr/local/bin/helm status agent-dock-execution-plane \
+  --namespace default \
+  --output json | grep -q '"status":"deployed"'
 
 TOKEN=""
 CA_DATA=""
@@ -302,5 +325,5 @@ grep -Eq '^[[:space:]]*gso[[:space:]]*=[[:space:]]*"false"' /etc/containerd/runs
 grep -Eq '^[[:space:]]*software-gso[[:space:]]*=[[:space:]]*"false"' /etc/containerd/runsc.toml
 
 echo "AgentDock Kubernetes/gVisor execution plane is installed."
-echo "K3s: ${K3S_VERSION}; RuntimeClass: agent-dock-gvisor; runsc: ${EXPECTED_RUNSC_VERSION}"
+echo "K3s: ${K3S_VERSION}; RuntimeClass: agent-dock-gvisor; runsc: ${EXPECTED_RUNSC_VERSION}; Helm: ${HELM_BUILD}"
 echo "Scoped kubeconfig: ${KUBECONFIG_PATH}"

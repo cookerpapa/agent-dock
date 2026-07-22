@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runtimeClass", "dependencyEgressProxy"],
+  "properties": {
+    "runtimeClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overhead"],
+      "properties": {
+        "overhead": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*m$"
+            },
+            "memory": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+            }
+          }
+        }
+      }
+    },
+    "dependencyEgressProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replicas",
+        "revisionHistoryLimit",
+        "image",
+        "rollingUpdate",
+        "disruptionBudget",
+        "resources",
+        "nodeSelector",
+        "tolerations"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20
+        },
+        "revisionHistoryLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "tag", "digest", "pullPolicy"],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[a-zA-Z0-9._/-]+$"
+            },
+            "tag": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-zA-Z0-9_.-]+$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^$|^sha256:[0-9a-f]{64}$"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          }
+        },
+        "rollingUpdate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxUnavailable", "maxSurge"],
+          "properties": {
+            "maxUnavailable": {
+              "type": "integer",
+              "const": 0
+            },
+            "maxSurge": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            }
+          }
+        },
+        "disruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minAvailable"],
+          "properties": {
+            "minAvailable": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 19
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requests", "limits"],
+          "properties": {
+            "requests": { "$ref": "#/$defs/resources" },
+            "limits": { "$ref": "#/$defs/resources" }
+          }
+        },
+        "nodeSelector": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "tolerations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "maxLength": 253 },
+              "operator": { "type": "string", "enum": ["Equal", "Exists"] },
+              "value": { "type": "string", "maxLength": 63 },
+              "effect": {
+                "type": "string",
+                "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+              },
+              "tolerationSeconds": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*m|[1-9][0-9]*)$"
+        },
+        "memory": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+        }
+      }
+    }
+  }
+}

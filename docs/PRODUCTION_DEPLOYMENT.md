@@ -84,9 +84,12 @@ newgrp docker
 npm run sandbox:check
 ```
 
-The installer is checksum/version pinned for K3s and runsc, creates the scoped
+The installer is checksum/version pinned for K3s, runsc and Helm. It installs
+the versioned `agent-dock-execution-plane` chart, creates the scoped
 RBAC/NetworkPolicy/RuntimeClass resources, and writes the private Manager
-kubeconfig. Do not expose Docker/containerd/Kubernetes credentials to an
+kubeconfig. `npm run helm:check` is the static policy gate; it does not replace
+the real `npm run sandbox:check` CNI/runtime test. Do not expose
+Docker/containerd/Kubernetes credentials to an
 application or Tool Pod. The Manager fails readiness instead of falling back to
 runc or systrap. On the validated WSL2/K3s network path, the installed runsc
 configuration retains `network = "sandbox"` but disables host/software GSO;
