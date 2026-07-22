@@ -106,7 +106,8 @@ enforcement service, lifecycle reconciliation and broader production tests.
 - The static execution manifest has been replaced by the closed, versioned Helm
   chart and policy gate under ADR-0048.
 - Final production acceptance completed two real-model coding Runs against an
-  exact public GitHub commit. It verified 22 persisted model calls, immutable
+  exact public GitHub commit on OCI/environment revision
+  `bb855b74da1056422ce8755232e3a6200c1b7647`. It verified 34 persisted model calls, immutable
   content-hashed Review Bundles, one physical gVisor Pod reused under fencing
   token 1 then 2, and exact assignment cleanup. The reproducible evidence is in
   `docs/reports/real-model-acceptance-latest.*`.

@@ -1945,8 +1945,9 @@
   fingerprint 分叉。门禁现在只使用部署配置的 issuer，不再轮换共享 trust anchor；生产 Manager 重启后验证 ConfigMap 与 Proxy 实际 fingerprint 已恢复。
 - gVisor 实测：5 个 Manager live tests 与 2 个 trusted Runner tests 全部通过，包括固定 GitHub commit、真实 npm 安装后换入全新离线 Pod、single-consumption
   prewarm（2,357 ms vs cold 4,256 ms）、跨租户/凭据/资源/输出/清理和 warm fence rebind；最终无 Tool/Importer 残留。
-- 真实模型：production Web/API 使用 `deepseek-v4-flash` 对固定 commit 连续完成两轮 Java coding。共 22 次请求、7,306 input、5,787 output、145,792
-  cache-read tokens；第一轮 164 events/28 tool calls/4,417-byte patch，第二轮 78 events/6 tool calls/6,086-byte cumulative patch。两轮 Review Bundle hash
-  复算一致且二次读取完全相同，测试均落为 passed。
-- 生命周期证据：两轮复用 Pod UID `ebd234aa-68fd-40c8-8cdf-1d1788adb813` 与同一 activation，fence 1→2；exact source snapshot 未重复导入，最后通过受信
+- 真实模型：最终 commit/OCI/environment revision `bb855b74da1056422ce8755232e3a6200c1b7647` 部署后，production Web/API 使用
+  `deepseek-v4-flash` 对固定 commit 连续完成两轮 Java coding。共 34 次请求、6,797 input、8,771 output、244,480 cache-read tokens；第一轮
+  174 events/29 tool calls/4,895-byte patch，第二轮 170 events/17 tool calls/6,782-byte cumulative patch。第二轮先持久记录两次 failed test，再由 Agent
+  修复并记录 passed；两轮 Review Bundle hash 复算一致且二次读取完全相同。
+- 生命周期证据：两轮复用 Pod UID `714fed06-da04-49e9-8899-13861bd50d7e` 与同一 activation，fence 1→2；exact source snapshot 未重复导入，最后通过受信
   inventory/terminate-and-confirm 协议删除该精确 UID。脱敏报告保存在 `docs/reports/real-model-acceptance-latest.json` 和 `.md`。
