@@ -212,37 +212,140 @@ async function runTurn(sessionId, prompt, afterSequence) {
   }
 }
 
-async function assertNoManagedKubernetesPods() {
-  const namespaces = ["agent-dock-sandboxes", "agent-dock-importers"];
+async function managedKubernetesPods(namespace) {
+  const value = JSON.parse(
+    await capture(
+      "kubectl",
+      [
+        "--kubeconfig",
+        kubeconfigPath,
+        "get",
+        "pods",
+        "--namespace",
+        namespace,
+        "--selector",
+        "agent-dock.io/managed=true",
+        "--output=json",
+      ],
+      60_000,
+    ),
+  );
+  assert(value !== null && typeof value === "object" && Array.isArray(value.items));
+  return value.items;
+}
+
+function warmSandboxIdentity(pod, sessionId) {
+  const metadata = pod?.metadata;
+  const annotations = metadata?.annotations;
+  assert.equal(annotations?.["agent-dock.io/session-id"], sessionId);
+  assert.equal(pod?.spec?.runtimeClassName, "agent-dock-gvisor");
+  for (const value of [
+    metadata?.name,
+    metadata?.uid,
+    annotations?.["agent-dock.io/activation-id"],
+    annotations?.["agent-dock.io/attempt-id"],
+    annotations?.["agent-dock.io/environment-version-id"],
+    annotations?.["agent-dock.io/environment-image-revision"],
+    annotations?.["agent-dock.io/sandbox-id"],
+  ]) {
+    assert.equal(typeof value, "string");
+    assert(value.length > 0);
+  }
+  const fencingToken = Number(annotations["agent-dock.io/fencing-token"]);
+  assert(Number.isSafeInteger(fencingToken) && fencingToken > 0);
+  return {
+    name: metadata.name,
+    uid: metadata.uid,
+    activationId: annotations["agent-dock.io/activation-id"],
+    attemptId: annotations["agent-dock.io/attempt-id"],
+    environmentVersionId: annotations["agent-dock.io/environment-version-id"],
+    environmentImageRevision: annotations["agent-dock.io/environment-image-revision"],
+    sandboxId: annotations["agent-dock.io/sandbox-id"],
+    fencingToken,
+  };
+}
+
+async function waitForWarmSessionSandbox(sessionId) {
   const deadline = Date.now() + 15_000;
   while (true) {
-    const survivors = [];
-    for (const namespace of namespaces) {
-      const pods = await capture(
-        "kubectl",
-        [
-          "--kubeconfig",
-          kubeconfigPath,
-          "get",
-          "pods",
-          "--namespace",
-          namespace,
-          "--selector",
-          "agent-dock.io/managed=true",
-          "--output=name",
-        ],
-        60_000,
-      );
-      if (pods.length > 0) survivors.push(`${namespace}:${pods}`);
-    }
-    if (survivors.length === 0) return;
+    const matches = (await managedKubernetesPods("agent-dock-sandboxes")).filter(
+      (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
+    );
+    if (matches.length === 1) return warmSandboxIdentity(matches[0], sessionId);
+    if (matches.length > 1) throw new Error("A Session owns more than one warm Tool Sandbox");
     if (Date.now() >= deadline) {
-      throw new Error(
-        `Managed Kubernetes Pods survived the acceptance run: ${survivors.join(", ")}`,
-      );
+      throw new Error("The completed coding Session did not retain one warm Tool Sandbox");
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
   }
+}
+
+async function sandboxManagerInventory(request) {
+  const encodedRequest = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+  const script = [
+    "const {readFile}=await import('node:fs/promises');",
+    "const token=(await readFile('/run/agent-dock-secrets/sandbox-manager-token','utf8')).trim();",
+    "const request=JSON.parse(Buffer.from(process.env.AGENT_DOCK_ACCEPTANCE_REQUEST,'base64url').toString('utf8'));",
+    "const response=await fetch('http://sandbox-manager:4300/internal/v1/sandbox-inventory',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(request)});",
+    "const body=await response.text();",
+    "if(!response.ok){process.stderr.write(body);process.exit(1)}",
+    "process.stdout.write(body);",
+  ].join("");
+  return JSON.parse(
+    await capture(
+      process.execPath,
+      [
+        "scripts/production-compose.mjs",
+        "exec",
+        "-T",
+        "-e",
+        `AGENT_DOCK_ACCEPTANCE_REQUEST=${encodedRequest}`,
+        "supervisor-host",
+        "node",
+        "--input-type=module",
+        "--eval",
+        script,
+      ],
+      60_000,
+    ),
+  );
+}
+
+async function terminateWarmSessionSandbox(sessionId, sandbox) {
+  const listed = await sandboxManagerInventory({
+    protocolVersion: 1,
+    type: "assignments.list",
+    requestId: crypto.randomUUID(),
+    sandboxId: sandbox.sandboxId,
+  });
+  assert.equal(listed.type, "assignments.listed");
+  const matches = listed.assignments.filter((assignment) => assignment.sessionId === sessionId);
+  assert.equal(
+    matches.length,
+    1,
+    "Sandbox inventory did not contain exactly one Session assignment",
+  );
+  assert.equal(matches[0].containerId, sandbox.uid);
+  const absent = await sandboxManagerInventory({
+    protocolVersion: 1,
+    type: "assignment.terminate_and_confirm",
+    requestId: crypto.randomUUID(),
+    sandboxId: sandbox.sandboxId,
+    assignment: matches[0],
+  });
+  assert.equal(absent.type, "assignment.absent");
+  assert.equal(absent.containerId, sandbox.uid);
+
+  const deadline = Date.now() + 15_000;
+  while (true) {
+    const survivors = (await managedKubernetesPods("agent-dock-sandboxes")).filter(
+      (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
+    );
+    if (survivors.length === 0) break;
+    if (Date.now() >= deadline) throw new Error("Warm Tool Sandbox termination was not observed");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  }
+  assert.equal((await managedKubernetesPods("agent-dock-importers")).length, 0);
 }
 
 const model = await api.getModelConfiguration();
@@ -277,6 +380,12 @@ const sourceAfterFirst = await psql(
 assert.match(sourceAfterFirst, /^ready\|[A-Za-z0-9/_.-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|/);
 assert(first.patch.includes("src/main/java/junit_project/Calculator.java"));
 assert(first.patch.includes("test.sh"));
+const firstWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
+assert.equal(
+  firstWarmSandbox.environmentImageRevision,
+  project.environment.imageRevision,
+  "Warm Sandbox did not run the deployed immutable environment revision",
+);
 
 const second = await runTurn(
   session.sessionId,
@@ -296,6 +405,13 @@ assert.equal(
 );
 assert(second.patch.includes("src/main/java/junit_project/Calculator.java"));
 assert(second.patch.includes("test.sh"));
+const secondWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
+assert.equal(secondWarmSandbox.name, firstWarmSandbox.name);
+assert.equal(secondWarmSandbox.uid, firstWarmSandbox.uid);
+assert.equal(secondWarmSandbox.activationId, firstWarmSandbox.activationId);
+assert.equal(secondWarmSandbox.environmentVersionId, firstWarmSandbox.environmentVersionId);
+assert.notEqual(secondWarmSandbox.attemptId, firstWarmSandbox.attemptId);
+assert(secondWarmSandbox.fencingToken > firstWarmSandbox.fencingToken);
 
 const conversation = await api.getConversation(session.sessionId);
 assert.equal(conversation.project.source.kind, "github_public");
@@ -313,7 +429,7 @@ const [modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens]
   .split("|")
   .map(Number);
 assert(modelCalls > 0 && outputTokens > 0, "Real model token usage was not persisted");
-await assertNoManagedKubernetesPods();
+await terminateWarmSessionSandbox(session.sessionId, secondWarmSandbox);
 
 process.stdout.write(
   `${JSON.stringify({
@@ -337,6 +453,15 @@ process.stdout.write(
       patchBytes: second.patchBytes,
     },
     usage: { modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+    warmReuse: {
+      podUid: secondWarmSandbox.uid,
+      activationId: secondWarmSandbox.activationId,
+      firstFence: firstWarmSandbox.fencingToken,
+      secondFence: secondWarmSandbox.fencingToken,
+      environmentVersionId: secondWarmSandbox.environmentVersionId,
+      imageRevision: secondWarmSandbox.environmentImageRevision,
+      cleaned: true,
+    },
     sourceSnapshot: sourceAfterSecond.split("|").slice(0, 4).join("|"),
   })}\n`,
 );
