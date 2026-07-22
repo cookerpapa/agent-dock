@@ -168,6 +168,19 @@ async function acceptTurn(idempotencyKey: string, prompt: string): Promise<Accep
   return response.json() as AcceptedTurnResource;
 }
 
+async function dispatchClaimableWork(dispatcher: OutboxDispatcher) {
+  const deadline = Date.now() + 2_000;
+  do {
+    const result = await dispatcher.dispatchNext();
+    if (result.status !== "idle") return result;
+    // SKIP LOCKED makes a single poll legitimately idle while another
+    // transaction is releasing a Session/policy row. Production pollers retry;
+    // this helper retains a hard deadline so a stranded mailbox still fails.
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 5));
+  } while (Date.now() < deadline);
+  throw new Error("Durable mailbox work did not become claimable before the deadline");
+}
+
 async function readTurnExecution(accepted: AcceptedTurnResource) {
   return database
     .selectFrom("commands as command")
@@ -1418,7 +1431,7 @@ describe.sequential("single-user durable turn intake API", () => {
       commandId: firstAccepted.resource.commandId,
     });
     for (const expected of accepted.slice(1)) {
-      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      await expect(dispatchClaimableWork(dispatcher)).resolves.toMatchObject({
         status: "completed",
         commandId: expected.resource.commandId,
       });

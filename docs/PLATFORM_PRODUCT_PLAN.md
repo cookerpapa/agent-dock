@@ -193,9 +193,9 @@ or claimed.
 
 Do not add Temporal, Kafka, Flink, Redis, MCP, subagents, arbitrary extensions,
 or dozens of tools merely to make the architecture look larger. Do not broaden
-the validated single-node Kubernetes execution plane into an untested Helm or
-multi-node claim. Each addition needs a measured requirement and an end-to-end
-acceptance test.
+the validated, versioned single-node Helm/Kubernetes execution plane into an
+untested multi-node claim. Each addition needs a measured requirement and an
+end-to-end acceptance test.
 
 Subagents can become a later product capability after the single-agent Run,
 Workspace, security, observability, and evaluation foundations are complete.

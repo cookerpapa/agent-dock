@@ -1,0 +1,74 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-22T19:02:47.759Z",
+  "endpoint": "http://127.0.0.1:8080/",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "source": {
+    "repository": "mathewjonas/java-calculator-junit",
+    "commitSha": "0b7314b2f25b83794bf0d52f13f4f750eb0f4bdb",
+    "status": "ready"
+  },
+  "projectId": "08899cf1-0545-4886-b677-82ba74424bb6",
+  "workspaceId": "aa901e74-2560-49b8-bf52-2b361ef17700",
+  "sessionId": "2e09969c-7954-4ee8-a952-093608984926",
+  "firstTurn": {
+    "runId": "f8de53f2-1133-4fd1-8e3a-c06099e861c4",
+    "turnId": "1d2bda35-0a6d-4b2f-8469-268a2b413e57",
+    "eventCount": 164,
+    "toolCalls": 28,
+    "patchBytes": 4417,
+    "reviewBundleId": "241e9b8a-d4a2-5bac-a038-295361af77c0",
+    "reviewBundleSha256": "117931b831b0bd2d677cd31bf528ca9edf84ead9332083e20afe39183b995c2d",
+    "changedPaths": [
+      "src/main/java/junit_project/Calculator.java",
+      "src/test/java/junit_project/CalculatorTest.java",
+      "test.sh"
+    ],
+    "tests": [
+      {
+        "suite": "cd",
+        "status": "passed"
+      }
+    ]
+  },
+  "secondTurn": {
+    "runId": "2495937a-b14e-4863-8182-a1fc21138438",
+    "turnId": "39cf5d74-a3e0-407b-ac46-36beeb8e7f08",
+    "eventCount": 78,
+    "toolCalls": 6,
+    "patchBytes": 6086,
+    "reviewBundleId": "ca266560-f6c3-5113-aa5a-1974de93c40e",
+    "reviewBundleSha256": "44dff53882b4bc41c5608cd768ecfd902523a9ed1a59aea3b2d67621ce4aed5b",
+    "changedPaths": [
+      "src/main/java/junit_project/Calculator.java",
+      "src/test/java/junit_project/CalculatorTest.java",
+      "test.sh"
+    ],
+    "tests": [
+      {
+        "suite": "cd",
+        "status": "passed"
+      }
+    ]
+  },
+  "usage": {
+    "modelCalls": 22,
+    "inputTokens": 7306,
+    "outputTokens": 5787,
+    "cacheReadTokens": 145792,
+    "cacheWriteTokens": 0
+  },
+  "warmReuse": {
+    "podUid": "ebd234aa-68fd-40c8-8cdf-1d1788adb813",
+    "activationId": "1bc4aa93-5a4b-4c71-81ee-b1efa060c9d0",
+    "firstFence": 1,
+    "secondFence": 2,
+    "environmentVersionId": "5f37206e-8801-4e22-9d42-8bf0dcba0c9f",
+    "imageRevision": "5147d3fdc810f34978be8aee0306c55f71d30145",
+    "cleaned": true
+  },
+  "sourceSnapshot": "ready|workspace-seeds/d16a4af7-4a07-4569-bf40-107f611a491c/aa901e74-2560-49b8-bf52-2b361ef17700/f3acbe05b6bb72d56f8221c77f9a5f85b1d7a6c66f4c93ff15ec86123c14d860.json|f3acbe05b6bb72d56f8221c77f9a5f85b1d7a6c66f4c93ff15ec86123c14d860|13904"
+}

@@ -1,14 +1,15 @@
 # Implementation roadmap
 
 This file preserves the original aspirational phase roadmap, including optional
-subagents and a future multi-node/Helm release. The single-node Kubernetes +
+subagents and a future multi-node release. The single-node Kubernetes +
 gVisor execution plane and demand-activated warm-Sandbox/event-batching upgrade
 are now implemented under ADR-0039 and ADR-0040. The
 dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
 private single-host product are tracked in
-[`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and are complete through
-ADR-0040. Do not interpret completion of that product plan as a claim that the
-optional Phase 5 subagent tree or a multi-node Helm release exists.
+[`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and now include the
+closed, versioned single-node Helm execution-plane chart under ADR-0048. Do not
+interpret completion of that product plan as a claim that the optional Phase 5
+subagent tree or a validated multi-node release exists.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -268,7 +269,8 @@ measured results rather than architecture claims.
 
 Deliverables:
 
-- single-node Kubernetes runner lifecycle and a future multi-node Helm chart;
+- a versioned single-node Kubernetes/gVisor Helm execution plane and a future
+  validated multi-node profile;
 - NetworkPolicy and storage configuration;
 - CI, image scanning, SBOM, and reproducible releases;
 - one-command local demo;
@@ -280,11 +282,12 @@ demo and failure tests from the documentation.
 Current status: the single-node deployment and evidence subset is complete.
 The host installer provisions K3s, containerd, `runsc`/KVM, RuntimeClass, scoped
 RBAC and NetworkPolicy; production deployment imports the pinned Tool image and
-runs the normal browser flow through Kubernetes Pods. CI, SBOM/image scanning,
-encrypted backup/restore, architecture/threat-model documentation and
-reproducible security/production gates exist. A multi-node cluster, Helm chart,
-external CSI/CNI operating profile and demo video remain future work and are
-not implied by the single-host release.
+runs the normal browser flow through Kubernetes Pods. The execution resources
+are packaged in a closed Helm chart with fixed runtime/RBAC/network identities,
+two proxy replicas and a PDB. CI, SBOM/image scanning, encrypted backup/restore,
+architecture/threat-model documentation and reproducible security/production
+gates exist. A multi-node cluster, external CSI/CNI operating profile and demo
+video remain future work and are not implied by the single-host release.
 
 ## Expected calendar time
 

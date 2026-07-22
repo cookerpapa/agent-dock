@@ -104,5 +104,9 @@ enforcement service, lifecycle reconciliation and broader production tests.
 - Attempt-aware rewind, canonical/superseded reconnect projection and immutable
   content-verified Review Bundles are complete under ADR-0047.
 - The static execution manifest has been replaced by the closed, versioned Helm
-  chart and policy gate under ADR-0048. Live upgrade and final production/model
-  acceptance remain release evidence rather than chart-render claims.
+  chart and policy gate under ADR-0048.
+- Final production acceptance completed two real-model coding Runs against an
+  exact public GitHub commit. It verified 22 persisted model calls, immutable
+  content-hashed Review Bundles, one physical gVisor Pod reused under fencing
+  token 1 then 2, and exact assignment cleanup. The reproducible evidence is in
+  `docs/reports/real-model-acceptance-latest.*`.

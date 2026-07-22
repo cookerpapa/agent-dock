@@ -1,8 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
-import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { createPublicKey } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -13,6 +12,11 @@ const kubeconfigPath = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_KUBECONFIG_PATH ??
     "deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig",
+);
+const dependencyEgressPrivateKeyPath = resolve(
+  repositoryRoot,
+  process.env.AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE ??
+    "deploy/production/runtime/secrets/dependency-egress-private-key.pem",
 );
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const executionEnvironment = {
@@ -91,6 +95,12 @@ if (process.platform !== "linux") {
   throw new Error("The Kubernetes gVisor gate requires a native Linux execution node.");
 }
 await access(kubeconfigPath);
+await access(dependencyEgressPrivateKeyPath);
+const expectedDependencyEgressPublicKey = createPublicKey(
+  await readFile(dependencyEgressPrivateKeyPath),
+)
+  .export({ type: "spki", format: "pem" })
+  .toString();
 const clusterVersion = await capture("kubectl", [
   "--kubeconfig",
   kubeconfigPath,
@@ -197,53 +207,47 @@ await run("docker", [
   dependencyEgressImage,
   ".",
 ]);
-const issuerDirectory = await mkdtemp(join(tmpdir(), "agent-dock-egress-issuer-"));
-const issuerPath = join(issuerDirectory, "private-key.pem");
-const { privateKey } = generateKeyPairSync("ed25519");
-await writeFile(issuerPath, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
-await chmod(issuerPath, 0o600);
 const testEnvironment = {
   ...executionEnvironment,
   AGENT_DOCK_KUBECONFIG_PATH: kubeconfigPath,
   AGENT_DOCK_TOOL_SANDBOX_IMAGE: image,
   AGENT_DOCK_DEPENDENCY_EGRESS_IMAGE: dependencyEgressImage,
-  AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
+  // This gate intentionally uses the execution plane's configured issuer.
+  // A temporary key would rotate the shared ConfigMap underneath live
+  // Sandbox Managers and make a read-only acceptance test corrupt production.
+  AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: dependencyEgressPrivateKeyPath,
 };
 await run(process.execPath, ["scripts/sync-kubernetes-tool-image.mjs"], testEnvironment);
 process.stdout.write(
   `${JSON.stringify({ cluster: JSON.parse(clusterVersion), runtimeClass: runtimeClass.metadata.name, image })}\n`,
 );
 
-try {
-  await run(
-    npmCommand,
-    [
-      "exec",
-      "--workspace",
-      "@agent-dock/sandbox-manager",
-      "--",
-      "vitest",
-      "--run",
-      "test/gvisor-sandbox-provider.integration.test.ts",
-    ],
-    { ...testEnvironment, AGENT_DOCK_KUBERNETES_GVISOR_TEST: "1" },
-  );
-  await run(
-    npmCommand,
-    [
-      "exec",
-      "--workspace",
-      "@agent-dock/sandbox-supervisor",
-      "--",
-      "vitest",
-      "--run",
-      "test/remote-tool-sandbox-turn-runner.integration.test.ts",
-    ],
-    { ...testEnvironment, AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST: "1" },
-  );
-} finally {
-  await rm(issuerDirectory, { recursive: true, force: true });
-}
+await run(
+  npmCommand,
+  [
+    "exec",
+    "--workspace",
+    "@agent-dock/sandbox-manager",
+    "--",
+    "vitest",
+    "--run",
+    "test/gvisor-sandbox-provider.integration.test.ts",
+  ],
+  { ...testEnvironment, AGENT_DOCK_KUBERNETES_GVISOR_TEST: "1" },
+);
+await run(
+  npmCommand,
+  [
+    "exec",
+    "--workspace",
+    "@agent-dock/sandbox-supervisor",
+    "--",
+    "vitest",
+    "--run",
+    "test/remote-tool-sandbox-turn-runner.integration.test.ts",
+  ],
+  { ...testEnvironment, AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST: "1" },
+);
 
 for (const namespace of namespaces) {
   const remaining = await capture("kubectl", [
@@ -260,5 +264,20 @@ for (const namespace of namespaces) {
   if (remaining.length > 0) {
     throw new Error(`The Kubernetes gVisor gate left a managed Pod in ${namespace}.`);
   }
+}
+const dependencyTrust = JSON.parse(
+  await capture("kubectl", [
+    "--kubeconfig",
+    kubeconfigPath,
+    "get",
+    "configmap",
+    "dependency-egress-trust",
+    "--namespace",
+    "agent-dock-egress",
+    "--output=json",
+  ]),
+);
+if (dependencyTrust?.data?.["public-key.pem"] !== expectedDependencyEgressPublicKey) {
+  throw new Error("The gVisor gate changed the deployed dependency egress trust anchor.");
 }
 process.stdout.write("kubernetes_gvisor_sandbox_check_passed\n");

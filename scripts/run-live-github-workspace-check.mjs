@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalReviewBundleManifestJson } from "@agent-dock/protocol";
 import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
@@ -212,6 +214,32 @@ async function runTurn(sessionId, prompt, afterSequence) {
   }
 }
 
+async function waitForReviewBundle(runId) {
+  const deadline = Date.now() + 30_000;
+  while (true) {
+    try {
+      const bundle = await api.getRunReviewBundle(runId);
+      const canonical = canonicalReviewBundleManifestJson(bundle.manifest);
+      const calculated = createHash("sha256").update(canonical, "utf8").digest("hex");
+      assert.equal(bundle.manifestSha256, calculated, "Review Bundle integrity hash is invalid");
+      assert.equal(bundle.manifest.run.runId, runId);
+      assert.equal(
+        bundle.manifest.attempts.filter((attempt) => attempt.projection === "canonical").length,
+        1,
+      );
+      assert(bundle.manifest.assistant.text.length > 0, "Review Bundle omitted the final answer");
+      assert(bundle.manifest.usage.requests > 0, "Review Bundle omitted real model usage");
+      assert(bundle.manifest.usage.outputTokens > 0, "Review Bundle omitted output tokens");
+      const repeated = await api.getRunReviewBundle(runId);
+      assert.deepEqual(repeated, bundle, "Review Bundle changed after its immutable commit");
+      return bundle;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    }
+  }
+}
+
 async function managedKubernetesPods(namespace) {
   const value = JSON.parse(
     await capture(
@@ -371,6 +399,7 @@ const first = await runTurn(
   ].join(" "),
   0,
 );
+const firstReviewBundle = await waitForReviewBundle(first.accepted.runId);
 const sourceAfterFirst = await psql(
   `select status || '|' || object_key || '|' || sha256 || '|' || size_bytes || '|' || updated_at::text
      from workspace_sources
@@ -380,6 +409,12 @@ const sourceAfterFirst = await psql(
 assert.match(sourceAfterFirst, /^ready\|[A-Za-z0-9/_.-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|/);
 assert(first.patch.includes("src/main/java/junit_project/Calculator.java"));
 assert(first.patch.includes("test.sh"));
+assert(
+  firstReviewBundle.manifest.changes.changedPaths.includes(
+    "src/main/java/junit_project/Calculator.java",
+  ),
+);
+assert(firstReviewBundle.manifest.changes.changedPaths.includes("test.sh"));
 const firstWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
 assert.equal(
   firstWarmSandbox.environmentImageRevision,
@@ -392,6 +427,7 @@ const second = await runTurn(
   "Continue in the same workspace. Add divideExact(int dividend, int divisor), throw ArithmeticException for zero, extend test.sh to verify a successful division and the zero-divisor failure, then run ./test.sh. Preserve and build on the prior turn's changes.",
   first.cursor,
 );
+const secondReviewBundle = await waitForReviewBundle(second.accepted.runId);
 const sourceAfterSecond = await psql(
   `select status || '|' || object_key || '|' || sha256 || '|' || size_bytes || '|' || updated_at::text
      from workspace_sources
@@ -405,6 +441,11 @@ assert.equal(
 );
 assert(second.patch.includes("src/main/java/junit_project/Calculator.java"));
 assert(second.patch.includes("test.sh"));
+assert(
+  secondReviewBundle.manifest.changes.changedPaths.includes(
+    "src/main/java/junit_project/Calculator.java",
+  ),
+);
 const secondWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
 assert.equal(secondWarmSandbox.name, firstWarmSandbox.name);
 assert.equal(secondWarmSandbox.uid, firstWarmSandbox.uid);
@@ -429,39 +470,95 @@ const [modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens]
   .split("|")
   .map(Number);
 assert(modelCalls > 0 && outputTokens > 0, "Real model token usage was not persisted");
+assert.equal(
+  firstReviewBundle.manifest.usage.requests + secondReviewBundle.manifest.usage.requests,
+  modelCalls,
+);
+assert.equal(
+  firstReviewBundle.manifest.usage.inputTokens + secondReviewBundle.manifest.usage.inputTokens,
+  inputTokens,
+);
+assert.equal(
+  firstReviewBundle.manifest.usage.outputTokens + secondReviewBundle.manifest.usage.outputTokens,
+  outputTokens,
+);
 await terminateWarmSessionSandbox(session.sessionId, secondWarmSandbox);
 
-process.stdout.write(
-  `${JSON.stringify({
-    accepted: true,
-    endpoint: baseUrl.toString(),
-    model: { provider: model.provider, modelId: model.modelId },
-    source: { repository, commitSha, status: conversation.project.source.status },
-    projectId: project.projectId,
-    workspaceId: project.workspaceId,
-    sessionId: session.sessionId,
-    firstTurn: {
-      turnId: first.accepted.turnId,
-      eventCount: first.eventCount,
-      toolCalls: first.toolCalls,
-      patchBytes: first.patchBytes,
-    },
-    secondTurn: {
-      turnId: second.accepted.turnId,
-      eventCount: second.eventCount,
-      toolCalls: second.toolCalls,
-      patchBytes: second.patchBytes,
-    },
-    usage: { modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
-    warmReuse: {
-      podUid: secondWarmSandbox.uid,
-      activationId: secondWarmSandbox.activationId,
-      firstFence: firstWarmSandbox.fencingToken,
-      secondFence: secondWarmSandbox.fencingToken,
-      environmentVersionId: secondWarmSandbox.environmentVersionId,
-      imageRevision: secondWarmSandbox.environmentImageRevision,
-      cleaned: true,
-    },
-    sourceSnapshot: sourceAfterSecond.split("|").slice(0, 4).join("|"),
-  })}\n`,
+const report = {
+  accepted: true,
+  checkedAt: new Date().toISOString(),
+  endpoint: baseUrl.toString(),
+  model: { provider: model.provider, modelId: model.modelId },
+  source: { repository, commitSha, status: conversation.project.source.status },
+  projectId: project.projectId,
+  workspaceId: project.workspaceId,
+  sessionId: session.sessionId,
+  firstTurn: {
+    runId: first.accepted.runId,
+    turnId: first.accepted.turnId,
+    eventCount: first.eventCount,
+    toolCalls: first.toolCalls,
+    patchBytes: first.patchBytes,
+    reviewBundleId: firstReviewBundle.reviewBundleId,
+    reviewBundleSha256: firstReviewBundle.manifestSha256,
+    changedPaths: firstReviewBundle.manifest.changes.changedPaths,
+    tests: firstReviewBundle.manifest.tests.map((test) => ({
+      suite: test.suite,
+      status: test.status,
+    })),
+  },
+  secondTurn: {
+    runId: second.accepted.runId,
+    turnId: second.accepted.turnId,
+    eventCount: second.eventCount,
+    toolCalls: second.toolCalls,
+    patchBytes: second.patchBytes,
+    reviewBundleId: secondReviewBundle.reviewBundleId,
+    reviewBundleSha256: secondReviewBundle.manifestSha256,
+    changedPaths: secondReviewBundle.manifest.changes.changedPaths,
+    tests: secondReviewBundle.manifest.tests.map((test) => ({
+      suite: test.suite,
+      status: test.status,
+    })),
+  },
+  usage: { modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+  warmReuse: {
+    podUid: secondWarmSandbox.uid,
+    activationId: secondWarmSandbox.activationId,
+    firstFence: firstWarmSandbox.fencingToken,
+    secondFence: secondWarmSandbox.fencingToken,
+    environmentVersionId: secondWarmSandbox.environmentVersionId,
+    imageRevision: secondWarmSandbox.environmentImageRevision,
+    cleaned: true,
+  },
+  sourceSnapshot: sourceAfterSecond.split("|").slice(0, 4).join("|"),
+};
+const reportDirectory = resolve(repositoryRoot, "docs/reports");
+await mkdir(reportDirectory, { recursive: true });
+await writeFile(
+  resolve(reportDirectory, "real-model-acceptance-latest.json"),
+  `${JSON.stringify(report, null, 2)}\n`,
+  "utf8",
 );
+await writeFile(
+  resolve(reportDirectory, "real-model-acceptance-latest.md"),
+  [
+    "# Real-model production acceptance",
+    "",
+    `- Checked at: ${report.checkedAt}`,
+    `- Provider/model: ${report.model.provider} / ${report.model.modelId}`,
+    `- Source: ${report.source.repository}@${report.source.commitSha}`,
+    `- Model calls: ${String(report.usage.modelCalls)}`,
+    `- Input/output tokens: ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)}`,
+    `- Warm Pod reused: ${report.warmReuse.podUid}`,
+    `- Fencing token advanced: ${String(report.warmReuse.firstFence)} -> ${String(report.warmReuse.secondFence)}`,
+    `- First Review Bundle: ${report.firstTurn.reviewBundleId} (${report.firstTurn.reviewBundleSha256})`,
+    `- Second Review Bundle: ${report.secondTurn.reviewBundleId} (${report.secondTurn.reviewBundleSha256})`,
+    `- Exact Sandbox cleanup: ${String(report.warmReuse.cleaned)}`,
+    "",
+    "Both turns changed the imported Java repository, executed tools inside the credential-free gVisor Sandbox, committed immutable Review Bundles, persisted real token usage, reused the same physical Pod with a newer writer fence, and then destroyed that exact assignment.",
+    "",
+  ].join("\n"),
+  "utf8",
+);
+process.stdout.write(`${JSON.stringify(report)}\n`);

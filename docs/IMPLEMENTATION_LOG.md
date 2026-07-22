@@ -1917,3 +1917,36 @@
   `npm run sandbox:check` 通过 5 个 Manager live tests 与 2 个 trusted-Runner live tests：真实 npm 安装后最终 Pod 断网、clean prewarm
   2,350 ms vs fresh 4,448 ms、跨租户/资源/清理、warm fence rebind、pure chat 零 Pod及 remote repair 全部通过，最终输出
   `kubernetes_gvisor_sandbox_check_passed`。
+
+## 2026-07-23 — Attempt Rewind and Immutable Review Bundles
+
+- 状态与恢复：migration 018 为每个 Run 固化 conversation boundary、Workspace base version 与 Pi artifact；显式 rewind 只接受当前最新 terminal
+  Attempt，要求 actor 与幂等键，并创建新 Run/Attempt。历史 events/Attempts 永不删除，API/SSE 将旧 Attempt 投影为 superseded、当前 Attempt 投影为
+  canonical，旧 fence 不能推进 conversation 或 Workspace head。
+- Review evidence：completed Run 在同一持久提交边界生成不可变 Review Bundle，canonical JSON 经过 SHA-256；内容包括最终 assistant 文本及 hash、
+  source/environment snapshot、Attempt history、changed paths、patch/artifact 引用、测试结果和真实 usage。数据库 trigger 阻止 update/delete，Web 只渲染
+  bounded escaped text，Artifact 仍走 tenant-scoped authenticated download。
+- 验证：Control Plane 覆盖 owner/viewer/foreign-tenant、幂等 rewind、旧 Attempt 拒绝、Workspace/Conversation 精确回退与 Bundle 内容/hash/不可变性；fault eval
+  新增 rewind boundary 与 immutable Bundle 两项并达到 12/12。并行全仓测试暴露的短暂 `SKIP LOCKED` idle 通过有界重试 helper 修正，2 秒内 mailbox 未被领取
+  仍 hard fail，不掩盖 stranded work。
+
+## 2026-07-23 — Versioned Helm gVisor Execution Plane
+
+- 唯一来源：删除静态 execution-plane manifest，新增 `deploy/helm/agent-dock-execution-plane` 0.1.0 closed chart。RuntimeClass→`runsc`、四个 restricted
+  namespace、tokenless ServiceAccount、resource-name-limited RBAC、default-deny/Proxy-only NetworkPolicy 和 ClusterIP identity 均不可通过 values 改写。
+- 可用性：dependency/repository CONNECT proxy 默认两副本，RollingUpdate `maxUnavailable=0`、PDB `minAvailable=1`、topology spread 与显式资源限制；chart
+  故意不部署 Runner/Ingress，维持 Supervisor 仅向 Control Plane 发起认证出站连接。
+- 供应链与门禁：Helm 3.18.6/构建/SHA 固定；`helm:check` 对 29 个 rendered resources 做语义断言，并证明不安全副本数、滚动策略和未知 values 被 schema 拒绝。
+  Supervisor image 另增递归 workspace dependency-closure gate；它在生产重启时真实捕获并修复了遗漏的 dependency-egress-proxy runtime package。
+
+## 2026-07-23 — Cursor-informed Production Acceptance
+
+- 测试隔离修正：live gVisor gate 原本生成临时 Ed25519 issuer，却复用生产 `dependency-egress-trust` ConfigMap，导致测试结束后生产签名 key 与 Proxy trust
+  fingerprint 分叉。门禁现在只使用部署配置的 issuer，不再轮换共享 trust anchor；生产 Manager 重启后验证 ConfigMap 与 Proxy 实际 fingerprint 已恢复。
+- gVisor 实测：5 个 Manager live tests 与 2 个 trusted Runner tests 全部通过，包括固定 GitHub commit、真实 npm 安装后换入全新离线 Pod、single-consumption
+  prewarm（2,357 ms vs cold 4,256 ms）、跨租户/凭据/资源/输出/清理和 warm fence rebind；最终无 Tool/Importer 残留。
+- 真实模型：production Web/API 使用 `deepseek-v4-flash` 对固定 commit 连续完成两轮 Java coding。共 22 次请求、7,306 input、5,787 output、145,792
+  cache-read tokens；第一轮 164 events/28 tool calls/4,417-byte patch，第二轮 78 events/6 tool calls/6,086-byte cumulative patch。两轮 Review Bundle hash
+  复算一致且二次读取完全相同，测试均落为 passed。
+- 生命周期证据：两轮复用 Pod UID `ebd234aa-68fd-40c8-8cdf-1d1788adb813` 与同一 activation，fence 1→2；exact source snapshot 未重复导入，最后通过受信
+  inventory/terminate-and-confirm 协议删除该精确 UID。脱敏报告保存在 `docs/reports/real-model-acceptance-latest.json` 和 `.md`。
