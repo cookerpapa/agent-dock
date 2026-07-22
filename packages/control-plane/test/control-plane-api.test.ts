@@ -1544,6 +1544,7 @@ describe.sequential("single-user durable turn intake API", () => {
               ...request.model,
               credentialBindingVersion: Number(request.model.credentialBindingVersion),
             },
+            environment: request.environment,
           },
         });
         if (command.type !== "command.turn.execute") throw new Error("Expected execute command");
@@ -2153,6 +2154,14 @@ describe.sequential("single-user durable turn intake API", () => {
               thinkingLevel: "off",
               credentialBindingId: IDS.credential,
               credentialBindingVersion: "1",
+            },
+            environment: {
+              environmentVersionId: project.environment.environmentVersionId,
+              versionNumber: project.environment.versionNumber,
+              profileKey: project.environment.profileKey,
+              profileVersion: project.environment.profileVersion,
+              imageRevision: project.environment.imageRevision,
+              specSha256: project.environment.specSha256,
             },
           },
           {

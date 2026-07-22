@@ -1,4 +1,5 @@
 import type {
+  EnvironmentRuntimeSnapshot,
   GitHubRepositorySource,
   SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
@@ -9,6 +10,11 @@ import type {
   ToolSandboxOperationResponse,
   ToolSandboxReleaseRequest,
   ToolSandboxReleaseResponse,
+} from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
 } from "@agent-dock/protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
@@ -26,6 +32,7 @@ export type ToolSandboxManagerOptions = {
   warmTtlMs?: number;
   maximumWarmActivations?: number;
   clock?: () => number;
+  imageRevision?: string;
 };
 
 type ManagedActivation = {
@@ -42,6 +49,7 @@ type ManagedActivation = {
 type WarmActivation = {
   handle: SandboxHandle;
   workspaceRevision: string;
+  environment: EnvironmentRuntimeSnapshot;
   expiresAt: number;
   lastUsedAt: number;
 };
@@ -70,6 +78,20 @@ function workspaceKey(assignment: ToolSandboxAssignment): string {
 
 function capabilityDigest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
+}
+
+function sameEnvironment(
+  left: EnvironmentRuntimeSnapshot,
+  right: EnvironmentRuntimeSnapshot,
+): boolean {
+  return (
+    left.environmentVersionId === right.environmentVersionId &&
+    left.versionNumber === right.versionNumber &&
+    left.profileKey === right.profileKey &&
+    left.profileVersion === right.profileVersion &&
+    left.imageRevision === right.imageRevision &&
+    left.specSha256 === right.specSha256
+  );
 }
 
 function validCapability(value: string): string {
@@ -108,6 +130,7 @@ function handleMatches(
   provider: SandboxProvider,
   activationId: string,
   assignment: ToolSandboxAssignment,
+  environment: EnvironmentRuntimeSnapshot,
 ): boolean {
   return (
     handle.providerApiVersion === 1 &&
@@ -116,7 +139,12 @@ function handleMatches(
     handle.workspaceRoot === "/workspace" &&
     /^[a-z0-9][a-z0-9_.-]{0,127}$/i.test(handle.runtimeName) &&
     /^[A-Za-z0-9._:-]{1,256}$/.test(handle.runtimeId) &&
-    sameAssignment(handle.assignment, assignment)
+    sameAssignment(handle.assignment, assignment) &&
+    sameEnvironment(handle.environment, environment) &&
+    handle.environmentValidation.profileKey === environment.profileKey &&
+    handle.environmentValidation.profileVersion === environment.profileVersion &&
+    handle.environmentValidation.imageRevision === environment.imageRevision &&
+    handle.environmentValidation.specSha256 === environment.specSha256
   );
 }
 
@@ -145,6 +173,7 @@ export class ToolSandboxManager {
   readonly #warmTtlMs: number;
   readonly #maximumWarmActivations: number;
   readonly #clock: () => number;
+  readonly #imageRevision: string;
   readonly #activations = new Map<string, ManagedActivation>();
   readonly #warm = new Map<string, WarmActivation>();
   readonly #reaper: NodeJS.Timeout;
@@ -168,6 +197,10 @@ export class ToolSandboxManager {
       1_000,
     );
     this.#clock = options.clock ?? Date.now;
+    this.#imageRevision = options.imageRevision ?? "development";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(this.#imageRevision)) {
+      throw new TypeError("Tool Sandbox image revision is invalid");
+    }
     this.#reaper = setInterval(() => void this.reapWarm().catch(() => undefined), 30_000);
     this.#reaper.unref();
   }
@@ -197,6 +230,18 @@ export class ToolSandboxManager {
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
     await this.reapWarm();
+    if (
+      request.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
+      request.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
+      request.environment.specSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 ||
+      request.environment.imageRevision !== this.#imageRevision
+    ) {
+      throw new SandboxManagerError(
+        "environment_policy_mismatch",
+        "Run environment is not served by this Sandbox Manager",
+        false,
+      );
+    }
     const key = workspaceKey(request.assignment);
     if ([...this.#activations.values()].some((entry) => workspaceKey(entry.assignment) === key)) {
       throw new SandboxManagerError(
@@ -210,7 +255,8 @@ export class ToolSandboxManager {
     if (
       inherited !== undefined &&
       (request.workspaceRevision === undefined ||
-        request.workspaceRevision !== inherited.workspaceRevision)
+        request.workspaceRevision !== inherited.workspaceRevision ||
+        !sameEnvironment(request.environment, inherited.environment))
     ) {
       this.#warm.delete(key);
       await this.#provider.stop(inherited.handle);
@@ -230,6 +276,7 @@ export class ToolSandboxManager {
     const spec = {
       activationId,
       assignment: request.assignment,
+      environment: request.environment,
       workspaceSeed: request.workspaceSeed,
       ...(request.workspaceRestore === undefined
         ? {}
@@ -316,6 +363,7 @@ export class ToolSandboxManager {
       this.#warm.set(key, {
         handle,
         workspaceRevision: request.workspaceRevision,
+        environment: activation.spec.environment,
         lastUsedAt: now,
         expiresAt: now + this.#warmTtlMs,
       });
@@ -458,7 +506,15 @@ export class ToolSandboxManager {
         }
       }
       if (handle === undefined) handle = await this.#provider.create(activation.spec);
-      if (!handleMatches(handle, this.#provider, activationId, activation.assignment)) {
+      if (
+        !handleMatches(
+          handle,
+          this.#provider,
+          activationId,
+          activation.assignment,
+          activation.spec.environment,
+        )
+      ) {
         await this.#provider.destroy(handle).catch(() => undefined);
         throw new SandboxManagerError(
           "sandbox_provider_protocol_error",

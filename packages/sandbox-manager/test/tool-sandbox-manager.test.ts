@@ -32,12 +32,38 @@ const assignment: ToolSandboxAssignment = {
   leaseId: "10000000-0000-4000-8000-000000000003",
   fencingToken: 5,
 };
+const environment = {
+  environmentVersionId: "10000000-0000-4000-8000-000000000004",
+  versionNumber: 1,
+  profileKey: "agent-dock-fullstack" as const,
+  profileVersion: "1" as const,
+  imageRevision: "development",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+};
+const environmentValidation = {
+  profileKey: "agent-dock-fullstack" as const,
+  profileVersion: "1" as const,
+  imageRevision: "development",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+  isolationBoundary: "gvisor" as const,
+  runtime: "runsc" as const,
+  networkMode: "deny_all" as const,
+  runAsUser: "1000:1000" as const,
+  readOnlyRootFilesystem: true as const,
+  tools: [
+    { name: "node" as const, version: "v24.18.0" },
+    { name: "java" as const, version: 'openjdk version "17.0.19"' },
+    { name: "python" as const, version: "Python 3.11.2" },
+    { name: "git" as const, version: "git version 2.39.5" },
+  ],
+};
 
 const createRequest: ToolSandboxCreateRequest = {
   managerProtocolVersion: 1,
   type: "tool_sandbox.create",
   requestId: "10000000-0000-4000-8000-000000000011",
   assignment,
+  environment,
   workspaceSeed: { kind: "sample_java" },
 };
 
@@ -70,6 +96,8 @@ function providerFixture() {
         runtimeName: `agent-dock-tool-${spec.activationId}`.slice(0, 63),
         workspaceRoot: "/workspace",
         assignment: spec.assignment,
+        environment: spec.environment,
+        environmentValidation,
       };
     },
     rebind,
@@ -276,6 +304,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
         }),
       ).resolves.toMatchObject({
@@ -288,6 +317,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
         }),
@@ -296,6 +326,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),

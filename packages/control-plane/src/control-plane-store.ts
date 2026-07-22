@@ -16,13 +16,22 @@ import type {
   CreateProjectRequest,
   CreateTurnCancellationRequest,
   ProjectResource,
+  ProjectEnvironmentResource,
+  EnvironmentRuntimeSnapshot,
   RunListResource,
   RunResource,
   SessionResource,
   TestResultListResource,
   WorkspaceSourceResource,
 } from "@agent-dock/protocol";
-import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  parseEnvironmentValidationReport,
+  TURN_CANCELLATION_OUTBOX_TOPIC,
+  TURN_COMMAND_OUTBOX_TOPIC,
+} from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 export type ControlPlaneStoreOptions = {
@@ -30,6 +39,7 @@ export type ControlPlaneStoreOptions = {
   tenantId: string;
   defaultModelProfileId: string;
   idGenerator?: () => string;
+  environmentImageRevision?: string;
 };
 
 export type ControlPlaneStoreErrorCode =
@@ -98,6 +108,39 @@ type WorkspaceSourceRow = {
   sourceRepositoryId: string | null;
   sourcePrivate: boolean | null;
 };
+
+type EnvironmentVersionRow = {
+  environmentVersionId: string;
+  environmentVersionNumber: number;
+  environmentProfileKey: string;
+  environmentProfileVersion: string;
+  environmentImageRevision: string;
+  environmentSpecSha256: string;
+  environmentState: "pending" | "validated" | "failed";
+  environmentCreatedAt: Date | string;
+  environmentValidatedAt: Date | string | null;
+};
+
+function environmentSnapshot(row: EnvironmentVersionRow): EnvironmentRuntimeSnapshot {
+  if (
+    row.environmentProfileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
+    row.environmentProfileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
+    row.environmentSpecSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256
+  ) {
+    throw new ControlPlaneStoreError(
+      "control_plane_misconfigured",
+      "Project environment metadata is invalid",
+    );
+  }
+  return {
+    environmentVersionId: row.environmentVersionId,
+    versionNumber: row.environmentVersionNumber,
+    profileKey: row.environmentProfileKey,
+    profileVersion: row.environmentProfileVersion,
+    imageRevision: row.environmentImageRevision,
+    specSha256: row.environmentSpecSha256,
+  };
+}
 
 function workspaceSourceResource(row: WorkspaceSourceRow): WorkspaceSourceResource {
   if (row.sourceKind === "empty" && row.sourceStatus === "ready") {
@@ -314,12 +357,17 @@ export class ControlPlaneStore {
   readonly #tenantId: string;
   readonly #defaultModelProfileId: string;
   readonly #idGenerator: () => string;
+  readonly #environmentImageRevision: string;
 
   constructor(options: ControlPlaneStoreOptions) {
     this.#database = options.database;
     this.#tenantId = options.tenantId;
     this.#defaultModelProfileId = options.defaultModelProfileId;
     this.#idGenerator = options.idGenerator ?? randomUUID;
+    this.#environmentImageRevision = options.environmentImageRevision ?? "development";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(this.#environmentImageRevision)) {
+      throw new TypeError("environmentImageRevision is invalid");
+    }
   }
 
   async createProject(input: string | CreateProjectRequest): Promise<ProjectResource> {
@@ -328,6 +376,7 @@ export class ControlPlaneStore {
     const source = request.source ?? { kind: "sample_java" as const };
     const projectId = this.#idGenerator();
     const workspaceId = this.#idGenerator();
+    const environmentVersionId = this.#idGenerator();
     try {
       return await this.#database.transaction().execute(async (transaction) => {
         const policy = await this.#lockTenantPolicy(transaction);
@@ -382,6 +431,23 @@ export class ControlPlaneStore {
             object_snapshot_key: null,
           })
           .executeTakeFirstOrThrow();
+        const environment = await transaction
+          .insertInto("environment_versions")
+          .values({
+            id: environmentVersionId,
+            tenant_id: this.#tenantId,
+            project_id: project.id,
+            version_number: 1,
+            profile_key: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+            profile_version: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+            image_revision: this.#environmentImageRevision,
+            spec_sha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+            state: "pending",
+            active: true,
+            validated_at: null,
+          })
+          .returning(["id", "version_number", "state", "created_at"])
+          .executeTakeFirstOrThrow();
         await transaction
           .insertInto("workspace_sources")
           .values({
@@ -433,6 +499,16 @@ export class ControlPlaneStore {
                 : source.kind === "empty"
                   ? { kind: "empty", status: "ready" }
                   : { kind: "sample_java", status: "ready" },
+          environment: {
+            environmentVersionId: environment.id,
+            versionNumber: environment.version_number,
+            profileKey: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+            profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+            imageRevision: this.#environmentImageRevision,
+            specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+            state: environment.state,
+            createdAt: isoTimestamp(environment.created_at),
+          },
         };
       });
     } catch (error) {
@@ -679,6 +755,7 @@ export class ControlPlaneStore {
             );
     }
 
+    const environment = await this.#loadActiveProjectEnvironment(conversation.projectId);
     return {
       project: {
         projectId: conversation.projectId,
@@ -686,6 +763,7 @@ export class ControlPlaneStore {
         name: conversation.projectName,
         createdAt: isoTimestamp(conversation.projectCreatedAt),
         source: workspaceSourceResource(conversation),
+        environment,
       },
       session: {
         sessionId: conversation.sessionId,
@@ -801,10 +879,27 @@ export class ControlPlaneStore {
 
   async #loadRunResource(runId: string): Promise<RunResource> {
     const run = await this.#database
-      .selectFrom("runs")
-      .selectAll()
-      .where("tenant_id", "=", this.#tenantId)
-      .where("id", "=", runId)
+      .selectFrom("runs as run")
+      .innerJoin("environment_versions as environment", (join) =>
+        join
+          .onRef("environment.tenant_id", "=", "run.tenant_id")
+          .onRef("environment.project_id", "=", "run.project_id")
+          .onRef("environment.id", "=", "run.environment_version_id"),
+      )
+      .selectAll("run")
+      .select([
+        "environment.id as environmentVersionId",
+        "environment.version_number as environmentVersionNumber",
+        "environment.profile_key as environmentProfileKey",
+        "environment.profile_version as environmentProfileVersion",
+        "environment.image_revision as environmentImageRevision",
+        "environment.spec_sha256 as environmentSpecSha256",
+        "environment.state as environmentState",
+        "environment.created_at as environmentCreatedAt",
+        "environment.validated_at as environmentValidatedAt",
+      ])
+      .where("run.tenant_id", "=", this.#tenantId)
+      .where("run.id", "=", runId)
       .executeTakeFirst();
     if (run === undefined) throw new ControlPlaneStoreError("not_found", "Run was not found");
 
@@ -861,6 +956,7 @@ export class ControlPlaneStore {
       sessionId: run.session_id,
       turnId: run.turn_id,
       commandId: run.command_id,
+      environment: environmentSnapshot(run),
       state: run.state,
       traceId: run.trace_id,
       attemptCount: nonNegativeSafeInteger(run.attempt_count, "Run attempt count"),
@@ -1053,6 +1149,7 @@ export class ControlPlaneStore {
         "Next mailbox position",
       );
       const model = await this.#resolveModelSnapshot(transaction, request.thinkingLevel);
+      const environment = await this.#activeEnvironmentForRun(transaction, session.project_id);
 
       await transaction
         .insertInto("turns")
@@ -1111,6 +1208,7 @@ export class ControlPlaneStore {
           session_id: session.id,
           turn_id: turnId,
           command_id: command.id,
+          environment_version_id: environment.environmentVersionId,
           idempotency_key: idempotencyKey,
           state: "queued",
           current_attempt_id: null,
@@ -1366,6 +1464,148 @@ export class ControlPlaneStore {
       .where("command.idempotency_key", "=", idempotencyKey)
       .where("command.kind", "=", "turn.cancel")
       .executeTakeFirst();
+  }
+
+  async #loadActiveProjectEnvironment(projectId: string): Promise<ProjectEnvironmentResource> {
+    const row = await this.#database
+      .selectFrom("environment_versions as environment")
+      .select([
+        "environment.id as environmentVersionId",
+        "environment.version_number as environmentVersionNumber",
+        "environment.profile_key as environmentProfileKey",
+        "environment.profile_version as environmentProfileVersion",
+        "environment.image_revision as environmentImageRevision",
+        "environment.spec_sha256 as environmentSpecSha256",
+        "environment.state as environmentState",
+        "environment.created_at as environmentCreatedAt",
+        "environment.validated_at as environmentValidatedAt",
+      ])
+      .where("environment.tenant_id", "=", this.#tenantId)
+      .where("environment.project_id", "=", projectId)
+      .where("environment.active", "=", true)
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Project has no active environment version",
+      );
+    }
+    const snapshot = environmentSnapshot(row);
+    const validation = await this.#database
+      .selectFrom("environment_validations")
+      .select(["report", "validated_at"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("project_id", "=", projectId)
+      .where("environment_version_id", "=", snapshot.environmentVersionId)
+      .where("status", "=", "validated")
+      .orderBy("validated_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
+    let latestValidation;
+    if (validation?.report !== null && validation?.report !== undefined) {
+      try {
+        latestValidation = parseEnvironmentValidationReport(validation.report);
+      } catch {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Project environment validation evidence is invalid",
+        );
+      }
+    }
+    if (row.environmentState === "validated" && latestValidation === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Validated project environment has no evidence",
+      );
+    }
+    return {
+      ...snapshot,
+      state: row.environmentState,
+      createdAt: isoTimestamp(row.environmentCreatedAt),
+      ...(row.environmentValidatedAt === null
+        ? {}
+        : { validatedAt: isoTimestamp(row.environmentValidatedAt) }),
+      ...(latestValidation === undefined ? {} : { latestValidation }),
+    };
+  }
+
+  async #activeEnvironmentForRun(
+    transaction: Transaction<Database>,
+    projectId: string,
+  ): Promise<EnvironmentRuntimeSnapshot> {
+    const project = await transaction
+      .selectFrom("projects")
+      .select("id")
+      .where("tenant_id", "=", this.#tenantId)
+      .where("id", "=", projectId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (project === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Project was not found");
+    }
+    const active = await transaction
+      .selectFrom("environment_versions as environment")
+      .select([
+        "environment.id as environmentVersionId",
+        "environment.version_number as environmentVersionNumber",
+        "environment.profile_key as environmentProfileKey",
+        "environment.profile_version as environmentProfileVersion",
+        "environment.image_revision as environmentImageRevision",
+        "environment.spec_sha256 as environmentSpecSha256",
+        "environment.state as environmentState",
+        "environment.created_at as environmentCreatedAt",
+        "environment.validated_at as environmentValidatedAt",
+      ])
+      .where("environment.tenant_id", "=", this.#tenantId)
+      .where("environment.project_id", "=", projectId)
+      .where("environment.active", "=", true)
+      .forUpdate()
+      .executeTakeFirst();
+    if (active === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Project has no active environment version",
+      );
+    }
+    const current = environmentSnapshot(active);
+    if (current.imageRevision === this.#environmentImageRevision) return current;
+
+    await transaction
+      .updateTable("environment_versions")
+      .set({ active: false, updated_at: sql<Date>`now()` })
+      .where("tenant_id", "=", this.#tenantId)
+      .where("project_id", "=", projectId)
+      .where("id", "=", current.environmentVersionId)
+      .where("active", "=", true)
+      .executeTakeFirstOrThrow();
+    const created = await transaction
+      .insertInto("environment_versions")
+      .values({
+        id: this.#idGenerator(),
+        tenant_id: this.#tenantId,
+        project_id: projectId,
+        version_number: current.versionNumber + 1,
+        profile_key: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+        profile_version: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+        image_revision: this.#environmentImageRevision,
+        spec_sha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+        state: "pending",
+        active: true,
+        validated_at: null,
+      })
+      .returning([
+        "id as environmentVersionId",
+        "version_number as environmentVersionNumber",
+        "profile_key as environmentProfileKey",
+        "profile_version as environmentProfileVersion",
+        "image_revision as environmentImageRevision",
+        "spec_sha256 as environmentSpecSha256",
+        "state as environmentState",
+        "created_at as environmentCreatedAt",
+        "validated_at as environmentValidatedAt",
+      ])
+      .executeTakeFirstOrThrow();
+    return environmentSnapshot(created);
   }
 
   async #resolveModelSnapshot(

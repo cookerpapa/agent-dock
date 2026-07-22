@@ -1,5 +1,7 @@
 import type {
   AgentWorkspaceSeed,
+  EnvironmentRuntimeSnapshot,
+  EnvironmentValidationReport,
   GitHubRepositorySource,
   SandboxCheckpointBlob,
   SupervisorRuntimeAssignment,
@@ -83,6 +85,7 @@ export const DEFAULT_TOOL_SANDBOX_POLICY: SandboxPolicy = Object.freeze({
 export type SandboxCreateSpec = Readonly<{
   activationId: string;
   assignment: ToolSandboxAssignment;
+  environment: EnvironmentRuntimeSnapshot;
   workspaceSeed: AgentWorkspaceSeed;
   workspaceRestore?: SandboxCheckpointBlob;
   policy: SandboxPolicy;
@@ -96,6 +99,8 @@ export type SandboxHandle = Readonly<{
   runtimeName: string;
   workspaceRoot: "/workspace";
   assignment: ToolSandboxAssignment;
+  environment: EnvironmentRuntimeSnapshot;
+  environmentValidation: EnvironmentValidationReport;
 }>;
 
 export type SandboxEffectiveIsolation = Readonly<{

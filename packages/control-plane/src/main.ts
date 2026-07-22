@@ -123,6 +123,7 @@ export async function startControlPlane(): Promise<void> {
       webAuthentication,
       modelCredentialVault,
       platformOperatorTenantId: config.platformModelSourceTenantId,
+      environmentImageRevision: config.environmentImageRevision,
       artifactReader: { get: (objectKey) => managementClient.readArtifact(objectKey) },
       ...(githubGateway === undefined ? {} : { githubGateway }),
       ...(config.githubGatewayServiceToken === undefined

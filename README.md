@@ -294,7 +294,17 @@ that exact tenant/workspace/session Pod across later Turns until its bounded
 idle TTL, while chat-only Runs never touch Kubernetes. K3s/containerd maps the
 class to `runsc` fixed to KVM. Manager readiness and activation inspection
 attest a real gVisor workload and fail closed without the RuntimeClass, policy,
-image or scoped API authority. See the
+image or scoped API authority.
+
+Each Project also owns an append-only, operator-managed environment version.
+Turn acceptance snapshots that exact profile, tool-image revision and canonical
+specification hash into the Run. The first Tool activation verifies Node.js 24,
+Java 17, Python 3.11 and Git inside the actual gVisor Pod before repository
+commands may run; the resulting gVisor/runsc, network, user, rootfs and
+toolchain evidence is committed with the Workspace checkpoint and shown in the
+Web conversation header. Warm Pod reuse requires both the committed Workspace
+revision and exact environment identity, so an image rollout cannot silently
+change an accepted Run or rebind a stale Pod. See ADR-0042 and the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for host setup, secrets,
 health, backup, upgrade, recovery, and the disposable full-topology acceptance
 command.

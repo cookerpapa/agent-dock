@@ -66,6 +66,8 @@ export type GitHubPullRequestDeliveryState = "pending" | "delivering" | "complet
 export type GitHubWebhookDeliveryStatus = "processed" | "ignored" | "failed";
 export type ModelRequestState = "reserved" | "completed" | "failed" | "aborted" | "budget_denied";
 export type ContextCompactionState = "running" | "completed" | "aborted" | "failed";
+export type EnvironmentVersionState = "pending" | "validated" | "failed";
+export type EnvironmentValidationStatus = "validated" | "failed";
 
 export interface TenantTable {
   id: string;
@@ -147,6 +149,35 @@ export interface ProjectTable {
   name: string;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
+}
+
+export interface EnvironmentVersionTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  version_number: number;
+  profile_key: string;
+  profile_version: string;
+  image_revision: string;
+  spec_sha256: string;
+  state: EnvironmentVersionState;
+  active: GeneratedBoolean;
+  validated_at: NullableTimestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface EnvironmentValidationTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  environment_version_id: string;
+  run_id: string;
+  attempt_id: string;
+  status: EnvironmentValidationStatus;
+  report: JsonObject | null;
+  failure_code: string | null;
+  validated_at: GeneratedTimestamp;
 }
 
 export interface WorkspaceTable {
@@ -267,6 +298,7 @@ export interface RunTable {
   session_id: string;
   turn_id: string;
   command_id: string;
+  environment_version_id: string;
   idempotency_key: string;
   trace_id: Generated<string>;
   state: RunState;
@@ -736,6 +768,8 @@ export interface Database {
   user_password_credentials: UserPasswordCredentialTable;
   web_sessions: WebSessionTable;
   projects: ProjectTable;
+  environment_versions: EnvironmentVersionTable;
+  environment_validations: EnvironmentValidationTable;
   workspaces: WorkspaceTable;
   workspace_sources: WorkspaceSourceTable;
   workspace_versions: WorkspaceVersionTable;

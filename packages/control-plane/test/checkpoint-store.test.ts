@@ -1,7 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type {
+  EnvironmentRuntimeSnapshot,
+  EnvironmentValidationReport,
+  ExecuteTurnCommandMessage,
+} from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -35,7 +39,35 @@ const IDS = {
   run2: "40000000-0000-4000-8000-000000000002",
   attempt1: "50000000-0000-4000-8000-000000000001",
   attempt2: "50000000-0000-4000-8000-000000000002",
+  environment: "10000000-0000-4000-8000-000000000013",
 } as const;
+
+const ENVIRONMENT: EnvironmentRuntimeSnapshot = {
+  environmentVersionId: IDS.environment,
+  versionNumber: 1,
+  profileKey: "agent-dock-fullstack",
+  profileVersion: "1",
+  imageRevision: "development",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+};
+
+const ENVIRONMENT_VALIDATION: EnvironmentValidationReport = {
+  profileKey: "agent-dock-fullstack",
+  profileVersion: "1",
+  imageRevision: "development",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+  isolationBoundary: "gvisor",
+  runtime: "runsc",
+  networkMode: "deny_all",
+  runAsUser: "1000:1000",
+  readOnlyRootFilesystem: true,
+  tools: [
+    { name: "node", version: "v24.18.0" },
+    { name: "java", version: 'openjdk version "17.0.19"' },
+    { name: "python", version: "Python 3.11.2" },
+    { name: "git", version: "git version 2.39.5" },
+  ],
+};
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -71,6 +103,7 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
         credentialBindingId: IDS.credential,
         credentialBindingVersion: 1,
       },
+      environment: ENVIRONMENT,
     },
   };
 }
@@ -126,6 +159,22 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       tenant_id: IDS.tenant,
       project_id: IDS.project,
       object_snapshot_key: null,
+    })
+    .execute();
+  await targetDatabase
+    .insertInto("environment_versions")
+    .values({
+      id: IDS.environment,
+      tenant_id: IDS.tenant,
+      project_id: IDS.project,
+      version_number: 1,
+      profile_key: "agent-dock-fullstack",
+      profile_version: "1",
+      image_revision: "development",
+      spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      state: "pending",
+      active: true,
+      validated_at: null,
     })
     .execute();
   await targetDatabase
@@ -246,6 +295,7 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
         session_id: IDS.session,
         turn_id: IDS.turn1,
         command_id: IDS.command1,
+        environment_version_id: IDS.environment,
         idempotency_key: "checkpoint-turn-1",
         state: "running",
         current_attempt_id: null,
@@ -260,6 +310,7 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
         session_id: IDS.session,
         turn_id: IDS.turn2,
         command_id: IDS.command2,
+        environment_version_id: IDS.environment,
         idempotency_key: "checkpoint-turn-2",
         state: "queued",
         current_attempt_id: null,
@@ -390,6 +441,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     const first = await store.save(command(1), null, {
       piSession: piSession("first"),
       workspace: workspace("first"),
+      environment: ENVIRONMENT_VALIDATION,
     });
     expect(first.revision).toMatch(/^[0-9a-f]{64}$/);
     await expect(store.load(command(1))).resolves.toBeUndefined();
@@ -508,6 +560,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     const second = await freshStore.save(command(2), first.revision, {
       piSession: piSession("second"),
       workspace: workspace("second"),
+      environment: ENVIRONMENT_VALIDATION,
     });
     expect(second.revision).not.toBe(first.revision);
     expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
@@ -519,6 +572,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       freshStore.save(command(2), first.revision, {
         piSession: piSession("stale"),
         workspace: workspace("stale"),
+        environment: ENVIRONMENT_VALIDATION,
       }),
     ).rejects.toMatchObject({ code: "checkpoint_conflict" });
     expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
@@ -629,6 +683,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
         const saved = await writer.save(command(1), null, {
           piSession: piSession("remote"),
           workspace: workspace("remote"),
+          environment: ENVIRONMENT_VALIDATION,
         });
         savedRevision = saved.revision;
         await writerObjectStore.put("probes/immutable.bin", Buffer.from("first"));

@@ -5,12 +5,13 @@ import {
   MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
+  parseEnvironmentValidationReport,
 } from "@agent-dock/protocol";
 import {
   PiRpcTurnError,
   validatePiSessionSnapshot,
   validateWorkspaceSnapshot,
-  type CapturedSandboxCheckpoint,
+  type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -388,8 +389,21 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
   async save(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
-    checkpoint: CapturedSandboxCheckpoint,
+    checkpoint: CapturedEnvironmentSandboxCheckpoint,
   ): Promise<SavedSandboxCheckpoint> {
+    const environment = parseEnvironmentValidationReport(checkpoint.environment);
+    if (
+      environment.profileKey !== command.payload.environment.profileKey ||
+      environment.profileVersion !== command.payload.environment.profileVersion ||
+      environment.imageRevision !== command.payload.environment.imageRevision ||
+      environment.specSha256 !== command.payload.environment.specSha256
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "environment_validation_mismatch",
+        "Tool Sandbox environment evidence did not match the accepted Run",
+        false,
+      );
+    }
     validatePiSessionSnapshot(checkpoint.piSession);
     validateWorkspaceSnapshot(checkpoint.workspace);
     const piArtifactId = this.#idGenerator();
@@ -402,6 +416,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       rawPatchBytes === undefined || rawPatchBytes.byteLength === 0 ? undefined : rawPatchBytes;
     const patchArtifactId = patchBytes === undefined ? undefined : this.#idGenerator();
     const versionId = this.#idGenerator();
+    const environmentValidationId = this.#idGenerator();
     const prefix = [
       "checkpoints",
       command.payload.tenantId,
@@ -516,6 +531,39 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
               ]),
         ];
         await transaction.insertInto("artifacts").values(artifacts).execute();
+        await transaction
+          .insertInto("environment_validations")
+          .values({
+            id: environmentValidationId,
+            tenant_id: command.payload.tenantId,
+            project_id: command.payload.projectId,
+            environment_version_id: command.payload.environment.environmentVersionId,
+            run_id: command.payload.runId,
+            attempt_id: command.payload.attemptId,
+            status: "validated",
+            report: environment,
+            failure_code: null,
+            validated_at: now,
+          })
+          .executeTakeFirstOrThrow();
+        const environmentUpdate = await transaction
+          .updateTable("environment_versions")
+          .set({ state: "validated", validated_at: now, updated_at: now })
+          .where("tenant_id", "=", command.payload.tenantId)
+          .where("project_id", "=", command.payload.projectId)
+          .where("id", "=", command.payload.environment.environmentVersionId)
+          .where("profile_key", "=", environment.profileKey)
+          .where("profile_version", "=", environment.profileVersion)
+          .where("image_revision", "=", environment.imageRevision)
+          .where("spec_sha256", "=", environment.specSha256)
+          .executeTakeFirst();
+        if (environmentUpdate.numUpdatedRows !== 1n) {
+          throw new SandboxCheckpointStoreError(
+            "environment_validation_mismatch",
+            "Project environment changed before validation evidence was committed",
+            false,
+          );
+        }
         const latestVersion = await transaction
           .selectFrom("workspace_versions")
           .select(["version_number"])

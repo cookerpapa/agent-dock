@@ -329,6 +329,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         type: "tool_sandbox.create",
         requestId: this.#idGenerator(),
         assignment: toolAssignment,
+        environment: command.payload.environment,
         workspaceSeed:
           workspaceSeed === undefined
             ? { kind: "sample_java" }
@@ -476,6 +477,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                   : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
                       piSession,
                       workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
+                      environment: captured.environment,
                       ...(captured.workspacePatch === undefined
                         ? {}
                         : { workspacePatch: captured.workspacePatch }),

@@ -64,6 +64,14 @@ function command(
         credentialBindingId: "credential-1",
         credentialBindingVersion: 1,
       },
+      environment: {
+        environmentVersionId: "10000000-0000-4000-8000-000000000001",
+        versionNumber: 1,
+        profileKey: "agent-dock-fullstack",
+        profileVersion: "1",
+        imageRevision: "development",
+        specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      },
     },
   };
 }

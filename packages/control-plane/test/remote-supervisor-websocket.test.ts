@@ -154,6 +154,14 @@ function executionRequest(seed: SeededTurn): TurnExecutionRequest {
       credentialBindingId: seed.credentialId,
       credentialBindingVersion: "1",
     },
+    environment: {
+      environmentVersionId: seed.project.environment.environmentVersionId,
+      versionNumber: seed.project.environment.versionNumber,
+      profileKey: seed.project.environment.profileKey,
+      profileVersion: seed.project.environment.profileVersion,
+      imageRevision: seed.project.environment.imageRevision,
+      specSha256: seed.project.environment.specSha256,
+    },
   };
 }
 

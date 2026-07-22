@@ -423,6 +423,7 @@ export class RemoteSupervisorExecutionBackend
             "credential binding version",
           ),
         },
+        environment: request.environment,
         ...(request.budgets === undefined ? {} : { budgets: request.budgets }),
         ...(request.traceContext === undefined ? {} : { traceContext: request.traceContext }),
       },

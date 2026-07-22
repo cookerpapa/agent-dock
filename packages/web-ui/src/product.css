@@ -207,6 +207,25 @@
   background: #171717;
 }
 
+.product-environment-badge {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  color: #a9a9a9;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-environment-validated {
+  color: #79c99b;
+}
+
+.product-environment-failed {
+  color: #e49a9a;
+}
+
 .product-sidebar-brand {
   display: flex;
   align-items: center;

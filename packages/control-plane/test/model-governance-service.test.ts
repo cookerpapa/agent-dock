@@ -26,6 +26,7 @@ const IDS = {
   endEvent: "c0000000-0000-4000-8000-000000000001",
   startMessage: "d0000000-0000-4000-8000-000000000001",
   endMessage: "e0000000-0000-4000-8000-000000000001",
+  environment: "f0000000-0000-4000-8000-000000000001",
 } as const;
 
 let pglite: PGlite;
@@ -88,6 +89,22 @@ beforeAll(async () => {
       object_snapshot_key: null,
       created_at: now,
       updated_at: now,
+    })
+    .executeTakeFirstOrThrow();
+  await database
+    .insertInto("environment_versions")
+    .values({
+      id: IDS.environment,
+      tenant_id: owner.tenantId,
+      project_id: IDS.project,
+      version_number: 1,
+      profile_key: "agent-dock-fullstack",
+      profile_version: "1",
+      image_revision: "development",
+      spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      state: "pending",
+      active: true,
+      validated_at: null,
     })
     .executeTakeFirstOrThrow();
   await database
@@ -155,6 +172,7 @@ beforeAll(async () => {
       session_id: IDS.session,
       turn_id: IDS.turn,
       command_id: IDS.command,
+      environment_version_id: IDS.environment,
       idempotency_key: "context-audit",
       state: "queued",
       current_attempt_id: null,

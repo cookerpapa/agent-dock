@@ -13,6 +13,7 @@ import {
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
+import { EnvironmentRuntimeSnapshotSchema } from "./environment.ts";
 
 export const TWO_PHASE_COMMAND_CAPABILITY = "command.two_phase.v1";
 
@@ -197,6 +198,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         nextEventSeq: PositiveSafeIntegerSchema,
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
         model: TurnModelSnapshotSchema,
+        environment: EnvironmentRuntimeSnapshotSchema,
         budgets: Type.Optional(TurnBudgetSnapshotSchema),
         traceContext: Type.Optional(TraceContextSchema),
       },

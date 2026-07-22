@@ -13,6 +13,7 @@ import * as contextAndModelGovernance from "./011_context_and_model_governance.t
 import * as observabilityTraceIdentity from "./012_observability_trace_identity.ts";
 import * as productAuthAndEmptyWorkspaces from "./013_product_auth_and_empty_workspaces.ts";
 import * as removePerRunTokenBudget from "./014_remove_per_run_token_budget.ts";
+import * as versionedProjectEnvironments from "./015_versioned_project_environments.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -31,6 +32,7 @@ export const migrationProvider: MigrationProvider = {
       "012_observability_trace_identity": observabilityTraceIdentity,
       "013_product_auth_and_empty_workspaces": productAuthAndEmptyWorkspaces,
       "014_remove_per_run_token_budget": removePerRunTokenBudget,
+      "015_versioned_project_environments": versionedProjectEnvironments,
     };
   },
 };
@@ -104,3 +106,8 @@ export {
   down as downRemovePerRunTokenBudget,
   up as upRemovePerRunTokenBudget,
 } from "./014_remove_per_run_token_budget.ts";
+
+export {
+  down as downVersionedProjectEnvironments,
+  up as upVersionedProjectEnvironments,
+} from "./015_versioned_project_environments.ts";

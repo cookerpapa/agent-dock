@@ -9,6 +9,7 @@ import {
 } from "@agent-dock/domain";
 import {
   TURN_CANCELLATION_OUTBOX_TOPIC,
+  parseEnvironmentRuntimeSnapshot,
   parseTurnCancellationOutboxPayload,
   type CancelTurnCommandMessage,
 } from "@agent-dock/protocol";
@@ -373,6 +374,12 @@ export class CancellationDispatcher {
             .onRef("run_attempt.run_id", "=", "run.id")
             .onRef("run_attempt.id", "=", "run.current_attempt_id"),
         )
+        .innerJoin("environment_versions as environment", (join) =>
+          join
+            .onRef("environment.tenant_id", "=", "run.tenant_id")
+            .onRef("environment.project_id", "=", "run.project_id")
+            .onRef("environment.id", "=", "run.environment_version_id"),
+        )
         .select([
           "outbox.tenant_id as tenantId",
           "outbox.id as outboxId",
@@ -400,6 +407,12 @@ export class CancellationDispatcher {
           "run.id as runId",
           "run_attempt.id as runAttemptId",
           "run_attempt.attempt_number as runAttemptNumber",
+          "environment.id as environmentVersionId",
+          "environment.version_number as environmentVersionNumber",
+          "environment.profile_key as environmentProfileKey",
+          "environment.profile_version as environmentProfileVersion",
+          "environment.image_revision as environmentImageRevision",
+          "environment.spec_sha256 as environmentSpecSha256",
         ])
         .where(
           this.#tenantId === undefined
@@ -521,6 +534,14 @@ export class CancellationDispatcher {
               credentialBindingId: row.credentialBindingId,
               credentialBindingVersion: row.credentialBindingVersion,
             },
+            environment: parseEnvironmentRuntimeSnapshot({
+              environmentVersionId: row.environmentVersionId,
+              versionNumber: row.environmentVersionNumber,
+              profileKey: row.environmentProfileKey,
+              profileVersion: row.environmentProfileVersion,
+              imageRevision: row.environmentImageRevision,
+              specSha256: row.environmentSpecSha256,
+            }),
           },
         },
       };

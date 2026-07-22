@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AgentDockApi } from "../src/api.ts";
 
+const environment = {
+  environmentVersionId: "90000000-0000-4000-8000-000000000001",
+  versionNumber: 1,
+  profileKey: "agent-dock-fullstack",
+  profileVersion: "1",
+  imageRevision: "sha-0123456789abcdef",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+  state: "pending",
+  createdAt: "2026-07-19T00:00:00.000Z",
+} as const;
+
 describe("tenant-aware browser API", () => {
   it("uses same-origin cookie sessions for product registration, login, and logout", async () => {
     const identity = {
@@ -57,6 +68,7 @@ describe("tenant-aware browser API", () => {
           workspaceId: "30000000-0000-4000-8000-000000000001",
           name: "Pinned repository",
           createdAt: "2026-07-19T00:00:00.000Z",
+          environment,
           source: {
             kind: "github_public",
             repository: "octocat/hello-world",
@@ -218,6 +230,7 @@ describe("tenant-aware browser API", () => {
                   name: "Alpha repair",
                   createdAt,
                   source: { kind: "sample_java", status: "ready" },
+                  environment: { ...environment, createdAt },
                 },
                 session: {
                   sessionId: "20000000-0000-4000-8000-000000000001",

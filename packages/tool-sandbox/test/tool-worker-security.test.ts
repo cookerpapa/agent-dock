@@ -3,6 +3,7 @@ import {
   resolveToolWorkspacePath,
   safeToolEnvironment,
   ToolWorkerError,
+  validateToolEnvironment,
 } from "../src/tool-worker.ts";
 
 describe("credential-free Tool Sandbox worker", () => {
@@ -39,5 +40,21 @@ describe("credential-free Tool Sandbox worker", () => {
     for (const path of ["../etc/passwd", "/etc/passwd", "src\\escape", "bad\0path"]) {
       expect(() => resolveToolWorkspacePath(path)).toThrow(ToolWorkerError);
     }
+  });
+
+  it("fails closed before probing when the physical image revision differs", async () => {
+    await expect(
+      validateToolEnvironment(
+        {
+          environmentVersionId: "10000000-0000-4000-8000-000000000001",
+          versionNumber: 1,
+          profileKey: "agent-dock-fullstack",
+          profileVersion: "1",
+          imageRevision: "expected-revision",
+          specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+        },
+        "different-revision",
+      ),
+    ).rejects.toMatchObject({ code: "environment_image_mismatch", retryable: false });
   });
 });

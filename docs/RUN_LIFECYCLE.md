@@ -3,7 +3,8 @@
 ## Durable acceptance
 
 The public request returns `202` only after PostgreSQL commits the prompt Turn,
-execute Command, mailbox position, idempotency fingerprint, and outbox record.
+execute Command, mailbox position, idempotency fingerprint, immutable Project
+environment snapshot, and outbox record.
 An HTTP retry with the same key and body returns the same Turn. The same key with
 a different body is rejected.
 
@@ -51,7 +52,9 @@ instead of blindly replaying commands.
    it does not create a Pod.
 7. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
 8. The first actual Tool operation makes the Provider create/restore/attest the
-   gVisor Pod. A chat-only Run skips this step entirely.
+   gVisor Pod. Before the first repository command, the worker verifies the
+   accepted image revision and expected Node.js/Java/Python/Git toolchain. A
+   chat-only Run skips this step entirely.
 
 Cold or queued sessions own no Pi process, Tool Sandbox, socket, thread, or
 per-session timer.
@@ -90,13 +93,16 @@ sequence.
 At `agent_settled`:
 
 1. If a Tool was used, Provider snapshots regular workspace files and the
-   cumulative Git patch. Otherwise no Workspace capture/version is created.
+   cumulative Git patch and returns the validated environment evidence.
+   Otherwise no Workspace capture/version or physical environment validation is
+   created.
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
 4. Bytes are conditionally written to object storage.
 5. PostgreSQL always stages the new Pi conversation pointer. A Tool-using Run
-   additionally stages an immutable Workspace version bound to the current
-   Run/Attempt, parent version, artifact hashes, lease, and fence.
+   additionally stages an immutable Workspace version and append-only
+   environment validation bound to the current Run/Attempt, parent version,
+   artifact hashes, lease, and fence.
 6. The terminal settlement transaction advances the checkpoint and current
    Workspace-version pointers with session-version/Run/Attempt/lease/fence CAS,
    settles the staged version, and records the Attempt revision. A failure

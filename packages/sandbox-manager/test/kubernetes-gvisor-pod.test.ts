@@ -23,6 +23,14 @@ const assignment: ToolSandboxAssignment = {
   leaseId: "10000000-0000-4000-8000-000000000003",
   fencingToken: 7,
 };
+const environment = {
+  environmentVersionId: "10000000-0000-4000-8000-000000000006",
+  versionNumber: 1,
+  profileKey: "agent-dock-fullstack" as const,
+  profileVersion: "1" as const,
+  imageRevision: "development",
+  specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+};
 
 describe("Kubernetes gVisor Pod boundary", () => {
   it("builds an offline, fixed-image, unprivileged and host-mount-free Tool Pod", () => {
@@ -32,6 +40,7 @@ describe("Kubernetes gVisor Pod boundary", () => {
       namespace: "agent-dock-sandboxes",
       activationId: "10000000-0000-4000-8000-000000000004",
       assignment,
+      environment,
     });
     const spec = pod.spec!;
     const container = spec.containers[0]!;
@@ -58,6 +67,7 @@ describe("Kubernetes gVisor Pod boundary", () => {
     });
     expect(container.args?.[0]).toContain("ulimit -u 128");
     expect(container.args?.[0]).toContain("ulimit -n 1024");
+    expect(container.args?.[0]).not.toContain("AGENT_DOCK_TOOL_IMAGE_REVISION");
     expect(container.resources?.limits).toMatchObject({
       cpu: "1000000000n",
       memory: String(768 * 1024 * 1024),
@@ -92,6 +102,7 @@ describe("Kubernetes gVisor Pod boundary", () => {
         namespace: "agent-dock-sandboxes",
         activationId: "10000000-0000-4000-8000-000000000004",
         assignment,
+        environment,
         policy: unsupported,
       }),
     ).toThrow("does not support");

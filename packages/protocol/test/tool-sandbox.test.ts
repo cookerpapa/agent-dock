@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseSandboxManagerRequest,
   parseToolSandboxOperationRequest,
   parseToolWorkerOutput,
   ToolSandboxProtocolError,
 } from "../src/index.ts";
+
+const environment = {
+  environmentVersionId: "10000000-0000-4000-8000-000000000010",
+  versionNumber: 1,
+  profileKey: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  imageRevision: "sha-0123456789abcdef",
+  specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+} as const;
 
 const assignment = {
   tenantId: "tenant-tool-protocol",
@@ -29,6 +41,7 @@ describe("Tool Sandbox protocol", () => {
         type: "tool_sandbox.create",
         requestId: "10000000-0000-4000-8000-000000000004",
         assignment,
+        environment,
         workspaceSeed: { kind: "sample_java" },
       }),
     ).toMatchObject({ type: "tool_sandbox.create", assignment });
@@ -53,6 +66,7 @@ describe("Tool Sandbox protocol", () => {
         type: "tool_sandbox.create",
         requestId: "10000000-0000-4000-8000-000000000007",
         assignment: { ...assignment, unexpected: true },
+        environment,
         workspaceSeed: { kind: "sample_java" },
       }),
     ).toThrow(ToolSandboxProtocolError);

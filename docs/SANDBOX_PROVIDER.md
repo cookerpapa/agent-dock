@@ -93,6 +93,37 @@ Production defaults retain at most four warm Pods for 15 minutes
 `AGENT_DOCK_SANDBOX_WARM_TTL_MS=900000`). Eviction destroys the Pod; recovery
 always uses the committed object-store checkpoint.
 
+## Versioned Project environment
+
+The fixed image is selected by the operator, but its identity is no longer
+implicit. Every accepted Run carries one immutable Project environment
+snapshot:
+
+```text
+environmentVersionId / versionNumber
+profileKey = agent-dock-fullstack
+profileVersion = 1
+imageRevision = immutable deployment revision
+specSha256 = canonical profile specification
+```
+
+`ToolSandboxManager` accepts the request only when the profile and image
+revision exactly match its own startup configuration. The model cannot supply
+an image location. Before readiness, the worker compares the expected Run
+revision with a read-only revision file baked into the physical image; the
+Manager cannot make a stale image pass merely by injecting a new environment
+variable. It then probes the fixed Node.js 24, Java 17, Python 3.11 and Git 2
+toolchain. The Provider combines the report with live `runsc`/gVisor, deny-all
+networking, UID/GID 1000:1000 and read-only-rootfs evidence.
+
+The evidence is returned with a Tool Workspace capture and committed as an
+append-only validation row bound to Project environment, Run and Attempt. A
+healthy warm Pod may be rebound only when both the Workspace revision and full
+environment snapshot are identical. A profile/image rollout or validation
+mismatch destroys the old activation and fails closed before repository code
+runs. Chat-only Runs retain only the durable environment snapshot and never
+materialize a Pod for validation.
+
 ## Fixed Tool policy
 
 ```text

@@ -7,6 +7,10 @@ LABEL org.opencontainers.image.title="AgentDock untrusted tool sandbox" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 
+RUN install -d -m 0755 /opt/agent-dock \
+    && printf '%s\n' "${AGENT_DOCK_REVISION}" > /opt/agent-dock/image-revision \
+    && chmod 0444 /opt/agent-dock/image-revision
+
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \

@@ -2,6 +2,7 @@ import {
   MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type ExecuteTurnCommandMessage,
+  type EnvironmentValidationReport,
   type SandboxCheckpointBlob,
   type SandboxSettledCheckpoint,
   type WorkspacePatch,
@@ -22,6 +23,10 @@ export type CapturedSandboxCheckpoint = {
   piSession: Uint8Array;
   workspace: Uint8Array;
   workspacePatch?: WorkspacePatch;
+};
+
+export type CapturedEnvironmentSandboxCheckpoint = CapturedSandboxCheckpoint & {
+  environment: EnvironmentValidationReport;
 };
 
 export type SavedSandboxCheckpoint = {
@@ -50,7 +55,7 @@ export interface SandboxCheckpointStore {
   save(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
-    checkpoint: CapturedSandboxCheckpoint,
+    checkpoint: CapturedEnvironmentSandboxCheckpoint,
   ): Promise<SavedSandboxCheckpoint>;
   saveToolOutput?(
     command: ExecuteTurnCommandMessage,

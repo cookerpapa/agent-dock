@@ -23,6 +23,7 @@ export type ProductionControlPlaneConfig = {
   port: number;
   maximumLanesPerSupervisor: number;
   platformModelSourceTenantId: string;
+  environmentImageRevision: string;
   webSessionCookieSecure: boolean;
   webSessionTtlMs: number;
   publicRegistration: {
@@ -240,6 +241,11 @@ export async function loadProductionControlPlaneConfig(
     platformModelSourceTenantId: parseUuidPathParameter(
       required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),
       "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID",
+    ),
+    environmentImageRevision: bounded(
+      required(environment, "AGENT_DOCK_IMAGE_REVISION"),
+      "AGENT_DOCK_IMAGE_REVISION",
+      128,
     ),
     webSessionCookieSecure: booleanValue(environment, "AGENT_DOCK_WEB_SESSION_COOKIE_SECURE"),
     webSessionTtlMs: integerValue(

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ControlPlaneApiValidationError,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
@@ -25,6 +28,14 @@ import {
 } from "../src/index.ts";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
+const ENVIRONMENT_SNAPSHOT = {
+  environmentVersionId: "90000000-0000-4000-8000-000000000001",
+  versionNumber: 1,
+  profileKey: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  imageRevision: "sha-0123456789abcdef",
+  specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+} as const;
 
 describe("control-plane public API schemas", () => {
   it("validates public resources before a browser consumes them", () => {
@@ -36,6 +47,11 @@ describe("control-plane public API schemas", () => {
         name: "Java repair demo",
         createdAt,
         source: { kind: "sample_java", status: "ready" },
+        environment: {
+          ...ENVIRONMENT_SNAPSHOT,
+          state: "pending",
+          createdAt,
+        },
       }),
     ).toMatchObject({ name: "Java repair demo" });
     expect(
@@ -121,6 +137,11 @@ describe("control-plane public API schemas", () => {
           name: "Java repair demo",
           createdAt,
           source: { kind: "sample_java", status: "ready" },
+          environment: {
+            ...ENVIRONMENT_SNAPSHOT,
+            state: "pending",
+            createdAt,
+          },
         },
         session: {
           sessionId: "30000000-0000-4000-8000-000000000001",
@@ -158,6 +179,7 @@ describe("control-plane public API schemas", () => {
         turnId: "50000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",
         state: "running",
+        environment: ENVIRONMENT_SNAPSHOT,
         attemptCount: 1,
         currentAttemptId: "50000000-0000-4000-8000-000000000011",
         queuedAt: createdAt,

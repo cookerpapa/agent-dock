@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AgentDockWireProtocolError,
   createAgentDockEventFactory,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
 } from "../src/index.ts";
@@ -57,6 +60,17 @@ function modelSnapshot() {
     thinkingLevel: "off",
     credentialBindingId: "credential-binding-1",
     credentialBindingVersion: 3,
+  } as const;
+}
+
+function environmentSnapshot() {
+  return {
+    environmentVersionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    versionNumber: 1,
+    profileKey: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+    profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+    imageRevision: "sha-0123456789abcdef",
+    specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   } as const;
 }
 
@@ -155,6 +169,7 @@ describe("supervisor/control-plane wire protocol", () => {
         nextEventSeq: 11,
         input: { kind: "prompt", text: "Fix the failing test" },
         model: modelSnapshot(),
+        environment: environmentSnapshot(),
         traceContext: {
           traceparent: "00-11111111111111111111111111111111-2222222222222222-01",
         },

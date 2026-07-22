@@ -21,6 +21,7 @@ const IDS = {
   command: "50000000-0000-4000-8000-000000000001",
   message: "60000000-0000-4000-8000-000000000001",
   lease: "70000000-0000-4000-8000-000000000001",
+  environment: "80000000-0000-4000-8000-000000000001",
 } as const;
 const PROVIDER_SECRET = `sk-${"p".repeat(48)}`;
 const MASTER_KEY = Buffer.alloc(32, 21).toString("base64url");
@@ -95,6 +96,22 @@ beforeAll(async () => {
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("environment_versions")
+    .values({
+      id: IDS.environment,
+      tenant_id: tenant.tenantId,
+      project_id: IDS.project,
+      version_number: 1,
+      profile_key: "agent-dock-fullstack",
+      profile_version: "1",
+      image_revision: "development",
+      spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      state: "pending",
+      active: true,
+      validated_at: null,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("sessions")
     .values({
       id: IDS.session,
@@ -156,6 +173,7 @@ beforeAll(async () => {
       session_id: IDS.session,
       turn_id: IDS.turn,
       command_id: IDS.command,
+      environment_version_id: IDS.environment,
       idempotency_key: "gateway-live-1",
       state: "queued",
       current_attempt_id: null,
@@ -219,6 +237,14 @@ beforeAll(async () => {
         thinkingLevel: "off",
         credentialBindingId: tenant.credentialBindingId,
         credentialBindingVersion: 2,
+      },
+      environment: {
+        environmentVersionId: IDS.environment,
+        versionNumber: 1,
+        profileKey: "agent-dock-fullstack",
+        profileVersion: "1",
+        imageRevision: "development",
+        specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
       },
     },
   };

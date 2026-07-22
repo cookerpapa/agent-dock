@@ -197,4 +197,5 @@ extension-policy support would overstate the current boundary.
 - [x] Inherit and re-seal the platform default model for new accounts without exposing model controls or credentials
 - [x] Restrict production model replacement to the platform operator tenant
 - [x] Remediate Pi 0.80.10's shrinkwrap-pinned `brace-expansion@5.0.6` and `protobufjs@7.6.4` with exact reviewed package aliases, post-install replacement, actual-version checks in CI/production images, and an audit reconciler limited to the two exact advisory paths; keep the hardening fail-closed on any future Pi version until upstream republishes fixed metadata
+- [x] Add append-only Project environment versions, immutable Run snapshots, Manager/image policy matching, in-gVisor Node/Java/Python/Git preflight, persisted environment evidence, exact-environment warm reuse, and Web validation status
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

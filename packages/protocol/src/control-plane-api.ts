@@ -7,6 +7,10 @@ import {
   UuidSchema,
 } from "./protocol-primitives.ts";
 import { SessionStateSchema } from "./event-envelope.ts";
+import {
+  EnvironmentRuntimeSnapshotSchema,
+  ProjectEnvironmentResourceSchema,
+} from "./environment.ts";
 
 export const TurnThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -549,6 +553,7 @@ export const ProjectResourceSchema = Type.Object(
     name: Type.String({ minLength: 1, maxLength: 256 }),
     createdAt: UtcTimestampSchema,
     source: WorkspaceSourceResourceSchema,
+    environment: ProjectEnvironmentResourceSchema,
   },
   { additionalProperties: false },
 );
@@ -747,6 +752,7 @@ export const RunResourceSchema = Type.Object(
     sessionId: UuidSchema,
     turnId: UuidSchema,
     commandId: UuidSchema,
+    environment: EnvironmentRuntimeSnapshotSchema,
     state: RunStateSchema,
     attemptCount: NonNegativeSafeIntegerSchema,
     currentAttemptId: Type.Optional(UuidSchema),

@@ -187,6 +187,13 @@ It separates conversation and Workspace checkpoints, uses exact Session-scoped
 warm reuse with revision/fence/UID verification, and publishes coalesced events
 through a bounded asynchronous batch pipeline with cumulative ACK.
 
+ADR-0042 makes the Project development environment durable and auditable. Runs
+snapshot an append-only environment version; Manager policy and in-gVisor
+toolchain preflight fail closed on drift; successful Tool checkpoints persist
+concrete runtime evidence; and warm reuse now also requires exact environment
+identity. Arbitrary user Dockerfiles remain intentionally outside this slice
+until a separate trusted image-build and provenance plane exists.
+
 This bounded tool-sandbox slice is resume-ready.
 
 ## Phase 4: multi-tenant scheduling (2-3 weeks)

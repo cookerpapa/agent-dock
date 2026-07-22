@@ -4,6 +4,7 @@ import type {
   ConversationDetailResource,
   ConversationSessionResource,
   ProjectResource,
+  ProjectEnvironmentResource,
   RunResource,
   SessionState,
   SessionResource,
@@ -97,6 +98,7 @@ export type SessionViewState = {
 export type SessionViewAction =
   | { type: "session.created"; project: ProjectResource; session: SessionResource }
   | { type: "conversation.loaded"; conversation: ConversationDetailResource }
+  | { type: "project.environment.refreshed"; environment: ProjectEnvironmentResource }
   | { type: "turn.accepted"; accepted: AcceptedTurnResource; prompt: string }
   | { type: "turn.cancellation.requested"; turnId: string }
   | {
@@ -432,6 +434,11 @@ export function sessionViewReducer(
       historyTruncated: action.conversation.historyTruncated,
       connection: { phase: "offline", attempt: 0, message: "Opening durable event stream" },
     };
+  }
+  if (action.type === "project.environment.refreshed") {
+    return state.project === null
+      ? state
+      : { ...state, project: { ...state.project, environment: action.environment } };
   }
   if (action.type === "turn.accepted") {
     const turns = updateTurn(state.turns, action.accepted.turnId, (turn) => ({

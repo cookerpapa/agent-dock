@@ -76,6 +76,9 @@ export class ControlPlaneModule {
           provide: ControlPlaneStoreFactory,
           useValue: new ControlPlaneStoreFactory({
             database: options.database,
+            ...(options.environmentImageRevision === undefined
+              ? {}
+              : { environmentImageRevision: options.environmentImageRevision }),
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
         },

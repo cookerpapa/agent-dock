@@ -22,6 +22,7 @@ const provider = new KubernetesGvisorSandboxProvider({
 });
 const manager = new ToolSandboxManager({
   provider,
+  imageRevision: config.imageRevision,
   warmTtlMs: config.warmTtlMs,
   maximumWarmActivations: config.maximumWarmActivations,
 });

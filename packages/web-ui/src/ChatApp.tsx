@@ -622,6 +622,15 @@ export default function ChatApp() {
           run.state === "superseded"
         ) {
           setInspectorRefreshSignal((value) => value + 1);
+          if (state.session !== null) {
+            const detail = await api.getConversation(state.session.sessionId).catch(() => null);
+            if (!cancelled && detail !== null) {
+              update({
+                type: "project.environment.refreshed",
+                environment: detail.project.environment,
+              });
+            }
+          }
           await refreshConversations().catch(() => undefined);
           return;
         }
@@ -635,7 +644,7 @@ export default function ChatApp() {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [api, authPhase, currentTurn?.runId, refreshConversations, update]);
+  }, [api, authPhase, currentTurn?.runId, refreshConversations, state.session, update]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -910,6 +919,25 @@ export default function ChatApp() {
             {state.session ? (
               <span className={state.connection.phase === "live" ? "online" : ""}>
                 {state.connection.phase === "live" ? "已连接" : "连接中"}
+              </span>
+            ) : null}
+            {state.project ? (
+              <span
+                className={`product-environment-badge product-environment-${state.project.environment.state}`}
+                title={
+                  state.project.environment.latestValidation === undefined
+                    ? `镜像 ${state.project.environment.imageRevision}`
+                    : state.project.environment.latestValidation.tools
+                        .map((tool) => `${tool.name} ${tool.version}`)
+                        .join(" · ")
+                }
+              >
+                Env v{String(state.project.environment.versionNumber)} ·{" "}
+                {state.project.environment.state === "validated"
+                  ? "gVisor 已验证"
+                  : state.project.environment.state === "failed"
+                    ? "验证失败"
+                    : "等待首次工具调用"}
               </span>
             ) : null}
           </div>

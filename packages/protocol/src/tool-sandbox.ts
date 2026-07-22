@@ -4,6 +4,11 @@ import { WorkspacePatchSchema } from "./event-envelope.ts";
 import { GitHubRepositorySourceSchema } from "./control-plane-api.ts";
 import { AgentWorkspaceSeedSchema, SandboxCheckpointBlobSchema } from "./agent-runtime.ts";
 import { OpaqueIdSchema, PositiveSafeIntegerSchema, UuidSchema } from "./protocol-primitives.ts";
+import {
+  EnvironmentRuntimeSnapshotSchema,
+  EnvironmentToolchainReportSchema,
+  EnvironmentValidationReportSchema,
+} from "./environment.ts";
 
 export const MAX_TOOL_COMMAND_BYTES = 64 * 1_024;
 export const MAX_TOOL_FILE_BYTES = 512 * 1_024;
@@ -52,6 +57,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     type: Type.Literal("tool_sandbox.create"),
     requestId: UuidSchema,
     assignment: ToolSandboxAssignmentSchema,
+    environment: EnvironmentRuntimeSnapshotSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
     workspaceRevision: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
@@ -91,6 +97,7 @@ export const ToolSandboxCaptureResponseSchema = Type.Union([
       activationId: UuidSchema,
       workspace: SandboxCheckpointBlobSchema,
       workspacePatch: Type.Optional(WorkspacePatchSchema),
+      environment: EnvironmentValidationReportSchema,
     },
     { additionalProperties: false },
   ),
@@ -312,6 +319,7 @@ export const ToolWorkerInputSchema = Type.Union([
       ...WorkerEnvelope,
       type: Type.Literal("worker.initialize"),
       activationId: UuidSchema,
+      environment: EnvironmentRuntimeSnapshotSchema,
       workspaceSeed: AgentWorkspaceSeedSchema,
       workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
     },
@@ -359,6 +367,7 @@ export const ToolWorkerOutputSchema = Type.Union([
       ...WorkerEnvelope,
       type: Type.Literal("worker.ready"),
       activationId: UuidSchema,
+      environment: EnvironmentToolchainReportSchema,
     },
     { additionalProperties: false },
   ),

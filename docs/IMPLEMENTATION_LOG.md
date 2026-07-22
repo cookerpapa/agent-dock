@@ -1810,3 +1810,21 @@
   真实 `sandbox:check` 再次通过 RuntimeClass → runsc/KVM、跨租户/凭据/网络/资源隔离、warm rebind、纯聊天零 Pod 以及 pinned Pi
   remote-tool 修复闭环。门禁期间 npm 新发布的 `fast-uri` high advisory 被直接升级到修复版本 3.1.4/4.1.1，没有降低审计等级；最终
   remaining high/critical vulnerabilities 为 0。
+
+## 2026-07-22 — 版本化 Project Environment Plane
+
+- 问题：此前所有 Project 隐式使用部署时的同一 Tool image。Run 没有保存环境身份，镜像滚动会覆盖“这次任务究竟在哪个工具链上执行”的
+  事实，Session warm Pod 也只校验 Workspace revision，无法证明复用的是同一开发环境。单纯让浏览器或模型传 Docker image 又会把供应链和
+  Kubernetes 策略控制交给不可信输入。
+- 决策：ADR-0042 引入 append-only `environment_versions`。Project 只有一个 active version；Turn acceptance 把 environment UUID、版本、
+  固定 `agent-dock-fullstack/1` profile、部署 image revision 和 canonical spec SHA-256 快照进 Run。Control Plane 与 Sandbox Manager 都必须
+  配置同一 immutable revision，升级只为后续 Run 生成新 version，旧 Run 不被静默改写。
+- 执行：环境快照经过 durable outbox、Supervisor wire、Tool reservation 到 gVisor Pod。Tool Worker 在 Workspace restore 和任何用户命令前
+  用镜像构建时写入的只读 revision 文件校验物理 image，而不是相信 Manager 注入的自报值；随后用绝对路径有界探测 Node 24、Java 17、
+  Python 3.11、Git 2。Provider 再合并真实 runsc/gVisor、deny-all、UID/GID 1000:1000 和 read-only rootfs 证据。任一不匹配都在
+  repository code 执行前 fail closed。
+- 持久化：成功的 Tool Run 在 fenced Workspace checkpoint 事务内写 append-only `environment_validations`，并把 Project environment projection
+  更新为 validated。pure chat 仍只保存逻辑 snapshot、0 Pod；warm reuse 同时要求 committed Workspace SHA 和完整 environment identity，
+  环境滚动会销毁旧 Pod。Web header 显示 pending/validated/failed 与实际工具版本。
+- 验证：新增 migration up/down、闭合 protocol、Manager policy/reuse、Pod annotation、worker revision 以及 checkpoint evidence 回归；最终还需
+  以生产 gVisor Pod 和真实模型 Tool Run 验证 token、toolchain report、Workspace checkpoint、Web API 与零残留资源。

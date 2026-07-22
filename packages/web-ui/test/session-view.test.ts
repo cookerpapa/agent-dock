@@ -23,6 +23,16 @@ const project: ProjectResource = {
   name: "Java repair demo",
   createdAt: CREATED_AT,
   source: { kind: "sample_java", status: "ready" },
+  environment: {
+    environmentVersionId: "30000000-0000-4000-8000-000000000002",
+    versionNumber: 1,
+    profileKey: "agent-dock-fullstack",
+    profileVersion: "1",
+    imageRevision: "development",
+    specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+    state: "pending",
+    createdAt: CREATED_AT,
+  },
 };
 
 const session: SessionResource = {

@@ -109,6 +109,7 @@ export {
   validateLoadedCheckpoint,
   validatePiSessionSnapshot,
   type CapturedSandboxCheckpoint,
+  type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,

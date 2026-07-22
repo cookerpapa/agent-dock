@@ -1,8 +1,11 @@
 import {
+  isExpectedDefaultToolchain,
   parseGitHubWorkspaceImportOutput,
   parseToolWorkerOutput,
   type GitHubRepositorySource,
   type GitHubWorkspaceImportRequest,
+  type EnvironmentRuntimeSnapshot,
+  type EnvironmentToolchainReport,
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
@@ -73,6 +76,11 @@ export const KUBERNETES_SANDBOX_ANNOTATIONS = {
   memoryBytes: "agent-dock.io/memory-bytes",
   cpuNano: "agent-dock.io/cpu-nano",
   policyVersion: "agent-dock.io/policy-version",
+  environmentVersionId: "agent-dock.io/environment-version-id",
+  environmentVersionNumber: "agent-dock.io/environment-version-number",
+  environmentProfile: "agent-dock.io/environment-profile",
+  environmentImageRevision: "agent-dock.io/environment-image-revision",
+  environmentSpecSha256: "agent-dock.io/environment-spec-sha256",
   importId: "agent-dock.io/import-id",
 } as const;
 
@@ -109,6 +117,7 @@ type ManagedPodRuntime = SupervisorRuntimeAssignment & {
 type Activation = {
   activationId: string;
   assignment: ToolSandboxAssignment;
+  environment: EnvironmentRuntimeSnapshot;
   runtimeName: string;
   runtimeId: string;
   handle?: SandboxHandle;
@@ -117,7 +126,7 @@ type Activation = {
   stderrStream: PassThrough;
   connection?: WebSocket;
   closed: Deferred<void>;
-  ready: Deferred<void>;
+  ready: Deferred<EnvironmentToolchainReport>;
   operations: Map<string, Deferred<ToolSandboxOperationResponse>>;
   captures: Map<string, Deferred<ToolSandboxCaptureResponse>>;
   seenOperationIds: Set<string>;
@@ -133,6 +142,7 @@ export type KubernetesToolPodOptions = {
   namespace: string;
   activationId: string;
   assignment: ToolSandboxAssignment;
+  environment: EnvironmentRuntimeSnapshot;
   policy?: SandboxPolicy;
   runtimeClassName?: string;
   serviceAccountName?: string;
@@ -270,6 +280,7 @@ function assignmentAnnotations(
   activationId: string,
   assignment: ToolSandboxAssignment,
   policy: SandboxPolicy,
+  environment?: EnvironmentRuntimeSnapshot,
 ): Record<string, string> {
   for (const [field, value] of Object.entries(assignment)) {
     if (field !== "fencingToken") bounded(String(value), `Tool Sandbox assignment ${field}`, 512);
@@ -293,6 +304,17 @@ function assignmentAnnotations(
     [KUBERNETES_SANDBOX_ANNOTATIONS.memoryBytes]: String(policy.resources.memoryBytes),
     [KUBERNETES_SANDBOX_ANNOTATIONS.cpuNano]: String(policy.resources.cpuNano),
     [KUBERNETES_SANDBOX_ANNOTATIONS.policyVersion]: String(policy.policyVersion),
+    ...(environment === undefined
+      ? {}
+      : {
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentVersionId]: environment.environmentVersionId,
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentVersionNumber]: String(
+            environment.versionNumber,
+          ),
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentProfile]: `${environment.profileKey}:${environment.profileVersion}`,
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision]: environment.imageRevision,
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentSpecSha256]: environment.specSha256,
+        }),
   };
 }
 
@@ -368,7 +390,12 @@ export function buildKubernetesToolSandboxPod(options: KubernetesToolPodOptions)
         [KUBERNETES_SANDBOX_LABELS.workload]: "tool-sandbox",
         [KUBERNETES_SANDBOX_LABELS.sandboxHash]: sandboxHash(options.assignment.sandboxId),
       },
-      annotations: assignmentAnnotations(activationId, options.assignment, policy),
+      annotations: assignmentAnnotations(
+        activationId,
+        options.assignment,
+        policy,
+        options.environment,
+      ),
     },
     spec: {
       activeDeadlineSeconds: Math.ceil(policy.resources.turnWallClockTimeoutMs / 1_000),
@@ -893,6 +920,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           namespace: this.#sandboxNamespace,
           activationId,
           assignment: spec.assignment,
+          environment: spec.environment,
           policy: spec.policy,
           runtimeClassName: this.#runtimeClassName,
           serviceAccountName: this.#toolServiceAccountName,
@@ -928,7 +956,13 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           false,
         );
       }
-      activation = this.#newActivation(activationId, spec.assignment, name, createdUid);
+      activation = this.#newActivation(
+        activationId,
+        spec.assignment,
+        spec.environment,
+        name,
+        createdUid,
+      );
       this.#activations.set(activationId, activation);
       this.#attachWorkerStreams(activation);
       activation.connection = await this.#client.attach(
@@ -945,6 +979,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           toolWorkerProtocolVersion: 1,
           type: "worker.initialize",
           activationId,
+          environment: spec.environment,
           workspaceSeed: spec.workspaceSeed,
           ...(spec.workspaceRestore === undefined
             ? {}
@@ -953,7 +988,24 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         this.#readyTimeoutMs,
         "Tool Sandbox initialization input",
       );
-      await withTimeout(activation.ready.promise, this.#readyTimeoutMs, "Tool Sandbox readiness");
+      const toolchain = await withTimeout(
+        activation.ready.promise,
+        this.#readyTimeoutMs,
+        "Tool Sandbox readiness",
+      );
+      if (
+        !isExpectedDefaultToolchain(toolchain) ||
+        toolchain.profileKey !== spec.environment.profileKey ||
+        toolchain.profileVersion !== spec.environment.profileVersion ||
+        toolchain.imageRevision !== spec.environment.imageRevision ||
+        toolchain.specSha256 !== spec.environment.specSha256
+      ) {
+        throw new SandboxManagerError(
+          "environment_preflight_mismatch",
+          "Tool Sandbox environment did not match the accepted Run",
+          false,
+        );
+      }
       const inspected = await this.#inspectEffectiveIsolation(runningPod);
       this.#assertEffectiveIsolation(inspected, spec.policy);
       const handle: SandboxHandle = {
@@ -964,6 +1016,15 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         runtimeName: name,
         workspaceRoot: "/workspace",
         assignment: spec.assignment,
+        environment: spec.environment,
+        environmentValidation: {
+          ...toolchain,
+          isolationBoundary: "gvisor",
+          runtime: "runsc",
+          networkMode: "deny_all",
+          runAsUser: "1000:1000",
+          readOnlyRootFilesystem: true,
+        },
       };
       activation.handle = handle;
       return handle;
@@ -1560,16 +1621,18 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   #newActivation(
     activationId: string,
     assignment: ToolSandboxAssignment,
+    environment: EnvironmentRuntimeSnapshot,
     name: string,
     uidValue: string,
   ): Activation {
-    const ready = deferred<void>();
+    const ready = deferred<EnvironmentToolchainReport>();
     const closed = deferred<void>();
     void ready.promise.catch(() => undefined);
     void closed.promise.catch(() => undefined);
     return {
       activationId,
       assignment,
+      environment,
       runtimeName: name,
       runtimeId: uidValue,
       stdin: new PassThrough(),
@@ -1709,7 +1772,19 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   #handleWorkerOutput(activation: Activation, output: ToolWorkerOutput): void {
     if (output.type === "worker.ready") {
       if (output.activationId !== activation.activationId) throw new Error("identity mismatch");
-      activation.ready.resolve();
+      if (
+        output.environment.profileKey !== activation.environment.profileKey ||
+        output.environment.profileVersion !== activation.environment.profileVersion ||
+        output.environment.imageRevision !== activation.environment.imageRevision ||
+        output.environment.specSha256 !== activation.environment.specSha256
+      ) {
+        throw new SandboxManagerError(
+          "environment_preflight_mismatch",
+          "Tool Sandbox environment did not match the accepted Run",
+          false,
+        );
+      }
+      activation.ready.resolve(output.environment);
       return;
     }
     if (output.type === "worker.operation_result") {
@@ -1730,6 +1805,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         requestId: output.requestId,
         activationId: output.activationId,
         workspace: output.workspace,
+        environment: activation.handle!.environmentValidation,
         ...(output.workspacePatch === undefined ? {} : { workspacePatch: output.workspacePatch }),
       });
       return;

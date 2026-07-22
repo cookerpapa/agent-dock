@@ -31,6 +31,29 @@ export {
 } from "./agent-runtime.ts";
 
 export {
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  EnvironmentImageRevisionSchema,
+  EnvironmentRuntimeSnapshotSchema,
+  EnvironmentToolNameSchema,
+  EnvironmentToolReportSchema,
+  EnvironmentToolchainReportSchema,
+  EnvironmentValidationReportSchema,
+  ProjectEnvironmentResourceSchema,
+  isExpectedDefaultToolchain,
+  parseEnvironmentRuntimeSnapshot,
+  parseEnvironmentToolchainReport,
+  parseEnvironmentValidationReport,
+  type EnvironmentRuntimeSnapshot,
+  type EnvironmentToolName,
+  type EnvironmentToolReport,
+  type EnvironmentToolchainReport,
+  type EnvironmentValidationReport,
+  type ProjectEnvironmentResource,
+} from "./environment.ts";
+
+export {
   GitHubWorkspaceImportFailureSchema,
   GitHubWorkspaceImportOutputSchema,
   GitHubWorkspaceImportProtocolError,

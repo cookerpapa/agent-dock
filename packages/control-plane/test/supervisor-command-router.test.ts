@@ -1,6 +1,9 @@
 import {
   TWO_PHASE_COMMAND_CAPABILITY,
   createAgentDockEventFactory,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+  DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type EventPublishMessage,
@@ -53,6 +56,14 @@ function command(): ExecuteTurnCommandMessage {
         thinkingLevel: "off",
         credentialBindingId: "credential-1",
         credentialBindingVersion: 1,
+      },
+      environment: {
+        environmentVersionId: "10000000-0000-4000-8000-000000000012",
+        versionNumber: 1,
+        profileKey: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
+        profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+        imageRevision: "sha-0123456789abcdef",
+        specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
       },
     },
   });

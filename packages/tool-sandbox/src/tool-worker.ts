@@ -1,8 +1,12 @@
 import {
+  isExpectedDefaultToolchain,
   MAX_TOOL_COMMAND_BYTES,
   MAX_TOOL_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
   parseToolWorkerInput,
+  type EnvironmentRuntimeSnapshot,
+  type EnvironmentToolName,
+  type EnvironmentToolchainReport,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWorkerOutput,
@@ -22,6 +26,7 @@ import { createInterface } from "node:readline";
 
 export const TOOL_WORKSPACE_DIRECTORY = "/workspace";
 export const SAMPLE_JAVA_FIXTURE = "/opt/agent-dock/sample-java-repair";
+const TOOL_IMAGE_REVISION_FILE = "/opt/agent-dock/image-revision";
 
 export class ToolWorkerError extends Error {
   readonly code: string;
@@ -52,6 +57,117 @@ function execute(file: string, args: readonly string[], cwd: string): Promise<st
       },
     );
   });
+}
+
+function probeVersion(file: string, args: readonly string[]): Promise<string> {
+  return new Promise<string>((resolvePromise, rejectPromise) => {
+    execFile(
+      file,
+      [...args],
+      {
+        cwd: TOOL_WORKSPACE_DIRECTORY,
+        encoding: "utf8",
+        maxBuffer: 8 * 1_024,
+        timeout: 5_000,
+        env: safeToolEnvironment(),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          rejectPromise(
+            new ToolWorkerError(
+              "environment_preflight_failed",
+              "Tool Sandbox environment preflight failed",
+              false,
+            ),
+          );
+          return;
+        }
+        const output = `${stdout}${stderr}`.trim().split("\n", 1)[0]?.trim() ?? "";
+        if (output.length < 1 || output.length > 256 || /[\u0000-\u001f\u007f]/.test(output)) {
+          rejectPromise(
+            new ToolWorkerError(
+              "environment_preflight_failed",
+              "Tool Sandbox environment preflight failed",
+              false,
+            ),
+          );
+          return;
+        }
+        resolvePromise(output);
+      },
+    );
+  });
+}
+
+async function readBakedImageRevision(): Promise<string> {
+  let handle;
+  try {
+    handle = await open(TOOL_IMAGE_REVISION_FILE, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const bytes = Buffer.alloc(130);
+    const result = await handle.read(bytes, 0, bytes.byteLength, 0);
+    if (result.bytesRead === bytes.byteLength) {
+      throw new ToolWorkerError(
+        "environment_image_evidence_invalid",
+        "Tool Sandbox image revision evidence was invalid",
+        false,
+      );
+    }
+    return bytes.subarray(0, result.bytesRead).toString("utf8").trim();
+  } catch (error) {
+    if (error instanceof ToolWorkerError) throw error;
+    throw new ToolWorkerError(
+      "environment_image_evidence_invalid",
+      "Tool Sandbox image revision evidence was invalid",
+      false,
+    );
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+export async function validateToolEnvironment(
+  environment: EnvironmentRuntimeSnapshot,
+  physicalImageRevision?: string,
+): Promise<EnvironmentToolchainReport> {
+  const imageRevision = physicalImageRevision ?? (await readBakedImageRevision());
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(imageRevision)) {
+    throw new ToolWorkerError(
+      "environment_image_evidence_invalid",
+      "Tool Sandbox image revision evidence was invalid",
+      false,
+    );
+  }
+  if (imageRevision !== environment.imageRevision) {
+    throw new ToolWorkerError(
+      "environment_image_mismatch",
+      "Tool Sandbox image revision did not match the accepted Run",
+      false,
+    );
+  }
+  const probes: readonly [EnvironmentToolName, string, readonly string[]][] = [
+    ["node", "/usr/local/bin/node", ["--version"]],
+    ["java", "/usr/bin/java", ["-version"]],
+    ["python", "/usr/bin/python3", ["--version"]],
+    ["git", "/usr/bin/git", ["--version"]],
+  ];
+  const tools = await Promise.all(
+    probes.map(async ([name, file, args]) => ({ name, version: await probeVersion(file, args) })),
+  );
+  const report: EnvironmentToolchainReport = {
+    profileKey: environment.profileKey,
+    profileVersion: environment.profileVersion,
+    imageRevision: environment.imageRevision,
+    specSha256: environment.specSha256,
+    tools,
+  };
+  if (!isExpectedDefaultToolchain(report)) {
+    throw new ToolWorkerError(
+      "environment_toolchain_mismatch",
+      "Tool Sandbox toolchain did not match its environment profile",
+      false,
+    );
+  }
+  return report;
 }
 
 export function safeToolEnvironment(): NodeJS.ProcessEnv {
@@ -448,6 +564,7 @@ export async function runToolWorker(): Promise<void> {
           );
         }
         activationId = message.activationId;
+        const environment = await validateToolEnvironment(message.environment);
         const seed =
           message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
         await prepareToolWorkspace(seed, message.workspaceRestore);
@@ -456,6 +573,7 @@ export async function runToolWorker(): Promise<void> {
           toolWorkerProtocolVersion: 1,
           type: "worker.ready",
           activationId,
+          environment,
         });
         return;
       }

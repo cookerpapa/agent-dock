@@ -338,6 +338,14 @@ async function createAcceptedTurn(): Promise<{
         credentialBindingId: credentialId,
         credentialBindingVersion: "1",
       },
+      environment: {
+        environmentVersionId: project.environment.environmentVersionId,
+        versionNumber: project.environment.versionNumber,
+        profileKey: project.environment.profileKey,
+        profileVersion: project.environment.profileVersion,
+        imageRevision: project.environment.imageRevision,
+        specSha256: project.environment.specSha256,
+      },
     },
   };
 }

@@ -10,9 +10,13 @@ import {
   type SessionState,
   type TurnState,
 } from "@agent-dock/domain";
-import { TURN_COMMAND_OUTBOX_TOPIC, parseTurnCommandOutboxPayload } from "@agent-dock/protocol";
+import {
+  TURN_COMMAND_OUTBOX_TOPIC,
+  parseEnvironmentRuntimeSnapshot,
+  parseTurnCommandOutboxPayload,
+} from "@agent-dock/protocol";
 import type { CancelTurnCommandMessage, TurnBudgetSnapshot } from "@agent-dock/protocol";
-import type { TraceContext } from "@agent-dock/protocol";
+import type { EnvironmentRuntimeSnapshot, TraceContext } from "@agent-dock/protocol";
 import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -51,6 +55,7 @@ export type TurnExecutionRequest = {
     credentialBindingId: string;
     credentialBindingVersion: string;
   };
+  environment: EnvironmentRuntimeSnapshot;
   budgets?: TurnBudgetSnapshot;
   traceContext?: TraceContext;
 };
@@ -542,6 +547,12 @@ export class OutboxDispatcher {
             .onRef("run.turn_id", "=", "turn.id")
             .onRef("run.command_id", "=", "command.id"),
         )
+        .innerJoin("environment_versions as environment", (join) =>
+          join
+            .onRef("environment.tenant_id", "=", "run.tenant_id")
+            .onRef("environment.project_id", "=", "run.project_id")
+            .onRef("environment.id", "=", "run.environment_version_id"),
+        )
         .innerJoin("tenant_runtime_policies as policy", "policy.tenant_id", "command.tenant_id")
         .select([
           "outbox.id as outboxId",
@@ -574,6 +585,12 @@ export class OutboxDispatcher {
           "run.current_attempt_id as currentAttemptId",
           "run.attempt_count as runAttemptCount",
           "run.row_version as runVersion",
+          "environment.id as environmentVersionId",
+          "environment.version_number as environmentVersionNumber",
+          "environment.profile_key as environmentProfileKey",
+          "environment.profile_version as environmentProfileVersion",
+          "environment.image_revision as environmentImageRevision",
+          "environment.spec_sha256 as environmentSpecSha256",
           "policy.maximum_model_requests_per_run as maximumModelRequests",
           "policy.maximum_cost_microusd_per_run as maximumCostMicrousd",
           "policy.daily_token_budget as dailyTokenBudget",
@@ -885,6 +902,14 @@ export class OutboxDispatcher {
             credentialBindingId: row.credentialBindingId,
             credentialBindingVersion: row.credentialBindingVersion,
           },
+          environment: parseEnvironmentRuntimeSnapshot({
+            environmentVersionId: row.environmentVersionId,
+            versionNumber: row.environmentVersionNumber,
+            profileKey: row.environmentProfileKey,
+            profileVersion: row.environmentProfileVersion,
+            imageRevision: row.environmentImageRevision,
+            specSha256: row.environmentSpecSha256,
+          }),
           budgets: {
             maximumModelRequests: safeNonNegativeInteger(
               row.maximumModelRequests,

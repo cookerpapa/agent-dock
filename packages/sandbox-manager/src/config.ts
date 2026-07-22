@@ -7,6 +7,7 @@ export type SandboxManagerConfig = {
   port: number;
   serviceToken: string;
   toolImage: string;
+  imageRevision: string;
   kubeconfigPath: string;
   sandboxNamespace: string;
   importerNamespace: string;
@@ -98,6 +99,11 @@ export async function loadSandboxManagerConfig(
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
+    imageRevision: bounded(
+      required(environment, "AGENT_DOCK_IMAGE_REVISION"),
+      "AGENT_DOCK_IMAGE_REVISION",
+      128,
+    ),
     kubeconfigPath,
     sandboxNamespace: bounded(
       environment.AGENT_DOCK_KUBERNETES_SANDBOX_NAMESPACE ?? "agent-dock-sandboxes",
