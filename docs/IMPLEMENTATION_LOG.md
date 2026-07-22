@@ -1826,5 +1826,18 @@
 - 持久化：成功的 Tool Run 在 fenced Workspace checkpoint 事务内写 append-only `environment_validations`，并把 Project environment projection
   更新为 validated。pure chat 仍只保存逻辑 snapshot、0 Pod；warm reuse 同时要求 committed Workspace SHA 和完整 environment identity，
   环境滚动会销毁旧 Pod。Web header 显示 pending/validated/failed 与实际工具版本。
-- 验证：新增 migration up/down、闭合 protocol、Manager policy/reuse、Pod annotation、worker revision 以及 checkpoint evidence 回归；最终还需
-  以生产 gVisor Pod 和真实模型 Tool Run 验证 token、toolchain report、Workspace checkpoint、Web API 与零残留资源。
+- 回归与生产修正：新增 migration up/down、闭合 protocol、Manager policy/reuse、Pod annotation、worker revision、checkpoint evidence 与
+  production composition 回归。第一次 live Run 在模型出站前 fail closed，证明 Remote Control Plane 组合层遗漏了
+  `environmentImageRevision`；修正后生产 Store、Manager policy 和物理 Tool image 均锁定 revision
+  `37a26878d210eae83a3ca9a994fadc9abd041492`，不再回落到 `development`。全仓 format/typecheck/test 通过。
+- gVisor 门禁：一次 Docker Compose 重建后，长期运行的 K3s/runsc 网络状态出现 public TLS stall；同 namespace/NetworkPolicy 的 runc 对照
+  Pod 可连接、gVisor Pod 不可连接，重启 K3s 执行面后恢复。没有降级 runtime 或放宽 egress。随后干净 `sandbox:check` 通过 exact-commit
+  import（7.837 秒）、隔离安全契约（22.318 秒）、同环境 warm rebind（4.420 秒）、pure chat 零 Pod 与 pinned-Pi remote repair；结束时两个
+  execution namespace 均无受管 Pod。
+- 真实闭环：production Web/API 使用 `deepseek-v4-flash` 在 Session `ce56b501-58b5-4de7-b980-87162cf7ffae` 完成两轮 Java coding Run，均为
+  completed。第一轮 144 events/18 tool calls/4,313-byte patch，第二轮 64 events/6 tool calls/5,374-byte cumulative patch；19 次真实模型调用
+  实耗 6,616 input、5,028 output、120,320 cache-read、0 cache-write tokens。两轮复用同一 gVisor Pod UID
+  `96ce5ff7-c14a-4d75-bfa9-72d208e76142` 和 activation，fence 1→2，随后通过受信 inventory/terminate protocol 精确回收。
+- 落库证据：environment version `3b6bbb64-c3f8-4d97-98de-805169985831` 为 validated，并为两个 Run 分别保存 append-only validation；报告
+  attests `runsc`/`gvisor`、deny-all、UID/GID 1000:1000、read-only rootfs、Node 24.18.0、OpenJDK 17.0.19、Python 3.11.2 与 Git 2.39.5。
+  immutable 13,904-byte GitHub source snapshot 未在第二轮重复导入，验收结束后 Tool/Importer Pod 都为 0。
