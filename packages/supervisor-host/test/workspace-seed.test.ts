@@ -11,6 +11,7 @@ import {
   type ExecuteTurnCommandMessage,
   type GitHubRepositorySource,
 } from "@agent-dock/protocol";
+import { createWorkspaceSnapshot, parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
 import type { Kysely } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostgresWorkspaceSeedResolver, WorkspaceSeedError } from "../src/index.ts";
@@ -31,6 +32,8 @@ const IDS = {
   lease: "80000000-0000-4000-8000-000000000001",
   profile: "90000000-0000-4000-8000-000000000001",
   credential: "a0000000-0000-4000-8000-000000000001",
+  environment: "b0000000-0000-4000-8000-000000000001",
+  run: "60000000-0000-4000-8000-000000000001",
 } as const;
 const SOURCE: GitHubRepositorySource = {
   kind: "github_public",
@@ -87,7 +90,7 @@ function command(tenantId: string = IDS.tenant): ExecuteTurnCommandMessage {
       projectId: IDS.project,
       workspaceId: IDS.workspace,
       sessionId: IDS.session,
-      runId: "60000000-0000-4000-8000-000000000001",
+      runId: IDS.run,
       turnId: IDS.turn,
       attemptId: "70000000-0000-4000-8000-000000000001",
       agentId: "root",
@@ -104,7 +107,7 @@ function command(tenantId: string = IDS.tenant): ExecuteTurnCommandMessage {
         credentialBindingVersion: 1,
       },
       environment: {
-        environmentVersionId: "b0000000-0000-4000-8000-000000000001",
+        environmentVersionId: IDS.environment,
         versionNumber: 1,
         profileKey: "agent-dock-fullstack",
         profileVersion: "1",
@@ -166,6 +169,114 @@ async function fixture(): Promise<Fixture> {
       failure_code: null,
     })
     .execute();
+  await database
+    .insertInto("credential_bindings")
+    .values({
+      id: IDS.credential,
+      tenant_id: IDS.tenant,
+      provider: "agent-dock-fake",
+      kind: "brokered",
+      secret_ref: "fixture",
+      version: 1,
+      status: "active",
+    })
+    .execute();
+  await database
+    .insertInto("model_profiles")
+    .values({
+      id: IDS.profile,
+      tenant_id: IDS.tenant,
+      name: "default",
+      provider: "agent-dock-fake",
+      model_id: "agent-dock-fake",
+      default_thinking_level: "off",
+      allowed_thinking_levels: ["off"],
+      credential_binding_id: IDS.credential,
+      credential_binding_version: 1,
+    })
+    .execute();
+  await database
+    .insertInto("environment_versions")
+    .values({
+      id: IDS.environment,
+      tenant_id: IDS.tenant,
+      project_id: IDS.project,
+      version_number: 1,
+      profile_key: "agent-dock-fullstack",
+      profile_version: "1",
+      image_revision: "development",
+      spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      state: "pending",
+      active: true,
+      validated_at: null,
+    })
+    .execute();
+  await database
+    .insertInto("sessions")
+    .values({
+      id: IDS.session,
+      tenant_id: IDS.tenant,
+      project_id: IDS.project,
+      workspace_id: IDS.workspace,
+      desired_model_profile_id: IDS.profile,
+      state: "running",
+    })
+    .execute();
+  await database
+    .insertInto("turns")
+    .values({
+      id: IDS.turn,
+      tenant_id: IDS.tenant,
+      session_id: IDS.session,
+      state: "running",
+      input_kind: "prompt",
+      input_text: "Inspect the imported repository",
+      model_profile_id: IDS.profile,
+      provider: "agent-dock-fake",
+      model_id: "agent-dock-fake",
+      thinking_level: "off",
+      credential_binding_id: IDS.credential,
+      credential_binding_version: 1,
+      started_at: new Date(),
+    })
+    .execute();
+  await database
+    .insertInto("commands")
+    .values({
+      id: IDS.command,
+      tenant_id: IDS.tenant,
+      session_id: IDS.session,
+      turn_id: IDS.turn,
+      idempotency_key: "workspace-seed-1",
+      kind: "turn.execute",
+      state: "acknowledged",
+      mailbox_position: 1,
+      payload: {},
+      dispatched_at: new Date(),
+      acknowledged_at: new Date(),
+    })
+    .execute();
+  await database
+    .insertInto("runs")
+    .values({
+      id: IDS.run,
+      tenant_id: IDS.tenant,
+      project_id: IDS.project,
+      workspace_id: IDS.workspace,
+      session_id: IDS.session,
+      turn_id: IDS.turn,
+      command_id: IDS.command,
+      environment_version_id: IDS.environment,
+      source_set_snapshot: {
+        schemaVersion: 1,
+        entries: [{ root: ".", ...SOURCE }],
+      },
+      idempotency_key: "workspace-seed-1",
+      state: "queued",
+      current_attempt_id: null,
+      attempt_count: 0,
+    })
+    .execute();
   const value: Fixture = {
     database,
     objectStore: new MemoryObjectStore(),
@@ -225,6 +336,138 @@ describe("PostgreSQL workspace seed provisioning", () => {
       new RegExp(`^workspace-seeds/${IDS.tenant}/${IDS.workspace}/[0-9a-f]{64}\\.json$`),
     );
     expect(test.objectStore.objects.size).toBe(1);
+  });
+
+  it("imports an immutable repository set under disjoint Workspace roots", async () => {
+    const test = await fixture();
+    const webSnapshot = createWorkspaceSnapshot([
+      {
+        path: "package.json",
+        executable: false,
+        content: Buffer.from('{"name":"web"}\n'),
+      },
+    ]);
+    const apiSnapshot = createWorkspaceSnapshot([
+      {
+        path: "src/index.ts",
+        executable: false,
+        content: Buffer.from('export const service = "api";\n'),
+      },
+    ]);
+    await test.database
+      .updateTable("workspace_sources")
+      .set({
+        kind: "repository_set",
+        repository: null,
+        commit_sha: null,
+        github_installation_id: null,
+        github_repository_id: null,
+      })
+      .where("tenant_id", "=", IDS.tenant)
+      .where("workspace_id", "=", IDS.workspace)
+      .execute();
+    await test.database
+      .insertInto("workspace_repository_sources")
+      .values([
+        {
+          tenant_id: IDS.tenant,
+          workspace_id: IDS.workspace,
+          ordinal: 1,
+          root_path: "web",
+          kind: "github_public",
+          repository: "octocat/frontend",
+          commit_sha: "c".repeat(40),
+          github_installation_id: null,
+          github_repository_id: null,
+        },
+        {
+          tenant_id: IDS.tenant,
+          workspace_id: IDS.workspace,
+          ordinal: 2,
+          root_path: "api",
+          kind: "github_public",
+          repository: "octocat/backend",
+          commit_sha: "d".repeat(40),
+          github_installation_id: null,
+          github_repository_id: null,
+        },
+      ])
+      .execute();
+    await test.database
+      .updateTable("runs")
+      .set({
+        source_set_snapshot: {
+          schemaVersion: 1,
+          entries: [
+            {
+              root: "web",
+              kind: "github_public",
+              repository: "octocat/frontend",
+              commitSha: "c".repeat(40),
+            },
+            {
+              root: "api",
+              kind: "github_public",
+              repository: "octocat/backend",
+              commitSha: "d".repeat(40),
+            },
+          ],
+        },
+      })
+      .where("id", "=", IDS.run)
+      .execute();
+    let importsStarted = 0;
+    let markBothStarted!: () => void;
+    let releaseImports!: () => void;
+    const bothStarted = new Promise<void>((resolvePromise) => {
+      markBothStarted = resolvePromise;
+    });
+    const release = new Promise<void>((resolvePromise) => {
+      releaseImports = resolvePromise;
+    });
+    const importer = {
+      import: vi.fn(async (source: GitHubRepositorySource) => {
+        importsStarted += 1;
+        if (importsStarted === 2) markBothStarted();
+        await release;
+        return source.repository === "octocat/frontend" ? webSnapshot : apiSnapshot;
+      }),
+    };
+    const resolver = new PostgresWorkspaceSeedResolver({
+      database: test.database,
+      objectStore: test.objectStore,
+      importer,
+      pollIntervalMs: 5,
+      maximumWaitMs: 2_000,
+    });
+
+    const resolving = resolver.resolve(command(), new AbortController().signal);
+    await bothStarted;
+    releaseImports();
+    const resolved = await resolving;
+    expect(resolved).toBeDefined();
+    expect(
+      parseWorkspaceSnapshot(resolved!).map((file) => ({
+        path: file.path,
+        content: file.content.toString("utf8"),
+      })),
+    ).toEqual([
+      { path: "api/src/index.ts", content: 'export const service = "api";\n' },
+      { path: "web/package.json", content: '{"name":"web"}\n' },
+    ]);
+    expect(importer.import).toHaveBeenCalledTimes(2);
+    expect(importer.import).toHaveBeenNthCalledWith(
+      1,
+      {
+        kind: "github_public",
+        repository: "octocat/backend",
+        commitSha: "d".repeat(40),
+      },
+      expect.any(AbortSignal),
+    );
+    const reused = await resolver.resolve(command(), new AbortController().signal);
+    expect(Buffer.from(reused!)).toEqual(Buffer.from(resolved!));
+    expect(importer.import).toHaveBeenCalledTimes(2);
   });
 
   it("serializes concurrent first activations behind one import lease", async () => {
@@ -301,6 +544,26 @@ describe("PostgreSQL workspace seed provisioning", () => {
       })
       .where("tenant_id", "=", IDS.tenant)
       .where("workspace_id", "=", IDS.workspace)
+      .execute();
+    await test.database
+      .updateTable("runs")
+      .set({
+        source_set_snapshot: {
+          schemaVersion: 1,
+          entries: [
+            {
+              root: ".",
+              kind: "github_app",
+              installationId: 7,
+              repositoryId: 42,
+              repository: "acme/private-repo",
+              commitSha: "c".repeat(40),
+              private: true,
+            },
+          ],
+        },
+      })
+      .where("id", "=", IDS.run)
       .execute();
     const publicImporter = { import: vi.fn(async () => Uint8Array.from(SNAPSHOT)) };
     const privateImporter = { import: vi.fn(async () => Uint8Array.from(SNAPSHOT)) };
@@ -434,6 +697,33 @@ describe("PostgreSQL workspace seed provisioning", () => {
       code: "workspace_seed_integrity_failed",
       retryable: false,
     });
+  });
+
+  it("rejects a Run whose immutable source snapshot does not match its Workspace source", async () => {
+    const test = await fixture();
+    await test.database
+      .updateTable("runs")
+      .set({
+        source_set_snapshot: {
+          schemaVersion: 1,
+          entries: [{ root: ".", ...SOURCE, commitSha: "f".repeat(40) }],
+        },
+      })
+      .where("id", "=", IDS.run)
+      .execute();
+    const importer = { import: vi.fn(async () => Uint8Array.from(SNAPSHOT)) };
+    const resolver = new PostgresWorkspaceSeedResolver({
+      database: test.database,
+      objectStore: test.objectStore,
+      importer,
+      pollIntervalMs: 5,
+      maximumWaitMs: 2_000,
+    });
+    await expect(resolver.resolve(command(), new AbortController().signal)).rejects.toMatchObject({
+      code: "workspace_source_snapshot_mismatch",
+      retryable: false,
+    });
+    expect(importer.import).not.toHaveBeenCalled();
   });
 
   it("records a safe retryable failure without publishing partial metadata", async () => {

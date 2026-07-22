@@ -199,7 +199,7 @@ extension-policy support would overstate the current boundary.
 - [x] Remediate Pi 0.80.10's shrinkwrap-pinned `brace-expansion@5.0.6` and `protobufjs@7.6.4` with exact reviewed package aliases, post-install replacement, actual-version checks in CI/production images, and an audit reconciler limited to the two exact advisory paths; keep the hardening fail-closed on any future Pi version until upstream republishes fixed metadata
 - [x] Add append-only Project environment versions, immutable Run snapshots, Manager/image policy matching, in-gVisor Node/Java/Python/Git preflight, persisted environment evidence, exact-environment warm reuse, and Web validation status
 - [x] Add declarative environment setup/verification recipes, immutable candidate history, fresh-gVisor validation, expected-active activation/rollback CAS, and actor audit
-- [ ] Add exact-commit multi-repository Workspaces with disjoint normalized roots and immutable Run source-set snapshots
+- [x] Add exact-commit multi-repository Workspaces with disjoint normalized roots and immutable Run source-set snapshots
 - [ ] Add per-environment dependency egress through an authenticated allowlist proxy without joining platform networks
 - [ ] Add single-consumption never-used gVisor prewarm Pods with measured cold-start evidence
 - [ ] Add Attempt supersession/rewind projections and immutable safe Review Bundles

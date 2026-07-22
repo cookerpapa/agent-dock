@@ -270,6 +270,34 @@ export function createWorkspaceSnapshot(
   return encoded;
 }
 
+export function mergeWorkspaceSnapshots(
+  sources: readonly { root: string; snapshot: Uint8Array }[],
+): Uint8Array {
+  if (sources.length < 1 || sources.length > 8) {
+    throw snapshotError("Workspace source set is outside its repository limit");
+  }
+  const roots = new Set<string>();
+  const files: WorkspaceSnapshotFileContent[] = [];
+  for (const source of sources) {
+    if (
+      (source.root !== "." && !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(source.root)) ||
+      (sources.length > 1 && source.root === ".") ||
+      roots.has(source.root)
+    ) {
+      throw snapshotError("Workspace source root is invalid or repeated");
+    }
+    roots.add(source.root);
+    for (const file of parseWorkspaceSnapshot(source.snapshot)) {
+      files.push({
+        path: source.root === "." ? file.path : `${source.root}/${file.path}`,
+        executable: file.executable,
+        content: file.content,
+      });
+    }
+  }
+  return createWorkspaceSnapshot(files);
+}
+
 export async function restoreWorkspaceSnapshot(
   workspaceDirectory: string,
   snapshot: Uint8Array,

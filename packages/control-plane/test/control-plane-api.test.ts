@@ -716,6 +716,172 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(rejectedUrl.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
 
+  it("persists a multi-repository layout and freezes it into the accepted Run", async () => {
+    const webCommit = "b".repeat(40);
+    const apiCommit = "c".repeat(40);
+    const projectResponse = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {
+        name: "Pinned full stack",
+        source: {
+          kind: "repository_set",
+          repositories: [
+            {
+              root: "web",
+              kind: "github_public",
+              repository: "octocat/frontend",
+              commitSha: webCommit,
+            },
+            {
+              root: "api",
+              kind: "github_public",
+              repository: "octocat/backend",
+              commitSha: apiCommit,
+            },
+          ],
+        },
+      },
+    });
+    expect(projectResponse.statusCode).toBe(201);
+    const repositoryProject = projectResponse.json<ProjectResource>();
+    expect(repositoryProject.source).toEqual({
+      kind: "repository_set",
+      repositories: [
+        {
+          root: "web",
+          kind: "github_public",
+          repository: "octocat/frontend",
+          commitSha: webCommit,
+        },
+        {
+          root: "api",
+          kind: "github_public",
+          repository: "octocat/backend",
+          commitSha: apiCommit,
+        },
+      ],
+      status: "pending",
+    });
+    const persisted = await database
+      .selectFrom("workspace_repository_sources")
+      .select(["ordinal", "root_path", "repository", "commit_sha"])
+      .where("tenant_id", "=", IDS.tenant)
+      .where("workspace_id", "=", repositoryProject.workspaceId)
+      .orderBy("ordinal", "asc")
+      .execute();
+    expect(persisted).toEqual([
+      {
+        ordinal: 1,
+        root_path: "web",
+        repository: "octocat/frontend",
+        commit_sha: webCommit,
+      },
+      {
+        ordinal: 2,
+        root_path: "api",
+        repository: "octocat/backend",
+        commit_sha: apiCommit,
+      },
+    ]);
+
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${repositoryProject.projectId}/sessions`,
+      payload: { workspaceId: repositoryProject.workspaceId },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const repositorySession = sessionResponse.json<SessionResource>();
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${repositorySession.sessionId}/turns`,
+      headers: { "idempotency-key": "repository-set-run" },
+      payload: { prompt: "Inspect both repositories" },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json<AcceptedTurnResource>();
+    const runResponse = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${accepted.runId}`,
+    });
+    expect(runResponse.statusCode).toBe(200);
+    expect(runResponse.json()).toMatchObject({
+      sourceSet: {
+        schemaVersion: 1,
+        entries: [
+          { root: "api", repository: "octocat/backend", commitSha: apiCommit },
+          { root: "web", repository: "octocat/frontend", commitSha: webCommit },
+        ],
+      },
+    });
+    // This sequential suite shares one durable queue. The source-set Run is
+    // inspected but intentionally not dispatched, so retire only its outbox
+    // delivery before later scheduler tests exercise their own commands.
+    await database
+      .updateTable("outbox")
+      .set({ attempts: 1, published_at: new Date() })
+      .where("tenant_id", "=", IDS.tenant)
+      .where("aggregate_id", "=", repositorySession.sessionId)
+      .execute();
+
+    await database
+      .insertInto("github_app_installations")
+      .values({
+        tenant_id: IDS.tenant,
+        installation_id: 701,
+        account_id: 702,
+        account_login: "octocat",
+        target_type: "Organization",
+        repository_selection: "selected",
+        status: "active",
+        permissions: { contents: "read" },
+      })
+      .execute();
+    await database
+      .insertInto("github_repositories")
+      .values({
+        tenant_id: IDS.tenant,
+        repository_id: 703,
+        installation_id: 701,
+        full_name: "octocat/frontend",
+        owner_login: "octocat",
+        name: "frontend",
+        private: true,
+        default_branch: "main",
+        enabled: true,
+      })
+      .execute();
+    const duplicateResolvedRepository = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {
+        name: "Ambiguous duplicate source",
+        source: {
+          kind: "repository_set",
+          repositories: [
+            {
+              root: "public-copy",
+              kind: "github_public",
+              repository: "octocat/frontend",
+              commitSha: webCommit,
+            },
+            {
+              root: "private-copy",
+              kind: "github_app",
+              installationId: 701,
+              repositoryId: 703,
+              commitSha: webCommit,
+            },
+          ],
+        },
+      },
+    });
+    expect(duplicateResolvedRepository.statusCode).toBe(400);
+    expect(duplicateResolvedRepository.json()).toMatchObject({
+      error: { code: "invalid_request" },
+    });
+  });
+
   it("rejects malformed bodies and a missing Idempotency-Key before writing", async () => {
     const missingRoute = await http.inject({ method: "GET", url: "/v1/does-not-exist" });
     expect(missingRoute.statusCode).toBe(404);

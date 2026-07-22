@@ -1857,3 +1857,17 @@
   并提供 create candidate、validate、activate/rollback 操作；普通用户仍不看到模型密钥或 Kubernetes 控件。
 - 回归：新增 recipe canonical/closed-schema、Worker 命令执行与无网络 fail-closed、migration backfill/constraint/down、service idempotency/CAS/rollback/
   tenant isolation 和 Web API 测试；完整 Control Plane 回归的 108 passed/3 environment-conditional skipped 测试保持通过。
+
+## 2026-07-22 — Cursor-informed Multi-repository Workspace
+
+- 产品：新建 Project 时可提交 2–8 个 public exact-commit 或 tenant-allowlisted GitHub App repository，并为每个仓库指定唯一、规范化的顶层
+  root。Web 对话产品提供闭合 JSON manifest 输入和 Workspace root/repository 投影；单仓库与内置 source 保持兼容。
+- 耐久性：migration 017 增加不可变 repository child rows，并为每个 Run 回填/写入 canonical `source_set_snapshot`。Turn 返回 202 前已经冻结
+  repository identity、exact SHA、root 和 private metadata；Runner 只使用该 Run snapshot，当前 Workspace source 与单仓 snapshot 不一致时在
+  GitHub 出站前 fail closed。
+- 执行：public repository 继续经过 credential-free gVisor importer，private repository 继续经过 trusted GitHub Gateway。每个 safe manifest
+  按 root 前缀合并，再统一校验 path/file/byte limits；并发首次激活仍共享一个 import lease，ready seed 内容寻址且后续多轮不重复导入。
+- 边界：repository-set 目前不开放自动 PR delivery。一个 cumulative patch 可能跨多个 root，系统不会猜测目标 repository；后续需要显式的
+  root-aware patch/branch/PR mapping 才能启用。
+- 回归：protocol 46、database 33、workspace runtime 3、Web 29、Supervisor Host 26 和 Control Plane 109 个测试通过；另外 3 个环境条件测试按
+  设计跳过。覆盖 migration 回填/拒绝有损回滚、duplicate root、snapshot drift、两个 manifest 合并、ready seed reuse 和共享调度队列隔离。

@@ -139,7 +139,8 @@
 
 .product-auth-card input,
 .product-workspace-modal input,
-.product-workspace-modal select {
+.product-workspace-modal select,
+.product-workspace-modal textarea {
   width: 100%;
   min-height: 43px;
   padding: 9px 12px;
@@ -152,9 +153,24 @@
 
 .product-auth-card input:focus,
 .product-workspace-modal input:focus,
-.product-workspace-modal select:focus {
+.product-workspace-modal select:focus,
+.product-workspace-modal textarea:focus {
   border-color: #8474d2;
   outline: 2px solid rgba(132, 116, 210, 0.16);
+}
+
+.product-workspace-modal textarea {
+  min-height: 190px;
+  resize: vertical;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.product-workspace-modal label small {
+  color: #858585;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .product-primary-button {

@@ -4,7 +4,10 @@
 
 The public request returns `202` only after PostgreSQL commits the prompt Turn,
 execute Command, mailbox position, idempotency fingerprint, immutable Project
-environment snapshot, and outbox record.
+environment snapshot, immutable Workspace source-set snapshot, and outbox
+record. The source-set snapshot is the only repository input used by the
+Runner; later Project metadata cannot redirect an accepted Run to another
+repository or commit.
 An HTTP retry with the same key and body returns the same Turn. The same key with
 a different body is rejected.
 

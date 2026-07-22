@@ -614,16 +614,26 @@ bucket/prefix. A digest-pinned localhost MinIO proof discards the writer and
 restores through a fresh client; declared and streamed size limits, S3 checksum,
 and the independent database hash fail closed on corruption. The supported
 production topology composes this S3 path with the trusted remote Supervisor.
-For a public GitHub source, PostgreSQL grants one expiring lease for the first
-activation. The Sandbox Manager starts a separate hardened gVisor importer Pod that
-fetches the exact 40-hex commit, removes `.git`, captures the existing safe
-manifest, and conditionally writes a content-addressed seed below a
-tenant/workspace prefix. Publishing ready state
+For a GitHub source set, the accepted Run stores a canonical immutable snapshot
+of every exact repository identity, 40-hex commit and normalized Workspace root.
+A legacy single source is represented as the same schema under root `.`; a
+multi-repository Workspace contains 2–8 sources under distinct named roots.
+PostgreSQL grants one expiring lease for the first activation. The Supervisor
+starts a separate hardened gVisor importer Pod for each public source or uses
+the credential-brokering GitHub Gateway for an allowlisted private source. It
+fetches only the exact commit, removes `.git`, captures the existing safe
+manifest, and merges manifests by prefixing each path with its accepted root.
+The merged manifest is revalidated against the global file/path/byte limits and
+cannot contain a root collision. It is conditionally written below a
+tenant/workspace content-addressed prefix. Publishing ready state
 and the workspace pointer is one fenced transaction. Concurrent activations
 wait; expired leases are reclaimable; stale owners cannot publish. Every turn
-revalidates object key, size, digest, and manifest before the Tool Sandbox
-receives the seed. A settled session checkpoint overlays that baseline, so a follow-up
-neither reclones nor depends on GitHub availability. See ADR-0028.
+requires the Run's frozen source snapshot, then revalidates object key, size,
+digest and manifest before the Tool Sandbox receives the seed. A settled
+session checkpoint overlays that baseline, so a follow-up neither reclones nor
+depends on GitHub availability. Repository-set PR delivery is not guessed: the
+existing PR adapter remains available only for one unambiguous GitHub App
+source. See ADR-0028 and ADR-0043.
 The local file spool now protects already-produced events across a supervisor
 process restart, including the PostgreSQL-commit/ACK-loss window. Unknown
 in-flight execution is never recreated: after the old owner boot is fenced, the

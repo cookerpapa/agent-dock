@@ -119,6 +119,7 @@ summary:focus-visible,
 
 .workspace-configuration-panel input,
 .workspace-configuration-panel select,
+.workspace-configuration-panel textarea,
 .workspace-configuration-panel button {
   min-width: 0;
   min-height: 30px;
@@ -128,8 +129,18 @@ summary:focus-visible,
 }
 
 .workspace-configuration-panel input,
-.workspace-configuration-panel select {
+.workspace-configuration-panel select,
+.workspace-configuration-panel textarea {
   padding: 5px 8px;
+}
+
+.workspace-configuration-panel textarea {
+  grid-column: span 2;
+  min-height: 150px;
+  resize: vertical;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.45;
 }
 
 .workspace-panel-actions {
@@ -888,6 +899,29 @@ a {
   color: var(--text);
   font-size: 9px;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-repository-set {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-repository-set li {
+  display: grid;
+  grid-template-columns: minmax(60px, auto) minmax(0, 1fr);
+  gap: 6px;
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.source-repository-set code,
+.source-repository-set li span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1944,6 +1978,7 @@ a {
   .workspace-panel-heading,
   .workspace-configuration-panel input,
   .workspace-configuration-panel select,
+  .workspace-configuration-panel textarea,
   .workspace-panel-actions {
     grid-column: 1;
   }

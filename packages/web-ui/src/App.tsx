@@ -29,6 +29,11 @@ import {
 } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
+import {
+  parseRepositorySetManifest,
+  repositorySetLabel,
+  REPOSITORY_SET_EXAMPLE,
+} from "./repository-set.ts";
 
 const DEFAULT_PROMPT = "Run the tests, repair the Java bug, and verify the result.";
 const MIN_SIDEBAR_WIDTH = 216;
@@ -46,6 +51,7 @@ function workspaceSourceLabel(source: WorkspaceSourceRequest | undefined): strin
   if (source.kind === "github_app") {
     return `github-app:${String(source.repositoryId)}@${source.commitSha.slice(0, 8)}`;
   }
+  if (source.kind === "repository_set") return repositorySetLabel(source);
   return `${source.repository}@${source.commitSha.slice(0, 8)}`;
 }
 
@@ -315,6 +321,7 @@ export default function App() {
   const [workspaceCommitSha, setWorkspaceCommitSha] = useState("");
   const [workspaceInstallationId, setWorkspaceInstallationId] = useState("");
   const [workspaceRepositoryId, setWorkspaceRepositoryId] = useState("");
+  const [workspaceRepositorySet, setWorkspaceRepositorySet] = useState("");
   const [githubInstallation, setGitHubInstallation] = useState<GitHubInstallationResource | null>(
     null,
   );
@@ -382,6 +389,7 @@ export default function App() {
     setWorkspaceCommitSha("");
     setWorkspaceInstallationId("");
     setWorkspaceRepositoryId("");
+    setWorkspaceRepositorySet("");
     setGitHubInstallation(null);
     setGitHubInstallationLoading(false);
     setInspectorOpen(false);
@@ -611,23 +619,34 @@ export default function App() {
       update({ type: "api.error", message: "Workspace name is required." });
       return;
     }
-    const source: WorkspaceSourceRequest =
-      workspaceSourceKind === "empty"
-        ? { kind: "empty" }
-        : workspaceSourceKind === "sample_java"
-          ? { kind: "sample_java" }
-          : workspaceSourceKind === "github_public"
-            ? {
-                kind: "github_public",
-                repository: workspaceRepository.trim(),
-                commitSha: workspaceCommitSha.trim(),
-              }
-            : {
-                kind: "github_app",
-                installationId: Number(workspaceInstallationId),
-                repositoryId: Number(workspaceRepositoryId),
-                commitSha: workspaceCommitSha.trim(),
-              };
+    let source: WorkspaceSourceRequest;
+    try {
+      source =
+        workspaceSourceKind === "empty"
+          ? { kind: "empty" }
+          : workspaceSourceKind === "sample_java"
+            ? { kind: "sample_java" }
+            : workspaceSourceKind === "github_public"
+              ? {
+                  kind: "github_public",
+                  repository: workspaceRepository.trim(),
+                  commitSha: workspaceCommitSha.trim(),
+                }
+              : workspaceSourceKind === "github_app"
+                ? {
+                    kind: "github_app",
+                    installationId: Number(workspaceInstallationId),
+                    repositoryId: Number(workspaceRepositoryId),
+                    commitSha: workspaceCommitSha.trim(),
+                  }
+                : parseRepositorySetManifest(workspaceRepositorySet);
+    } catch (error: unknown) {
+      update({
+        type: "api.error",
+        message: error instanceof Error ? error.message : "Repository-set manifest is invalid.",
+      });
+      return;
+    }
     const session = await provisionSession(name, source);
     if (session !== undefined) {
       setWorkspacePanelOpen(false);
@@ -636,6 +655,7 @@ export default function App() {
       setWorkspaceCommitSha("");
       setWorkspaceInstallationId("");
       setWorkspaceRepositoryId("");
+      setWorkspaceRepositorySet("");
       setGitHubInstallation(null);
     }
   }
@@ -1187,6 +1207,7 @@ export default function App() {
               <option value="sample_java">Built-in Java repair sample</option>
               <option value="github_public">Public GitHub exact commit</option>
               <option value="github_app">GitHub App repository</option>
+              <option value="repository_set">Multi-repository exact commits</option>
             </select>
             {workspaceSourceKind === "github_public" ? (
               <>
@@ -1275,6 +1296,24 @@ export default function App() {
                 />
               </div>
             ) : null}
+            {workspaceSourceKind === "repository_set" ? (
+              <>
+                <label htmlFor="workspace-repository-set">repository manifest</label>
+                <textarea
+                  disabled={operation !== null}
+                  id="workspace-repository-set"
+                  onChange={(event) => setWorkspaceRepositorySet(event.target.value)}
+                  placeholder={REPOSITORY_SET_EXAMPLE}
+                  required
+                  rows={12}
+                  spellCheck={false}
+                  value={workspaceRepositorySet}
+                />
+                <span>
+                  JSON array with 2–8 immutable repositories and unique top-level Workspace roots.
+                </span>
+              </>
+            ) : null}
             <div className="workspace-panel-actions">
               <button
                 disabled={
@@ -1285,7 +1324,8 @@ export default function App() {
                   (workspaceSourceKind === "github_app" &&
                     (workspaceInstallationId.trim() === "" ||
                       workspaceRepositoryId.trim() === "" ||
-                      workspaceCommitSha.trim() === ""))
+                      workspaceCommitSha.trim() === "")) ||
+                  (workspaceSourceKind === "repository_set" && workspaceRepositorySet.trim() === "")
                 }
                 type="submit"
               >

@@ -15,6 +15,7 @@ import * as productAuthAndEmptyWorkspaces from "./013_product_auth_and_empty_wor
 import * as removePerRunTokenBudget from "./014_remove_per_run_token_budget.ts";
 import * as versionedProjectEnvironments from "./015_versioned_project_environments.ts";
 import * as environmentRecipesAndOperations from "./016_environment_recipes_and_operations.ts";
+import * as multiRepositorySourceSets from "./017_multi_repository_source_sets.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -35,6 +36,7 @@ export const migrationProvider: MigrationProvider = {
       "014_remove_per_run_token_budget": removePerRunTokenBudget,
       "015_versioned_project_environments": versionedProjectEnvironments,
       "016_environment_recipes_and_operations": environmentRecipesAndOperations,
+      "017_multi_repository_source_sets": multiRepositorySourceSets,
     };
   },
 };
@@ -118,3 +120,8 @@ export {
   down as downEnvironmentRecipesAndOperations,
   up as upEnvironmentRecipesAndOperations,
 } from "./016_environment_recipes_and_operations.ts";
+
+export {
+  down as downMultiRepositorySourceSets,
+  up as upMultiRepositorySourceSets,
+} from "./017_multi_repository_source_sets.ts";

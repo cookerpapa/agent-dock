@@ -5,6 +5,7 @@ export {
   WorkspaceRuntimeError,
   captureWorkspaceSnapshot,
   createWorkspaceSnapshot,
+  mergeWorkspaceSnapshots,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   restoreWorkspaceSnapshot,

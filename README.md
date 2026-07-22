@@ -64,6 +64,9 @@ Untrusted demand-activated Tool Pod
 - Metadata and durable commands: PostgreSQL with Kysely
 - Session/workspace artifacts: S3-compatible object storage, with MinIO used as
   the disposable compatibility fixture and a private file adapter for the demo
+- Workspace input: one built-in/empty source, one exact GitHub commit, or 2–8
+  exact public/private repositories under disjoint named roots; every Run
+  freezes the source set before queue acceptance
 - Sandbox: Kubernetes `RuntimeClass` with gVisor `runsc`/KVM only; K3s owns
   lifecycle and Docker remains limited to the trusted Compose product plane
 - Frontend: React, kept deliberately small
@@ -105,6 +108,7 @@ only after a measured requirement appears.
 - [Web UI direction](docs/WEB_UI_DIRECTION.md)
 - [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
 - [Strong Sandbox Provider selection](docs/research/2026-07-20-strong-sandbox-provider-selection.md)
+- [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
@@ -144,6 +148,8 @@ only after a measured requirement appears.
 - [ADR-0037: browser accounts and a platform-managed model](docs/adr/0037-browser-accounts-and-platform-managed-model.md)
 - [ADR-0038: gVisor-only untrusted tool execution](docs/adr/0038-gvisor-only-tool-execution.md)
 - [ADR-0041: remove the cumulative per-Run token budget](docs/adr/0041-remove-per-run-token-budget.md)
+- [ADR-0042: versioned Project environments](docs/adr/0042-versioned-project-environment-plane.md)
+- [ADR-0043: Cursor-informed Cloud Agent product loop](docs/adr/0043-cursor-informed-cloud-agent-product-loop.md)
 
 ## Current executable spikes
 
@@ -313,8 +319,9 @@ health, backup, upgrade, recovery, and the disposable full-topology acceptance
 command.
 
 This is production-complete for the bounded private multi-tenant Java fixture
-and controlled GitHub repositories pinned to an exact commit (public by
-default, private through an explicitly configured GitHub App),
+and controlled GitHub repositories pinned to exact commits (one repository or
+2–8 repositories under disjoint roots; public by default and private through
+an explicitly configured GitHub App),
 with either the deterministic fake or an owner-configured DeepSeek model.
 Request identity, roles, encrypted per-tenant provider credentials,
 resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,

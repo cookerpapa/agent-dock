@@ -6,14 +6,17 @@ import {
 import type { Database } from "@agent-dock/database";
 import { GitHubGatewayClient, GitHubGatewayError } from "@agent-dock/github-gateway";
 import {
+  canonicalWorkspaceSourceSetJson,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
+  parseWorkspaceSourceSetSnapshot,
   type ExecuteTurnCommandMessage,
   type GitHubRepositorySource,
+  type WorkspaceSourceSetSnapshot,
 } from "@agent-dock/protocol";
 import { PiRpcTurnError, validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
-import { createWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import { createWorkspaceSnapshot, mergeWorkspaceSnapshots } from "@agent-dock/workspace-runtime";
 
 type GitHubWorkspaceImporter = {
   import(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array>;
@@ -32,7 +35,7 @@ function isWorkspaceImporterFailure(
 }
 
 type WorkspaceSourceRow = {
-  kind: "empty" | "sample_java" | "github_public" | "github_app";
+  kind: "empty" | "sample_java" | "github_public" | "github_app" | "repository_set";
   repository: string | null;
   commitSha: string | null;
   status: "pending" | "importing" | "ready" | "failed";
@@ -43,6 +46,7 @@ type WorkspaceSourceRow = {
   leaseExpiresAt: Date | string | null;
   installationId: string | null;
   repositoryId: string | null;
+  sourceSet: WorkspaceSourceSetSnapshot;
 };
 
 export type PostgresWorkspaceSeedResolverOptions = {
@@ -300,6 +304,14 @@ export class PostgresWorkspaceSeedResolver {
           );
         }
       }
+      if (claimed?.kind === "repository_set") {
+        return this.#importAndPublish(
+          command,
+          leaseId,
+          () => this.#importRepositorySet(source.sourceSet, signal),
+          signal,
+        );
+      }
       await abortableDelay(this.#pollIntervalMs, signal);
     }
     throw new WorkspaceSeedError(
@@ -317,6 +329,12 @@ export class PostgresWorkspaceSeedResolver {
           .onRef("source.tenant_id", "=", "workspace.tenant_id")
           .onRef("source.workspace_id", "=", "workspace.id"),
       )
+      .innerJoin("runs as run", (join) =>
+        join
+          .onRef("run.tenant_id", "=", "workspace.tenant_id")
+          .onRef("run.project_id", "=", "workspace.project_id")
+          .onRef("run.workspace_id", "=", "workspace.id"),
+      )
       .select([
         "source.kind",
         "source.repository",
@@ -329,10 +347,12 @@ export class PostgresWorkspaceSeedResolver {
         "source.lease_expires_at as leaseExpiresAt",
         "source.github_installation_id as installationId",
         "source.github_repository_id as repositoryId",
+        "run.source_set_snapshot as sourceSet",
       ])
       .where("workspace.tenant_id", "=", command.payload.tenantId)
       .where("workspace.project_id", "=", command.payload.projectId)
       .where("workspace.id", "=", command.payload.workspaceId)
+      .where("run.id", "=", command.payload.runId)
       .executeTakeFirst();
     if (row === undefined) {
       throw new WorkspaceSeedError(
@@ -341,7 +361,118 @@ export class PostgresWorkspaceSeedResolver {
         false,
       );
     }
-    return row;
+    const sourceSet = parseWorkspaceSourceSetSnapshot(row.sourceSet);
+    this.#assertSourceSetMatches(row, sourceSet);
+    return { ...row, sourceSet };
+  }
+
+  #assertSourceSetMatches(
+    source: Omit<WorkspaceSourceRow, "sourceSet"> & { sourceSet: unknown },
+    sourceSet: WorkspaceSourceSetSnapshot,
+  ): void {
+    const entry = sourceSet.entries[0];
+    const matched =
+      source.kind === "repository_set"
+        ? sourceSet.entries.length >= 2 &&
+          sourceSet.entries.every((candidate) => candidate.root !== ".")
+        : sourceSet.entries.length === 1 &&
+          entry?.root === "." &&
+          entry.kind === source.kind &&
+          (entry.kind === "empty" ||
+            entry.kind === "sample_java" ||
+            (entry.kind === "github_public" &&
+              entry.repository === source.repository &&
+              entry.commitSha === source.commitSha) ||
+            (entry.kind === "github_app" &&
+              entry.repository === source.repository &&
+              entry.commitSha === source.commitSha &&
+              entry.installationId ===
+                safeId(source.installationId ?? "", "GitHub installation ID") &&
+              entry.repositoryId === safeId(source.repositoryId ?? "", "GitHub repository ID")));
+    if (!matched) {
+      throw new WorkspaceSeedError(
+        "workspace_source_snapshot_mismatch",
+        "Workspace source changed after the Run was accepted",
+        false,
+      );
+    }
+    canonicalWorkspaceSourceSetJson(sourceSet);
+  }
+
+  async #importRepositorySet(
+    sourceSet: WorkspaceSourceSetSnapshot,
+    signal: AbortSignal,
+  ): Promise<Uint8Array> {
+    const importController = new AbortController();
+    const abortImports = (): void => importController.abort(signal.reason);
+    if (signal.aborted) abortImports();
+    else signal.addEventListener("abort", abortImports, { once: true });
+    const imports = sourceSet.entries.map(async (source) => {
+      if (importController.signal.aborted) {
+        throw new WorkspaceSeedError(
+          "workspace_seed_cancelled",
+          "Workspace import was cancelled",
+          true,
+        );
+      }
+      if (source.kind === "github_public") {
+        return {
+          root: source.root,
+          snapshot: await this.#importer.import(
+            {
+              kind: "github_public",
+              repository: source.repository,
+              commitSha: source.commitSha,
+            },
+            importController.signal,
+          ),
+        };
+      }
+      if (source.kind === "github_app") {
+        if (this.#privateImporter === undefined) {
+          throw new WorkspaceSeedError(
+            "github_app_not_configured",
+            "Private GitHub import is not configured",
+            false,
+          );
+        }
+        return {
+          root: source.root,
+          snapshot: await this.#privateImporter.import(
+            {
+              installationId: source.installationId,
+              repositoryId: source.repositoryId,
+              commitSha: source.commitSha,
+            },
+            importController.signal,
+          ),
+        };
+      }
+      throw new WorkspaceSeedError(
+        "workspace_source_snapshot_mismatch",
+        "Repository set contained a non-repository source",
+        false,
+      );
+    });
+    let imported: { root: string; snapshot: Uint8Array }[];
+    try {
+      imported = await Promise.all(imports);
+    } catch (error: unknown) {
+      importController.abort();
+      await Promise.allSettled(imports);
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", abortImports);
+    }
+    try {
+      return mergeWorkspaceSnapshots(imported);
+    } catch {
+      throw new WorkspaceSeedError(
+        "workspace_repository_set_limit",
+        "Combined repository set exceeded Workspace limits",
+        false,
+      );
+    }
   }
 
   async #loadReady(source: WorkspaceSourceRow): Promise<Uint8Array> {

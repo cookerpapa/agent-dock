@@ -18,6 +18,7 @@ import {
 } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
+import { parseRepositorySetManifest, REPOSITORY_SET_EXAMPLE } from "./repository-set.ts";
 
 type SourceHighlightModule = typeof import("./source-highlight.ts");
 type SourceHighlightResult = ReturnType<SourceHighlightModule["highlightSource"]>;
@@ -504,6 +505,7 @@ export default function ChatApp() {
   const [workspaceCommitSha, setWorkspaceCommitSha] = useState("");
   const [workspaceInstallationId, setWorkspaceInstallationId] = useState("");
   const [workspaceRepositoryId, setWorkspaceRepositoryId] = useState("");
+  const [workspaceRepositorySet, setWorkspaceRepositorySet] = useState("");
   const [githubInstallation, setGitHubInstallation] = useState<GitHubInstallationResource | null>(
     null,
   );
@@ -713,23 +715,34 @@ export default function ChatApp() {
   async function createWorkspace(): Promise<void> {
     const name = workspaceName.trim();
     if (name.length === 0) return;
-    const source: WorkspaceSourceRequest =
-      workspaceSourceKind === "empty"
-        ? { kind: "empty" }
-        : workspaceSourceKind === "sample_java"
-          ? { kind: "sample_java" }
-          : workspaceSourceKind === "github_public"
-            ? {
-                kind: "github_public",
-                repository: workspaceRepository.trim(),
-                commitSha: workspaceCommitSha.trim(),
-              }
-            : {
-                kind: "github_app",
-                installationId: Number(workspaceInstallationId),
-                repositoryId: Number(workspaceRepositoryId),
-                commitSha: workspaceCommitSha.trim(),
-              };
+    let source: WorkspaceSourceRequest;
+    try {
+      source =
+        workspaceSourceKind === "empty"
+          ? { kind: "empty" }
+          : workspaceSourceKind === "sample_java"
+            ? { kind: "sample_java" }
+            : workspaceSourceKind === "github_public"
+              ? {
+                  kind: "github_public",
+                  repository: workspaceRepository.trim(),
+                  commitSha: workspaceCommitSha.trim(),
+                }
+              : workspaceSourceKind === "github_app"
+                ? {
+                    kind: "github_app",
+                    installationId: Number(workspaceInstallationId),
+                    repositoryId: Number(workspaceRepositoryId),
+                    commitSha: workspaceCommitSha.trim(),
+                  }
+                : parseRepositorySetManifest(workspaceRepositorySet);
+    } catch (error: unknown) {
+      update({
+        type: "api.error",
+        message: error instanceof Error ? error.message : "多仓库清单格式无效。",
+      });
+      return;
+    }
     const session = await provisionSession(name, source);
     if (session !== undefined) {
       setWorkspacePanelOpen(false);
@@ -738,6 +751,7 @@ export default function ChatApp() {
       setWorkspaceCommitSha("");
       setWorkspaceInstallationId("");
       setWorkspaceRepositoryId("");
+      setWorkspaceRepositorySet("");
       setGitHubInstallation(null);
     }
   }
@@ -996,6 +1010,7 @@ export default function ChatApp() {
                   <option value="empty">空 Workspace</option>
                   <option value="github_public">公开 GitHub 仓库</option>
                   <option value="github_app">GitHub App 私有仓库</option>
+                  <option value="repository_set">多仓库精确版本</option>
                   <option value="sample_java">Java 修复示例</option>
                 </select>
               </label>
@@ -1073,6 +1088,23 @@ export default function ChatApp() {
                     />
                   </label>
                 </div>
+              ) : null}
+              {workspaceSourceKind === "repository_set" ? (
+                <label>
+                  <span>仓库清单（2–8 个，JSON）</span>
+                  <textarea
+                    onChange={(event) => setWorkspaceRepositorySet(event.target.value)}
+                    placeholder={REPOSITORY_SET_EXAMPLE}
+                    required
+                    rows={12}
+                    spellCheck={false}
+                    value={workspaceRepositorySet}
+                  />
+                  <small>
+                    每个仓库必须固定到 40 位 Commit SHA，并映射到唯一顶层目录。清单也支持 github_app
+                    条目。
+                  </small>
+                </label>
               ) : null}
               <footer>
                 <button onClick={() => setWorkspacePanelOpen(false)} type="button">

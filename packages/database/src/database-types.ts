@@ -62,7 +62,8 @@ export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout
 export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementState = "pending" | "claimed" | "blocked" | "completed";
 export type TenantApiCredentialRole = "owner" | "member" | "viewer";
-export type WorkspaceSourceKind = "empty" | "sample_java" | "github_public" | "github_app";
+export type WorkspaceSourceKind =
+  "empty" | "sample_java" | "github_public" | "github_app" | "repository_set";
 export type WorkspaceImportStatus = "pending" | "importing" | "ready" | "failed";
 export type WorkspaceVersionOrigin = "checkpoint" | "fork" | "migration";
 export type WorkspaceOperationKind = "fork" | "rollback" | "archive" | "unarchive";
@@ -231,6 +232,19 @@ export interface WorkspaceSourceTable {
   updated_at: GeneratedTimestamp;
 }
 
+export interface WorkspaceRepositorySourceTable {
+  tenant_id: string;
+  workspace_id: string;
+  ordinal: number;
+  root_path: string;
+  kind: "github_public" | "github_app";
+  repository: string;
+  commit_sha: string;
+  github_installation_id: NullableInt8;
+  github_repository_id: NullableInt8;
+  created_at: GeneratedTimestamp;
+}
+
 export interface CredentialBindingTable {
   id: string;
   tenant_id: string;
@@ -322,6 +336,7 @@ export interface RunTable {
   turn_id: string;
   command_id: string;
   environment_version_id: string;
+  source_set_snapshot: GeneratedJsonObject;
   idempotency_key: string;
   trace_id: Generated<string>;
   state: RunState;
@@ -796,6 +811,7 @@ export interface Database {
   environment_operations: EnvironmentOperationTable;
   workspaces: WorkspaceTable;
   workspace_sources: WorkspaceSourceTable;
+  workspace_repository_sources: WorkspaceRepositorySourceTable;
   workspace_versions: WorkspaceVersionTable;
   workspace_operations: WorkspaceOperationTable;
   credential_bindings: CredentialBindingTable;

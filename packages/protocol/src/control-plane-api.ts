@@ -487,11 +487,43 @@ export const GitHubAppRepositorySourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const RepositoryWorkspaceRootSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+});
+
+export const RepositorySetEntryRequestSchema = Type.Union([
+  Type.Object(
+    {
+      root: RepositoryWorkspaceRootSchema,
+      ...GitHubRepositorySourceSchema.properties,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      root: RepositoryWorkspaceRootSchema,
+      ...GitHubAppRepositorySourceSchema.properties,
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const RepositorySetSourceRequestSchema = Type.Object(
+  {
+    kind: Type.Literal("repository_set"),
+    repositories: Type.Array(RepositorySetEntryRequestSchema, { minItems: 2, maxItems: 8 }),
+  },
+  { additionalProperties: false },
+);
+
 export const WorkspaceSourceRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("empty") }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("sample_java") }, { additionalProperties: false }),
   GitHubRepositorySourceSchema,
   GitHubAppRepositorySourceSchema,
+  RepositorySetSourceRequestSchema,
 ]);
 
 export const WorkspaceImportStatusSchema = Type.Union([
@@ -537,7 +569,73 @@ export const WorkspaceSourceResourceSchema = Type.Union([
     },
     { additionalProperties: false },
   ),
+  Type.Object(
+    {
+      kind: Type.Literal("repository_set"),
+      repositories: Type.Array(
+        Type.Union([
+          Type.Object(
+            {
+              root: RepositoryWorkspaceRootSchema,
+              ...GitHubRepositorySourceSchema.properties,
+            },
+            { additionalProperties: false },
+          ),
+          Type.Object(
+            {
+              root: RepositoryWorkspaceRootSchema,
+              ...GitHubAppRepositorySourceSchema.properties,
+              repository: Type.String({ minLength: 3, maxLength: 140 }),
+              private: Type.Boolean(),
+            },
+            { additionalProperties: false },
+          ),
+        ]),
+        { minItems: 2, maxItems: 8 },
+      ),
+      status: WorkspaceImportStatusSchema,
+      failureCode: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z][a-z0-9_]*$" }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
 ]);
+
+export const WorkspaceSourceSetEntrySnapshotSchema = Type.Union([
+  Type.Object(
+    { root: Type.Literal("."), kind: Type.Literal("empty") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { root: Type.Literal("."), kind: Type.Literal("sample_java") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      root: Type.Union([Type.Literal("."), RepositoryWorkspaceRootSchema]),
+      ...GitHubRepositorySourceSchema.properties,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      root: Type.Union([Type.Literal("."), RepositoryWorkspaceRootSchema]),
+      ...GitHubAppRepositorySourceSchema.properties,
+      repository: Type.String({ minLength: 3, maxLength: 140 }),
+      private: Type.Boolean(),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const WorkspaceSourceSetSnapshotSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    entries: Type.Array(WorkspaceSourceSetEntrySnapshotSchema, { minItems: 1, maxItems: 8 }),
+  },
+  { additionalProperties: false },
+);
 
 export const CreateProjectRequestSchema = Type.Object(
   {
@@ -754,6 +852,7 @@ export const RunResourceSchema = Type.Object(
     turnId: UuidSchema,
     commandId: UuidSchema,
     environment: EnvironmentRuntimeSnapshotSchema,
+    sourceSet: WorkspaceSourceSetSnapshotSchema,
     state: RunStateSchema,
     attemptCount: NonNegativeSafeIntegerSchema,
     currentAttemptId: Type.Optional(UuidSchema),
@@ -1075,9 +1174,13 @@ export type CreateTenantRegistrationRequest = Static<typeof CreateTenantRegistra
 export type TenantRegistrationResource = Static<typeof TenantRegistrationResourceSchema>;
 export type GitHubRepositorySource = Static<typeof GitHubRepositorySourceSchema>;
 export type GitHubAppRepositorySource = Static<typeof GitHubAppRepositorySourceSchema>;
+export type RepositorySetEntryRequest = Static<typeof RepositorySetEntryRequestSchema>;
+export type RepositorySetSourceRequest = Static<typeof RepositorySetSourceRequestSchema>;
 export type WorkspaceSourceRequest = Static<typeof WorkspaceSourceRequestSchema>;
 export type WorkspaceImportStatus = Static<typeof WorkspaceImportStatusSchema>;
 export type WorkspaceSourceResource = Static<typeof WorkspaceSourceResourceSchema>;
+export type WorkspaceSourceSetEntrySnapshot = Static<typeof WorkspaceSourceSetEntrySnapshotSchema>;
+export type WorkspaceSourceSetSnapshot = Static<typeof WorkspaceSourceSetSnapshotSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
@@ -1130,6 +1233,11 @@ export class ControlPlaneApiValidationError extends Error {
   }
 }
 
+export const DEFAULT_SAMPLE_WORKSPACE_SOURCE_SET = {
+  schemaVersion: 1,
+  entries: [{ root: ".", kind: "sample_java" }],
+} as const satisfies WorkspaceSourceSetSnapshot;
+
 function parseSchema<Schema extends TSchema>(
   schema: Schema,
   value: unknown,
@@ -1143,6 +1251,22 @@ function parseSchema<Schema extends TSchema>(
     );
   }
   return value as Static<Schema>;
+}
+
+function normalizedPublicGitHubRepository(value: string): string {
+  const repository = value.trim().toLowerCase();
+  if (
+    !/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\/[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/.test(
+      repository,
+    ) ||
+    repository.includes("..") ||
+    repository.endsWith(".git")
+  ) {
+    throw new ControlPlaneApiValidationError(
+      "GitHub repository must be a normalized public owner/repository coordinate",
+    );
+  }
+  return repository;
 }
 
 export function parseCreateProjectRequest(value: unknown): CreateProjectRequest {
@@ -1159,6 +1283,36 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
   if (request.source.kind === "empty") {
     return { name, source: { kind: "empty" } };
   }
+  if (request.source.kind === "repository_set") {
+    const roots = new Set<string>();
+    const identities = new Set<string>();
+    const repositories = request.source.repositories.map((entry) => {
+      if (roots.has(entry.root)) {
+        throw new ControlPlaneApiValidationError("Repository-set Workspace roots must be unique");
+      }
+      roots.add(entry.root);
+      if (entry.kind === "github_app") {
+        const identity = `github_app:${String(entry.installationId)}:${String(entry.repositoryId)}`;
+        if (identities.has(identity)) {
+          throw new ControlPlaneApiValidationError(
+            "Repository-set entries must identify distinct repositories",
+          );
+        }
+        identities.add(identity);
+        return { ...entry, commitSha: entry.commitSha.toLowerCase() };
+      }
+      const repository = normalizedPublicGitHubRepository(entry.repository);
+      const identity = `github_public:${repository}`;
+      if (identities.has(identity)) {
+        throw new ControlPlaneApiValidationError(
+          "Repository-set entries must identify distinct repositories",
+        );
+      }
+      identities.add(identity);
+      return { ...entry, repository, commitSha: entry.commitSha.toLowerCase() };
+    });
+    return { name, source: { kind: "repository_set", repositories } };
+  }
   if (request.source.kind === "github_app") {
     return {
       name,
@@ -1168,23 +1322,84 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
       },
     };
   }
-  const repository = request.source.repository.trim().toLowerCase();
+  const repository = normalizedPublicGitHubRepository(request.source.repository);
   const commitSha = request.source.commitSha.toLowerCase();
-  if (
-    !/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\/[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/.test(
-      repository,
-    ) ||
-    repository.includes("..") ||
-    repository.endsWith(".git")
-  ) {
-    throw new ControlPlaneApiValidationError(
-      "GitHub repository must be a normalized public owner/repository coordinate",
-    );
-  }
   return {
     name,
     source: { kind: "github_public", repository, commitSha },
   };
+}
+
+export function parseWorkspaceSourceSetSnapshot(value: unknown): WorkspaceSourceSetSnapshot {
+  const snapshot = parseSchema(
+    WorkspaceSourceSetSnapshotSchema,
+    value,
+    "Workspace source-set snapshot",
+  );
+  const roots = new Set<string>();
+  const identities = new Set<string>();
+  for (const entry of snapshot.entries) {
+    if (roots.has(entry.root)) {
+      throw new ControlPlaneApiValidationError("Workspace source-set roots must be unique");
+    }
+    roots.add(entry.root);
+    if (entry.kind === "empty" || entry.kind === "sample_java") {
+      if (snapshot.entries.length !== 1 || entry.root !== ".") {
+        throw new ControlPlaneApiValidationError(
+          "Built-in Workspace sources cannot be combined with repositories",
+        );
+      }
+      continue;
+    }
+    if (snapshot.entries.length > 1 && entry.root === ".") {
+      throw new ControlPlaneApiValidationError(
+        "Multi-repository Workspace entries require disjoint named roots",
+      );
+    }
+    const identity =
+      entry.kind === "github_public"
+        ? `github_public:${entry.repository}`
+        : `github_app:${String(entry.installationId)}:${String(entry.repositoryId)}`;
+    if (identities.has(identity)) {
+      throw new ControlPlaneApiValidationError(
+        "Workspace source-set entries must identify distinct repositories",
+      );
+    }
+    identities.add(identity);
+  }
+  return {
+    schemaVersion: 1,
+    entries: [...snapshot.entries].sort((left, right) => left.root.localeCompare(right.root)),
+  };
+}
+
+export function canonicalWorkspaceSourceSetJson(value: unknown): string {
+  const snapshot = parseWorkspaceSourceSetSnapshot(value);
+  return JSON.stringify({
+    schemaVersion: 1,
+    entries: snapshot.entries.map((entry) => {
+      if (entry.kind === "empty" || entry.kind === "sample_java") {
+        return { root: entry.root, kind: entry.kind };
+      }
+      if (entry.kind === "github_public") {
+        return {
+          root: entry.root,
+          kind: entry.kind,
+          repository: entry.repository,
+          commitSha: entry.commitSha,
+        };
+      }
+      return {
+        root: entry.root,
+        kind: entry.kind,
+        installationId: entry.installationId,
+        repositoryId: entry.repositoryId,
+        repository: entry.repository,
+        commitSha: entry.commitSha,
+        private: entry.private,
+      };
+    }),
+  });
 }
 
 export function parseTenantIdentityResource(value: unknown): TenantIdentityResource {

@@ -641,15 +641,33 @@ export function WorkspaceInspector({
                       ? "sample/java-repair"
                       : source.kind === "github_public"
                         ? source.repository
-                        : `${source.repository} · installation ${String(source.installationId)}`}
+                        : source.kind === "github_app"
+                          ? `${source.repository} · installation ${String(source.installationId)}`
+                          : `${String(source.repositories.length)} repositories · ${source.repositories
+                              .map((repository) => repository.root)
+                              .join(", ")}`}
                 </strong>
                 <small>
                   {source.kind === "empty"
                     ? "clean git baseline"
                     : source.kind === "sample_java"
                       ? "built-in immutable seed"
-                      : `${shortId(source.commitSha)} · ${source.status}`}
+                      : source.kind === "repository_set"
+                        ? `${source.status} · exact commits under disjoint roots`
+                        : `${shortId(source.commitSha)} · ${source.status}`}
                 </small>
+                {source.kind === "repository_set" ? (
+                  <ul className="source-repository-set">
+                    {source.repositories.map((repository) => (
+                      <li key={repository.root}>
+                        <code>{repository.root}/</code>
+                        <span>
+                          {repository.repository}@{shortId(repository.commitSha)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             ) : null}
             {mutation ? <div className="inspector-progress">{mutation}…</div> : null}

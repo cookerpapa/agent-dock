@@ -86,3 +86,14 @@ sources, operators can improve cold starts without weakening tenancy, retries
 become understandable to users, and completed work has a reviewable evidence
 surface. The implementation cost is additional schema, APIs, a network
 enforcement service, lifecycle reconciliation and broader production tests.
+
+## Implementation status
+
+- Environment configuration, validation, activation and rollback are complete.
+- Exact-commit multi-repository Workspaces and immutable Run source-set
+  snapshots are complete. Public and tenant-allowlisted GitHub App sources may
+  be combined under 2–8 unique top-level roots. Root-aware multi-repository PR
+  delivery remains intentionally unavailable until a patch can be mapped to an
+  explicit destination repository without ambiguity.
+- Controlled dependency egress, clean prewarming, Attempt rewind/Review
+  Bundles and Helm acceptance remain subsequent dependency-ordered work.

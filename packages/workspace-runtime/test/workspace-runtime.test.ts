@@ -8,6 +8,9 @@ import {
   collectGitWorkspacePatch,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
+  createWorkspaceSnapshot,
+  mergeWorkspaceSnapshots,
+  parseWorkspaceSnapshot,
   restoreWorkspaceSnapshot,
 } from "../src/index.ts";
 
@@ -84,5 +87,42 @@ describe("shared workspace runtime", () => {
     expect(patch.patch).toContain("deleted file mode");
     expect(patch.patch).toContain("diff --git a/src/New.java b/src/New.java");
     expect(await git(root, ["diff", "--cached"])).toBe("");
+  });
+
+  it("merges exact repository snapshots beneath disjoint normalized roots", () => {
+    const merged = mergeWorkspaceSnapshots([
+      {
+        root: "frontend",
+        snapshot: createWorkspaceSnapshot([
+          { path: "package.json", executable: false, content: Buffer.from("{}\n") },
+        ]),
+      },
+      {
+        root: "shared-lib",
+        snapshot: createWorkspaceSnapshot([
+          {
+            path: "src/Library.java",
+            executable: false,
+            content: Buffer.from("class Library {}\n"),
+          },
+        ]),
+      },
+    ]);
+    expect(parseWorkspaceSnapshot(merged).map((file) => file.path)).toEqual([
+      "frontend/package.json",
+      "shared-lib/src/Library.java",
+    ]);
+    expect(() =>
+      mergeWorkspaceSnapshots([
+        { root: "frontend", snapshot: createWorkspaceSnapshot([]) },
+        { root: "frontend", snapshot: createWorkspaceSnapshot([]) },
+      ]),
+    ).toThrow(/root/);
+    expect(() =>
+      mergeWorkspaceSnapshots([
+        { root: ".", snapshot: createWorkspaceSnapshot([]) },
+        { root: "backend", snapshot: createWorkspaceSnapshot([]) },
+      ]),
+    ).toThrow(/root/);
   });
 });
