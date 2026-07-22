@@ -10,6 +10,8 @@ import {
   type EnvironmentRecipeCommandResult,
   type EnvironmentToolName,
   type EnvironmentToolchainReport,
+  type DependencyProxyBootstrap,
+  type ToolWorkerEnvironmentStage,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWorkerOutput,
@@ -26,7 +28,10 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { access, cp, lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { request as httpRequest } from "node:http";
 import { createInterface } from "node:readline";
+import { isIPv4 } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
 
 export const TOOL_WORKSPACE_DIRECTORY = "/workspace";
 export const SAMPLE_JAVA_FIXTURE = "/opt/agent-dock/sample-java-repair";
@@ -195,8 +200,9 @@ type EnvironmentCommandExecution = {
 async function executeEnvironmentCommand(
   command: EnvironmentRecipeCommand,
   workspaceDirectory: string,
+  dependencyProxy?: DependencyProxyBootstrap,
 ): Promise<EnvironmentCommandExecution> {
-  if (command.network === "dependency") {
+  if (command.network === "dependency" && dependencyProxy === undefined) {
     throw new ToolWorkerError(
       "environment_dependency_network_unavailable",
       `Environment command ${command.id} requires an unavailable dependency network policy`,
@@ -241,7 +247,10 @@ async function executeEnvironmentCommand(
   const child = spawn("/bin/bash", ["--noprofile", "--norc", "-lc", command.command], {
     cwd: canonicalCwd,
     detached: process.platform !== "win32",
-    env: safeToolEnvironment(),
+    env:
+      command.network === "dependency"
+        ? safeToolEnvironment(dependencyProxy)
+        : safeToolEnvironment(),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = Buffer.alloc(0);
@@ -289,12 +298,22 @@ async function executeEnvironmentCommand(
     return { exitCode: result.exitCode, output, timedOut };
   } finally {
     clearTimeout(timer);
+    // A setup command is allowed to download dependencies, but that authority
+    // must not survive the command boundary in a detached child. Bash can
+    // otherwise exit after redirecting a background process, leaving that
+    // process with the proxy capability in its inherited environment.
+    terminateProcessGroup(child, "SIGKILL");
   }
 }
 
 export async function executeEnvironmentRecipe(
   environment: EnvironmentRuntimeSnapshot,
   workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+  options: {
+    dependencyProxy?: DependencyProxyBootstrap;
+    environmentStage?: ToolWorkerEnvironmentStage;
+    verifyDependencyProxy?: (proxy: DependencyProxyBootstrap) => Promise<void>;
+  } = {},
 ): Promise<EnvironmentRecipeCommandResult[]> {
   const recipeSha256 = createHash("sha256")
     .update(canonicalEnvironmentRecipeJson(environment.recipe))
@@ -306,15 +325,68 @@ export async function executeEnvironmentRecipe(
       false,
     );
   }
-  const results: EnvironmentRecipeCommandResult[] = [];
-  const phases = [
-    ["setup", environment.recipe.setupCommands],
-    ["verification", environment.recipe.verificationCommands],
-  ] as const;
+  const dependencyHosts = environment.recipe.dependencyHosts ?? [];
+  const dependencyProxy = options.dependencyProxy;
+  const stage = options.environmentStage;
+  let phases: readonly (readonly ["setup" | "verification", readonly EnvironmentRecipeCommand[]])[];
+  let results: EnvironmentRecipeCommandResult[] = [];
+  if (stage?.type === "dependency_setup") {
+    if (dependencyHosts.length < 1 || dependencyProxy === undefined) {
+      throw new ToolWorkerError(
+        "environment_dependency_network_unavailable",
+        "Dependency setup did not receive its accepted network capability",
+        false,
+      );
+    }
+    phases = [["setup", environment.recipe.setupCommands]];
+  } else if (stage?.type === "offline_restore") {
+    if (dependencyHosts.length < 1 || dependencyProxy !== undefined) {
+      throw new ToolWorkerError(
+        "environment_dependency_network_invalid",
+        "Offline environment restore received an invalid network state",
+        false,
+      );
+    }
+    if (
+      stage.setupCommands.length !== environment.recipe.setupCommands.length ||
+      stage.setupCommands.some(
+        (result, index) =>
+          result.id !== environment.recipe.setupCommands[index]?.id ||
+          result.phase !== "setup" ||
+          result.exitCode !== 0,
+      )
+    ) {
+      throw new ToolWorkerError(
+        "environment_recipe_restore_mismatch",
+        "Offline environment restore evidence did not match the accepted recipe",
+        false,
+      );
+    }
+    results = [...stage.setupCommands];
+    phases = [["verification", environment.recipe.verificationCommands]];
+  } else {
+    if (dependencyHosts.length > 0 !== (dependencyProxy !== undefined)) {
+      throw new ToolWorkerError(
+        "environment_dependency_network_unavailable",
+        "Environment dependency network capability did not match the accepted recipe",
+        false,
+      );
+    }
+    phases = [
+      ["setup", environment.recipe.setupCommands],
+      ["verification", environment.recipe.verificationCommands],
+    ];
+  }
+  if (
+    dependencyProxy !== undefined &&
+    phases.some(([, commands]) => commands.some((command) => command.network === "dependency"))
+  ) {
+    await (options.verifyDependencyProxy ?? verifyDependencyProxyTrust)(dependencyProxy);
+  }
   for (const [phase, commands] of phases) {
     for (const command of commands) {
       const startedAt = Date.now();
-      const result = await executeEnvironmentCommand(command, workspaceDirectory);
+      const result = await executeEnvironmentCommand(command, workspaceDirectory, dependencyProxy);
       if (result.timedOut) {
         throw new ToolWorkerError(
           "environment_command_timeout",
@@ -343,7 +415,111 @@ export async function executeEnvironmentRecipe(
   return results;
 }
 
-export function safeToolEnvironment(): NodeJS.ProcessEnv {
+async function dependencyProxyHealth(
+  dependencyProxy: DependencyProxyBootstrap,
+): Promise<string | undefined> {
+  return await new Promise<string | undefined>((resolvePromise) => {
+    const request = httpRequest(
+      {
+        host: dependencyProxy.host,
+        port: dependencyProxy.port,
+        path: "/health/ready",
+        method: "GET",
+        headers: { connection: "close" },
+        timeout: 1_000,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        response.on("data", (chunk: Buffer) => {
+          bytes += chunk.byteLength;
+          if (bytes > 1_024) request.destroy();
+          else chunks.push(chunk);
+        });
+        response.once("end", () => {
+          if (response.statusCode !== 200 || bytes > 1_024) {
+            resolvePromise(undefined);
+            return;
+          }
+          try {
+            const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              !Array.isArray(value) &&
+              Object.keys(value).length === 2 &&
+              (value as { status?: unknown }).status === "ok" &&
+              typeof (value as { publicKeyFingerprint?: unknown }).publicKeyFingerprint === "string"
+            ) {
+              resolvePromise((value as { publicKeyFingerprint: string }).publicKeyFingerprint);
+              return;
+            }
+          } catch {
+            // An incomplete or non-JSON response is not a ready trust anchor.
+          }
+          resolvePromise(undefined);
+        });
+      },
+    );
+    request.once("timeout", () => request.destroy());
+    request.once("error", () => resolvePromise(undefined));
+    request.end();
+  });
+}
+
+export async function verifyDependencyProxyTrust(
+  dependencyProxy: DependencyProxyBootstrap,
+  timeoutMs = 120_000,
+): Promise<void> {
+  safeToolEnvironment(dependencyProxy);
+  if (!/^[0-9a-f]{64}$/.test(dependencyProxy.publicKeyFingerprint)) {
+    throw new ToolWorkerError(
+      "environment_dependency_network_invalid",
+      "Environment dependency network trust was invalid",
+      false,
+    );
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await dependencyProxyHealth(dependencyProxy)) === dependencyProxy.publicKeyFingerprint) {
+      return;
+    }
+    await delay(250);
+  }
+  throw new ToolWorkerError(
+    "environment_dependency_network_unavailable",
+    "Environment dependency network trust did not become ready",
+    true,
+  );
+}
+
+export function safeToolEnvironment(dependencyProxy?: DependencyProxyBootstrap): NodeJS.ProcessEnv {
+  let proxyEnvironment: NodeJS.ProcessEnv = {};
+  if (dependencyProxy !== undefined) {
+    if (
+      !isIPv4(dependencyProxy.host) ||
+      !Number.isSafeInteger(dependencyProxy.port) ||
+      dependencyProxy.port < 1 ||
+      dependencyProxy.port > 65_535 ||
+      !/^adpc1_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/.test(dependencyProxy.capability) ||
+      !/^[0-9a-f]{64}$/.test(dependencyProxy.publicKeyFingerprint)
+    ) {
+      throw new ToolWorkerError(
+        "environment_dependency_network_invalid",
+        "Environment dependency network capability was invalid",
+        false,
+      );
+    }
+    const proxy = `http://agent-dock:${encodeURIComponent(dependencyProxy.capability)}@${dependencyProxy.host}:${String(dependencyProxy.port)}`;
+    proxyEnvironment = {
+      HTTP_PROXY: proxy,
+      HTTPS_PROXY: proxy,
+      http_proxy: proxy,
+      https_proxy: proxy,
+      NO_PROXY: "",
+      no_proxy: "",
+    };
+  }
   return {
     PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     HOME: "/tmp/agent-dock-tool-home",
@@ -360,6 +536,7 @@ export function safeToolEnvironment(): NodeJS.ProcessEnv {
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "/bin/false",
     GIT_LFS_SKIP_SMUDGE: "1",
+    ...proxyEnvironment,
   };
 }
 
@@ -741,7 +918,18 @@ export async function runToolWorker(): Promise<void> {
         const seed =
           message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
         await prepareToolWorkspace(seed, message.workspaceRestore);
-        environment.recipeCommands = await executeEnvironmentRecipe(message.environment);
+        environment.recipeCommands = await executeEnvironmentRecipe(
+          message.environment,
+          TOOL_WORKSPACE_DIRECTORY,
+          {
+            ...(message.dependencyProxy === undefined
+              ? {}
+              : { dependencyProxy: message.dependencyProxy }),
+            ...(message.environmentStage === undefined
+              ? {}
+              : { environmentStage: message.environmentStage }),
+          },
+        );
         initialized = true;
         await writeOutput({
           toolWorkerProtocolVersion: 1,

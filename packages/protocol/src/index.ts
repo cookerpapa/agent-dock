@@ -38,6 +38,7 @@ export {
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   ActivateProjectEnvironmentVersionRequestSchema,
   CreateProjectEnvironmentVersionRequestSchema,
+  DependencyHostnameSchema,
   EnvironmentRecipeCommandResultSchema,
   EnvironmentRecipeCommandSchema,
   EnvironmentRecipeSchema,
@@ -92,6 +93,8 @@ export {
   MAX_TOOL_COMMAND_BYTES,
   MAX_TOOL_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
+  DependencyProxyBootstrapSchema,
+  ToolWorkerEnvironmentStageSchema,
   SandboxManagerGitHubImportRequestSchema,
   SandboxManagerGitHubImportResponseSchema,
   SandboxManagerRequestSchema,
@@ -133,6 +136,8 @@ export {
   type ToolSandboxStopResponse,
   type ToolWorkerInput,
   type ToolWorkerOutput,
+  type DependencyProxyBootstrap,
+  type ToolWorkerEnvironmentStage,
 } from "./tool-sandbox.ts";
 
 export {

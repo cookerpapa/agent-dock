@@ -31,6 +31,19 @@ metadata:
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: latest
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+---
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
@@ -83,6 +96,15 @@ kind: ServiceAccount
 metadata:
   name: repository-importer
   namespace: agent-dock-importers
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dependency-egress-proxy
+  namespace: agent-dock-egress
   labels:
     app.kubernetes.io/part-of: agent-dock
 automountServiceAccountToken: false
@@ -162,6 +184,46 @@ roleRef:
   name: sandbox-manager
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-manager-dependency-egress-reader
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["dependency-egress-trust"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    resourceNames: ["dependency-egress-proxy"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    resourceNames:
+      - agent-dock-default-deny-all
+      - dependency-egress-ingress
+      - dependency-egress-public-https
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-manager-dependency-egress-reader
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-manager
+    namespace: agent-dock-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-manager-dependency-egress-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: agent-dock-sandbox-manager-runtimeclass-reader
@@ -213,6 +275,249 @@ spec:
   policyTypes:
     - Ingress
     - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-dock-default-deny-all
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-dock-dependency-egress
+  namespace: agent-dock-sandboxes
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+  annotations:
+    agent-dock.io/policy-version: dependency-egress-v1
+spec:
+  podSelector:
+    matchLabels:
+      agent-dock.io/dependency-egress: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agent-dock-egress
+          podSelector:
+            matchLabels:
+              agent-dock.io/workload: dependency-egress-proxy
+      ports:
+        - protocol: TCP
+          port: 3128
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dependency-egress-ingress
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+  annotations:
+    agent-dock.io/policy-version: dependency-egress-v1
+spec:
+  podSelector:
+    matchLabels:
+      agent-dock.io/workload: dependency-egress-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agent-dock-sandboxes
+          podSelector:
+            matchLabels:
+              agent-dock.io/dependency-egress: "true"
+      ports:
+        - protocol: TCP
+          port: 3128
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dependency-egress-public-https
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+  annotations:
+    agent-dock.io/policy-version: dependency-egress-v1
+spec:
+  podSelector:
+    matchLabels:
+      agent-dock.io/workload: dependency-egress-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.88.99.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dependency-egress-trust
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dependency-egress-proxy
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      agent-dock.io/workload: dependency-egress-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: agent-dock
+        agent-dock.io/workload: dependency-egress-proxy
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      restartPolicy: Always
+      serviceAccountName: dependency-egress-proxy
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          image: agent-dock/dependency-egress-proxy:production
+          imagePullPolicy: Never
+          env:
+            - name: AGENT_DOCK_DEPENDENCY_EGRESS_HOST
+              value: 0.0.0.0
+            - name: AGENT_DOCK_DEPENDENCY_EGRESS_PORT
+              value: "3128"
+            - name: AGENT_DOCK_DEPENDENCY_EGRESS_PUBLIC_KEY_FILE
+              value: /run/agent-dock-egress/public-key.pem
+          ports:
+            - name: connect
+              containerPort: 3128
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: connect
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: connect
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+          volumeMounts:
+            - name: trust
+              mountPath: /run/agent-dock-egress
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: trust
+          configMap:
+            name: dependency-egress-trust
+            items:
+              - key: public-key.pem
+                path: public-key.pem
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dependency-egress-proxy
+  namespace: agent-dock-egress
+  labels:
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  type: ClusterIP
+  selector:
+    agent-dock.io/workload: dependency-egress-proxy
+  ports:
+    - name: connect
+      protocol: TCP
+      port: 3128
+      targetPort: connect
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

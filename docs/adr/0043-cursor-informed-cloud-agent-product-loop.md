@@ -95,5 +95,9 @@ enforcement service, lifecycle reconciliation and broader production tests.
   be combined under 2–8 unique top-level roots. Root-aware multi-repository PR
   delivery remains intentionally unavailable until a patch can be mapped to an
   explicit destination repository without ambiguity.
-- Controlled dependency egress, clean prewarming, Attempt rewind/Review
-  Bundles and Helm acceptance remain subsequent dependency-ordered work.
+- Controlled dependency egress is complete. Exact per-environment HTTPS hosts
+  are enforced by an Ed25519 capability proxy; recipe descendants are killed
+  and the networked bootstrap Pod is destroyed before a fresh, never-networked
+  gVisor Pod restores and verifies the Workspace for Agent tools.
+- Clean prewarming, Attempt rewind/Review Bundles and Helm acceptance remain
+  subsequent dependency-ordered work.

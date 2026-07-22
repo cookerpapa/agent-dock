@@ -19,6 +19,7 @@ const provider = new KubernetesGvisorSandboxProvider({
   importerServiceAccountName: config.importerServiceAccountName,
   imagePullPolicy: config.imagePullPolicy,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
+  ...(config.dependencyEgress === undefined ? {} : { dependencyEgress: config.dependencyEgress }),
 });
 const manager = new ToolSandboxManager({
   provider,

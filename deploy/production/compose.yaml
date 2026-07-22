@@ -488,6 +488,12 @@ services:
       AGENT_DOCK_KUBERNETES_IMPORTER_SERVICE_ACCOUNT: repository-importer
       AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY: Never
       AGENT_DOCK_REPOSITORY_IMPORT_TIMEOUT_MS: "180000"
+      AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: /run/agent-dock-secrets/dependency-egress-private-key.pem
+      AGENT_DOCK_DEPENDENCY_EGRESS_NAMESPACE: agent-dock-egress
+      AGENT_DOCK_DEPENDENCY_EGRESS_CONFIG_MAP: dependency-egress-trust
+      AGENT_DOCK_DEPENDENCY_EGRESS_SERVICE: dependency-egress-proxy
+      AGENT_DOCK_DEPENDENCY_EGRESS_SERVICE_PORT: "3128"
+      AGENT_DOCK_DEPENDENCY_EGRESS_CAPABILITY_TTL_MS: "900000"
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9466"
       AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
@@ -500,6 +506,10 @@ services:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
         target: /run/agent-dock-secrets/sandbox-manager-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/dependency-egress-private-key.pem
+        target: /run/agent-dock-secrets/dependency-egress-private-key.pem
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
@@ -843,6 +853,17 @@ services:
       dockerfile: packages/tool-sandbox/Dockerfile
       args: *application-build-args
       network: host
+    network_mode: none
+    restart: "no"
+
+  dependency-egress-proxy-image:
+    profiles: [image-only]
+    image: agent-dock/dependency-egress-proxy:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/dependency-egress-proxy/Dockerfile
+      args: *application-build-args
+      network: none
     network_mode: none
     restart: "no"
 

@@ -200,7 +200,7 @@ extension-policy support would overstate the current boundary.
 - [x] Add append-only Project environment versions, immutable Run snapshots, Manager/image policy matching, in-gVisor Node/Java/Python/Git preflight, persisted environment evidence, exact-environment warm reuse, and Web validation status
 - [x] Add declarative environment setup/verification recipes, immutable candidate history, fresh-gVisor validation, expected-active activation/rollback CAS, and actor audit
 - [x] Add exact-commit multi-repository Workspaces with disjoint normalized roots and immutable Run source-set snapshots
-- [ ] Add per-environment dependency egress through an authenticated allowlist proxy without joining platform networks
+- [x] Add per-environment dependency egress through an authenticated exact-host allowlist proxy, kill setup descendants, destroy the bootstrap Pod, and expose only a fresh never-networked gVisor Pod to Agent tools
 - [ ] Add single-consumption never-used gVisor prewarm Pods with measured cold-start evidence
 - [ ] Add Attempt supersession/rewind projections and immutable safe Review Bundles
 - [ ] Add reproducible Helm execution-plane packaging and failure/production acceptance evidence

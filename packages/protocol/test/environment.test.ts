@@ -100,5 +100,56 @@ describe("versioned project environment protocol", () => {
         },
       }),
     ).toThrow();
+    expect(() =>
+      canonicalEnvironmentRecipeJson({
+        schemaVersion: 1,
+        setupCommands: ["one", "two", "three"].map((id) => ({
+          id,
+          command: "true",
+          cwd: ".",
+          timeoutMs: 300_000,
+          network: "none",
+        })),
+        verificationCommands: DEFAULT_PROJECT_ENVIRONMENT_RECIPE.verificationCommands,
+      }),
+    ).toThrow(/ten minutes/);
+  });
+
+  it("binds dependency commands to a normalized exact-host policy", () => {
+    const recipe = {
+      schemaVersion: 1,
+      dependencyHosts: ["registry.npmjs.org", "files.pythonhosted.org"],
+      setupCommands: [
+        {
+          id: "install",
+          command: "python3 -m pip install -r requirements.txt",
+          cwd: ".",
+          timeoutMs: 120_000,
+          network: "dependency",
+        },
+      ],
+      verificationCommands: DEFAULT_PROJECT_ENVIRONMENT_RECIPE.verificationCommands,
+    } as const;
+    expect(JSON.parse(canonicalEnvironmentRecipeJson(recipe))).toMatchObject({
+      dependencyHosts: ["files.pythonhosted.org", "registry.npmjs.org"],
+    });
+    expect(() =>
+      canonicalEnvironmentRecipeJson({
+        ...recipe,
+        dependencyHosts: undefined,
+      }),
+    ).toThrow(/dependency hosts/);
+    expect(() =>
+      canonicalEnvironmentRecipeJson({
+        ...DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        dependencyHosts: ["registry.npmjs.org"],
+      }),
+    ).toThrow(/dependency hosts/);
+    expect(() =>
+      canonicalEnvironmentRecipeJson({
+        ...recipe,
+        dependencyHosts: ["*.npmjs.org"],
+      }),
+    ).toThrow();
   });
 });

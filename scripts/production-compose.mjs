@@ -28,6 +28,7 @@ if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
 const applicationSecretNames = [
   "api-token",
   "database-url",
+  "dependency-egress-private-key.pem",
   "github-app-private-key.pem",
   "github-gateway-token",
   "github-webhook-secret",
@@ -68,6 +69,7 @@ const serviceArguments =
         "github-gateway",
         "web",
         "tool-sandbox-image",
+        "dependency-egress-proxy-image",
       ]
     : commandArguments;
 const args = [

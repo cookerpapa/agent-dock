@@ -18,6 +18,14 @@ export type SandboxManagerConfig = {
   repositoryImportTimeoutMs: number;
   warmTtlMs: number;
   maximumWarmActivations: number;
+  dependencyEgress?: {
+    privateKeyPem: string;
+    namespace: string;
+    configMapName: string;
+    serviceName: string;
+    servicePort: number;
+    capabilityTtlMs: number;
+  };
 };
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -73,6 +81,33 @@ async function readSecret(path: string): Promise<string> {
   }
 }
 
+async function readPrivatePem(path: string): Promise<string> {
+  if (!isAbsolute(path) || path.includes("\0")) {
+    throw new TypeError("Dependency egress issuer key path must be absolute");
+  }
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.size < 100 ||
+      metadata.size > 4_096
+    ) {
+      throw new TypeError("Dependency egress issuer key file is not private and bounded");
+    }
+    const value = await handle.readFile("utf8");
+    if (
+      !/^-----BEGIN PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END PRIVATE KEY-----\n?$/.test(value)
+    ) {
+      throw new TypeError("Dependency egress issuer key file is invalid");
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function loadSandboxManagerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SandboxManagerConfig> {
@@ -94,6 +129,7 @@ export async function loadSandboxManagerConfig(
   if (pullPolicy !== "Always" && pullPolicy !== "IfNotPresent" && pullPolicy !== "Never") {
     throw new TypeError("AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY is invalid");
   }
+  const dependencyEgressKeyFile = environment.AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE;
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
@@ -144,5 +180,39 @@ export async function loadSandboxManagerConfig(
       24 * 60 * 60_000,
     ),
     maximumWarmActivations: integer(environment.AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, 4, 1, 1_000),
+    ...(dependencyEgressKeyFile === undefined
+      ? {}
+      : {
+          dependencyEgress: {
+            privateKeyPem: await readPrivatePem(dependencyEgressKeyFile),
+            namespace: bounded(
+              environment.AGENT_DOCK_DEPENDENCY_EGRESS_NAMESPACE ?? "agent-dock-egress",
+              "dependencyEgressNamespace",
+              63,
+            ),
+            configMapName: bounded(
+              environment.AGENT_DOCK_DEPENDENCY_EGRESS_CONFIG_MAP ?? "dependency-egress-trust",
+              "dependencyEgressConfigMap",
+              63,
+            ),
+            serviceName: bounded(
+              environment.AGENT_DOCK_DEPENDENCY_EGRESS_SERVICE ?? "dependency-egress-proxy",
+              "dependencyEgressService",
+              63,
+            ),
+            servicePort: integer(
+              environment.AGENT_DOCK_DEPENDENCY_EGRESS_SERVICE_PORT,
+              3_128,
+              1,
+              65_535,
+            ),
+            capabilityTtlMs: integer(
+              environment.AGENT_DOCK_DEPENDENCY_EGRESS_CAPABILITY_TTL_MS,
+              15 * 60_000,
+              10_000,
+              20 * 60_000,
+            ),
+          },
+        }),
   };
 }

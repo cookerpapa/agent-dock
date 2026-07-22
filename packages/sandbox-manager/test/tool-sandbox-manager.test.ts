@@ -8,6 +8,7 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { generateKeyPairSync } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -305,22 +306,47 @@ describe("provider-backed Tool Sandbox Manager", () => {
   it("loads only the fixed Kubernetes gVisor deployment configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
     const tokenPath = join(directory, "manager-token");
+    const issuerPath = join(directory, "dependency-egress-private-key.pem");
     try {
       await writeFile(tokenPath, `${"t".repeat(48)}\n`, { mode: 0o600 });
       await chmod(tokenPath, 0o600);
+      const { privateKey } = generateKeyPairSync("ed25519");
+      await writeFile(issuerPath, privateKey.export({ type: "pkcs8", format: "pem" }), {
+        mode: 0o600,
+      });
+      await chmod(issuerPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
+          AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
         }),
       ).resolves.toMatchObject({
         toolImage: "agent-dock/tool-sandbox:test",
         kubeconfigPath: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
         runtimeClassName: "agent-dock-gvisor",
         imagePullPolicy: "Never",
+        dependencyEgress: {
+          namespace: "agent-dock-egress",
+          configMapName: "dependency-egress-trust",
+          serviceName: "dependency-egress-proxy",
+          servicePort: 3128,
+          capabilityTtlMs: 900_000,
+        },
       });
+      await chmod(issuerPath, 0o644);
+      await expect(
+        loadSandboxManagerConfig({
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_IMAGE_REVISION: "development",
+          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
+          AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
+        }),
+      ).rejects.toThrow(/not private/);
+      await chmod(issuerPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,

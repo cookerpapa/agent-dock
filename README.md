@@ -150,6 +150,7 @@ only after a measured requirement appears.
 - [ADR-0041: remove the cumulative per-Run token budget](docs/adr/0041-remove-per-run-token-budget.md)
 - [ADR-0042: versioned Project environments](docs/adr/0042-versioned-project-environment-plane.md)
 - [ADR-0043: Cursor-informed Cloud Agent product loop](docs/adr/0043-cursor-informed-cloud-agent-product-loop.md)
+- [ADR-0044: capability-scoped dependency egress](docs/adr/0044-capability-scoped-dependency-egress.md)
 
 ## Current executable spikes
 
@@ -317,6 +318,42 @@ change an accepted Run or rebind a stale Pod. See ADR-0042 and the
 [production runbook](docs/PRODUCTION_DEPLOYMENT.md) for host setup, secrets,
 health, backup, upgrade, recovery, and the disposable full-topology acceptance
 command.
+
+Dependency installation is explicit environment configuration, not general
+Agent Internet access. For example, an owner may validate a candidate recipe
+like this:
+
+```json
+{
+  "schemaVersion": 1,
+  "dependencyHosts": ["registry.npmjs.org"],
+  "setupCommands": [
+    {
+      "id": "npm-install",
+      "command": "npm ci --ignore-scripts --no-audit --no-fund",
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "network": "dependency"
+    }
+  ],
+  "verificationCommands": [
+    {
+      "id": "npm-test",
+      "command": "npm test",
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "network": "none"
+    }
+  ]
+}
+```
+
+Only the marked command receives a short-lived exact-host proxy capability.
+Its process group is terminated at the command boundary. The Manager captures
+the prepared Workspace, destroys and confirms absence of that exact bootstrap
+Pod, then restores into a fresh gVisor Pod that never had proxy access. Offline
+verification runs there before any Agent tool is exposed, so warm coding Turns
+remain deny-all.
 
 This is production-complete for the bounded private multi-tenant Java fixture
 and controlled GitHub repositories pinned to exact commits (one repository or

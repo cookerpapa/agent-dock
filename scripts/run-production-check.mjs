@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createPrivateKey, randomBytes, randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { release as hostKernelRelease, tmpdir } from "node:os";
@@ -946,13 +946,24 @@ async function readSecretValues() {
     resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig"),
     "utf8",
   );
+  const dependencyEgressPrivateKey = await readFile(
+    resolve(runtimeDirectory, "secrets/dependency-egress-private-key.pem"),
+    "utf8",
+  );
+  assert.equal(createPrivateKey(dependencyEgressPrivateKey).asymmetricKeyType, "ed25519");
   const kubernetesToken = /^\s*token:\s*(\S+)\s*$/m.exec(kubeconfig)?.[1];
   assert.equal(typeof kubernetesToken, "string");
   assert.notEqual(applicationAccessKey, values[names.indexOf("minio-root-user")]);
   assert.notEqual(applicationSecretKey, values[names.indexOf("minio-root-password")]);
   return {
     applicationAccessKey,
-    secretValues: [...values, applicationAccessKey, applicationSecretKey, kubernetesToken],
+    secretValues: [
+      ...values,
+      applicationAccessKey,
+      applicationSecretKey,
+      kubernetesToken,
+      dependencyEgressPrivateKey.trim(),
+    ],
   };
 }
 
@@ -986,6 +997,7 @@ async function assertPrivateRuntimeFiles() {
       "api-token",
       "aws-credentials",
       "database-url",
+      "dependency-egress-private-key.pem",
       "github-app-private-key.pem",
       "github-gateway-token",
       "github-webhook-secret",
@@ -1346,6 +1358,10 @@ async function main() {
     resolve(runtimeDirectory, "secrets/model-credential-master-key"),
     "utf8",
   );
+  const initializedDependencyEgressPrivateKey = await readFile(
+    resolve(runtimeDirectory, "secrets/dependency-egress-private-key.pem"),
+    "utf8",
+  );
   const legacyRootUser = await readFile(
     resolve(runtimeDirectory, "secrets/minio-root-user"),
     "utf8",
@@ -1371,6 +1387,10 @@ async function main() {
     initializedModelCredentialMasterKey,
   );
   assert.equal(
+    await readFile(resolve(runtimeDirectory, "secrets/dependency-egress-private-key.pem"), "utf8"),
+    initializedDependencyEgressPrivateKey,
+  );
+  assert.equal(
     (await readFile(resolve(runtimeDirectory, "secrets/aws-credentials"), "utf8")).includes(
       legacyRootPassword.trim(),
     ),
@@ -1393,6 +1413,7 @@ async function main() {
       "github-gateway",
       "web",
       "tool-sandbox-image",
+      "dependency-egress-proxy-image",
     ]);
   }
   report("sync_kubernetes_tool_image");

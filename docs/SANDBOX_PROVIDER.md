@@ -116,6 +116,17 @@ variable. It then probes the fixed Node.js 24, Java 17, Python 3.11 and Git 2
 toolchain. The Provider combines the report with live `runsc`/gVisor, deny-all
 networking, UID/GID 1000:1000 and read-only-rootfs evidence.
 
+A recipe may temporarily request exact-host HTTPS dependency access. The
+Manager signs an activation-scoped capability for a dedicated CONNECT proxy;
+the disposable bootstrap Pod still has no DNS or general Internet route.
+Recipe process groups are terminated after each command. Before the Provider
+returns a handle, it captures the Workspace, deletes the bootstrap Pod with a
+UID precondition, confirms absence, and restores into a newly created gVisor
+Pod that never possessed the dependency label or capability. Verification and
+all Agent tools run in that second Pod. Persisted validation therefore reports
+the final `deny_all` state, and a warm Pod never retains dependency egress or a
+networked runtime identity.
+
 The evidence is returned with a Tool Workspace capture and committed as an
 append-only validation row bound to Project environment, Run and Attempt. A
 healthy warm Pod may be rebound only when both the Workspace revision and full

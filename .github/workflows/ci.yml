@@ -122,6 +122,8 @@ jobs:
             dockerfile: packages/web-ui/Dockerfile
           - image: tool-sandbox
             dockerfile: packages/tool-sandbox/Dockerfile
+          - image: dependency-egress-proxy
+            dockerfile: packages/dependency-egress-proxy/Dockerfile
 
     steps:
       - name: Check out repository

@@ -5,6 +5,7 @@ import type {
   ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
 import {
+  canonicalEnvironmentRecipeJson,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
@@ -14,6 +15,7 @@ import {
   parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
@@ -27,6 +29,10 @@ const kubeconfigPath =
   process.env.AGENT_DOCK_KUBECONFIG_PATH ??
   "/home/rayn/agent-dock/deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig";
 const toolImage = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:production";
+const imageRevision = process.env.AGENT_DOCK_IMAGE_REVISION ?? "development";
+const dependencyEgressPrivateKeyFile =
+  process.env.AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE ??
+  "/home/rayn/agent-dock/deploy/production/runtime/secrets/dependency-egress-private-key.pem";
 const ids = [
   "10000000-0000-4000-8000-000000000101",
   "10000000-0000-4000-8000-000000000102",
@@ -64,7 +70,7 @@ function createRequest(index: number): ToolSandboxCreateRequest {
       versionNumber: 1,
       profileKey: "agent-dock-fullstack",
       profileVersion: "1",
-      imageRevision: "development",
+      imageRevision,
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
       recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
       recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
@@ -128,6 +134,103 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
     }
   }, 120_000);
 
+  it("installs a dependency through an exact-host capability while Agent bash stays offline", async () => {
+    const privateKeyPem = await readFile(dependencyEgressPrivateKeyFile, "utf8");
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
+      toolImage,
+      runtimeClient,
+      dependencyEgress: { privateKeyPem },
+    });
+    let nextId = 0;
+    const manager = new ToolSandboxManager({
+      provider,
+      imageRevision,
+      idGenerator: () => ids[nextId++]!,
+      capabilityGenerator: () => `adts_${String(nextId).repeat(43).slice(0, 43)}`,
+    });
+    const recipe = {
+      schemaVersion: 1 as const,
+      dependencyHosts: ["registry.npmjs.org"],
+      setupCommands: [
+        {
+          id: "install-is-number",
+          command:
+            "npm install --ignore-scripts --no-audit --no-fund --package-lock=false is-number@7.0.0",
+          cwd: ".",
+          timeoutMs: 120_000,
+          network: "dependency" as const,
+        },
+      ],
+      verificationCommands: [
+        {
+          id: "verify-is-number",
+          command: "node -e \"if(!require('is-number')(7))process.exit(1)\"",
+          cwd: ".",
+          timeoutMs: 10_000,
+          network: "none" as const,
+        },
+      ],
+    };
+    const request = createRequest(4);
+    request.environment.recipe = recipe;
+    request.environment.recipeSha256 = createHash("sha256")
+      .update(canonicalEnvironmentRecipeJson(recipe))
+      .digest("hex");
+    const assignmentValue = assignment(4);
+    let reserved: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    try {
+      await provider.checkHealth();
+      reserved = await manager.create(request);
+      await expect(
+        manager.execute(
+          reserved.capability,
+          operation(
+            reserved.activationId,
+            "60000000-0000-4000-8000-000000000001",
+            "node -e \"if(!require('is-number')(42))process.exit(1)\"",
+          ),
+        ),
+      ).resolves.toMatchObject({ exitCode: 0 });
+      await expect(manager.inspect(reserved.activationId, assignmentValue)).resolves.toMatchObject({
+        state: "running",
+        handle: { environmentValidation: { networkMode: "deny_all" } },
+        effectiveIsolation: {
+          networkMode: "kubernetes-network-policy/deny-all",
+          runtime: "runsc",
+        },
+      });
+      const finalPod = await runtimeClient.readPod(
+        "agent-dock-sandboxes",
+        `agent-dock-tool-${reserved.activationId}`.slice(0, 63),
+      );
+      expect(finalPod?.metadata?.labels).toMatchObject({
+        "agent-dock.io/workload": "tool-sandbox",
+      });
+      expect(finalPod?.metadata?.labels?.["agent-dock.io/dependency-egress"]).toBeUndefined();
+      await expect(
+        runtimeClient.listPods(
+          "agent-dock-sandboxes",
+          "agent-dock.io/managed=true,agent-dock.io/workload=dependency-bootstrap",
+        ),
+      ).resolves.toEqual([]);
+      await expect(
+        manager.execute(
+          reserved.capability,
+          operation(
+            reserved.activationId,
+            "60000000-0000-4000-8000-000000000002",
+            "node -e \"fetch('https://example.com').then(()=>process.exit(1)).catch(()=>process.exit(0))\"",
+            10_000,
+          ),
+        ),
+      ).resolves.toMatchObject({ exitCode: 0 });
+    } finally {
+      if (reserved !== undefined) await manager.stop(reserved.activationId, assignmentValue);
+      await manager.close();
+    }
+  }, 180_000);
+
   it("enforces identity, cgroups, namespace isolation, bounded output and exact cleanup", async () => {
     let nextId = 0;
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
@@ -137,6 +240,7 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
     });
     const manager = new ToolSandboxManager({
       provider,
+      imageRevision,
       idGenerator: () => ids[nextId++]!,
       capabilityGenerator: () => `adts_${String(nextId).repeat(43).slice(0, 43)}`,
     });
@@ -442,7 +546,7 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
   it("rebinds one exact-session warm Pod to a higher fenced attempt", async () => {
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
     const provider = new KubernetesGvisorSandboxProvider({ toolImage, runtimeClient });
-    const manager = new ToolSandboxManager({ provider });
+    const manager = new ToolSandboxManager({ provider, imageRevision });
     const firstAssignment = assignment(10);
     let currentAssignment = firstAssignment;
     let activationId: string | undefined;

@@ -48,6 +48,9 @@ decision in [ADR-0038](adr/0038-gvisor-only-tool-execution.md), and the current
 Kubernetes-managed execution plane in
 [ADR-0039](adr/0039-kubernetes-gvisor-execution-plane.md) and
 [ADR-0040](adr/0040-demand-activated-warm-sandboxes-and-batched-events.md).
+Versioned environments and capability-scoped dependency setup are recorded in
+[ADR-0042](adr/0042-versioned-project-environment-plane.md) and
+[ADR-0044](adr/0044-capability-scoped-dependency-egress.md).
 Product operations,
 recovery, and release evidence are recorded in
 [ADR-0036](adr/0036-product-operations-and-release-evidence.md). See also the
@@ -66,7 +69,7 @@ recovery, and release evidence are recorded in
   `2.3.2-k3s2`, and `runsc release-20260714.0`.
 - Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
   application images pin their own Node and service image digests.
-- Enough local CPU, memory, and storage for PostgreSQL, MinIO, six application
+- Enough local CPU, memory, and storage for PostgreSQL, MinIO, seven application
   images, and up to two concurrent workers. The Compose file declares explicit
   per-service limits; capacity should be measured against the intended host.
 - A private checkout and a trusted operator account. Anyone who can read the
@@ -112,7 +115,7 @@ npm run production:deploy
 ```
 
 The first invocation creates `deploy/production/runtime/`, generates private
-random credentials and stable logical IDs, builds all six pinned application
+random credentials and stable logical IDs, builds all seven pinned application
 images, migrates and bootstraps PostgreSQL, creates a private checkpoint bucket,
 and waits for every long-running service to become healthy. A completed runtime
 directory is reused on later invocations. A non-empty partial directory is
@@ -168,6 +171,13 @@ mounted application secret files, avoiding an assumption that every Docker host
 uses UID `1000`. Initialization performed as root assigns those files to the
 image's unprivileged `1000:1000` identity. Mixed owners or a root-owned
 application secret fail before Compose starts.
+
+Initialization also creates `secrets/dependency-egress-private-key.pem`, a
+stable Ed25519 issuer owned only by the Sandbox Manager. The Manager publishes
+only its public key into the named Kubernetes trust ConfigMap. Re-running
+initialization validates and preserves the private key; production acceptance
+checks that neither the PEM nor any other secret appears in Compose output,
+container logs or durable Agent events.
 The generated `model-credential-master-key` encrypts tenant provider keys with
 AES-256-GCM and must be backed up with PostgreSQL. It is mounted only into the
 control plane and trusted Supervisor host. Losing it makes configured provider

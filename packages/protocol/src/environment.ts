@@ -26,6 +26,12 @@ const EnvironmentCommandWorkingDirectorySchema = Type.String({
   pattern: "^(?:\\.|[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)$",
 });
 
+export const DependencyHostnameSchema = Type.String({
+  minLength: 4,
+  maxLength: 253,
+  pattern: "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+});
+
 export const EnvironmentRecipeCommandSchema = Type.Object(
   {
     id: EnvironmentCommandIdSchema,
@@ -40,6 +46,9 @@ export const EnvironmentRecipeCommandSchema = Type.Object(
 export const EnvironmentRecipeSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
+    dependencyHosts: Type.Optional(
+      Type.Array(DependencyHostnameSchema, { minItems: 1, maxItems: 32, uniqueItems: true }),
+    ),
     setupCommands: Type.Array(EnvironmentRecipeCommandSchema, { maxItems: 10 }),
     verificationCommands: Type.Array(EnvironmentRecipeCommandSchema, {
       minItems: 1,
@@ -135,6 +144,9 @@ export const EnvironmentValidationReportSchema = Type.Object(
     recipeSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
     isolationBoundary: Type.Literal("gvisor"),
     runtime: Type.Literal("runsc"),
+    // This is the network state exposed to Agent tools after environment
+    // setup. A dependency recipe may temporarily use the scoped proxy, but
+    // the Manager must seal that path before it accepts this report.
     networkMode: Type.Literal("deny_all"),
     runAsUser: Type.Literal("1000:1000"),
     readOnlyRootFilesystem: Type.Literal(true),
@@ -228,7 +240,11 @@ export type ProjectEnvironmentHistoryResource = Static<
 
 function assertEnvironmentRecipeSemantics(recipe: EnvironmentRecipe): void {
   const ids = new Set<string>();
-  for (const command of [...recipe.setupCommands, ...recipe.verificationCommands]) {
+  const commands = [...recipe.setupCommands, ...recipe.verificationCommands];
+  if (commands.reduce((total, command) => total + command.timeoutMs, 0) > 10 * 60_000) {
+    throw new TypeError("Environment recipe command budget exceeds ten minutes");
+  }
+  for (const command of commands) {
     if (ids.has(command.id))
       throw new TypeError(`Environment command ID ${command.id} is repeated`);
     ids.add(command.id);
@@ -242,18 +258,38 @@ function assertEnvironmentRecipeSemantics(recipe: EnvironmentRecipe): void {
       throw new TypeError("Environment command contains control characters");
     }
   }
+  if (recipe.verificationCommands.some((command) => command.network === "dependency")) {
+    throw new TypeError("Environment verification commands must run offline");
+  }
+  const requiresDependencyNetwork = recipe.setupCommands.some(
+    (command) => command.network === "dependency",
+  );
+  const dependencyHosts = recipe.dependencyHosts ?? [];
+  if (requiresDependencyNetwork !== dependencyHosts.length > 0) {
+    throw new TypeError(
+      "Environment dependency hosts must exist exactly when a command requests dependency network",
+    );
+  }
 }
 
 export function parseEnvironmentRecipe(value: unknown): EnvironmentRecipe {
   const recipe = Value.Parse(EnvironmentRecipeSchema, value);
   assertEnvironmentRecipeSemantics(recipe);
-  return recipe;
+  return {
+    ...recipe,
+    ...(recipe.dependencyHosts === undefined
+      ? {}
+      : { dependencyHosts: [...recipe.dependencyHosts].sort() }),
+  };
 }
 
 export function canonicalEnvironmentRecipeJson(value: unknown): string {
   const recipe = parseEnvironmentRecipe(value);
   return JSON.stringify({
     schemaVersion: 1,
+    ...(recipe.dependencyHosts === undefined
+      ? {}
+      : { dependencyHosts: [...recipe.dependencyHosts] }),
     setupCommands: recipe.setupCommands.map((command) => ({
       id: command.id,
       command: command.command,

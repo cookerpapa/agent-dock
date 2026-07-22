@@ -7,9 +7,10 @@ import {
   type EnvironmentRuntimeSnapshot,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   executeEnvironmentRecipe,
   resolveToolWorkspacePath,
@@ -126,14 +127,23 @@ describe("credential-free Tool Sandbox worker", () => {
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-network-"));
     const recipe: EnvironmentRecipe = {
       schemaVersion: 1,
-      setupCommands: [],
-      verificationCommands: [
+      dependencyHosts: ["registry.npmjs.org"],
+      setupCommands: [
         {
           id: "network-probe",
           command: "true",
           cwd: ".",
           timeoutMs: 1_000,
           network: "dependency",
+        },
+      ],
+      verificationCommands: [
+        {
+          id: "offline-probe",
+          command: "true",
+          cwd: ".",
+          timeoutMs: 1_000,
+          network: "none",
         },
       ],
     };
@@ -143,6 +153,96 @@ describe("credential-free Tool Sandbox worker", () => {
       ).rejects.toMatchObject({
         code: "environment_dependency_network_unavailable",
         retryable: false,
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("injects an ephemeral proxy only into dependency recipe commands", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-proxy-"));
+    const recipe: EnvironmentRecipe = {
+      schemaVersion: 1,
+      dependencyHosts: ["registry.npmjs.org"],
+      setupCommands: [
+        {
+          id: "proxy-evidence",
+          command:
+            'test -n "$HTTPS_PROXY"; test "$NO_PROXY" = ""; printf configured > proxy-marker.txt',
+          cwd: ".",
+          timeoutMs: 1_000,
+          network: "dependency",
+        },
+      ],
+      verificationCommands: [
+        {
+          id: "proxy-cleared",
+          command: 'test -z "${HTTPS_PROXY:-}"; test "$(cat proxy-marker.txt)" = configured',
+          cwd: ".",
+          timeoutMs: 1_000,
+          network: "none",
+        },
+      ],
+    };
+    try {
+      const setup = await executeEnvironmentRecipe(recipeEnvironment(recipe), workspace, {
+        dependencyProxy: {
+          host: "10.43.0.53",
+          port: 3_128,
+          capability: `adpc1_${"a".repeat(64)}.${"b".repeat(86)}`,
+          publicKeyFingerprint: "c".repeat(64),
+        },
+        environmentStage: { type: "dependency_setup" },
+        verifyDependencyProxy: async (proxy) => {
+          expect(proxy.publicKeyFingerprint).toBe("c".repeat(64));
+        },
+      });
+      expect(setup).toMatchObject([{ id: "proxy-evidence", phase: "setup", exitCode: 0 }]);
+      await expect(
+        executeEnvironmentRecipe(recipeEnvironment(recipe), workspace, {
+          environmentStage: {
+            type: "offline_restore",
+            setupCommands: setup,
+          },
+        }),
+      ).resolves.toMatchObject([
+        { id: "proxy-evidence", phase: "setup", exitCode: 0 },
+        { id: "proxy-cleared", phase: "verification", exitCode: 0 },
+      ]);
+      expect(await readFile(resolve(workspace, "proxy-marker.txt"), "utf8")).toBe("configured");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("kills detached recipe descendants before the temporary network authority can outlive setup", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-descendant-"));
+    const recipe: EnvironmentRecipe = {
+      schemaVersion: 1,
+      setupCommands: [
+        {
+          id: "background-process",
+          command: "(sleep 1; printf escaped > background.txt) </dev/null >/dev/null 2>&1 &",
+          cwd: ".",
+          timeoutMs: 1_000,
+          network: "none",
+        },
+      ],
+      verificationCommands: [
+        {
+          id: "verify-shell",
+          command: "true",
+          cwd: ".",
+          timeoutMs: 1_000,
+          network: "none",
+        },
+      ],
+    };
+    try {
+      await executeEnvironmentRecipe(recipeEnvironment(recipe), workspace);
+      await delay(1_200);
+      await expect(access(resolve(workspace, "background.txt"))).rejects.toMatchObject({
+        code: "ENOENT",
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });

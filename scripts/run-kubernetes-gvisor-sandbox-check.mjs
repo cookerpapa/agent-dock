@@ -1,10 +1,14 @@
 import { execFile, spawn } from "node:child_process";
-import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { generateKeyPairSync } from "node:crypto";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const image = process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ?? "agent-dock/tool-sandbox:provider-check";
+const dependencyEgressImage =
+  process.env.AGENT_DOCK_DEPENDENCY_EGRESS_IMAGE ?? "agent-dock/dependency-egress-proxy:production";
 const kubeconfigPath = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_KUBECONFIG_PATH ??
@@ -148,6 +152,19 @@ const runtimeClassListAllowed = await captureOutcome("kubectl", [
 if (runtimeClassListAllowed.stdout !== "no" || runtimeClassListAllowed.code !== 1) {
   throw new Error("Sandbox Manager unexpectedly has RuntimeClass inventory access.");
 }
+const dependencyTrustAllowed = await capture("kubectl", [
+  "--kubeconfig",
+  kubeconfigPath,
+  "auth",
+  "can-i",
+  "patch",
+  "configmaps/dependency-egress-trust",
+  "--namespace",
+  "agent-dock-egress",
+]);
+if (dependencyTrustAllowed !== "yes") {
+  throw new Error("Sandbox Manager cannot publish the dependency egress public trust anchor.");
+}
 
 const buildArguments = [];
 for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]) {
@@ -170,42 +187,63 @@ await run("docker", [
   image,
   ".",
 ]);
+await run("docker", [
+  "build",
+  "--network",
+  "none",
+  "--file",
+  "packages/dependency-egress-proxy/Dockerfile",
+  "--tag",
+  dependencyEgressImage,
+  ".",
+]);
+const issuerDirectory = await mkdtemp(join(tmpdir(), "agent-dock-egress-issuer-"));
+const issuerPath = join(issuerDirectory, "private-key.pem");
+const { privateKey } = generateKeyPairSync("ed25519");
+await writeFile(issuerPath, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+await chmod(issuerPath, 0o600);
 const testEnvironment = {
   ...executionEnvironment,
   AGENT_DOCK_KUBECONFIG_PATH: kubeconfigPath,
   AGENT_DOCK_TOOL_SANDBOX_IMAGE: image,
+  AGENT_DOCK_DEPENDENCY_EGRESS_IMAGE: dependencyEgressImage,
+  AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
 };
 await run(process.execPath, ["scripts/sync-kubernetes-tool-image.mjs"], testEnvironment);
 process.stdout.write(
   `${JSON.stringify({ cluster: JSON.parse(clusterVersion), runtimeClass: runtimeClass.metadata.name, image })}\n`,
 );
 
-await run(
-  npmCommand,
-  [
-    "exec",
-    "--workspace",
-    "@agent-dock/sandbox-manager",
-    "--",
-    "vitest",
-    "--run",
-    "test/gvisor-sandbox-provider.integration.test.ts",
-  ],
-  { ...testEnvironment, AGENT_DOCK_KUBERNETES_GVISOR_TEST: "1" },
-);
-await run(
-  npmCommand,
-  [
-    "exec",
-    "--workspace",
-    "@agent-dock/sandbox-supervisor",
-    "--",
-    "vitest",
-    "--run",
-    "test/remote-tool-sandbox-turn-runner.integration.test.ts",
-  ],
-  { ...testEnvironment, AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST: "1" },
-);
+try {
+  await run(
+    npmCommand,
+    [
+      "exec",
+      "--workspace",
+      "@agent-dock/sandbox-manager",
+      "--",
+      "vitest",
+      "--run",
+      "test/gvisor-sandbox-provider.integration.test.ts",
+    ],
+    { ...testEnvironment, AGENT_DOCK_KUBERNETES_GVISOR_TEST: "1" },
+  );
+  await run(
+    npmCommand,
+    [
+      "exec",
+      "--workspace",
+      "@agent-dock/sandbox-supervisor",
+      "--",
+      "vitest",
+      "--run",
+      "test/remote-tool-sandbox-turn-runner.integration.test.ts",
+    ],
+    { ...testEnvironment, AGENT_DOCK_REMOTE_TOOL_SANDBOX_TEST: "1" },
+  );
+} finally {
+  await rm(issuerDirectory, { recursive: true, force: true });
+}
 
 for (const namespace of namespaces) {
   const remaining = await capture("kubectl", [

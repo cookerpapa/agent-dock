@@ -114,6 +114,53 @@ describe("Kubernetes gVisor Pod boundary", () => {
     ).toThrow("does not support");
   });
 
+  it("labels only a dependency bootstrap Pod for the narrow proxy policy", () => {
+    const dependencyEnvironment = {
+      ...environment,
+      recipe: {
+        schemaVersion: 1 as const,
+        dependencyHosts: ["registry.npmjs.org"],
+        setupCommands: [
+          {
+            id: "install",
+            command: "npm install",
+            cwd: ".",
+            timeoutMs: 120_000,
+            network: "dependency" as const,
+          },
+        ],
+        verificationCommands: environment.recipe.verificationCommands,
+      },
+    };
+    const pod = buildKubernetesToolSandboxPod({
+      image: "agent-dock/tool-sandbox:test",
+      name: "agent-dock-tool-dependency-test",
+      namespace: "agent-dock-sandboxes",
+      activationId: "10000000-0000-4000-8000-000000000007",
+      assignment,
+      dependencyEgress: true,
+      workload: "dependency-bootstrap",
+      environment: dependencyEnvironment,
+    });
+    expect(pod.metadata?.labels).toMatchObject({
+      [KUBERNETES_SANDBOX_LABELS.dependencyEgress]: "true",
+      [KUBERNETES_SANDBOX_LABELS.workload]: "dependency-bootstrap",
+    });
+    expect(pod.spec?.dnsPolicy).toBe("None");
+    expect(pod.spec?.containers[0]?.env).toEqual([]);
+    expect(JSON.stringify(pod)).not.toMatch(/adpc1_|Proxy-Authorization|PRIVATE KEY/);
+    const offline = buildKubernetesToolSandboxPod({
+      image: "agent-dock/tool-sandbox:test",
+      name: "agent-dock-tool-offline-restore",
+      namespace: "agent-dock-sandboxes",
+      activationId: "10000000-0000-4000-8000-000000000008",
+      assignment,
+      environment: dependencyEnvironment,
+    });
+    expect(offline.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress]).toBeUndefined();
+    expect(offline.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.workload]).toBe("tool-sandbox");
+  });
+
   it("builds a bounded public-repository importer with no platform authority", () => {
     const pod = buildKubernetesRepositoryImportPod({
       image: "agent-dock/tool-sandbox:test",

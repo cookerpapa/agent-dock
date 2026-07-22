@@ -94,7 +94,7 @@ Assumed trusted or out of scope for the current claim:
 | Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool Pod has no ServiceAccount token; Manager RBAC is namespace-scoped except read-only access to the one named RuntimeClass | production topology, RBAC and Pod-spec inspection |
 | Accepted Run silently changes tool image or warm Pod after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-Pod toolchain preflight; exact-environment warm reuse | migration/protocol tests, Manager rejection/reuse tests, gVisor environment evidence and real-token Run |
 | Model chooses an unreviewed image or Pod policy | image/profile/RuntimeClass/PodSpec remain operator configuration and closed protocols reject extra client fields | protocol schemas, fixed Pod-template tests and Manager policy mismatch tests |
-| Tool reaches internal services or Internet | Tool namespace has default-deny ingress/egress and DNS disabled | cluster/service/node/public TCP denial probe and network matrix |
+| Ordinary Tool reaches internal services or Internet | Tool namespace has default-deny ingress/egress and DNS disabled; dependency setup occurs in a capability-scoped disposable Pod that is destroyed before a never-networked Agent Pod restores the Workspace | cluster/service/node/public TCP probes, live dependency install, bootstrap-absence assertion, offline Bash, and network matrix |
 | Cross-tenant workspace read | one memory-backed workspace per exact tenant/project/workspace/session activation; warm reuse never crosses that key; immutable handle, rotating capability and Pod UID/fence checks | simultaneous two-tenant and warm-rebind integration tests |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
@@ -141,7 +141,8 @@ Before exposing arbitrary untrusted repositories to the public Internet:
 
 1. complete a production gVisor/KVM capacity and security review on the actual
    Linux host rather than relying on the validated WSL2 demonstration host;
-2. put repository and dependency egress behind a DNS-aware allowlisting proxy;
+2. replace the public GitHub importer's broad public-HTTPS NetworkPolicy with a
+   DNS-aware allowlisting proxy (dependency egress is already proxied);
 3. add verified identity, password recovery/MFA, distributed login and
    registration abuse/rate controls, audit retention, and incident response
    around the existing tenant model budgets;

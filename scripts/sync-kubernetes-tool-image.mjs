@@ -3,11 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const image =
+const images = [
   process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE ??
-  `agent-dock/tool-sandbox:${process.env.AGENT_DOCK_IMAGE_VERSION ?? "production"}`;
-if (!/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,511}$/.test(image)) {
-  throw new Error("AGENT_DOCK_TOOL_SANDBOX_IMAGE is invalid");
+    `agent-dock/tool-sandbox:${process.env.AGENT_DOCK_IMAGE_VERSION ?? "production"}`,
+  process.env.AGENT_DOCK_DEPENDENCY_EGRESS_IMAGE ??
+    `agent-dock/dependency-egress-proxy:${process.env.AGENT_DOCK_IMAGE_VERSION ?? "production"}`,
+];
+if (images.some((image) => !/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,511}$/.test(image))) {
+  throw new Error("Kubernetes execution-plane image reference is invalid");
 }
 
 function containerdReference(value) {
@@ -47,42 +50,49 @@ function run(command, args) {
   });
 }
 
-const dockerImageId = await capture("docker", ["image", "inspect", "--format", "{{.Id}}", image]);
-if (!/^sha256:[a-f0-9]{64}$/.test(dockerImageId)) {
-  throw new Error("The exact Tool Sandbox Docker image is unavailable");
-}
-
 const directory = await mkdtemp(join(tmpdir(), "agent-dock-k3s-image-"));
-const archive = join(directory, "tool-sandbox.tar");
 try {
-  await run("docker", ["image", "save", "--output", archive, image]);
-  await run("ctr", [
-    "--address",
-    "/run/k3s/containerd/containerd.sock",
-    "--namespace",
-    "k8s.io",
-    "images",
-    "import",
-    "--all-platforms",
-    archive,
-  ]);
-  const imported = await capture("ctr", [
-    "--address",
-    "/run/k3s/containerd/containerd.sock",
-    "--namespace",
-    "k8s.io",
-    "images",
-    "list",
-    "--quiet",
-  ]);
-  const importedReferences = imported.split(/\r?\n/);
-  const runtimeImage = containerdReference(image);
-  if (!importedReferences.includes(image) && !importedReferences.includes(runtimeImage)) {
-    throw new Error("K3s containerd did not retain the configured Tool Sandbox image reference");
+  const results = [];
+  for (const [index, image] of images.entries()) {
+    const dockerImageId = await capture("docker", [
+      "image",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      image,
+    ]);
+    if (!/^sha256:[a-f0-9]{64}$/.test(dockerImageId)) {
+      throw new Error("An exact execution-plane Docker image is unavailable");
+    }
+    const archive = join(directory, `execution-plane-${String(index)}.tar`);
+    await run("docker", ["image", "save", "--output", archive, image]);
+    await run("ctr", [
+      "--address",
+      "/run/k3s/containerd/containerd.sock",
+      "--namespace",
+      "k8s.io",
+      "images",
+      "import",
+      "--all-platforms",
+      archive,
+    ]);
+    const imported = await capture("ctr", [
+      "--address",
+      "/run/k3s/containerd/containerd.sock",
+      "--namespace",
+      "k8s.io",
+      "images",
+      "list",
+      "--quiet",
+    ]);
+    const importedReferences = imported.split(/\r?\n/);
+    const runtimeImage = containerdReference(image);
+    if (!importedReferences.includes(image) && !importedReferences.includes(runtimeImage)) {
+      throw new Error("K3s containerd did not retain an execution-plane image reference");
+    }
+    results.push({ image, runtimeImage, dockerImageId, imported: true });
   }
-  process.stdout.write(
-    `${JSON.stringify({ image, runtimeImage, dockerImageId, imported: true })}\n`,
-  );
+  process.stdout.write(`${JSON.stringify({ images: results })}\n`);
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

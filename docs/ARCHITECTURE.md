@@ -229,7 +229,7 @@ each command has an immutable ID, normalized working directory, timeout and
 explicit network class. Raw setup output is not copied into the trusted control
 plane: validation retains only phase, exit code, duration and output SHA-256.
 The Provider combines this
-toolchain report with its live gVisor/runsc, deny-all network, non-root and
+toolchain report with its live gVisor/runsc, final deny-all network, non-root and
 read-only-rootfs inspection. Successful Tool settlement stores that evidence
 under Project environment, Run and Attempt identity. Pure chat creates no Pod
 and therefore keeps the environment in `pending` until a real Tool Run proves
@@ -469,9 +469,18 @@ Kubernetes owns placement, cgroup declarations, policy and Pod lifecycle;
 untrusted syscalls are handled by gVisor's userspace application kernel instead
 of directly by the host kernel.
 
-There is no runtime selector. The Provider contract reserves deny-all, GitHub,
-package-registry, and explicit-host network policy shapes, but current Tool
-execution accepts only deny-all. GitHub import remains a separate
+There is no runtime selector. Ordinary Tool execution accepts only deny-all.
+An environment recipe may request dependency access to an immutable list of
+exact HTTPS hosts. The Manager signs a short-lived activation-scoped Ed25519
+capability; a dedicated credential-free CONNECT proxy resolves each request,
+rejects every non-public answer, enforces host/port/connection/byte/duration
+limits, and never joins a platform network. Only the individual recipe command
+receives proxy variables. When setup completes, the Worker kills its process
+group; the Manager snapshots the Workspace, deletes and confirms absence of the
+UID-fenced bootstrap Pod, then restores into a newly created gVisor Pod that
+never had proxy reachability. Offline verification completes in that second
+Pod before its handle is exposed, so warm reuse and all Agent tools remain
+deny-all without relying on runtime NetworkPolicy relabelling. GitHub import remains a separate
 credential-free gVisor Pod in `agent-dock-importers`. Its fixed NetworkPolicy
 allows cluster DNS and public TCP/443 while excluding private, link-local,
 cluster and node ranges. Imported repository hooks or code are never executed.
@@ -493,8 +502,9 @@ production Java repair path activates a separate Tool Pod with UID/GID
 `1000:1000`, read-only rootfs, `RuntimeDefault` seccomp, dropped capabilities,
 `no-new-privileges`, no host namespaces/ports/hostPath/devices, and bounded CPU,
 memory, ephemeral storage, PIDs, file descriptors, `/tmp`, and workspace
-memory-backed volumes. Default-deny policy and `dnsPolicy: None` make fake and
-real Tool Pods offline. Pinned Pi and the request-scoped model gateway stay together
+memory-backed volumes. Default-deny policy and `dnsPolicy: None` make normal
+fake and real Tool execution offline. Dependency setup has only the temporary
+capability path described above. Pinned Pi and the request-scoped model gateway stay together
 in the trusted Runner; the Runner alone joins provider egress and receives a
 short-lived model capability, while remote tools receive neither it nor the
 long-lived provider credential.

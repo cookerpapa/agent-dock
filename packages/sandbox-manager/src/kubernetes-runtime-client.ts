@@ -5,9 +5,12 @@ import {
   KubeConfig,
   NetworkingV1Api,
   NodeV1Api,
+  type V1ConfigMap,
+  type V1Endpoints,
   type V1NetworkPolicy,
   type V1Pod,
   type V1RuntimeClass,
+  type V1Service,
   type V1Status,
 } from "@kubernetes/client-node";
 import { PassThrough, type Readable, type Writable } from "node:stream";
@@ -34,6 +37,15 @@ export interface KubernetesRuntimeClient {
     gracePeriodSeconds: number,
   ): Promise<void>;
   readPodLog(namespace: string, name: string, containerName: string): Promise<string>;
+  readConfigMap(namespace: string, name: string): Promise<V1ConfigMap | undefined>;
+  patchConfigMapData(
+    namespace: string,
+    name: string,
+    resourceVersion: string,
+    data: Readonly<Record<string, string>>,
+  ): Promise<V1ConfigMap>;
+  readService(namespace: string, name: string): Promise<V1Service | undefined>;
+  readEndpoints(namespace: string, name: string): Promise<V1Endpoints | undefined>;
   readNetworkPolicy(namespace: string, name: string): Promise<V1NetworkPolicy | undefined>;
   readRuntimeClass(name: string): Promise<V1RuntimeClass | undefined>;
   attach(
@@ -262,6 +274,61 @@ export class OfficialKubernetesRuntimeClient implements KubernetesRuntimeClient 
       });
     } catch (error: unknown) {
       throw kubernetesFailure(error, "Pod log read");
+    }
+  }
+
+  async readConfigMap(namespace: string, name: string): Promise<V1ConfigMap | undefined> {
+    try {
+      return await this.#core.readNamespacedConfigMap({ namespace, name });
+    } catch (error: unknown) {
+      if (apiStatus(error) === 404) return undefined;
+      throw kubernetesFailure(error, "ConfigMap inspection");
+    }
+  }
+
+  async patchConfigMapData(
+    namespace: string,
+    name: string,
+    resourceVersion: string,
+    data: Readonly<Record<string, string>>,
+  ): Promise<V1ConfigMap> {
+    try {
+      return await this.#core.patchNamespacedConfigMap({
+        namespace,
+        name,
+        fieldManager: "agent-dock-sandbox-manager",
+        body: [
+          { op: "test", path: "/metadata/resourceVersion", value: resourceVersion },
+          { op: "add", path: "/data", value: data },
+        ],
+      });
+    } catch (error: unknown) {
+      if (apiStatus(error) === 409 || apiStatus(error) === 422) {
+        throw new SandboxManagerError(
+          "kubernetes_config_identity_mismatch",
+          "Kubernetes rejected a stale dependency egress trust update",
+          true,
+        );
+      }
+      throw kubernetesFailure(error, "ConfigMap update");
+    }
+  }
+
+  async readService(namespace: string, name: string): Promise<V1Service | undefined> {
+    try {
+      return await this.#core.readNamespacedService({ namespace, name });
+    } catch (error: unknown) {
+      if (apiStatus(error) === 404) return undefined;
+      throw kubernetesFailure(error, "Service inspection");
+    }
+  }
+
+  async readEndpoints(namespace: string, name: string): Promise<V1Endpoints | undefined> {
+    try {
+      return await this.#core.readNamespacedEndpoints({ namespace, name });
+    } catch (error: unknown) {
+      if (apiStatus(error) === 404) return undefined;
+      throw kubernetesFailure(error, "Endpoint inspection");
     }
   }
 

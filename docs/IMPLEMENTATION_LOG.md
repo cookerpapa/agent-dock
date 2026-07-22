@@ -1871,3 +1871,20 @@
   root-aware patch/branch/PR mapping 才能启用。
 - 回归：protocol 46、database 33、workspace runtime 3、Web 29、Supervisor Host 26 和 Control Plane 109 个测试通过；另外 3 个环境条件测试按
   设计跳过。覆盖 migration 回填/拒绝有损回滚、duplicate root、snapshot drift、两个 manifest 合并、ready seed reuse 和共享调度队列隔离。
+
+## 2026-07-22 — Capability-scoped Dependency Egress
+
+- 边界：Environment recipe 只有 setup command 可声明 `network: dependency`，并必须绑定 canonical exact-host allowlist。Sandbox Manager 在可信侧
+  持有 Ed25519 issuer 私钥，为一次 bootstrap activation 签发同时限制 host、有效期、连接数、并发、字节与持续时间的 capability；Kubernetes
+  只接收公开验证键。CONNECT proxy 每次解析域名并拒绝 loopback、private、link-local、cluster/node 等非公网地址，不进入任何平台网络。
+- 两阶段执行：最初尝试在同一 Pod 上移除 dependency label 并等待 CNI 收敛，真实测试证明该节点的 selector 更新超过 120 秒仍未可靠撤销，系统按
+  设计 fail closed。最终删除这条动态重标路径：联网的 `dependency-bootstrap` gVisor Pod 只执行 setup，命令结束强杀整个 process group；随后
+  capture Workspace、按 UID 删除并确认该 Pod 消失，再把内容恢复进一个从未拥有 egress label、proxy token 或联网进程的新 gVisor Pod。所有
+  verification 与 Agent bash 都只在第二个 Pod 中执行。
+- 恢复：bootstrap workload 不进入 Supervisor inventory。Manager 启动时先枚举并清理上次进程故障留下的 bootstrap Pod，正式
+  `tool-sandbox` 才允许被 Session warm-reuse；因此旧联网 runtime 既不会被接管，也不会跨 tenant/session 复用。
+- 真实验收：在 K3s 1.36.2、`RuntimeClass/agent-dock-gvisor`、KVM platform 上，通过 capability 对
+  `registry.npmjs.org` 实际执行 `npm install is-number@7.0.0`；随后新 Pod 离线 `require` 验证成功，访问 `example.com` 失败，最终 Pod 没有
+  dependency-egress label，且 bootstrap inventory 为 0。完整 gVisor gate 还通过 exact-commit GitHub import、跨租户文件隔离、凭据与宿主信息
+  隔离、cgroup/进程/输出/超时限制、取消清理、warm fence rebind、纯聊天零 Pod 和真实 remote-tool repair；6 个 live integration tests 全部通过，
+  结束时两个 execution namespace 均无受管 Pod。

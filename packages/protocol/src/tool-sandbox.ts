@@ -6,6 +6,7 @@ import { AgentWorkspaceSeedSchema, SandboxCheckpointBlobSchema } from "./agent-r
 import { OpaqueIdSchema, PositiveSafeIntegerSchema, UuidSchema } from "./protocol-primitives.ts";
 import {
   EnvironmentRuntimeSnapshotSchema,
+  EnvironmentRecipeCommandResultSchema,
   EnvironmentToolchainReportSchema,
   EnvironmentValidationReportSchema,
 } from "./environment.ts";
@@ -32,6 +33,31 @@ const Base64Schema = Type.String({
   maxLength: Math.ceil(MAX_TOOL_OUTPUT_BYTES / 3) * 4 + 4,
   pattern: "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
 });
+
+export const DependencyProxyBootstrapSchema = Type.Object(
+  {
+    host: Type.String({ minLength: 7, maxLength: 15, pattern: "^[0-9.]+$" }),
+    port: Type.Integer({ minimum: 1, maximum: 65_535 }),
+    capability: Type.String({
+      minLength: 128,
+      maxLength: 16_384,
+      pattern: "^adpc1_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{86}$",
+    }),
+    publicKeyFingerprint: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  },
+  { additionalProperties: false },
+);
+
+export const ToolWorkerEnvironmentStageSchema = Type.Union([
+  Type.Object({ type: Type.Literal("dependency_setup") }, { additionalProperties: false }),
+  Type.Object(
+    {
+      type: Type.Literal("offline_restore"),
+      setupCommands: Type.Array(EnvironmentRecipeCommandResultSchema, { maxItems: 10 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 export const ToolSandboxAssignmentSchema = Type.Object(
   {
@@ -322,6 +348,8 @@ export const ToolWorkerInputSchema = Type.Union([
       environment: EnvironmentRuntimeSnapshotSchema,
       workspaceSeed: AgentWorkspaceSeedSchema,
       workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
+      dependencyProxy: Type.Optional(DependencyProxyBootstrapSchema),
+      environmentStage: Type.Optional(ToolWorkerEnvironmentStageSchema),
     },
     { additionalProperties: false },
   ),
@@ -426,6 +454,8 @@ export type ToolSandboxOperationRequest = Static<typeof ToolSandboxOperationRequ
 export type ToolSandboxOperationResponse = Static<typeof ToolSandboxOperationResponseSchema>;
 export type ToolWorkerInput = Static<typeof ToolWorkerInputSchema>;
 export type ToolWorkerOutput = Static<typeof ToolWorkerOutputSchema>;
+export type DependencyProxyBootstrap = Static<typeof DependencyProxyBootstrapSchema>;
+export type ToolWorkerEnvironmentStage = Static<typeof ToolWorkerEnvironmentStageSchema>;
 
 export class ToolSandboxProtocolError extends Error {
   constructor(message: string) {

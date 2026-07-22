@@ -1,4 +1,9 @@
 import {
+  dependencyEgressPublicKeyFingerprint,
+  dependencyEgressPublicKeyPem,
+  mintDependencyEgressCapability,
+} from "@agent-dock/dependency-egress-proxy";
+import {
   isExpectedDefaultToolchain,
   parseGitHubWorkspaceImportOutput,
   parseToolWorkerOutput,
@@ -12,10 +17,13 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWorkerOutput,
+  type DependencyProxyBootstrap,
+  type ToolWorkerEnvironmentStage,
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import type { V1Container, V1NetworkPolicy, V1Pod, V1Status } from "@kubernetes/client-node";
 import { createHash, randomUUID } from "node:crypto";
+import { isIPv4 } from "node:net";
 import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import type WebSocket from "isomorphic-ws";
@@ -43,6 +51,7 @@ const MAX_IMPORT_STDOUT_BYTES = 3 * 1_024 * 1_024;
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_OPERATION_GRACE_MS = 5_000;
 const DEFAULT_CLEANUP_TIMEOUT_MS = 15_000;
+const DEPENDENCY_TRUST_READY_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 100;
 const TOOL_CONTAINER_NAME = "workspace";
 const IMPORT_CONTAINER_NAME = "repository-importer";
@@ -55,6 +64,7 @@ export const KUBERNETES_SANDBOX_LABELS = {
   managed: "agent-dock.io/managed",
   workload: "agent-dock.io/workload",
   sandboxHash: "agent-dock.io/sandbox-hash",
+  dependencyEgress: "agent-dock.io/dependency-egress",
 } as const;
 
 export const KUBERNETES_SANDBOX_ANNOTATIONS = {
@@ -97,9 +107,37 @@ export type KubernetesGvisorSandboxProviderOptions = {
   readyTimeoutMs?: number;
   cleanupTimeoutMs?: number;
   repositoryImportTimeoutMs?: number;
+  dependencyEgress?: {
+    privateKeyPem: string;
+    namespace?: string;
+    configMapName?: string;
+    serviceName?: string;
+    servicePort?: number;
+    capabilityTtlMs?: number;
+  };
   idGenerator?: () => string;
   runtimeClient?: KubernetesRuntimeClient;
 };
+
+type DependencyEgressRuntime = Readonly<{
+  privateKeyPem: string;
+  publicKeyPem: string;
+  publicKeyFingerprint: string;
+  namespace: string;
+  configMapName: string;
+  serviceName: string;
+  servicePort: number;
+  capabilityTtlMs: number;
+}>;
+
+type PhysicalSandboxCreateOptions = Readonly<{
+  activationId: string;
+  dependencyEgress: boolean;
+  dependencyProxy?: DependencyProxyBootstrap;
+  environmentStage?: ToolWorkerEnvironmentStage;
+}>;
+
+type ToolSandboxWorkload = "tool-sandbox" | "dependency-bootstrap";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -119,6 +157,7 @@ type Activation = {
   activationId: string;
   assignment: ToolSandboxAssignment;
   environment: EnvironmentRuntimeSnapshot;
+  workload: ToolSandboxWorkload;
   runtimeName: string;
   runtimeId: string;
   handle?: SandboxHandle;
@@ -144,6 +183,8 @@ export type KubernetesToolPodOptions = {
   activationId: string;
   assignment: ToolSandboxAssignment;
   environment: EnvironmentRuntimeSnapshot;
+  dependencyEgress?: boolean;
+  workload?: ToolSandboxWorkload;
   policy?: SandboxPolicy;
   runtimeClassName?: string;
   serviceAccountName?: string;
@@ -380,6 +421,7 @@ export function buildKubernetesToolSandboxPod(options: KubernetesToolPodOptions)
     options.serviceAccountName ?? "untrusted-tool",
     "Tool Sandbox ServiceAccount",
   );
+  const workload = options.workload ?? "tool-sandbox";
   const worker = fixedWorkerCommand(policy);
   return {
     apiVersion: "v1",
@@ -389,8 +431,11 @@ export function buildKubernetesToolSandboxPod(options: KubernetesToolPodOptions)
       namespace,
       labels: {
         [KUBERNETES_SANDBOX_LABELS.managed]: "true",
-        [KUBERNETES_SANDBOX_LABELS.workload]: "tool-sandbox",
+        [KUBERNETES_SANDBOX_LABELS.workload]: workload,
         [KUBERNETES_SANDBOX_LABELS.sandboxHash]: sandboxHash(options.assignment.sandboxId),
+        ...(options.dependencyEgress !== true
+          ? {}
+          : { [KUBERNETES_SANDBOX_LABELS.dependencyEgress]: "true" }),
       },
       annotations: assignmentAnnotations(
         activationId,
@@ -712,6 +757,82 @@ function networkPolicyIsDefaultDeny(policy: V1NetworkPolicy | undefined): boolea
   );
 }
 
+function networkPolicyHasVersion(
+  policy: V1NetworkPolicy | undefined,
+  version: "dependency-egress-v1",
+): boolean {
+  return policy?.metadata?.annotations?.["agent-dock.io/policy-version"] === version;
+}
+
+function toolDependencyEgressPolicyIsBounded(
+  policy: V1NetworkPolicy | undefined,
+  egressNamespace: string,
+  port: number,
+): boolean {
+  const spec = policy?.spec;
+  const rule = spec?.egress?.[0];
+  const peer = rule?.to?.[0];
+  const selected = spec?.podSelector?.matchLabels;
+  return (
+    networkPolicyHasVersion(policy, "dependency-egress-v1") &&
+    spec?.egress?.length === 1 &&
+    spec.policyTypes?.length === 1 &&
+    spec.policyTypes[0] === "Egress" &&
+    selected?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress] === "true" &&
+    rule?.to?.length === 1 &&
+    peer?.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === egressNamespace &&
+    peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.workload] ===
+      "dependency-egress-proxy" &&
+    rule.ports?.length === 1 &&
+    rule.ports[0]?.protocol === "TCP" &&
+    rule.ports[0]?.port === port
+  );
+}
+
+function proxyIngressPolicyIsBounded(
+  policy: V1NetworkPolicy | undefined,
+  sandboxNamespace: string,
+  port: number,
+): boolean {
+  const spec = policy?.spec;
+  const rule = spec?.ingress?.[0];
+  const peer = rule?._from?.[0];
+  return (
+    networkPolicyHasVersion(policy, "dependency-egress-v1") &&
+    spec?.ingress?.length === 1 &&
+    spec.policyTypes?.length === 1 &&
+    spec.policyTypes[0] === "Ingress" &&
+    spec.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.workload] ===
+      "dependency-egress-proxy" &&
+    rule?._from?.length === 1 &&
+    peer?.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === sandboxNamespace &&
+    peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress] === "true" &&
+    rule.ports?.length === 1 &&
+    rule.ports[0]?.protocol === "TCP" &&
+    rule.ports[0]?.port === port
+  );
+}
+
+function proxyPublicEgressPolicyIsBounded(policy: V1NetworkPolicy | undefined): boolean {
+  const spec = policy?.spec;
+  const rules = spec?.egress;
+  const publicRule = rules?.find((rule) =>
+    rule.to?.some((peer) => peer.ipBlock?.cidr === "0.0.0.0/0"),
+  );
+  const publicBlock = publicRule?.to?.find((peer) => peer.ipBlock?.cidr === "0.0.0.0/0")?.ipBlock;
+  return (
+    networkPolicyHasVersion(policy, "dependency-egress-v1") &&
+    spec?.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.workload] ===
+      "dependency-egress-proxy" &&
+    spec.policyTypes?.includes("Egress") === true &&
+    (rules?.length ?? 0) === 2 &&
+    (publicBlock?.except?.length ?? 0) >= 14 &&
+    publicRule?.ports?.length === 1 &&
+    publicRule.ports[0]?.protocol === "TCP" &&
+    publicRule.ports[0]?.port === 443
+  );
+}
+
 function statusSucceeded(status: V1Status): boolean {
   return status.status === "Success";
 }
@@ -756,11 +877,13 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   readonly #readyTimeoutMs: number;
   readonly #cleanupTimeoutMs: number;
   readonly #repositoryImportTimeoutMs: number;
+  readonly #dependencyEgress: DependencyEgressRuntime | undefined;
   readonly #idGenerator: () => string;
   readonly #client: KubernetesRuntimeClient;
   readonly #activations = new Map<string, Activation>();
 
   #runtimeProbe: Promise<void> | undefined;
+  #dependencyProxyEndpoint: { host: string; port: number } | undefined;
 
   constructor(options: KubernetesGvisorSandboxProviderOptions) {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image", 512);
@@ -800,6 +923,47 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       "repositoryImportTimeoutMs",
       300_000,
     );
+    if (options.dependencyEgress !== undefined) {
+      const privateKeyPem = options.dependencyEgress.privateKeyPem;
+      if (
+        privateKeyPem.length < 100 ||
+        privateKeyPem.length > 4_096 ||
+        !privateKeyPem.includes("BEGIN PRIVATE KEY")
+      ) {
+        throw new TypeError("Dependency egress issuer private key is invalid");
+      }
+      const publicKeyPem = dependencyEgressPublicKeyPem(privateKeyPem);
+      this.#dependencyEgress = {
+        privateKeyPem,
+        publicKeyPem,
+        publicKeyFingerprint: dependencyEgressPublicKeyFingerprint(publicKeyPem),
+        namespace: kubernetesName(
+          options.dependencyEgress.namespace ?? "agent-dock-egress",
+          "Dependency egress namespace",
+        ),
+        configMapName: kubernetesName(
+          options.dependencyEgress.configMapName ?? "dependency-egress-trust",
+          "Dependency egress trust ConfigMap",
+        ),
+        serviceName: kubernetesName(
+          options.dependencyEgress.serviceName ?? "dependency-egress-proxy",
+          "Dependency egress Service",
+        ),
+        servicePort: positiveInteger(
+          options.dependencyEgress.servicePort ?? 3_128,
+          "Dependency egress Service port",
+          65_535,
+        ),
+        capabilityTtlMs: positiveInteger(
+          options.dependencyEgress.capabilityTtlMs ?? 15 * 60_000,
+          "Dependency egress capability TTL",
+          20 * 60_000,
+        ),
+      };
+      if (this.#dependencyEgress.capabilityTtlMs < 10_000) {
+        throw new TypeError("Dependency egress capability TTL is too short");
+      }
+    }
     this.#idGenerator = options.idGenerator ?? randomUUID;
     if (options.runtimeClient !== undefined) {
       this.#client = options.runtimeClient;
@@ -835,6 +999,10 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         false,
       );
     }
+    await this.#cleanupOrphanedDependencyBootstraps();
+    if (this.#dependencyEgress !== undefined) {
+      await this.#ensureDependencyProxyReady();
+    }
     if (this.#runtimeProbe === undefined) this.#runtimeProbe = this.#probeGvisorRuntime();
     try {
       await this.#runtimeProbe;
@@ -842,6 +1010,109 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       this.#runtimeProbe = undefined;
       throw error;
     }
+  }
+
+  async #ensureDependencyProxyReady(): Promise<{ host: string; port: number }> {
+    const configuration = this.#dependencyEgress;
+    if (configuration === undefined) {
+      throw new SandboxManagerError(
+        "dependency_egress_unavailable",
+        "Dependency egress is not configured",
+        false,
+      );
+    }
+    const trust = await this.#client.readConfigMap(
+      configuration.namespace,
+      configuration.configMapName,
+    );
+    const resourceVersion = trust?.metadata?.resourceVersion;
+    if (trust === undefined || resourceVersion === undefined) {
+      throw new SandboxManagerError(
+        "dependency_egress_trust_unavailable",
+        "Dependency egress trust anchor is unavailable",
+        false,
+      );
+    }
+    const trustUpdated = trust.data?.["public-key.pem"] !== configuration.publicKeyPem;
+    if (trustUpdated) {
+      await this.#client.patchConfigMapData(
+        configuration.namespace,
+        configuration.configMapName,
+        resourceVersion,
+        { "public-key.pem": configuration.publicKeyPem },
+      );
+    }
+    const [service, endpoints, toolPolicy, proxyDefaultDeny, proxyIngress, proxyEgress] =
+      await Promise.all([
+        this.#client.readService(configuration.namespace, configuration.serviceName),
+        this.#client.readEndpoints(configuration.namespace, configuration.serviceName),
+        this.#client.readNetworkPolicy(this.#sandboxNamespace, "agent-dock-dependency-egress"),
+        this.#client.readNetworkPolicy(configuration.namespace, "agent-dock-default-deny-all"),
+        this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-ingress"),
+        this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-public-https"),
+      ]);
+    const host = service?.spec?.clusterIP;
+    const servicePorts = service?.spec?.ports ?? [];
+    if (
+      service?.spec?.type !== "ClusterIP" ||
+      host === undefined ||
+      !isIPv4(host) ||
+      servicePorts.length !== 1 ||
+      servicePorts[0]?.protocol !== "TCP" ||
+      servicePorts[0]?.port !== configuration.servicePort ||
+      service?.spec?.selector?.[KUBERNETES_SANDBOX_LABELS.workload] !== "dependency-egress-proxy"
+    ) {
+      throw new SandboxManagerError(
+        "dependency_egress_service_invalid",
+        "Dependency egress Service is invalid",
+        false,
+      );
+    }
+    if (
+      !networkPolicyIsDefaultDeny(proxyDefaultDeny) ||
+      !toolDependencyEgressPolicyIsBounded(
+        toolPolicy,
+        configuration.namespace,
+        configuration.servicePort,
+      ) ||
+      !proxyIngressPolicyIsBounded(
+        proxyIngress,
+        this.#sandboxNamespace,
+        configuration.servicePort,
+      ) ||
+      !proxyPublicEgressPolicyIsBounded(proxyEgress)
+    ) {
+      throw new SandboxManagerError(
+        "dependency_egress_policy_invalid",
+        "Dependency egress NetworkPolicy is invalid",
+        false,
+      );
+    }
+    let readyAddresses =
+      endpoints?.subsets?.flatMap((subset) => subset.addresses?.map((entry) => entry.ip) ?? []) ??
+      [];
+    if (readyAddresses.length < 1 && trustUpdated) {
+      const deadline = Date.now() + 90_000;
+      while (readyAddresses.length < 1 && Date.now() < deadline) {
+        await delay(500);
+        const current = await this.#client.readEndpoints(
+          configuration.namespace,
+          configuration.serviceName,
+        );
+        readyAddresses =
+          current?.subsets?.flatMap((subset) => subset.addresses?.map((entry) => entry.ip) ?? []) ??
+          [];
+      }
+    }
+    if (readyAddresses.length < 1) {
+      throw new SandboxManagerError(
+        "dependency_egress_proxy_unavailable",
+        "Dependency egress proxy is not ready",
+        true,
+      );
+    }
+    this.#dependencyProxyEndpoint = { host, port: configuration.servicePort };
+    return this.#dependencyProxyEndpoint;
   }
 
   async #probeGvisorRuntime(): Promise<void> {
@@ -902,7 +1173,80 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   }
 
   async create(spec: SandboxCreateSpec): Promise<SandboxHandle> {
-    const activationId = uuid(spec.activationId, "Tool Sandbox activation ID");
+    const dependencyHosts = spec.environment.recipe.dependencyHosts;
+    if (dependencyHosts === undefined) {
+      return await this.#createPhysical(spec, {
+        activationId: spec.activationId,
+        dependencyEgress: false,
+      });
+    }
+    const configuration = this.#dependencyEgress;
+    if (configuration === undefined) {
+      throw new SandboxManagerError(
+        "dependency_egress_unavailable",
+        "Environment dependency egress is not configured",
+        false,
+      );
+    }
+    const endpoint = this.#dependencyProxyEndpoint ?? (await this.#ensureDependencyProxyReady());
+    const bootstrapId = uuid(this.#idGenerator(), "Dependency bootstrap activation ID");
+    const minted = mintDependencyEgressCapability({
+      privateKey: configuration.privateKeyPem,
+      activationId: bootstrapId,
+      hosts: dependencyHosts,
+      ttlMs: configuration.capabilityTtlMs,
+    });
+    let bootstrap: SandboxHandle | undefined;
+    try {
+      bootstrap = await this.#createPhysical(spec, {
+        activationId: bootstrapId,
+        dependencyEgress: true,
+        dependencyProxy: {
+          host: endpoint.host,
+          port: endpoint.port,
+          capability: minted.token,
+          publicKeyFingerprint: configuration.publicKeyFingerprint,
+        },
+        environmentStage: { type: "dependency_setup" },
+      });
+      const capture = await this.snapshot(
+        bootstrap,
+        uuid(this.#idGenerator(), "Dependency bootstrap capture ID"),
+      );
+      if (capture.type !== "tool_sandbox.captured") {
+        throw new SandboxManagerError(
+          "dependency_bootstrap_capture_failed",
+          "Dependency bootstrap Workspace was not captured",
+          false,
+        );
+      }
+      const setupCommands = bootstrap.environmentValidation.recipeCommands;
+      await this.stop(bootstrap);
+      bootstrap = undefined;
+      return await this.#createPhysical(
+        {
+          ...spec,
+          workspaceRestore: capture.workspace,
+        },
+        {
+          activationId: spec.activationId,
+          dependencyEgress: false,
+          environmentStage: { type: "offline_restore", setupCommands },
+        },
+      );
+    } finally {
+      if (bootstrap !== undefined) await this.stop(bootstrap).catch(() => undefined);
+    }
+  }
+
+  async #createPhysical(
+    spec: SandboxCreateSpec,
+    options: PhysicalSandboxCreateOptions,
+  ): Promise<SandboxHandle> {
+    const activationId = uuid(options.activationId, "Tool Sandbox activation ID");
+    const workload: ToolSandboxWorkload = options.dependencyEgress
+      ? "dependency-bootstrap"
+      : "tool-sandbox";
     if (this.#activations.has(activationId)) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_collision",
@@ -923,6 +1267,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           activationId,
           assignment: spec.assignment,
           environment: spec.environment,
+          dependencyEgress: options.dependencyEgress,
+          workload,
           policy: spec.policy,
           runtimeClassName: this.#runtimeClassName,
           serviceAccountName: this.#toolServiceAccountName,
@@ -962,6 +1308,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         activationId,
         spec.assignment,
         spec.environment,
+        workload,
         name,
         createdUid,
       );
@@ -986,13 +1333,33 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           ...(spec.workspaceRestore === undefined
             ? {}
             : { workspaceRestore: spec.workspaceRestore }),
+          ...(options.dependencyProxy === undefined
+            ? {}
+            : { dependencyProxy: options.dependencyProxy }),
+          ...(options.environmentStage === undefined
+            ? {}
+            : { environmentStage: options.environmentStage }),
         }),
         this.#readyTimeoutMs,
         "Tool Sandbox initialization input",
       );
       const toolchain = await withTimeout(
         activation.ready.promise,
-        this.#readyTimeoutMs,
+        Math.min(
+          spec.policy.resources.turnWallClockTimeoutMs,
+          Math.max(
+            this.#readyTimeoutMs,
+            (options.environmentStage?.type === "dependency_setup"
+              ? spec.environment.recipe.setupCommands
+              : options.environmentStage?.type === "offline_restore"
+                ? spec.environment.recipe.verificationCommands
+                : spec.environment.recipe.setupCommands.concat(
+                    spec.environment.recipe.verificationCommands,
+                  )
+            ).reduce((total, command) => total + command.timeoutMs, 10_000) +
+              (options.dependencyProxy === undefined ? 0 : DEPENDENCY_TRUST_READY_TIMEOUT_MS),
+          ),
+        ),
         "Tool Sandbox readiness",
       );
       if (
@@ -1010,7 +1377,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         );
       }
       const inspected = await this.#inspectEffectiveIsolation(runningPod);
-      this.#assertEffectiveIsolation(inspected, spec.policy);
+      this.#assertEffectiveIsolation(inspected, spec.policy, options.dependencyEgress);
       const handle: SandboxHandle = {
         providerApiVersion: 1,
         providerId: this.providerId,
@@ -1040,7 +1407,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
           (await this.#managedPodUidForCleanup(
             this.#sandboxNamespace,
             name,
-            "tool-sandbox",
+            workload,
             KUBERNETES_SANDBOX_ANNOTATIONS.activationId,
             activationId,
           ));
@@ -1381,7 +1748,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     bounded(sandboxId, "Sandbox inventory ID", 512);
     const pods = await this.#client.listPods(
       this.#sandboxNamespace,
-      `${KUBERNETES_SANDBOX_LABELS.managed}=true,${KUBERNETES_SANDBOX_LABELS.sandboxHash}=${sandboxHash(sandboxId)}`,
+      `${KUBERNETES_SANDBOX_LABELS.managed}=true,${KUBERNETES_SANDBOX_LABELS.workload}=tool-sandbox,${KUBERNETES_SANDBOX_LABELS.sandboxHash}=${sandboxHash(sandboxId)}`,
     );
     if (pods.length > 1_000) {
       throw new SandboxManagerError(
@@ -1625,6 +1992,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     activationId: string,
     assignment: ToolSandboxAssignment,
     environment: EnvironmentRuntimeSnapshot,
+    workload: ToolSandboxWorkload,
     name: string,
     uidValue: string,
   ): Activation {
@@ -1636,6 +2004,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       activationId,
       assignment,
       environment,
+      workload,
       runtimeName: name,
       runtimeId: uidValue,
       stdin: new PassThrough(),
@@ -1939,7 +2308,12 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         user: `${String(containerSecurity?.runAsUser ?? podSecurity?.runAsUser)}:${String(containerSecurity?.runAsGroup ?? podSecurity?.runAsGroup)}`,
         privileged: containerSecurity?.privileged === true,
         readOnlyRootFilesystem: containerSecurity?.readOnlyRootFilesystem === true,
-        networkMode: spec.hostNetwork === true ? "host" : "kubernetes-network-policy/deny-all",
+        networkMode:
+          spec.hostNetwork === true
+            ? "host"
+            : pod.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress] === "true"
+              ? "kubernetes-network-policy/dependency-proxy"
+              : "kubernetes-network-policy/deny-all",
         mountCount: hostMounts.length + (container.volumeDevices?.length ?? 0),
         hasDockerSocket:
           hostMounts.some((volume) => volume.hostPath?.path === "/var/run/docker.sock") ||
@@ -1969,6 +2343,7 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   #assertEffectiveIsolation(
     inspected: { running: boolean; effectiveIsolation: SandboxEffectiveIsolation },
     policy: SandboxPolicy,
+    dependencyEgress: boolean,
   ): void {
     const isolation = inspected.effectiveIsolation;
     const expected = policy.resources;
@@ -1979,7 +2354,10 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       isolation.user !== policy.user ||
       isolation.privileged ||
       !isolation.readOnlyRootFilesystem ||
-      isolation.networkMode !== "kubernetes-network-policy/deny-all" ||
+      isolation.networkMode !==
+        (dependencyEgress
+          ? "kubernetes-network-policy/dependency-proxy"
+          : "kubernetes-network-policy/deny-all") ||
       isolation.mountCount !== 0 ||
       isolation.hasDockerSocket ||
       isolation.pidLimit !== expected.pids ||
@@ -2060,6 +2438,23 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       "Tool Sandbox Pod removal could not be confirmed",
       true,
     );
+  }
+
+  async #cleanupOrphanedDependencyBootstraps(): Promise<void> {
+    const pods = await this.#client.listPods(
+      this.#sandboxNamespace,
+      `${KUBERNETES_SANDBOX_LABELS.managed}=true,${KUBERNETES_SANDBOX_LABELS.workload}=dependency-bootstrap`,
+    );
+    for (const pod of pods) {
+      const current = podToAssignment(pod);
+      const tracked = this.#activations.get(current.activationId);
+      if (tracked?.runtimeId === current.containerId) continue;
+      await this.#deleteExactPod(
+        this.#sandboxNamespace,
+        current.containerName,
+        current.containerId,
+      );
+    }
   }
 
   async #managedPodUidForCleanup(
