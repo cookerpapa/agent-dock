@@ -487,6 +487,7 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
       const rebound = await manager.create({
         ...createRequest(11),
         assignment: currentAssignment,
+        environment: createRequest(10).environment,
         workspaceRevision: captured.workspace.sha256,
       });
       expect(rebound.activationId).toBe(first.activationId);

@@ -1,7 +1,7 @@
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 
 ARG AGENT_DOCK_VERSION=development
-ARG AGENT_DOCK_REVISION=unknown
+ARG AGENT_DOCK_REVISION=development
 LABEL org.opencontainers.image.title="AgentDock untrusted tool sandbox" \
       org.opencontainers.image.description="Credential-free offline workspace and tool worker" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \

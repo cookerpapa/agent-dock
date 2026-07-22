@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   ControlPlaneStore,
+  ControlPlaneStoreFactory,
   DurableEventStore,
   HashedBearerSupervisorAuthorizer,
   RemoteSupervisorWorkerRuntime,
@@ -38,6 +39,7 @@ const IDS = {
 
 const SUPERVISOR_ID = "remote-runtime-test";
 const TOKEN = `agent-dock-${"w".repeat(48)}`;
+const ENVIRONMENT_IMAGE_REVISION = "remote-runtime-revision";
 
 let pglite: PGlite | undefined;
 let socketServer: PGLiteSocketServer | undefined;
@@ -316,7 +318,7 @@ describe.sequential("remote control-plane runtime composition", () => {
   });
 
   it("automatically executes, cancels, maintains, and drains a real remote Supervisor", async () => {
-    const store = await seed();
+    await seed();
     const activities: RemoteSupervisorWorkerActivity[] = [];
     let threwObserverFailure = false;
     let runtime: RemoteControlPlaneRuntime | undefined;
@@ -330,6 +332,7 @@ describe.sequential("remote control-plane runtime composition", () => {
         database,
         tenantId: IDS.tenant,
         defaultModelProfileId: IDS.profile,
+        environmentImageRevision: ENVIRONMENT_IMAGE_REVISION,
         controlPlaneInstanceId: IDS.controlPlane,
         supervisorAuthorizer: new HashedBearerSupervisorAuthorizer({
           token: TOKEN,
@@ -381,6 +384,15 @@ describe.sequential("remote control-plane runtime composition", () => {
       const address = await runtime.listen(0, "127.0.0.1");
       expect(runtime.application.get(DurableEventStore)).toBe(runtime.eventStore);
       expect(runtime.application.get(SessionEventHub)).toBe(runtime.eventHub);
+      const store = runtime.application.get(ControlPlaneStoreFactory).forIdentity({
+        credentialId: IDS.credential,
+        tenantId: IDS.tenant,
+        tenantSlug: "remote-runtime",
+        userId: uuid(),
+        displayName: "Remote Runtime Owner",
+        role: "owner",
+        defaultModelProfileId: IDS.profile,
+      });
 
       const supervisor = new LocalSandboxSupervisor({
         maxConcurrentSessions: 3,
@@ -460,6 +472,7 @@ describe.sequential("remote control-plane runtime composition", () => {
       });
 
       const project = await store.createProject(`automatic-${uuid()}`);
+      expect(project.environment.imageRevision).toBe(ENVIRONMENT_IMAGE_REVISION);
       const session = await store.createSession(project.projectId, project.workspaceId);
       const first = await store.acceptTurn(session.sessionId, `first-${uuid()}`, {
         prompt: "execute without a manual dispatcher",

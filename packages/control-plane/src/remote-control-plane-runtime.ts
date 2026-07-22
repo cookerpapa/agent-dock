@@ -190,6 +190,10 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.defaultModelProfileId === undefined
         ? {}
         : { defaultModelProfileId: options.defaultModelProfileId }),
+      ...(options.environmentImageRevision === undefined
+        ? {}
+        : { environmentImageRevision: options.environmentImageRevision }),
+      ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
       supervisorWebSocketGateway: gateway,
       ...(options.supervisorProvisioningGateway === undefined
         ? {}
