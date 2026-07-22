@@ -169,6 +169,10 @@ the exact Session under newer fencing authority. Production
 acceptance proves remote `bash/edit`, checkpoint/diff capture, cancellation,
 exact cleanup, scoped Kubernetes authority, and secret absence. The old
 whole-Pi ordinary-Docker runner and its demo/test protocol have been removed.
+ADR-0045 can satisfy that first Tool activation from a small pool of
+never-assigned, empty, default-deny gVisor Pods. Claim is single-consumption and
+UID/resourceVersion fenced; a Pod that has seen tenant code can only remain
+warm for that exact Session or be destroyed, never re-enter the clean pool.
 User/project extensions, interactive approvals, and mutually hostile public
 tenants are still outside the claim. The owner explicitly deferred extension
 and approval work, so those items are not represented as silently complete.

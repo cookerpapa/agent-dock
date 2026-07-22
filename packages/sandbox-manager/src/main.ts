@@ -11,6 +11,7 @@ const observability = await startServiceObservability({
 });
 const provider = new KubernetesGvisorSandboxProvider({
   toolImage: config.toolImage,
+  imageRevision: config.imageRevision,
   kubeconfigPath: config.kubeconfigPath,
   sandboxNamespace: config.sandboxNamespace,
   importerNamespace: config.importerNamespace,
@@ -19,6 +20,8 @@ const provider = new KubernetesGvisorSandboxProvider({
   importerServiceAccountName: config.importerServiceAccountName,
   imagePullPolicy: config.imagePullPolicy,
   repositoryImportTimeoutMs: config.repositoryImportTimeoutMs,
+  cleanPrewarmTarget: config.cleanPrewarmTarget,
+  cleanPrewarmTtlMs: config.cleanPrewarmTtlMs,
   ...(config.dependencyEgress === undefined ? {} : { dependencyEgress: config.dependencyEgress }),
 });
 const manager = new ToolSandboxManager({

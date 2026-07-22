@@ -117,9 +117,16 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
       expect({
         reservedCount: backend.reservedCount,
         activeCount: backend.activeCount,
+        cleanPrewarmCount: backend.cleanPrewarmCount,
         warmCount: backend.warmCount,
         assignments: await provider.listAssignments("10000000-0000-4000-8000-000000000004"),
-      }).toEqual({ reservedCount: 0, activeCount: 0, warmCount: 0, assignments: [] });
+      }).toEqual({
+        reservedCount: 0,
+        activeCount: 0,
+        cleanPrewarmCount: 0,
+        warmCount: 0,
+        assignments: [],
+      });
     } finally {
       await server.close().catch(() => undefined);
       await rm(trustedWorkspace, { recursive: true, force: true });

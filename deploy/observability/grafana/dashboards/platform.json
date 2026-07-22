@@ -131,6 +131,30 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Assigned / session-warm sandboxes",
+      "id": 11,
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 29 },
+      "targets": [
+        {
+          "expr": "sum(agent_dock_sandbox_active{provider=\"gvisor\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Never-used clean prewarm sandboxes",
+      "id": 12,
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 29 },
+      "targets": [
+        {
+          "expr": "sum(agent_dock_sandbox_prewarm{provider=\"gvisor\"})",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "10s",

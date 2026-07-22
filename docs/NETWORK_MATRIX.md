@@ -35,6 +35,7 @@ the Kubernetes API server.
 
 | Workload/namespace | Ingress | DNS | Public egress | Cluster/private/link-local | Platform networks |
 | --- | ---: | ---: | ---: | ---: | ---: |
+| Clean prewarm Pod / `agent-dock-sandboxes` | deny | deny | deny | deny | none |
 | Ordinary Tool Pod / `agent-dock-sandboxes` | deny | deny | deny | deny | none |
 | Disposable dependency bootstrap Pod / `agent-dock-sandboxes` | proxy Pod only | deny | exact-host HTTPS through proxy only | proxy rejects every non-public answer | none |
 | Importer Pod / `agent-dock-importers` | deny | cluster DNS only | TCP/443 only | explicitly excluded | none |

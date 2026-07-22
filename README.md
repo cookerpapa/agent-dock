@@ -151,6 +151,7 @@ only after a measured requirement appears.
 - [ADR-0042: versioned Project environments](docs/adr/0042-versioned-project-environment-plane.md)
 - [ADR-0043: Cursor-informed Cloud Agent product loop](docs/adr/0043-cursor-informed-cloud-agent-product-loop.md)
 - [ADR-0044: capability-scoped dependency egress](docs/adr/0044-capability-scoped-dependency-egress.md)
+- [ADR-0045: single-consumption clean gVisor prewarming](docs/adr/0045-single-consumption-clean-prewarm.md)
 
 ## Current executable spikes
 

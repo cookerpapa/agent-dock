@@ -18,6 +18,8 @@ export type SandboxManagerConfig = {
   repositoryImportTimeoutMs: number;
   warmTtlMs: number;
   maximumWarmActivations: number;
+  cleanPrewarmTarget: number;
+  cleanPrewarmTtlMs: number;
   dependencyEgress?: {
     privateKeyPem: string;
     namespace: string;
@@ -180,6 +182,13 @@ export async function loadSandboxManagerConfig(
       24 * 60 * 60_000,
     ),
     maximumWarmActivations: integer(environment.AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, 4, 1, 1_000),
+    cleanPrewarmTarget: integer(environment.AGENT_DOCK_CLEAN_PREWARM_TARGET, 2, 0, 100),
+    cleanPrewarmTtlMs: integer(
+      environment.AGENT_DOCK_CLEAN_PREWARM_TTL_MS,
+      5 * 60_000,
+      10_000,
+      24 * 60 * 60_000,
+    ),
     ...(dependencyEgressKeyFile === undefined
       ? {}
       : {

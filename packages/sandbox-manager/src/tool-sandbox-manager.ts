@@ -228,6 +228,10 @@ export class ToolSandboxManager {
     return this.#warm.size;
   }
 
+  get cleanPrewarmCount(): number {
+    return this.#provider.cleanPrewarmCount ?? 0;
+  }
+
   async checkHealth(): Promise<void> {
     await this.#provider.checkHealth();
   }

@@ -53,6 +53,7 @@ const DEFAULT_OPERATION_GRACE_MS = 5_000;
 const DEFAULT_CLEANUP_TIMEOUT_MS = 15_000;
 const DEPENDENCY_TRUST_READY_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 100;
+const DEFAULT_CLEAN_PREWARM_TTL_MS = 5 * 60_000;
 const TOOL_CONTAINER_NAME = "workspace";
 const IMPORT_CONTAINER_NAME = "repository-importer";
 const PROBE_CONTAINER_NAME = "runtime-probe";
@@ -93,10 +94,12 @@ export const KUBERNETES_SANDBOX_ANNOTATIONS = {
   environmentSpecSha256: "agent-dock.io/environment-spec-sha256",
   environmentRecipeSha256: "agent-dock.io/environment-recipe-sha256",
   importId: "agent-dock.io/import-id",
+  prewarmId: "agent-dock.io/prewarm-id",
 } as const;
 
 export type KubernetesGvisorSandboxProviderOptions = {
   toolImage: string;
+  imageRevision?: string;
   kubeconfigPath?: string;
   sandboxNamespace?: string;
   importerNamespace?: string;
@@ -115,6 +118,8 @@ export type KubernetesGvisorSandboxProviderOptions = {
     servicePort?: number;
     capabilityTtlMs?: number;
   };
+  cleanPrewarmTarget?: number;
+  cleanPrewarmTtlMs?: number;
   idGenerator?: () => string;
   runtimeClient?: KubernetesRuntimeClient;
 };
@@ -138,6 +143,13 @@ type PhysicalSandboxCreateOptions = Readonly<{
 }>;
 
 type ToolSandboxWorkload = "tool-sandbox" | "dependency-bootstrap";
+
+type CleanPrewarm = Readonly<{
+  prewarmId: string;
+  runtimeName: string;
+  runtimeId: string;
+  expiresAt: number;
+}>;
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -191,6 +203,19 @@ export type KubernetesToolPodOptions = {
   imagePullPolicy?: KubernetesImagePullPolicy;
 };
 
+export type KubernetesCleanPrewarmPodOptions = {
+  image: string;
+  name: string;
+  namespace: string;
+  prewarmId: string;
+  imageRevision: string;
+  ttlMs: number;
+  policy?: SandboxPolicy;
+  runtimeClassName?: string;
+  serviceAccountName?: string;
+  imagePullPolicy?: KubernetesImagePullPolicy;
+};
+
 export type KubernetesRepositoryImportPodOptions = {
   image: string;
   name: string;
@@ -215,6 +240,13 @@ function deferred<T>(): Deferred<T> {
 function positiveInteger(value: number, name: string, maximum = Number.MAX_SAFE_INTEGER): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
     throw new TypeError(`${name} must be a bounded positive integer`);
+  }
+  return value;
+}
+
+function nonNegativeInteger(value: number, name: string, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+    throw new TypeError(`${name} must be a bounded non-negative integer`);
   }
   return value;
 }
@@ -446,6 +478,112 @@ export function buildKubernetesToolSandboxPod(options: KubernetesToolPodOptions)
     },
     spec: {
       activeDeadlineSeconds: Math.ceil(policy.resources.turnWallClockTimeoutMs / 1_000),
+      automountServiceAccountToken: false,
+      dnsPolicy: "None",
+      dnsConfig: { nameservers: ["127.0.0.1"] },
+      enableServiceLinks: false,
+      hostIPC: false,
+      hostNetwork: false,
+      hostPID: false,
+      restartPolicy: "Never",
+      runtimeClassName,
+      serviceAccountName,
+      shareProcessNamespace: false,
+      terminationGracePeriodSeconds: 5,
+      securityContext: {
+        fsGroup: 1_000,
+        fsGroupChangePolicy: "OnRootMismatch",
+        runAsGroup: 1_000,
+        runAsNonRoot: true,
+        runAsUser: 1_000,
+        seccompProfile: { type: "RuntimeDefault" },
+      },
+      containers: [
+        {
+          name: TOOL_CONTAINER_NAME,
+          image,
+          imagePullPolicy: options.imagePullPolicy ?? "Never",
+          command: worker.command,
+          args: worker.args,
+          env: [],
+          stdin: true,
+          stdinOnce: false,
+          tty: false,
+          workingDir: "/workspace",
+          securityContext: restrictedSecurityContext(),
+          resources: {
+            requests: { cpu: "100m", memory: "128Mi", "ephemeral-storage": "16Mi" },
+            limits: {
+              cpu: `${String(policy.resources.cpuNano)}n`,
+              memory: String(policy.resources.memoryBytes),
+              "ephemeral-storage": String(
+                policy.resources.workspaceBytes + policy.resources.temporaryBytes,
+              ),
+            },
+          },
+          volumeMounts: [
+            { name: "workspace", mountPath: "/workspace" },
+            { name: "temporary", mountPath: "/tmp" },
+          ],
+        },
+      ],
+      volumes: [
+        {
+          name: "workspace",
+          emptyDir: { medium: "Memory", sizeLimit: String(policy.resources.workspaceBytes) },
+        },
+        {
+          name: "temporary",
+          emptyDir: { medium: "Memory", sizeLimit: String(policy.resources.temporaryBytes) },
+        },
+      ],
+    },
+  };
+}
+
+export function buildKubernetesCleanPrewarmPod(options: KubernetesCleanPrewarmPodOptions): V1Pod {
+  const policy = options.policy ?? DEFAULT_TOOL_SANDBOX_POLICY;
+  assertSupportedPolicy(policy);
+  const image = bounded(options.image, "Clean prewarm image", 512);
+  const name = kubernetesName(options.name, "Clean prewarm Pod name");
+  const namespace = kubernetesName(options.namespace, "Clean prewarm namespace");
+  const prewarmId = uuid(options.prewarmId, "Clean prewarm ID");
+  const imageRevision = bounded(options.imageRevision, "Clean prewarm image revision", 128);
+  const ttlMs = positiveInteger(options.ttlMs, "Clean prewarm TTL", 24 * 60 * 60_000);
+  const runtimeClassName = kubernetesName(
+    options.runtimeClassName ?? "agent-dock-gvisor",
+    "Clean prewarm RuntimeClass",
+  );
+  const serviceAccountName = kubernetesName(
+    options.serviceAccountName ?? "untrusted-tool",
+    "Clean prewarm ServiceAccount",
+  );
+  const worker = fixedWorkerCommand(policy);
+  return {
+    apiVersion: "v1",
+    kind: "Pod",
+    metadata: {
+      name,
+      namespace,
+      labels: {
+        [KUBERNETES_SANDBOX_LABELS.managed]: "true",
+        [KUBERNETES_SANDBOX_LABELS.workload]: "clean-prewarm",
+      },
+      annotations: {
+        [KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId]: prewarmId,
+        [KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision]: imageRevision,
+        [KUBERNETES_SANDBOX_ANNOTATIONS.processLimit]: String(policy.resources.pids),
+        [KUBERNETES_SANDBOX_ANNOTATIONS.openFilesLimit]: String(policy.resources.openFiles),
+        [KUBERNETES_SANDBOX_ANNOTATIONS.memoryBytes]: String(policy.resources.memoryBytes),
+        [KUBERNETES_SANDBOX_ANNOTATIONS.cpuNano]: String(policy.resources.cpuNano),
+        [KUBERNETES_SANDBOX_ANNOTATIONS.policyVersion]: String(policy.policyVersion),
+      },
+    },
+    spec: {
+      // The deadline begins when Kubernetes starts the Pod. Keeping the pool
+      // TTL plus a complete Turn budget guarantees a claimed Pod still has the
+      // same minimum execution window without mutating immutable Pod fields.
+      activeDeadlineSeconds: Math.ceil((ttlMs + policy.resources.turnWallClockTimeoutMs) / 1_000),
       automountServiceAccountToken: false,
       dnsPolicy: "None",
       dnsConfig: { nameservers: ["127.0.0.1"] },
@@ -868,6 +1006,7 @@ function quantityToNumber(value: unknown, kind: "cpu" | "bytes"): number | null 
 export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   readonly providerId = "kubernetes-gvisor";
   readonly #toolImage: string;
+  readonly #imageRevision: string;
   readonly #sandboxNamespace: string;
   readonly #importerNamespace: string;
   readonly #runtimeClassName: string;
@@ -878,15 +1017,26 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   readonly #cleanupTimeoutMs: number;
   readonly #repositoryImportTimeoutMs: number;
   readonly #dependencyEgress: DependencyEgressRuntime | undefined;
+  readonly #cleanPrewarmTarget: number;
+  readonly #cleanPrewarmTtlMs: number;
   readonly #idGenerator: () => string;
   readonly #client: KubernetesRuntimeClient;
   readonly #activations = new Map<string, Activation>();
+  readonly #cleanPrewarms = new Map<string, CleanPrewarm>();
 
   #runtimeProbe: Promise<void> | undefined;
   #dependencyProxyEndpoint: { host: string; port: number } | undefined;
+  #prewarmReconcile: Promise<void> | undefined;
+  #prewarmReaper: NodeJS.Timeout | undefined;
+  #closing = false;
 
   constructor(options: KubernetesGvisorSandboxProviderOptions) {
     this.#toolImage = bounded(options.toolImage, "Tool Sandbox image", 512);
+    this.#imageRevision = bounded(
+      options.imageRevision ?? "development",
+      "Tool Sandbox image revision",
+      128,
+    );
     this.#sandboxNamespace = kubernetesName(
       options.sandboxNamespace ?? "agent-dock-sandboxes",
       "Tool Sandbox namespace",
@@ -922,6 +1072,16 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       options.repositoryImportTimeoutMs ?? 180_000,
       "repositoryImportTimeoutMs",
       300_000,
+    );
+    this.#cleanPrewarmTarget = nonNegativeInteger(
+      options.cleanPrewarmTarget ?? 0,
+      "cleanPrewarmTarget",
+      100,
+    );
+    this.#cleanPrewarmTtlMs = positiveInteger(
+      options.cleanPrewarmTtlMs ?? DEFAULT_CLEAN_PREWARM_TTL_MS,
+      "cleanPrewarmTtlMs",
+      24 * 60 * 60_000,
     );
     if (options.dependencyEgress !== undefined) {
       const privateKeyPem = options.dependencyEgress.privateKeyPem;
@@ -974,6 +1134,10 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     }
   }
 
+  get cleanPrewarmCount(): number {
+    return this.#cleanPrewarms.size;
+  }
+
   async checkHealth(): Promise<void> {
     const [toolPolicy, importerPolicy, runtimeClass] = await Promise.all([
       this.#client.readNetworkPolicy(this.#sandboxNamespace, "agent-dock-default-deny-all"),
@@ -999,7 +1163,10 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    await this.#cleanupOrphanedDependencyBootstraps();
+    await Promise.all([
+      this.#cleanupOrphanedDependencyBootstraps(),
+      this.#cleanupOrphanedCleanPrewarms(),
+    ]);
     if (this.#dependencyEgress !== undefined) {
       await this.#ensureDependencyProxyReady();
     }
@@ -1009,6 +1176,14 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     } catch (error: unknown) {
       this.#runtimeProbe = undefined;
       throw error;
+    }
+    await this.#reconcileCleanPrewarms();
+    if (this.#cleanPrewarmTarget > 0 && this.#prewarmReaper === undefined) {
+      this.#prewarmReaper = setInterval(
+        () => void this.#reconcileCleanPrewarms().catch(() => undefined),
+        30_000,
+      );
+      this.#prewarmReaper.unref();
     }
   }
 
@@ -1254,28 +1429,36 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    const name = runtimeName(activationId);
+    let name = runtimeName(activationId);
     let createdUid: string | undefined;
     let activation: Activation | undefined;
     try {
-      const created = await this.#client.createPod(
-        this.#sandboxNamespace,
-        buildKubernetesToolSandboxPod({
-          image: this.#toolImage,
-          name,
-          namespace: this.#sandboxNamespace,
-          activationId,
-          assignment: spec.assignment,
-          environment: spec.environment,
-          dependencyEgress: options.dependencyEgress,
-          workload,
-          policy: spec.policy,
-          runtimeClassName: this.#runtimeClassName,
-          serviceAccountName: this.#toolServiceAccountName,
-          imagePullPolicy: this.#imagePullPolicy,
-        }),
-      );
-      createdUid = this.#podUid(created);
+      const prewarmed = options.dependencyEgress
+        ? undefined
+        : await this.#claimCleanPrewarm(activationId, spec);
+      if (prewarmed !== undefined) {
+        name = prewarmed.metadata!.name!;
+        createdUid = this.#podUid(prewarmed);
+      } else {
+        const created = await this.#client.createPod(
+          this.#sandboxNamespace,
+          buildKubernetesToolSandboxPod({
+            image: this.#toolImage,
+            name,
+            namespace: this.#sandboxNamespace,
+            activationId,
+            assignment: spec.assignment,
+            environment: spec.environment,
+            dependencyEgress: options.dependencyEgress,
+            workload,
+            policy: spec.policy,
+            runtimeClassName: this.#runtimeClassName,
+            serviceAccountName: this.#toolServiceAccountName,
+            imagePullPolicy: this.#imagePullPolicy,
+          }),
+        );
+        createdUid = this.#podUid(created);
+      }
       const runningPod = await this.#waitForPodRunning(
         this.#sandboxNamespace,
         name,
@@ -1464,11 +1647,12 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    const updated = await this.#client.patchPodAnnotations(
+    const updated = await this.#client.patchPodMetadata(
       this.#sandboxNamespace,
       handle.runtimeName,
       handle.runtimeId,
       resourceVersion,
+      pod.metadata?.labels ?? {},
       {
         ...(pod.metadata?.annotations ?? {}),
         ...assignmentAnnotations(handle.activationId, assignment, DEFAULT_TOOL_SANDBOX_POLICY),
@@ -1976,9 +2160,16 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
   }
 
   async close(): Promise<void> {
-    const results = await Promise.allSettled(
-      [...this.#activations.values()].map((activation) => this.#stopActivation(activation)),
-    );
+    this.#closing = true;
+    if (this.#prewarmReaper !== undefined) clearInterval(this.#prewarmReaper);
+    await this.#prewarmReconcile?.catch(() => undefined);
+    const results = await Promise.allSettled([
+      ...[...this.#activations.values()].map((activation) => this.#stopActivation(activation)),
+      ...[...this.#cleanPrewarms.values()].map((prewarm) =>
+        this.#deleteExactPod(this.#sandboxNamespace, prewarm.runtimeName, prewarm.runtimeId),
+      ),
+    ]);
+    this.#cleanPrewarms.clear();
     if (results.some((result) => result.status === "rejected")) {
       throw new SandboxManagerError(
         "sandbox_provider_cleanup_unverified",
@@ -2204,7 +2395,10 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       handle.providerApiVersion !== 1 ||
       handle.providerId !== this.providerId ||
       handle.workspaceRoot !== "/workspace" ||
-      runtimeName(handle.activationId) !== handle.runtimeName
+      (runtimeName(handle.activationId) !== handle.runtimeName &&
+        !/^agent-dock-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          handle.runtimeName,
+        ))
     ) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
@@ -2440,6 +2634,200 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
     );
   }
 
+  async #createCleanPrewarm(): Promise<CleanPrewarm> {
+    const prewarmId = uuid(this.#idGenerator(), "Clean prewarm ID");
+    const name = `agent-dock-prewarm-${prewarmId}`.slice(0, 63);
+    let uidValue: string | undefined;
+    try {
+      const created = await this.#client.createPod(
+        this.#sandboxNamespace,
+        buildKubernetesCleanPrewarmPod({
+          image: this.#toolImage,
+          imageRevision: this.#imageRevision,
+          name,
+          namespace: this.#sandboxNamespace,
+          prewarmId,
+          ttlMs: this.#cleanPrewarmTtlMs,
+          runtimeClassName: this.#runtimeClassName,
+          serviceAccountName: this.#toolServiceAccountName,
+          imagePullPolicy: this.#imagePullPolicy,
+        }),
+      );
+      uidValue = this.#podUid(created);
+      const running = await this.#waitForPodRunning(
+        this.#sandboxNamespace,
+        name,
+        this.#readyTimeoutMs,
+        "Clean prewarm",
+      );
+      if (
+        this.#podUid(running) !== uidValue ||
+        running.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.workload] !== "clean-prewarm" ||
+        running.metadata.annotations?.[KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId] !== prewarmId ||
+        running.metadata.annotations[KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision] !==
+          this.#imageRevision ||
+        Object.keys(running.metadata.annotations).some((key) =>
+          new Set<string>([
+            KUBERNETES_SANDBOX_ANNOTATIONS.tenantId,
+            KUBERNETES_SANDBOX_ANNOTATIONS.projectId,
+            KUBERNETES_SANDBOX_ANNOTATIONS.workspaceId,
+            KUBERNETES_SANDBOX_ANNOTATIONS.sessionId,
+            KUBERNETES_SANDBOX_ANNOTATIONS.attemptId,
+          ]).has(key),
+        )
+      ) {
+        throw new SandboxManagerError(
+          "clean_prewarm_identity_mismatch",
+          "Clean prewarm Pod identity was invalid",
+          false,
+        );
+      }
+      this.#assertEffectiveIsolation(
+        await this.#inspectEffectiveIsolation(running),
+        DEFAULT_TOOL_SANDBOX_POLICY,
+        false,
+      );
+      const createdAt = Date.parse(running.metadata.creationTimestamp?.toISOString() ?? "");
+      if (!Number.isFinite(createdAt)) {
+        throw new SandboxManagerError(
+          "clean_prewarm_identity_mismatch",
+          "Clean prewarm Pod creation time was invalid",
+          false,
+        );
+      }
+      return {
+        prewarmId,
+        runtimeName: name,
+        runtimeId: uidValue,
+        expiresAt: createdAt + this.#cleanPrewarmTtlMs,
+      };
+    } catch (error: unknown) {
+      const cleanupUid =
+        uidValue ??
+        (await this.#managedPodUidForCleanup(
+          this.#sandboxNamespace,
+          name,
+          "clean-prewarm",
+          KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId,
+          prewarmId,
+        ));
+      if (cleanupUid !== undefined) {
+        await this.#deleteExactPod(this.#sandboxNamespace, name, cleanupUid);
+      }
+      throw error;
+    }
+  }
+
+  async #reconcileCleanPrewarms(): Promise<void> {
+    if (this.#prewarmReconcile !== undefined) return this.#prewarmReconcile;
+    const reconcile = (async (): Promise<void> => {
+      const now = Date.now();
+      for (const [prewarmId, prewarm] of this.#cleanPrewarms) {
+        if (prewarm.expiresAt > now) continue;
+        this.#cleanPrewarms.delete(prewarmId);
+        await this.#deleteExactPod(this.#sandboxNamespace, prewarm.runtimeName, prewarm.runtimeId);
+      }
+      while (!this.#closing && this.#cleanPrewarms.size < this.#cleanPrewarmTarget) {
+        const prewarm = await this.#createCleanPrewarm();
+        this.#cleanPrewarms.set(prewarm.prewarmId, prewarm);
+      }
+    })();
+    this.#prewarmReconcile = reconcile;
+    try {
+      await reconcile;
+    } finally {
+      if (this.#prewarmReconcile === reconcile) this.#prewarmReconcile = undefined;
+    }
+  }
+
+  #scheduleCleanPrewarmReconcile(): void {
+    if (this.#closing || this.#cleanPrewarmTarget === 0) return;
+    queueMicrotask(() => void this.#reconcileCleanPrewarms().catch(() => undefined));
+  }
+
+  async #claimCleanPrewarm(
+    activationId: string,
+    spec: SandboxCreateSpec,
+  ): Promise<V1Pod | undefined> {
+    const candidates = [...this.#cleanPrewarms.values()].sort(
+      (left, right) => left.expiresAt - right.expiresAt,
+    );
+    const candidate = candidates[0];
+    if (candidate === undefined) return undefined;
+    this.#cleanPrewarms.delete(candidate.prewarmId);
+    try {
+      if (candidate.expiresAt <= Date.now()) {
+        await this.#deleteExactPod(
+          this.#sandboxNamespace,
+          candidate.runtimeName,
+          candidate.runtimeId,
+        );
+        return undefined;
+      }
+      const pod = await this.#client.readPod(this.#sandboxNamespace, candidate.runtimeName);
+      const resourceVersion = pod?.metadata?.resourceVersion;
+      if (
+        pod === undefined ||
+        pod.metadata?.uid !== candidate.runtimeId ||
+        typeof resourceVersion !== "string" ||
+        resourceVersion.length < 1 ||
+        pod.status?.phase !== "Running" ||
+        pod.metadata.labels?.[KUBERNETES_SANDBOX_LABELS.managed] !== "true" ||
+        pod.metadata.labels[KUBERNETES_SANDBOX_LABELS.workload] !== "clean-prewarm" ||
+        pod.metadata.annotations?.[KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId] !==
+          candidate.prewarmId ||
+        pod.metadata.annotations[KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision] !==
+          this.#imageRevision
+      ) {
+        throw new SandboxManagerError(
+          "clean_prewarm_identity_mismatch",
+          "Clean prewarm Pod could not be claimed safely",
+          false,
+        );
+      }
+      const claimed = await this.#client.patchPodMetadata(
+        this.#sandboxNamespace,
+        candidate.runtimeName,
+        candidate.runtimeId,
+        resourceVersion,
+        {
+          [KUBERNETES_SANDBOX_LABELS.managed]: "true",
+          [KUBERNETES_SANDBOX_LABELS.workload]: "tool-sandbox",
+          [KUBERNETES_SANDBOX_LABELS.sandboxHash]: sandboxHash(spec.assignment.sandboxId),
+        },
+        assignmentAnnotations(activationId, spec.assignment, spec.policy, spec.environment),
+      );
+      const current = podToAssignment(claimed);
+      if (
+        current.containerId !== candidate.runtimeId ||
+        current.activationId !== activationId ||
+        current.tenantId !== spec.assignment.tenantId ||
+        current.projectId !== spec.assignment.projectId ||
+        current.workspaceId !== spec.assignment.workspaceId ||
+        current.attemptId !== spec.assignment.attemptId ||
+        !assignmentMatchesRuntime(spec.assignment, current) ||
+        claimed.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.workload] !== "tool-sandbox" ||
+        claimed.metadata.labels[KUBERNETES_SANDBOX_LABELS.dependencyEgress] !== undefined
+      ) {
+        throw new SandboxManagerError(
+          "clean_prewarm_identity_mismatch",
+          "Claimed clean prewarm Pod identity was invalid",
+          false,
+        );
+      }
+      return claimed;
+    } catch (error: unknown) {
+      await this.#deleteExactPod(
+        this.#sandboxNamespace,
+        candidate.runtimeName,
+        candidate.runtimeId,
+      ).catch(() => undefined);
+      throw error;
+    } finally {
+      this.#scheduleCleanPrewarmReconcile();
+    }
+  }
+
   async #cleanupOrphanedDependencyBootstraps(): Promise<void> {
     const pods = await this.#client.listPods(
       this.#sandboxNamespace,
@@ -2454,6 +2842,33 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         current.containerName,
         current.containerId,
       );
+    }
+  }
+
+  async #cleanupOrphanedCleanPrewarms(): Promise<void> {
+    const pods = await this.#client.listPods(
+      this.#sandboxNamespace,
+      `${KUBERNETES_SANDBOX_LABELS.managed}=true,${KUBERNETES_SANDBOX_LABELS.workload}=clean-prewarm`,
+    );
+    for (const pod of pods) {
+      const name = pod.metadata?.name;
+      const runtimeId = pod.metadata?.uid;
+      const prewarmId = pod.metadata?.annotations?.[KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId];
+      if (
+        typeof name !== "string" ||
+        typeof runtimeId !== "string" ||
+        typeof prewarmId !== "string" ||
+        !/^[0-9a-f-]{36}$/i.test(prewarmId)
+      ) {
+        throw new SandboxManagerError(
+          "clean_prewarm_identity_mismatch",
+          "Orphaned clean prewarm Pod identity was invalid",
+          false,
+        );
+      }
+      const tracked = this.#cleanPrewarms.get(prewarmId);
+      if (tracked?.runtimeId === runtimeId) continue;
+      await this.#deleteExactPod(this.#sandboxNamespace, name, runtimeId);
     }
   }
 

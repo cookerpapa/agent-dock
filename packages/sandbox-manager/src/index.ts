@@ -13,9 +13,11 @@ export {
   KUBERNETES_SANDBOX_ANNOTATIONS,
   KUBERNETES_SANDBOX_LABELS,
   KubernetesGvisorSandboxProvider,
+  buildKubernetesCleanPrewarmPod,
   buildKubernetesRepositoryImportPod,
   buildKubernetesToolSandboxPod,
   type KubernetesGvisorSandboxProviderOptions,
+  type KubernetesCleanPrewarmPodOptions,
   type KubernetesRepositoryImportPodOptions,
   type KubernetesToolPodOptions,
 } from "./kubernetes-gvisor-sandbox-provider.ts";

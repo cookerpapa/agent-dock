@@ -236,6 +236,14 @@ and therefore keeps the environment in `pending` until a real Tool Run proves
 it. Session-warm reuse additionally requires the exact environment snapshot;
 an environment change always destroys the stale Pod instead of rebinding it.
 
+ADR-0045 adds an orthogonal clean prewarm pool for the first Tool Call. These
+Pods contain only the fixed image and empty memory-backed volumes, carry no
+tenant/Workspace/Attempt metadata, and remain default-deny behind runsc. Claim
+is an atomic UID/resourceVersion-fenced metadata transition and consumes the
+Pod permanently. Used Pods can enter only the existing exact-Session warm set,
+never the shared clean pool. Startup clears orphaned clean Pods before a
+singleton Manager refills its configured target.
+
 ADR-0043 extends this resource with owner-controlled configuration-as-code.
 Editing a recipe creates an inactive append-only candidate. A candidate must
 complete a fresh physical validation Run before it can become active. Activation

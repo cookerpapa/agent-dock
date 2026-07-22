@@ -251,6 +251,9 @@ authorization and assignment fencing remain above the Provider implementation.
 Tool Pods are demand-activated on the first Tool Call, not for pure chat. A
 healthy Pod is dedicated to one exact tenant/project/workspace/session and may
 remain warm across later Runs under a fresh fence until idle TTL/LRU eviction.
+The Manager also maintains two optional tenant-free `clean-prewarm` gVisor Pods.
+They contain empty volumes and no assignment, are consumed exactly once by a
+first Tool activation, and can never be returned after tenant code runs.
 They run as UID/GID `1000:1000`, with
 `runtimeClassName: agent-dock-gvisor`, default-deny network,
 no ServiceAccount token, host namespace/path/device/socket, inherited
@@ -521,7 +524,9 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 - `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
   exited successfully;
 - no `tool-sandbox-image` service is running;
-- no Pod labelled `agent-dock.io/managed=true` remains after a Turn settles;
+- no assigned `workload=tool-sandbox`, dependency-bootstrap or importer Pod
+  remains after explicit Session retirement; up to the configured two
+  tenant-free `workload=clean-prewarm` Pods remain as steady-state capacity;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.
 
 `production:up` includes Compose orphan cleanup. An upgrade from the former

@@ -8,6 +8,7 @@ import {
   DEFAULT_TOOL_SANDBOX_POLICY,
   KUBERNETES_SANDBOX_ANNOTATIONS,
   KUBERNETES_SANDBOX_LABELS,
+  buildKubernetesCleanPrewarmPod,
   buildKubernetesRepositoryImportPod,
   buildKubernetesToolSandboxPod,
   type SandboxPolicy,
@@ -39,6 +40,37 @@ const environment = {
 };
 
 describe("Kubernetes gVisor Pod boundary", () => {
+  it("builds a tenant-free, never-networked clean prewarm Pod", () => {
+    const pod = buildKubernetesCleanPrewarmPod({
+      image: "agent-dock/tool-sandbox:test",
+      imageRevision: "revision-test",
+      name: "agent-dock-prewarm-security-test",
+      namespace: "agent-dock-sandboxes",
+      prewarmId: "10000000-0000-4000-8000-000000000009",
+      ttlMs: 300_000,
+    });
+    expect(pod.metadata?.labels).toEqual({
+      [KUBERNETES_SANDBOX_LABELS.managed]: "true",
+      [KUBERNETES_SANDBOX_LABELS.workload]: "clean-prewarm",
+    });
+    expect(pod.metadata?.annotations).toMatchObject({
+      [KUBERNETES_SANDBOX_ANNOTATIONS.prewarmId]: "10000000-0000-4000-8000-000000000009",
+      [KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision]: "revision-test",
+    });
+    expect(JSON.stringify(pod.metadata)).not.toMatch(
+      /tenant|project|workspace|session|attempt|lease|sandbox-hash/i,
+    );
+    expect(pod.spec).toMatchObject({
+      runtimeClassName: "agent-dock-gvisor",
+      automountServiceAccountToken: false,
+      dnsPolicy: "None",
+      hostNetwork: false,
+      hostPID: false,
+      activeDeadlineSeconds: 1_200,
+    });
+    expect(pod.spec?.containers[0]?.env).toEqual([]);
+  });
+
   it("builds an offline, fixed-image, unprivileged and host-mount-free Tool Pod", () => {
     const pod = buildKubernetesToolSandboxPod({
       image: "agent-dock/tool-sandbox:test",

@@ -17,6 +17,7 @@ export class AgentDockMetrics {
   readonly activeRuns: Gauge;
   readonly queuedRuns: Gauge;
   readonly sandboxActive: Gauge<"provider">;
+  readonly sandboxPrewarm: Gauge<"provider">;
 
   constructor(serviceName: string, collectProcessMetrics = false) {
     this.registry = new Registry();
@@ -101,6 +102,12 @@ export class AgentDockMetrics {
     this.sandboxActive = new Gauge({
       name: "agent_dock_sandbox_active",
       help: "Active sandboxes owned by Provider",
+      labelNames: ["provider"],
+      registers: [this.registry],
+    });
+    this.sandboxPrewarm = new Gauge({
+      name: "agent_dock_sandbox_prewarm",
+      help: "Never-used clean sandboxes waiting for single-consumption claim",
       labelNames: ["provider"],
       registers: [this.registry],
     });

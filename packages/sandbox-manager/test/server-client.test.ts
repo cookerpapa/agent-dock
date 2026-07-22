@@ -98,6 +98,7 @@ function backend(): SandboxManagerBackend {
       };
     },
     activeCount: 0,
+    cleanPrewarmCount: 0,
     async stop() {},
     async execute(capability, request) {
       if (capability !== CAPABILITY) throw new Error("wrong capability");

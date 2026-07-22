@@ -328,6 +328,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
         kubeconfigPath: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
         runtimeClassName: "agent-dock-gvisor",
         imagePullPolicy: "Never",
+        cleanPrewarmTarget: 2,
+        cleanPrewarmTtlMs: 300_000,
         dependencyEgress: {
           namespace: "agent-dock-egress",
           configMapName: "dependency-egress-trust",

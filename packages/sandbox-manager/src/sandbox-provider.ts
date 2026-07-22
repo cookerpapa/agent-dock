@@ -154,6 +154,7 @@ export type SandboxWriteFileInput = Readonly<{
  */
 export interface SandboxProvider {
   readonly providerId: string;
+  readonly cleanPrewarmCount?: number;
 
   checkHealth(): Promise<void>;
   create(spec: SandboxCreateSpec): Promise<SandboxHandle>;

@@ -43,6 +43,7 @@ export type SandboxManagerBackend = Pick<
   | "confirmAbsent"
   | "close"
   | "activeCount"
+  | "cleanPrewarmCount"
 >;
 
 function digest(value: string): Buffer {
@@ -119,6 +120,8 @@ export class SandboxManagerServer {
   async listen(): Promise<string> {
     if (this.#address !== undefined) throw new Error("Sandbox Manager is already listening");
     await this.#manager.checkHealth();
+    this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+    this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
     this.#address = await this.#server.listen({ host: this.#host, port: this.#port });
     this.#ready = true;
     return this.#address;
@@ -207,6 +210,7 @@ export class SandboxManagerServer {
       await reply.code(200).send({ status: "ok" });
     });
     this.#server.get(SANDBOX_MANAGER_READY_PATH, async (_request, reply) => {
+      this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
       await reply.code(this.#ready ? 200 : 503).send({
         status: this.#ready ? "ready" : "not_ready",
       });
@@ -234,6 +238,10 @@ export class SandboxManagerServer {
             run: () => this.#manager.create(message),
           });
           this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxPrewarm.set(
+            { provider: "gvisor" },
+            this.#manager.cleanPrewarmCount,
+          );
           await reply.code(200).send(reserved);
           return;
         }
@@ -259,6 +267,10 @@ export class SandboxManagerServer {
             run: () => this.#manager.release(message),
           });
           this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxPrewarm.set(
+            { provider: "gvisor" },
+            this.#manager.cleanPrewarmCount,
+          );
           await reply.code(200).send(released);
           return;
         }
@@ -271,6 +283,10 @@ export class SandboxManagerServer {
             run: () => this.#manager.stop(message.activationId, message.assignment),
           });
           this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxPrewarm.set(
+            { provider: "gvisor" },
+            this.#manager.cleanPrewarmCount,
+          );
           await reply.code(200).send({
             managerProtocolVersion: 1,
             type: "tool_sandbox.stopped",
@@ -324,6 +340,7 @@ export class SandboxManagerServer {
           run: () => this.#manager.execute(capability, message, controller.signal),
         });
         this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+        this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
         await reply.code(200).send(response);
       } catch (error: unknown) {
         await this.#failure(reply, error);

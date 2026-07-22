@@ -80,6 +80,16 @@ code: reserve -> first Tool -> create/restore/attach gVisor Pod
       -> idle TTL/revision mismatch/failure/cancel/shutdown -> delete Pod
 ```
 
+When enabled, `create` in the coding path may be a single-consumption claim of
+a ready `clean-prewarm` Pod rather than a fresh Pod. Before claim it has no
+tenant or Workspace identity/data and has never executed tenant code. Claim
+atomically changes the exact UID/resourceVersion to `tool-sandbox`, after which
+normal restore and validation run. A claimed Pod follows only exact-Session
+warm reuse or destruction; it can never return to the clean pool. Pure chat
+still creates and claims nothing. Production keeps two clean Pods for at most
+five minutes (`AGENT_DOCK_CLEAN_PREWARM_TARGET=2`,
+`AGENT_DOCK_CLEAN_PREWARM_TTL_MS=300000`). See ADR-0045.
+
 Successful tool-using Runs retain at most the configured number of exact
 tenant/project/workspace/session Pods for the configured idle TTL. Reuse
 requires an exact committed Workspace content revision. Capability rotation,

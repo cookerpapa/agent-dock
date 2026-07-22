@@ -896,6 +896,8 @@ async function assertExecutionBoundary() {
     ),
     true,
   );
+  assert.equal(managerEnvironment.includes("AGENT_DOCK_CLEAN_PREWARM_TARGET=2"), true);
+  assert.equal(managerEnvironment.includes("AGENT_DOCK_CLEAN_PREWARM_TTL_MS=300000"), true);
   for (const prefix of [
     "DATABASE_URL=",
     "DATABASE_URL_FILE=",

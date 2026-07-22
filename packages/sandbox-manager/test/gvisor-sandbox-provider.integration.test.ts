@@ -231,6 +231,117 @@ describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract"
     }
   }, 180_000);
 
+  it("single-consumption claims a tenant-free clean prewarm Pod", async () => {
+    const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
+    const provider = new KubernetesGvisorSandboxProvider({
+      toolImage,
+      imageRevision,
+      runtimeClient,
+      cleanPrewarmTarget: 1,
+      cleanPrewarmTtlMs: 120_000,
+    });
+    const manager = new ToolSandboxManager({ provider, imageRevision });
+    const assignmentValue = assignment(20);
+    const coldProvider = new KubernetesGvisorSandboxProvider({
+      toolImage,
+      imageRevision,
+      runtimeClient,
+    });
+    const coldManager = new ToolSandboxManager({ provider: coldProvider, imageRevision });
+    const coldAssignment = assignment(21);
+    let reserved: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    let coldReserved: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+    try {
+      await provider.checkHealth();
+      expect(provider.cleanPrewarmCount).toBe(1);
+      const clean = await runtimeClient.listPods(
+        "agent-dock-sandboxes",
+        "agent-dock.io/managed=true,agent-dock.io/workload=clean-prewarm",
+      );
+      expect(clean).toHaveLength(1);
+      const cleanName = clean[0]?.metadata?.name;
+      const cleanUid = clean[0]?.metadata?.uid;
+      expect(cleanName).toMatch(/^agent-dock-prewarm-/);
+      expect(cleanUid).toBeDefined();
+      expect(JSON.stringify(clean[0]?.metadata)).not.toMatch(
+        /tenant-provider-20|project-provider-20|workspace-provider-20|session-provider-20/,
+      );
+
+      reserved = await manager.create({
+        ...createRequest(20),
+        assignment: assignmentValue,
+      });
+      expect(provider.cleanPrewarmCount).toBe(1);
+      const prewarmStartedAt = performance.now();
+      const prewarmResult = await manager.execute(
+        reserved.capability,
+        operation(
+          reserved.activationId,
+          "60000000-0000-4000-8000-000000000020",
+          "node -e \"process.stdout.write('claimed-clean-prewarm')\"",
+        ),
+      );
+      const prewarmFirstToolMs = Math.round(performance.now() - prewarmStartedAt);
+      expect(prewarmResult).toMatchObject({ exitCode: 0 });
+      const inspection = await manager.inspect(reserved.activationId, assignmentValue);
+      expect(inspection).toMatchObject({
+        state: "running",
+        handle: {
+          runtimeName: cleanName,
+          runtimeId: cleanUid,
+          assignment: { tenantId: assignmentValue.tenantId },
+        },
+        effectiveIsolation: {
+          runtime: "runsc",
+          networkMode: "kubernetes-network-policy/deny-all",
+        },
+      });
+      const claimed = await runtimeClient.readPod("agent-dock-sandboxes", cleanName!);
+      expect(claimed?.metadata?.labels).toMatchObject({
+        "agent-dock.io/workload": "tool-sandbox",
+      });
+      expect(claimed?.metadata?.annotations?.["agent-dock.io/prewarm-id"]).toBeUndefined();
+      expect(claimed?.metadata?.annotations).toMatchObject({
+        "agent-dock.io/tenant-id": assignmentValue.tenantId,
+        "agent-dock.io/attempt-id": assignmentValue.attemptId,
+      });
+
+      const refillDeadline = Date.now() + 30_000;
+      while (provider.cleanPrewarmCount < 1 && Date.now() < refillDeadline) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+      }
+      expect(provider.cleanPrewarmCount).toBe(1);
+      coldReserved = await coldManager.create({
+        ...createRequest(21),
+        assignment: coldAssignment,
+      });
+      const coldStartedAt = performance.now();
+      const coldResult = await coldManager.execute(
+        coldReserved.capability,
+        operation(
+          coldReserved.activationId,
+          "60000000-0000-4000-8000-000000000021",
+          "node -e \"process.stdout.write('fresh-cold-start')\"",
+        ),
+      );
+      const coldFirstToolMs = Math.round(performance.now() - coldStartedAt);
+      expect(coldResult).toMatchObject({ exitCode: 0 });
+      expect(prewarmFirstToolMs).toBeLessThan(coldFirstToolMs);
+      process.stdout.write(
+        `${JSON.stringify({ cleanPrewarmBenchmark: { prewarmFirstToolMs, coldFirstToolMs } })}\n`,
+      );
+    } finally {
+      if (coldReserved !== undefined) {
+        await coldManager.stop(coldReserved.activationId, coldAssignment).catch(() => undefined);
+      }
+      await coldManager.close().catch(() => undefined);
+      if (reserved !== undefined) {
+        await manager.stop(reserved.activationId, assignmentValue).catch(() => undefined);
+      }
+      await manager.close().catch(() => undefined);
+    }
+  }, 120_000);
+
   it("enforces identity, cgroups, namespace isolation, bounded output and exact cleanup", async () => {
     let nextId = 0;
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);

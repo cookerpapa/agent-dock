@@ -1888,3 +1888,18 @@
   dependency-egress label，且 bootstrap inventory 为 0。完整 gVisor gate 还通过 exact-commit GitHub import、跨租户文件隔离、凭据与宿主信息
   隔离、cgroup/进程/输出/超时限制、取消清理、warm fence rebind、纯聊天零 Pod 和真实 remote-tool repair；6 个 live integration tests 全部通过，
   结束时两个 execution namespace 均无受管 Pod。
+
+## 2026-07-22 — Single-consumption Clean gVisor Prewarm
+
+- 决策：ADR-0045 只预热固定 image/revision 的空 gVisor Pod，不预热租户 Workspace。Pool Pod 没有 tenant/project/workspace/session/attempt/
+  lease/fence/sandbox-hash，没有 DNS、网络、ServiceAccount token 或凭据；只有空的 memory-backed volume、只读 rootfs 和等待首次可信初始化的固定
+  Tool Worker。production target 为 2、claim TTL 为 5 分钟。
+- 领取：第一次离线 Tool activation 从 pool 原子移除一个候选，再用 Pod UID 与 resourceVersion 前置条件把 metadata 单向绑定为
+  `tool-sandbox`。绑定后才 attach、restore、验证 toolchain 和执行 recipe。领取或初始化失败会销毁 Pod；执行过租户代码的 Pod 只能精确 Session
+  warm-reuse 或删除，永远没有返回 clean pool 的路径。dependency-bootstrap 不使用 pool，但它销毁后的新离线 Pod 可以领取 clean prewarm。
+- 恢复与观测：`listAssignments` 只选择正式 `tool-sandbox`，不会把 prewarm 当成 Supervisor runtime。singleton Manager 启动先清理上次进程遗留的
+  clean/bootstrap Pod，再补足目标；shutdown 删除全部 tracked prewarm。新增独立低基数
+  `agent_dock_sandbox_prewarm{provider="gvisor"}` gauge，不把共享容量混入 active Session 数。
+- 真实证据：K3s/runsc 测试在领取前证明 Pod metadata 不含目标 tenant，领取后 name/UID 不变、prewarm annotation 消失并绑定 exact Attempt，随后
+  离线 Node Tool 成功且 effective isolation 仍为 `runsc` + deny-all。相同已缓存 image/command 下两次实测分别为 2,260 ms vs 4,073 ms、
+  2,218 ms vs 4,379 ms（ready clean-prewarm vs fresh Pod）；used Pod 删除，补池产生新的 clean Pod，测试退出后无残留。

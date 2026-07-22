@@ -23,11 +23,12 @@ export interface KubernetesRuntimeClient {
   createPod(namespace: string, pod: V1Pod): Promise<V1Pod>;
   readPod(namespace: string, name: string): Promise<V1Pod | undefined>;
   listPods(namespace: string, labelSelector: string): Promise<readonly V1Pod[]>;
-  patchPodAnnotations(
+  patchPodMetadata(
     namespace: string,
     name: string,
     uid: string,
     resourceVersion: string,
+    labels: Readonly<Record<string, string>>,
     annotations: Readonly<Record<string, string>>,
   ): Promise<V1Pod>;
   deletePod(
@@ -201,11 +202,12 @@ export class OfficialKubernetesRuntimeClient implements KubernetesRuntimeClient 
     }
   }
 
-  async patchPodAnnotations(
+  async patchPodMetadata(
     namespace: string,
     name: string,
     uid: string,
     resourceVersion: string,
+    labels: Readonly<Record<string, string>>,
     annotations: Readonly<Record<string, string>>,
   ): Promise<V1Pod> {
     try {
@@ -216,6 +218,7 @@ export class OfficialKubernetesRuntimeClient implements KubernetesRuntimeClient 
         body: [
           { op: "test", path: "/metadata/uid", value: uid },
           { op: "test", path: "/metadata/resourceVersion", value: resourceVersion },
+          { op: "replace", path: "/metadata/labels", value: labels },
           { op: "replace", path: "/metadata/annotations", value: annotations },
         ],
       });
@@ -223,11 +226,11 @@ export class OfficialKubernetesRuntimeClient implements KubernetesRuntimeClient 
       if (apiStatus(error) === 409 || apiStatus(error) === 422) {
         throw new SandboxManagerError(
           "kubernetes_pod_identity_mismatch",
-          "Kubernetes rejected a stale Pod annotation precondition",
+          "Kubernetes rejected a stale Pod metadata precondition",
           false,
         );
       }
-      throw kubernetesFailure(error, "Pod annotation update");
+      throw kubernetesFailure(error, "Pod metadata update");
     }
   }
 

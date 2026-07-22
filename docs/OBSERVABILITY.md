@@ -34,6 +34,11 @@ observability network:
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
 | Sandbox Manager | `sandbox-manager:9466/metrics` | Provider lifecycle, tools, process |
 
+`agent_dock_sandbox_prewarm{provider="gvisor"}` reports only never-used,
+tenant-free Pods waiting for a single-consumption claim. It is separate from
+`agent_dock_sandbox_active`, which reports assigned and exact-Session warm
+Sandboxes.
+
 The bearer token is generated under the private runtime directory and mounted
 read-only. It is not the user API token. Prometheus is available through the
 loopback proxy at `http://127.0.0.1:9090`.
