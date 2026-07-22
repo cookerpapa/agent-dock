@@ -26,6 +26,7 @@ import {
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
+import { createCompletedRunReviewBundle } from "./review-bundle.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -1147,6 +1148,21 @@ export class OutboxDispatcher {
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
       expectOne(sessionUpdate.numUpdatedRows, "settling a session");
+      await createCompletedRunReviewBundle(
+        transaction,
+        {
+          tenantId: claim.request.tenantId,
+          projectId: claim.request.projectId,
+          workspaceId: claim.request.workspaceId,
+          sessionId: claim.request.sessionId,
+          runId: claim.request.runId,
+          turnId: claim.request.turnId,
+          attemptId: claim.request.attemptId,
+          environment: claim.request.environment,
+        },
+        stopReason,
+        now,
+      );
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
         await this.#leaseManager.releaseCurrent(transaction, claim.request, acknowledgement, now);
       }

@@ -22,6 +22,7 @@ import {
   parseCreateTenantRegistrationRequest,
   parseCreateGitHubPullRequestRequest,
   parseCreateProjectRequest,
+  parseCreateRunRewindRequest,
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
@@ -48,6 +49,8 @@ import {
   type OperationalAuditLogResource,
   type OperationalInsightsResource,
   type RunUsageResource,
+  type RunRewindResource,
+  type ReviewBundleResource,
   type SessionContextResource,
   type UsageSummaryResource,
   type RunListResource,
@@ -325,6 +328,36 @@ export class ControlPlaneController {
     const runId = parseUuidPathParameter(runIdValue, "runId");
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).getRun(runId);
+  }
+
+  @Post("runs/:runId/rewinds")
+  @HttpCode(202)
+  async rewindRun(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<RunRewindResource> {
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.controlPlaneStores
+      .forIdentity(identity)
+      .acceptRunRewind(
+        parseUuidPathParameter(runIdValue, "runId"),
+        parseIdempotencyKey(idempotencyKeyValue),
+        parseCreateRunRewindRequest(body),
+        identity.userId,
+      );
+  }
+
+  @Get("runs/:runId/review-bundle")
+  async getRunReviewBundle(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+  ): Promise<ReviewBundleResource> {
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores
+      .forIdentity(identity)
+      .getReviewBundle(parseUuidPathParameter(runIdValue, "runId"));
   }
 
   @Get("runs/:runId/test-results")

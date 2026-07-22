@@ -134,6 +134,7 @@ describe("session transcript reducer", () => {
           mailboxPosition: 8,
           prompt: "Historical private prompt",
           state: "running",
+          projection: "canonical",
           acceptedAt: CREATED_AT,
         },
       ],

@@ -246,6 +246,17 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
     expect(alphaTurn.statusCode).toBe(202);
     turnA = alphaTurn.json<AcceptedTurnResource>();
 
+    const viewerRewind = await http.inject({
+      method: "POST",
+      url: `/v1/runs/${turnA.runId}/rewinds`,
+      headers: {
+        ...authorization(viewerAToken),
+        "idempotency-key": "viewer-rewind-denied",
+      },
+      payload: { sourceAttemptId: TENANT_A_IDS[0] },
+    });
+    expect(viewerRewind.statusCode).toBe(403);
+
     const foreignProbes = [
       await http.inject({
         method: "POST",
@@ -278,6 +289,20 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
           ...authorization(tenantB.credential.token),
           "last-event-id": "0",
         },
+      }),
+      await http.inject({
+        method: "GET",
+        url: `/v1/runs/${turnA.runId}/review-bundle`,
+        headers: authorization(tenantB.credential.token),
+      }),
+      await http.inject({
+        method: "POST",
+        url: `/v1/runs/${turnA.runId}/rewinds`,
+        headers: {
+          ...authorization(tenantB.credential.token),
+          "idempotency-key": "foreign-rewind-probe",
+        },
+        payload: { sourceAttemptId: TENANT_B_IDS[0] },
       }),
     ];
     for (const response of foreignProbes) {

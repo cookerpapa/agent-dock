@@ -19,6 +19,8 @@ import {
   parseRollbackWorkspaceRequest,
   parseRunListResource,
   parseRunResource,
+  parseRunRewindResource,
+  parseReviewBundleResource,
   parseRunUsageResource,
   parseSessionResource,
   parseSessionContextResource,
@@ -49,6 +51,8 @@ import {
   type OperationalInsightsResource,
   type RunListResource,
   type RunResource,
+  type RunRewindResource,
+  type ReviewBundleResource,
   type RunUsageResource,
   type SessionResource,
   type SessionContextResource,
@@ -393,6 +397,36 @@ export class AgentDockApi {
       await request(
         this.#fetch,
         `/v1/runs/${encodeURIComponent(runId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async rewindRun(
+    runId: string,
+    sourceAttemptId: string,
+    idempotencyKey: string,
+  ): Promise<RunRewindResource> {
+    return parseRunRewindResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}/rewinds`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+          body: JSON.stringify({ sourceAttemptId }),
+        },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getRunReviewBundle(runId: string): Promise<ReviewBundleResource> {
+    return parseReviewBundleResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}/review-bundle`,
         { method: "GET" },
         this.#authorizationToken,
       ),

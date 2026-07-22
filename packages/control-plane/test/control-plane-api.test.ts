@@ -8,6 +8,7 @@ import type {
   ControlPlaneApiError,
   EventPublishMessage,
   ProjectResource,
+  RunResource,
   SessionResource,
 } from "@agent-dock/protocol";
 import {
@@ -111,6 +112,10 @@ async function seedSingleUserProfile(): Promise<void> {
   await database
     .insertInto("tenants")
     .values({ id: IDS.tenant, slug: "owner" })
+    .executeTakeFirstOrThrow();
+  await database
+    .insertInto("users")
+    .values({ id: IDS.tenant, tenant_id: IDS.tenant, display_name: "Development Operator" })
     .executeTakeFirstOrThrow();
   await database
     .insertInto("credential_bindings")
@@ -1136,6 +1141,95 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     ]);
     expect(JSON.stringify(backend.records)).not.toContain("fix the failing test");
+  });
+
+  it("publishes an immutable Review Bundle and atomically rewinds the latest Run", async () => {
+    const sourceResponse = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${firstAccepted.runId}`,
+    });
+    expect(sourceResponse.statusCode).toBe(200);
+    const source = sourceResponse.json() as RunResource;
+    expect(source).toMatchObject({ state: "completed", projection: "canonical" });
+    expect(source.currentAttemptId).toEqual(expect.any(String));
+
+    const reviewResponse = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${firstAccepted.runId}/review-bundle`,
+    });
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toMatchObject({
+      manifest: {
+        schemaVersion: 1,
+        run: { runId: firstAccepted.runId, attemptId: source.currentAttemptId },
+        attempts: [{ projection: "canonical", state: "completed" }],
+        usage: { requests: 0, inputTokens: 0, outputTokens: 0 },
+      },
+      manifestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    const rewind = await http.inject({
+      method: "POST",
+      url: `/v1/runs/${firstAccepted.runId}/rewinds`,
+      headers: { "idempotency-key": "rewind-repair-request-1" },
+      payload: { sourceAttemptId: source.currentAttemptId },
+    });
+    expect(rewind.statusCode, rewind.body).toBe(202);
+    const rewound = rewind.json() as {
+      replacementRunId: string;
+      conversationBoundarySeq: number;
+      acceptedTurn: AcceptedTurnResource;
+      replayed: boolean;
+    };
+    expect(rewound).toMatchObject({
+      conversationBoundarySeq: 0,
+      replayed: false,
+      acceptedTurn: { mailboxPosition: 2, replayed: false },
+    });
+    expect(rewound.acceptedTurn.runId).toBe(rewound.replacementRunId);
+    const replay = await http.inject({
+      method: "POST",
+      url: `/v1/runs/${firstAccepted.runId}/rewinds`,
+      headers: { "idempotency-key": "rewind-repair-request-1" },
+      payload: { sourceAttemptId: source.currentAttemptId },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toMatchObject({
+      replacementRunId: rewound.replacementRunId,
+      replayed: true,
+      acceptedTurn: { runId: rewound.replacementRunId, replayed: true },
+    });
+
+    const originalProjection = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${firstAccepted.runId}`,
+    });
+    expect(originalProjection.json()).toMatchObject({
+      projection: "superseded",
+      supersededByRunId: rewound.replacementRunId,
+      attempts: [{ projection: "superseded" }],
+    });
+    const replacementProjection = await http.inject({
+      method: "GET",
+      url: `/v1/runs/${rewound.replacementRunId}`,
+    });
+    expect(replacementProjection.json()).toMatchObject({
+      projection: "canonical",
+      rewoundFrom: {
+        sourceRunId: firstAccepted.runId,
+        sourceAttemptId: source.currentAttemptId,
+        conversationBoundarySeq: 0,
+      },
+    });
+
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "rewound" }]),
+    });
+    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: rewound.acceptedTurn.commandId,
+    });
   });
 
   it("does not let two dispatchers execute the same claimed turn", async () => {

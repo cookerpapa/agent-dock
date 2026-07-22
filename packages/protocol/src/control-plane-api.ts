@@ -8,6 +8,7 @@ import {
 } from "./protocol-primitives.ts";
 import { SessionStateSchema } from "./event-envelope.ts";
 import {
+  EnvironmentValidationReportSchema,
   EnvironmentRuntimeSnapshotSchema,
   ProjectEnvironmentResourceSchema,
 } from "./environment.ts";
@@ -732,6 +733,9 @@ export const ConversationTurnResourceSchema = Type.Object(
     mailboxPosition: PositiveSafeIntegerSchema,
     prompt: Type.String({ minLength: 1, maxLength: 100_000 }),
     state: ConversationTurnStateSchema,
+    projection: Type.Union([Type.Literal("canonical"), Type.Literal("superseded")]),
+    supersededByRunId: Type.Optional(UuidSchema),
+    rewoundFromRunId: Type.Optional(UuidSchema),
     acceptedAt: UtcTimestampSchema,
   },
   { additionalProperties: false },
@@ -823,6 +827,8 @@ export const RunAttemptResourceSchema = Type.Object(
     attemptId: UuidSchema,
     attemptNumber: PositiveSafeIntegerSchema,
     state: RunAttemptStateSchema,
+    projection: Type.Union([Type.Literal("canonical"), Type.Literal("superseded")]),
+    supersededByAttemptId: Type.Optional(UuidSchema),
     claimOwnerId: Type.String({ minLength: 1, maxLength: 256 }),
     claimExpiresAt: UtcTimestampSchema,
     sandboxId: Type.Optional(UuidSchema),
@@ -854,6 +860,18 @@ export const RunResourceSchema = Type.Object(
     environment: EnvironmentRuntimeSnapshotSchema,
     sourceSet: WorkspaceSourceSetSnapshotSchema,
     state: RunStateSchema,
+    projection: Type.Union([Type.Literal("canonical"), Type.Literal("superseded")]),
+    supersededByRunId: Type.Optional(UuidSchema),
+    rewoundFrom: Type.Optional(
+      Type.Object(
+        {
+          sourceRunId: UuidSchema,
+          sourceAttemptId: UuidSchema,
+          conversationBoundarySeq: NonNegativeSafeIntegerSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
     attemptCount: NonNegativeSafeIntegerSchema,
     currentAttemptId: Type.Optional(UuidSchema),
     stopReason: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -895,6 +913,163 @@ export const TestResultResourceSchema = Type.Object(
 
 export const TestResultListResourceSchema = Type.Object(
   { runId: UuidSchema, results: Type.Array(TestResultResourceSchema, { maxItems: 100 }) },
+  { additionalProperties: false },
+);
+
+export const CreateRunRewindRequestSchema = Type.Object(
+  { sourceAttemptId: UuidSchema },
+  { additionalProperties: false },
+);
+
+export const RunRewindResourceSchema = Type.Object(
+  {
+    rewindId: UuidSchema,
+    sourceRunId: UuidSchema,
+    sourceAttemptId: UuidSchema,
+    replacementRunId: UuidSchema,
+    conversationBoundarySeq: NonNegativeSafeIntegerSchema,
+    workspaceBaseVersionId: Type.Optional(UuidSchema),
+    piSessionBaseArtifactId: Type.Optional(UuidSchema),
+    acceptedTurn: AcceptedTurnResourceSchema,
+    replayed: Type.Boolean(),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+const ReviewBundleArtifactSchema = Type.Object(
+  {
+    artifactId: UuidSchema,
+    kind: Type.Union([
+      Type.Literal("pi_session_snapshot"),
+      Type.Literal("workspace_snapshot"),
+      Type.Literal("tool_output"),
+      Type.Literal("patch"),
+      Type.Literal("report"),
+      Type.Literal("crash_bundle"),
+    ]),
+    fileName: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    sizeBytes: NonNegativeSafeIntegerSchema,
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+const ReviewBundleAttemptSchema = Type.Object(
+  {
+    attemptId: UuidSchema,
+    attemptNumber: PositiveSafeIntegerSchema,
+    state: RunAttemptStateSchema,
+    projection: Type.Union([Type.Literal("canonical"), Type.Literal("superseded")]),
+    failure: Type.Optional(RunFailureResourceSchema),
+    claimedAt: UtcTimestampSchema,
+    settledAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const ReviewBundleManifestSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    run: Type.Object(
+      {
+        runId: UuidSchema,
+        traceId: Type.String({ pattern: "^[0-9a-f]{32}$" }),
+        projectId: UuidSchema,
+        workspaceId: UuidSchema,
+        sessionId: UuidSchema,
+        turnId: UuidSchema,
+        attemptId: UuidSchema,
+        stopReason: Type.String({ minLength: 1, maxLength: 256 }),
+        queuedAt: UtcTimestampSchema,
+        startedAt: Type.Optional(UtcTimestampSchema),
+        settledAt: UtcTimestampSchema,
+      },
+      { additionalProperties: false },
+    ),
+    environment: EnvironmentRuntimeSnapshotSchema,
+    sourceSet: WorkspaceSourceSetSnapshotSchema,
+    attempts: Type.Array(ReviewBundleAttemptSchema, { minItems: 1, maxItems: 32 }),
+    assistant: Type.Object(
+      {
+        text: Type.String({ maxLength: 100_000 }),
+        textSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+        firstSeq: Type.Optional(PositiveSafeIntegerSchema),
+        lastSeq: Type.Optional(PositiveSafeIntegerSchema),
+        truncated: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+    changes: Type.Object(
+      {
+        workspaceVersionId: Type.Optional(UuidSchema),
+        patchArtifactId: Type.Optional(UuidSchema),
+        patchSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        changedPaths: Type.Array(Type.String({ minLength: 1, maxLength: 1_024 }), {
+          maxItems: 1_000,
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    tests: Type.Array(
+      Type.Object(
+        {
+          testResultId: UuidSchema,
+          toolCallId: Type.String({ minLength: 1, maxLength: 256 }),
+          suite: Type.String({ minLength: 1, maxLength: 256 }),
+          command: Type.String({ minLength: 1, maxLength: 4_096 }),
+          status: Type.Union([
+            Type.Literal("passed"),
+            Type.Literal("failed"),
+            Type.Literal("errored"),
+          ]),
+          exitCode: Type.Optional(Type.Integer({ minimum: 0, maximum: 255 })),
+          durationMs: Type.Optional(NonNegativeSafeIntegerSchema),
+          summary: Type.Optional(Type.String({ maxLength: 2_000 })),
+          artifactId: Type.Optional(UuidSchema),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 100 },
+    ),
+    artifacts: Type.Array(ReviewBundleArtifactSchema, { maxItems: 1_000 }),
+    usage: Type.Object(
+      {
+        requests: NonNegativeSafeIntegerSchema,
+        inputTokens: NonNegativeSafeIntegerSchema,
+        outputTokens: NonNegativeSafeIntegerSchema,
+        cacheReadTokens: NonNegativeSafeIntegerSchema,
+        cacheWriteTokens: NonNegativeSafeIntegerSchema,
+        costMicrousd: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+    environmentValidation: Type.Optional(
+      Type.Object(
+        {
+          status: Type.Union([Type.Literal("validated"), Type.Literal("failed")]),
+          report: Type.Optional(EnvironmentValidationReportSchema),
+          reportSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+          failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+          validatedAt: UtcTimestampSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ReviewBundleResourceSchema = Type.Object(
+  {
+    reviewBundleId: UuidSchema,
+    manifestSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    manifest: ReviewBundleManifestSchema,
+    createdAt: UtcTimestampSchema,
+  },
   { additionalProperties: false },
 );
 
@@ -1201,6 +1376,10 @@ export type RunResource = Static<typeof RunResourceSchema>;
 export type RunListResource = Static<typeof RunListResourceSchema>;
 export type TestResultResource = Static<typeof TestResultResourceSchema>;
 export type TestResultListResource = Static<typeof TestResultListResourceSchema>;
+export type CreateRunRewindRequest = Static<typeof CreateRunRewindRequestSchema>;
+export type RunRewindResource = Static<typeof RunRewindResourceSchema>;
+export type ReviewBundleManifest = Static<typeof ReviewBundleManifestSchema>;
+export type ReviewBundleResource = Static<typeof ReviewBundleResourceSchema>;
 export type WorkspaceArtifactResource = Static<typeof WorkspaceArtifactResourceSchema>;
 export type WorkspaceVersionResource = Static<typeof WorkspaceVersionResourceSchema>;
 export type WorkspaceVersionListResource = Static<typeof WorkspaceVersionListResourceSchema>;
@@ -1593,6 +1772,36 @@ export function parseRunResource(value: unknown): RunResource {
 
 export function parseRunListResource(value: unknown): RunListResource {
   return parseSchema(RunListResourceSchema, value, "run list resource");
+}
+
+export function parseCreateRunRewindRequest(value: unknown): CreateRunRewindRequest {
+  return parseSchema(CreateRunRewindRequestSchema, value, "create-run-rewind request");
+}
+
+export function parseRunRewindResource(value: unknown): RunRewindResource {
+  return parseSchema(RunRewindResourceSchema, value, "run-rewind resource");
+}
+
+export function parseReviewBundleManifest(value: unknown): ReviewBundleManifest {
+  return parseSchema(ReviewBundleManifestSchema, value, "review-bundle manifest");
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => canonicalJsonValue(entry));
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
+  );
+}
+
+export function canonicalReviewBundleManifestJson(value: unknown): string {
+  return JSON.stringify(canonicalJsonValue(parseReviewBundleManifest(value)));
+}
+
+export function parseReviewBundleResource(value: unknown): ReviewBundleResource {
+  return parseSchema(ReviewBundleResourceSchema, value, "review-bundle resource");
 }
 
 export function parseTestResultListResource(value: unknown): TestResultListResource {

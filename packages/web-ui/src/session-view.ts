@@ -63,6 +63,9 @@ export type TurnView = {
   mailboxPosition: number | null;
   prompt: string;
   acceptedAt: string | null;
+  projection: "canonical" | "superseded";
+  supersededByRunId: string | null;
+  rewoundFromRunId: string | null;
   status: TurnViewStatus;
   items: readonly TranscriptItem[];
   startedSequence: number | null;
@@ -131,6 +134,9 @@ function unknownTurn(turnId: string): TurnView {
     mailboxPosition: null,
     prompt: "Input was accepted before this browser connected.",
     acceptedAt: null,
+    projection: "canonical",
+    supersededByRunId: null,
+    rewoundFromRunId: null,
     status: "running",
     items: [],
     startedSequence: null,
@@ -410,6 +416,9 @@ export function sessionViewReducer(
         mailboxPosition: turn.mailboxPosition,
         prompt: turn.prompt,
         acceptedAt: turn.acceptedAt,
+        projection: turn.projection,
+        supersededByRunId: turn.supersededByRunId ?? null,
+        rewoundFromRunId: turn.rewoundFromRunId ?? null,
         status:
           turn.state === "queued" || turn.state === "dispatching"
             ? "queued"
@@ -448,6 +457,9 @@ export function sessionViewReducer(
       mailboxPosition: action.accepted.mailboxPosition,
       prompt: action.prompt,
       acceptedAt: action.accepted.acceptedAt,
+      projection: "canonical",
+      supersededByRunId: null,
+      rewoundFromRunId: null,
       status: turn.startedSequence === null ? "queued" : turn.status,
     }));
     return { ...state, turns, apiError: null };

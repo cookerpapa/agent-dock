@@ -320,7 +320,21 @@ function ConversationTurn({ turn }: { turn: TurnView }) {
     -1,
   );
   return (
-    <section className="product-turn" id={`turn-${turn.turnId}`}>
+    <section
+      className={`product-turn${turn.projection === "superseded" ? " product-turn-superseded" : ""}`}
+      id={`turn-${turn.turnId}`}
+    >
+      {turn.projection === "superseded" ? (
+        <div className="product-muted-line">
+          此运行已被 {turn.supersededByRunId?.slice(0, 8) ?? "后续运行"}{" "}
+          回退替代；原始记录仅供审计。
+        </div>
+      ) : null}
+      {turn.rewoundFromRunId ? (
+        <div className="product-muted-line">
+          已恢复到运行 {turn.rewoundFromRunId.slice(0, 8)} 之前的对话与工作区。
+        </div>
+      ) : null}
       <div className="product-message product-user-message">
         <div className="product-user-bubble">{turn.prompt}</div>
       </div>
@@ -823,12 +837,22 @@ export default function ChatApp() {
     }
   }
 
-  async function retryRun(runId: string): Promise<void> {
-    if (state.session === null || operation !== null) return;
+  async function retryRun(runId: string, sourceAttemptId: string): Promise<void> {
+    if (state.session === null || operation !== null || currentTurn !== undefined) return;
     const run = await api.getRun(runId);
     const original = state.turns.find((turn) => turn.turnId === run.turnId);
     if (original === undefined) return;
-    setPrompt(original.prompt);
+    setOperation("submitting");
+    update({ type: "api.error.cleared" });
+    try {
+      const rewind = await api.rewindRun(runId, sourceAttemptId, newIdempotencyKey("retry"));
+      update({ type: "turn.accepted", accepted: rewind.acceptedTurn, prompt: original.prompt });
+      setPrompt("");
+      setInspectorRefreshSignal((value) => value + 1);
+      await refreshConversations();
+    } finally {
+      setOperation(null);
+    }
   }
 
   if (authPhase === "checking") {

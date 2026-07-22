@@ -337,6 +337,9 @@ export interface RunTable {
   command_id: string;
   environment_version_id: string;
   source_set_snapshot: GeneratedJsonObject;
+  conversation_base_seq: GeneratedInt8;
+  workspace_base_version_id: GeneratedNullable<string>;
+  pi_session_base_artifact_id: GeneratedNullable<string>;
   idempotency_key: string;
   trace_id: Generated<string>;
   state: RunState;
@@ -389,6 +392,35 @@ export interface RunAttemptTransitionTable {
   to_state: RunAttemptState;
   reason: string;
   occurred_at: GeneratedTimestamp;
+}
+
+export interface RunRewindTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  source_run_id: string;
+  source_attempt_id: string;
+  replacement_run_id: string;
+  conversation_boundary_seq: Int8;
+  workspace_base_version_id: string | null;
+  pi_session_base_artifact_id: string | null;
+  actor_user_id: string;
+  idempotency_key: string;
+  created_at: GeneratedTimestamp;
+}
+
+export interface ReviewBundleTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  workspace_id: string;
+  session_id: string;
+  run_id: string;
+  attempt_id: string;
+  workspace_version_id: string | null;
+  manifest: JsonObject;
+  manifest_sha256: string;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AgentNodeTable {
@@ -822,6 +854,8 @@ export interface Database {
   runs: RunTable;
   run_attempts: RunAttemptTable;
   run_attempt_transitions: RunAttemptTransitionTable;
+  run_rewinds: RunRewindTable;
+  review_bundles: ReviewBundleTable;
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
   supervisor_connections: SupervisorConnectionTable;

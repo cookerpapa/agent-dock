@@ -5,6 +5,7 @@ import type {
   OperationalAuditLogResource,
   OperationalInsightsResource,
   ProjectEnvironmentHistoryResource,
+  ReviewBundleResource,
   RunListResource,
   RunUsageResource,
   SessionContextResource,
@@ -34,7 +35,7 @@ type WorkspaceInspectorProps = {
   onClose: () => void;
   onError: (message: string) => void;
   onForked: (sessionId: string) => Promise<void>;
-  onRetry: (runId: string) => Promise<void>;
+  onRetry: (runId: string, sourceAttemptId: string) => Promise<void>;
   onSessionChanged: () => Promise<void>;
 };
 
@@ -155,6 +156,7 @@ export function WorkspaceInspector({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runUsage, setRunUsage] = useState<RunUsageResource | null>(null);
   const [testResults, setTestResults] = useState<TestResultListResource | null>(null);
+  const [reviewBundle, setReviewBundle] = useState<ReviewBundleResource | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [files, setFiles] = useState<readonly WorkspaceFileResource[]>([]);
   const [comparison, setComparison] = useState<WorkspaceVersionCompareResource | null>(null);
@@ -253,6 +255,7 @@ export function WorkspaceInspector({
     setSelectedEnvironmentVersionId(null);
     setEnvironmentRecipeText("");
     setSelectedRunId(null);
+    setReviewBundle(null);
     setSelectedVersionId(null);
     setFiles([]);
     setComparison(null);
@@ -275,6 +278,7 @@ export function WorkspaceInspector({
   }, [sessionId]);
 
   useEffect(() => {
+    setReviewBundle(null);
     if (selectedRunId === null) {
       setRunUsage(null);
       setTestResults(null);
@@ -423,10 +427,32 @@ export function WorkspaceInspector({
   }
 
   async function retrySelectedRun(): Promise<void> {
-    if (selectedRunId === null || mutation !== null) return;
+    if (
+      selectedRunId === null ||
+      selectedRun?.currentAttemptId === undefined ||
+      mutation !== null ||
+      !globalThis.confirm(
+        "Rewind the conversation and Workspace to this Run's recorded base, then execute the original prompt again?",
+      )
+    ) {
+      return;
+    }
     setMutation("retrying");
     try {
-      await onRetry(selectedRunId);
+      await onRetry(selectedRunId, selectedRun.currentAttemptId);
+      await refresh();
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function loadReviewBundle(): Promise<void> {
+    if (selectedRunId === null || mutation !== null) return;
+    setMutation("loading review bundle");
+    try {
+      setReviewBundle(await api.getRunReviewBundle(selectedRunId));
     } catch (error: unknown) {
       onError(failureMessage(error));
     } finally {
@@ -1008,12 +1034,20 @@ export function WorkspaceInspector({
                   busy ||
                   selectedRun === null ||
                   !TERMINAL_RETRY_STATES.has(selectedRun.state) ||
+                  selectedRun.projection === "superseded" ||
                   role === "viewer"
                 }
                 onClick={() => void retrySelectedRun()}
                 type="button"
               >
-                retry as new run
+                rewind &amp; retry
+              </button>
+              <button
+                disabled={selectedRun?.state !== "completed" || mutation !== null}
+                onClick={() => void loadReviewBundle()}
+                type="button"
+              >
+                review bundle
               </button>
             </div>
             <label className="inspector-field">
@@ -1024,7 +1058,8 @@ export function WorkspaceInspector({
               >
                 {runs?.runs.map((run) => (
                   <option key={run.runId} value={run.runId}>
-                    {shortId(run.runId)} · {run.state} · {String(run.attemptCount)} attempt(s)
+                    {shortId(run.runId)} · {run.state} · {run.projection} ·{" "}
+                    {String(run.attemptCount)} attempt(s)
                   </option>
                 ))}
               </select>
@@ -1035,12 +1070,25 @@ export function WorkspaceInspector({
               <>
                 <div className="inspector-metrics compact">
                   <Metric label="state" value={selectedRun.state} />
+                  <Metric label="projection" value={selectedRun.projection} />
                   <Metric label="attempts" value={String(selectedRun.attemptCount)} />
                   <Metric label="trace" value={shortId(selectedRun.traceId)} />
                 </div>
                 {selectedRun.failure ? (
                   <div className="inspector-warning">
                     {selectedRun.failure.code} · {selectedRun.failure.message ?? "no detail"}
+                  </div>
+                ) : null}
+                {selectedRun.supersededByRunId ? (
+                  <div className="inspector-note">
+                    Superseded by Run {shortId(selectedRun.supersededByRunId)}. Raw events remain
+                    append-only for audit.
+                  </div>
+                ) : null}
+                {selectedRun.rewoundFrom ? (
+                  <div className="inspector-note">
+                    Restored from Run {shortId(selectedRun.rewoundFrom.sourceRunId)} at durable
+                    event {String(selectedRun.rewoundFrom.conversationBoundarySeq)}.
                   </div>
                 ) : null}
                 <div className="attempt-list">
@@ -1050,8 +1098,8 @@ export function WorkspaceInspector({
                       open={attempt.attemptId === selectedRun.currentAttemptId}
                     >
                       <summary>
-                        attempt {String(attempt.attemptNumber)} · {attempt.state} · owner{" "}
-                        {attempt.claimOwnerId}
+                        attempt {String(attempt.attemptNumber)} · {attempt.state} ·{" "}
+                        {attempt.projection} · owner {attempt.claimOwnerId}
                       </summary>
                       <div className="attempt-detail">
                         <span>lease expires {timestampLabel(attempt.claimExpiresAt)}</span>
@@ -1073,6 +1121,47 @@ export function WorkspaceInspector({
                     </details>
                   ))}
                 </div>
+                {reviewBundle ? (
+                  <div className="review-bundle" aria-label="Immutable Run review bundle">
+                    <div className="inspector-subheading">immutable review bundle</div>
+                    <div className="inspector-metrics compact">
+                      <Metric label="integrity" value={shortId(reviewBundle.manifestSha256)} />
+                      <Metric
+                        label="changed files"
+                        value={String(reviewBundle.manifest.changes.changedPaths.length)}
+                      />
+                      <Metric label="tests" value={String(reviewBundle.manifest.tests.length)} />
+                      <Metric
+                        label="tokens"
+                        value={String(
+                          reviewBundle.manifest.usage.inputTokens +
+                            reviewBundle.manifest.usage.outputTokens,
+                        )}
+                      />
+                    </div>
+                    {reviewBundle.manifest.changes.changedPaths.length > 0 ? (
+                      <pre>{reviewBundle.manifest.changes.changedPaths.join("\n")}</pre>
+                    ) : (
+                      <p className="inspector-note">No Workspace path changed.</p>
+                    )}
+                    <pre>{reviewBundle.manifest.assistant.text}</pre>
+                    <div className="artifact-list">
+                      {reviewBundle.manifest.artifacts.map((artifact) => (
+                        <div key={artifact.artifactId}>
+                          <span>
+                            <strong>{artifact.fileName ?? artifact.kind}</strong>
+                            <small>
+                              {bytesLabel(artifact.sizeBytes)} · {shortId(artifact.sha256)}
+                            </small>
+                          </span>
+                          <button onClick={() => void downloadArtifact(artifact)} type="button">
+                            download
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </>
             )}
           </section>

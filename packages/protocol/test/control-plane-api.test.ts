@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalReviewBundleManifestJson,
   canonicalWorkspaceSourceSetJson,
   ControlPlaneApiValidationError,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
@@ -14,6 +15,7 @@ import {
   parseConversationListResource,
   parseControlPlaneApiError,
   parseCreateProjectRequest,
+  parseCreateRunRewindRequest,
   parseCreateSessionRequest,
   parseCreateTenantRegistrationRequest,
   parseCreateTurnCancellationRequest,
@@ -24,6 +26,8 @@ import {
   parseProjectResource,
   parseReplaceModelConfigurationRequest,
   parseRunResource,
+  parseRunRewindResource,
+  parseReviewBundleResource,
   parseSessionResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
@@ -169,6 +173,7 @@ describe("control-plane public API schemas", () => {
             mailboxPosition: 1,
             prompt: "repair it",
             state: "running",
+            projection: "canonical",
             acceptedAt: createdAt,
           },
         ],
@@ -187,6 +192,7 @@ describe("control-plane public API schemas", () => {
         turnId: "50000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",
         state: "running",
+        projection: "canonical",
         environment: ENVIRONMENT_SNAPSHOT,
         sourceSet: {
           schemaVersion: 1,
@@ -202,6 +208,7 @@ describe("control-plane public API schemas", () => {
             attemptId: "50000000-0000-4000-8000-000000000011",
             attemptNumber: 1,
             state: "running",
+            projection: "canonical",
             claimOwnerId: "control-plane-1",
             claimExpiresAt: "2026-07-19T00:01:00.000Z",
             sandboxId: "50000000-0000-4000-8000-000000000012",
@@ -569,6 +576,92 @@ describe("control-plane public API schemas", () => {
     );
     expect(() => parseCreateTurnCancellationRequest({ reason: "shutdown" })).toThrow(
       ControlPlaneApiValidationError,
+    );
+  });
+
+  it("validates explicit rewind boundaries and canonical immutable review manifests", () => {
+    const sourceAttemptId = "50000000-0000-4000-8000-000000000011";
+    expect(parseCreateRunRewindRequest({ sourceAttemptId })).toEqual({ sourceAttemptId });
+    const createdAt = "2026-07-19T00:00:00.000Z";
+    const acceptedTurn = {
+      runId: "50000000-0000-4000-8000-000000000020",
+      turnId: "50000000-0000-4000-8000-000000000021",
+      sessionId: "30000000-0000-4000-8000-000000000001",
+      commandId: "60000000-0000-4000-8000-000000000021",
+      mailboxPosition: 2,
+      state: "queued",
+      acceptedAt: createdAt,
+      replayed: false,
+    } as const;
+    expect(
+      parseRunRewindResource({
+        rewindId: "70000000-0000-4000-8000-000000000021",
+        sourceRunId: "50000000-0000-4000-8000-000000000010",
+        sourceAttemptId,
+        replacementRunId: acceptedTurn.runId,
+        conversationBoundarySeq: 0,
+        acceptedTurn,
+        replayed: false,
+        createdAt,
+      }),
+    ).toMatchObject({ conversationBoundarySeq: 0, replacementRunId: acceptedTurn.runId });
+
+    const manifest = {
+      schemaVersion: 1,
+      run: {
+        runId: acceptedTurn.runId,
+        traceId: "1".repeat(32),
+        projectId: "10000000-0000-4000-8000-000000000001",
+        workspaceId: "20000000-0000-4000-8000-000000000001",
+        sessionId: acceptedTurn.sessionId,
+        turnId: acceptedTurn.turnId,
+        attemptId: sourceAttemptId,
+        stopReason: "stop",
+        queuedAt: createdAt,
+        settledAt: createdAt,
+      },
+      environment: ENVIRONMENT_SNAPSHOT,
+      sourceSet: { schemaVersion: 1, entries: [{ root: ".", kind: "sample_java" }] },
+      attempts: [
+        {
+          attemptId: sourceAttemptId,
+          attemptNumber: 1,
+          state: "completed",
+          projection: "canonical",
+          claimedAt: createdAt,
+          settledAt: createdAt,
+        },
+      ],
+      assistant: {
+        text: "done",
+        textSha256: "a".repeat(64),
+        firstSeq: 1,
+        lastSeq: 2,
+        truncated: false,
+      },
+      changes: { changedPaths: ["src/App.ts"] },
+      tests: [],
+      artifacts: [],
+      usage: {
+        requests: 1,
+        inputTokens: 2,
+        outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costMicrousd: 4,
+      },
+      createdAt,
+    } as const;
+    expect(
+      parseReviewBundleResource({
+        reviewBundleId: "70000000-0000-4000-8000-000000000022",
+        manifestSha256: "b".repeat(64),
+        manifest,
+        createdAt,
+      }).manifest.assistant.text,
+    ).toBe("done");
+    expect(canonicalReviewBundleManifestJson(manifest)).toBe(
+      canonicalReviewBundleManifestJson({ ...manifest, usage: { ...manifest.usage } }),
     );
   });
 

@@ -16,6 +16,7 @@ import * as removePerRunTokenBudget from "./014_remove_per_run_token_budget.ts";
 import * as versionedProjectEnvironments from "./015_versioned_project_environments.ts";
 import * as environmentRecipesAndOperations from "./016_environment_recipes_and_operations.ts";
 import * as multiRepositorySourceSets from "./017_multi_repository_source_sets.ts";
+import * as attemptRewindsAndReviewBundles from "./018_attempt_rewinds_and_review_bundles.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -37,6 +38,7 @@ export const migrationProvider: MigrationProvider = {
       "015_versioned_project_environments": versionedProjectEnvironments,
       "016_environment_recipes_and_operations": environmentRecipesAndOperations,
       "017_multi_repository_source_sets": multiRepositorySourceSets,
+      "018_attempt_rewinds_and_review_bundles": attemptRewindsAndReviewBundles,
     };
   },
 };
@@ -125,3 +127,8 @@ export {
   down as downMultiRepositorySourceSets,
   up as upMultiRepositorySourceSets,
 } from "./017_multi_repository_source_sets.ts";
+
+export {
+  down as downAttemptRewindsAndReviewBundles,
+  up as upAttemptRewindsAndReviewBundles,
+} from "./018_attempt_rewinds_and_review_bundles.ts";

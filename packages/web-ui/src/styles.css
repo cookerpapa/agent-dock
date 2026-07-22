@@ -1112,6 +1112,27 @@ a {
   white-space: nowrap;
 }
 
+.review-bundle {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.review-bundle pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #111310;
+  color: var(--text);
+  font-size: 9px;
+  white-space: pre-wrap;
+}
+
 .context-layer-list > div > span {
   width: 23px;
   color: var(--green);

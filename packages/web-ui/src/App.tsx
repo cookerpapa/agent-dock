@@ -222,7 +222,14 @@ function TurnTranscript({ turn }: { turn: TurnView }) {
         </span>
         <span>{timeLabel(turn.acceptedAt)}</span>
         <StatusMark status={turn.status} />
+        {turn.projection === "superseded" ? <span>superseded</span> : null}
       </header>
+      {turn.rewoundFromRunId ? (
+        <div className="notification notification-info">
+          <span>rewind</span>
+          <p>Restored from Run {shortId(turn.rewoundFromRunId)}.</p>
+        </div>
+      ) : null}
       <section className="user-message" aria-label="User message">
         <div className="message-role">you</div>
         <p>{turn.prompt}</p>
@@ -720,8 +727,9 @@ export default function App() {
     }
   }
 
-  async function retryRun(runId: string): Promise<void> {
-    if (!canMutate || state.session === null || operation !== null || !sessionCanQueueTurn) return;
+  async function retryRun(runId: string, sourceAttemptId: string): Promise<void> {
+    if (!canMutate || state.session === null || operation !== null || currentTurn !== undefined)
+      return;
     const run = await api.getRun(runId);
     const original = state.turns.find((turn) => turn.turnId === run.turnId);
     if (original === undefined) {
@@ -734,14 +742,9 @@ export default function App() {
     setOperation("submitting");
     update({ type: "api.error.cleared" });
     try {
-      const accepted = await api.acceptTurn(
-        state.session.sessionId,
-        original.prompt,
-        newIdempotencyKey("retry"),
-        "off",
-      );
-      update({ type: "turn.accepted", accepted, prompt: original.prompt });
-      setPrompt(original.prompt);
+      const rewind = await api.rewindRun(runId, sourceAttemptId, newIdempotencyKey("retry"));
+      update({ type: "turn.accepted", accepted: rewind.acceptedTurn, prompt: original.prompt });
+      setPrompt("");
       setInspectorRefreshSignal((value) => value + 1);
       await refreshConversations();
     } finally {

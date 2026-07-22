@@ -13,13 +13,16 @@ import type {
   AcceptedTurnResource,
   ConversationDetailResource,
   ConversationListResource,
+  CreateRunRewindRequest,
   CreateProjectRequest,
   CreateTurnCancellationRequest,
   ProjectResource,
   ProjectEnvironmentResource,
   EnvironmentRuntimeSnapshot,
   RunListResource,
+  RunRewindResource,
   RunResource,
+  ReviewBundleResource,
   SessionResource,
   TestResultListResource,
   WorkspaceSourceResource,
@@ -32,9 +35,11 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   canonicalEnvironmentRecipeJson,
+  canonicalReviewBundleManifestJson,
   canonicalWorkspaceSourceSetJson,
   parseEnvironmentRecipe,
   parseEnvironmentValidationReport,
+  parseReviewBundleManifest,
   parseWorkspaceSourceSetSnapshot,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
@@ -83,6 +88,17 @@ type AcceptedTurnCancellationRow = {
   sessionId: string;
   commandCreatedAt: Date | string;
   commandPayload: Record<string, unknown>;
+};
+
+type AcceptedRunRewindRow = AcceptedTurnRow & {
+  rewindId: string;
+  sourceRunId: string;
+  sourceAttemptId: string;
+  replacementRunId: string;
+  conversationBoundarySeq: string;
+  workspaceBaseVersionId: string | null;
+  piSessionBaseArtifactId: string | null;
+  rewindCreatedAt: Date | string;
 };
 
 type ModelSnapshotRow = {
@@ -541,6 +557,32 @@ function acceptedTurnCancellationResource(
   };
 }
 
+function runRewindResource(
+  row: AcceptedRunRewindRow,
+  expectedRequestHash: string,
+  replayed: boolean,
+): RunRewindResource {
+  return {
+    rewindId: row.rewindId,
+    sourceRunId: row.sourceRunId,
+    sourceAttemptId: row.sourceAttemptId,
+    replacementRunId: row.replacementRunId,
+    conversationBoundarySeq: nonNegativeSafeInteger(
+      row.conversationBoundarySeq,
+      "Rewind conversation boundary",
+    ),
+    ...(row.workspaceBaseVersionId === null
+      ? {}
+      : { workspaceBaseVersionId: row.workspaceBaseVersionId }),
+    ...(row.piSessionBaseArtifactId === null
+      ? {}
+      : { piSessionBaseArtifactId: row.piSessionBaseArtifactId }),
+    acceptedTurn: acceptedTurnResource(row, expectedRequestHash, replayed),
+    replayed,
+    createdAt: isoTimestamp(row.rewindCreatedAt),
+  };
+}
+
 export class ControlPlaneStore {
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
@@ -970,6 +1012,16 @@ export class ControlPlaneStore {
           .onRef("run.turn_id", "=", "turn.id")
           .onRef("run.command_id", "=", "command.id"),
       )
+      .leftJoin("run_rewinds as source_rewind", (join) =>
+        join
+          .onRef("source_rewind.tenant_id", "=", "run.tenant_id")
+          .onRef("source_rewind.source_run_id", "=", "run.id"),
+      )
+      .leftJoin("run_rewinds as replacement_rewind", (join) =>
+        join
+          .onRef("replacement_rewind.tenant_id", "=", "run.tenant_id")
+          .onRef("replacement_rewind.replacement_run_id", "=", "run.id"),
+      )
       .select([
         "run.id as runId",
         "turn.id as turnId",
@@ -979,6 +1031,8 @@ export class ControlPlaneStore {
         "command.id as commandId",
         "command.mailbox_position as mailboxPosition",
         "command.created_at as acceptedAt",
+        "source_rewind.replacement_run_id as supersededByRunId",
+        "replacement_rewind.source_run_id as rewoundFromRunId",
       ])
       .where("command.tenant_id", "=", this.#tenantId)
       .where("command.session_id", "=", sessionId)
@@ -1004,6 +1058,10 @@ export class ControlPlaneStore {
         mailboxPosition: positiveSafeInteger(row.mailboxPosition, "Conversation mailbox position"),
         prompt: row.prompt,
         state: row.turnState,
+        projection:
+          row.supersededByRunId === null ? ("canonical" as const) : ("superseded" as const),
+        ...(row.supersededByRunId === null ? {} : { supersededByRunId: row.supersededByRunId }),
+        ...(row.rewoundFromRunId === null ? {} : { rewoundFromRunId: row.rewoundFromRunId }),
         acceptedAt: isoTimestamp(row.acceptedAt),
       };
     });
@@ -1139,6 +1197,43 @@ export class ControlPlaneStore {
     };
   }
 
+  async getReviewBundle(runId: string): Promise<ReviewBundleResource> {
+    const row = await this.#database
+      .selectFrom("review_bundles")
+      .select(["id", "manifest", "manifest_sha256", "created_at"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("run_id", "=", runId)
+      .executeTakeFirst();
+    if (row === undefined) {
+      const run = await this.#database
+        .selectFrom("runs")
+        .select("id")
+        .where("tenant_id", "=", this.#tenantId)
+        .where("id", "=", runId)
+        .executeTakeFirst();
+      throw new ControlPlaneStoreError(
+        "not_found",
+        run === undefined ? "Run was not found" : "Run Review Bundle is not available",
+      );
+    }
+    const manifest = parseReviewBundleManifest(row.manifest);
+    const digest = createHash("sha256")
+      .update(canonicalReviewBundleManifestJson(manifest), "utf8")
+      .digest("hex");
+    if (digest !== row.manifest_sha256) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Run Review Bundle failed its integrity check",
+      );
+    }
+    return {
+      reviewBundleId: row.id,
+      manifestSha256: row.manifest_sha256,
+      manifest,
+      createdAt: isoTimestamp(row.created_at),
+    };
+  }
+
   async acceptTurn(
     sessionId: string,
     idempotencyKey: string,
@@ -1165,6 +1260,422 @@ export class ControlPlaneStore {
       }
       return acceptedTurnResource(concurrentWinner, fingerprint, true);
     }
+  }
+
+  async acceptRunRewind(
+    runId: string,
+    idempotencyKey: string,
+    request: CreateRunRewindRequest,
+    actorUserId: string,
+  ): Promise<RunRewindResource> {
+    const requestHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          schemaVersion: 1,
+          kind: "run.rewind",
+          sourceRunId: runId,
+          sourceAttemptId: request.sourceAttemptId,
+        }),
+      )
+      .digest("hex");
+    const existing = await this.#findAcceptedRunRewind(idempotencyKey);
+    if (existing !== undefined) {
+      if (existing.sourceRunId !== runId || existing.sourceAttemptId !== request.sourceAttemptId) {
+        throw new ControlPlaneStoreError(
+          "idempotency_conflict",
+          "Idempotency-Key was already used for a different Run rewind",
+        );
+      }
+      return runRewindResource(existing, requestHash, true);
+    }
+
+    const rewindId = this.#idGenerator();
+    const turnId = this.#idGenerator();
+    const commandId = this.#idGenerator();
+    const replacementRunId = this.#idGenerator();
+    const outboxId = this.#idGenerator();
+    try {
+      return await this.#database.transaction().execute(async (transaction) => {
+        const policy = await this.#lockTenantPolicy(transaction);
+        const source = await transaction
+          .selectFrom("runs as run")
+          .innerJoin("turns as turn", (join) =>
+            join.onRef("turn.tenant_id", "=", "run.tenant_id").onRef("turn.id", "=", "run.turn_id"),
+          )
+          .innerJoin("commands as command", (join) =>
+            join
+              .onRef("command.tenant_id", "=", "run.tenant_id")
+              .onRef("command.id", "=", "run.command_id"),
+          )
+          .select([
+            "run.id as runId",
+            "run.project_id as projectId",
+            "run.workspace_id as workspaceId",
+            "run.session_id as sessionId",
+            "run.state as runState",
+            "run.current_attempt_id as currentAttemptId",
+            "run.environment_version_id as environmentVersionId",
+            "run.source_set_snapshot as sourceSetSnapshot",
+            "run.conversation_base_seq as conversationBaseSeq",
+            "run.workspace_base_version_id as workspaceBaseVersionId",
+            "run.pi_session_base_artifact_id as piSessionBaseArtifactId",
+            "turn.input_text as prompt",
+            "turn.model_profile_id as modelProfileId",
+            "turn.provider",
+            "turn.model_id as modelId",
+            "turn.thinking_level as thinkingLevel",
+            "turn.credential_binding_id as credentialBindingId",
+            "turn.credential_binding_version as credentialBindingVersion",
+            "command.mailbox_position as mailboxPosition",
+          ])
+          .where("run.tenant_id", "=", this.#tenantId)
+          .where("run.id", "=", runId)
+          .forUpdate(["run", "turn", "command"])
+          .executeTakeFirst();
+        if (source === undefined)
+          throw new ControlPlaneStoreError("not_found", "Run was not found");
+        if (
+          source.prompt === null ||
+          source.mailboxPosition === null ||
+          source.currentAttemptId === null
+        ) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Source Run is missing immutable execution metadata",
+          );
+        }
+        if (source.currentAttemptId !== request.sourceAttemptId) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Only the source Run's current Attempt can be rewound",
+          );
+        }
+        if (
+          source.runState !== "completed" &&
+          source.runState !== "failed" &&
+          source.runState !== "cancelled" &&
+          source.runState !== "timed_out"
+        ) {
+          throw new ControlPlaneStoreError("conflict", "Only a terminal Run can be rewound");
+        }
+        const priorRewind = await transaction
+          .selectFrom("run_rewinds")
+          .select("id")
+          .where("tenant_id", "=", this.#tenantId)
+          .where("source_run_id", "=", source.runId)
+          .executeTakeFirst();
+        if (priorRewind !== undefined) {
+          throw new ControlPlaneStoreError("conflict", "Run has already been rewound");
+        }
+        const session = await transaction
+          .selectFrom("sessions")
+          .select([
+            "id",
+            "state",
+            "next_mailbox_position",
+            "archived_at",
+            "current_workspace_version_id",
+          ])
+          .where("tenant_id", "=", this.#tenantId)
+          .where("id", "=", source.sessionId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        if (session.archived_at !== null) {
+          throw new ControlPlaneStoreError("conflict", "Archived Session cannot be rewound");
+        }
+        if (session.state !== "cold" && session.state !== "idle" && session.state !== "failed") {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Session must be idle before its latest Run can be rewound",
+          );
+        }
+        const nextMailboxPosition = positiveSafeInteger(
+          session.next_mailbox_position,
+          "Next mailbox position",
+        );
+        if (
+          positiveSafeInteger(source.mailboxPosition, "Source mailbox position") !==
+          nextMailboxPosition - 1
+        ) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Only the latest Run in a Session can be rewound",
+          );
+        }
+        const unsettled = await transaction
+          .selectFrom("turns")
+          .select((expression) => expression.fn.countAll<string>().as("count"))
+          .where("tenant_id", "=", this.#tenantId)
+          .where("state", "in", [
+            "queued",
+            "dispatching",
+            "running",
+            "waiting_approval",
+            "cancelling",
+          ])
+          .executeTakeFirstOrThrow();
+        if (
+          nonNegativeSafeInteger(unsettled.count, "Tenant unsettled-turn count") >=
+          policy.maximumUnsettledTurns
+        ) {
+          throw new ControlPlaneStoreError(
+            "tenant_quota_exceeded",
+            "Tenant unsettled-turn quota has been reached",
+          );
+        }
+
+        const baseVersion =
+          source.workspaceBaseVersionId === null
+            ? undefined
+            : await transaction
+                .selectFrom("workspace_versions as version")
+                .innerJoin("artifacts as workspace_artifact", (join) =>
+                  join
+                    .onRef("workspace_artifact.tenant_id", "=", "version.tenant_id")
+                    .onRef("workspace_artifact.id", "=", "version.workspace_artifact_id"),
+                )
+                .select(["version.id", "workspace_artifact.object_key as workspaceObjectKey"])
+                .where("version.tenant_id", "=", this.#tenantId)
+                .where("version.id", "=", source.workspaceBaseVersionId)
+                .where("version.session_id", "=", source.sessionId)
+                .where("version.state", "=", "settled")
+                .executeTakeFirst();
+        if (source.workspaceBaseVersionId !== null && baseVersion === undefined) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Rewind Workspace base is missing or unsettled",
+          );
+        }
+        const piArtifact =
+          source.piSessionBaseArtifactId === null
+            ? undefined
+            : await transaction
+                .selectFrom("artifacts")
+                .select(["id", "object_key"])
+                .where("tenant_id", "=", this.#tenantId)
+                .where("id", "=", source.piSessionBaseArtifactId)
+                .where("session_id", "=", source.sessionId)
+                .where("kind", "=", "pi_session_snapshot")
+                .executeTakeFirst();
+        if (source.piSessionBaseArtifactId !== null && piArtifact === undefined) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Rewind Pi Session base Artifact is missing",
+          );
+        }
+
+        await transaction
+          .insertInto("turns")
+          .values({
+            id: turnId,
+            tenant_id: this.#tenantId,
+            session_id: source.sessionId,
+            state: "queued",
+            input_kind: "prompt",
+            input_text: source.prompt,
+            model_profile_id: source.modelProfileId,
+            provider: source.provider,
+            model_id: source.modelId,
+            thinking_level: source.thinkingLevel,
+            credential_binding_id: source.credentialBindingId,
+            credential_binding_version: source.credentialBindingVersion,
+            stop_reason: null,
+            failure_code: null,
+            failure_message: null,
+            failure_retryable: null,
+          })
+          .executeTakeFirstOrThrow();
+        const command = await transaction
+          .insertInto("commands")
+          .values({
+            id: commandId,
+            tenant_id: this.#tenantId,
+            session_id: source.sessionId,
+            turn_id: turnId,
+            idempotency_key: idempotencyKey,
+            kind: "turn.execute",
+            state: "pending",
+            mailbox_position: nextMailboxPosition,
+            payload: {
+              schemaVersion: 1,
+              requestHash,
+              rewindId,
+              sourceRunId: source.runId,
+              sourceAttemptId: request.sourceAttemptId,
+            },
+            dispatched_at: null,
+            acknowledged_at: null,
+            completed_at: null,
+            failure_code: null,
+          })
+          .returning(["id", "created_at", "payload"])
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("runs")
+          .values({
+            id: replacementRunId,
+            trace_id: createHash("sha256")
+              .update("agent-dock.run-trace.v1\0", "utf8")
+              .update(replacementRunId, "utf8")
+              .digest("hex")
+              .slice(0, 32),
+            tenant_id: this.#tenantId,
+            project_id: source.projectId,
+            workspace_id: source.workspaceId,
+            session_id: source.sessionId,
+            turn_id: turnId,
+            command_id: command.id,
+            environment_version_id: source.environmentVersionId,
+            source_set_snapshot: source.sourceSetSnapshot,
+            conversation_base_seq: source.conversationBaseSeq,
+            workspace_base_version_id: source.workspaceBaseVersionId,
+            pi_session_base_artifact_id: source.piSessionBaseArtifactId,
+            idempotency_key: idempotencyKey,
+            state: "queued",
+            current_attempt_id: null,
+            attempt_count: 0,
+            stop_reason: null,
+            failure_code: null,
+            failure_message: null,
+            failure_retryable: null,
+            started_at: null,
+            settled_at: null,
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("run_rewinds")
+          .values({
+            id: rewindId,
+            tenant_id: this.#tenantId,
+            session_id: source.sessionId,
+            source_run_id: source.runId,
+            source_attempt_id: request.sourceAttemptId,
+            replacement_run_id: replacementRunId,
+            conversation_boundary_seq: source.conversationBaseSeq,
+            workspace_base_version_id: source.workspaceBaseVersionId,
+            pi_session_base_artifact_id: source.piSessionBaseArtifactId,
+            actor_user_id: actorUserId,
+            idempotency_key: idempotencyKey,
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("outbox")
+          .values({
+            id: outboxId,
+            tenant_id: this.#tenantId,
+            aggregate_type: "session",
+            aggregate_id: source.sessionId,
+            topic: TURN_COMMAND_OUTBOX_TOPIC,
+            payload: {
+              schemaVersion: 1,
+              commandId: command.id,
+              sessionId: source.sessionId,
+              turnId,
+              kind: "turn.execute",
+            },
+            published_at: null,
+            last_error: null,
+          })
+          .executeTakeFirstOrThrow();
+        const sessionUpdate = await transaction
+          .updateTable("sessions")
+          .set({
+            state: session.state === "failed" ? "cold" : session.state,
+            current_workspace_version_id: source.workspaceBaseVersionId,
+            workspace_snapshot_key: baseVersion?.workspaceObjectKey ?? null,
+            pi_session_snapshot_key: piArtifact?.object_key ?? null,
+            next_mailbox_position: sql<string>`${sql.ref("next_mailbox_position")} + 1`,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: sql<Date>`now()`,
+            last_active_at: sql<Date>`now()`,
+          })
+          .where("tenant_id", "=", this.#tenantId)
+          .where("id", "=", source.sessionId)
+          .where("next_mailbox_position", "=", String(nextMailboxPosition))
+          .executeTakeFirst();
+        if (sessionUpdate.numUpdatedRows !== 1n) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Session rewind could not atomically restore its base",
+          );
+        }
+        return runRewindResource(
+          {
+            rewindId,
+            sourceRunId: source.runId,
+            sourceAttemptId: request.sourceAttemptId,
+            replacementRunId,
+            conversationBoundarySeq: source.conversationBaseSeq,
+            workspaceBaseVersionId: source.workspaceBaseVersionId,
+            piSessionBaseArtifactId: source.piSessionBaseArtifactId,
+            runId: replacementRunId,
+            commandId: command.id,
+            mailboxPosition: String(nextMailboxPosition),
+            turnId,
+            sessionId: source.sessionId,
+            commandCreatedAt: command.created_at,
+            commandPayload: command.payload,
+            rewindCreatedAt: command.created_at,
+          },
+          requestHash,
+          false,
+        );
+      });
+    } catch (error: unknown) {
+      if (
+        !isPostgresConstraint(error, "commands_session_idempotency_unique") &&
+        !isPostgresConstraint(error, "run_rewinds_session_key_unique")
+      ) {
+        throw error;
+      }
+      const concurrentWinner = await this.#findAcceptedRunRewind(idempotencyKey);
+      if (
+        concurrentWinner === undefined ||
+        concurrentWinner.sourceRunId !== runId ||
+        concurrentWinner.sourceAttemptId !== request.sourceAttemptId
+      ) {
+        throw new ControlPlaneStoreError(
+          "idempotency_conflict",
+          "Idempotency-Key was already used for a different command",
+        );
+      }
+      return runRewindResource(concurrentWinner, requestHash, true);
+    }
+  }
+
+  async #findAcceptedRunRewind(idempotencyKey: string): Promise<AcceptedRunRewindRow | undefined> {
+    return this.#database
+      .selectFrom("run_rewinds as rewind")
+      .innerJoin("runs as replacement", (join) =>
+        join
+          .onRef("replacement.tenant_id", "=", "rewind.tenant_id")
+          .onRef("replacement.id", "=", "rewind.replacement_run_id"),
+      )
+      .innerJoin("commands as command", (join) =>
+        join
+          .onRef("command.tenant_id", "=", "replacement.tenant_id")
+          .onRef("command.id", "=", "replacement.command_id"),
+      )
+      .select([
+        "rewind.id as rewindId",
+        "rewind.source_run_id as sourceRunId",
+        "rewind.source_attempt_id as sourceAttemptId",
+        "rewind.replacement_run_id as replacementRunId",
+        "rewind.conversation_boundary_seq as conversationBoundarySeq",
+        "rewind.workspace_base_version_id as workspaceBaseVersionId",
+        "rewind.pi_session_base_artifact_id as piSessionBaseArtifactId",
+        "rewind.created_at as rewindCreatedAt",
+        "replacement.id as runId",
+        "replacement.turn_id as turnId",
+        "replacement.session_id as sessionId",
+        "command.id as commandId",
+        "command.mailbox_position as mailboxPosition",
+        "command.created_at as commandCreatedAt",
+        "command.payload as commandPayload",
+      ])
+      .where("rewind.tenant_id", "=", this.#tenantId)
+      .where("rewind.idempotency_key", "=", idempotencyKey)
+      .executeTakeFirst() as Promise<AcceptedRunRewindRow | undefined>;
   }
 
   async acceptEnvironmentValidationTurn(
@@ -1247,6 +1758,20 @@ export class ControlPlaneStore {
       .orderBy("occurred_at", "asc")
       .orderBy("id", "asc")
       .execute();
+    const [rewoundFrom, rewoundBy] = await Promise.all([
+      this.#database
+        .selectFrom("run_rewinds")
+        .select(["source_run_id", "source_attempt_id", "conversation_boundary_seq"])
+        .where("tenant_id", "=", this.#tenantId)
+        .where("replacement_run_id", "=", run.id)
+        .executeTakeFirst(),
+      this.#database
+        .selectFrom("run_rewinds")
+        .select("replacement_run_id")
+        .where("tenant_id", "=", this.#tenantId)
+        .where("source_run_id", "=", run.id)
+        .executeTakeFirst(),
+    ]);
     const optionalTimestamp = (value: Date | string | null): string | undefined =>
       value === null ? undefined : isoTimestamp(value);
     const transitionRank: Record<string, number> = {
@@ -1287,6 +1812,20 @@ export class ControlPlaneStore {
       environment: environmentSnapshot(run),
       sourceSet: parseWorkspaceSourceSetSnapshot(run.source_set_snapshot),
       state: run.state,
+      projection: rewoundBy === undefined ? "canonical" : "superseded",
+      ...(rewoundBy === undefined ? {} : { supersededByRunId: rewoundBy.replacement_run_id }),
+      ...(rewoundFrom === undefined
+        ? {}
+        : {
+            rewoundFrom: {
+              sourceRunId: rewoundFrom.source_run_id,
+              sourceAttemptId: rewoundFrom.source_attempt_id,
+              conversationBoundarySeq: nonNegativeSafeInteger(
+                rewoundFrom.conversation_boundary_seq,
+                "Rewind conversation boundary",
+              ),
+            },
+          }),
       traceId: run.trace_id,
       attemptCount: nonNegativeSafeInteger(run.attempt_count, "Run attempt count"),
       ...(run.current_attempt_id === null ? {} : { currentAttemptId: run.current_attempt_id }),
@@ -1302,7 +1841,7 @@ export class ControlPlaneStore {
         ? {}
         : { settledAt: optionalTimestamp(run.settled_at)! }),
       updatedAt: isoTimestamp(run.updated_at),
-      attempts: attempts.map((attempt) => {
+      attempts: attempts.map((attempt, index) => {
         const attemptFailure = failure(
           attempt.failure_code,
           attempt.failure_message,
@@ -1312,6 +1851,13 @@ export class ControlPlaneStore {
           attemptId: attempt.id,
           attemptNumber: positiveSafeInteger(String(attempt.attempt_number), "Run attempt number"),
           state: attempt.state,
+          projection:
+            rewoundBy === undefined && attempt.id === run.current_attempt_id
+              ? "canonical"
+              : "superseded",
+          ...(attempt.id === run.current_attempt_id || attempts[index + 1] === undefined
+            ? {}
+            : { supersededByAttemptId: attempts[index + 1]!.id }),
           claimOwnerId: attempt.claim_owner_id,
           claimExpiresAt: isoTimestamp(attempt.claim_expires_at),
           ...(attempt.sandbox_id === null ? {} : { sandboxId: attempt.sandbox_id }),
@@ -1428,7 +1974,10 @@ export class ControlPlaneStore {
           "workspace_id",
           "desired_model_profile_id",
           "state",
+          "next_event_seq",
           "next_mailbox_position",
+          "current_workspace_version_id",
+          "pi_session_snapshot_key",
           "archived_at",
         ])
         .where("tenant_id", "=", this.#tenantId)
@@ -1492,6 +2041,23 @@ export class ControlPlaneStore {
         session.project_id,
         session.workspace_id,
       );
+      const piSessionBaseArtifact =
+        session.pi_session_snapshot_key === null
+          ? undefined
+          : await transaction
+              .selectFrom("artifacts")
+              .select("id")
+              .where("tenant_id", "=", this.#tenantId)
+              .where("session_id", "=", session.id)
+              .where("kind", "=", "pi_session_snapshot")
+              .where("object_key", "=", session.pi_session_snapshot_key)
+              .executeTakeFirst();
+      if (session.pi_session_snapshot_key !== null && piSessionBaseArtifact === undefined) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Session Pi snapshot does not reference a durable Artifact",
+        );
+      }
 
       await transaction
         .insertInto("turns")
@@ -1578,6 +2144,12 @@ export class ControlPlaneStore {
           source_set_snapshot: sql<Record<string, unknown>>`${canonicalWorkspaceSourceSetJson(
             sourceSet,
           )}::jsonb`,
+          conversation_base_seq: Math.max(
+            0,
+            positiveSafeInteger(session.next_event_seq, "Next event sequence") - 1,
+          ),
+          workspace_base_version_id: session.current_workspace_version_id,
+          pi_session_base_artifact_id: piSessionBaseArtifact?.id ?? null,
           idempotency_key: idempotencyKey,
           state: "queued",
           current_attempt_id: null,

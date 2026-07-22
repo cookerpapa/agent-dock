@@ -139,10 +139,33 @@ If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not
 treated as current state.
 
+The successful terminal transaction also creates one immutable Review Bundle
+for the current Attempt. Its canonical manifest links the final assistant text,
+Workspace/patch identities, changed paths, tests, bounded Artifact metadata,
+environment/source snapshots, Attempt history and usage. The database rejects
+update/delete and every read verifies the stored SHA-256. Object-store keys and
+active HTML are not part of the public manifest.
+
 Rollback never edits a historical version. An idle Session moves its current
 pointer to an existing settled version under an expected-current-version CAS;
 the next activation restores that version. A fork creates a new cold Session
 from an immutable version. Both write tenant-scoped operation audit records.
+
+## Attempt-aware rewind
+
+An explicit rewind is not an automatic shell retry. It is allowed only for the
+latest terminal Run and exact current Attempt while the Session is idle. The
+source Run recorded its conversation sequence, Workspace version and Pi
+snapshot before execution. One actor-bound transaction restores those bases and
+appends a replacement Turn/Command/Run with the same immutable prompt, model,
+environment and repository set.
+
+The source events and Attempts remain durable but project as `superseded`; the
+replacement Run projects as `canonical` with a link to the rewind boundary.
+Browser reconnect reconstructs that projection from PostgreSQL. A Sandbox warm
+cache whose committed Workspace revision differs from the restored base cannot
+be reused. Older non-latest work must use the separate Workspace fork operation
+rather than pretending process state can be rewound.
 
 ## Cancellation
 
