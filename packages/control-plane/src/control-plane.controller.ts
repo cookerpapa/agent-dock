@@ -14,6 +14,8 @@ import {
 } from "@nestjs/common";
 import {
   parseAcceptTurnRequest,
+  parseActivateProjectEnvironmentVersionRequest,
+  parseCreateProjectEnvironmentVersionRequest,
   parseLoginAccountRequest,
   parseRegisterAccountRequest,
   parseArchiveSessionRequest,
@@ -40,6 +42,7 @@ import {
   type GitHubInstallationResource,
   type GitHubPullRequestDeliveryResource,
   type ProjectResource,
+  type ProjectEnvironmentHistoryResource,
   type ModelConfigurationResource,
   type ModelGovernanceResource,
   type OperationalAuditLogResource,
@@ -71,6 +74,7 @@ import { WorkspaceVersionService } from "./workspace-version-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";
 import { OperationalInsightsService } from "./operational-insights-service.ts";
 import { readWebSessionCookie, WebAuthenticationService } from "./web-authentication.ts";
+import { ProjectEnvironmentService } from "./project-environment-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -92,6 +96,8 @@ export class ControlPlaneController {
     private readonly githubIntegration: GitHubIntegrationService,
     @Inject(WebAuthenticationService)
     private readonly webAuthentication: WebAuthenticationService,
+    @Inject(ProjectEnvironmentService)
+    private readonly projectEnvironments: ProjectEnvironmentService,
   ) {}
 
   @Post("auth/register")
@@ -190,6 +196,67 @@ export class ControlPlaneController {
   @Get("operations/audit")
   async getOperationalAudit(@Req() request: FastifyRequest): Promise<OperationalAuditLogResource> {
     return this.operationalInsights.audit(this.tenantRequestContext.requireOwner(request));
+  }
+
+  @Get("projects/:projectId/environments")
+  async getProjectEnvironments(
+    @Req() request: FastifyRequest,
+    @Param("projectId") projectIdValue: unknown,
+  ): Promise<ProjectEnvironmentHistoryResource> {
+    return this.projectEnvironments.history(
+      this.tenantRequestContext.resolve(request),
+      parseUuidPathParameter(projectIdValue, "projectId"),
+    );
+  }
+
+  @Post("projects/:projectId/environments")
+  async createProjectEnvironment(
+    @Req() request: FastifyRequest,
+    @Param("projectId") projectIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<ProjectEnvironmentHistoryResource> {
+    return this.projectEnvironments.createVersion(
+      this.tenantRequestContext.requireOwner(request),
+      parseUuidPathParameter(projectIdValue, "projectId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseCreateProjectEnvironmentVersionRequest(body),
+    );
+  }
+
+  @Post("projects/:projectId/environments/:environmentVersionId/activate")
+  async activateProjectEnvironment(
+    @Req() request: FastifyRequest,
+    @Param("projectId") projectIdValue: unknown,
+    @Param("environmentVersionId") environmentVersionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<ProjectEnvironmentHistoryResource> {
+    return this.projectEnvironments.activateVersion(
+      this.tenantRequestContext.requireOwner(request),
+      parseUuidPathParameter(projectIdValue, "projectId"),
+      parseUuidPathParameter(environmentVersionIdValue, "environmentVersionId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseActivateProjectEnvironmentVersionRequest(body),
+    );
+  }
+
+  @Post("sessions/:sessionId/environments/:environmentVersionId/validate")
+  async validateProjectEnvironment(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Param("environmentVersionId") environmentVersionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+  ): Promise<AcceptedTurnResource> {
+    const identity = this.tenantRequestContext.requireOwner(request);
+    return this.controlPlaneStores
+      .forIdentity(identity)
+      .acceptEnvironmentValidationTurn(
+        parseUuidPathParameter(sessionIdValue, "sessionId"),
+        parseUuidPathParameter(environmentVersionIdValue, "environmentVersionId"),
+        identity.userId,
+        parseIdempotencyKey(idempotencyKeyValue),
+      );
   }
 
   @Get("runs/:runId/usage")

@@ -1,10 +1,13 @@
 import {
+  canonicalEnvironmentRecipeJson,
   isExpectedDefaultToolchain,
   MAX_TOOL_COMMAND_BYTES,
   MAX_TOOL_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
   parseToolWorkerInput,
   type EnvironmentRuntimeSnapshot,
+  type EnvironmentRecipeCommand,
+  type EnvironmentRecipeCommandResult,
   type EnvironmentToolName,
   type EnvironmentToolchainReport,
   type ToolSandboxOperationRequest,
@@ -19,6 +22,7 @@ import {
   restoreWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { access, cp, lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -144,6 +148,16 @@ export async function validateToolEnvironment(
       false,
     );
   }
+  const recipeSha256 = createHash("sha256")
+    .update(canonicalEnvironmentRecipeJson(environment.recipe))
+    .digest("hex");
+  if (recipeSha256 !== environment.recipeSha256) {
+    throw new ToolWorkerError(
+      "environment_recipe_mismatch",
+      "Tool Sandbox environment recipe did not match the accepted Run",
+      false,
+    );
+  }
   const probes: readonly [EnvironmentToolName, string, readonly string[]][] = [
     ["node", "/usr/local/bin/node", ["--version"]],
     ["java", "/usr/bin/java", ["-version"]],
@@ -158,7 +172,9 @@ export async function validateToolEnvironment(
     profileVersion: environment.profileVersion,
     imageRevision: environment.imageRevision,
     specSha256: environment.specSha256,
+    recipeSha256,
     tools,
+    recipeCommands: [],
   };
   if (!isExpectedDefaultToolchain(report)) {
     throw new ToolWorkerError(
@@ -168,6 +184,163 @@ export async function validateToolEnvironment(
     );
   }
   return report;
+}
+
+type EnvironmentCommandExecution = {
+  exitCode: number | null;
+  output: Buffer;
+  timedOut: boolean;
+};
+
+async function executeEnvironmentCommand(
+  command: EnvironmentRecipeCommand,
+  workspaceDirectory: string,
+): Promise<EnvironmentCommandExecution> {
+  if (command.network === "dependency") {
+    throw new ToolWorkerError(
+      "environment_dependency_network_unavailable",
+      `Environment command ${command.id} requires an unavailable dependency network policy`,
+      false,
+    );
+  }
+  const workspaceRoot = await realpath(workspaceDirectory).catch(() => {
+    throw new ToolWorkerError(
+      "environment_workspace_unavailable",
+      "Environment workspace was unavailable",
+      false,
+    );
+  });
+  const cwd = resolve(workspaceRoot, command.cwd);
+  const fromRoot = relative(workspaceRoot, cwd);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new ToolWorkerError(
+      "environment_command_path_escape",
+      `Environment command ${command.id} escaped the workspace`,
+      false,
+    );
+  }
+  const canonicalCwd = await realpath(cwd).catch(() => {
+    throw new ToolWorkerError(
+      "environment_command_working_directory_missing",
+      `Environment command ${command.id} working directory was unavailable`,
+      false,
+    );
+  });
+  const canonicalFromRoot = relative(workspaceRoot, canonicalCwd);
+  if (
+    canonicalFromRoot === ".." ||
+    canonicalFromRoot.startsWith(`..${sep}`) ||
+    isAbsolute(canonicalFromRoot)
+  ) {
+    throw new ToolWorkerError(
+      "environment_command_path_escape",
+      `Environment command ${command.id} escaped the workspace`,
+      false,
+    );
+  }
+  const child = spawn("/bin/bash", ["--noprofile", "--norc", "-lc", command.command], {
+    cwd: canonicalCwd,
+    detached: process.platform !== "win32",
+    env: safeToolEnvironment(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = Buffer.alloc(0);
+  let overflow = false;
+  let timedOut = false;
+  const append = (chunk: Buffer): void => {
+    if (overflow) return;
+    output = Buffer.concat([output, chunk]);
+    if (output.byteLength > MAX_TOOL_OUTPUT_BYTES) {
+      overflow = true;
+      terminateProcessGroup(child, "SIGKILL");
+    }
+  };
+  child.stdout?.on("data", append);
+  child.stderr?.on("data", append);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    terminateProcessGroup(child, "SIGTERM");
+    const force = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), 250);
+    force.unref();
+  }, command.timeoutMs);
+  timer.unref();
+  try {
+    const result = await new Promise<{ exitCode: number | null }>(
+      (resolvePromise, rejectPromise) => {
+        child.once("error", () =>
+          rejectPromise(
+            new ToolWorkerError(
+              "environment_command_start_failed",
+              `Environment command ${command.id} could not start`,
+              false,
+            ),
+          ),
+        );
+        child.once("close", (exitCode) => resolvePromise({ exitCode }));
+      },
+    );
+    if (overflow) {
+      throw new ToolWorkerError(
+        "environment_command_output_limit",
+        `Environment command ${command.id} exceeded its output limit`,
+        false,
+      );
+    }
+    return { exitCode: result.exitCode, output, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function executeEnvironmentRecipe(
+  environment: EnvironmentRuntimeSnapshot,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): Promise<EnvironmentRecipeCommandResult[]> {
+  const recipeSha256 = createHash("sha256")
+    .update(canonicalEnvironmentRecipeJson(environment.recipe))
+    .digest("hex");
+  if (recipeSha256 !== environment.recipeSha256) {
+    throw new ToolWorkerError(
+      "environment_recipe_mismatch",
+      "Tool Sandbox environment recipe did not match the accepted Run",
+      false,
+    );
+  }
+  const results: EnvironmentRecipeCommandResult[] = [];
+  const phases = [
+    ["setup", environment.recipe.setupCommands],
+    ["verification", environment.recipe.verificationCommands],
+  ] as const;
+  for (const [phase, commands] of phases) {
+    for (const command of commands) {
+      const startedAt = Date.now();
+      const result = await executeEnvironmentCommand(command, workspaceDirectory);
+      if (result.timedOut) {
+        throw new ToolWorkerError(
+          "environment_command_timeout",
+          `Environment command ${command.id} timed out`,
+          false,
+        );
+      }
+      if (result.exitCode !== 0) {
+        throw new ToolWorkerError(
+          phase === "setup"
+            ? "environment_setup_command_failed"
+            : "environment_verification_command_failed",
+          `Environment command ${command.id} failed`,
+          false,
+        );
+      }
+      results.push({
+        id: command.id,
+        phase,
+        exitCode: result.exitCode,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        outputSha256: createHash("sha256").update(result.output).digest("hex"),
+      });
+    }
+  }
+  return results;
 }
 
 export function safeToolEnvironment(): NodeJS.ProcessEnv {
@@ -568,6 +741,7 @@ export async function runToolWorker(): Promise<void> {
         const seed =
           message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
         await prepareToolWorkspace(seed, message.workspaceRestore);
+        environment.recipeCommands = await executeEnvironmentRecipe(message.environment);
         initialized = true;
         await writeOutput({
           toolWorkerProtocolVersion: 1,

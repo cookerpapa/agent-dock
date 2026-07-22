@@ -6,6 +6,10 @@ import type {
   EnvironmentValidationReport,
   ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -49,6 +53,8 @@ const ENVIRONMENT: EnvironmentRuntimeSnapshot = {
   profileVersion: "1",
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 };
 
 const ENVIRONMENT_VALIDATION: EnvironmentValidationReport = {
@@ -56,6 +62,7 @@ const ENVIRONMENT_VALIDATION: EnvironmentValidationReport = {
   profileVersion: "1",
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   isolationBoundary: "gvisor",
   runtime: "runsc",
   networkMode: "deny_all",
@@ -67,6 +74,7 @@ const ENVIRONMENT_VALIDATION: EnvironmentValidationReport = {
     { name: "python", version: "Python 3.11.2" },
     { name: "git", version: "git version 2.39.5" },
   ],
+  recipeCommands: [],
 };
 
 let pglite: PGlite;

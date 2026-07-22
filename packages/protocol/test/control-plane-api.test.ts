@@ -3,6 +3,8 @@ import {
   ControlPlaneApiValidationError,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
@@ -35,6 +37,8 @@ const ENVIRONMENT_SNAPSHOT = {
   profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   imageRevision: "sha-0123456789abcdef",
   specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } as const;
 
 describe("control-plane public API schemas", () => {
@@ -50,6 +54,7 @@ describe("control-plane public API schemas", () => {
         environment: {
           ...ENVIRONMENT_SNAPSHOT,
           state: "pending",
+          active: true,
           createdAt,
         },
       }),
@@ -140,6 +145,7 @@ describe("control-plane public API schemas", () => {
           environment: {
             ...ENVIRONMENT_SNAPSHOT,
             state: "pending",
+            active: true,
             createdAt,
           },
         },

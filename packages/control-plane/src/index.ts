@@ -39,6 +39,7 @@ export {
 
 export { ModelGovernanceError, ModelGovernanceService } from "./model-governance-service.ts";
 export { OperationalInsightsService } from "./operational-insights-service.ts";
+export { ProjectEnvironmentService } from "./project-environment-service.ts";
 
 export {
   TenantAdministrationError,

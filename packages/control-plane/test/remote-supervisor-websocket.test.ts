@@ -161,6 +161,8 @@ function executionRequest(seed: SeededTurn): TurnExecutionRequest {
       profileVersion: seed.project.environment.profileVersion,
       imageRevision: seed.project.environment.imageRevision,
       specSha256: seed.project.environment.specSha256,
+      recipe: seed.project.environment.recipe,
+      recipeSha256: seed.project.environment.recipeSha256,
     },
   };
 }

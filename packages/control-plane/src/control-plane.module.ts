@@ -24,6 +24,7 @@ import {
   type TrustedArtifactReader,
 } from "./workspace-version-service.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
+import { ProjectEnvironmentService } from "./project-environment-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -143,6 +144,14 @@ export class ControlPlaneModule {
           useValue: workspaceVersions,
         },
         {
+          provide: ProjectEnvironmentService,
+          useValue: new ProjectEnvironmentService({
+            database: options.database,
+            imageRevision: options.environmentImageRevision ?? "development",
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
+        {
           provide: GitHubIntegrationService,
           useValue: new GitHubIntegrationService({
             database: options.database,
@@ -171,6 +180,7 @@ export class ControlPlaneModule {
         SessionEventHub,
         SessionEventStream,
         WorkspaceVersionService,
+        ProjectEnvironmentService,
         GitHubIntegrationService,
       ],
     };

@@ -259,6 +259,7 @@ export const OperationalAuditEventResourceSchema = Type.Object(
       Type.Literal("workspace"),
       Type.Literal("model"),
       Type.Literal("github"),
+      Type.Literal("environment"),
     ]),
     action: Type.String({ minLength: 1, maxLength: 128 }),
     state: Type.String({ minLength: 1, maxLength: 128 }),

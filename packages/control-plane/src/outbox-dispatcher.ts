@@ -591,6 +591,8 @@ export class OutboxDispatcher {
           "environment.profile_version as environmentProfileVersion",
           "environment.image_revision as environmentImageRevision",
           "environment.spec_sha256 as environmentSpecSha256",
+          "environment.recipe as environmentRecipe",
+          "environment.recipe_sha256 as environmentRecipeSha256",
           "policy.maximum_model_requests_per_run as maximumModelRequests",
           "policy.maximum_cost_microusd_per_run as maximumCostMicrousd",
           "policy.daily_token_budget as dailyTokenBudget",
@@ -909,6 +911,8 @@ export class OutboxDispatcher {
             profileVersion: row.environmentProfileVersion,
             imageRevision: row.environmentImageRevision,
             specSha256: row.environmentSpecSha256,
+            recipe: row.environmentRecipe,
+            recipeSha256: row.environmentRecipeSha256,
           }),
           budgets: {
             maximumModelRequests: safeNonNegativeInteger(
@@ -1279,6 +1283,39 @@ export class OutboxDispatcher {
         }
       }
       const timedOut = /(?:^|_)timeout$/.test(failure.code) || failure.code === "pi_timeout";
+      if (failure.code.startsWith("environment_")) {
+        await transaction
+          .insertInto("environment_validations")
+          .values({
+            id: this.#idGenerator(),
+            tenant_id: claim.request.tenantId,
+            project_id: claim.request.projectId,
+            environment_version_id: claim.request.environment.environmentVersionId,
+            run_id: claim.request.runId,
+            attempt_id: claim.request.attemptId,
+            status: "failed",
+            report: null,
+            failure_code: failure.code,
+            validated_at: now,
+          })
+          .onConflict((conflict) =>
+            conflict.columns(["environment_version_id", "run_id", "attempt_id"]).doNothing(),
+          )
+          .executeTakeFirst();
+        await transaction
+          .updateTable("environment_versions")
+          .set({
+            state: "failed",
+            failure_code: failure.code,
+            validated_at: null,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", claim.request.tenantId)
+          .where("project_id", "=", claim.request.projectId)
+          .where("id", "=", claim.request.environment.environmentVersionId)
+          .where("recipe_sha256", "=", claim.request.environment.recipeSha256)
+          .executeTakeFirstOrThrow();
+      }
       await transitionCurrentRunAttempt(
         transaction,
         {

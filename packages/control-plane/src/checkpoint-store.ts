@@ -396,7 +396,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       environment.profileKey !== command.payload.environment.profileKey ||
       environment.profileVersion !== command.payload.environment.profileVersion ||
       environment.imageRevision !== command.payload.environment.imageRevision ||
-      environment.specSha256 !== command.payload.environment.specSha256
+      environment.specSha256 !== command.payload.environment.specSha256 ||
+      environment.recipeSha256 !== command.payload.environment.recipeSha256
     ) {
       throw new SandboxCheckpointStoreError(
         "environment_validation_mismatch",
@@ -548,7 +549,12 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
           .executeTakeFirstOrThrow();
         const environmentUpdate = await transaction
           .updateTable("environment_versions")
-          .set({ state: "validated", validated_at: now, updated_at: now })
+          .set({
+            state: "validated",
+            failure_code: null,
+            validated_at: now,
+            updated_at: now,
+          })
           .where("tenant_id", "=", command.payload.tenantId)
           .where("project_id", "=", command.payload.projectId)
           .where("id", "=", command.payload.environment.environmentVersionId)
@@ -556,6 +562,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
           .where("profile_version", "=", environment.profileVersion)
           .where("image_revision", "=", environment.imageRevision)
           .where("spec_sha256", "=", environment.specSha256)
+          .where("recipe_sha256", "=", environment.recipeSha256)
           .executeTakeFirst();
         if (environmentUpdate.numUpdatedRows !== 1n) {
           throw new SandboxCheckpointStoreError(

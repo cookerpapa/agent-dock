@@ -12,6 +12,7 @@ import type {
   ToolSandboxReleaseResponse,
 } from "@agent-dock/protocol";
 import {
+  canonicalEnvironmentRecipeJson,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
@@ -90,7 +91,9 @@ function sameEnvironment(
     left.profileKey === right.profileKey &&
     left.profileVersion === right.profileVersion &&
     left.imageRevision === right.imageRevision &&
-    left.specSha256 === right.specSha256
+    left.specSha256 === right.specSha256 &&
+    left.recipeSha256 === right.recipeSha256 &&
+    canonicalEnvironmentRecipeJson(left.recipe) === canonicalEnvironmentRecipeJson(right.recipe)
   );
 }
 
@@ -144,7 +147,8 @@ function handleMatches(
     handle.environmentValidation.profileKey === environment.profileKey &&
     handle.environmentValidation.profileVersion === environment.profileVersion &&
     handle.environmentValidation.imageRevision === environment.imageRevision &&
-    handle.environmentValidation.specSha256 === environment.specSha256
+    handle.environmentValidation.specSha256 === environment.specSha256 &&
+    handle.environmentValidation.recipeSha256 === environment.recipeSha256
   );
 }
 
@@ -234,7 +238,10 @@ export class ToolSandboxManager {
       request.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
       request.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
       request.environment.specSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 ||
-      request.environment.imageRevision !== this.#imageRevision
+      request.environment.imageRevision !== this.#imageRevision ||
+      createHash("sha256")
+        .update(canonicalEnvironmentRecipeJson(request.environment.recipe))
+        .digest("hex") !== request.environment.recipeSha256
     ) {
       throw new SandboxManagerError(
         "environment_policy_mismatch",

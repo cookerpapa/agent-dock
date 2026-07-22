@@ -413,6 +413,8 @@ export class CancellationDispatcher {
           "environment.profile_version as environmentProfileVersion",
           "environment.image_revision as environmentImageRevision",
           "environment.spec_sha256 as environmentSpecSha256",
+          "environment.recipe as environmentRecipe",
+          "environment.recipe_sha256 as environmentRecipeSha256",
         ])
         .where(
           this.#tenantId === undefined
@@ -541,6 +543,8 @@ export class CancellationDispatcher {
               profileVersion: row.environmentProfileVersion,
               imageRevision: row.environmentImageRevision,
               specSha256: row.environmentSpecSha256,
+              recipe: row.environmentRecipe,
+              recipeSha256: row.environmentRecipeSha256,
             }),
           },
         },

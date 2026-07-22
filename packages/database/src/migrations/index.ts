@@ -14,6 +14,7 @@ import * as observabilityTraceIdentity from "./012_observability_trace_identity.
 import * as productAuthAndEmptyWorkspaces from "./013_product_auth_and_empty_workspaces.ts";
 import * as removePerRunTokenBudget from "./014_remove_per_run_token_budget.ts";
 import * as versionedProjectEnvironments from "./015_versioned_project_environments.ts";
+import * as environmentRecipesAndOperations from "./016_environment_recipes_and_operations.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -33,6 +34,7 @@ export const migrationProvider: MigrationProvider = {
       "013_product_auth_and_empty_workspaces": productAuthAndEmptyWorkspaces,
       "014_remove_per_run_token_budget": removePerRunTokenBudget,
       "015_versioned_project_environments": versionedProjectEnvironments,
+      "016_environment_recipes_and_operations": environmentRecipesAndOperations,
     };
   },
 };
@@ -111,3 +113,8 @@ export {
   down as downVersionedProjectEnvironments,
   up as upVersionedProjectEnvironments,
 } from "./015_versioned_project_environments.ts";
+
+export {
+  down as downEnvironmentRecipesAndOperations,
+  up as upEnvironmentRecipesAndOperations,
+} from "./016_environment_recipes_and_operations.ts";

@@ -1337,6 +1337,7 @@ export default function App() {
               onSessionChanged={refreshConversations}
               refreshSignal={inspectorRefreshSignal}
               role={identity?.role ?? null}
+              projectId={state.project?.projectId ?? null}
               sessionId={state.session?.sessionId ?? null}
               source={state.project?.source ?? null}
             />

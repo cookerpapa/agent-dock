@@ -27,7 +27,11 @@ import type {
 import {
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  canonicalEnvironmentRecipeJson,
+  parseEnvironmentRecipe,
   parseEnvironmentValidationReport,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
@@ -116,16 +120,24 @@ type EnvironmentVersionRow = {
   environmentProfileVersion: string;
   environmentImageRevision: string;
   environmentSpecSha256: string;
+  environmentRecipe: unknown;
+  environmentRecipeSha256: string;
   environmentState: "pending" | "validated" | "failed";
+  environmentActive: boolean;
   environmentCreatedAt: Date | string;
   environmentValidatedAt: Date | string | null;
 };
 
 function environmentSnapshot(row: EnvironmentVersionRow): EnvironmentRuntimeSnapshot {
+  const recipe = parseEnvironmentRecipe(row.environmentRecipe);
+  const recipeSha256 = createHash("sha256")
+    .update(canonicalEnvironmentRecipeJson(recipe))
+    .digest("hex");
   if (
     row.environmentProfileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
     row.environmentProfileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
-    row.environmentSpecSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256
+    row.environmentSpecSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 ||
+    row.environmentRecipeSha256 !== recipeSha256
   ) {
     throw new ControlPlaneStoreError(
       "control_plane_misconfigured",
@@ -139,6 +151,8 @@ function environmentSnapshot(row: EnvironmentVersionRow): EnvironmentRuntimeSnap
     profileVersion: row.environmentProfileVersion,
     imageRevision: row.environmentImageRevision,
     specSha256: row.environmentSpecSha256,
+    recipe,
+    recipeSha256: row.environmentRecipeSha256,
   };
 }
 
@@ -442,6 +456,10 @@ export class ControlPlaneStore {
             profile_version: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
             image_revision: this.#environmentImageRevision,
             spec_sha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+            recipe: sql<Record<string, unknown>>`${JSON.stringify(
+              DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+            )}::jsonb`,
+            recipe_sha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
             state: "pending",
             active: true,
             validated_at: null,
@@ -506,7 +524,10 @@ export class ControlPlaneStore {
             profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
             imageRevision: this.#environmentImageRevision,
             specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+            recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+            recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
             state: environment.state,
+            active: true,
             createdAt: isoTimestamp(environment.created_at),
           },
         };
@@ -877,6 +898,41 @@ export class ControlPlaneStore {
     }
   }
 
+  async acceptEnvironmentValidationTurn(
+    sessionId: string,
+    environmentVersionId: string,
+    actorUserId: string,
+    idempotencyKey: string,
+  ): Promise<AcceptedTurnResource> {
+    const request: AcceptTurnRequest = {
+      prompt: [
+        `Validate AgentDock environment version ${environmentVersionId}.`,
+        "Before answering, call the bash tool exactly once with `git status --short` in /workspace.",
+        "Do not edit files. Report whether the environment is ready.",
+      ].join(" "),
+      thinkingLevel: "minimal",
+    };
+    const fingerprint = turnRequestFingerprint(request);
+    const existing = await this.#findAcceptedTurn(sessionId, idempotencyKey);
+    if (existing) return acceptedTurnResource(existing, fingerprint, true);
+    try {
+      return await this.#acceptNewTurn(sessionId, idempotencyKey, request, fingerprint, {
+        environmentVersionId,
+        actorUserId,
+      });
+    } catch (error) {
+      if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) throw error;
+      const concurrentWinner = await this.#findAcceptedTurn(sessionId, idempotencyKey);
+      if (!concurrentWinner) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Idempotent environment validation exists without its accepted turn",
+        );
+      }
+      return acceptedTurnResource(concurrentWinner, fingerprint, true);
+    }
+  }
+
   async #loadRunResource(runId: string): Promise<RunResource> {
     const run = await this.#database
       .selectFrom("runs as run")
@@ -894,7 +950,10 @@ export class ControlPlaneStore {
         "environment.profile_version as environmentProfileVersion",
         "environment.image_revision as environmentImageRevision",
         "environment.spec_sha256 as environmentSpecSha256",
+        "environment.recipe as environmentRecipe",
+        "environment.recipe_sha256 as environmentRecipeSha256",
         "environment.state as environmentState",
+        "environment.active as environmentActive",
         "environment.created_at as environmentCreatedAt",
         "environment.validated_at as environmentValidatedAt",
       ])
@@ -1083,6 +1142,7 @@ export class ControlPlaneStore {
     idempotencyKey: string,
     request: AcceptTurnRequest,
     fingerprint: string,
+    validation?: { environmentVersionId: string; actorUserId: string },
   ): Promise<AcceptedTurnResource> {
     const turnId = this.#idGenerator();
     const commandId = this.#idGenerator();
@@ -1149,7 +1209,14 @@ export class ControlPlaneStore {
         "Next mailbox position",
       );
       const model = await this.#resolveModelSnapshot(transaction, request.thinkingLevel);
-      const environment = await this.#activeEnvironmentForRun(transaction, session.project_id);
+      const environment =
+        validation === undefined
+          ? await this.#activeEnvironmentForRun(transaction, session.project_id)
+          : await this.#environmentVersionForValidation(
+              transaction,
+              session.project_id,
+              validation.environmentVersionId,
+            );
 
       await transaction
         .insertInto("turns")
@@ -1192,6 +1259,30 @@ export class ControlPlaneStore {
         })
         .returning(["id", "created_at", "payload"])
         .executeTakeFirstOrThrow();
+
+      if (validation !== undefined) {
+        const active = await transaction
+          .selectFrom("environment_versions")
+          .select("id")
+          .where("tenant_id", "=", this.#tenantId)
+          .where("project_id", "=", session.project_id)
+          .where("active", "=", true)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("environment_operations")
+          .values({
+            id: this.#idGenerator(),
+            tenant_id: this.#tenantId,
+            project_id: session.project_id,
+            actor_user_id: validation.actorUserId,
+            kind: "validate",
+            from_environment_version_id: active.id,
+            to_environment_version_id: validation.environmentVersionId,
+            idempotency_key: idempotencyKey,
+            request_fingerprint: fingerprint,
+          })
+          .executeTakeFirstOrThrow();
+      }
 
       await transaction
         .insertInto("runs")
@@ -1476,7 +1567,10 @@ export class ControlPlaneStore {
         "environment.profile_version as environmentProfileVersion",
         "environment.image_revision as environmentImageRevision",
         "environment.spec_sha256 as environmentSpecSha256",
+        "environment.recipe as environmentRecipe",
+        "environment.recipe_sha256 as environmentRecipeSha256",
         "environment.state as environmentState",
+        "environment.active as environmentActive",
         "environment.created_at as environmentCreatedAt",
         "environment.validated_at as environmentValidatedAt",
       ])
@@ -1521,6 +1615,7 @@ export class ControlPlaneStore {
     return {
       ...snapshot,
       state: row.environmentState,
+      active: row.environmentActive,
       createdAt: isoTimestamp(row.environmentCreatedAt),
       ...(row.environmentValidatedAt === null
         ? {}
@@ -1552,7 +1647,10 @@ export class ControlPlaneStore {
         "environment.profile_version as environmentProfileVersion",
         "environment.image_revision as environmentImageRevision",
         "environment.spec_sha256 as environmentSpecSha256",
+        "environment.recipe as environmentRecipe",
+        "environment.recipe_sha256 as environmentRecipeSha256",
         "environment.state as environmentState",
+        "environment.active as environmentActive",
         "environment.created_at as environmentCreatedAt",
         "environment.validated_at as environmentValidatedAt",
       ])
@@ -1568,6 +1666,12 @@ export class ControlPlaneStore {
       );
     }
     const current = environmentSnapshot(active);
+    if (active.environmentState === "failed") {
+      throw new ControlPlaneStoreError(
+        "conflict",
+        "Active environment failed validation and must be rolled back",
+      );
+    }
     if (current.imageRevision === this.#environmentImageRevision) return current;
 
     await transaction
@@ -1589,6 +1693,8 @@ export class ControlPlaneStore {
         profile_version: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
         image_revision: this.#environmentImageRevision,
         spec_sha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+        recipe: sql<Record<string, unknown>>`${JSON.stringify(current.recipe)}::jsonb`,
+        recipe_sha256: current.recipeSha256,
         state: "pending",
         active: true,
         validated_at: null,
@@ -1600,12 +1706,57 @@ export class ControlPlaneStore {
         "profile_version as environmentProfileVersion",
         "image_revision as environmentImageRevision",
         "spec_sha256 as environmentSpecSha256",
+        "recipe as environmentRecipe",
+        "recipe_sha256 as environmentRecipeSha256",
         "state as environmentState",
+        "active as environmentActive",
         "created_at as environmentCreatedAt",
         "validated_at as environmentValidatedAt",
       ])
       .executeTakeFirstOrThrow();
     return environmentSnapshot(created);
+  }
+
+  async #environmentVersionForValidation(
+    transaction: Transaction<Database>,
+    projectId: string,
+    environmentVersionId: string,
+  ): Promise<EnvironmentRuntimeSnapshot> {
+    const row = await transaction
+      .selectFrom("environment_versions as environment")
+      .select([
+        "environment.id as environmentVersionId",
+        "environment.version_number as environmentVersionNumber",
+        "environment.profile_key as environmentProfileKey",
+        "environment.profile_version as environmentProfileVersion",
+        "environment.image_revision as environmentImageRevision",
+        "environment.spec_sha256 as environmentSpecSha256",
+        "environment.recipe as environmentRecipe",
+        "environment.recipe_sha256 as environmentRecipeSha256",
+        "environment.state as environmentState",
+        "environment.active as environmentActive",
+        "environment.created_at as environmentCreatedAt",
+        "environment.validated_at as environmentValidatedAt",
+      ])
+      .where("environment.tenant_id", "=", this.#tenantId)
+      .where("environment.project_id", "=", projectId)
+      .where("environment.id", "=", environmentVersionId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Environment version was not found");
+    }
+    if (row.environmentState === "failed") {
+      throw new ControlPlaneStoreError("conflict", "Failed environment version cannot be retried");
+    }
+    const snapshot = environmentSnapshot(row);
+    if (snapshot.imageRevision !== this.#environmentImageRevision) {
+      throw new ControlPlaneStoreError(
+        "conflict",
+        "Environment version is not served by the current deployment image",
+      );
+    }
+    return snapshot;
   }
 
   async #resolveModelSnapshot(

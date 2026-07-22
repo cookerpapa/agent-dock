@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
 
 import { AgentDockApi } from "../src/api.ts";
 
@@ -9,7 +13,10 @@ const environment = {
   profileVersion: "1",
   imageRevision: "sha-0123456789abcdef",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   state: "pending",
+  active: true,
   createdAt: "2026-07-19T00:00:00.000Z",
 } as const;
 
@@ -87,6 +94,80 @@ describe("tenant-aware browser API", () => {
         commitSha,
       }),
     ).resolves.toMatchObject({ source: { kind: "github_public", status: "pending" } });
+  });
+
+  it("manages environment candidates through versioned, idempotent APIs", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const projectId = "20000000-0000-4000-8000-000000000001";
+    const sessionId = "30000000-0000-4000-8000-000000000001";
+    const history = {
+      projectId,
+      activeEnvironmentVersionId: environment.environmentVersionId,
+      versions: [environment],
+      operations: [],
+      truncated: false,
+    };
+    const accepted = {
+      turnId: "40000000-0000-4000-8000-000000000001",
+      sessionId,
+      runId: "50000000-0000-4000-8000-000000000001",
+      commandId: "60000000-0000-4000-8000-000000000001",
+      mailboxPosition: 1,
+      state: "queued",
+      acceptedAt: "2026-07-19T00:00:00.000Z",
+      replayed: false,
+    } as const;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      const path = String(input);
+      if (path.includes(`/v1/sessions/${sessionId}/environments/`)) {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("idempotency-key")).toBe("validate-environment");
+        return new Response(JSON.stringify(accepted), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (path.endsWith("/activate")) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          expectedActiveEnvironmentVersionId: environment.environmentVersionId,
+        });
+        expect(new Headers(init?.headers).get("idempotency-key")).toBe("activate-environment");
+      } else if (init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({
+          recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        });
+        expect(new Headers(init.headers).get("idempotency-key")).toBe("create-environment");
+      }
+      return new Response(JSON.stringify(history), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(api.getProjectEnvironments(projectId)).resolves.toEqual(history);
+    await expect(
+      api.createProjectEnvironment(
+        projectId,
+        DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        "create-environment",
+      ),
+    ).resolves.toEqual(history);
+    await expect(
+      api.activateProjectEnvironment(
+        projectId,
+        environment.environmentVersionId,
+        environment.environmentVersionId,
+        "activate-environment",
+      ),
+    ).resolves.toEqual(history);
+    await expect(
+      api.validateProjectEnvironment(
+        sessionId,
+        environment.environmentVersionId,
+        "validate-environment",
+      ),
+    ).resolves.toEqual(accepted);
   });
 
   it("reads safe model metadata and submits a write-only provider credential", async () => {

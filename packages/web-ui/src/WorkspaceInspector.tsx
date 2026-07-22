@@ -4,6 +4,7 @@ import type {
   ModelGovernanceResource,
   OperationalAuditLogResource,
   OperationalInsightsResource,
+  ProjectEnvironmentHistoryResource,
   RunListResource,
   RunUsageResource,
   SessionContextResource,
@@ -17,13 +18,15 @@ import type {
   WorkspaceVersionListResource,
   WorkspaceVersionResource,
 } from "@agent-dock/protocol";
+import { parseEnvironmentRecipe } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 
-type InspectorTab = "workspace" | "runs" | "tests" | "usage" | "activity";
+type InspectorTab = "workspace" | "environment" | "runs" | "tests" | "usage" | "activity";
 
 type WorkspaceInspectorProps = {
   api: AgentDockApi;
   sessionId: string | null;
+  projectId: string | null;
   role: TenantApiRole | null;
   busy: boolean;
   refreshSignal: number;
@@ -123,6 +126,7 @@ function EmptyPanel({ children }: { children: string }) {
 export function WorkspaceInspector({
   api,
   sessionId,
+  projectId,
   role,
   busy,
   refreshSignal,
@@ -143,6 +147,11 @@ export function WorkspaceInspector({
   const [governance, setGovernance] = useState<ModelGovernanceResource | null>(null);
   const [operations, setOperations] = useState<OperationalInsightsResource | null>(null);
   const [audit, setAudit] = useState<OperationalAuditLogResource | null>(null);
+  const [environments, setEnvironments] = useState<ProjectEnvironmentHistoryResource | null>(null);
+  const [selectedEnvironmentVersionId, setSelectedEnvironmentVersionId] = useState<string | null>(
+    null,
+  );
+  const [environmentRecipeText, setEnvironmentRecipeText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runUsage, setRunUsage] = useState<RunUsageResource | null>(null);
   const [testResults, setTestResults] = useState<TestResultListResource | null>(null);
@@ -168,27 +177,43 @@ export function WorkspaceInspector({
     () => runs?.runs.find((run) => run.runId === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+  const selectedEnvironment = useMemo(
+    () =>
+      environments?.versions.find(
+        (environment) => environment.environmentVersionId === selectedEnvironmentVersionId,
+      ) ?? null,
+    [environments, selectedEnvironmentVersionId],
+  );
 
   const refresh = useCallback(async () => {
     if (sessionId === null) return;
     setLoading(true);
     try {
-      const [runList, versionList, sessionContext, tenantUsage, modelGovernance, ownerData] =
-        await Promise.all([
-          api.listRuns(sessionId),
-          api.listWorkspaceVersions(sessionId),
-          api.getSessionContext(sessionId),
-          api.getUsage(),
-          api.getModelGovernance(),
-          role === "owner"
-            ? Promise.all([api.getOperationalInsights(), api.getOperationalAudit()])
-            : Promise.resolve(null),
-        ]);
+      const [
+        runList,
+        versionList,
+        sessionContext,
+        tenantUsage,
+        modelGovernance,
+        environmentHistory,
+        ownerData,
+      ] = await Promise.all([
+        api.listRuns(sessionId),
+        api.listWorkspaceVersions(sessionId),
+        api.getSessionContext(sessionId),
+        api.getUsage(),
+        api.getModelGovernance(),
+        projectId === null ? Promise.resolve(null) : api.getProjectEnvironments(projectId),
+        role === "owner"
+          ? Promise.all([api.getOperationalInsights(), api.getOperationalAudit()])
+          : Promise.resolve(null),
+      ]);
       setRuns(runList);
       setVersions(versionList);
       setContext(sessionContext);
       setUsage(tenantUsage);
       setGovernance(modelGovernance);
+      setEnvironments(environmentHistory);
       setOperations(ownerData?.[0] ?? null);
       setAudit(ownerData?.[1] ?? null);
       setSelectedRunId((current) =>
@@ -201,12 +226,20 @@ export function WorkspaceInspector({
           ? current
           : (versionList.currentVersionId ?? versionList.versions[0]?.versionId ?? null),
       );
+      setSelectedEnvironmentVersionId((current) =>
+        current !== null &&
+        environmentHistory?.versions.some(
+          (environment) => environment.environmentVersionId === current,
+        )
+          ? current
+          : (environmentHistory?.activeEnvironmentVersionId ?? null),
+      );
     } catch (error: unknown) {
       onError(failureMessage(error));
     } finally {
       setLoading(false);
     }
-  }, [api, onError, role, sessionId]);
+  }, [api, onError, projectId, role, sessionId]);
 
   useEffect(() => {
     setRuns(null);
@@ -216,6 +249,9 @@ export function WorkspaceInspector({
     setGovernance(null);
     setOperations(null);
     setAudit(null);
+    setEnvironments(null);
+    setSelectedEnvironmentVersionId(null);
+    setEnvironmentRecipeText("");
     setSelectedRunId(null);
     setSelectedVersionId(null);
     setFiles([]);
@@ -224,6 +260,12 @@ export function WorkspaceInspector({
     setArtifactPreview(null);
     if (sessionId !== null) void refresh();
   }, [refresh, refreshSignal, sessionId]);
+
+  useEffect(() => {
+    setEnvironmentRecipeText(
+      selectedEnvironment === null ? "" : JSON.stringify(selectedEnvironment.recipe, null, 2),
+    );
+  }, [selectedEnvironment]);
 
   useEffect(() => {
     setPullRequestDelivery(null);
@@ -392,6 +434,90 @@ export function WorkspaceInspector({
     }
   }
 
+  async function createEnvironmentVersion(): Promise<void> {
+    if (projectId === null || mutation !== null || role !== "owner") return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(environmentRecipeText) as unknown;
+    } catch {
+      onError("Environment recipe is not valid JSON.");
+      return;
+    }
+    let recipe;
+    try {
+      recipe = parseEnvironmentRecipe(parsed);
+    } catch {
+      onError("Environment recipe does not match the bounded AgentDock schema.");
+      return;
+    }
+    setMutation("creating environment candidate");
+    try {
+      const history = await api.createProjectEnvironment(
+        projectId,
+        recipe,
+        newIdempotencyKey("environment-create"),
+      );
+      setEnvironments(history);
+      const candidate = history.versions.find((environment) => !environment.active);
+      setSelectedEnvironmentVersionId(candidate?.environmentVersionId ?? null);
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function validateEnvironmentVersion(): Promise<void> {
+    if (
+      sessionId === null ||
+      selectedEnvironmentVersionId === null ||
+      mutation !== null ||
+      role !== "owner"
+    ) {
+      return;
+    }
+    setMutation("queuing environment validation");
+    try {
+      await api.validateProjectEnvironment(
+        sessionId,
+        selectedEnvironmentVersionId,
+        newIdempotencyKey("environment-validate"),
+      );
+      await onSessionChanged();
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function activateEnvironmentVersion(): Promise<void> {
+    if (
+      projectId === null ||
+      environments === null ||
+      selectedEnvironmentVersionId === null ||
+      mutation !== null ||
+      role !== "owner" ||
+      !globalThis.confirm("Activate this validated environment for future Runs?")
+    ) {
+      return;
+    }
+    setMutation("activating environment");
+    try {
+      const history = await api.activateProjectEnvironment(
+        projectId,
+        selectedEnvironmentVersionId,
+        environments.activeEnvironmentVersionId,
+        newIdempotencyKey("environment-activate"),
+      );
+      setEnvironments(history);
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
   async function deliverPullRequest(): Promise<void> {
     if (
       source?.kind !== "github_app" ||
@@ -445,18 +571,20 @@ export function WorkspaceInspector({
         </button>
       </header>
       <nav className="inspector-tabs" aria-label="Inspector sections">
-        {(["workspace", "runs", "tests", "usage", "activity"] as const).map((value) => (
-          <button
-            aria-selected={tab === value}
-            className={tab === value ? "active" : ""}
-            key={value}
-            onClick={() => setTab(value)}
-            role="tab"
-            type="button"
-          >
-            {value}
-          </button>
-        ))}
+        {(["workspace", "environment", "runs", "tests", "usage", "activity"] as const).map(
+          (value) => (
+            <button
+              aria-selected={tab === value}
+              className={tab === value ? "active" : ""}
+              key={value}
+              onClick={() => setTab(value)}
+              role="tab"
+              type="button"
+            >
+              {value}
+            </button>
+          ),
+        )}
       </nav>
       <div className="inspector-scroll">
         {sessionId === null ? <EmptyPanel>Select a durable Session first.</EmptyPanel> : null}
@@ -708,6 +836,145 @@ export function WorkspaceInspector({
                 <pre>{artifactPreview.text}</pre>
               </div>
             ) : null}
+          </section>
+        ) : null}
+
+        {sessionId !== null && tab === "environment" ? (
+          <section className="inspector-panel">
+            <div className="inspector-section-heading">
+              <div>
+                <strong>Development environment</strong>
+                <span>immutable recipe, validation evidence and CAS activation</span>
+              </div>
+              <div className="inspector-actions">
+                <button
+                  disabled={
+                    role !== "owner" ||
+                    busy ||
+                    mutation !== null ||
+                    selectedEnvironment === null ||
+                    selectedEnvironment.state === "failed"
+                  }
+                  onClick={() => void validateEnvironmentVersion()}
+                  type="button"
+                >
+                  validate
+                </button>
+                <button
+                  disabled={
+                    role !== "owner" ||
+                    busy ||
+                    mutation !== null ||
+                    selectedEnvironment === null ||
+                    selectedEnvironment.active ||
+                    selectedEnvironment.state !== "validated"
+                  }
+                  onClick={() => void activateEnvironmentVersion()}
+                  type="button"
+                >
+                  activate / rollback
+                </button>
+              </div>
+            </div>
+            {mutation ? <div className="inspector-progress">{mutation}…</div> : null}
+            <label className="inspector-field">
+              <span>version</span>
+              <select
+                onChange={(event) => setSelectedEnvironmentVersionId(event.target.value)}
+                value={selectedEnvironmentVersionId ?? ""}
+              >
+                {environments?.versions.map((environment) => (
+                  <option
+                    key={environment.environmentVersionId}
+                    value={environment.environmentVersionId}
+                  >
+                    v{String(environment.versionNumber)} · {environment.state}
+                    {environment.active ? " · active" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedEnvironment ? (
+              <>
+                <div className="inspector-metrics compact">
+                  <Metric label="state" value={selectedEnvironment.state} />
+                  <Metric label="image" value={shortId(selectedEnvironment.imageRevision)} />
+                  <Metric label="recipe" value={shortId(selectedEnvironment.recipeSha256)} />
+                </div>
+                <div className="inspector-subheading">configuration as code</div>
+                <textarea
+                  aria-label="Environment recipe JSON"
+                  disabled={role !== "owner" || mutation !== null}
+                  onChange={(event) => setEnvironmentRecipeText(event.target.value)}
+                  rows={14}
+                  spellCheck={false}
+                  value={environmentRecipeText}
+                />
+                <button
+                  disabled={role !== "owner" || busy || mutation !== null}
+                  onClick={() => void createEnvironmentVersion()}
+                  type="button"
+                >
+                  create pending version from recipe
+                </button>
+                <p className="inspector-note">
+                  Setup and verification commands run inside the untrusted gVisor Workspace before
+                  Agent tools are enabled. Image, RuntimeClass, mounts and resource policy remain
+                  operator-owned.
+                </p>
+                <div className="inspector-subheading">latest fresh-Sandbox evidence</div>
+                {selectedEnvironment.latestValidation ? (
+                  <div className="test-result-list">
+                    {selectedEnvironment.latestValidation.recipeCommands.map((result) => (
+                      <article className="test-result test-passed" key={result.id}>
+                        <header>
+                          <strong>{result.id}</strong>
+                          <span>{result.phase}</span>
+                        </header>
+                        <small>
+                          exit {String(result.exitCode)} · {durationLabel(result.durationMs)} ·
+                          output {shortId(result.outputSha256)}
+                        </small>
+                      </article>
+                    ))}
+                    <div className="inspector-metrics compact">
+                      <Metric
+                        label="boundary"
+                        value={`${selectedEnvironment.latestValidation.runtime}/gVisor`}
+                      />
+                      <Metric
+                        label="network"
+                        value={selectedEnvironment.latestValidation.networkMode}
+                      />
+                      <Metric label="user" value={selectedEnvironment.latestValidation.runAsUser} />
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyPanel>No successful physical validation has been committed.</EmptyPanel>
+                )}
+                <div className="inspector-subheading">environment audit</div>
+                <div className="audit-list">
+                  {environments?.operations.map((operation) => (
+                    <article key={operation.operationId}>
+                      <header>
+                        <span>environment</span>
+                        <strong>{operation.kind}</strong>
+                        <em>{shortId(operation.toEnvironmentVersionId)}</em>
+                      </header>
+                      <p>
+                        {operation.fromEnvironmentVersionId
+                          ? `${shortId(operation.fromEnvironmentVersionId)} → `
+                          : ""}
+                        {shortId(operation.toEnvironmentVersionId)}
+                      </p>
+                      <small>{timestampLabel(operation.createdAt)}</small>
+                    </article>
+                  )) ?? <EmptyPanel>No environment operations.</EmptyPanel>}
+                </div>
+              </>
+            ) : (
+              <EmptyPanel>No environment version is available.</EmptyPanel>
+            )}
           </section>
         ) : null}
 

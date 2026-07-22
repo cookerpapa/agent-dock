@@ -5,6 +5,10 @@ import type {
   ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
 import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
+import {
   createWorkspaceSnapshot,
   encodeWorkspaceSnapshotBlob,
   parseWorkspaceSnapshot,
@@ -62,6 +66,8 @@ function createRequest(index: number): ToolSandboxCreateRequest {
       profileVersion: "1",
       imageRevision: "development",
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+      recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
     },
     workspaceSeed: { kind: "sample_java" },
   };

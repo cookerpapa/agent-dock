@@ -1,4 +1,8 @@
 import type { ToolSandboxAssignment } from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TOOL_SANDBOX_POLICY,
@@ -30,6 +34,8 @@ const environment = {
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 };
 
 describe("Kubernetes gVisor Pod boundary", () => {

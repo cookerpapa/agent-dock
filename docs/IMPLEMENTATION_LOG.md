@@ -1841,3 +1841,19 @@
 - 落库证据：environment version `3b6bbb64-c3f8-4d97-98de-805169985831` 为 validated，并为两个 Run 分别保存 append-only validation；报告
   attests `runsc`/`gvisor`、deny-all、UID/GID 1000:1000、read-only rootfs、Node 24.18.0、OpenJDK 17.0.19、Python 3.11.2 与 Git 2.39.5。
   immutable 13,904-byte GitHub source snapshot 未在第二轮重复导入，验收结束后 Tool/Importer Pod 都为 0。
+
+## 2026-07-22 — Cursor-informed Environment Configuration as Code
+
+- 取舍：依据 ADR-0043，保留现有 PostgreSQL RunAttempt/Lease/Fence 协议而不为了技术名词迁移 Temporal；先实现 Cursor 经验中对现有依赖最强的
+  Environment-as-code。环境 Recipe 只能描述最多 10 条 setup 与 10 条 verification 命令、固定 cwd/timeout/network class；image、PodSpec、
+  RuntimeClass、挂载、资源与平台网络仍完全属于 operator policy。
+- 执行边界：Recipe 和 canonical SHA-256 进入 Run immutable snapshot，经过 outbox、Supervisor、Manager 到 Tool Worker。Worker 在 Workspace
+  restore 后、Agent Tool 开放前执行命令，校验 symlink/realpath 边界并管理 process group、timeout 与输出上限；持久证据只含 command ID、phase、
+  exit/duration 和 output hash，不把原始安装日志带回可信控制面。`dependency` 网络在 allowlist proxy 完成前 fail closed。
+- 生命周期：owner 编辑配置只会创建 pending/inactive candidate。真实 validation 是一个绑定候选环境的普通 durable Run；成功的 fenced
+  checkpoint 才写 append-only physical evidence 并置为 validated。激活/回滚要求 expected-active CAS，只接受当前部署 image 下的 validated
+  version，并在同一事务记录 actor/from/to/idempotency audit。失败候选不可重试或篡改，只能从历史派生新版本。
+- 产品：Session inspector 新增 environment 页，显示版本、recipe hash、gVisor/runsc/network/user 证据、每条 recipe command hash 与审计轨迹，
+  并提供 create candidate、validate、activate/rollback 操作；普通用户仍不看到模型密钥或 Kubernetes 控件。
+- 回归：新增 recipe canonical/closed-schema、Worker 命令执行与无网络 fail-closed、migration backfill/constraint/down、service idempotency/CAS/rollback/
+  tenant isolation 和 Web API 测试；完整 Control Plane 回归的 108 passed/3 environment-conditional skipped 测试保持通过。

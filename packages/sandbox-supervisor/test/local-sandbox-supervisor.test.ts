@@ -5,6 +5,10 @@ import type {
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -71,6 +75,8 @@ function command(
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+        recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
       },
     },
   };

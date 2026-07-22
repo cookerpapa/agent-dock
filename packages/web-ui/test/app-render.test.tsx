@@ -40,6 +40,7 @@ describe("product chat experience", () => {
         onSessionChanged={async () => undefined}
         refreshSignal={0}
         role="owner"
+        projectId="30000000-0000-4000-8000-000000000001"
         sessionId="10000000-0000-4000-8000-000000000001"
         source={{ kind: "sample_java", status: "ready" }}
       />,

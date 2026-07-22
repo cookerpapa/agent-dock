@@ -81,6 +81,7 @@ export const KUBERNETES_SANDBOX_ANNOTATIONS = {
   environmentProfile: "agent-dock.io/environment-profile",
   environmentImageRevision: "agent-dock.io/environment-image-revision",
   environmentSpecSha256: "agent-dock.io/environment-spec-sha256",
+  environmentRecipeSha256: "agent-dock.io/environment-recipe-sha256",
   importId: "agent-dock.io/import-id",
 } as const;
 
@@ -314,6 +315,7 @@ function assignmentAnnotations(
           [KUBERNETES_SANDBOX_ANNOTATIONS.environmentProfile]: `${environment.profileKey}:${environment.profileVersion}`,
           [KUBERNETES_SANDBOX_ANNOTATIONS.environmentImageRevision]: environment.imageRevision,
           [KUBERNETES_SANDBOX_ANNOTATIONS.environmentSpecSha256]: environment.specSha256,
+          [KUBERNETES_SANDBOX_ANNOTATIONS.environmentRecipeSha256]: environment.recipeSha256,
         }),
   };
 }
@@ -998,7 +1000,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         toolchain.profileKey !== spec.environment.profileKey ||
         toolchain.profileVersion !== spec.environment.profileVersion ||
         toolchain.imageRevision !== spec.environment.imageRevision ||
-        toolchain.specSha256 !== spec.environment.specSha256
+        toolchain.specSha256 !== spec.environment.specSha256 ||
+        toolchain.recipeSha256 !== spec.environment.recipeSha256
       ) {
         throw new SandboxManagerError(
           "environment_preflight_mismatch",
@@ -1776,7 +1779,8 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         output.environment.profileKey !== activation.environment.profileKey ||
         output.environment.profileVersion !== activation.environment.profileVersion ||
         output.environment.imageRevision !== activation.environment.imageRevision ||
-        output.environment.specSha256 !== activation.environment.specSha256
+        output.environment.specSha256 !== activation.environment.specSha256 ||
+        output.environment.recipeSha256 !== activation.environment.recipeSha256
       ) {
         throw new SandboxManagerError(
           "environment_preflight_mismatch",

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  canonicalEnvironmentRecipeJson,
   isExpectedDefaultToolchain,
   parseEnvironmentRuntimeSnapshot,
   parseEnvironmentValidationReport,
@@ -15,6 +18,8 @@ const snapshot = {
   profileVersion: DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   imageRevision: "sha-0123456789abcdef",
   specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } as const;
 
 const tools = [
@@ -39,12 +44,14 @@ describe("versioned project environment protocol", () => {
       profileVersion: snapshot.profileVersion,
       imageRevision: snapshot.imageRevision,
       specSha256: snapshot.specSha256,
+      recipeSha256: snapshot.recipeSha256,
       isolationBoundary: "gvisor",
       runtime: "runsc",
       networkMode: "deny_all",
       runAsUser: "1000:1000",
       readOnlyRootFilesystem: true,
       tools,
+      recipeCommands: [],
     });
     expect(isExpectedDefaultToolchain(report)).toBe(true);
     expect(
@@ -55,5 +62,43 @@ describe("versioned project environment protocol", () => {
         ),
       }),
     ).toBe(false);
+  });
+
+  it("canonicalizes recipes and rejects ambiguous command identities and paths", () => {
+    expect(canonicalEnvironmentRecipeJson(DEFAULT_PROJECT_ENVIRONMENT_RECIPE)).toBe(
+      JSON.stringify(DEFAULT_PROJECT_ENVIRONMENT_RECIPE),
+    );
+    expect(() =>
+      parseEnvironmentRuntimeSnapshot({
+        ...snapshot,
+        recipe: {
+          schemaVersion: 1,
+          setupCommands: [
+            {
+              id: "git-worktree",
+              command: "true",
+              cwd: ".",
+              timeoutMs: 1_000,
+              network: "none",
+            },
+          ],
+          verificationCommands: DEFAULT_PROJECT_ENVIRONMENT_RECIPE.verificationCommands,
+        },
+      }),
+    ).toThrow(/repeated/);
+    expect(() =>
+      parseEnvironmentRuntimeSnapshot({
+        ...snapshot,
+        recipe: {
+          ...DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+          verificationCommands: [
+            {
+              ...DEFAULT_PROJECT_ENVIRONMENT_RECIPE.verificationCommands[0],
+              cwd: "src/../escape",
+            },
+          ],
+        },
+      }),
+    ).toThrow();
   });
 });

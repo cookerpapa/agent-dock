@@ -37,6 +37,11 @@ type JsonObject = JSONColumnType<
   Record<string, unknown>,
   Record<string, unknown>
 >;
+type GeneratedJsonObject = JSONColumnType<
+  Record<string, unknown>,
+  Record<string, unknown> | undefined,
+  Record<string, unknown>
+>;
 
 export type CredentialBindingStatus = "active" | "disabled" | "revoked";
 export type CredentialKind = "oauth" | "api_key" | "brokered";
@@ -68,6 +73,7 @@ export type ModelRequestState = "reserved" | "completed" | "failed" | "aborted" 
 export type ContextCompactionState = "running" | "completed" | "aborted" | "failed";
 export type EnvironmentVersionState = "pending" | "validated" | "failed";
 export type EnvironmentValidationStatus = "validated" | "failed";
+export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "validate";
 
 export interface TenantTable {
   id: string;
@@ -160,11 +166,28 @@ export interface EnvironmentVersionTable {
   profile_version: string;
   image_revision: string;
   spec_sha256: string;
+  recipe: GeneratedJsonObject;
+  recipe_sha256: Generated<string>;
   state: EnvironmentVersionState;
   active: GeneratedBoolean;
+  created_by_user_id: Generated<string | null>;
+  failure_code: Generated<string | null>;
   validated_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
+}
+
+export interface EnvironmentOperationTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  actor_user_id: string;
+  kind: EnvironmentOperationKind;
+  from_environment_version_id: string | null;
+  to_environment_version_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  created_at: GeneratedTimestamp;
 }
 
 export interface EnvironmentValidationTable {
@@ -770,6 +793,7 @@ export interface Database {
   projects: ProjectTable;
   environment_versions: EnvironmentVersionTable;
   environment_validations: EnvironmentValidationTable;
+  environment_operations: EnvironmentOperationTable;
   workspaces: WorkspaceTable;
   workspace_sources: WorkspaceSourceTable;
   workspace_versions: WorkspaceVersionTable;

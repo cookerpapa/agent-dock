@@ -53,11 +53,31 @@ instead of blindly replaying commands.
 7. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
 8. The first actual Tool operation makes the Provider create/restore/attest the
    gVisor Pod. Before the first repository command, the worker verifies the
-   accepted image revision and expected Node.js/Java/Python/Git toolchain. A
-   chat-only Run skips this step entirely.
+   accepted image revision and expected Node.js/Java/Python/Git toolchain, then
+   executes the accepted environment version's bounded setup and verification
+   recipe. A chat-only Run skips this step entirely.
 
 Cold or queued sessions own no Pi process, Tool Sandbox, socket, thread, or
 per-session timer.
+
+## Environment candidate lifecycle
+
+Environment mutation never edits an active version in place:
+
+```text
+owner creates recipe -> pending/inactive
+pending -> fresh gVisor validation Run -> validated/inactive
+validated + expected-active CAS -> active
+failed -> inert history (create a new candidate)
+older validated + expected-active CAS -> rollback target becomes active
+```
+
+Every create, validation request, activation and rollback appends an actor-bound
+operation. The validation Run snapshots the candidate rather than the active
+version, so Manager policy, physical image evidence, automatic recipe commands,
+Pi Tool routing and Workspace checkpointing are tested together. An environment
+identity mismatch or recipe failure is terminal and cannot be hidden by silently
+falling back to the active version.
 
 ## Active execution
 

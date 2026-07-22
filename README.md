@@ -298,7 +298,10 @@ image or scoped API authority.
 
 Each Project also owns an append-only, operator-managed environment version.
 Turn acceptance snapshots that exact profile, tool-image revision and canonical
-specification hash into the Run. The first Tool activation verifies Node.js 24,
+specification hash into the Run. Owners can derive an inactive version with a
+bounded setup/verification recipe, validate it in a fresh gVisor activation,
+and only then activate or roll it back with expected-current CAS; every change
+is audited and failed candidates remain inert. The first Tool activation verifies Node.js 24,
 Java 17, Python 3.11 and Git inside the actual gVisor Pod before repository
 commands may run; the resulting gVisor/runsc, network, user, rootfs and
 toolchain evidence is committed with the Workspace checkpoint and shown in the

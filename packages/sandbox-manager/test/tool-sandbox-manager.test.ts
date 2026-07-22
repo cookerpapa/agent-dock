@@ -3,6 +3,10 @@ import type {
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
 } from "@agent-dock/protocol";
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+} from "@agent-dock/protocol";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,12 +43,15 @@ const environment = {
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+  recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 };
 const environmentValidation = {
   profileKey: "agent-dock-fullstack" as const,
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
+  recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   isolationBoundary: "gvisor" as const,
   runtime: "runsc" as const,
   networkMode: "deny_all" as const,
@@ -56,6 +63,7 @@ const environmentValidation = {
     { name: "python" as const, version: "Python 3.11.2" },
     { name: "git" as const, version: "git version 2.39.5" },
   ],
+  recipeCommands: [],
 };
 
 const createRequest: ToolSandboxCreateRequest = {

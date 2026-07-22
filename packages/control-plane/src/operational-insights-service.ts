@@ -217,12 +217,26 @@ export class OperationalInsightsService {
 
   async audit(identity: TenantRequestIdentity): Promise<OperationalAuditLogResource> {
     const limit = 101;
-    const [attemptRows, workspaceRows, modelRows, githubRows] = await Promise.all([
+    const [attemptRows, environmentRows, workspaceRows, modelRows, githubRows] = await Promise.all([
       this.#database
         .selectFrom("run_attempt_transitions")
         .select(["id", "run_id", "to_state", "reason", "occurred_at"])
         .where("tenant_id", "=", identity.tenantId)
         .orderBy("occurred_at", "desc")
+        .limit(limit)
+        .execute(),
+      this.#database
+        .selectFrom("environment_operations")
+        .select([
+          "id",
+          "project_id",
+          "kind",
+          "from_environment_version_id",
+          "to_environment_version_id",
+          "created_at",
+        ])
+        .where("tenant_id", "=", identity.tenantId)
+        .orderBy("created_at", "desc")
         .limit(limit)
         .execute(),
       this.#database
@@ -306,6 +320,15 @@ export class OperationalInsightsService {
         summary: `branch ${row.head_branch}${row.pull_request_number === null ? "" : `; PR #${String(row.pull_request_number)}`}${row.failure_code === null ? "" : `; failure=${row.failure_code}`}`,
         occurredAt: timestamp(row.updated_at ?? row.created_at),
       })),
+      ...environmentRows.map((row) => ({
+        eventId: row.id,
+        category: "environment" as const,
+        action: `environment.${row.kind}`,
+        state: "committed",
+        subjectId: row.project_id,
+        summary: `${row.from_environment_version_id ?? "none"} -> ${row.to_environment_version_id}`,
+        occurredAt: timestamp(row.created_at),
+      })),
     ];
     events.sort(
       (left, right) =>
@@ -320,7 +343,8 @@ export class OperationalInsightsService {
         attemptRows.length === limit ||
         workspaceRows.length === limit ||
         modelRows.length === limit ||
-        githubRows.length === limit,
+        githubRows.length === limit ||
+        environmentRows.length === limit,
     };
   }
 }

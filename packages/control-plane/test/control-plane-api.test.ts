@@ -2162,6 +2162,8 @@ describe.sequential("single-user durable turn intake API", () => {
               profileVersion: project.environment.profileVersion,
               imageRevision: project.environment.imageRevision,
               specSha256: project.environment.specSha256,
+              recipe: project.environment.recipe,
+              recipeSha256: project.environment.recipeSha256,
             },
           },
           {

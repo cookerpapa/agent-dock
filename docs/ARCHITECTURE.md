@@ -213,7 +213,8 @@ deletion. See ADR-0040.
 ADR-0042 adds a durable environment plane without moving image policy into the
 Agent. Every Project owns one active member of an append-only environment
 version sequence. Turn acceptance snapshots the environment UUID, version,
-operator profile, image revision and canonical specification hash into the
+operator profile, image revision, canonical specification hash, declarative
+setup/verification recipe and recipe hash into the
 Run; the same closed value crosses the outbox, Supervisor protocol and Manager
 reservation. A new deployment image is therefore a new Project environment for
 future Runs, while already accepted Runs retain their original identity and
@@ -223,13 +224,25 @@ image, PodSpec, RuntimeClass, mount or network policy.
 Physical validation remains demand-activated. Before the first Tool command,
 the image-owned worker compares the expected revision with a read-only value
 baked into the physical image and probes the expected Node.js, Java, Python and
-Git binaries. The Provider combines this
+Git binaries. It then executes the bounded recipe in the untrusted Workspace;
+each command has an immutable ID, normalized working directory, timeout and
+explicit network class. Raw setup output is not copied into the trusted control
+plane: validation retains only phase, exit code, duration and output SHA-256.
+The Provider combines this
 toolchain report with its live gVisor/runsc, deny-all network, non-root and
 read-only-rootfs inspection. Successful Tool settlement stores that evidence
 under Project environment, Run and Attempt identity. Pure chat creates no Pod
 and therefore keeps the environment in `pending` until a real Tool Run proves
 it. Session-warm reuse additionally requires the exact environment snapshot;
 an environment change always destroys the stale Pod instead of rebinding it.
+
+ADR-0043 extends this resource with owner-controlled configuration-as-code.
+Editing a recipe creates an inactive append-only candidate. A candidate must
+complete a fresh physical validation Run before it can become active. Activation
+and rollback both compare the caller's expected active version under the locked
+Project row, atomically flip the unique active pointer, and append an actor-bound
+audit operation. Failed candidates remain inert; the owner creates a new version
+instead of rewriting failed history.
 
 ADR-0030 splits the Manager's stable authorization/lifecycle contract from the
 runtime implementation. `ToolSandboxManager` owns activation capabilities,

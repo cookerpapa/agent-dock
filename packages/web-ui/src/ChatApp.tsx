@@ -1135,6 +1135,7 @@ export default function ChatApp() {
               onSessionChanged={refreshConversations}
               refreshSignal={inspectorRefreshSignal}
               role={identity.role}
+              projectId={state.project?.projectId ?? null}
               sessionId={state.session?.sessionId ?? null}
               source={state.project?.source ?? null}
             />

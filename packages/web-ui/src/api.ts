@@ -14,6 +14,7 @@ import {
   parseLogoutResource,
   parseOperationalAuditLogResource,
   parseOperationalInsightsResource,
+  parseProjectEnvironmentHistoryResource,
   parseProjectResource,
   parseRollbackWorkspaceRequest,
   parseRunListResource,
@@ -36,6 +37,8 @@ import {
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type ProjectResource,
+  type EnvironmentRecipe,
+  type ProjectEnvironmentHistoryResource,
   type DeepSeekModelId,
   type GitHubInstallationResource,
   type GitHubPullRequestDeliveryResource,
@@ -286,6 +289,63 @@ export class AgentDockApi {
         this.#fetch,
         "/v1/operations/audit",
         { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getProjectEnvironments(projectId: string): Promise<ProjectEnvironmentHistoryResource> {
+    return parseProjectEnvironmentHistoryResource(
+      await request(
+        this.#fetch,
+        `/v1/projects/${encodeURIComponent(projectId)}/environments`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async createProjectEnvironment(
+    projectId: string,
+    recipe: EnvironmentRecipe,
+    idempotencyKey: string,
+  ): Promise<ProjectEnvironmentHistoryResource> {
+    return parseProjectEnvironmentHistoryResource(
+      await request(
+        this.#fetch,
+        `/v1/projects/${encodeURIComponent(projectId)}/environments`,
+        jsonRequest({ recipe }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async activateProjectEnvironment(
+    projectId: string,
+    environmentVersionId: string,
+    expectedActiveEnvironmentVersionId: string,
+    idempotencyKey: string,
+  ): Promise<ProjectEnvironmentHistoryResource> {
+    return parseProjectEnvironmentHistoryResource(
+      await request(
+        this.#fetch,
+        `/v1/projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(environmentVersionId)}/activate`,
+        jsonRequest({ expectedActiveEnvironmentVersionId }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async validateProjectEnvironment(
+    sessionId: string,
+    environmentVersionId: string,
+    idempotencyKey: string,
+  ): Promise<AcceptedTurnResource> {
+    return parseAcceptedTurnResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/environments/${encodeURIComponent(environmentVersionId)}/validate`,
+        jsonRequest({}, idempotencyKey),
         this.#authorizationToken,
       ),
     );
@@ -611,7 +671,17 @@ export class AgentDockApi {
 }
 
 export function newIdempotencyKey(
-  prefix: "turn" | "cancel" | "fork" | "rollback" | "archive" | "retry" | "pr",
+  prefix:
+    | "turn"
+    | "cancel"
+    | "fork"
+    | "rollback"
+    | "archive"
+    | "retry"
+    | "pr"
+    | "environment-create"
+    | "environment-activate"
+    | "environment-validate",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }
