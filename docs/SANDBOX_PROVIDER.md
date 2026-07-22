@@ -179,9 +179,11 @@ limits from inside the gVisor workload.
 
 Repository import is not Agent tool egress. A second fixed-purpose gVisor Pod
 runs in `agent-dock-importers`; it receives a normalized GitHub repository plus
-exact commit, no prompt and no credential, and never runs repository code. Its
-namespace permits DNS and public TCP/443 while excluding loopback, private,
-link-local, Pod, Service and node ranges. Redirects, hooks, credential helpers,
+exact commit, no prompt and no credential, and never runs repository code. It
+has no DNS and can reach only the capability proxy ClusterIP. A per-import
+Ed25519 capability permits only `github.com:443` and bounds time, connections,
+concurrency and bytes; the proxy rejects every non-public DNS answer. Redirects,
+hooks, credential helpers,
 submodules, LFS and interactive authentication are disabled. The importer is
 deleted after returning a bounded manifest. Git is pinned to HTTP/1.1 because
 HTTP/2 pack negotiation reproducibly failed through this host's gVisor/K3s

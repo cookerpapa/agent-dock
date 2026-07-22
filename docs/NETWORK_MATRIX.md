@@ -38,17 +38,16 @@ the Kubernetes API server.
 | Clean prewarm Pod / `agent-dock-sandboxes` | deny | deny | deny | deny | none |
 | Ordinary Tool Pod / `agent-dock-sandboxes` | deny | deny | deny | deny | none |
 | Disposable dependency bootstrap Pod / `agent-dock-sandboxes` | proxy Pod only | deny | exact-host HTTPS through proxy only | proxy rejects every non-public answer | none |
-| Importer Pod / `agent-dock-importers` | deny | cluster DNS only | TCP/443 only | explicitly excluded | none |
-| Dependency proxy / `agent-dock-egress` | labelled setup Pods only | cluster DNS only | TCP/443 only | NetworkPolicy exclusion plus per-resolution application check | none |
+| Importer Pod / `agent-dock-importers` | proxy Pod only | deny | exact `github.com:443` through a signed capability only | proxy rejects every non-public answer | none |
+| Capability proxy / `agent-dock-egress` | labelled setup/import Pods only | cluster DNS only | TCP/443 only | NetworkPolicy exclusion plus per-resolution application check | none |
 
-Both namespaces receive pre-created default-deny NetworkPolicies. The importer
-has an additional egress policy for DNS plus public HTTPS, excluding loopback,
-RFC1918, link-local, Pod, Service and node ranges. This is a bounded public
-GitHub bootstrap path, not dependency or Agent-command egress. Standard
-NetworkPolicy is L3/L4 policy, not a DNS-aware domain firewall. The dependency
-path therefore uses a separate application proxy; the public GitHub importer
-remains a broader bootstrap exception and is not claimed as a hostile
-public-SaaS domain boundary.
+Both namespaces receive pre-created default-deny NetworkPolicies. Neither the
+importer nor a dependency-bootstrap Pod receives DNS or arbitrary public HTTPS.
+Their only egress is the proxy ClusterIP. The Manager signs a short-lived
+capability for exact recipe hosts or the fixed `github.com` import host; the
+proxy resolves names and rejects non-public answers. Standard NetworkPolicy
+provides the L3/L4 path while the application capability supplies the domain,
+port, lifetime, connection, concurrency, byte and duration boundary.
 
 Tool Pods set `dnsPolicy: None`, publish no port, and are unreachable from the
 Manager except through Kubernetes attach/exec subresources. A disposable Pod

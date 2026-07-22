@@ -37,7 +37,8 @@ Only the public verification key enters Kubernetes, through a named ConfigMap
 that the Manager may patch but not create. The private key is never mounted in
 Kubernetes or a Tool Pod.
 
-A dedicated trusted CONNECT proxy runs in `agent-dock-egress`. Disposable
+A dedicated trusted CONNECT proxy runs in `agent-dock-egress` and is also reused
+by the separately scoped public-repository import protocol in ADR-0046. Disposable
 dependency-bootstrap Pods with an immutable dependency-policy label may
 connect only to that proxy. They keep
 `dnsPolicy: None`; the proxy, not the Sandbox, resolves dependency names. The

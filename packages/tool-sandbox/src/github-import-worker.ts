@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { safeToolEnvironment, verifyDependencyProxyTrust } from "./tool-worker.ts";
 
 const WORKSPACE_DIRECTORY = "/workspace";
 const GIT_HOME = "/tmp/agent-dock-git-home";
@@ -32,7 +33,20 @@ class WorkspaceImportWorkerError extends Error {
   }
 }
 
-function runGit(args: readonly string[], timeoutMs = GIT_TIMEOUT_MS): Promise<string> {
+function runGit(
+  args: readonly string[],
+  request: GitHubWorkspaceImportRequest,
+  timeoutMs = GIT_TIMEOUT_MS,
+): Promise<string> {
+  const environment = safeToolEnvironment(request.egressProxy);
+  const proxy = environment.HTTPS_PROXY;
+  if (typeof proxy !== "string") {
+    throw new WorkspaceImportWorkerError(
+      "repository_egress_invalid",
+      "Repository import egress was invalid",
+      false,
+    );
+  }
   return new Promise<string>((resolvePromise, rejectPromise) => {
     execFile(
       "git",
@@ -43,12 +57,19 @@ function runGit(args: readonly string[], timeoutMs = GIT_TIMEOUT_MS): Promise<st
         timeout: timeoutMs,
         maxBuffer: 128 * 1_024,
         env: {
-          PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          ...environment,
           HOME: GIT_HOME,
           GIT_ASKPASS: "/bin/false",
           GIT_CONFIG_NOSYSTEM: "1",
           GIT_TERMINAL_PROMPT: "0",
           GIT_LFS_SKIP_SMUDGE: "1",
+          GIT_CONFIG_COUNT: "3",
+          GIT_CONFIG_KEY_0: "safe.directory",
+          GIT_CONFIG_VALUE_0: WORKSPACE_DIRECTORY,
+          GIT_CONFIG_KEY_1: "http.proxy",
+          GIT_CONFIG_VALUE_1: proxy,
+          GIT_CONFIG_KEY_2: "http.proxyAuthMethod",
+          GIT_CONFIG_VALUE_2: "basic",
         },
       },
       (error, stdout) => {
@@ -76,11 +97,14 @@ function runGit(args: readonly string[], timeoutMs = GIT_TIMEOUT_MS): Promise<st
   });
 }
 
-async function fetchExactCommit(args: readonly string[]): Promise<void> {
+async function fetchExactCommit(
+  args: readonly string[],
+  request: GitHubWorkspaceImportRequest,
+): Promise<void> {
   let lastFailure: WorkspaceImportWorkerError | undefined;
   for (let attempt = 1; attempt <= GIT_FETCH_MAXIMUM_ATTEMPTS; attempt += 1) {
     try {
-      await runGit(args, GIT_FETCH_TIMEOUT_MS);
+      await runGit(args, request, GIT_FETCH_TIMEOUT_MS);
       return;
     } catch (error: unknown) {
       if (!(error instanceof WorkspaceImportWorkerError) || !error.retryable) throw error;
@@ -100,6 +124,8 @@ const SAFE_GIT_CONFIG = [
   "protocol.ext.allow=never",
   "-c",
   "http.version=HTTP/1.1",
+  "-c",
+  "http.proxyAuthMethod=basic",
   "-c",
   "http.lowSpeedLimit=1024",
   "-c",
@@ -128,19 +154,23 @@ const SAFE_GIT_CONFIG = [
 
 async function importRepository(request: GitHubWorkspaceImportRequest): Promise<Uint8Array> {
   const url = `https://github.com/${request.source.repository}.git`;
+  await verifyDependencyProxyTrust(request.egressProxy);
   await mkdir(GIT_HOME, { recursive: true, mode: 0o700 });
-  await runGit([...SAFE_GIT_CONFIG, "init", "--quiet", "."]);
-  await fetchExactCommit([
-    ...SAFE_GIT_CONFIG,
-    "fetch",
-    "--depth=1",
-    "--no-tags",
-    "--filter=blob:limit=524288",
-    url,
-    request.source.commitSha,
-  ]);
-  await runGit([...SAFE_GIT_CONFIG, "checkout", "--detach", "--force", "FETCH_HEAD"]);
-  const head = (await runGit([...SAFE_GIT_CONFIG, "rev-parse", "HEAD"])).trim();
+  await runGit([...SAFE_GIT_CONFIG, "init", "--quiet", "."], request);
+  await fetchExactCommit(
+    [
+      ...SAFE_GIT_CONFIG,
+      "fetch",
+      "--depth=1",
+      "--no-tags",
+      "--filter=blob:limit=524288",
+      url,
+      request.source.commitSha,
+    ],
+    request,
+  );
+  await runGit([...SAFE_GIT_CONFIG, "checkout", "--detach", "--force", "FETCH_HEAD"], request);
+  const head = (await runGit([...SAFE_GIT_CONFIG, "rev-parse", "HEAD"], request)).trim();
   if (head !== request.source.commitSha) {
     throw new WorkspaceImportWorkerError(
       "repository_commit_mismatch",

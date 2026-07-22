@@ -80,8 +80,9 @@ function parseConnectTarget(value: string | undefined): { host: string; port: 44
 
 function deny(socket: Duplex, status: number, reason: string): void {
   if (!socket.destroyed) {
+    const challenge = status === 407 ? 'Proxy-Authenticate: Basic realm="AgentDock"\r\n' : "";
     socket.end(
-      `HTTP/1.1 ${String(status)} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+      `HTTP/1.1 ${String(status)} ${reason}\r\n${challenge}Connection: close\r\nContent-Length: 0\r\n\r\n`,
     );
   }
 }

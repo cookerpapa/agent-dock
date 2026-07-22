@@ -1903,3 +1903,17 @@
 - 真实证据：K3s/runsc 测试在领取前证明 Pod metadata 不含目标 tenant，领取后 name/UID 不变、prewarm annotation 消失并绑定 exact Attempt，随后
   离线 Node Tool 成功且 effective isolation 仍为 `runsc` + deny-all。相同已缓存 image/command 下两次实测分别为 2,260 ms vs 4,073 ms、
   2,218 ms vs 4,379 ms（ready clean-prewarm vs fresh Pod）；used Pod 删除，补池产生新的 clean Pod，测试退出后无残留。
+
+## 2026-07-22 — Capability-scoped Public GitHub Import
+
+- 根因与取舍：完整 gVisor 回归连续暴露 public GitHub importer 直连 TLS stall，而宿主 `git ls-remote` 正常。没有重启掩盖、切回 runc 或放宽
+  NetworkPolicy；按 ADR-0046 将 importer 迁移到 ADR-0044 的签名 CONNECT proxy。Importer 现在无 DNS、无任意公网，唯一 L3/L4 路径是
+  proxy ClusterIP；每次 import 的 Ed25519 capability 只允许 `github.com:443`，并限制有效期、连接、并发、字节与持续时间。
+- 升级安全：沿用原 NetworkPolicy 对象名并原地替换其内容，避免 `kubectl apply` 升级后遗留旧 broad-public rule。Provider readiness 同时验证
+  importer→proxy、bootstrap→proxy、proxy ingress/default-deny/public-resolution 四组有效策略；缺一即 fail closed。
+- 协议与 Git：闭合 importer request 必须携带可信侧生成的 proxy bootstrap；Pod metadata、环境和 Workspace 不保存 capability。Proxy 补齐标准
+  Basic 407 challenge，Git 通过 process-local config 明确使用该代理，仍禁用 redirect、credential helper、hook、submodule、LFS 和交互认证。
+- 真实证据：定向 runsc 测试 8.162 秒导入固定 commit，proxy audit 仅记录一个 `github.com` tunnel（10,945 bytes）且不含 token。随后完整
+  `npm run sandbox:check` 通过 5 个 Manager live tests 与 2 个 trusted-Runner live tests：真实 npm 安装后最终 Pod 断网、clean prewarm
+  2,350 ms vs fresh 4,448 ms、跨租户/资源/清理、warm fence rebind、pure chat 零 Pod及 remote repair 全部通过，最终输出
+  `kubernetes_gvisor_sandbox_check_passed`。

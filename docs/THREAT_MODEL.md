@@ -127,9 +127,11 @@ The public repository importer receives no GitHub token. It can fetch only a
 normalized public `owner/repository` at an exact commit from a fixed-purpose
 gVisor Pod in `agent-dock-importers`. It has no host mount, ServiceAccount token,
 published port, prompt, user-controlled command, or enabled repository hook.
-NetworkPolicy permits cluster DNS and public TCP/443 while excluding private,
-link-local, Pod, Service and node ranges; it is not claimed as a DNS-aware
-domain firewall. For the optional private path, the GitHub Gateway alone signs
+The Pod has no DNS and its NetworkPolicy permits only the capability proxy
+ClusterIP. A per-import Ed25519 capability fixes the only CONNECT target to
+`github.com:443` and bounds lifetime, connections, concurrency, bytes and
+duration; proxy resolution rejects private, link-local, Pod, Service and node
+addresses. For the optional private path, the GitHub Gateway alone signs
 App JWTs and caches short-lived installation tokens in memory. The trusted
 Runner receives canonical repository bytes; the Control Plane submits a
 tenant/version-validated artifact for delivery. Neither component receives the
@@ -142,15 +144,13 @@ Before exposing arbitrary untrusted repositories to the public Internet:
 
 1. complete a production gVisor/KVM capacity and security review on the actual
    Linux host rather than relying on the validated WSL2 demonstration host;
-2. replace the public GitHub importer's broad public-HTTPS NetworkPolicy with a
-   DNS-aware allowlisting proxy (dependency egress is already proxied);
-3. add verified identity, password recovery/MFA, distributed login and
+2. add verified identity, password recovery/MFA, distributed login and
    registration abuse/rate controls, audit retention, and incident response
    around the existing tenant model budgets;
-4. isolate project/user extension code from Pi and model credentials;
-5. add signed provenance attestations and automated patch cadence on top of the
+3. isolate project/user extension code from Pi and model credentials;
+4. add signed provenance attestations and automated patch cadence on top of the
    current OCI labels, CycloneDX SBOMs, and vulnerability gate;
-6. run an independent penetration review of the Manager and host configuration.
+5. run an independent penetration review of the Manager and host configuration.
 
 The observability backends remain on an internal Compose network. A separate
 read-only Caddy process joins that network and its own non-platform edge network,

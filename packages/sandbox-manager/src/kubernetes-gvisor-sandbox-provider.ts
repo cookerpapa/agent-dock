@@ -66,6 +66,7 @@ export const KUBERNETES_SANDBOX_LABELS = {
   workload: "agent-dock.io/workload",
   sandboxHash: "agent-dock.io/sandbox-hash",
   dependencyEgress: "agent-dock.io/dependency-egress",
+  repositoryEgress: "agent-dock.io/repository-egress",
 } as const;
 
 export const KUBERNETES_SANDBOX_ANNOTATIONS = {
@@ -662,6 +663,7 @@ export function buildKubernetesRepositoryImportPod(
       labels: {
         [KUBERNETES_SANDBOX_LABELS.managed]: "true",
         [KUBERNETES_SANDBOX_LABELS.workload]: "repository-importer",
+        [KUBERNETES_SANDBOX_LABELS.repositoryEgress]: "true",
       },
       annotations: { [KUBERNETES_SANDBOX_ANNOTATIONS.importId]: importId },
     },
@@ -672,6 +674,8 @@ export function buildKubernetesRepositoryImportPod(
       hostIPC: false,
       hostNetwork: false,
       hostPID: false,
+      dnsPolicy: "None",
+      dnsConfig: { nameservers: ["127.0.0.1"] },
       restartPolicy: "Never",
       runtimeClassName: options.runtimeClassName ?? "agent-dock-gvisor",
       serviceAccountName: options.serviceAccountName ?? "repository-importer",
@@ -897,9 +901,33 @@ function networkPolicyIsDefaultDeny(policy: V1NetworkPolicy | undefined): boolea
 
 function networkPolicyHasVersion(
   policy: V1NetworkPolicy | undefined,
-  version: "dependency-egress-v1",
+  version: "dependency-egress-v1" | "repository-egress-v1",
 ): boolean {
   return policy?.metadata?.annotations?.["agent-dock.io/policy-version"] === version;
+}
+
+function repositoryEgressPolicyIsBounded(
+  policy: V1NetworkPolicy | undefined,
+  egressNamespace: string,
+  port: number,
+): boolean {
+  const spec = policy?.spec;
+  const rule = spec?.egress?.[0];
+  const peer = rule?.to?.[0];
+  return (
+    networkPolicyHasVersion(policy, "repository-egress-v1") &&
+    spec?.egress?.length === 1 &&
+    spec.policyTypes?.length === 1 &&
+    spec.policyTypes[0] === "Egress" &&
+    spec.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.repositoryEgress] === "true" &&
+    rule?.to?.length === 1 &&
+    peer?.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === egressNamespace &&
+    peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.workload] ===
+      "dependency-egress-proxy" &&
+    rule?.ports?.length === 1 &&
+    rule.ports[0]?.protocol === "TCP" &&
+    rule.ports[0]?.port === port
+  );
 }
 
 function toolDependencyEgressPolicyIsBounded(
@@ -930,11 +958,22 @@ function toolDependencyEgressPolicyIsBounded(
 function proxyIngressPolicyIsBounded(
   policy: V1NetworkPolicy | undefined,
   sandboxNamespace: string,
+  importerNamespace: string,
   port: number,
 ): boolean {
   const spec = policy?.spec;
   const rule = spec?.ingress?.[0];
-  const peer = rule?._from?.[0];
+  const peers = rule?._from ?? [];
+  const toolPeer = peers.find(
+    (peer) =>
+      peer.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === sandboxNamespace &&
+      peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress] === "true",
+  );
+  const importerPeer = peers.find(
+    (peer) =>
+      peer.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === importerNamespace &&
+      peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.repositoryEgress] === "true",
+  );
   return (
     networkPolicyHasVersion(policy, "dependency-egress-v1") &&
     spec?.ingress?.length === 1 &&
@@ -942,10 +981,10 @@ function proxyIngressPolicyIsBounded(
     spec.policyTypes[0] === "Ingress" &&
     spec.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.workload] ===
       "dependency-egress-proxy" &&
-    rule?._from?.length === 1 &&
-    peer?.namespaceSelector?.matchLabels?.["kubernetes.io/metadata.name"] === sandboxNamespace &&
-    peer.podSelector?.matchLabels?.[KUBERNETES_SANDBOX_LABELS.dependencyEgress] === "true" &&
-    rule.ports?.length === 1 &&
+    peers.length === 2 &&
+    toolPeer !== undefined &&
+    importerPeer !== undefined &&
+    rule?.ports?.length === 1 &&
     rule.ports[0]?.protocol === "TCP" &&
     rule.ports[0]?.port === port
   );
@@ -1217,15 +1256,23 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         { "public-key.pem": configuration.publicKeyPem },
       );
     }
-    const [service, endpoints, toolPolicy, proxyDefaultDeny, proxyIngress, proxyEgress] =
-      await Promise.all([
-        this.#client.readService(configuration.namespace, configuration.serviceName),
-        this.#client.readEndpoints(configuration.namespace, configuration.serviceName),
-        this.#client.readNetworkPolicy(this.#sandboxNamespace, "agent-dock-dependency-egress"),
-        this.#client.readNetworkPolicy(configuration.namespace, "agent-dock-default-deny-all"),
-        this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-ingress"),
-        this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-public-https"),
-      ]);
+    const [
+      service,
+      endpoints,
+      toolPolicy,
+      repositoryPolicy,
+      proxyDefaultDeny,
+      proxyIngress,
+      proxyEgress,
+    ] = await Promise.all([
+      this.#client.readService(configuration.namespace, configuration.serviceName),
+      this.#client.readEndpoints(configuration.namespace, configuration.serviceName),
+      this.#client.readNetworkPolicy(this.#sandboxNamespace, "agent-dock-dependency-egress"),
+      this.#client.readNetworkPolicy(this.#importerNamespace, "repository-import-public-https"),
+      this.#client.readNetworkPolicy(configuration.namespace, "agent-dock-default-deny-all"),
+      this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-ingress"),
+      this.#client.readNetworkPolicy(configuration.namespace, "dependency-egress-public-https"),
+    ]);
     const host = service?.spec?.clusterIP;
     const servicePorts = service?.spec?.ports ?? [];
     if (
@@ -1250,9 +1297,15 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         configuration.namespace,
         configuration.servicePort,
       ) ||
+      !repositoryEgressPolicyIsBounded(
+        repositoryPolicy,
+        configuration.namespace,
+        configuration.servicePort,
+      ) ||
       !proxyIngressPolicyIsBounded(
         proxyIngress,
         this.#sandboxNamespace,
+        this.#importerNamespace,
         configuration.servicePort,
       ) ||
       !proxyPublicEgressPolicyIsBounded(proxyEgress)
@@ -2006,6 +2059,25 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
       );
     }
     const importId = uuid(this.#idGenerator(), "Repository import ID");
+    const configuration = this.#dependencyEgress;
+    if (configuration === undefined) {
+      throw new SandboxManagerError(
+        "repository_egress_unavailable",
+        "Repository import egress is not configured",
+        false,
+      );
+    }
+    const endpoint = this.#dependencyProxyEndpoint ?? (await this.#ensureDependencyProxyReady());
+    const minted = mintDependencyEgressCapability({
+      privateKey: configuration.privateKeyPem,
+      activationId: importId,
+      hosts: ["github.com"],
+      ttlMs: configuration.capabilityTtlMs,
+      maximumConnections: 8,
+      maximumConcurrentConnections: 2,
+      maximumBytes: 96 * 1_024 * 1_024,
+      maximumConnectionDurationMs: Math.min(5 * 60_000, this.#repositoryImportTimeoutMs),
+    });
     const name = `agent-dock-import-${importId}`.slice(0, 63);
     let uidValue: string | undefined;
     let connection: WebSocket | undefined;
@@ -2075,6 +2147,12 @@ export class KubernetesGvisorSandboxProvider implements SandboxProvider {
         type: "workspace.import",
         importId,
         source,
+        egressProxy: {
+          host: endpoint.host,
+          port: endpoint.port,
+          capability: minted.token,
+          publicKeyFingerprint: configuration.publicKeyFingerprint,
+        },
       };
       stdin.write(`${JSON.stringify(request)}\n`);
       const terminal = await this.#waitForPodTerminal(

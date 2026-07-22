@@ -193,7 +193,7 @@ describe("Kubernetes gVisor Pod boundary", () => {
     expect(offline.metadata?.labels?.[KUBERNETES_SANDBOX_LABELS.workload]).toBe("tool-sandbox");
   });
 
-  it("builds a bounded public-repository importer with no platform authority", () => {
+  it("builds a proxy-only public-repository importer with no platform authority", () => {
     const pod = buildKubernetesRepositoryImportPod({
       image: "agent-dock/tool-sandbox:test",
       name: "agent-dock-import-security-test",
@@ -206,6 +206,11 @@ describe("Kubernetes gVisor Pod boundary", () => {
     expect(spec.serviceAccountName).toBe("repository-importer");
     expect(spec.automountServiceAccountToken).toBe(false);
     expect(spec.hostNetwork).toBe(false);
+    expect(spec.dnsPolicy).toBe("None");
+    expect(spec.dnsConfig).toEqual({ nameservers: ["127.0.0.1"] });
+    expect(pod.metadata?.labels).toMatchObject({
+      [KUBERNETES_SANDBOX_LABELS.repositoryEgress]: "true",
+    });
     expect(container.env).toEqual([]);
     expect(container.securityContext).toMatchObject({
       runAsUser: 1000,

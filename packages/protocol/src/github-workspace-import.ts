@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { GitHubRepositorySourceSchema } from "./control-plane-api.ts";
 import { SandboxCheckpointBlobSchema } from "./agent-runtime.ts";
 import { UuidSchema } from "./protocol-primitives.ts";
+import { DependencyProxyBootstrapSchema } from "./tool-sandbox.ts";
 
 const WorkspaceImportEnvelopeProperties = {
   workspaceImportProtocolVersion: Type.Literal(1),
@@ -14,6 +15,7 @@ export const GitHubWorkspaceImportRequestSchema = Type.Object(
     ...WorkspaceImportEnvelopeProperties,
     type: Type.Literal("workspace.import"),
     source: GitHubRepositorySourceSchema,
+    egressProxy: DependencyProxyBootstrapSchema,
   },
   { additionalProperties: false },
 );

@@ -489,9 +489,10 @@ UID-fenced bootstrap Pod, then restores into a newly created gVisor Pod that
 never had proxy reachability. Offline verification completes in that second
 Pod before its handle is exposed, so warm reuse and all Agent tools remain
 deny-all without relying on runtime NetworkPolicy relabelling. GitHub import remains a separate
-credential-free gVisor Pod in `agent-dock-importers`. Its fixed NetworkPolicy
-allows cluster DNS and public TCP/443 while excluding private, link-local,
-cluster and node ranges. Imported repository hooks or code are never executed.
+credential-free gVisor Pod in `agent-dock-importers`. It has no DNS or general
+public route: its fixed NetworkPolicy reaches only the capability proxy, and a
+per-import signed grant permits the exact `github.com:443` target with bounded
+time, connections and bytes. Imported repository hooks or code are never executed.
 See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
 

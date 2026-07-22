@@ -106,10 +106,12 @@ function bashOutput(response: ToolSandboxOperationResponse): string {
 
 describe.skipIf(!enabled)("Kubernetes gVisor Sandbox Provider security contract", () => {
   it("imports an exact public GitHub commit through the restricted importer plane", async () => {
+    const privateKeyPem = await readFile(dependencyEgressPrivateKeyFile, "utf8");
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
     const provider = new KubernetesGvisorSandboxProvider({
       toolImage,
       runtimeClient,
+      dependencyEgress: { privateKeyPem },
     });
     try {
       const snapshot = await provider.importGitHub(

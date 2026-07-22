@@ -89,6 +89,12 @@ describe("dependency CONNECT proxy", () => {
     expect(health).toContain(
       dependencyEgressPublicKeyFingerprint(publicKey.export({ type: "spki", format: "pem" })),
     );
+    const challenge = await response(
+      proxyPort,
+      "CONNECT registry.npmjs.org:443 HTTP/1.1\r\nHost: registry.npmjs.org:443\r\n\r\n",
+    );
+    expect(challenge).toContain("407 Proxy Authentication Required");
+    expect(challenge).toContain('Proxy-Authenticate: Basic realm="AgentDock"');
     const authorization = Buffer.from(`agent-dock:${token}`).toString("base64");
     const output = await response(
       proxyPort,

@@ -8,6 +8,12 @@ import {
 
 const IMPORT_ID = "10000000-0000-4000-8000-000000000001";
 const COMMIT_SHA = "a".repeat(40);
+const EGRESS_PROXY = {
+  host: "10.43.0.10",
+  port: 3128,
+  capability: `adpc1_${"a".repeat(128)}.${"b".repeat(86)}`,
+  publicKeyFingerprint: "c".repeat(64),
+} as const;
 
 function blob(value: string) {
   const bytes = Buffer.from(value);
@@ -31,6 +37,7 @@ describe("GitHub workspace importer protocol", () => {
           repository: "octocat/hello-world",
           commitSha: COMMIT_SHA,
         },
+        egressProxy: EGRESS_PROXY,
       }),
     ).toMatchObject({ source: { repository: "octocat/hello-world", commitSha: COMMIT_SHA } });
 
@@ -88,6 +95,7 @@ describe("GitHub workspace importer protocol", () => {
           type: "workspace.import",
           importId: IMPORT_ID,
           source,
+          egressProxy: EGRESS_PROXY,
         }),
       ).toThrow(GitHubWorkspaceImportProtocolError);
     }

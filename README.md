@@ -152,6 +152,7 @@ only after a measured requirement appears.
 - [ADR-0043: Cursor-informed Cloud Agent product loop](docs/adr/0043-cursor-informed-cloud-agent-product-loop.md)
 - [ADR-0044: capability-scoped dependency egress](docs/adr/0044-capability-scoped-dependency-egress.md)
 - [ADR-0045: single-consumption clean gVisor prewarming](docs/adr/0045-single-consumption-clean-prewarm.md)
+- [ADR-0046: capability-scoped public repository import](docs/adr/0046-capability-scoped-repository-import.md)
 
 ## Current executable spikes
 

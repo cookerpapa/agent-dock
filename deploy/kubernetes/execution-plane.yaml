@@ -339,6 +339,12 @@ spec:
           podSelector:
             matchLabels:
               agent-dock.io/dependency-egress: "true"
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agent-dock-importers
+          podSelector:
+            matchLabels:
+              agent-dock.io/repository-egress: "true"
       ports:
         - protocol: TCP
           port: 3128
@@ -522,47 +528,28 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  # Keep the stable object identity so an in-place upgrade replaces the former
+  # broad public-HTTPS rule instead of leaving it active beside this policy.
   name: repository-import-public-https
   namespace: agent-dock-importers
   labels:
     app.kubernetes.io/part-of: agent-dock
+  annotations:
+    agent-dock.io/policy-version: repository-egress-v1
 spec:
   podSelector:
     matchLabels:
-      agent-dock.io/workload: repository-importer
+      agent-dock.io/repository-egress: "true"
   policyTypes:
     - Egress
   egress:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              kubernetes.io/metadata.name: agent-dock-egress
           podSelector:
             matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 0.0.0.0/8
-              - 10.0.0.0/8
-              - 100.64.0.0/10
-              - 127.0.0.0/8
-              - 169.254.0.0/16
-              - 172.16.0.0/12
-              - 192.0.0.0/24
-              - 192.0.2.0/24
-              - 192.168.0.0/16
-              - 198.18.0.0/15
-              - 198.51.100.0/24
-              - 203.0.113.0/24
-              - 224.0.0.0/4
-              - 240.0.0.0/4
+              agent-dock.io/workload: dependency-egress-proxy
       ports:
         - protocol: TCP
-          port: 443
+          port: 3128
