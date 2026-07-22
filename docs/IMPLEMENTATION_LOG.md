@@ -1965,3 +1965,18 @@
 - 升级后真实模型：production Web/API 再次用 `deepseek-v4-flash` 完成同一 Workspace 的两轮代码修改，实际产生 24 次 model call、5,675 input、
   4,877 output、123,008 cache-read tokens，以及 31 次 Tool Call。两轮分别生成 4,180/4,962-byte cumulative patch 与内容哈希固定的 Review Bundle；
   同一 gVisor Pod fence 1→2，结束后精确回收。最新脱敏报告覆盖写入 `docs/reports/real-model-acceptance-latest.{json,md}`。
+
+## 2026-07-23 — Legacy Environment Evidence Compatibility Repair
+
+- 根因：Environment Recipe 上线前写入的 6 条 `validated` evidence 使用旧 JSON shape；migration 016 为 `environment_versions` 回填了默认 Recipe，
+  却没有同步升级既有 `environment_validations.report`。新 Control Plane 打开历史会话时通过闭合 schema 解析 active environment，因缺少
+  `recipeSha256` 和 `recipeCommands` 而返回 `Project environment validation evidence is invalid`。新项目正常，因此此前生产双轮验收没有覆盖这个
+  upgrade-only 路径。
+- 修复：migration 019 只选择 validated、JSON object 且缺少 Recipe evidence 的历史行，将原始 JSON 保存到独立 backfill ledger，再从对应 immutable
+  environment version 写入真实 Recipe hash，并以空 command evidence 明确表示旧版本未记录逐命令结果。当前格式报告保持逐字不变；新增数据库约束禁止未来
+  validated evidence 再缺少这两个字段；down migration 先移除约束，再从 ledger 精确恢复原始 JSON。
+- 安全上线：全仓 CI、35 项数据库测试和 high-level security audit 全过。部署前确认 active Run 为 0，构建 revision
+  `137032d323fe390d2d45a67b24f7f2888917cb2a`，生成独立密钥保护的 33,089,358-byte 冷备后才启动新版本。bootstrap 确认 migration 019 applied，
+  6 条旧 evidence 全部修复，12 条 validated evidence 的当前 schema 均完整。
+- 产品验收：在新生产 Control Plane 内使用与 HTTP API 相同的 `ControlPlaneStore.getConversation()` 逐一读取全部 351 个既有 Session；351/351 成功、
+  0 failure。12 个 Compose 服务随后全部处于 running 且 healthy/no-probe 状态。
