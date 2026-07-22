@@ -17,6 +17,7 @@ import * as versionedProjectEnvironments from "./015_versioned_project_environme
 import * as environmentRecipesAndOperations from "./016_environment_recipes_and_operations.ts";
 import * as multiRepositorySourceSets from "./017_multi_repository_source_sets.ts";
 import * as attemptRewindsAndReviewBundles from "./018_attempt_rewinds_and_review_bundles.ts";
+import * as legacyEnvironmentValidationEvidence from "./019_legacy_environment_validation_evidence.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -39,6 +40,7 @@ export const migrationProvider: MigrationProvider = {
       "016_environment_recipes_and_operations": environmentRecipesAndOperations,
       "017_multi_repository_source_sets": multiRepositorySourceSets,
       "018_attempt_rewinds_and_review_bundles": attemptRewindsAndReviewBundles,
+      "019_legacy_environment_validation_evidence": legacyEnvironmentValidationEvidence,
     };
   },
 };
@@ -132,3 +134,8 @@ export {
   down as downAttemptRewindsAndReviewBundles,
   up as upAttemptRewindsAndReviewBundles,
 } from "./018_attempt_rewinds_and_review_bundles.ts";
+
+export {
+  down as downLegacyEnvironmentValidationEvidence,
+  up as upLegacyEnvironmentValidationEvidence,
+} from "./019_legacy_environment_validation_evidence.ts";
