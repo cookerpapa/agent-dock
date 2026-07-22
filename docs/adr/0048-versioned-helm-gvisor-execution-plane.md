@@ -71,6 +71,27 @@ every object and asserts:
 multi-node availability claim additionally requires a real external cluster
 with the intended CNI, CSI, taints and node failure tests.
 
+The first in-place release takeover was accepted on 2026-07-23. Live reads
+through the deliberately scoped Sandbox Manager identity proved that the fixed
+`RuntimeClass`, proxy Service/Endpoints and trust ConfigMap are owned by Helm
+release `agent-dock-execution-plane`; the Service exposed two distinct ready
+proxy Pod UIDs. Eight direct readiness probes returned the same SHA-256 public
+key fingerprint as the production capability issuer. The Manager identity was
+still forbidden from reading Deployment, PodDisruptionBudget and NetworkPolicy
+objects, so live ownership did not expand its least-privilege RBAC.
+
+After the takeover, the full dynamic gate passed five real Manager tests and
+two trusted Pi Runner tests. It exercised exact-commit GitHub import, scoped npm
+dependency installation followed by a fresh offline Pod, single-consumption
+clean prewarming (2,488 ms versus 4,214 ms cold), cross-tenant and resource
+isolation, exact cleanup, warm fence rebind, text-only execution with zero Tool
+Pods and a remote code repair. A final two-turn production run then consumed
+real `deepseek-v4-flash` tokens, reused one physical gVisor Pod with fence 1 to
+2, committed two immutable Review Bundles and destroyed the exact assignment.
+The redacted evidence is recorded in
+`docs/reports/helm-execution-plane-acceptance-latest.md` and
+`docs/reports/real-model-acceptance-latest.md`.
+
 ## Consequences
 
 The execution boundary is reproducible and upgradeable without weakening the

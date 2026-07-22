@@ -1951,3 +1951,17 @@
   修复并记录 passed；两轮 Review Bundle hash 复算一致且二次读取完全相同。
 - 生命周期证据：两轮复用 Pod UID `714fed06-da04-49e9-8899-13861bd50d7e` 与同一 activation，fence 1→2；exact source snapshot 未重复导入，最后通过受信
   inventory/terminate-and-confirm 协议删除该精确 UID。脱敏报告保存在 `docs/reports/real-model-acceptance-latest.json` 和 `.md`。
+
+## 2026-07-23 — Helm Release Takeover and Post-upgrade Acceptance
+
+- 实际接管：使用固定 Helm 3.18.6 对既有 execution plane 执行 `upgrade --install --take-ownership`。低权限 Manager 随后读到
+  `RuntimeClass/agent-dock-gvisor`、proxy Endpoints 与 trust ConfigMap 的 `managed-by=Helm`、release name/namespace 元数据；RuntimeClass handler
+  仍为 `runsc`，Service 同时包含两个 Ready Pod UID。Manager 对 Deployment、PDB 和 NetworkPolicy 的读取仍被 RBAC 拒绝，证明 Helm 部署没有扩大
+  运行时身份权限。
+- 信任链：从生产 capability issuer 私钥只派生公钥指纹，与 Helm 接管后 ConfigMap 以及 Service 的 8 次 `/health/ready` 返回逐一比较，全部为
+  `840148802ac2838a51a66c070c970cc53cb6741ca0623d3de24a870192c61d49`；未输出、复制或注入生产私钥。
+- 升级后 gVisor 门禁：5 个 Manager live tests 与 2 个 trusted Runner tests 全过。覆盖 restricted GitHub import、真实 npm dependency bootstrap 后销毁联网
+  Pod 并换入 fresh offline Pod、clean prewarm（2,488 ms vs cold 4,214 ms）、跨租户/资源/输出/精确清理、warm fence rebind、纯聊天零 Pod与 Pi remote repair。
+- 升级后真实模型：production Web/API 再次用 `deepseek-v4-flash` 完成同一 Workspace 的两轮代码修改，实际产生 24 次 model call、5,675 input、
+  4,877 output、123,008 cache-read tokens，以及 31 次 Tool Call。两轮分别生成 4,180/4,962-byte cumulative patch 与内容哈希固定的 Review Bundle；
+  同一 gVisor Pod fence 1→2，结束后精确回收。最新脱敏报告覆盖写入 `docs/reports/real-model-acceptance-latest.{json,md}`。
