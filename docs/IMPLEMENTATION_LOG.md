@@ -1980,3 +1980,30 @@
   6 条旧 evidence 全部修复，12 条 validated evidence 的当前 schema 均完整。
 - 产品验收：在新生产 Control Plane 内使用与 HTTP API 相同的 `ControlPlaneStore.getConversation()` 逐一读取全部 351 个既有 Session；351/351 成功、
   0 failure。12 个 Compose 服务随后全部处于 running 且 healthy/no-probe 状态。
+
+## 2026-07-23 — Semantic Conversation Projection and Capability-free Provider Egress
+
+- 外部实现取舍：调研 `maidangzhu/cloud-agent-platform` 后，没有照搬其 Vercel Sandbox、Redis Pub/Sub 或前端拼装原始事件的路径；保留现有自托管
+  PostgreSQL durable log、Outbox、RunAttempt/Lease/Fence 与 Kubernetes + gVisor 执行面，只吸收适合当前系统的两点：独立的语义会话读模型，
+  以及受信网络出口与 Agent Runner 解耦。
+- 会话投影：migration 020 增加 terminal-turn semantic projection。`turn.completed` 在检查 Attempt lease/fence 后，与 durable event 持久化位于同一
+  PostgreSQL 事务；投影保存 bounded text/thinking/tool summary、来源 event high-water 和版本，原始 durable events 与 Pi JSONL 继续作为权威事实源。
+  `getConversation()` 对历史 Session 做惰性修复，Web 先加载语义投影，再从 `replayAfterSequence` 继续 SSE，因此不会重新传输并在浏览器拼装全部历史
+  token delta。
+- 模型出口：Supervisor 不再加入具有宿主外联能力的网络。新增 private `model-egress` 与两段 relay：bridge 仅在内部网络接受 CONNECT，host relay
+  使用私有 Unix socket 与 bridge 通信、只允许 `api.deepseek.com:443`，并可复用宿主既有 HTTPS proxy。两者均不持有模型/API/数据库凭据；
+  Tool Sandbox 仍不加入任何 Compose 网络。直接解析模式还拒绝 private、loopback、link-local 和 reserved 地址。
+- 验证：全仓 CI 通过（Control Plane 113 passed/3 environment-conditional skipped、database 36 passed），新增 relay 测试覆盖 allowlist、
+  upstream proxy、普通 HTTP 拒绝、private DNS 拒绝与 direct CONNECT；production composition gate 验证 network membership、精确 proxy 配置、
+  non-root、read-only、no privilege、no Docker socket/secret。
+- 安全部署：在 active Run 为 0 时生成
+  `/home/rayn/agent-dock-backups/pre-provider-relay-deploy-d216ae0.adbackup`（36,503,137 bytes、mode 0600），随后部署 revision
+  `76f276fea94319c637ac47f5b2a972a5286bfa40`。首次启动暴露 one-shot volume bootstrap 在 drop-all capability 下的 chmod 顺序问题；
+  修复为先 chmod 后 chown，并只为 bootstrap 增加 `CHOWN`/`FOWNER`，长期 relay 仍保持 drop-all。最终所有生产服务健康。
+- 真实模型与 gVisor 闭环：production Web/API 使用 `deepseek-v4-flash` 完成两轮同一 Session 验收。纯聊天首字/settled 为
+  4,127/4,332 ms，1 次真实请求消耗 65 input、27 output、1,280 cache-read token，0 Tool Call、0 Sandbox activation；第二轮编码
+  首字/settled 为 5,186/5,793 ms，2 次真实请求消耗 182 input、200 output、2,816 cache-read token，在
+  `RuntimeClass/agent-dock-gvisor` 内完成 1 次 Tool Call并产生 207-byte patch。
+- 投影与清理证据：两轮共 15 个 durable events 投影为 2 个 turn/3 个 semantic items，`replayAfterSequence=15` 与 durable high-water 一致；
+  精确 gVisor Sandbox UID `06cb040a-b632-495b-88ba-cb5760674a1f` 验收后已销毁。脱敏报告保存在
+  `docs/reports/semantic-conversation-acceptance-latest.{json,md}`。

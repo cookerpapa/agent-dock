@@ -1,0 +1,56 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-23T14:30:52.184Z",
+  "endpoint": "http://127.0.0.1:8080/",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "projectId": "de236d86-ae8c-4c1f-88c5-8b6a720a2deb",
+  "workspaceId": "8f41b95e-7985-43f8-ab47-9a277c380f8d",
+  "sessionId": "03b9e604-7dfc-42f9-96d7-bd7be3f688b6",
+  "chat": {
+    "runId": "bec7b01c-62e0-4b82-a755-3b0797f5206a",
+    "firstTextMs": 4127,
+    "settledMs": 4332,
+    "durableEvents": 4,
+    "toolCalls": 0,
+    "usage": {
+      "requests": 1,
+      "inputTokens": 65,
+      "outputTokens": 27,
+      "cacheReadTokens": 1280,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    },
+    "sandboxActivations": 0
+  },
+  "coding": {
+    "runId": "4c08af2b-2b98-4f6b-9c92-d6e395eaae3d",
+    "firstTextMs": 5186,
+    "settledMs": 5793,
+    "durableEvents": 11,
+    "toolCalls": 1,
+    "patchBytes": 207,
+    "usage": {
+      "requests": 2,
+      "inputTokens": 182,
+      "outputTokens": 200,
+      "cacheReadTokens": 2816,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    },
+    "sandboxRuntimeClass": "agent-dock-gvisor"
+  },
+  "semanticConversation": {
+    "projectionCount": 2,
+    "durableEvents": 15,
+    "projectedSourceEvents": 15,
+    "semanticItems": 3,
+    "replayAfterSequence": 15
+  },
+  "cleanup": {
+    "sandboxUid": "06cb040a-b632-495b-88ba-cb5760674a1f",
+    "exactAssignmentDestroyed": true
+  }
+}
