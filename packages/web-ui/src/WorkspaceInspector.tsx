@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  CandidateRaceListResource,
+  CandidateRaceResource,
   GitHubPullRequestDeliveryResource,
   ModelGovernanceResource,
   OperationalAuditLogResource,
@@ -22,7 +24,8 @@ import type {
 import { parseEnvironmentRecipe } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 
-type InspectorTab = "workspace" | "environment" | "runs" | "tests" | "usage" | "activity";
+type InspectorTab =
+  "workspace" | "parallel" | "environment" | "runs" | "tests" | "usage" | "activity";
 
 type WorkspaceInspectorProps = {
   api: AgentDockApi;
@@ -54,6 +57,23 @@ type ArtifactPreview = {
 
 const TERMINAL_RETRY_STATES = new Set(["failed", "cancelled", "timed_out", "superseded"]);
 const MAX_PREVIEW_BYTES = 256 * 1_024;
+const DEFAULT_RACE_CANDIDATES = [
+  {
+    label: "Minimal patch",
+    strategy:
+      "Prefer the smallest correct change. Preserve existing architecture and add focused tests.",
+  },
+  {
+    label: "Tests first",
+    strategy:
+      "Reproduce the problem with deterministic tests first, then implement the smallest fix that makes them pass.",
+  },
+  {
+    label: "Robust design",
+    strategy:
+      "Inspect adjacent code and edge cases, then implement a maintainable solution with regression coverage.",
+  },
+] as const;
 
 function failureMessage(error: unknown): string {
   if (error instanceof AgentDockApiError) return `${error.code}: ${error.message}`;
@@ -142,6 +162,16 @@ export function WorkspaceInspector({
   const [loading, setLoading] = useState(false);
   const [mutation, setMutation] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunListResource | null>(null);
+  const [candidateRaces, setCandidateRaces] = useState<CandidateRaceListResource | null>(null);
+  const [selectedRaceId, setSelectedRaceId] = useState<string | null>(null);
+  const [racePrompt, setRacePrompt] = useState("");
+  const [raceCandidates, setRaceCandidates] = useState<Array<{ label: string; strategy: string }>>(
+    () => DEFAULT_RACE_CANDIDATES.map((candidate) => ({ ...candidate })),
+  );
+  const [raceConcurrency, setRaceConcurrency] = useState(2);
+  const [raceRequirePatch, setRaceRequirePatch] = useState(true);
+  const [raceRequireTests, setRaceRequireTests] = useState(true);
+  const [raceMaximumChangedPaths, setRaceMaximumChangedPaths] = useState(100);
   const [versions, setVersions] = useState<WorkspaceVersionListResource | null>(null);
   const [context, setContext] = useState<SessionContextResource | null>(null);
   const [usage, setUsage] = useState<UsageSummaryResource | null>(null);
@@ -179,6 +209,10 @@ export function WorkspaceInspector({
     () => runs?.runs.find((run) => run.runId === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+  const selectedRace = useMemo(
+    () => candidateRaces?.races.find((race) => race.orchestrationId === selectedRaceId) ?? null,
+    [candidateRaces, selectedRaceId],
+  );
   const selectedEnvironment = useMemo(
     () =>
       environments?.versions.find(
@@ -193,6 +227,7 @@ export function WorkspaceInspector({
     try {
       const [
         runList,
+        raceList,
         versionList,
         sessionContext,
         tenantUsage,
@@ -201,6 +236,7 @@ export function WorkspaceInspector({
         ownerData,
       ] = await Promise.all([
         api.listRuns(sessionId),
+        api.listCandidateRaces(sessionId),
         api.listWorkspaceVersions(sessionId),
         api.getSessionContext(sessionId),
         api.getUsage(),
@@ -211,6 +247,7 @@ export function WorkspaceInspector({
           : Promise.resolve(null),
       ]);
       setRuns(runList);
+      setCandidateRaces(raceList);
       setVersions(versionList);
       setContext(sessionContext);
       setUsage(tenantUsage);
@@ -222,6 +259,11 @@ export function WorkspaceInspector({
         current !== null && runList.runs.some((run) => run.runId === current)
           ? current
           : (runList.runs[0]?.runId ?? null),
+      );
+      setSelectedRaceId((current) =>
+        current !== null && raceList.races.some((race) => race.orchestrationId === current)
+          ? current
+          : (raceList.races[0]?.orchestrationId ?? null),
       );
       setSelectedVersionId((current) =>
         current !== null && versionList.versions.some((version) => version.versionId === current)
@@ -245,6 +287,9 @@ export function WorkspaceInspector({
 
   useEffect(() => {
     setRuns(null);
+    setCandidateRaces(null);
+    setSelectedRaceId(null);
+    setRacePrompt("");
     setVersions(null);
     setContext(null);
     setUsage(null);
@@ -269,6 +314,42 @@ export function WorkspaceInspector({
       selectedEnvironment === null ? "" : JSON.stringify(selectedEnvironment.recipe, null, 2),
     );
   }, [selectedEnvironment]);
+
+  useEffect(() => {
+    if (
+      selectedRaceId === null ||
+      (selectedRace?.state !== "running" && selectedRace?.state !== "cancel_requested")
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const next = await api.getCandidateRace(selectedRaceId);
+        if (cancelled) return;
+        setCandidateRaces((current) => {
+          if (current === null) return { races: [next], truncated: false };
+          return {
+            ...current,
+            races: current.races.map((race) =>
+              race.orchestrationId === next.orchestrationId ? next : race,
+            ),
+          };
+        });
+        if (next.state === "running" || next.state === "cancel_requested") {
+          timer = setTimeout(() => void poll(), 1_500);
+        }
+      } catch (error: unknown) {
+        if (!cancelled) onError(failureMessage(error));
+      }
+    };
+    timer = setTimeout(() => void poll(), 750);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [api, onError, selectedRace?.state, selectedRaceId]);
 
   useEffect(() => {
     setPullRequestDelivery(null);
@@ -327,6 +408,144 @@ export function WorkspaceInspector({
       cancelled = true;
     };
   }, [api, onError, selectedVersion]);
+
+  function upsertCandidateRace(next: CandidateRaceResource): void {
+    setCandidateRaces((current) => {
+      if (current === null) return { races: [next], truncated: false };
+      const exists = current.races.some((race) => race.orchestrationId === next.orchestrationId);
+      return {
+        ...current,
+        races: exists
+          ? current.races.map((race) =>
+              race.orchestrationId === next.orchestrationId ? next : race,
+            )
+          : [next, ...current.races].slice(0, 50),
+      };
+    });
+    setSelectedRaceId(next.orchestrationId);
+  }
+
+  async function createCandidateRace(): Promise<void> {
+    const baseWorkspaceVersionId = versions?.currentVersionId;
+    if (
+      sessionId === null ||
+      baseWorkspaceVersionId === undefined ||
+      mutation !== null ||
+      racePrompt.trim().length === 0
+    ) {
+      return;
+    }
+    setMutation("starting candidate race");
+    try {
+      const next = await api.createCandidateRace(
+        sessionId,
+        {
+          baseWorkspaceVersionId,
+          prompt: racePrompt.trim(),
+          candidates: raceCandidates.map((candidate) => ({
+            label: candidate.label.trim(),
+            strategy: candidate.strategy.trim(),
+          })),
+          maximumConcurrentCandidates: Math.min(raceConcurrency, raceCandidates.length),
+          acceptance: {
+            requirePatch: raceRequirePatch,
+            requireTests: raceRequireTests,
+            maximumChangedPaths: raceMaximumChangedPaths,
+            protectedPathPrefixes: [],
+          },
+        },
+        newIdempotencyKey("race"),
+      );
+      upsertCandidateRace(next);
+      setRacePrompt("");
+      await onSessionChanged();
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function cancelCandidateRace(): Promise<void> {
+    if (
+      selectedRace === null ||
+      mutation !== null ||
+      !globalThis.confirm("Cancel queued and active candidates in this race?")
+    ) {
+      return;
+    }
+    setMutation("cancelling candidate race");
+    try {
+      upsertCandidateRace(
+        await api.cancelCandidateRace(
+          selectedRace.orchestrationId,
+          newIdempotencyKey("race-cancel"),
+        ),
+      );
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function promoteRaceCandidate(candidateId: string): Promise<void> {
+    if (
+      selectedRace === null ||
+      mutation !== null ||
+      !globalThis.confirm(
+        "Promote this candidate Workspace into the parent Session? The parent conversation remains unchanged.",
+      )
+    ) {
+      return;
+    }
+    setMutation("promoting candidate");
+    try {
+      upsertCandidateRace(
+        await api.promoteCandidate(
+          selectedRace.orchestrationId,
+          candidateId,
+          selectedRace.baseWorkspaceVersionId,
+          newIdempotencyKey("race-promote"),
+        ),
+      );
+      await Promise.all([refresh(), onSessionChanged()]);
+    } catch (error: unknown) {
+      onError(failureMessage(error));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  function updateRaceCandidate(index: number, field: "label" | "strategy", value: string): void {
+    setRaceCandidates((current) =>
+      current.map((candidate, candidateIndex) =>
+        candidateIndex === index ? { ...candidate, [field]: value } : candidate,
+      ),
+    );
+  }
+
+  function addRaceCandidate(): void {
+    setRaceCandidates((current) =>
+      current.length >= 4
+        ? current
+        : [
+            ...current,
+            {
+              label: `Alternative ${String(current.length + 1)}`,
+              strategy:
+                "Try an independent implementation and validate it with deterministic tests.",
+            },
+          ],
+    );
+  }
+
+  function removeRaceCandidate(index: number): void {
+    if (raceCandidates.length <= 2) return;
+    const next = raceCandidates.filter((_, candidateIndex) => candidateIndex !== index);
+    setRaceCandidates(next);
+    setRaceConcurrency((value) => Math.min(value, next.length));
+  }
 
   async function previewFile(file: WorkspaceFileResource): Promise<void> {
     if (selectedVersionId === null) return;
@@ -597,20 +816,20 @@ export function WorkspaceInspector({
         </button>
       </header>
       <nav className="inspector-tabs" aria-label="Inspector sections">
-        {(["workspace", "environment", "runs", "tests", "usage", "activity"] as const).map(
-          (value) => (
-            <button
-              aria-selected={tab === value}
-              className={tab === value ? "active" : ""}
-              key={value}
-              onClick={() => setTab(value)}
-              role="tab"
-              type="button"
-            >
-              {value}
-            </button>
-          ),
-        )}
+        {(
+          ["workspace", "parallel", "environment", "runs", "tests", "usage", "activity"] as const
+        ).map((value) => (
+          <button
+            aria-selected={tab === value}
+            className={tab === value ? "active" : ""}
+            key={value}
+            onClick={() => setTab(value)}
+            role="tab"
+            type="button"
+          >
+            {value}
+          </button>
+        ))}
       </nav>
       <div className="inspector-scroll">
         {sessionId === null ? <EmptyPanel>Select a durable Session first.</EmptyPanel> : null}
@@ -880,6 +1099,236 @@ export function WorkspaceInspector({
                 <pre>{artifactPreview.text}</pre>
               </div>
             ) : null}
+          </section>
+        ) : null}
+
+        {sessionId !== null && tab === "parallel" ? (
+          <section className="inspector-panel">
+            <div className="inspector-section-heading">
+              <div>
+                <strong>Parallel candidate race</strong>
+                <span>isolated child Sessions · deterministic acceptance · human promotion</span>
+              </div>
+              {selectedRace?.state === "running" || selectedRace?.state === "cancel_requested" ? (
+                <button
+                  disabled={role === "viewer" || mutation !== null}
+                  onClick={() => void cancelCandidateRace()}
+                  type="button"
+                >
+                  cancel race
+                </button>
+              ) : null}
+            </div>
+            <form
+              className="candidate-race-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createCandidateRace();
+              }}
+            >
+              <label>
+                <span>shared task</span>
+                <textarea
+                  disabled={role === "viewer" || busy || mutation !== null}
+                  onChange={(event) => setRacePrompt(event.target.value)}
+                  placeholder="Describe one bounded coding task for all candidates…"
+                  rows={4}
+                  value={racePrompt}
+                />
+              </label>
+              <div className="candidate-strategy-list">
+                {raceCandidates.map((candidate, index) => (
+                  <fieldset key={String(index)}>
+                    <legend>candidate {String(index + 1)}</legend>
+                    <input
+                      aria-label={`Candidate ${String(index + 1)} label`}
+                      disabled={role === "viewer" || mutation !== null}
+                      onChange={(event) => updateRaceCandidate(index, "label", event.target.value)}
+                      value={candidate.label}
+                    />
+                    <textarea
+                      aria-label={`Candidate ${String(index + 1)} strategy`}
+                      disabled={role === "viewer" || mutation !== null}
+                      onChange={(event) =>
+                        updateRaceCandidate(index, "strategy", event.target.value)
+                      }
+                      rows={3}
+                      value={candidate.strategy}
+                    />
+                    <button
+                      disabled={
+                        role === "viewer" || mutation !== null || raceCandidates.length <= 2
+                      }
+                      onClick={() => removeRaceCandidate(index)}
+                      type="button"
+                    >
+                      remove
+                    </button>
+                  </fieldset>
+                ))}
+              </div>
+              <div className="candidate-race-controls">
+                <button
+                  disabled={role === "viewer" || mutation !== null || raceCandidates.length >= 4}
+                  onClick={addRaceCandidate}
+                  type="button"
+                >
+                  add candidate
+                </button>
+                <label>
+                  <span>parallel slots</span>
+                  <select
+                    disabled={role === "viewer" || mutation !== null}
+                    onChange={(event) => setRaceConcurrency(Number(event.target.value))}
+                    value={raceConcurrency}
+                  >
+                    {raceCandidates.map((_, index) => (
+                      <option key={String(index + 1)} value={index + 1}>
+                        {String(index + 1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>max changed paths</span>
+                  <input
+                    disabled={role === "viewer" || mutation !== null}
+                    max={1_000}
+                    min={1}
+                    onChange={(event) => setRaceMaximumChangedPaths(Number(event.target.value))}
+                    type="number"
+                    value={raceMaximumChangedPaths}
+                  />
+                </label>
+                <label className="candidate-race-check">
+                  <input
+                    checked={raceRequirePatch}
+                    disabled={role === "viewer" || mutation !== null}
+                    onChange={(event) => setRaceRequirePatch(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>require patch</span>
+                </label>
+                <label className="candidate-race-check">
+                  <input
+                    checked={raceRequireTests}
+                    disabled={role === "viewer" || mutation !== null}
+                    onChange={(event) => setRaceRequireTests(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>require green tests</span>
+                </label>
+              </div>
+              <button
+                disabled={
+                  role === "viewer" ||
+                  busy ||
+                  mutation !== null ||
+                  versions?.currentVersionId === undefined ||
+                  racePrompt.trim().length === 0 ||
+                  raceCandidates.some(
+                    (candidate) =>
+                      candidate.label.trim().length === 0 || candidate.strategy.trim().length === 0,
+                  )
+                }
+                type="submit"
+              >
+                run {String(raceCandidates.length)} isolated candidates
+              </button>
+            </form>
+            {mutation ? <div className="inspector-progress">{mutation}…</div> : null}
+            <label className="inspector-field">
+              <span>race history</span>
+              <select
+                onChange={(event) => setSelectedRaceId(event.target.value)}
+                value={selectedRaceId ?? ""}
+              >
+                {candidateRaces?.races.map((race) => (
+                  <option key={race.orchestrationId} value={race.orchestrationId}>
+                    {shortId(race.orchestrationId)} · {race.state} ·{" "}
+                    {String(race.candidates.length)} candidates
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedRace === null ? (
+              <EmptyPanel>No candidate race has been submitted for this Session.</EmptyPanel>
+            ) : (
+              <>
+                <div className="inspector-metrics compact">
+                  <Metric label="state" value={selectedRace.state} />
+                  <Metric
+                    label="parallel"
+                    value={String(selectedRace.maximumConcurrentCandidates)}
+                  />
+                  <Metric label="base" value={shortId(selectedRace.baseWorkspaceVersionId)} />
+                </div>
+                <div className="inspector-note">
+                  Each candidate owns a separate child Session and gVisor Sandbox activation. The
+                  parent Workspace changes only after an explicit, fenced promotion.
+                </div>
+                <div className="candidate-result-list">
+                  {selectedRace.candidates.map((candidate) => {
+                    const score = candidate.acceptance?.scorecard.metrics;
+                    const recommended =
+                      candidate.candidateId === selectedRace.recommendedCandidateId;
+                    const winner = candidate.candidateId === selectedRace.winnerCandidateId;
+                    return (
+                      <article
+                        className={
+                          candidate.acceptance?.verdict === "passed"
+                            ? "candidate-passed"
+                            : candidate.acceptance?.verdict === "failed"
+                              ? "candidate-failed"
+                              : ""
+                        }
+                        key={candidate.candidateId}
+                      >
+                        <header>
+                          <span>#{String(candidate.ordinal)}</span>
+                          <strong>{candidate.label}</strong>
+                          <em>
+                            {winner
+                              ? "winner"
+                              : recommended
+                                ? "recommended"
+                                : (candidate.acceptance?.verdict ?? candidate.runState)}
+                          </em>
+                        </header>
+                        <p>{candidate.strategy}</p>
+                        <div className="candidate-result-metrics">
+                          <span>{score ? `${String(score.tests.passed)} tests` : "tests —"}</span>
+                          <span>{score ? `${String(score.changedPaths)} paths` : "paths —"}</span>
+                          <span>{score ? costLabel(score.costMicrousd) : "cost —"}</span>
+                          <span>{score ? durationLabel(score.durationMs) : "time —"}</span>
+                        </div>
+                        {candidate.acceptance?.scorecard.reasons.length ? (
+                          <small>{candidate.acceptance.scorecard.reasons.join(" · ")}</small>
+                        ) : null}
+                        <footer>
+                          <button onClick={() => void onForked(candidate.sessionId)} type="button">
+                            open candidate
+                          </button>
+                          <button
+                            disabled={
+                              role === "viewer" ||
+                              mutation !== null ||
+                              selectedRace.state !== "awaiting_decision" ||
+                              candidate.acceptance?.verdict !== "passed" ||
+                              versions?.currentVersionId !== selectedRace.baseWorkspaceVersionId
+                            }
+                            onClick={() => void promoteRaceCandidate(candidate.candidateId)}
+                            type="button"
+                          >
+                            promote
+                          </button>
+                        </footer>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </section>
         ) : null}
 

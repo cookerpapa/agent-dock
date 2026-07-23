@@ -9,8 +9,9 @@ private single-host product are tracked in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and now include the
 closed, versioned single-node Helm execution-plane chart under ADR-0048 and
 transactional semantic conversation projections under ADR-0049. Do not
-interpret completion of that product plan as a claim that the optional Phase 5
-subagent tree or a validated multi-node release exists.
+interpret completion of that product plan as a claim that the complete optional
+Phase 5 autonomous subagent tree or a validated multi-node release exists. A
+bounded, human-initiated Candidate Race slice is implemented under ADR-0051.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -256,6 +257,17 @@ Exit criteria: a root agent runs scout, worker, and reviewer agents concurrently
 the writer changes an isolated worktree and the parent receives a reviewed patch.
 
 This is the standout portfolio release.
+
+Current status: the bounded orchestration precursor is complete. A user can
+fan one task out from an immutable parent Workspace version into two to four
+independent child Sessions, cap their concurrent admission, inspect each normal
+Run and gVisor-backed execution, apply deterministic Review-Bundle acceptance,
+cancel the race, and explicitly CAS-promote one passing Workspace while keeping
+the parent conversation unchanged. Candidate dispatch uses the existing
+tenant-fair scheduler and used Sandboxes are never shared across candidates.
+Recursive model-invoked spawn/send/wait tools, context inheritance modes,
+read-only sharing, tree depth budgets, and parent-agent aggregation remain
+future work; this slice must not be described as the complete Phase 5 tree.
 
 ## Phase 6: observability and failure engineering (2 weeks)
 

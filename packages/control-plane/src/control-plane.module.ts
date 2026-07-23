@@ -25,6 +25,7 @@ import {
 } from "./workspace-version-service.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
+import { CandidateRaceService } from "./candidate-race-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -69,17 +70,26 @@ export class ControlPlaneModule {
       ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
       ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     });
+    const controlPlaneStores = new ControlPlaneStoreFactory({
+      database: options.database,
+      ...(options.environmentImageRevision === undefined
+        ? {}
+        : { environmentImageRevision: options.environmentImageRevision }),
+      ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+    });
     return {
       module: ControlPlaneModule,
       controllers: [ControlPlaneController],
       providers: [
         {
           provide: ControlPlaneStoreFactory,
-          useValue: new ControlPlaneStoreFactory({
+          useValue: controlPlaneStores,
+        },
+        {
+          provide: CandidateRaceService,
+          useValue: new CandidateRaceService({
             database: options.database,
-            ...(options.environmentImageRevision === undefined
-              ? {}
-              : { environmentImageRevision: options.environmentImageRevision }),
+            controlPlaneStores,
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
         },
@@ -182,6 +192,7 @@ export class ControlPlaneModule {
         WorkspaceVersionService,
         ProjectEnvironmentService,
         GitHubIntegrationService,
+        CandidateRaceService,
       ],
     };
   }

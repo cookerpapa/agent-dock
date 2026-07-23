@@ -924,6 +924,14 @@ export class ControlPlaneStore {
       ])
       .select((expression) => expression.fn.count<string>("turn.id").as("turnCount"))
       .where("session_row.tenant_id", "=", this.#tenantId)
+      .where(
+        sql<boolean>`not exists (
+          select 1
+          from orchestration_candidates as hidden_candidate
+          where hidden_candidate.tenant_id = ${sql.ref("session_row.tenant_id")}
+            and hidden_candidate.child_session_id = ${sql.ref("session_row.id")}
+        )`,
+      )
       .groupBy([
         "session_row.id",
         "session_row.project_id",

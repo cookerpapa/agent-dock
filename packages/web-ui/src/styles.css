@@ -737,7 +737,7 @@ a {
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   border-bottom: 1px solid var(--border);
 }
 
@@ -978,6 +978,182 @@ a {
 
 .pull-request-result strong {
   color: var(--green);
+}
+
+.candidate-race-form {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #3c4c37;
+  border-radius: 4px;
+  background: #151914;
+}
+
+.candidate-race-form > label {
+  display: grid;
+  gap: 4px;
+}
+
+.candidate-race-form label > span,
+.candidate-strategy-list legend {
+  color: var(--faint);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.candidate-race-form input,
+.candidate-race-form textarea,
+.candidate-race-form select {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-raised);
+}
+
+.candidate-race-form textarea {
+  resize: vertical;
+}
+
+.candidate-race-form > button {
+  justify-self: end;
+  padding: 5px 8px;
+  border-color: #4f6048;
+  background: #263023;
+  color: var(--green-strong);
+}
+
+.candidate-strategy-list {
+  display: grid;
+  gap: 6px;
+}
+
+.candidate-strategy-list fieldset {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.candidate-strategy-list fieldset > button {
+  justify-self: end;
+  padding: 3px 6px;
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.candidate-race-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.candidate-race-controls > label {
+  display: grid;
+  gap: 3px;
+}
+
+.candidate-race-controls > button {
+  align-self: end;
+  min-height: 27px;
+}
+
+.candidate-race-controls .candidate-race-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.candidate-race-check input {
+  min-width: auto;
+  margin: 0;
+}
+
+.candidate-result-list {
+  display: grid;
+  gap: 7px;
+}
+
+.candidate-result-list article {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #171916;
+}
+
+.candidate-result-list article.candidate-passed {
+  border-color: #41583b;
+}
+
+.candidate-result-list article.candidate-failed {
+  border-color: #5b3f39;
+}
+
+.candidate-result-list header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.candidate-result-list header span,
+.candidate-result-list header em {
+  color: var(--faint);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.candidate-result-list header strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-result-list p,
+.candidate-result-list small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.candidate-result-list small {
+  color: var(--red);
+}
+
+.candidate-result-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.candidate-result-metrics span {
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--faint);
+  font-size: 8px;
+  text-align: center;
+}
+
+.candidate-result-list footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.candidate-result-list footer button {
+  padding: 3px 6px;
+  font-size: 8px;
 }
 
 .inspector-progress {

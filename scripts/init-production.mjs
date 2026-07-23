@@ -429,7 +429,7 @@ const publicTenantMaximumUnsettledTurns = integerEnvironmentValue(
 );
 const publicTenantMaximumConcurrentTurns = integerEnvironmentValue(
   "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
-  1,
+  2,
   1,
   256,
 );

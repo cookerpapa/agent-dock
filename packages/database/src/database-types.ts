@@ -65,8 +65,8 @@ export type TenantApiCredentialRole = "owner" | "member" | "viewer";
 export type WorkspaceSourceKind =
   "empty" | "sample_java" | "github_public" | "github_app" | "repository_set";
 export type WorkspaceImportStatus = "pending" | "importing" | "ready" | "failed";
-export type WorkspaceVersionOrigin = "checkpoint" | "fork" | "migration";
-export type WorkspaceOperationKind = "fork" | "rollback" | "archive" | "unarchive";
+export type WorkspaceVersionOrigin = "checkpoint" | "fork" | "migration" | "promotion";
+export type WorkspaceOperationKind = "fork" | "rollback" | "archive" | "unarchive" | "promote";
 export type GitHubInstallationStatus = "active" | "suspended" | "removed";
 export type GitHubPullRequestDeliveryState = "pending" | "delivering" | "completed" | "failed";
 export type GitHubWebhookDeliveryStatus = "processed" | "ignored" | "failed";
@@ -75,6 +75,11 @@ export type ContextCompactionState = "running" | "completed" | "aborted" | "fail
 export type EnvironmentVersionState = "pending" | "validated" | "failed";
 export type EnvironmentValidationStatus = "validated" | "failed";
 export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "validate";
+export type OrchestrationState =
+  "running" | "cancel_requested" | "awaiting_decision" | "completed" | "failed" | "cancelled";
+export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "cancelled";
+export type OrchestrationAcceptanceVerdict = "passed" | "failed";
+export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
 
 export interface TenantTable {
   id: string;
@@ -420,6 +425,92 @@ export interface ReviewBundleTable {
   workspace_version_id: string | null;
   manifest: JsonObject;
   manifest_sha256: string;
+  created_at: GeneratedTimestamp;
+}
+
+export interface OrchestrationRunTable {
+  id: string;
+  tenant_id: string;
+  project_id: string;
+  workspace_id: string;
+  parent_session_id: string;
+  base_workspace_version_id: string;
+  kind: "candidate_race";
+  state: OrchestrationState;
+  prompt: string;
+  candidate_specs: JsonObject;
+  acceptance_policy: JsonObject;
+  candidate_count: number;
+  maximum_concurrent_candidates: number;
+  created_by_user_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  winner_candidate_id: string | null;
+  cancel_idempotency_key: string | null;
+  cancel_requested_by_user_id: string | null;
+  cancel_requested_at: NullableTimestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
+}
+
+export interface OrchestrationCandidateTable {
+  id: string;
+  tenant_id: string;
+  orchestration_id: string;
+  ordinal: number;
+  label: string;
+  strategy: string;
+  child_session_id: string;
+  run_id: string;
+  created_at: GeneratedTimestamp;
+}
+
+export interface OrchestrationDispatchTable {
+  id: string;
+  tenant_id: string;
+  orchestration_id: string;
+  candidate_id: string;
+  run_id: string;
+  generation: GeneratedInteger;
+  state: OrchestrationDispatchState;
+  accepted_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
+}
+
+export interface OrchestrationAcceptanceResultTable {
+  candidate_id: string;
+  tenant_id: string;
+  orchestration_id: string;
+  verdict: OrchestrationAcceptanceVerdict;
+  review_bundle_id: string | null;
+  workspace_version_id: string | null;
+  scorecard: JsonObject;
+  evaluated_at: GeneratedTimestamp;
+}
+
+export interface OrchestrationDecisionGateTable {
+  id: string;
+  tenant_id: string;
+  orchestration_id: string;
+  state: OrchestrationDecisionGateState;
+  selected_candidate_id: string | null;
+  resolved_by_user_id: string | null;
+  created_at: GeneratedTimestamp;
+  resolved_at: NullableTimestamp;
+}
+
+export interface CandidatePromotionTable {
+  id: string;
+  tenant_id: string;
+  orchestration_id: string;
+  candidate_id: string;
+  parent_session_id: string;
+  from_workspace_version_id: string;
+  candidate_workspace_version_id: string;
+  promoted_workspace_version_id: string;
+  actor_user_id: string;
+  idempotency_key: string;
   created_at: GeneratedTimestamp;
 }
 
@@ -867,6 +958,12 @@ export interface Database {
   run_attempt_transitions: RunAttemptTransitionTable;
   run_rewinds: RunRewindTable;
   review_bundles: ReviewBundleTable;
+  orchestration_runs: OrchestrationRunTable;
+  orchestration_candidates: OrchestrationCandidateTable;
+  orchestration_dispatches: OrchestrationDispatchTable;
+  orchestration_acceptance_results: OrchestrationAcceptanceResultTable;
+  orchestration_decision_gates: OrchestrationDecisionGateTable;
+  candidate_promotions: CandidatePromotionTable;
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
   supervisor_connections: SupervisorConnectionTable;

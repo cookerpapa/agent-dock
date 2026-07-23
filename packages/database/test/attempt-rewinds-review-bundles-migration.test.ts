@@ -28,7 +28,7 @@ async function fixture(): Promise<PGlite> {
   for (const [name, migration] of Object.entries(migrations).sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    if (name === "018_attempt_rewinds_and_review_bundles") continue;
+    if (name.localeCompare("018_attempt_rewinds_and_review_bundles") >= 0) continue;
     await applyCompiledQueries(postgres, await compileMigration(migration.up));
   }
   await postgres.query("insert into tenants (id, slug) values ($1, 'review-owner')", [IDS.tenant]);

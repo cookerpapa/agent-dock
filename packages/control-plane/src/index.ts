@@ -14,6 +14,12 @@ export {
 
 export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 export {
+  CandidateRaceError,
+  CandidateRaceService,
+  type CandidateRaceErrorCode,
+  type CandidateRaceServiceOptions,
+} from "./candidate-race-service.ts";
+export {
   PublicTenantRegistrationError,
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,

@@ -885,8 +885,39 @@ and supervisor consumers cannot invent different legal transitions.
 
 ## 7. Subagents
 
-The runner registers cloud-aware collaboration tools such as `spawn_agent`,
-`send_message`, `wait_agent`, `cancel_agent`, and `list_agents`.
+The implemented first slice is a user-directed `Candidate Race`, not an
+autonomous Pi subagent tree. One request fixes the parent Session, immutable
+base Workspace version, common task, two to four named strategies, an
+acceptance policy, and a bounded parallelism value. The acceptance transaction
+creates one child Session, fork version, Turn, Run, outbox record, candidate,
+and dispatch generation per strategy. Candidate Sessions are hidden from the
+ordinary conversation list but remain directly inspectable from the parent
+race.
+
+The existing global dispatcher remains the only execution scheduler. It
+preserves tenant fairness and same-Session FIFO, and additionally admits a
+candidate only while its orchestration is `running` and fewer sibling Runs than
+the race limit are active. Each child Session therefore follows the normal
+lazy activation path into its own exact-identity gVisor Sandbox; candidates
+never share a writable Workspace or a used Pod.
+
+After a candidate Run settles, the control plane evaluates its immutable,
+hash-verified Review Bundle. The deterministic gate can require a non-empty
+patch, at least one structured test, all tests green, a maximum changed-path
+count, and no protected-path changes. Passing candidates are ranked by test
+passes, smaller change surface, cost, duration, and ordinal. This ranking is
+advisory. A human must select a passing candidate, and promotion uses a parent
+Workspace-version CAS. It creates a new immutable `promotion` version whose
+Workspace comes from the child while the parent's Pi conversation artifact
+remains unchanged. A stale parent version cannot be overwritten.
+
+Cancellation first closes orchestration admission, then withdraws queued
+candidates and routes active Runs through the existing durable cancellation
+path. Acceptance rows are append-only; dispatch generations, decision gates,
+and promotions remain auditable. See ADR-0051.
+
+The later autonomous phase may register cloud-aware collaboration tools such as
+`spawn_agent`, `send_message`, `wait_agent`, `cancel_agent`, and `list_agents`.
 
 Each child agent has an independent Pi session, context, status, event identity,
 model configuration, tool set, and budget. The agent tree enforces:
@@ -899,6 +930,8 @@ model configuration, tool set, and budget. The agent tree enforces:
 
 Read-only children may share a workspace. A writing child receives a separate
 Git worktree and branch; the parent consumes a patch or commit after review.
+Those model-invoked tools, recursive context inheritance, and depth budgets are
+not implied by the implemented Candidate Race.
 
 ## 8. Extension compatibility
 

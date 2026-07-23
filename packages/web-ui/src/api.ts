@@ -3,8 +3,11 @@ import {
   parseAcceptedTurnResource,
   parseAuthSessionResource,
   parseArchiveSessionRequest,
+  parseCandidateRaceListResource,
+  parseCandidateRaceResource,
   parseConversationDetailResource,
   parseConversationListResource,
+  parseCreateCandidateRaceRequest,
   parseControlPlaneApiError,
   parseForkSessionRequest,
   parseGitHubInstallationResource,
@@ -16,6 +19,7 @@ import {
   parseOperationalInsightsResource,
   parseProjectEnvironmentHistoryResource,
   parseProjectResource,
+  parsePromoteCandidateRequest,
   parseRollbackWorkspaceRequest,
   parseRunListResource,
   parseRunResource,
@@ -38,6 +42,9 @@ import {
   type ConversationListResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
+  type CandidateRaceListResource,
+  type CandidateRaceResource,
+  type CreateCandidateRaceRequest,
   type ProjectResource,
   type EnvironmentRecipe,
   type ProjectEnvironmentHistoryResource,
@@ -392,6 +399,78 @@ export class AgentDockApi {
     );
   }
 
+  async listCandidateRaces(sessionId: string): Promise<CandidateRaceListResource> {
+    return parseCandidateRaceListResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/candidate-races`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async createCandidateRace(
+    sessionId: string,
+    input: CreateCandidateRaceRequest,
+    idempotencyKey: string,
+  ): Promise<CandidateRaceResource> {
+    const body = parseCreateCandidateRaceRequest(input);
+    return parseCandidateRaceResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/candidate-races`,
+        jsonRequest(body, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getCandidateRace(orchestrationId: string): Promise<CandidateRaceResource> {
+    return parseCandidateRaceResource(
+      await request(
+        this.#fetch,
+        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async cancelCandidateRace(
+    orchestrationId: string,
+    idempotencyKey: string,
+  ): Promise<CandidateRaceResource> {
+    return parseCandidateRaceResource(
+      await request(
+        this.#fetch,
+        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}/cancellation`,
+        jsonRequest({}, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async promoteCandidate(
+    orchestrationId: string,
+    candidateId: string,
+    expectedParentWorkspaceVersionId: string,
+    idempotencyKey: string,
+  ): Promise<CandidateRaceResource> {
+    const body = parsePromoteCandidateRequest({
+      candidateId,
+      expectedParentWorkspaceVersionId,
+    });
+    return parseCandidateRaceResource(
+      await request(
+        this.#fetch,
+        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}/promotion`,
+        jsonRequest(body, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async getRun(runId: string): Promise<RunResource> {
     return parseRunResource(
       await request(
@@ -715,7 +794,10 @@ export function newIdempotencyKey(
     | "pr"
     | "environment-create"
     | "environment-activate"
-    | "environment-validate",
+    | "environment-validate"
+    | "race"
+    | "race-cancel"
+    | "race-promote",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

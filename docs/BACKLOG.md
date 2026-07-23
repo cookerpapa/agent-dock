@@ -205,4 +205,10 @@ extension-policy support would overstate the current boundary.
 - [x] Add Attempt supersession/rewind projections and immutable safe Review Bundles
 - [x] Add reproducible Helm execution-plane packaging and failure/production acceptance evidence
 - [x] Add transactionally materialized semantic Turn transcripts, legacy read repair, and active-suffix-only SSE hydration
+- [x] Add a human-initiated Candidate Race from one immutable Workspace baseline
+- [x] Fork 2–4 isolated child Sessions atomically and enforce a race-local concurrency cap in the tenant-fair dispatcher
+- [x] Evaluate immutable Review Bundles with deterministic patch/test/path gates and an auditable scorecard
+- [x] Add cancellation, a human decision gate, and parent Workspace-version CAS promotion without replacing parent Pi history
+- [x] Expose candidate strategy, progress, evidence, recommendation, inspection, cancellation, and promotion in the authenticated Web inspector
+- [ ] Add model-invoked recursive spawn/send/wait collaboration tools, inherited context modes, and tree budgets
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

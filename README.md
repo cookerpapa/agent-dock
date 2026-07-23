@@ -157,6 +157,7 @@ only after a measured requirement appears.
 - [ADR-0046: capability-scoped public repository import](docs/adr/0046-capability-scoped-repository-import.md)
 - [ADR-0049: transactional semantic conversation projections](docs/adr/0049-transactional-semantic-conversation-projections.md)
 - [ADR-0050: capability-free trusted provider egress relay](docs/adr/0050-capability-free-trusted-provider-egress-relay.md)
+- [ADR-0051: bounded parallel candidate races](docs/adr/0051-parallel-candidate-races.md)
 
 ## Current executable spikes
 
@@ -381,9 +382,14 @@ workspace checkpoints but consume no Pi child process, Tool Sandbox, dedicated
 thread, or timer. The Web Session inspector exposes immutable Workspace
 history/files/compare, safe Artifact previews, Runs/Attempts, tests,
 usage/context, workspace operations, owner activity, and optional GitHub PR
-delivery. Cold encrypted backup/restore and checksummed release evidence are
-executable operator paths. It is not an arbitrary Git host, untrusted extension
-host, hostile public Internet SaaS, multi-node Kubernetes release, or direct Internet ingress.
+delivery. It can also fork one immutable Workspace baseline into two to four
+isolated candidate Sessions, admit them through the existing tenant-fair
+dispatcher with a race-local concurrency cap, compare immutable Review Bundles,
+and CAS-promote an accepted candidate only after an explicit human decision.
+Cold encrypted backup/restore and checksummed release evidence are executable
+operator paths. It is not an arbitrary Git host, untrusted extension host,
+hostile public Internet SaaS, multi-node Kubernetes release, direct Internet
+ingress, or an unconstrained autonomous subagent tree.
 
 ## Current status
 
@@ -393,7 +399,7 @@ implemented. The local Pi RPC extension compatibility spike passes end to end,
 and the embedded rehydration spike proves that cold logical sessions do not need
 dedicated Pi processes. The domain package now enforces explicit session, turn,
 sandbox, approval, and agent-node transitions plus allowlisted model-profile
-resolution. The database package now supplies a 21-table Kysely/PostgreSQL
+resolution. The database package now supplies a versioned Kysely/PostgreSQL
 schema with executable ownership, idempotency, ordering, connection generation,
 fencing, ACK, and usage constraints. A hardened two-service Docker Compose topology, pinned runner
 images, and executable container-configuration contracts are implemented. The

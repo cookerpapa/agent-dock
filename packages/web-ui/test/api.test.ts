@@ -118,6 +118,7 @@ describe("tenant-aware browser API", () => {
       replayed: false,
     } as const;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      if (init === undefined) throw new Error("Expected request options");
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
       const path = String(input);
       if (path.includes(`/v1/sessions/${sessionId}/environments/`)) {
@@ -168,6 +169,109 @@ describe("tenant-aware browser API", () => {
         "validate-environment",
       ),
     ).resolves.toEqual(accepted);
+  });
+
+  it("creates and promotes a bounded candidate race through idempotent APIs", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const sessionId = "31000000-0000-4000-8000-000000000001";
+    const orchestrationId = "32000000-0000-4000-8000-000000000001";
+    const baseWorkspaceVersionId = "33000000-0000-4000-8000-000000000001";
+    const firstCandidateId = "34000000-0000-4000-8000-000000000001";
+    const createBody = {
+      baseWorkspaceVersionId,
+      prompt: "Repair the failing tests.",
+      candidates: [
+        { label: "Minimal", strategy: "Prefer the smallest safe patch." },
+        { label: "Robust", strategy: "Prefer explicit validation and regression tests." },
+      ],
+      maximumConcurrentCandidates: 2,
+      acceptance: {
+        requirePatch: true,
+        requireTests: true,
+        maximumChangedPaths: 12,
+        protectedPathPrefixes: [".github/"],
+      },
+    };
+    const race = {
+      orchestrationId,
+      kind: "candidate_race",
+      state: "running",
+      projectId: "35000000-0000-4000-8000-000000000001",
+      workspaceId: "36000000-0000-4000-8000-000000000001",
+      parentSessionId: sessionId,
+      baseWorkspaceVersionId,
+      prompt: createBody.prompt,
+      maximumConcurrentCandidates: 2,
+      acceptancePolicy: createBody.acceptance,
+      candidates: [
+        {
+          candidateId: firstCandidateId,
+          ordinal: 1,
+          label: "Minimal",
+          strategy: "Prefer the smallest safe patch.",
+          sessionId: "37000000-0000-4000-8000-000000000001",
+          runId: "38000000-0000-4000-8000-000000000001",
+          dispatchId: "39000000-0000-4000-8000-000000000001",
+          dispatchGeneration: 1,
+          dispatchState: "accepted",
+          runState: "queued",
+          createdAt: "2026-07-23T00:00:00.000Z",
+        },
+        {
+          candidateId: "34000000-0000-4000-8000-000000000002",
+          ordinal: 2,
+          label: "Robust",
+          strategy: "Prefer explicit validation and regression tests.",
+          sessionId: "37000000-0000-4000-8000-000000000002",
+          runId: "38000000-0000-4000-8000-000000000002",
+          dispatchId: "39000000-0000-4000-8000-000000000002",
+          dispatchGeneration: 1,
+          dispatchState: "accepted",
+          runState: "queued",
+          createdAt: "2026-07-23T00:00:00.000Z",
+        },
+      ],
+      decisionGate: {
+        gateId: "3a000000-0000-4000-8000-000000000001",
+        state: "pending",
+      },
+      createdAt: "2026-07-23T00:00:00.000Z",
+      updatedAt: "2026-07-23T00:00:00.000Z",
+    } as const;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      if (init === undefined) throw new Error("Expected candidate-race request options");
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      const path = String(input);
+      if (path.endsWith("/promotion")) {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init.headers).get("idempotency-key")).toBe("promote-race");
+        expect(JSON.parse(String(init.body))).toEqual({
+          candidateId: firstCandidateId,
+          expectedParentWorkspaceVersionId: baseWorkspaceVersionId,
+        });
+      } else {
+        expect(path).toBe(`/v1/sessions/${sessionId}/candidate-races`);
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init.headers).get("idempotency-key")).toBe("create-race");
+        expect(JSON.parse(String(init.body))).toEqual(createBody);
+      }
+      return new Response(JSON.stringify(race), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(api.createCandidateRace(sessionId, createBody, "create-race")).resolves.toEqual(
+      race,
+    );
+    await expect(
+      api.promoteCandidate(
+        orchestrationId,
+        firstCandidateId,
+        baseWorkspaceVersionId,
+        "promote-race",
+      ),
+    ).resolves.toEqual(race);
   });
 
   it("reads safe model metadata and submits a write-only provider credential", async () => {

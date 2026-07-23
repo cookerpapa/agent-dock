@@ -51,6 +51,7 @@ describe("product chat experience", () => {
     expect(markup).toContain("tests");
     expect(markup).toContain("usage");
     expect(markup).toContain("activity");
+    expect(markup).toContain("parallel");
     expect(markup).toContain("Versioned workspace");
   });
 

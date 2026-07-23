@@ -19,6 +19,7 @@ import {
   parseLoginAccountRequest,
   parseRegisterAccountRequest,
   parseArchiveSessionRequest,
+  parseCreateCandidateRaceRequest,
   parseCreateTenantRegistrationRequest,
   parseCreateGitHubPullRequestRequest,
   parseCreateProjectRequest,
@@ -29,6 +30,7 @@ import {
   parseForkSessionRequest,
   parseLastEventIdHeader,
   parsePositiveIntegerPathParameter,
+  parsePromoteCandidateRequest,
   parseRegisterGitHubInstallationRequest,
   parseReplaceModelConfigurationRequest,
   parseReplaceModelGovernanceRequest,
@@ -38,6 +40,8 @@ import {
   type AcceptedTurnResource,
   type AuthSessionResource,
   type AcceptedTurnCancellationResource,
+  type CandidateRaceListResource,
+  type CandidateRaceResource,
   type ConversationDetailResource,
   type ConversationListResource,
   type GitHubInstallationResource,
@@ -78,6 +82,7 @@ import { ModelGovernanceService } from "./model-governance-service.ts";
 import { OperationalInsightsService } from "./operational-insights-service.ts";
 import { readWebSessionCookie, WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
+import { CandidateRaceService } from "./candidate-race-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -101,6 +106,8 @@ export class ControlPlaneController {
     private readonly webAuthentication: WebAuthenticationService,
     @Inject(ProjectEnvironmentService)
     private readonly projectEnvironments: ProjectEnvironmentService,
+    @Inject(CandidateRaceService)
+    private readonly candidateRaces: CandidateRaceService,
   ) {}
 
   @Post("auth/register")
@@ -318,6 +325,74 @@ export class ControlPlaneController {
     const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).listRuns(sessionId);
+  }
+
+  @Post("sessions/:sessionId/candidate-races")
+  @HttpCode(202)
+  async createCandidateRace(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<CandidateRaceResource> {
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.candidateRaces.create(
+      identity,
+      parseUuidPathParameter(sessionIdValue, "sessionId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseCreateCandidateRaceRequest(body),
+    );
+  }
+
+  @Get("sessions/:sessionId/candidate-races")
+  async listCandidateRaces(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<CandidateRaceListResource> {
+    return this.candidateRaces.list(
+      this.tenantRequestContext.resolve(request),
+      parseUuidPathParameter(sessionIdValue, "sessionId"),
+    );
+  }
+
+  @Get("candidate-races/:orchestrationId")
+  async getCandidateRace(
+    @Req() request: FastifyRequest,
+    @Param("orchestrationId") orchestrationIdValue: unknown,
+  ): Promise<CandidateRaceResource> {
+    return this.candidateRaces.get(
+      this.tenantRequestContext.resolve(request),
+      parseUuidPathParameter(orchestrationIdValue, "orchestrationId"),
+    );
+  }
+
+  @Post("candidate-races/:orchestrationId/cancellation")
+  @HttpCode(202)
+  async cancelCandidateRace(
+    @Req() request: FastifyRequest,
+    @Param("orchestrationId") orchestrationIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+  ): Promise<CandidateRaceResource> {
+    return this.candidateRaces.cancel(
+      this.tenantRequestContext.requireMutation(request),
+      parseUuidPathParameter(orchestrationIdValue, "orchestrationId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+    );
+  }
+
+  @Post("candidate-races/:orchestrationId/promotion")
+  async promoteCandidateRace(
+    @Req() request: FastifyRequest,
+    @Param("orchestrationId") orchestrationIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<CandidateRaceResource> {
+    return this.candidateRaces.promote(
+      this.tenantRequestContext.requireMutation(request),
+      parseUuidPathParameter(orchestrationIdValue, "orchestrationId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parsePromoteCandidateRequest(body),
+    );
   }
 
   @Get("runs/:runId")

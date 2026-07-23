@@ -11,10 +11,12 @@ import {
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseCandidateRaceResource,
   parseConversationDetailResource,
   parseConversationListResource,
   parseControlPlaneApiError,
   parseCreateProjectRequest,
+  parseCreateCandidateRaceRequest,
   parseCreateRunRewindRequest,
   parseCreateSessionRequest,
   parseCreateTenantRegistrationRequest,
@@ -48,6 +50,128 @@ const ENVIRONMENT_SNAPSHOT = {
 } as const;
 
 describe("control-plane public API schemas", () => {
+  it("validates bounded candidate races and their deterministic acceptance projection", () => {
+    const request = {
+      baseWorkspaceVersionId: UUID,
+      prompt: "Implement and test a bounded change.",
+      candidates: [
+        { label: "Minimal", strategy: "Keep the patch small." },
+        { label: "Tests first", strategy: "Write a regression test before the fix." },
+      ],
+      maximumConcurrentCandidates: 2,
+      acceptance: {
+        requirePatch: true,
+        requireTests: true,
+        maximumChangedPaths: 20,
+        protectedPathPrefixes: [".github"],
+      },
+    };
+    expect(parseCreateCandidateRaceRequest(request)).toEqual(request);
+    expect(() =>
+      parseCreateCandidateRaceRequest({
+        ...request,
+        maximumConcurrentCandidates: 3,
+      }),
+    ).toThrow(/cannot exceed/);
+    expect(() =>
+      parseCreateCandidateRaceRequest({
+        ...request,
+        candidates: [
+          { label: "Same", strategy: "One" },
+          { label: "same", strategy: "Two" },
+        ],
+      }),
+    ).toThrow(/unique/);
+
+    const createdAt = "2026-07-23T00:00:00.000Z";
+    expect(
+      parseCandidateRaceResource({
+        orchestrationId: "21111111-1111-4111-8111-111111111111",
+        kind: "candidate_race",
+        state: "awaiting_decision",
+        projectId: "31111111-1111-4111-8111-111111111111",
+        workspaceId: "41111111-1111-4111-8111-111111111111",
+        parentSessionId: "51111111-1111-4111-8111-111111111111",
+        baseWorkspaceVersionId: UUID,
+        prompt: request.prompt,
+        maximumConcurrentCandidates: 2,
+        acceptancePolicy: request.acceptance,
+        candidates: [
+          {
+            candidateId: "61111111-1111-4111-8111-111111111111",
+            ordinal: 1,
+            label: "Minimal",
+            strategy: "Keep the patch small.",
+            sessionId: "71111111-1111-4111-8111-111111111111",
+            runId: "81111111-1111-4111-8111-111111111111",
+            dispatchId: "91111111-1111-4111-8111-111111111111",
+            dispatchGeneration: 1,
+            dispatchState: "settled",
+            runState: "completed",
+            workspaceVersionId: "a1111111-1111-4111-8111-111111111111",
+            acceptance: {
+              verdict: "passed",
+              reviewBundleId: "b1111111-1111-4111-8111-111111111111",
+              evaluatedAt: createdAt,
+              scorecard: {
+                reasons: [],
+                metrics: {
+                  runState: "completed",
+                  changedPaths: 2,
+                  tests: { total: 3, passed: 3, failed: 0, errored: 0 },
+                  modelRequests: 2,
+                  tokens: 1_200,
+                  costMicrousd: 80_000,
+                  durationMs: 4_000,
+                },
+              },
+            },
+            createdAt,
+          },
+          {
+            candidateId: "c1111111-1111-4111-8111-111111111111",
+            ordinal: 2,
+            label: "Tests first",
+            strategy: "Write a regression test before the fix.",
+            sessionId: "d1111111-1111-4111-8111-111111111111",
+            runId: "e1111111-1111-4111-8111-111111111111",
+            dispatchId: "f1111111-1111-4111-8111-111111111111",
+            dispatchGeneration: 1,
+            dispatchState: "settled",
+            runState: "failed",
+            acceptance: {
+              verdict: "failed",
+              evaluatedAt: createdAt,
+              scorecard: {
+                reasons: ["run_failed"],
+                metrics: {
+                  runState: "failed",
+                  changedPaths: 0,
+                  tests: { total: 0, passed: 0, failed: 0, errored: 0 },
+                  modelRequests: 1,
+                  tokens: 300,
+                  costMicrousd: 20_000,
+                  durationMs: 1_000,
+                },
+              },
+            },
+            createdAt,
+          },
+        ],
+        recommendedCandidateId: "61111111-1111-4111-8111-111111111111",
+        decisionGate: {
+          gateId: "12111111-1111-4111-8111-111111111111",
+          state: "pending",
+        },
+        createdAt,
+        updatedAt: createdAt,
+      }),
+    ).toMatchObject({
+      state: "awaiting_decision",
+      recommendedCandidateId: "61111111-1111-4111-8111-111111111111",
+    });
+  });
+
   it("validates public resources before a browser consumes them", () => {
     const createdAt = "2026-07-19T00:00:00.000Z";
     expect(

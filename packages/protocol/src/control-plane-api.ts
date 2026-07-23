@@ -1168,6 +1168,191 @@ export const ReviewBundleResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const CandidateRaceAcceptancePolicySchema = Type.Object(
+  {
+    requirePatch: Type.Boolean(),
+    requireTests: Type.Boolean(),
+    maximumChangedPaths: Type.Integer({ minimum: 1, maximum: 1_000 }),
+    protectedPathPrefixes: Type.Array(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f\\\\]+$",
+      }),
+      { maxItems: 32, uniqueItems: true },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const CandidateRaceCandidateInputSchema = Type.Object(
+  {
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    strategy: Type.String({ minLength: 1, maxLength: 4_096 }),
+  },
+  { additionalProperties: false },
+);
+
+export const CreateCandidateRaceRequestSchema = Type.Object(
+  {
+    baseWorkspaceVersionId: UuidSchema,
+    prompt: Type.String({ minLength: 1, maxLength: 65_536 }),
+    candidates: Type.Array(CandidateRaceCandidateInputSchema, {
+      minItems: 2,
+      maxItems: 4,
+    }),
+    maximumConcurrentCandidates: Type.Integer({ minimum: 1, maximum: 4 }),
+    thinkingLevel: Type.Optional(TurnThinkingLevelSchema),
+    acceptance: Type.Optional(
+      Type.Object(
+        {
+          requirePatch: Type.Optional(Type.Boolean()),
+          requireTests: Type.Optional(Type.Boolean()),
+          maximumChangedPaths: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000 })),
+          protectedPathPrefixes: Type.Optional(
+            Type.Array(
+              Type.String({
+                minLength: 1,
+                maxLength: 256,
+                pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f\\\\]+$",
+              }),
+              { maxItems: 32, uniqueItems: true },
+            ),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const CandidateRaceStateSchema = Type.Union([
+  Type.Literal("running"),
+  Type.Literal("cancel_requested"),
+  Type.Literal("awaiting_decision"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+]);
+
+const CandidateRaceScorecardSchema = Type.Object(
+  {
+    reasons: Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 64 }),
+    metrics: Type.Object(
+      {
+        runState: RunStateSchema,
+        changedPaths: NonNegativeSafeIntegerSchema,
+        tests: Type.Object(
+          {
+            total: NonNegativeSafeIntegerSchema,
+            passed: NonNegativeSafeIntegerSchema,
+            failed: NonNegativeSafeIntegerSchema,
+            errored: NonNegativeSafeIntegerSchema,
+          },
+          { additionalProperties: false },
+        ),
+        modelRequests: NonNegativeSafeIntegerSchema,
+        tokens: NonNegativeSafeIntegerSchema,
+        costMicrousd: NonNegativeSafeIntegerSchema,
+        durationMs: NonNegativeSafeIntegerSchema,
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const CandidateRaceCandidateResourceSchema = Type.Object(
+  {
+    candidateId: UuidSchema,
+    ordinal: PositiveSafeIntegerSchema,
+    label: Type.String({ minLength: 1, maxLength: 128 }),
+    strategy: Type.String({ minLength: 1, maxLength: 4_096 }),
+    sessionId: UuidSchema,
+    runId: UuidSchema,
+    dispatchId: UuidSchema,
+    dispatchGeneration: PositiveSafeIntegerSchema,
+    dispatchState: Type.Union([
+      Type.Literal("accepted"),
+      Type.Literal("running"),
+      Type.Literal("settled"),
+      Type.Literal("cancelled"),
+    ]),
+    runState: RunStateSchema,
+    workspaceVersionId: Type.Optional(UuidSchema),
+    acceptance: Type.Optional(
+      Type.Object(
+        {
+          verdict: Type.Union([Type.Literal("passed"), Type.Literal("failed")]),
+          reviewBundleId: Type.Optional(UuidSchema),
+          evaluatedAt: UtcTimestampSchema,
+          scorecard: CandidateRaceScorecardSchema,
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const CandidateRaceResourceSchema = Type.Object(
+  {
+    orchestrationId: UuidSchema,
+    kind: Type.Literal("candidate_race"),
+    state: CandidateRaceStateSchema,
+    projectId: UuidSchema,
+    workspaceId: UuidSchema,
+    parentSessionId: UuidSchema,
+    baseWorkspaceVersionId: UuidSchema,
+    prompt: Type.String({ minLength: 1, maxLength: 65_536 }),
+    maximumConcurrentCandidates: PositiveSafeIntegerSchema,
+    acceptancePolicy: CandidateRaceAcceptancePolicySchema,
+    candidates: Type.Array(CandidateRaceCandidateResourceSchema, {
+      minItems: 2,
+      maxItems: 4,
+    }),
+    recommendedCandidateId: Type.Optional(UuidSchema),
+    decisionGate: Type.Object(
+      {
+        gateId: UuidSchema,
+        state: Type.Union([
+          Type.Literal("pending"),
+          Type.Literal("resolved"),
+          Type.Literal("cancelled"),
+        ]),
+        selectedCandidateId: Type.Optional(UuidSchema),
+        resolvedAt: Type.Optional(UtcTimestampSchema),
+      },
+      { additionalProperties: false },
+    ),
+    winnerCandidateId: Type.Optional(UuidSchema),
+    promotedWorkspaceVersionId: Type.Optional(UuidSchema),
+    cancelRequestedAt: Type.Optional(UtcTimestampSchema),
+    createdAt: UtcTimestampSchema,
+    updatedAt: UtcTimestampSchema,
+    settledAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const CandidateRaceListResourceSchema = Type.Object(
+  {
+    races: Type.Array(CandidateRaceResourceSchema, { maxItems: 50 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+export const PromoteCandidateRequestSchema = Type.Object(
+  {
+    candidateId: UuidSchema,
+    expectedParentWorkspaceVersionId: UuidSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const WorkspaceArtifactResourceSchema = Type.Object(
   {
     artifactId: UuidSchema,
@@ -1200,6 +1385,7 @@ export const WorkspaceVersionResourceSchema = Type.Object(
       Type.Literal("checkpoint"),
       Type.Literal("fork"),
       Type.Literal("migration"),
+      Type.Literal("promotion"),
     ]),
     runId: Type.Optional(UuidSchema),
     attemptId: Type.Optional(UuidSchema),
@@ -1481,6 +1667,12 @@ export type CreateRunRewindRequest = Static<typeof CreateRunRewindRequestSchema>
 export type RunRewindResource = Static<typeof RunRewindResourceSchema>;
 export type ReviewBundleManifest = Static<typeof ReviewBundleManifestSchema>;
 export type ReviewBundleResource = Static<typeof ReviewBundleResourceSchema>;
+export type CandidateRaceAcceptancePolicy = Static<typeof CandidateRaceAcceptancePolicySchema>;
+export type CreateCandidateRaceRequest = Static<typeof CreateCandidateRaceRequestSchema>;
+export type CandidateRaceState = Static<typeof CandidateRaceStateSchema>;
+export type CandidateRaceResource = Static<typeof CandidateRaceResourceSchema>;
+export type CandidateRaceListResource = Static<typeof CandidateRaceListResourceSchema>;
+export type PromoteCandidateRequest = Static<typeof PromoteCandidateRequestSchema>;
 export type WorkspaceArtifactResource = Static<typeof WorkspaceArtifactResourceSchema>;
 export type WorkspaceVersionResource = Static<typeof WorkspaceVersionResourceSchema>;
 export type WorkspaceVersionListResource = Static<typeof WorkspaceVersionListResourceSchema>;
@@ -1913,6 +2105,59 @@ export function canonicalReviewBundleManifestJson(value: unknown): string {
 
 export function parseReviewBundleResource(value: unknown): ReviewBundleResource {
   return parseSchema(ReviewBundleResourceSchema, value, "review-bundle resource");
+}
+
+export function parseCreateCandidateRaceRequest(value: unknown): CreateCandidateRaceRequest {
+  const request = parseSchema(
+    CreateCandidateRaceRequestSchema,
+    value,
+    "create-candidate-race request",
+  );
+  if (request.prompt.trim().length === 0) {
+    throw new ControlPlaneApiValidationError(
+      "Candidate-race prompt must contain a non-whitespace character",
+    );
+  }
+  if (request.maximumConcurrentCandidates > request.candidates.length) {
+    throw new ControlPlaneApiValidationError(
+      "maximumConcurrentCandidates cannot exceed the candidate count",
+    );
+  }
+  const labels = new Set<string>();
+  for (const candidate of request.candidates) {
+    const label = candidate.label.trim();
+    if (label.length === 0 || candidate.strategy.trim().length === 0) {
+      throw new ControlPlaneApiValidationError(
+        "Candidate labels and strategies must contain non-whitespace characters",
+      );
+    }
+    const identity = label.toLocaleLowerCase();
+    if (labels.has(identity)) {
+      throw new ControlPlaneApiValidationError("Candidate labels must be unique");
+    }
+    labels.add(identity);
+  }
+  return request;
+}
+
+export function parseCandidateRaceAcceptancePolicy(value: unknown): CandidateRaceAcceptancePolicy {
+  return parseSchema(
+    CandidateRaceAcceptancePolicySchema,
+    value,
+    "candidate-race acceptance policy",
+  );
+}
+
+export function parseCandidateRaceResource(value: unknown): CandidateRaceResource {
+  return parseSchema(CandidateRaceResourceSchema, value, "candidate-race resource");
+}
+
+export function parseCandidateRaceListResource(value: unknown): CandidateRaceListResource {
+  return parseSchema(CandidateRaceListResourceSchema, value, "candidate-race-list resource");
+}
+
+export function parsePromoteCandidateRequest(value: unknown): PromoteCandidateRequest {
+  return parseSchema(PromoteCandidateRequestSchema, value, "promote-candidate request");
 }
 
 export function parseTestResultListResource(value: unknown): TestResultListResource {

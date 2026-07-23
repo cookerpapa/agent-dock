@@ -172,7 +172,7 @@ export async function loadProductionControlPlaneConfig(
   const publicTenantMaximumConcurrentTurns = integerValue(
     environment,
     "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
-    1,
+    2,
     1,
     256,
   );

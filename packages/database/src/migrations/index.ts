@@ -19,6 +19,7 @@ import * as multiRepositorySourceSets from "./017_multi_repository_source_sets.t
 import * as attemptRewindsAndReviewBundles from "./018_attempt_rewinds_and_review_bundles.ts";
 import * as legacyEnvironmentValidationEvidence from "./019_legacy_environment_validation_evidence.ts";
 import * as semanticConversationProjections from "./020_semantic_conversation_projections.ts";
+import * as parallelCandidateRaces from "./021_parallel_candidate_races.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -43,6 +44,7 @@ export const migrationProvider: MigrationProvider = {
       "018_attempt_rewinds_and_review_bundles": attemptRewindsAndReviewBundles,
       "019_legacy_environment_validation_evidence": legacyEnvironmentValidationEvidence,
       "020_semantic_conversation_projections": semanticConversationProjections,
+      "021_parallel_candidate_races": parallelCandidateRaces,
     };
   },
 };
@@ -146,3 +148,8 @@ export {
   down as downSemanticConversationProjections,
   up as upSemanticConversationProjections,
 } from "./020_semantic_conversation_projections.ts";
+
+export {
+  down as downParallelCandidateRaces,
+  up as upParallelCandidateRaces,
+} from "./021_parallel_candidate_races.ts";
