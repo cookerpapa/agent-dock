@@ -174,13 +174,38 @@ describe("control-plane public API schemas", () => {
             prompt: "repair it",
             state: "running",
             projection: "canonical",
+            transcript: {
+              schemaVersion: 1,
+              throughSequence: 4,
+              items: [
+                {
+                  kind: "text",
+                  text: "Working on it.",
+                  firstSequence: 2,
+                  lastSequence: 3,
+                },
+              ],
+              startedSequence: 1,
+              terminalSequence: 4,
+              stopReason: "stop",
+              failure: null,
+              cancellation: null,
+              workspacePatch: null,
+            },
             acceptedAt: createdAt,
           },
         ],
         historyTruncated: false,
         replayAfterSequence: 0,
       }),
-    ).toMatchObject({ turns: [{ prompt: "repair it" }] });
+    ).toMatchObject({
+      turns: [
+        {
+          prompt: "repair it",
+          transcript: { throughSequence: 4, items: [{ text: "Working on it." }] },
+        },
+      ],
+    });
 
     expect(
       parseRunResource({

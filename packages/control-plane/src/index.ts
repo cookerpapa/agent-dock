@@ -124,6 +124,13 @@ export {
   type EventReplayWindow,
 } from "./durable-event-store.ts";
 export {
+  materializeConversationTurnProjection,
+  materializeConversationTurnProjections,
+  projectConversationTurnTranscript,
+  type MaterializeConversationTurnProjectionInput,
+  type MaterializeConversationTurnProjectionsInput,
+} from "./conversation-turn-projection.ts";
+export {
   DeterministicExecutionBackend,
   type DeterministicExecutionOutcome,
   type DeterministicExecutionRecord,

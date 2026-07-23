@@ -39,12 +39,14 @@ import {
   canonicalWorkspaceSourceSetJson,
   parseEnvironmentRecipe,
   parseEnvironmentValidationReport,
+  parseConversationTurnTranscriptResource,
   parseReviewBundleManifest,
   parseWorkspaceSourceSetSnapshot,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { materializeConversationTurnProjections } from "./conversation-turn-projection.ts";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -1044,6 +1046,56 @@ export class ControlPlaneStore {
       .execute();
     const historyTruncated = newestTurnRows.length > MAX_CONVERSATION_TURNS;
     const includedRows = newestTurnRows.slice(0, MAX_CONVERSATION_TURNS).reverse();
+    const terminalTurnIds = includedRows
+      .filter(
+        (row) =>
+          row.turnState === "completed" ||
+          row.turnState === "failed" ||
+          row.turnState === "cancelled",
+      )
+      .map((row) => row.turnId);
+    let projectionRows =
+      terminalTurnIds.length === 0
+        ? []
+        : await this.#database
+            .selectFrom("conversation_turn_projections")
+            .select(["turn_id", "through_seq", "transcript"])
+            .where("tenant_id", "=", this.#tenantId)
+            .where("session_id", "=", sessionId)
+            .where("turn_id", "in", terminalTurnIds)
+            .execute();
+    const projectedTurnIds = new Set(projectionRows.map((row) => row.turn_id));
+    const missingTerminalTurnIds = terminalTurnIds.filter(
+      (turnId) => !projectedTurnIds.has(turnId),
+    );
+    if (missingTerminalTurnIds.length > 0) {
+      await this.#database.transaction().execute(async (transaction) => {
+        await materializeConversationTurnProjections(transaction, {
+          tenantId: this.#tenantId,
+          sessionId,
+          turnIds: missingTerminalTurnIds,
+        });
+      });
+      projectionRows = await this.#database
+        .selectFrom("conversation_turn_projections")
+        .select(["turn_id", "through_seq", "transcript"])
+        .where("tenant_id", "=", this.#tenantId)
+        .where("session_id", "=", sessionId)
+        .where("turn_id", "in", terminalTurnIds)
+        .execute();
+    }
+    const transcriptByTurnId = new Map(
+      projectionRows.map((row) => {
+        const transcript = parseConversationTurnTranscriptResource(row.transcript);
+        if (transcript.throughSequence !== positiveSafeInteger(row.through_seq, "Projection seq")) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Conversation transcript projection watermark is inconsistent",
+          );
+        }
+        return [row.turn_id, transcript] as const;
+      }),
+    );
     const turns = includedRows.map((row) => {
       if (row.inputKind !== "prompt" || row.prompt === null || row.mailboxPosition === null) {
         throw new ControlPlaneStoreError(
@@ -1062,26 +1114,36 @@ export class ControlPlaneStore {
           row.supersededByRunId === null ? ("canonical" as const) : ("superseded" as const),
         ...(row.supersededByRunId === null ? {} : { supersededByRunId: row.supersededByRunId }),
         ...(row.rewoundFromRunId === null ? {} : { rewoundFromRunId: row.rewoundFromRunId }),
+        ...(transcriptByTurnId.has(row.turnId)
+          ? { transcript: transcriptByTurnId.get(row.turnId)! }
+          : {}),
         acceptedAt: isoTimestamp(row.acceptedAt),
       };
     });
 
-    let replayAfterSequence = 0;
-    if (historyTruncated) {
-      const includedTurnIds = turns.map((turn) => turn.turnId);
+    let replayAfterSequence = Math.max(
+      nonNegativeSafeInteger(
+        conversation.lastPersistedSequence,
+        "Conversation durable event cursor",
+      ),
+      ...projectionRows.map((row) =>
+        positiveSafeInteger(row.through_seq, "Conversation projection sequence"),
+      ),
+    );
+    const unprojectedTurnIds = includedRows
+      .filter((row) => !transcriptByTurnId.has(row.turnId))
+      .map((row) => row.turnId);
+    if (unprojectedTurnIds.length > 0) {
       const earliestIncludedEvent = await this.#database
         .selectFrom("session_events")
         .select((expression) => expression.fn.min<string>("seq").as("sequence"))
         .where("tenant_id", "=", this.#tenantId)
         .where("session_id", "=", sessionId)
-        .where("turn_id", "in", includedTurnIds)
+        .where("turn_id", "in", unprojectedTurnIds)
         .executeTakeFirstOrThrow();
       replayAfterSequence =
         earliestIncludedEvent.sequence === null
-          ? nonNegativeSafeInteger(
-              conversation.lastPersistedSequence,
-              "Conversation durable event cursor",
-            )
+          ? replayAfterSequence
           : Math.max(
               0,
               positiveSafeInteger(

@@ -109,6 +109,7 @@ only after a measured requirement appears.
 - [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
 - [Strong Sandbox Provider selection](docs/research/2026-07-20-strong-sandbox-provider-selection.md)
 - [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
+- [`cloud-agent-platform` comparison](docs/research/2026-07-23-cloud-agent-platform-comparison.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
@@ -153,6 +154,7 @@ only after a measured requirement appears.
 - [ADR-0044: capability-scoped dependency egress](docs/adr/0044-capability-scoped-dependency-egress.md)
 - [ADR-0045: single-consumption clean gVisor prewarming](docs/adr/0045-single-consumption-clean-prewarm.md)
 - [ADR-0046: capability-scoped public repository import](docs/adr/0046-capability-scoped-repository-import.md)
+- [ADR-0049: transactional semantic conversation projections](docs/adr/0049-transactional-semantic-conversation-projections.md)
 
 ## Current executable spikes
 
@@ -414,6 +416,13 @@ read event bodies from the durable table, coalesce duplicate hints, reconnect
 their dedicated listener with bounded jitter, and use the SSE heartbeat as a
 missed-notification recovery poll. Completion and post-ACK failure both release
 lease and sandbox capacity transactionally.
+
+ADR-0049 keeps that complete event log while adding a compact conversation read
+model. A fenced terminal event transactionally materializes coalesced text,
+Tool, approval, notification and terminal state for the Turn. Completed
+conversations hydrate from that semantic projection and open SSE at the durable
+high-water mark; only an active unprojected suffix is replayed. Missing legacy
+projections rebuild from durable events on first read.
 
 The fourth Phase 1 slice adds durable cancellation as an independent command
 path, so a cancel can reach Pi while the execute dispatcher is blocked awaiting

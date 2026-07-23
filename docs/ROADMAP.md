@@ -7,7 +7,8 @@ are now implemented under ADR-0039 and ADR-0040. The
 dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
 private single-host product are tracked in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and now include the
-closed, versioned single-node Helm execution-plane chart under ADR-0048. Do not
+closed, versioned single-node Helm execution-plane chart under ADR-0048 and
+transactional semantic conversation projections under ADR-0049. Do not
 interpret completion of that product plan as a claim that the optional Phase 5
 subagent tree or a validated multi-node release exists.
 
@@ -191,6 +192,11 @@ ADR-0040 removes eager per-Run Pod creation and per-event remote ACK blocking.
 It separates conversation and Workspace checkpoints, uses exact Session-scoped
 warm reuse with revision/fence/UID verification, and publishes coalesced events
 through a bounded asynchronous batch pipeline with cumulative ACK.
+
+ADR-0049 keeps that full durable stream for audit/reconnect while materializing
+terminal Turn transcripts transactionally. Completed conversation discovery is
+now proportional to semantic text/Tool items; only active unprojected events
+remain on the initial SSE replay path.
 
 ADR-0042 makes the Project development environment durable and auditable. Runs
 snapshot an append-only environment version; Manager policy and in-gVisor

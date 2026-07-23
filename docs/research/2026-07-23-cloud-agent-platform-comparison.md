@@ -1,0 +1,58 @@
+# `maidangzhu/cloud-agent-platform` comparison
+
+Date: 2026-07-23
+
+Source: <https://github.com/maidangzhu/cloud-agent-platform>
+
+## Useful implementation shape
+
+The reviewed repository uses a thin Web/control path to ignite a remote
+Sandbox, gives that runtime short-lived access back to trusted model/search
+services, streams high-frequency output separately from durable semantic
+messages, and persists a compact conversation-facing representation.
+
+Four ideas are worth checking against AgentDock:
+
+1. keep prompt acceptance/control work thin and asynchronous;
+2. separate high-frequency transport deltas from semantic conversation reads;
+3. move Workspace data by explicit revision/watermark rather than implicit
+   mutable process state; and
+4. reduce cold starts with clean images/snapshots or prewarmed capacity.
+
+## Existing stronger AgentDock equivalents
+
+AgentDock already implements three of those ideas with stricter boundaries:
+
+- PostgreSQL command mailbox + transactional outbox + Supervisor delivery is
+  the durable ignition path;
+- immutable Workspace versions, exact source-set snapshots, CAS checkpoint
+  commit and exact Session warm reuse provide the revision boundary; and
+- single-consumption, never-used gVisor prewarm Pods reduce cold start without
+  recycling a Pod that has executed tenant code.
+
+AgentDock also keeps Pi and provider credentials in the trusted Runner, routes
+only bounded Tools into a tokenless gVisor Pod, and retains RunAttempt,
+lease/fence, cumulative event ACK and capability-scoped egress guarantees.
+Those guarantees must not be replaced by placing the Agent runtime or broad
+credentials inside the code-execution Sandbox.
+
+## Adopted gap
+
+The missing counterpart was a semantic conversation read model. AgentDock
+previously reconstructed completed conversations by replaying every durable
+delta from sequence zero. ADR-0049 adds a transactionally maintained,
+rebuildable per-Turn semantic transcript and lets the browser resume only the
+unprojected live suffix.
+
+The result deliberately keeps both layers:
+
+```text
+session_events
+  complete, fenced, durable, resumable audit log
+
+conversation_turn_projections
+  compact, versioned, rebuildable product read model
+```
+
+This is the useful part of the reference design adapted to AgentDock's stronger
+durability and isolation model.

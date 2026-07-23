@@ -179,6 +179,21 @@ function appendText(turn: TurnView, text: string, sequence: number): TurnView {
   return { ...turn, status: "running", items };
 }
 
+function transcriptItem(
+  item: NonNullable<ConversationDetailResource["turns"][number]["transcript"]>["items"][number],
+): TranscriptItem {
+  if (item.kind === "text") {
+    return { ...item, key: `text:${String(item.firstSequence)}` };
+  }
+  if (item.kind === "tool") {
+    return { ...item, key: `tool:${item.toolCallId}` };
+  }
+  if (item.kind === "approval") {
+    return { ...item, key: `approval:${item.approval.approvalId}` };
+  }
+  return { ...item, key: `notification:${String(item.sequence)}` };
+}
+
 function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionViewState {
   if (state.session !== null && event.sessionId !== state.session.sessionId) return state;
   if (event.seq <= state.lastSequence) return state;
@@ -410,6 +425,33 @@ export function sessionViewReducer(
       sessionState: action.conversation.session.state,
       lastSequence: action.conversation.replayAfterSequence,
       turns: action.conversation.turns.map((turn): TurnView => ({
+        ...(turn.transcript === undefined
+          ? {
+              items: [],
+              startedSequence: null,
+              terminalSequence: null,
+              stopReason: null,
+              failure:
+                turn.state === "failed"
+                  ? {
+                      code: "run_failed",
+                      message: "这次运行失败了，请重试。",
+                      retryable: true,
+                    }
+                  : null,
+              cancellation:
+                turn.state === "cancelled" ? { reason: "cancelled", forced: false } : null,
+              workspacePatch: null,
+            }
+          : {
+              items: turn.transcript.items.map(transcriptItem),
+              startedSequence: turn.transcript.startedSequence,
+              terminalSequence: turn.transcript.terminalSequence,
+              stopReason: turn.transcript.stopReason,
+              failure: turn.transcript.failure,
+              cancellation: turn.transcript.cancellation,
+              workspacePatch: turn.transcript.workspacePatch,
+            }),
         runId: turn.runId,
         turnId: turn.turnId,
         commandId: turn.commandId,
@@ -425,20 +467,6 @@ export function sessionViewReducer(
             : turn.state === "waiting_approval"
               ? "running"
               : turn.state,
-        items: [],
-        startedSequence: null,
-        terminalSequence: null,
-        stopReason: null,
-        failure:
-          turn.state === "failed"
-            ? {
-                code: "run_failed",
-                message: "这次运行失败了，请重试。",
-                retryable: true,
-              }
-            : null,
-        cancellation: turn.state === "cancelled" ? { reason: "cancelled", forced: false } : null,
-        workspacePatch: null,
       })),
       historyTruncated: action.conversation.historyTruncated,
       connection: { phase: "offline", attempt: 0, message: "Opening durable event stream" },

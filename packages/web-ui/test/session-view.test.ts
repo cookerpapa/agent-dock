@@ -161,6 +161,78 @@ describe("session transcript reducer", () => {
     ]);
   });
 
+  it("hydrates a completed semantic transcript without replaying historical deltas", () => {
+    const conversation: ConversationDetailResource = {
+      project,
+      session: {
+        ...session,
+        state: "idle",
+        updatedAt: CREATED_AT,
+        lastActiveAt: CREATED_AT,
+      },
+      turns: [
+        {
+          turnId: TURN_ID,
+          runId: accepted.runId,
+          commandId: accepted.commandId,
+          mailboxPosition: 1,
+          prompt: "Historical projected prompt",
+          state: "completed",
+          projection: "canonical",
+          transcript: {
+            schemaVersion: 1,
+            throughSequence: 6,
+            items: [
+              {
+                kind: "text",
+                text: "Inspecting tests.",
+                firstSequence: 2,
+                lastSequence: 3,
+              },
+              {
+                kind: "tool",
+                toolCallId: "call-1",
+                toolName: "bash",
+                input: { command: "npm test" },
+                output: "all green",
+                status: "completed",
+                firstSequence: 4,
+                lastSequence: 5,
+                startedAt: CREATED_AT,
+                completedAt: CREATED_AT,
+              },
+            ],
+            startedSequence: 1,
+            terminalSequence: 6,
+            stopReason: "stop",
+            failure: null,
+            cancellation: null,
+            workspacePatch: null,
+          },
+          acceptedAt: CREATED_AT,
+        },
+      ],
+      historyTruncated: false,
+      replayAfterSequence: 6,
+    };
+    const state = sessionViewReducer(createInitialSessionView(), {
+      type: "conversation.loaded",
+      conversation,
+    });
+
+    expect(state.lastSequence).toBe(6);
+    expect(state.turns[0]).toMatchObject({
+      status: "completed",
+      startedSequence: 1,
+      terminalSequence: 6,
+      stopReason: "stop",
+      items: [
+        { kind: "text", key: "text:2", text: "Inspecting tests." },
+        { kind: "tool", key: "tool:call-1", output: "all green" },
+      ],
+    });
+  });
+
   it("keeps ordered text/tool lifecycle and the final bounded patch", () => {
     const events: AgentDockEvent[] = [
       envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),

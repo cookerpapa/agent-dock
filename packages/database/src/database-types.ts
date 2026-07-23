@@ -585,6 +585,17 @@ export interface SessionEventCursorTable {
   updated_at: GeneratedTimestamp;
 }
 
+export interface ConversationTurnProjectionTable {
+  turn_id: string;
+  tenant_id: string;
+  session_id: string;
+  schema_version: number;
+  through_seq: Int8;
+  source_event_count: number;
+  transcript: JsonObject;
+  projected_at: GeneratedTimestamp;
+}
+
 export interface OutboxTable {
   id: string;
   tenant_id: string;
@@ -867,6 +878,7 @@ export interface Database {
   approvals: ApprovalTable;
   session_events: SessionEventTable;
   session_event_cursors: SessionEventCursorTable;
+  conversation_turn_projections: ConversationTurnProjectionTable;
   outbox: OutboxTable;
   artifacts: ArtifactTable;
   test_results: TestResultTable;

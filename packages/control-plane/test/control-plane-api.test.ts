@@ -5,6 +5,7 @@ import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-serv
 import type {
   AcceptedTurnResource,
   AcceptedTurnCancellationResource,
+  ConversationDetailResource,
   ControlPlaneApiError,
   EventPublishMessage,
   ProjectResource,
@@ -2366,6 +2367,77 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("session_id", "=", piSession.sessionId)
         .executeTakeFirstOrThrow();
       expect(cursor).toEqual({ last_persisted_seq: "4", acknowledged_through_seq: "4" });
+      const projection = await database
+        .selectFrom("conversation_turn_projections")
+        .select(["through_seq", "source_event_count", "transcript"])
+        .where("tenant_id", "=", IDS.tenant)
+        .where("session_id", "=", piSession.sessionId)
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow();
+      expect(projection).toMatchObject({
+        through_seq: "4",
+        source_event_count: 4,
+        transcript: {
+          schemaVersion: 1,
+          throughSequence: 4,
+          items: [
+            {
+              kind: "text",
+              text: "AgentDock fake stream OK.",
+              firstSequence: 2,
+              lastSequence: 3,
+            },
+          ],
+          startedSequence: 1,
+          terminalSequence: 4,
+          stopReason: "stop",
+        },
+      });
+      const projectedConversation = await http.inject({
+        method: "GET",
+        url: `/v1/conversations/${piSession.sessionId}`,
+      });
+      expect(projectedConversation.statusCode).toBe(200);
+      expect(projectedConversation.json<ConversationDetailResource>()).toMatchObject({
+        replayAfterSequence: 4,
+        turns: [
+          {
+            turnId: accepted.turnId,
+            transcript: {
+              throughSequence: 4,
+              items: [{ kind: "text", text: "AgentDock fake stream OK." }],
+            },
+          },
+        ],
+      });
+      await database
+        .deleteFrom("conversation_turn_projections")
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow();
+      const repairedConversation = await http.inject({
+        method: "GET",
+        url: `/v1/conversations/${piSession.sessionId}`,
+      });
+      expect(repairedConversation.statusCode).toBe(200);
+      expect(repairedConversation.json<ConversationDetailResource>()).toMatchObject({
+        replayAfterSequence: 4,
+        turns: [
+          {
+            turnId: accepted.turnId,
+            transcript: {
+              throughSequence: 4,
+              items: [{ kind: "text", text: "AgentDock fake stream OK." }],
+            },
+          },
+        ],
+      });
+      expect(
+        await database
+          .selectFrom("conversation_turn_projections")
+          .select("source_event_count")
+          .where("turn_id", "=", accepted.turnId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ source_event_count: 4 });
 
       const duplicate = structuredClone(events[3]!);
       duplicate.messageId = globalThis.crypto.randomUUID();

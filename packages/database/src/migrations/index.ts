@@ -18,6 +18,7 @@ import * as environmentRecipesAndOperations from "./016_environment_recipes_and_
 import * as multiRepositorySourceSets from "./017_multi_repository_source_sets.ts";
 import * as attemptRewindsAndReviewBundles from "./018_attempt_rewinds_and_review_bundles.ts";
 import * as legacyEnvironmentValidationEvidence from "./019_legacy_environment_validation_evidence.ts";
+import * as semanticConversationProjections from "./020_semantic_conversation_projections.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -41,6 +42,7 @@ export const migrationProvider: MigrationProvider = {
       "017_multi_repository_source_sets": multiRepositorySourceSets,
       "018_attempt_rewinds_and_review_bundles": attemptRewindsAndReviewBundles,
       "019_legacy_environment_validation_evidence": legacyEnvironmentValidationEvidence,
+      "020_semantic_conversation_projections": semanticConversationProjections,
     };
   },
 };
@@ -139,3 +141,8 @@ export {
   down as downLegacyEnvironmentValidationEvidence,
   up as upLegacyEnvironmentValidationEvidence,
 } from "./019_legacy_environment_validation_evidence.ts";
+
+export {
+  down as downSemanticConversationProjections,
+  up as upSemanticConversationProjections,
+} from "./020_semantic_conversation_projections.ts";

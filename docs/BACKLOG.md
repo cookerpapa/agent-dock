@@ -204,4 +204,5 @@ extension-policy support would overstate the current boundary.
 - [x] Add single-consumption never-used gVisor prewarm Pods with measured cold-start evidence
 - [x] Add Attempt supersession/rewind projections and immutable safe Review Bundles
 - [x] Add reproducible Helm execution-plane packaging and failure/production acceptance evidence
+- [x] Add transactionally materialized semantic Turn transcripts, legacy read repair, and active-suffix-only SSE hydration
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure

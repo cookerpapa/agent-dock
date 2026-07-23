@@ -250,16 +250,18 @@ const EditorApprovalPayloadSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ApprovalRequestPayloadSchema = Type.Union([
+  ConfirmApprovalPayloadSchema,
+  SelectApprovalPayloadSchema,
+  InputApprovalPayloadSchema,
+  EditorApprovalPayloadSchema,
+]);
+
 const ApprovalRequestedEventSchema = Type.Object(
   {
     ...TurnEnvelopeProperties,
     type: Type.Literal("approval.requested"),
-    payload: Type.Union([
-      ConfirmApprovalPayloadSchema,
-      SelectApprovalPayloadSchema,
-      InputApprovalPayloadSchema,
-      EditorApprovalPayloadSchema,
-    ]),
+    payload: ApprovalRequestPayloadSchema,
   },
   { additionalProperties: false },
 );

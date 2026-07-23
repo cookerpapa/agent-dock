@@ -6,7 +6,12 @@ import {
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
-import { SessionStateSchema } from "./event-envelope.ts";
+import {
+  ApprovalRequestPayloadSchema,
+  SessionStateSchema,
+  TurnCancellationReasonSchema,
+  WorkspacePatchSchema,
+} from "./event-envelope.ts";
 import {
   EnvironmentValidationReportSchema,
   EnvironmentRuntimeSnapshotSchema,
@@ -725,6 +730,95 @@ export const ConversationSessionResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ConversationTranscriptItemResourceSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("text"),
+      text: Type.String(),
+      firstSequence: PositiveSafeIntegerSchema,
+      lastSequence: PositiveSafeIntegerSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("tool"),
+      toolCallId: Type.String({ minLength: 1, maxLength: 1_024 }),
+      toolName: Type.String({ minLength: 1, maxLength: 1_024 }),
+      input: Type.Unknown(),
+      inputJson: Type.Optional(Type.String()),
+      output: Type.Optional(Type.Unknown()),
+      status: Type.Union([
+        Type.Literal("preparing"),
+        Type.Literal("running"),
+        Type.Literal("completed"),
+        Type.Literal("failed"),
+      ]),
+      firstSequence: PositiveSafeIntegerSchema,
+      lastSequence: Type.Optional(PositiveSafeIntegerSchema),
+      startedAt: UtcTimestampSchema,
+      completedAt: Type.Optional(UtcTimestampSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("approval"),
+      approval: ApprovalRequestPayloadSchema,
+      outcome: Type.Optional(
+        Type.Union([Type.Literal("approved"), Type.Literal("rejected"), Type.Literal("cancelled")]),
+      ),
+      value: Type.Optional(Type.String({ maxLength: 100_000 })),
+      firstSequence: PositiveSafeIntegerSchema,
+      lastSequence: Type.Optional(PositiveSafeIntegerSchema),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("notification"),
+      level: Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]),
+      message: Type.String({ maxLength: 16_384 }),
+      sequence: PositiveSafeIntegerSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+export const ConversationTurnTranscriptResourceSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    throughSequence: PositiveSafeIntegerSchema,
+    items: Type.Array(ConversationTranscriptItemResourceSchema, { maxItems: 10_000 }),
+    startedSequence: Type.Union([PositiveSafeIntegerSchema, Type.Null()]),
+    terminalSequence: Type.Union([PositiveSafeIntegerSchema, Type.Null()]),
+    stopReason: Type.Union([Type.String({ minLength: 1, maxLength: 256 }), Type.Null()]),
+    failure: Type.Union([
+      Type.Object(
+        {
+          code: Type.String({ minLength: 1, maxLength: 256 }),
+          message: Type.String({ maxLength: 16_384 }),
+          retryable: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    cancellation: Type.Union([
+      Type.Object(
+        {
+          reason: TurnCancellationReasonSchema,
+          forced: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    workspacePatch: Type.Union([WorkspacePatchSchema, Type.Null()]),
+  },
+  { additionalProperties: false },
+);
+
 export const ConversationTurnResourceSchema = Type.Object(
   {
     runId: UuidSchema,
@@ -736,6 +830,7 @@ export const ConversationTurnResourceSchema = Type.Object(
     projection: Type.Union([Type.Literal("canonical"), Type.Literal("superseded")]),
     supersededByRunId: Type.Optional(UuidSchema),
     rewoundFromRunId: Type.Optional(UuidSchema),
+    transcript: Type.Optional(ConversationTurnTranscriptResourceSchema),
     acceptedAt: UtcTimestampSchema,
   },
   { additionalProperties: false },
@@ -1364,6 +1459,12 @@ export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
 export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
 export type ConversationListResource = Static<typeof ConversationListResourceSchema>;
 export type ConversationSessionResource = Static<typeof ConversationSessionResourceSchema>;
+export type ConversationTranscriptItemResource = Static<
+  typeof ConversationTranscriptItemResourceSchema
+>;
+export type ConversationTurnTranscriptResource = Static<
+  typeof ConversationTurnTranscriptResourceSchema
+>;
 export type ConversationTurnResource = Static<typeof ConversationTurnResourceSchema>;
 export type ConversationDetailResource = Static<typeof ConversationDetailResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
@@ -1760,6 +1861,16 @@ export function parseConversationListResource(value: unknown): ConversationListR
 
 export function parseConversationDetailResource(value: unknown): ConversationDetailResource {
   return parseSchema(ConversationDetailResourceSchema, value, "conversation detail resource");
+}
+
+export function parseConversationTurnTranscriptResource(
+  value: unknown,
+): ConversationTurnTranscriptResource {
+  return parseSchema(
+    ConversationTurnTranscriptResourceSchema,
+    value,
+    "conversation turn transcript resource",
+  );
 }
 
 export function parseAcceptedTurnResource(value: unknown): AcceptedTurnResource {

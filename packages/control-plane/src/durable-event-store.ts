@@ -12,6 +12,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import { materializeConversationTurnProjection } from "./conversation-turn-projection.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -447,6 +448,19 @@ export class DurableEventStore implements DurableEventIngestor {
 
     await this.#recordStructuredTestResult(transaction, tenantId, message, now);
     await this.#recordContextCompaction(transaction, tenantId, message);
+    if (
+      event.turnId !== null &&
+      (event.type === "turn.completed" ||
+        event.type === "turn.failed" ||
+        event.type === "turn.cancelled")
+    ) {
+      await materializeConversationTurnProjection(transaction, {
+        tenantId,
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        projectedAt: now,
+      });
+    }
 
     const cursorUpdate = await transaction
       .updateTable("session_event_cursors")

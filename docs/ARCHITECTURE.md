@@ -545,8 +545,11 @@ Authoritative for control state:
 
 It also stores model-profile policy, opaque credential bindings, tenant runtime
 limits/fairness cursors, SHA-256 tenant API credential digests, the desired
-session profile, and each turn's immutable resolved model snapshot. It never
-stores provider tokens or plaintext tenant API tokens in ordinary rows.
+session profile, each turn's immutable resolved model snapshot, and rebuildable
+semantic Turn projections for bounded conversation reads. The projections are
+derived from the authoritative durable event rows and do not replace Pi JSONL
+or event history. PostgreSQL never stores provider tokens or plaintext tenant
+API tokens in ordinary rows.
 
 Important uniqueness constraints include `(session_id, idempotency_key)`, one
 positive execute-command `mailbox_position` per session, and
@@ -614,11 +617,14 @@ recovery. See ADR-0024.
    deltas, and publishes bounded batches without blocking Pi on each database
    transaction; the control plane persists each batch and returns one cumulative
    ACK.
-9. On `agent_settled`, the runner always saves Pi conversation state but captures
+9. A fenced terminal event materializes a versioned semantic Turn transcript in
+   the same transaction. Completed history reads this projection; an active Turn
+   continues from its earliest unprojected SSE sequence.
+10. On `agent_settled`, the runner always saves Pi conversation state but captures
    a Workspace snapshot only when a materialized Tool Sandbox may have changed it.
-10. The control plane completes the turn and schedules the next mailbox command.
+11. The control plane completes the turn and schedules the next mailbox command.
 
-Steps 1-10 are executable for the bounded sample or controlled-GitHub workspace
+Steps 1-11 are executable for the bounded sample or controlled-GitHub workspace
 path through the local integration boundary: the control plane acquires a real PostgreSQL
 lease/fence, persists ACK before run,
 activates a hardened Kubernetes/gVisor workspace only on the first Tool Call,
@@ -794,6 +800,12 @@ second command broker. See ADR-0019.
   numbers. The Supervisor publishes ordered batches from its durable spool; a
   cumulative ACK means the entire contiguous prefix is durably persisted, so an
   ACK lost in transit can safely cause replay.
+- A valid terminal event also replaces one rebuildable
+  `conversation_turn_projections` row inside the event commit transaction. The
+  projection coalesces text and Tool/approval/notification lifecycle into a
+  versioned semantic transcript with an exact source sequence watermark. It is
+  never an event or Pi-session authority; a missing row is reconstructed from
+  tenant-scoped durable events.
 - Duplicate current ACKs are idempotent. Regressing ACKs, ACKs beyond the highest
   publication, sequence gaps, and stale lease/fencing metadata are rejected.
 - A permanent `stale_fence` event rejection is not an ACK. It preserves the
@@ -935,8 +947,11 @@ login card can request an opt-in self-service tenant, verify the returned
 one-time owner token, and then list only that tenant's conversations. Token
 change/logout clears transcript, conversation list, pending operations, SSE
 cursor, and stream before another security context is rendered. Historical
-selection loads bounded prompt metadata and then resumes the matching durable
-SSE suffix; the token remains in memory rather than Web Storage or the URL.
+selection loads bounded prompt metadata plus completed semantic Turn
+projections, then resumes only the active unprojected durable SSE suffix. When
+every included Turn is projected, it starts at the durable high-water mark
+instead of replaying old token deltas. The token remains in memory rather than
+Web Storage or the URL.
 
 The Milestone 7 Session inspector is a read/operation projection over the same
 public tenant API. It exposes immutable Workspace history, structured compare,
