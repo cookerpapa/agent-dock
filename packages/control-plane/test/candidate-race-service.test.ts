@@ -367,6 +367,7 @@ async function settlePassingCandidate(
   },
   passedTests: number,
   changedPaths: number,
+  initialFailure = false,
 ): Promise<void> {
   const run = await database
     .selectFrom("runs")
@@ -573,8 +574,29 @@ async function settlePassingCandidate(
       .execute();
     await transaction
       .insertInto("test_results")
-      .values(
-        Array.from({ length: passedTests }, (_, index) => ({
+      .values([
+        ...(initialFailure
+          ? [
+              {
+                id: randomUUID(),
+                tenant_id: IDS.tenant,
+                session_id: candidate.sessionId,
+                turn_id: run.turn_id,
+                run_id: candidate.runId,
+                workspace_version_id: workspaceVersionId,
+                tool_call_id: "test-initial-red",
+                command: `test candidate ${String(candidate.ordinal)} case 1`,
+                suite: `candidate-${String(candidate.ordinal)}`,
+                status: "failed" as const,
+                exit_code: 1,
+                duration_ms: 25,
+                summary: "failed before repair",
+                artifact_id: null,
+                created_at: new Date(startedAt.valueOf() + 100),
+              },
+            ]
+          : []),
+        ...Array.from({ length: passedTests }, (_, index) => ({
           id: randomUUID(),
           tenant_id: IDS.tenant,
           session_id: candidate.sessionId,
@@ -582,15 +604,16 @@ async function settlePassingCandidate(
           run_id: candidate.runId,
           workspace_version_id: workspaceVersionId,
           tool_call_id: `test-${String(index + 1)}`,
-          command: `test candidate ${String(candidate.ordinal)}`,
+          command: `test candidate ${String(candidate.ordinal)} case ${String(index + 1)}`,
           suite: `candidate-${String(candidate.ordinal)}`,
           status: "passed" as const,
           exit_code: 0,
           duration_ms: 25,
           summary: "passed",
           artifact_id: null,
+          created_at: new Date(startedAt.valueOf() + 200 + index),
         })),
-      )
+      ])
       .execute();
     await createCompletedRunReviewBundle(
       transaction,
@@ -827,7 +850,7 @@ describe.sequential("candidate race orchestration", () => {
         protectedPathPrefixes: [],
       },
     });
-    await settlePassingCandidate(race.candidates[0]!, 2, 1);
+    await settlePassingCandidate(race.candidates[0]!, 2, 1, true);
     await settlePassingCandidate(race.candidates[1]!, 3, 2);
 
     const evaluated = await service.get(identity, race.orchestrationId);

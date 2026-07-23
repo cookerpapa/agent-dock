@@ -151,6 +151,14 @@ function podIdentity(pod, sessionId) {
   };
 }
 
+function effectiveTestResults(tests) {
+  const latestByExactCommand = new Map();
+  for (const test of tests) {
+    latestByExactCommand.set(`${test.suite}\0${test.command}`, test);
+  }
+  return [...latestByExactCommand.values()];
+}
+
 async function sessionSandboxPods(sessionId) {
   return (await managedSandboxPods()).filter(
     (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
@@ -345,7 +353,9 @@ try {
       assert(run.startedAt !== undefined && run.settledAt !== undefined);
       assert.deepEqual(bundle.manifest.changes.changedPaths, ["src/Calculator.java"]);
       assert(bundle.manifest.tests.length > 0);
-      assert(bundle.manifest.tests.every((test) => test.status === "passed"));
+      const effectiveTests = effectiveTestResults(bundle.manifest.tests);
+      assert(effectiveTests.length > 0);
+      assert(effectiveTests.every((test) => test.status === "passed"));
       return {
         candidateId: candidate.candidateId,
         label: candidate.label,
@@ -359,6 +369,12 @@ try {
         reviewBundleSha256: bundle.manifestSha256,
         changedPaths: bundle.manifest.changes.changedPaths,
         tests: bundle.manifest.tests.map((test) => ({
+          command: test.command,
+          suite: test.suite,
+          status: test.status,
+        })),
+        effectiveTests: effectiveTests.map((test) => ({
+          command: test.command,
           suite: test.suite,
           status: test.status,
         })),
@@ -456,7 +472,9 @@ try {
     (candidate) =>
       `- ${candidate.label}: ${String(candidate.usage.requests)} model requests, ` +
       `${String(candidate.usage.inputTokens)}/${String(candidate.usage.outputTokens)} input/output tokens, ` +
-      `${String(candidate.tests.length)} passed test record(s), gVisor Pod ${candidate.sandbox.uid}`,
+      `${String(candidate.tests.length)} test attempt(s) / ` +
+      `${String(candidate.effectiveTests.length)} green effective result(s), ` +
+      `gVisor Pod ${candidate.sandbox.uid}`,
   );
   await writeFile(
     resolve(reportDirectory, "parallel-candidate-race-acceptance-latest.md"),

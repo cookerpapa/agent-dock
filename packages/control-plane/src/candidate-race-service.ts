@@ -245,6 +245,16 @@ function pathProtected(path: string, prefixes: readonly string[]): boolean {
   );
 }
 
+function effectiveTestResults(
+  tests: ReturnType<typeof parseReviewBundleManifest>["tests"],
+): ReturnType<typeof parseReviewBundleManifest>["tests"] {
+  const latestByExactCommand = new Map<string, (typeof tests)[number]>();
+  for (const test of tests) {
+    latestByExactCommand.set(`${test.suite}\0${test.command}`, test);
+  }
+  return [...latestByExactCommand.values()];
+}
+
 function stateForDispatch(runState: RunState): OrchestrationDispatchState {
   if (runState === "cancelled") return "cancelled";
   if (TERMINAL_RUN_STATES.has(runState)) return "settled";
@@ -1555,11 +1565,12 @@ export class CandidateRaceService {
       const manifest = parseReviewBundleManifest(bundle.manifest);
       reviewBundleId = bundle.reviewBundleId;
       workspaceVersionId = manifest.changes.workspaceVersionId ?? workspaceVersionId;
+      const effectiveTests = effectiveTestResults(manifest.tests);
       const testCounts = {
-        total: manifest.tests.length,
-        passed: manifest.tests.filter((test) => test.status === "passed").length,
-        failed: manifest.tests.filter((test) => test.status === "failed").length,
-        errored: manifest.tests.filter((test) => test.status === "errored").length,
+        total: effectiveTests.length,
+        passed: effectiveTests.filter((test) => test.status === "passed").length,
+        failed: effectiveTests.filter((test) => test.status === "failed").length,
+        errored: effectiveTests.filter((test) => test.status === "errored").length,
       };
       const reasons: string[] = [];
       if (

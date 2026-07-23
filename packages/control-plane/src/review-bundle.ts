@@ -193,8 +193,39 @@ export async function createCompletedRunReviewBundle(
     .where("tenant_id", "=", identity.tenantId)
     .where("run_id", "=", identity.runId)
     .orderBy("created_at")
+    .orderBy("id")
     .limit(100)
     .execute();
+  const testEvents = await transaction
+    .selectFrom("session_events")
+    .select(["seq", "payload"])
+    .where("tenant_id", "=", identity.tenantId)
+    .where("session_id", "=", identity.sessionId)
+    .where("turn_id", "=", identity.turnId)
+    .where("type", "=", "tool.completed")
+    .orderBy("seq")
+    .execute();
+  const testSequenceByToolCall = new Map(
+    testEvents.flatMap((event) => {
+      const payload = event.payload;
+      return "toolCallId" in payload && typeof payload.toolCallId === "string"
+        ? [[payload.toolCallId, event.seq] as const]
+        : [];
+    }),
+  );
+  tests.sort((left, right) => {
+    const leftSeq = testSequenceByToolCall.get(left.tool_call_id);
+    const rightSeq = testSequenceByToolCall.get(right.tool_call_id);
+    if (leftSeq !== undefined && rightSeq !== undefined) {
+      const leftSequence = BigInt(leftSeq);
+      const rightSequence = BigInt(rightSeq);
+      return leftSequence < rightSequence ? -1 : leftSequence > rightSequence ? 1 : 0;
+    }
+    if (leftSeq !== undefined) return -1;
+    if (rightSeq !== undefined) return 1;
+    const created = new Date(left.created_at).valueOf() - new Date(right.created_at).valueOf();
+    return created === 0 ? left.id.localeCompare(right.id) : created;
+  });
   const usage = await sql<{
     requests: string;
     input_tokens: string;

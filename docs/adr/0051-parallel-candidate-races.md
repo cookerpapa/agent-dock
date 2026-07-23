@@ -61,7 +61,11 @@ Candidate completion is evaluated from the immutable Review Bundle. The first
 closed acceptance policy supports:
 
 - requiring a Workspace patch;
-- requiring at least one structured test and requiring every test to pass;
+- requiring at least one effective structured test and requiring every effective
+  result to pass. For each exact suite/command pair, the final invocation is
+  authoritative, so an initial red test followed by the same green regression
+  test is accepted while the complete red/green history remains in the
+  immutable Review Bundle;
 - a maximum changed-path count;
 - protected path prefixes.
 

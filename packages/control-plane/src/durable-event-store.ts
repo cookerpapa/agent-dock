@@ -556,7 +556,7 @@ export class DurableEventStore implements DurableEventIngestor {
         duration_ms: Math.min(durationMs, 86_400_000),
         summary,
         artifact_id: event.payload.outputArtifact?.artifactId ?? null,
-        created_at: now,
+        created_at: new Date(event.occurredAt),
       })
       .onConflict((conflict) => conflict.columns(["run_id", "tool_call_id"]).doNothing())
       .execute();
