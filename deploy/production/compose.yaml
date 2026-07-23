@@ -312,8 +312,8 @@ services:
     command:
       - |
         owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
-        chown "$${owner}" /run/agent-dock-provider-relay
         chmod 0700 /run/agent-dock-provider-relay
+        chown "$${owner}" /run/agent-dock-provider-relay
     user: "0:0"
     volumes:
       - provider-relay:/run/agent-dock-provider-relay
@@ -324,6 +324,7 @@ services:
       - ALL
     cap_add:
       - CHOWN
+      - FOWNER
     security_opt:
       - no-new-privileges:true
     pids_limit: 16
