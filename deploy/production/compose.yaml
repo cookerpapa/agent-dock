@@ -305,6 +305,105 @@ services:
     stop_grace_period: 30s
     logging: *bounded-logging
 
+  provider-relay-volume-bootstrap:
+    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: "no"
+    entrypoint: [/bin/sh, -eu, -c]
+    command:
+      - |
+        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
+        chown "$${owner}" /run/agent-dock-provider-relay
+        chmod 0700 /run/agent-dock-provider-relay
+    user: "0:0"
+    volumes:
+      - provider-relay:/run/agent-dock-provider-relay
+    network_mode: none
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 16
+    mem_limit: 32m
+    cpus: 0.1
+    logging: *bounded-logging
+
+  provider-host-egress-relay:
+    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    depends_on:
+      provider-relay-volume-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      AGENT_DOCK_PROVIDER_RELAY_MODE: host
+      AGENT_DOCK_PROVIDER_RELAY_SOCKET: /run/agent-dock-provider-relay/provider-egress.sock
+      AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS: api.deepseek.com
+      AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY: ${HTTPS_PROXY:-}
+    volumes:
+      - provider-relay:/run/agent-dock-provider-relay
+    network_mode: host
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const s=require('node:net').connect({path:'/run/agent-dock-provider-relay/provider-egress.sock'});s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 15s
+    logging: *bounded-logging
+
+  provider-egress-relay:
+    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    depends_on:
+      provider-host-egress-relay:
+        condition: service_healthy
+    environment:
+      AGENT_DOCK_PROVIDER_RELAY_MODE: bridge
+      AGENT_DOCK_PROVIDER_RELAY_SOCKET: /run/agent-dock-provider-relay/provider-egress.sock
+      AGENT_DOCK_PROVIDER_RELAY_HOST: 0.0.0.0
+      AGENT_DOCK_PROVIDER_RELAY_PORT: "3129"
+    volumes:
+      - provider-relay:/run/agent-dock-provider-relay
+    networks:
+      - model-egress
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const s=require('node:net').connect(3129,'127.0.0.1');s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 15s
+    logging: *bounded-logging
+
   supervisor-host:
     image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
@@ -320,10 +419,16 @@ services:
         condition: service_completed_successfully
       sandbox-manager:
         condition: service_healthy
+      provider-egress-relay:
+        condition: service_healthy
       supervisor-volume-bootstrap:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
+      NODE_USE_ENV_PROXY: "1"
+      HTTP_PROXY: http://provider-egress-relay:3129
+      HTTPS_PROXY: http://provider-egress-relay:3129
+      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,supervisor-host
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
       AWS_EC2_METADATA_DISABLED: "true"
@@ -405,7 +510,7 @@ services:
       - database
       - object-storage
       - sandbox-control
-      - provider-egress
+      - model-egress
       - github-control
       - observability
     healthcheck:
@@ -869,6 +974,17 @@ services:
     network_mode: none
     restart: "no"
 
+  provider-egress-relay-image:
+    profiles: [image-only]
+    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/provider-egress-relay/Dockerfile
+      args: *application-build-args
+      network: none
+    network_mode: none
+    restart: "no"
+
 networks:
   edge: {}
   api:
@@ -884,6 +1000,8 @@ networks:
   kubernetes-host-egress: {}
   github-control:
     internal: true
+  model-egress:
+    internal: true
   provider-egress: {}
   observability:
     internal: true
@@ -897,3 +1015,4 @@ volumes:
   prometheus-data: {}
   grafana-data: {}
   jaeger-data: {}
+  provider-relay: {}

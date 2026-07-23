@@ -70,6 +70,7 @@ const serviceArguments =
         "web",
         "tool-sandbox-image",
         "dependency-egress-proxy-image",
+        "provider-egress-relay-image",
       ]
     : commandArguments;
 const args = [

@@ -40,6 +40,7 @@ Trusted TypeScript Agent Runner
     |-- pinned Pi RPC child process and model capability
     |-- event spool and session snapshots
     |-- no runtime socket/Kubernetes credential/local untrusted tools
+    |-- fixed model TLS via internal bridge -> Unix socket -> host egress relay
     |
     | authenticated narrow Tool RPC
     v
@@ -155,6 +156,7 @@ only after a measured requirement appears.
 - [ADR-0045: single-consumption clean gVisor prewarming](docs/adr/0045-single-consumption-clean-prewarm.md)
 - [ADR-0046: capability-scoped public repository import](docs/adr/0046-capability-scoped-repository-import.md)
 - [ADR-0049: transactional semantic conversation projections](docs/adr/0049-transactional-semantic-conversation-projections.md)
+- [ADR-0050: capability-free trusted provider egress relay](docs/adr/0050-capability-free-trusted-provider-egress-relay.md)
 
 ## Current executable spikes
 
@@ -306,6 +308,13 @@ idle TTL, while chat-only Runs never touch Kubernetes. K3s/containerd maps the
 class to `runsc` fixed to KVM. Manager readiness and activation inspection
 attest a real gVisor workload and fail closed without the RuntimeClass, policy,
 image or scoped API authority.
+
+The Runner has no host network and no directly routed public network. Its
+loopback Model Gateway sends provider TLS through a private internal bridge,
+Unix socket and exact-host relay. The relay has no model/platform credential,
+does not terminate TLS and listens on no host TCP port; Tool Pods cannot reach
+it. This also supports hosts whose only public path is an operator
+`HTTPS_PROXY`. See ADR-0050 and the network matrix.
 
 Each Project also owns an append-only, operator-managed environment version.
 Turn acceptance snapshots that exact profile, tool-image revision and canonical

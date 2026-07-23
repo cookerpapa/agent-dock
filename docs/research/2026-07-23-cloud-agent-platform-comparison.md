@@ -36,9 +36,9 @@ lease/fence, cumulative event ACK and capability-scoped egress guarantees.
 Those guarantees must not be replaced by placing the Agent runtime or broad
 credentials inside the code-execution Sandbox.
 
-## Adopted gap
+## Adopted gaps
 
-The missing counterpart was a semantic conversation read model. AgentDock
+The first missing counterpart was a semantic conversation read model. AgentDock
 previously reconstructed completed conversations by replaying every durable
 delta from sequence zero. ADR-0049 adds a transactionally maintained,
 rebuildable per-Turn semantic transcript and lets the browser resume only the
@@ -56,3 +56,21 @@ conversation_turn_projections
 
 This is the useful part of the reference design adapted to AgentDock's stronger
 durability and isolation model.
+
+The second adopted point is an explicit trusted-proxy boundary. AgentDock does
+not put a broad proxy token or provider credential in the gVisor runtime.
+ADR-0050 instead gives the trusted Model Gateway a fixed, transport-only
+CONNECT path:
+
+```text
+internal model-egress bridge
+  -> private Unix socket
+  -> host egress relay
+  -> exact provider host
+```
+
+The Runner no longer needs a directly routed public network, the relay never
+sees the model API key because TLS stays end-to-end, and Tool Pods cannot reach
+either relay. This keeps the reference repository's useful “trusted proxy”
+shape while preserving AgentDock's stricter separation between Agent Loop,
+provider authority and untrusted execution.

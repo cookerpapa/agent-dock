@@ -6,30 +6,40 @@ Untrusted Tool Pods never join a platform network and have default-deny ingress
 and egress. Network membership never replaces application authentication.
 
 The trusted product plane currently runs in isolated Compose networks; the
-untrusted execution plane runs in K3s. A credential-free relay is the only
-bridge between the Manager's internal Compose network and the host Kubernetes
-API endpoint.
+untrusted execution plane runs in K3s. Credential-free relays provide two
+closed bridges: Manager to the fixed host Kubernetes API endpoint, and trusted
+Model Gateway to the exact provider host.
 
 ## Trusted product plane
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Provider egress | K3s API relay | Public ports |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Web ingress | yes | no | no | no | no | webhook proxy only | no | no | no | loopback `8080` |
-| Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | none |
-| Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | yes | no | none |
-| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | via relay | none |
-| Kubernetes API relay | no | no | no | no | yes | no | no | no | fixed host `6443` | none |
-| GitHub Gateway | no | no | no | no | no | yes | no | yes | no | none |
-| PostgreSQL | no | no | yes | no | no | no | no | no | no | none |
-| MinIO | no | no | no | yes | no | no | no | no | no | none |
-| Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | none |
-| Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | loopback `9090`, `16686`, `3001` |
+| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Model egress | Provider egress | K3s API relay | Public ports |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Web ingress | yes | no | no | no | no | webhook proxy only | no | no | no | no | loopback `8080` |
+| Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | no | none |
+| Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | internal relay only | no direct route | no | none |
+| Provider bridge relay | no | no | no | no | no | no | no | yes | Unix socket only | no | none |
+| Provider host relay | no | no | no | no | no | no | no | Unix socket only | exact provider or operator proxy | no | no TCP listener |
+| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | via relay | none |
+| Kubernetes API relay | no | no | no | no | yes | no | no | no | no | fixed host `6443` | none |
+| GitHub Gateway | no | no | no | no | no | yes | no | no | yes | no | none |
+| PostgreSQL | no | no | yes | no | no | no | no | no | no | no | none |
+| MinIO | no | no | no | yes | no | no | no | no | no | no | none |
+| Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | no | none |
+| Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | no | loopback `9090`, `16686`, `3001` |
 
 The relay has no mount, secret, environment credential or application route. It
 accepts TCP only on the private `sandbox-control` network and forwards only to
 the fixed `agent-dock-kubernetes-host:6443` target. TLS authentication and
 authorization remain end-to-end between the Manager's scoped kubeconfig and
 the Kubernetes API server.
+
+The provider bridge accepts CONNECT only on the internal `model-egress`
+network and forwards bytes through a `0700` named-volume Unix socket. The
+host-network half listens on no TCP port, permits only
+`api.deepseek.com:443`, rejects non-public direct DNS answers, and contains no
+model or platform credential. Provider TLS and API authentication remain
+end-to-end between the trusted Model Gateway and DeepSeek. The Runner is not a
+member of the directly routed `provider-egress` network.
 
 ## Kubernetes execution plane
 
@@ -67,6 +77,7 @@ neither Pod can connect back to the Manager, Runner or relay.
 | Sandbox Manager | no | no | no | no | own verifier | no | two execution namespaces plus one named RuntimeClass read | no |
 | Kubernetes API relay | no | no | no | no | no | no | no | no |
 | GitHub Gateway | no | no | no | no | no | App key + memory-only token | no | no |
+| Provider relays | no | no | no | no | no | no | no | no |
 | Tool Pod | no | no | no | no | no | no | no ServiceAccount token | no |
 | Importer Pod | no | no | no | no | no | no | no ServiceAccount token | no |
 

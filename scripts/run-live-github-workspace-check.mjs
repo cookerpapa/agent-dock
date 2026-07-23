@@ -458,6 +458,45 @@ const conversation = await api.getConversation(session.sessionId);
 assert.equal(conversation.project.source.kind, "github_public");
 assert.equal(conversation.project.source.status, "ready");
 assert.equal(conversation.turns.length, 2);
+assert(
+  conversation.turns.every((turn) => turn.transcript !== undefined),
+  "Completed turns did not expose semantic transcript projections",
+);
+assert(
+  conversation.turns.every((turn) => turn.transcript?.items.some((item) => item.kind === "tool")),
+  "Semantic transcript omitted completed tool executions",
+);
+const projectionEvidence = await psql(
+  `select count(*) || '|' || coalesce(sum(source_event_count), 0) || '|' ||
+          coalesce(max(through_seq), 0) || '|' ||
+          coalesce(sum(jsonb_array_length(transcript -> 'items')), 0)
+     from conversation_turn_projections
+    where tenant_id = ${sqlLiteral(tenantId)}
+      and session_id = ${sqlLiteral(session.sessionId)}`,
+);
+const [projectionCount, projectedSourceEvents, projectedThroughSequence, semanticItems] =
+  projectionEvidence.split("|").map(Number);
+assert.equal(projectionCount, 2, "One semantic projection per completed turn was not committed");
+assert(
+  projectedSourceEvents > semanticItems,
+  "Semantic transcript did not compact the source event stream",
+);
+const durableEventEvidence = await psql(
+  `select count(*) || '|' || coalesce(max(seq), 0)
+     from session_events
+    where tenant_id = ${sqlLiteral(tenantId)}
+      and session_id = ${sqlLiteral(session.sessionId)}`,
+);
+const [durableEvents, durableThroughSequence] = durableEventEvidence.split("|").map(Number);
+assert.equal(
+  conversation.replayAfterSequence,
+  durableThroughSequence,
+  "Conversation discovery would replay already projected history",
+);
+assert(
+  projectedThroughSequence <= durableThroughSequence,
+  "Projection high-water mark exceeded the durable event stream",
+);
 const usage = await psql(
   `select count(*) || '|' || coalesce(sum(input_tokens), 0) || '|' ||
           coalesce(sum(output_tokens), 0) || '|' || coalesce(sum(cache_read_tokens), 0) || '|' ||
@@ -522,6 +561,13 @@ const report = {
     })),
   },
   usage: { modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+  semanticConversation: {
+    projectionCount,
+    durableEvents,
+    projectedSourceEvents,
+    semanticItems,
+    replayAfterSequence: conversation.replayAfterSequence,
+  },
   warmReuse: {
     podUid: secondWarmSandbox.uid,
     activationId: secondWarmSandbox.activationId,
@@ -550,13 +596,15 @@ await writeFile(
     `- Source: ${report.source.repository}@${report.source.commitSha}`,
     `- Model calls: ${String(report.usage.modelCalls)}`,
     `- Input/output tokens: ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)}`,
+    `- Semantic transcript: ${String(report.semanticConversation.projectedSourceEvents)} projected source events -> ${String(report.semanticConversation.semanticItems)} UI items`,
+    `- Durable replay high-water: ${String(report.semanticConversation.replayAfterSequence)} / ${String(report.semanticConversation.durableEvents)} events`,
     `- Warm Pod reused: ${report.warmReuse.podUid}`,
     `- Fencing token advanced: ${String(report.warmReuse.firstFence)} -> ${String(report.warmReuse.secondFence)}`,
     `- First Review Bundle: ${report.firstTurn.reviewBundleId} (${report.firstTurn.reviewBundleSha256})`,
     `- Second Review Bundle: ${report.secondTurn.reviewBundleId} (${report.secondTurn.reviewBundleSha256})`,
     `- Exact Sandbox cleanup: ${String(report.warmReuse.cleaned)}`,
     "",
-    "Both turns changed the imported Java repository, executed tools inside the credential-free gVisor Sandbox, committed immutable Review Bundles, persisted real token usage, reused the same physical Pod with a newer writer fence, and then destroyed that exact assignment.",
+    "Both turns changed the imported Java repository, executed tools inside the credential-free gVisor Sandbox, committed immutable Review Bundles and semantic conversation projections, persisted real token usage, resumed SSE from the durable high-water mark without historical delta replay, reused the same physical Pod with a newer writer fence, and then destroyed that exact assignment.",
     "",
   ].join("\n"),
   "utf8",

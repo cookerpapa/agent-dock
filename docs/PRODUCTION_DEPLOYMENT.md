@@ -206,8 +206,11 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                       v
                               trusted Pi Agent Runner -> MinIO checkpoints
                                       |         |
-                                      |         +-> fixed provider API (egress only here)
                                       |         +-> loopback Model Gateway
+                                      |                    |
+                                      |                    +-> internal model-egress bridge
+                                      |                         -> private Unix socket
+                                      |                         -> fixed provider API
                                       |
                                       +-> narrow authenticated tool RPC
                                                    |
@@ -233,6 +236,17 @@ route, readiness endpoints, and outbound Supervisor transport stay on isolated
 Compose networks. Caddy returns `404` for `/internal/*` and `/health/*`; it only
 proxies `/v1/*` and serves static assets. Liveness is exposed as `/healthz` and
 contains no dependency detail.
+
+The trusted Runner is not attached to the directly routed `provider-egress`
+network. It reaches the configured DeepSeek host through an internal
+`model-egress` CONNECT bridge, a private Unix socket and one non-root
+host-network relay. The host half listens on no TCP port, accepts only
+`api.deepseek.com:443`, holds no model/platform credential and does not
+terminate TLS. If the deployment host has no direct route, the relay uses the
+operator `HTTPS_PROXY` inherited by the production command. Internal
+Control-Plane, Manager, object-store, GitHub and observability requests remain
+on their isolated networks through the Supervisor's explicit `NO_PROXY` list.
+See ADR-0050.
 
 The trusted `supervisor-host` runs as the deployment's non-root application UID
 and has no runtime socket or Kubernetes credential. It runs pinned Pi with built-in local tools and
@@ -775,3 +789,18 @@ RuntimeClass read, and that the transient Tool Pod has
 default-deny networking and no credential-bearing environment or mount. Rotate or
 revoke a temporary test key afterward. Any broader claim requires its own ADR,
 threat model, and acceptance evidence.
+
+To validate the semantic conversation read model and trusted provider relay
+without depending on GitHub import, run the focused live gate:
+
+```bash
+AGENT_DOCK_LIVE_SEMANTIC_CHECK=1 npm run production:semantic-check
+```
+
+It submits one real-model pure-chat Run and requires zero Tool Sandbox
+activations, then submits a second Run that creates and verifies a file in a
+real gVisor Tool Pod. It checks positive provider token usage, one terminal
+semantic projection per Turn, source-event-to-transcript compaction, replay at
+the durable high-water mark, and exact Sandbox assignment cleanup. The
+redacted result is written to
+`docs/reports/semantic-conversation-acceptance-latest.{json,md}`.

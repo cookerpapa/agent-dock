@@ -41,9 +41,11 @@ Untrusted browser input / repository / model output
        authenticated commands/events
                  v
    Trusted Pi Runner + Model Gateway ---- service RPC ---- GitHub Gateway
-                 |                                      (trusted credential boundary)
+          |      |                                      (trusted credential boundary)
+          |      `---- fixed CONNECT ---- Provider egress relay
+          |                                  (no model credential)
        capability-scoped Tool RPC
-                 v
+          v
        Sandbox Manager (trusted TCB)
                  |
        scoped Kubernetes API
@@ -91,6 +93,7 @@ Assumed trusted or out of scope for the current claim:
 | Password or browser session disclosure | Per-account salted scrypt verifier; opaque HttpOnly/SameSite session; digest-only persistence; bounded lifetime and immediate revocation | PostgreSQL account/login/logout and cookie-auth integration tests |
 | Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
+| Runner's provider route exposes host networking or arbitrary egress | Runner joins internal model egress only; a TCP-to-Unix-socket relay permits exact provider TCP/443, holds no model key and does not terminate TLS | production topology inspection, relay allowlist tests and real-provider acceptance |
 | Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool Pod has no ServiceAccount token; Manager RBAC is namespace-scoped except read-only access to the one named RuntimeClass | production topology, RBAC and Pod-spec inspection |
 | Accepted Run silently changes tool image or warm Pod after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-Pod toolchain preflight; exact-environment warm reuse | migration/protocol tests, Manager rejection/reuse tests, gVisor environment evidence and real-token Run |
 | Model chooses an unreviewed image or Pod policy | image/profile/RuntimeClass/PodSpec remain operator configuration and closed protocols reject extra client fields | protocol schemas, fixed Pod-template tests and Manager policy mismatch tests |
@@ -137,6 +140,16 @@ Runner receives canonical repository bytes; the Control Plane submits a
 tenant/version-validated artifact for delivery. Neither component receives the
 token, and the Tool Sandbox cannot route to the Gateway. The default deployment
 ships without a usable App private key and fails App operations closed.
+
+The trusted Model Gateway receives the provider key but no host network. Its
+public HTTPS request uses Node's environment-aware proxy dispatcher to reach a
+private bridge, which forwards to a Unix-socket-only host relay. The relay
+accepts only the operator-owned DeepSeek hostname on TCP/443 and transports
+opaque TLS bytes; it never receives the request headers inside TLS or the model
+key. Tool Pods cannot route to Compose networks. The host relay is trusted
+transport code and its host-network blast radius is constrained by non-root
+execution, no TCP listener, no platform secrets, dropped capabilities,
+read-only rootfs and bounded resources.
 
 ## Residual risks and required upgrades
 

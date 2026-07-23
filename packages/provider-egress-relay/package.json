@@ -1,0 +1,14 @@
+{
+  "name": "@agent-dock/provider-egress-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run"
+  }
+}

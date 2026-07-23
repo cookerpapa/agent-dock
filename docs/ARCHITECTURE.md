@@ -328,12 +328,16 @@ provisions the boot through a file-backed enrollment credential, recovers its
 event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
 
-The host receives S3/database credentials and fixed provider egress, but no
-container-runtime or Kubernetes credential. It composes the pinned Pi Runner, PostgreSQL workspace-import
+The host receives S3/database credentials, but no container-runtime,
+Kubernetes credential or host network. It composes the pinned Pi Runner, PostgreSQL workspace-import
 lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
 S3-compatible byte store, tenant model-credential resolver/loopback gateway,
 active/quarantine spool roots, reconnect client, and an authenticated private
-management endpoint. A separate `@agent-dock/sandbox-manager` service receives
+management endpoint. Public model traffic leaves an internal `model-egress`
+network only through a credential-free TCP-to-Unix-socket bridge and a
+host-network relay that permits the exact configured provider host on TCP/443.
+Provider TLS and authentication stay end-to-end; neither relay receives the
+model key. A separate `@agent-dock/sandbox-manager` service receives
 a least-privilege kubeconfig. Its authenticated API is limited to
 create/execute/capture/stop, exact assignment inventory, and a fixed public
 GitHub importer. It receives no Docker/containerd socket, database, S3,
@@ -361,6 +365,7 @@ The supported deployment adds a K3s/gVisor execution plane to a Compose-hosted
 trusted product plane with persistent PostgreSQL and MinIO, explicit
 migration/bootstrap jobs, one control-plane replica, one trusted Pi Runner, one
 scoped-kubeconfig Sandbox Manager, a credential-free Kubernetes API relay, one
+credential-free provider egress bridge plus a Unix-socket-only host relay, one
 optional credential-owning GitHub Gateway, static Web ingress, isolated
 networks, private secret-file mounts, health checks, bounded resources/logs,
 and seven declared volumes. Only Web publishes a
@@ -523,9 +528,10 @@ memory, ephemeral storage, PIDs, file descriptors, `/tmp`, and workspace
 memory-backed volumes. Default-deny policy and `dnsPolicy: None` make normal
 fake and real Tool execution offline. Dependency setup has only the temporary
 capability path described above. Pinned Pi and the request-scoped model gateway stay together
-in the trusted Runner; the Runner alone joins provider egress and receives a
-short-lived model capability, while remote tools receive neither it nor the
-long-lived provider credential.
+in the trusted Runner; the Runner receives a short-lived model capability and
+joins only internal model egress, while the provider relay transports opaque
+TLS bytes to the fixed provider host. Remote tools receive neither that route,
+the capability nor the long-lived provider credential.
 
 ## 3. State ownership
 

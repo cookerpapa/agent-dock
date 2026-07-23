@@ -765,6 +765,8 @@ async function assertApplicationIdentity() {
     "sandbox-manager",
     "kubernetes-api-relay",
     "github-gateway",
+    "provider-host-egress-relay",
+    "provider-egress-relay",
   ]) {
     const output = await composeCapture(["ps", "--all", "--quiet", service]);
     const ids = output.split(/\r?\n/).filter(Boolean);
@@ -792,33 +794,49 @@ async function assertExecutionBoundary() {
   const managerId = (await serviceContainerIds("sandbox-manager"))[0];
   const relayId = (await serviceContainerIds("kubernetes-api-relay"))[0];
   const githubGatewayId = (await serviceContainerIds("github-gateway"))[0];
+  const providerHostRelayId = (await serviceContainerIds("provider-host-egress-relay"))[0];
+  const providerBridgeRelayId = (await serviceContainerIds("provider-egress-relay"))[0];
   assert(supervisorId);
   assert(managerId);
   assert(relayId);
   assert(githubGatewayId);
-  const [supervisor, manager, relay, githubGateway] = await Promise.all(
-    [supervisorId, managerId, relayId, githubGatewayId].map(async (id) =>
-      JSON.parse(await capture("docker", ["inspect", id])).at(0),
-    ),
-  );
+  assert(providerHostRelayId);
+  assert(providerBridgeRelayId);
+  const [supervisor, manager, relay, githubGateway, providerHostRelay, providerBridgeRelay] =
+    await Promise.all(
+      [
+        supervisorId,
+        managerId,
+        relayId,
+        githubGatewayId,
+        providerHostRelayId,
+        providerBridgeRelayId,
+      ].map(async (id) => JSON.parse(await capture("docker", ["inspect", id])).at(0)),
+    );
   const hasDockerSocket = (container) =>
     (container.Mounts ?? []).some((mount) => mount.Destination === "/var/run/docker.sock");
-  assert.equal(hasDockerSocket(supervisor), false);
-  assert.equal(hasDockerSocket(manager), false);
-  assert.equal(hasDockerSocket(relay), false);
-  assert.equal(hasDockerSocket(githubGateway), false);
-  assert.equal(supervisor.HostConfig.Privileged, false);
-  assert.equal(manager.HostConfig.Privileged, false);
-  assert.equal(relay.HostConfig.Privileged, false);
-  assert.equal(supervisor.HostConfig.ReadonlyRootfs, true);
-  assert.equal(manager.HostConfig.ReadonlyRootfs, true);
-  assert.equal(relay.HostConfig.ReadonlyRootfs, true);
+  for (const container of [
+    supervisor,
+    manager,
+    relay,
+    githubGateway,
+    providerHostRelay,
+    providerBridgeRelay,
+  ]) {
+    assert.equal(hasDockerSocket(container), false);
+    assert.equal(container.HostConfig.Privileged, false);
+    assert.equal(container.HostConfig.ReadonlyRootfs, true);
+  }
   assert.deepEqual(supervisor.HostConfig.CapDrop, ["ALL"]);
   assert.deepEqual(supervisor.HostConfig.CapAdd ?? [], []);
   assert(manager.HostConfig.CapDrop.includes("ALL"));
   assert.deepEqual(manager.HostConfig.CapAdd ?? [], []);
   assert(relay.HostConfig.CapDrop.includes("ALL"));
   assert.deepEqual(relay.HostConfig.CapAdd ?? [], []);
+  assert(providerHostRelay.HostConfig.CapDrop.includes("ALL"));
+  assert.deepEqual(providerHostRelay.HostConfig.CapAdd ?? [], []);
+  assert(providerBridgeRelay.HostConfig.CapDrop.includes("ALL"));
+  assert.deepEqual(providerBridgeRelay.HostConfig.CapAdd ?? [], []);
   assert.equal(relay.Mounts?.length ?? 0, 0);
   assert.equal(
     (manager.Mounts ?? []).some((mount) =>
@@ -840,7 +858,13 @@ async function assertExecutionBoundary() {
   const managerNetworks = Object.keys(manager.NetworkSettings.Networks ?? {});
   const relayNetworks = Object.keys(relay.NetworkSettings.Networks ?? {});
   const githubGatewayNetworks = Object.keys(githubGateway.NetworkSettings.Networks ?? {});
+  const providerBridgeNetworks = Object.keys(providerBridgeRelay.NetworkSettings.Networks ?? {});
   assert(supervisorNetworks.some((name) => name.endsWith("_sandbox-control")));
+  assert(supervisorNetworks.some((name) => name.endsWith("_model-egress")));
+  assert.equal(
+    supervisorNetworks.some((name) => name.endsWith("_provider-egress")),
+    false,
+  );
   assert.deepEqual(
     managerNetworks.sort(),
     [`${projectName}_observability`, `${projectName}_sandbox-control`].sort(),
@@ -853,6 +877,56 @@ async function assertExecutionBoundary() {
     githubGatewayNetworks.sort(),
     [`${projectName}_github-control`, `${projectName}_provider-egress`].sort(),
   );
+  assert.equal(providerHostRelay.HostConfig.NetworkMode, "host");
+  assert.deepEqual(providerBridgeNetworks, [`${projectName}_model-egress`]);
+  for (const providerRelay of [providerHostRelay, providerBridgeRelay]) {
+    assert.equal(providerRelay.Mounts?.length, 1);
+    assert.equal(providerRelay.Mounts[0]?.Destination, "/run/agent-dock-provider-relay");
+    assert.equal(providerRelay.Mounts[0]?.Type, "volume");
+  }
+  const providerHostEnvironment = providerHostRelay.Config.Env ?? [];
+  const providerBridgeEnvironment = providerBridgeRelay.Config.Env ?? [];
+  assert.equal(providerHostEnvironment.includes("AGENT_DOCK_PROVIDER_RELAY_MODE=host"), true);
+  assert.equal(
+    providerHostEnvironment.includes("AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS=api.deepseek.com"),
+    true,
+  );
+  assert.equal(providerBridgeEnvironment.includes("AGENT_DOCK_PROVIDER_RELAY_MODE=bridge"), true);
+  assert.equal(
+    providerBridgeEnvironment.some((value) =>
+      value.startsWith("AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY="),
+    ),
+    false,
+  );
+  for (const providerRelay of [providerHostRelay, providerBridgeRelay]) {
+    const serialized = JSON.stringify({
+      command: providerRelay.Config.Cmd,
+      entrypoint: providerRelay.Config.Entrypoint,
+      mounts: providerRelay.Mounts,
+    });
+    for (const value of [
+      "DATABASE_URL",
+      "AWS_",
+      "MODEL_CREDENTIAL",
+      "SANDBOX_MANAGER_TOKEN",
+      "GITHUB_APP",
+      "SUPERVISOR_ENROLLMENT",
+      "docker.sock",
+      "containerd.sock",
+    ]) {
+      assert.equal(serialized.toLowerCase().includes(value.toLowerCase()), false);
+    }
+  }
+  const supervisorEnvironment = supervisor.Config.Env ?? [];
+  assert.equal(
+    supervisorEnvironment.includes("HTTPS_PROXY=http://provider-egress-relay:3129"),
+    true,
+  );
+  assert.equal(
+    supervisorEnvironment.includes("HTTP_PROXY=http://provider-egress-relay:3129"),
+    true,
+  );
+  assert.equal(supervisorEnvironment.includes("NODE_USE_ENV_PROXY=1"), true);
   const githubEnvironment = githubGateway.Config.Env ?? [];
   for (const prefix of [
     "DATABASE_URL=",
@@ -1416,6 +1490,7 @@ async function main() {
       "web",
       "tool-sandbox-image",
       "dependency-egress-proxy-image",
+      "provider-egress-relay-image",
     ]);
   }
   report("sync_kubernetes_tool_image");
@@ -1433,6 +1508,8 @@ async function main() {
     waitForHealthyService("sandbox-manager"),
     waitForHealthyService("kubernetes-api-relay"),
     waitForHealthyService("github-gateway"),
+    waitForHealthyService("provider-host-egress-relay"),
+    waitForHealthyService("provider-egress-relay"),
     waitForHealthyService("web"),
     waitForHealthyService("observability-ingress"),
   ]);
