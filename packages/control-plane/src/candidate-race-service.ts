@@ -28,6 +28,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+import { classifyStructuredTestCommand } from "./structured-test-command.ts";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
 const TERMINAL_RUN_STATES = new Set<RunState>([
@@ -248,11 +249,12 @@ function pathProtected(path: string, prefixes: readonly string[]): boolean {
 function effectiveTestResults(
   tests: ReturnType<typeof parseReviewBundleManifest>["tests"],
 ): ReturnType<typeof parseReviewBundleManifest>["tests"] {
-  const latestByExactCommand = new Map<string, (typeof tests)[number]>();
+  const latestByInvocation = new Map<string, (typeof tests)[number]>();
   for (const test of tests) {
-    latestByExactCommand.set(`${test.suite}\0${test.command}`, test);
+    const invocation = classifyStructuredTestCommand(test.command);
+    if (invocation !== undefined) latestByInvocation.set(invocation.key, test);
   }
-  return [...latestByExactCommand.values()];
+  return [...latestByInvocation.values()];
 }
 
 function stateForDispatch(runState: RunState): OrchestrationDispatchState {

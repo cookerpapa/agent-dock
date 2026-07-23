@@ -62,10 +62,12 @@ closed acceptance policy supports:
 
 - requiring a Workspace patch;
 - requiring at least one effective structured test and requiring every effective
-  result to pass. For each exact suite/command pair, the final invocation is
-  authoritative, so an initial red test followed by the same green regression
-  test is accepted while the complete red/green history remains in the
-  immutable Review Bundle;
+  result to pass. A conservative shell-command classifier extracts supported
+  test runners/scripts from compound commands, rejects incidental filename
+  mentions, and canonicalizes `/workspace` paths. For each canonical test
+  invocation, the final result is authoritative, so an initial red test
+  followed by the same green regression test is accepted while the complete
+  red/green history remains in the immutable Review Bundle;
 - a maximum changed-path count;
 - protected path prefixes.
 

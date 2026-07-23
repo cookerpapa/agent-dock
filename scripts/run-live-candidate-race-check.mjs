@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import { classifyStructuredTestCommand } from "../packages/control-plane/src/structured-test-command.ts";
 import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -152,11 +153,12 @@ function podIdentity(pod, sessionId) {
 }
 
 function effectiveTestResults(tests) {
-  const latestByExactCommand = new Map();
+  const latestByInvocation = new Map();
   for (const test of tests) {
-    latestByExactCommand.set(`${test.suite}\0${test.command}`, test);
+    const invocation = classifyStructuredTestCommand(test.command);
+    if (invocation !== undefined) latestByInvocation.set(invocation.key, test);
   }
-  return [...latestByExactCommand.values()];
+  return [...latestByInvocation.values()];
 }
 
 async function sessionSandboxPods(sessionId) {
@@ -353,6 +355,11 @@ try {
       assert(run.startedAt !== undefined && run.settledAt !== undefined);
       assert.deepEqual(bundle.manifest.changes.changedPaths, ["src/Calculator.java"]);
       assert(bundle.manifest.tests.length > 0);
+      assert(
+        bundle.manifest.tests.every(
+          (test) => classifyStructuredTestCommand(test.command) !== undefined,
+        ),
+      );
       const effectiveTests = effectiveTestResults(bundle.manifest.tests);
       assert(effectiveTests.length > 0);
       assert(effectiveTests.every((test) => test.status === "passed"));

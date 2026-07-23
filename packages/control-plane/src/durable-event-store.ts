@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { materializeConversationTurnProjection } from "./conversation-turn-projection.ts";
+import { classifyStructuredTestCommand } from "./structured-test-command.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -515,13 +516,8 @@ export class DurableEventStore implements DurableEventIngestor {
     if (typeof input !== "object" || input === null || !("command" in input)) return;
     const command = (input as { command?: unknown }).command;
     if (typeof command !== "string" || command.length < 1 || command.length > 4_096) return;
-    if (
-      !/(?:^|\s)(?:npm|pnpm|yarn|mvn|gradle|\.\/gradlew|pytest|python\s+-m\s+pytest|go|cargo|dotnet)\b[^\n]*(?:test|check)|(?:^|\s)(?:pytest|go\s+test|cargo\s+test|dotnet\s+test)\b|(?:^|\s)(?:(?:bash|sh)\s+)?(?:\.\/)?(?:[A-Za-z0-9._-]+\/)*(?:test|check)(?:[-_.][A-Za-z0-9._-]+)*\.sh(?:\s|$)/i.test(
-        command,
-      )
-    ) {
-      return;
-    }
+    const testInvocation = classifyStructuredTestCommand(command);
+    if (testInvocation === undefined) return;
     const run = await transaction
       .selectFrom("runs")
       .select("id")
@@ -550,7 +546,7 @@ export class DurableEventStore implements DurableEventIngestor {
         workspace_version_id: null,
         tool_call_id: event.payload.toolCallId,
         command,
-        suite: command.split(/\s+/)[0]?.slice(0, 256) || "test",
+        suite: testInvocation.suite,
         status: event.payload.isError ? "failed" : "passed",
         exit_code: null,
         duration_ms: Math.min(durationMs, 86_400_000),

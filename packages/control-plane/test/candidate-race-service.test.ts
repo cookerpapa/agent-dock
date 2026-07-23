@@ -585,7 +585,7 @@ async function settlePassingCandidate(
                 run_id: candidate.runId,
                 workspace_version_id: workspaceVersionId,
                 tool_call_id: "test-initial-red",
-                command: `test candidate ${String(candidate.ordinal)} case 1`,
+                command: `./test-candidate-${String(candidate.ordinal)}.sh case 1`,
                 suite: `candidate-${String(candidate.ordinal)}`,
                 status: "failed" as const,
                 exit_code: 1,
@@ -604,7 +604,7 @@ async function settlePassingCandidate(
           run_id: candidate.runId,
           workspace_version_id: workspaceVersionId,
           tool_call_id: `test-${String(index + 1)}`,
-          command: `test candidate ${String(candidate.ordinal)} case ${String(index + 1)}`,
+          command: `./test-candidate-${String(candidate.ordinal)}.sh case ${String(index + 1)}`,
           suite: `candidate-${String(candidate.ordinal)}`,
           status: "passed" as const,
           exit_code: 0,
@@ -856,6 +856,20 @@ describe.sequential("candidate race orchestration", () => {
     const evaluated = await service.get(identity, race.orchestrationId);
     expect(evaluated.state).toBe("awaiting_decision");
     expect(evaluated.candidates.map((candidate) => candidate.acceptance?.verdict)).toEqual([
+      "passed",
+      "passed",
+    ]);
+    expect(evaluated.candidates[0]?.acceptance?.scorecard.metrics.tests).toEqual({
+      total: 2,
+      passed: 2,
+      failed: 0,
+      errored: 0,
+    });
+    const redGreenBundle = await new ControlPlaneStoreFactory({ database })
+      .forIdentity(identity)
+      .getReviewBundle(evaluated.candidates[0]!.runId);
+    expect(redGreenBundle.manifest.tests.map((test) => test.status)).toEqual([
+      "failed",
       "passed",
       "passed",
     ]);
