@@ -1488,6 +1488,7 @@ export const WorkspaceOperationResourceSchema = Type.Object(
       Type.Literal("rollback"),
       Type.Literal("archive"),
       Type.Literal("unarchive"),
+      Type.Literal("promote"),
     ]),
     sessionId: UuidSchema,
     versionId: Type.Optional(UuidSchema),
