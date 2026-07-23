@@ -1,0 +1,202 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-23T16:53:36.426Z",
+  "endpoint": "http://127.0.0.1:8080/",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "projectId": "b81fea1a-cc19-47a1-9881-4369a20690a5",
+  "workspaceId": "b795d21c-acbb-49ac-9f8e-12452e34ab84",
+  "parentSessionId": "e03bb792-e472-449f-8478-8b4bc4ec2322",
+  "baseWorkspaceVersionId": "62b24799-da78-4c81-a02a-d8caf4e685a1",
+  "seed": {
+    "runId": "6948b8e3-4191-4d42-bba4-53fbca6c9210",
+    "settledMs": 12501,
+    "reviewBundleId": "614f026b-7727-50e3-af17-01f859cfc757",
+    "usage": {
+      "requests": 6,
+      "inputTokens": 803,
+      "outputTokens": 563,
+      "cacheReadTokens": 10880,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    }
+  },
+  "race": {
+    "orchestrationId": "7d27247a-eb83-48ed-b85c-92a923ee0d5d",
+    "maximumConcurrentCandidates": 2,
+    "settledMs": 15681,
+    "simultaneousCandidateSandboxes": true,
+    "executionIntervalsOverlapped": true,
+    "sharedTrustedSupervisor": true,
+    "candidates": [
+      {
+        "candidateId": "936296bb-f440-4e31-a704-9f4981c123bd",
+        "label": "Minimal patch",
+        "sessionId": "92883538-ec0d-4c8d-94af-1c9149c841e6",
+        "runId": "bd176134-0b66-47d2-8f55-df4171e24d57",
+        "workspaceVersionId": "a311ec09-b983-45b0-ab5b-51b13aefcd47",
+        "startedAt": "2026-07-23T16:53:49.878Z",
+        "settledAt": "2026-07-23T16:54:03.327Z",
+        "acceptance": {
+          "verdict": "passed",
+          "reviewBundleId": "c4830acb-8bff-588b-ac93-71d7847853a6",
+          "scorecard": {
+            "metrics": {
+              "tests": {
+                "total": 1,
+                "failed": 0,
+                "passed": 1,
+                "errored": 0
+              },
+              "tokens": 15140,
+              "runState": "completed",
+              "durationMs": 14364,
+              "changedPaths": 1,
+              "costMicrousd": 0,
+              "modelRequests": 7
+            },
+            "reasons": []
+          },
+          "evaluatedAt": "2026-07-23T16:54:03.709Z"
+        },
+        "reviewBundleId": "c4830acb-8bff-588b-ac93-71d7847853a6",
+        "reviewBundleSha256": "a65ab83a78520bfea0289bfed65eedccd5b1f24cca9b4d8e524169ad7a918398",
+        "changedPaths": ["src/Calculator.java"],
+        "tests": [
+          {
+            "command": "cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "failed"
+          },
+          {
+            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ],
+        "effectiveTests": [
+          {
+            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ],
+        "usage": {
+          "requests": 7,
+          "inputTokens": 1164,
+          "outputTokens": 664,
+          "cacheReadTokens": 13312,
+          "cacheWriteTokens": 0,
+          "costMicrousd": 0
+        },
+        "sandbox": {
+          "name": "agent-dock-prewarm-8c7ba2da-1bdf-4922-acba-f1281a83c415",
+          "uid": "f347e02c-6244-4e50-9f79-5bdff6a603cd",
+          "activationId": "97a4da3d-a97c-41a0-9905-abb366861d53",
+          "supervisorSandboxId": "ac696278-1644-4e6b-95a3-1846655923ca",
+          "runtimeClassName": "agent-dock-gvisor"
+        }
+      },
+      {
+        "candidateId": "94137f26-22aa-42a3-acd9-e40adae0b933",
+        "label": "Verification first",
+        "sessionId": "c607d2ca-417c-4aea-bbaf-be42519ef60f",
+        "runId": "3526a9f8-f7a5-4343-a7b1-34e79a4cdcc8",
+        "workspaceVersionId": "ed3ba609-4a2f-4fca-a99c-91cb194387b6",
+        "startedAt": "2026-07-23T16:53:49.570Z",
+        "settledAt": "2026-07-23T16:54:04.364Z",
+        "acceptance": {
+          "verdict": "passed",
+          "reviewBundleId": "cb2eb332-8056-5509-aad2-14b8b3048051",
+          "scorecard": {
+            "metrics": {
+              "tests": {
+                "total": 1,
+                "failed": 0,
+                "passed": 1,
+                "errored": 0
+              },
+              "tokens": 17930,
+              "runState": "completed",
+              "durationMs": 15401,
+              "changedPaths": 1,
+              "costMicrousd": 0,
+              "modelRequests": 8
+            },
+            "reasons": []
+          },
+          "evaluatedAt": "2026-07-23T16:54:04.622Z"
+        },
+        "reviewBundleId": "cb2eb332-8056-5509-aad2-14b8b3048051",
+        "reviewBundleSha256": "d76621de02e286a9c9063679851959d77037e349ebb7938150d58a6024908fba",
+        "changedPaths": ["src/Calculator.java"],
+        "tests": [
+          {
+            "command": "cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "failed"
+          },
+          {
+            "command": "cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "failed"
+          },
+          {
+            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ],
+        "effectiveTests": [
+          {
+            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ],
+        "usage": {
+          "requests": 8,
+          "inputTokens": 1026,
+          "outputTokens": 776,
+          "cacheReadTokens": 16128,
+          "cacheWriteTokens": 0,
+          "costMicrousd": 0
+        },
+        "sandbox": {
+          "name": "agent-dock-prewarm-9035d856-08c3-459a-9aa8-77bbe4ec72be",
+          "uid": "1e90c423-e38c-4a58-a7b7-8b32be62b549",
+          "activationId": "e08b552a-42f7-43b8-88b4-8cd3aa2c6f41",
+          "supervisorSandboxId": "ac696278-1644-4e6b-95a3-1846655923ca",
+          "runtimeClassName": "agent-dock-gvisor"
+        }
+      }
+    ],
+    "recommendedCandidateId": "936296bb-f440-4e31-a704-9f4981c123bd"
+  },
+  "promotion": {
+    "winnerCandidateId": "936296bb-f440-4e31-a704-9f4981c123bd",
+    "promotedWorkspaceVersionId": "b8a23814-0ec2-437d-8fd6-5486f0342b64",
+    "sourceWorkspaceVersionId": "a311ec09-b983-45b0-ab5b-51b13aefcd47",
+    "parentPiArtifactPreserved": true,
+    "decisionGate": "resolved"
+  },
+  "cleanup": {
+    "sessions": [
+      {
+        "sessionId": "e03bb792-e472-449f-8478-8b4bc4ec2322",
+        "count": 1
+      },
+      {
+        "sessionId": "92883538-ec0d-4c8d-94af-1c9149c841e6",
+        "count": 1
+      },
+      {
+        "sessionId": "c607d2ca-417c-4aea-bbaf-be42519ef60f",
+        "count": 1
+      }
+    ],
+    "exactAssignmentsDestroyed": true
+  }
+}

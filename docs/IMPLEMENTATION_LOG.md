@@ -2007,3 +2007,50 @@
 - 投影与清理证据：两轮共 15 个 durable events 投影为 2 个 turn/3 个 semantic items，`replayAfterSequence=15` 与 durable high-water 一致；
   精确 gVisor Sandbox UID `06cb040a-b632-495b-88ba-cb5760674a1f` 验收后已销毁。脱敏报告保存在
   `docs/reports/semantic-conversation-acceptance-latest.{json,md}`。
+
+## 2026-07-23 — Bounded Parallel Candidate Races
+
+- 产品闭环：Session Inspector 新增 `parallel` 页。用户可从当前 immutable
+  WorkspaceVersion 一次创建 2–4 个策略候选，设置 race 内并发上限和
+  patch/test/path policy；候选卡片实时显示 Run、验收、测试、路径、token、
+  成本和耗时，可打开独立子会话、取消整场 race，并显式提升推荐或任一通过
+  的候选。普通会话列表隐藏内部候选，避免把 orchestration 细节混入产品导航。
+- 耐久协议：migration 021 增加 tenant-bound Orchestration、Candidate、
+  Dispatch、Acceptance、DecisionGate 和 Promotion。fan-out 与
+  Turn/Command/Run/Outbox 在一个事务创建；现有 tenant-fair dispatcher 外再
+  加 race concurrency gate。取消覆盖 queued、active 以及 claim/ACK 竞态；
+  Acceptance append-only，promotion 要求 passing evidence、父 Workspace
+  expected-version CAS、无未完成父 Run，并只复制候选 Workspace artifact，
+  保留父 Pi artifact 和对话。
+- 执行隔离：每个候选是独立 Session/Run/Attempt，由同一可信 Supervisor
+  并发代理到不同 Tool activation 和不同 gVisor Pod；候选不共享可写
+  Workspace。模型看不到 Pod、runtime、lease、winner authority 或 promotion
+  凭据。完成后通过受信 inventory + terminate-and-confirm 按 UID 精确回收。
+- 验收语义：首轮真实测试暴露把 red→green 历史累计成失败，第二轮又暴露
+  `ls ... test.sh` 被正则误当测试。最终实现保守的 shell command classifier：
+  解析 compound command，只识别受支持 runner/script，忽略 `cd/chmod`
+  准备段，规范化 `/workspace` 路径并拒绝 incidental filename。Review
+  Bundle 继续完整保留每次 red/green attempt，Acceptance 对同一 canonical
+  invocation 只采用最终结果。
+- 生产上线：部署前 active Run 为 0，并生成
+  `/home/rayn/agent-dock-backups/pre-parallel-candidate-races-3d6ba17.adbackup`
+ （35,987,342 bytes、mode 0600）。migration 021 已应用；所有既有租户
+  concurrent-turn quota 至少为 2；最终 production revision
+  `176de64dc561effaea6496fd9d868f77c2c52ab8` 的服务全部健康。
+- 真实模型证据：`deepseek-v4-flash` 先用 6 次请求修复父基线，再以并发 2
+  运行两个 subtract 候选。race 15,681 ms settled，两个 Run 时间区间重叠；
+  候选分别使用 7/8 次模型请求、1,164/1,026 input、664/776 output 和
+  13,312/16,128 cache-read tokens。两个候选都只修改
+  `src/Calculator.java`，完整 Bundle 分别保留 2/3 次测试尝试，最终有效结果
+  均为 1 passed、0 failed。
+- 物理证据：同时观测到两个 `RuntimeClass/agent-dock-gvisor` Pod，UID 为
+  `f347e02c-6244-4e50-9f79-5bdff6a603cd` 与
+  `1e90c423-e38c-4a58-a7b7-8b32be62b549`，Tool activation 为
+  `97a4da3d-a97c-41a0-9905-abb366861d53` 与
+  `e08b552a-42f7-43b8-88b4-8cd3aa2c6f41`。稳定评分推荐 Minimal patch，
+  CAS promotion 后父 Pi artifact 保持不变；父/两个候选共 3 个分配均精确
+  销毁，最终 active Run 和受管 Tool Pod 都为 0。脱敏报告保存在
+  `docs/reports/parallel-candidate-race-acceptance-latest.{json,md}`。
+- 边界：这次实现的是有界 fan-out/fan-in、确定性验收和人工 promotion，
+  不是无限递归 subagent tree 或通用 task DAG；CubeSandbox/microVM provider
+  仍是可选的未来执行后端，不把它虚构为已完成能力。

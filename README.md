@@ -668,6 +668,19 @@ no importer survives:
 AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
 ```
 
+The bounded parallel candidate-race slice is independently reproducible. It
+forks one immutable parent baseline into two child Sessions, spends real model
+tokens, proves overlapping Runs in distinct gVisor Tool activations, verifies
+immutable red/green Review Bundles, CAS-promotes the deterministic recommendation
+and confirms exact Sandbox cleanup:
+
+```bash
+AGENT_DOCK_LIVE_PARALLEL_CHECK=1 npm run production:parallel-check
+```
+
+The latest sanitized evidence is
+[`docs/reports/parallel-candidate-race-acceptance-latest.md`](docs/reports/parallel-candidate-race-acceptance-latest.md).
+
 Routine CI and `npm run production:check` remain deterministic and consume no
 provider quota. See ADR-0028 and the production runbook for the source limits
 and trust boundary.

@@ -140,14 +140,20 @@ function podIdentity(pod, sessionId) {
   const annotations = metadata?.annotations;
   assert.equal(annotations?.["agent-dock.io/session-id"], sessionId);
   assert.equal(pod?.spec?.runtimeClassName, "agent-dock-gvisor");
-  for (const value of [metadata?.name, metadata?.uid, annotations?.["agent-dock.io/sandbox-id"]]) {
+  for (const value of [
+    metadata?.name,
+    metadata?.uid,
+    annotations?.["agent-dock.io/activation-id"],
+    annotations?.["agent-dock.io/sandbox-id"],
+  ]) {
     assert.equal(typeof value, "string");
     assert(value.length > 0);
   }
   return {
     name: metadata.name,
     uid: metadata.uid,
-    sandboxId: annotations["agent-dock.io/sandbox-id"],
+    activationId: annotations["agent-dock.io/activation-id"],
+    supervisorSandboxId: annotations["agent-dock.io/sandbox-id"],
     runtimeClassName: pod.spec.runtimeClassName,
   };
 }
@@ -203,7 +209,7 @@ async function terminateSessionSandbox(sessionId, sandbox) {
     protocolVersion: 1,
     type: "assignments.list",
     requestId: randomUUID(),
-    sandboxId: sandbox.sandboxId,
+    sandboxId: sandbox.supervisorSandboxId,
   });
   assert.equal(listed.type, "assignments.listed");
   const matches = listed.assignments.filter((assignment) => assignment.sessionId === sessionId);
@@ -213,7 +219,7 @@ async function terminateSessionSandbox(sessionId, sandbox) {
     protocolVersion: 1,
     type: "assignment.terminate_and_confirm",
     requestId: randomUUID(),
-    sandboxId: sandbox.sandboxId,
+    sandboxId: sandbox.supervisorSandboxId,
     assignment: matches[0],
   });
   assert.equal(absent.type, "assignment.absent");
@@ -343,6 +349,14 @@ try {
     2,
     "Candidate Sessions reused one physical gVisor Pod",
   );
+  assert.equal(
+    new Set([...observedSandboxes.values()].map((sandbox) => sandbox.activationId)).size,
+    2,
+    "Candidate Sessions reused one Tool Sandbox activation",
+  );
+  const sharedTrustedSupervisor =
+    new Set([...observedSandboxes.values()].map((sandbox) => sandbox.supervisorSandboxId)).size ===
+    1;
 
   const candidateEvidence = await Promise.all(
     race.candidates.map(async (candidate) => {
@@ -453,6 +467,7 @@ try {
       settledMs: raceSettledMs,
       simultaneousCandidateSandboxes,
       executionIntervalsOverlapped: true,
+      sharedTrustedSupervisor,
       candidates: candidateEvidence,
       recommendedCandidateId: race.recommendedCandidateId,
     },
@@ -481,7 +496,7 @@ try {
       `${String(candidate.usage.inputTokens)}/${String(candidate.usage.outputTokens)} input/output tokens, ` +
       `${String(candidate.tests.length)} test attempt(s) / ` +
       `${String(candidate.effectiveTests.length)} green effective result(s), ` +
-      `gVisor Pod ${candidate.sandbox.uid}`,
+      `gVisor Pod ${candidate.sandbox.uid}, activation ${candidate.sandbox.activationId}`,
   );
   await writeFile(
     resolve(reportDirectory, "parallel-candidate-race-acceptance-latest.md"),
@@ -493,6 +508,7 @@ try {
       `- Candidate concurrency: ${String(report.race.maximumConcurrentCandidates)}`,
       `- Candidate execution intervals overlapped: ${String(report.race.executionIntervalsOverlapped)}`,
       `- Distinct gVisor Pods observed simultaneously: ${String(report.race.simultaneousCandidateSandboxes)}`,
+      `- Shared trusted Supervisor with isolated Tool activations: ${String(report.race.sharedTrustedSupervisor)}`,
       ...candidateLines,
       `- Recommended/promoted candidate: ${report.promotion.winnerCandidateId}`,
       `- Promotion preserved parent Pi context: ${String(report.promotion.parentPiArtifactPreserved)}`,
