@@ -12,6 +12,9 @@ transactional semantic conversation projections under ADR-0049. Do not
 interpret completion of that product plan as a claim that the complete optional
 Phase 5 autonomous subagent tree or a validated multi-node release exists. A
 bounded, human-initiated Candidate Race slice is implemented under ADR-0051.
+An operator-only Tencent CubeSandbox v0.6.0 Provider experiment is implemented
+under ADR-0052 on `experiment/cubesandbox-provider`; it does not replace the
+supported gVisor plane until its dedicated-cluster KVM gate is run and reviewed.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the

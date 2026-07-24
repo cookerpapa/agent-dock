@@ -33,6 +33,14 @@
 !packages/protocol/package.json
 !packages/protocol/src/
 !packages/protocol/src/**
+!packages/tool-sandbox/
+!packages/tool-sandbox/package.json
+!packages/tool-sandbox/src/
+!packages/tool-sandbox/src/**
+!packages/workspace-runtime/
+!packages/workspace-runtime/package.json
+!packages/workspace-runtime/src/
+!packages/workspace-runtime/src/**
 !packages/sandbox-supervisor/
 !packages/sandbox-supervisor/Dockerfile
 !packages/sandbox-supervisor/package.json
@@ -71,3 +79,8 @@
 !spikes/pi-embedded-rehydrate/package.json
 !spikes/pi-embedded-rehydrate/src/
 !spikes/pi-embedded-rehydrate/src/**
+
+!deploy/
+!deploy/cubesandbox/
+!deploy/cubesandbox/Dockerfile.tool
+!deploy/cubesandbox/tool-entrypoint.sh

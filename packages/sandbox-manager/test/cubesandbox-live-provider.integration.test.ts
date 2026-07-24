@@ -1,0 +1,436 @@
+import {
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+  DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+  type ToolSandboxAssignment,
+  type ToolSandboxCreateRequest,
+  type ToolSandboxOperationRequest,
+  type ToolSandboxOperationResponse,
+} from "@agent-dock/protocol";
+import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { connect } from "node:net";
+import { release as hostKernelRelease } from "node:os";
+import { describe, expect, it } from "vitest";
+import {
+  CubeSandboxProvider,
+  OfficialCubeSandboxRuntimeClient,
+  ToolSandboxManager,
+  type OfficialCubeSandboxRuntimeClientOptions,
+} from "../src/index.ts";
+
+const enabled = process.env.AGENT_DOCK_CUBESANDBOX_TEST === "1";
+
+type LiveConfiguration = Readonly<{
+  templateId: string;
+  imageRevision: string;
+  runtime: OfficialCubeSandboxRuntimeClientOptions;
+  forbiddenEndpoints: readonly Readonly<{ host: string; port: number }>[];
+}>;
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.length < 1) {
+    throw new Error(`${name} is required by the CubeSandbox live gate`);
+  }
+  return value;
+}
+
+function port(value: string | undefined, fallback: number): number {
+  const candidate = Number(value ?? String(fallback));
+  if (!Number.isSafeInteger(candidate) || candidate < 1 || candidate > 65_535) {
+    throw new Error("CubeSandbox live-gate port was invalid");
+  }
+  return candidate;
+}
+
+async function readPrivateKey(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
+      throw new Error("CubeSandbox live-gate API key must be a private regular file");
+    }
+    const key = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
+    if (key.length < 32 || key.length > 4_096 || /[\u0000-\u001f\u007f]/.test(key)) {
+      throw new Error("CubeSandbox live-gate API key was invalid");
+    }
+    return key;
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseForbiddenEndpoints(
+  value: string,
+): readonly Readonly<{ host: string; port: number }>[] {
+  const endpoints = value.split(",").map((item) => item.trim());
+  if (endpoints.length < 2) {
+    throw new Error(
+      "AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS must name at least two real platform endpoints",
+    );
+  }
+  return endpoints.map((endpoint) => {
+    const match = endpoint.match(/^([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?):(\d{1,5})$/);
+    if (match === null) {
+      throw new Error(`Forbidden endpoint ${endpoint} was invalid`);
+    }
+    return Object.freeze({ host: match[1]!, port: port(match[2], 1) });
+  });
+}
+
+async function configuration(): Promise<LiveConfiguration> {
+  const apiUrl = new URL(required("AGENT_DOCK_CUBESANDBOX_API_URL"));
+  if (apiUrl.protocol !== "http:" && apiUrl.protocol !== "https:") {
+    throw new Error("AGENT_DOCK_CUBESANDBOX_API_URL must use HTTP or HTTPS");
+  }
+  const proxyScheme = process.env.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
+  if (proxyScheme !== "http" && proxyScheme !== "https") {
+    throw new Error("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME was invalid");
+  }
+  const configured = parseForbiddenEndpoints(
+    required("AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS"),
+  );
+  const apiEndpoint = Object.freeze({
+    host: apiUrl.hostname,
+    port: port(
+      apiUrl.port === "" ? undefined : apiUrl.port,
+      apiUrl.protocol === "https:" ? 443 : 80,
+    ),
+  });
+  return {
+    templateId: required("AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
+    imageRevision: required("AGENT_DOCK_IMAGE_REVISION"),
+    runtime: {
+      apiUrl: apiUrl.toString(),
+      apiKey: await readPrivateKey(required("AGENT_DOCK_CUBESANDBOX_API_KEY_FILE")),
+      proxyNodeIp: required("AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP"),
+      proxyPort: port(
+        process.env.AGENT_DOCK_CUBESANDBOX_PROXY_PORT,
+        proxyScheme === "https" ? 443 : 80,
+      ),
+      proxyScheme,
+      sandboxDomain: process.env.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
+      requestTimeoutMs: 30_000,
+    },
+    forbiddenEndpoints: [apiEndpoint, ...configured],
+  };
+}
+
+function assignment(testRun: string, index: number): ToolSandboxAssignment {
+  return {
+    tenantId: `cube-live-${testRun}-tenant-${String(index)}`,
+    projectId: `cube-live-${testRun}-project-${String(index)}`,
+    workspaceId: `cube-live-${testRun}-workspace-${String(index)}`,
+    supervisorId: `cube-live-${testRun}-supervisor`,
+    bootId: randomUUID(),
+    sandboxId: randomUUID(),
+    commandId: `cube-live-${testRun}-command-${String(index)}`,
+    sessionId: `cube-live-${testRun}-session-${String(index)}`,
+    turnId: `cube-live-${testRun}-turn-${String(index)}`,
+    attemptId: randomUUID(),
+    leaseId: randomUUID(),
+    fencingToken: index,
+  };
+}
+
+function createRequest(
+  assigned: ToolSandboxAssignment,
+  imageRevision: string,
+): ToolSandboxCreateRequest {
+  return {
+    managerProtocolVersion: 1,
+    type: "tool_sandbox.create",
+    requestId: randomUUID(),
+    assignment: assigned,
+    environment: {
+      environmentVersionId: randomUUID(),
+      versionNumber: 1,
+      profileKey: "agent-dock-fullstack",
+      profileVersion: "1",
+      imageRevision,
+      specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+      recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+      recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+    },
+    workspaceSeed: { kind: "sample_java" },
+  };
+}
+
+function operation(
+  activationId: string,
+  command: string,
+  timeoutMs = 10_000,
+): ToolSandboxOperationRequest {
+  return {
+    managerProtocolVersion: 1,
+    type: "tool_sandbox.operation",
+    activationId,
+    operationId: randomUUID(),
+    operation: "bash.exec",
+    command,
+    cwd: "/workspace",
+    timeoutMs,
+  };
+}
+
+function output(response: ToolSandboxOperationResponse): string {
+  if (
+    response.type !== "tool_sandbox.operation_result" ||
+    response.operation !== "bash.exec" ||
+    response.exitCode !== 0
+  ) {
+    throw new Error("CubeSandbox live command did not succeed");
+  }
+  return Buffer.from(response.output, "base64").toString("utf8");
+}
+
+async function assertReachableFromTrustedHost(
+  endpoint: Readonly<{ host: string; port: number }>,
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const socket = connect(endpoint.port, endpoint.host);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      rejectPromise(
+        new Error(
+          `Trusted host could not reach forbidden endpoint ${endpoint.host}:${String(endpoint.port)}`,
+        ),
+      );
+    }, 3_000);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolvePromise();
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      rejectPromise(error);
+    });
+  });
+}
+
+function denyProbeCommand(endpoints: readonly Readonly<{ host: string; port: number }>[]): string {
+  const encoded = Buffer.from(JSON.stringify(endpoints), "utf8").toString("base64");
+  const program =
+    `const net=require('node:net');` +
+    `const targets=JSON.parse(Buffer.from('${encoded}','base64'));` +
+    `const probe=({host,port})=>new Promise(r=>{` +
+    `const s=net.createConnection({host,port});` +
+    `const done=v=>{s.destroy();r(v)};` +
+    `s.setTimeout(2000,()=>done(false));` +
+    `s.once('connect',()=>done(true));` +
+    `s.once('error',()=>done(false));` +
+    `});` +
+    `Promise.all(targets.map(probe)).then(results=>{` +
+    `const open=targets.filter((_,i)=>results[i]);` +
+    `if(open.length){console.error(JSON.stringify(open));process.exit(91)}` +
+    `process.stdout.write('all-forbidden-endpoints-blocked')` +
+    `});`;
+  return `node -e ${JSON.stringify(program)}`;
+}
+
+async function waitForNoManagedInstances(
+  config: LiveConfiguration,
+  activationIds: ReadonlySet<string>,
+): Promise<void> {
+  const client = new OfficialCubeSandboxRuntimeClient(config.runtime);
+  try {
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const remaining = (await client.list()).filter((instance) =>
+        activationIds.has(instance.metadata["agentdock.activation_id"] ?? ""),
+      );
+      if (remaining.length === 0) return;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+    }
+    throw new Error("CubeSandbox live gate found orphaned AgentDock microVMs");
+  } finally {
+    await client.close();
+  }
+}
+
+describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
+  it(
+    "proves two-tenant isolation, deny-all egress, cancellation and cleanup",
+    async () => {
+      const config = await configuration();
+      await Promise.all(
+        config.forbiddenEndpoints.map((endpoint) => assertReachableFromTrustedHost(endpoint)),
+      );
+
+      const testRun = randomUUID().slice(0, 8);
+      const firstAssignment = assignment(testRun, 1);
+      const secondAssignment = assignment(testRun, 2);
+      const provider = new CubeSandboxProvider({
+        templateId: config.templateId,
+        imageRevision: config.imageRevision,
+        runtime: config.runtime,
+        importGitHub: async () => {
+          throw new Error("Repository import is outside the Cube live Provider gate");
+        },
+      });
+      const manager = new ToolSandboxManager({
+        provider,
+        imageRevision: config.imageRevision,
+      });
+      const activationIds = new Set<string>();
+      let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+      let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+      const startedAt = performance.now();
+      let firstToolMs = 0;
+      let secondToolMs = 0;
+      try {
+        await provider.checkHealth();
+        first = await manager.create(createRequest(firstAssignment, config.imageRevision));
+        second = await manager.create(createRequest(secondAssignment, config.imageRevision));
+        activationIds.add(first.activationId);
+        activationIds.add(second.activationId);
+
+        const firstCanary = `tenant-a-${randomUUID()}`;
+        const secondCanary = `tenant-b-${randomUUID()}`;
+        const firstStartedAt = performance.now();
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(first.activationId, `printf '%s' '${firstCanary}' > tenant-canary`),
+            ),
+          ),
+        ).toBe("");
+        firstToolMs = Math.round(performance.now() - firstStartedAt);
+
+        const secondStartedAt = performance.now();
+        expect(
+          output(
+            await manager.execute(
+              second.capability,
+              operation(second.activationId, `printf '%s' '${secondCanary}' > tenant-canary`),
+            ),
+          ),
+        ).toBe("");
+        secondToolMs = Math.round(performance.now() - secondStartedAt);
+
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(first.activationId, "cat tenant-canary"),
+            ),
+          ),
+        ).toBe(firstCanary);
+        expect(
+          output(
+            await manager.execute(
+              second.capability,
+              operation(second.activationId, "cat tenant-canary"),
+            ),
+          ),
+        ).toBe(secondCanary);
+
+        const kernel = output(
+          await manager.execute(first.capability, operation(first.activationId, "uname -r")),
+        ).trim();
+        expect(kernel).not.toBe(hostKernelRelease());
+        await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
+          state: "running",
+          effectiveIsolation: {
+            isolationBoundary: "microvm",
+            runtime: "cubesandbox-kvm",
+            user: "1000:1000",
+            privileged: false,
+            hasDockerSocket: false,
+            networkMode: "deny_all",
+            droppedCapabilities: ["ALL"],
+            securityOptions: ["no-new-privileges"],
+          },
+        });
+
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(
+                first.activationId,
+                "test ! -S /var/run/docker.sock; " +
+                  "test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token; " +
+                  "if env | grep -Ei '(OPENAI|DEEPSEEK|DATABASE_URL|POSTGRES|MINIO|KUBECONFIG|CUBE_API_KEY)'; then exit 92; fi",
+              ),
+            ),
+          ),
+        ).toBe("");
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(first.activationId, denyProbeCommand(config.forbiddenEndpoints), 15_000),
+            ),
+          ),
+        ).toBe("all-forbidden-endpoints-blocked");
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(
+                first.activationId,
+                "node -e \"fetch('https://example.com',{signal:AbortSignal.timeout(3000)}).then(()=>process.exit(93)).catch(()=>process.exit(0))\"",
+                10_000,
+              ),
+            ),
+          ),
+        ).toBe("");
+
+        const captured = await manager.capture(first.activationId, firstAssignment, randomUUID());
+        expect(captured.type).toBe("tool_sandbox.captured");
+        if (captured.type !== "tool_sandbox.captured") {
+          throw new Error("CubeSandbox live Workspace capture was missing");
+        }
+        const files = parseWorkspaceSnapshot(Buffer.from(captured.workspace.data, "base64"));
+        expect(files.find((file) => file.path === "tenant-canary")?.content.toString()).toBe(
+          firstCanary,
+        );
+
+        const controller = new AbortController();
+        const cancelled = manager.execute(
+          first.capability,
+          operation(first.activationId, "sleep 120", 125_000),
+          controller.signal,
+        );
+        setTimeout(() => controller.abort(), 500).unref();
+        await expect(cancelled).rejects.toMatchObject({ code: "tool_cancelled" });
+        await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
+          state: "absent",
+        });
+      } finally {
+        if (first !== undefined) {
+          await manager.stop(first.activationId, firstAssignment).catch(() => undefined);
+        }
+        if (second !== undefined) {
+          await manager.stop(second.activationId, secondAssignment).catch(() => undefined);
+        }
+        await manager.close().catch(() => undefined);
+      }
+
+      await waitForNoManagedInstances(config, activationIds);
+      process.stdout.write(
+        `${JSON.stringify({
+          cubeSandboxLiveGate: {
+            upstream: "TencentCloud/CubeSandbox@v0.6.0",
+            isolationValidated: true,
+            tenantCount: 2,
+            firstToolMs,
+            secondToolMs,
+            totalMs: Math.round(performance.now() - startedAt),
+            guestKernelDistinctFromHost: true,
+            forbiddenEndpointCount: config.forbiddenEndpoints.length,
+            publicInternetDenied: true,
+            cancellationDestroyedMicroVm: true,
+            orphanCount: 0,
+          },
+        })}\n`,
+      );
+    },
+    10 * 60_000,
+  );
+});

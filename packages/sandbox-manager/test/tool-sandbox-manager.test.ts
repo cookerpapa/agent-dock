@@ -297,10 +297,10 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
   });
 
-  it("rejects removed runtime selectors instead of accepting a lower-security fallback", async () => {
+  it("rejects unknown runtime selectors instead of accepting a fallback", async () => {
     await expect(
       loadSandboxManagerConfig({ AGENT_DOCK_SANDBOX_PROVIDER: "vercel" }),
-    ).rejects.toThrow("was removed");
+    ).rejects.toThrow("is invalid");
   });
 
   it("loads only the fixed Kubernetes gVisor deployment configuration", async () => {
@@ -358,6 +358,35 @@ describe("provider-backed Tool Sandbox Manager", () => {
           AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
         }),
       ).rejects.toThrow("was removed");
+
+      const cubeKeyPath = join(directory, "cube-api-key");
+      await writeFile(cubeKeyPath, `${"k".repeat(48)}\n`, { mode: 0o600 });
+      await chmod(cubeKeyPath, 0o600);
+      await expect(
+        loadSandboxManagerConfig({
+          AGENT_DOCK_SANDBOX_PROVIDER: "cubesandbox",
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
+          AGENT_DOCK_IMAGE_REVISION: "development",
+          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
+          AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
+          AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
+          AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
+          AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
+          AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: "https",
+        }),
+      ).resolves.toMatchObject({
+        provider: "cubesandbox",
+        cubeSandbox: {
+          apiUrl: "https://cube-api.internal",
+          apiKey: "k".repeat(48),
+          templateId: "agent-dock-tool-v1",
+          proxyNodeIp: "10.20.30.40",
+          proxyPort: 443,
+          proxyScheme: "https",
+          sandboxDomain: "cube.app",
+        },
+      });
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,

@@ -135,29 +135,47 @@ export const EnvironmentToolchainReportSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const EnvironmentValidationReportSchema = Type.Object(
-  {
-    profileKey: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY),
-    profileVersion: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION),
-    imageRevision: EnvironmentImageRevisionSchema,
-    specSha256: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256),
-    recipeSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
-    isolationBoundary: Type.Literal("gvisor"),
-    runtime: Type.Literal("runsc"),
-    // This is the network state exposed to Agent tools after environment
-    // setup. A dependency recipe may temporarily use the scoped proxy, but
-    // the Manager must seal that path before it accepts this report.
-    networkMode: Type.Literal("deny_all"),
-    runAsUser: Type.Literal("1000:1000"),
-    readOnlyRootFilesystem: Type.Literal(true),
-    tools: Type.Array(EnvironmentToolReportSchema, {
-      minItems: 4,
-      maxItems: 4,
-    }),
-    recipeCommands: Type.Array(EnvironmentRecipeCommandResultSchema, { maxItems: 20 }),
-  },
-  { additionalProperties: false },
-);
+const EnvironmentValidationCommonSchema = {
+  profileKey: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY),
+  profileVersion: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION),
+  imageRevision: EnvironmentImageRevisionSchema,
+  specSha256: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256),
+  recipeSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  // This is the network state exposed to Agent tools after environment
+  // setup. A dependency recipe may temporarily use the scoped proxy, but
+  // the Manager must seal that path before it accepts this report.
+  networkMode: Type.Literal("deny_all"),
+  runAsUser: Type.Literal("1000:1000"),
+  tools: Type.Array(EnvironmentToolReportSchema, {
+    minItems: 4,
+    maxItems: 4,
+  }),
+  recipeCommands: Type.Array(EnvironmentRecipeCommandResultSchema, { maxItems: 20 }),
+} as const;
+
+export const EnvironmentValidationReportSchema = Type.Union([
+  Type.Object(
+    {
+      ...EnvironmentValidationCommonSchema,
+      isolationBoundary: Type.Literal("gvisor"),
+      runtime: Type.Literal("runsc"),
+      readOnlyRootFilesystem: Type.Literal(true),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...EnvironmentValidationCommonSchema,
+      isolationBoundary: Type.Literal("microvm"),
+      runtime: Type.Literal("cubesandbox-kvm"),
+      // Cube's disposable CoW guest rootfs is writable. The non-root Tool
+      // Worker and the independent guest kernel, rather than a read-only OCI
+      // rootfs, are the effective execution boundary.
+      readOnlyRootFilesystem: Type.Literal(false),
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 export const ProjectEnvironmentResourceSchema = Type.Object(
   {

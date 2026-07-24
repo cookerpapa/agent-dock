@@ -292,7 +292,7 @@ export class ToolSandboxManager {
       ...(request.workspaceRestore === undefined
         ? {}
         : { workspaceRestore: request.workspaceRestore }),
-      policy: DEFAULT_TOOL_SANDBOX_POLICY,
+      policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
     } as const;
     this.#activations.set(activationId, {
       assignment: request.assignment,
@@ -364,7 +364,11 @@ export class ToolSandboxManager {
     if (activation.materializing !== undefined) {
       handle = await activation.materializing;
     }
-    if (request.disposition === "keep_warm" && handle !== undefined) {
+    if (
+      request.disposition === "keep_warm" &&
+      handle !== undefined &&
+      this.#provider.supportsWarmRebind !== false
+    ) {
       const key = workspaceKey(request.assignment);
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {

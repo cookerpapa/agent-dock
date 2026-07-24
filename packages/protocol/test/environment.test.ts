@@ -64,6 +64,36 @@ describe("versioned project environment protocol", () => {
     ).toBe(false);
   });
 
+  it("accepts only the explicit CubeSandbox microVM evidence pair", () => {
+    const report = parseEnvironmentValidationReport({
+      profileKey: snapshot.profileKey,
+      profileVersion: snapshot.profileVersion,
+      imageRevision: snapshot.imageRevision,
+      specSha256: snapshot.specSha256,
+      recipeSha256: snapshot.recipeSha256,
+      isolationBoundary: "microvm",
+      runtime: "cubesandbox-kvm",
+      networkMode: "deny_all",
+      runAsUser: "1000:1000",
+      readOnlyRootFilesystem: false,
+      tools,
+      recipeCommands: [],
+    });
+    expect(report.runtime).toBe("cubesandbox-kvm");
+    expect(() =>
+      parseEnvironmentValidationReport({
+        ...report,
+        runtime: "runsc",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseEnvironmentValidationReport({
+        ...report,
+        readOnlyRootFilesystem: true,
+      }),
+    ).toThrow();
+  });
+
   it("canonicalizes recipes and rejects ambiguous command identities and paths", () => {
     expect(canonicalEnvironmentRecipeJson(DEFAULT_PROJECT_ENVIRONMENT_RECIPE)).toBe(
       JSON.stringify(DEFAULT_PROJECT_ENVIRONMENT_RECIPE),

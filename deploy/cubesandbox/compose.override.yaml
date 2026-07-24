@@ -1,0 +1,119 @@
+services:
+  sandbox-manager:
+    depends_on:
+      cube-api-relay:
+        condition: service_healthy
+      cube-proxy-relay:
+        condition: service_healthy
+    environment:
+      AGENT_DOCK_SANDBOX_PROVIDER: cubesandbox
+      AGENT_DOCK_CLEAN_PREWARM_TARGET: "0"
+      AGENT_DOCK_CUBESANDBOX_API_URL: http://cube-api-relay:3000
+      AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: /run/agent-dock-secrets/cubesandbox-api-key
+      AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: ${AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:?set the READY Cube template ID}
+      AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: cube-proxy-relay
+      AGENT_DOCK_CUBESANDBOX_PROXY_PORT: "8080"
+      AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: http
+      AGENT_DOCK_CUBESANDBOX_DOMAIN: ${AGENT_DOCK_CUBESANDBOX_DOMAIN:?set the CubeProxy sandbox domain}
+      AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS: "30000"
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_CUBESANDBOX_API_KEY_HOST_FILE:?set a private CubeAPI bearer-token file}
+        target: /run/agent-dock-secrets/cubesandbox-api-key
+        read_only: true
+    networks:
+      - sandbox-control
+      - observability
+      - cube-control
+
+  cube-api-relay:
+    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    command: [/app/packages/sandbox-manager/src/fixed-tcp-relay.ts]
+    environment:
+      AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "3000"
+      AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_API_NODE_IP:?set the private CubeAPI node IP}
+      AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT: ${AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:-3000}
+      AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS: "64"
+      AGENT_DOCK_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
+    networks:
+      - cube-control
+      - cube-host-egress
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const s=require('node:net').connect(3000,'127.0.0.1');s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 10s
+
+  cube-proxy-relay:
+    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    restart: unless-stopped
+    command: [/app/packages/sandbox-manager/src/fixed-tcp-relay.ts]
+    environment:
+      AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "8080"
+      AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:?set the private CubeProxy node IP}
+      AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT: ${AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:-80}
+      AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS: "128"
+      AGENT_DOCK_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
+    networks:
+      - cube-control
+      - cube-host-egress
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "const s=require('node:net').connect(8080,'127.0.0.1');s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.25
+    stop_grace_period: 10s
+
+  cube-tool-image:
+    profiles: [image-only]
+    image: ${AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE:-agent-dock/cubesandbox-tool:${AGENT_DOCK_IMAGE_VERSION:-production}}
+    build:
+      context: ../..
+      dockerfile: deploy/cubesandbox/Dockerfile.tool
+      args:
+        AGENT_DOCK_VERSION: ${AGENT_DOCK_IMAGE_VERSION:-production}
+        AGENT_DOCK_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
+      network: host
+    network_mode: none
+    restart: "no"
+
+networks:
+  cube-control:
+    internal: true
+  cube-host-egress: {}

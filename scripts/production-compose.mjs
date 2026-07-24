@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
+const composeOverride =
+  process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE === undefined
+    ? undefined
+    : resolve(repositoryRoot, process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE);
 const runtimeDirectory = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
@@ -13,6 +17,7 @@ const environmentFile = resolve(runtimeDirectory, ".env");
 const input = process.argv.slice(2);
 if (input.length === 0) throw new Error("A Docker Compose command is required");
 await access(environmentFile);
+if (composeOverride !== undefined) await access(composeOverride);
 
 const imageRevision =
   process.env.AGENT_DOCK_IMAGE_REVISION ??
@@ -71,6 +76,7 @@ const serviceArguments =
         "tool-sandbox-image",
         "dependency-egress-proxy-image",
         "provider-egress-relay-image",
+        ...(composeOverride === undefined ? [] : ["cube-tool-image"]),
       ]
     : commandArguments;
 const args = [
@@ -79,6 +85,7 @@ const args = [
   environmentFile,
   "--file",
   composeFile,
+  ...(composeOverride === undefined ? [] : ["--file", composeOverride]),
   ...profileArguments,
   command,
   ...serviceArguments,

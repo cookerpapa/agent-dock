@@ -73,6 +73,7 @@ afterEach(async () => {
 
 function backend(): SandboxManagerBackend {
   return {
+    providerId: "test-provider",
     async checkHealth() {},
     async create(request) {
       observedServerTrace = activeTraceCarrier();

@@ -70,6 +70,9 @@ Untrusted demand-activated Tool Pod
   freezes the source set before queue acceptance
 - Sandbox: Kubernetes `RuntimeClass` with gVisor `runsc`/KVM only; K3s owns
   lifecycle and Docker remains limited to the trusted Compose product plane
+- Sandbox experiment: an operator-only Tencent CubeSandbox v0.6.0 KVM
+  microVM Provider exists on `experiment/cubesandbox-provider`; it is not a
+  supported fallback or user/model-selectable runtime
 - Frontend: React, kept deliberately small
 - Observability: OpenTelemetry, Prometheus, Grafana, Loki, Tempo
 - Tests: Vitest, Testcontainers, k6, Toxiproxy
@@ -96,6 +99,7 @@ only after a measured requirement appears.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Sandbox Provider contract](docs/SANDBOX_PROVIDER.md)
+- [Experimental CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
 - [Network matrix](docs/NETWORK_MATRIX.md)
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
 - [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
@@ -158,6 +162,7 @@ only after a measured requirement appears.
 - [ADR-0049: transactional semantic conversation projections](docs/adr/0049-transactional-semantic-conversation-projections.md)
 - [ADR-0050: capability-free trusted provider egress relay](docs/adr/0050-capability-free-trusted-provider-egress-relay.md)
 - [ADR-0051: bounded parallel candidate races](docs/adr/0051-parallel-candidate-races.md)
+- [ADR-0052: CubeSandbox KVM microVM Provider experiment](docs/adr/0052-cubesandbox-microvm-provider-experiment.md)
 
 ## Current executable spikes
 

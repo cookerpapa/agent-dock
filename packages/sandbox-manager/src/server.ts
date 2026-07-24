@@ -44,6 +44,7 @@ export type SandboxManagerBackend = Pick<
   | "close"
   | "activeCount"
   | "cleanPrewarmCount"
+  | "providerId"
 >;
 
 function digest(value: string): Buffer {
@@ -120,8 +121,14 @@ export class SandboxManagerServer {
   async listen(): Promise<string> {
     if (this.#address !== undefined) throw new Error("Sandbox Manager is already listening");
     await this.#manager.checkHealth();
-    this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
-    this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
+    this.#metrics?.sandboxActive.set(
+      { provider: this.#manager.providerId },
+      this.#manager.activeCount,
+    );
+    this.#metrics?.sandboxPrewarm.set(
+      { provider: this.#manager.providerId },
+      this.#manager.cleanPrewarmCount,
+    );
     this.#address = await this.#server.listen({ host: this.#host, port: this.#port });
     this.#ready = true;
     return this.#address;

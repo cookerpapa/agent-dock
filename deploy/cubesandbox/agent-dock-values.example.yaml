@@ -1,0 +1,22 @@
+# Merge this file after CubeSandbox's runtime-values.yaml. This file contains
+# no credential value; create the referenced Secret out of band.
+#
+# The AgentDock Provider is intentionally pinned to CubeSandbox v0.6.0. Review
+# upstream release notes and rerun the live gate before changing chart images.
+
+controlPlane:
+  api:
+    env:
+      - name: CUBE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: agent-dock-cube-api
+            key: api-key
+
+cubeProxy:
+  domain: cube.app
+  # Keep the chart Services private. Expose only CubeAPI:3000 and
+  # CubeProxy:80/443 to the fixed AgentDock relay through private routing or
+  # dedicated internal LoadBalancer Services. Never expose the admin port.
+  service:
+    type: ClusterIP

@@ -114,7 +114,7 @@ extension-policy support would overstate the current boundary.
 - [x] ADR-0030: separate Manager authorization/lifecycle from a provider-neutral SandboxProvider
 - [x] Bind Provider handles to tenant, session, turn, attempt, lease, fence, and opaque runtime identity
 - [x] Implement sole KubernetesGvisorSandboxProvider create/exec/read/write/snapshot/inspect/stop/destroy and orphan cleanup
-- [x] Remove Provider selection/fallback and reject unsupported non-deny-all Tool network policies
+- [x] Remove tenant/model Provider selection and lower-security fallback; reject unsupported non-deny-all Tool network policies
 - [x] Add a live K3s/containerd/runsc KVM gate for guest identity, effective Pod policy/resources, `/proc`/credential isolation, cross-tenant workspaces, network denial, symlink/output bounds, cancellation, and exact cleanup
 - [x] Publish the threat model, Provider contract, network matrix, and Run lifecycle
 - [x] Add explicit tenant-scoped Run and immutable-numbered RunAttempt resources
@@ -130,6 +130,28 @@ extension-policy support would overstate the current boundary.
 - [x] Route the internal Manager to the authenticated Kubernetes API through a credential-free fixed-target relay
 - [x] Fence Pod assignment/deletion with tenant/session/Turn/Attempt annotations and Kubernetes UID preconditions
 - [x] Prove full production restart/scale/backup recovery through the Kubernetes gVisor execution plane
+
+## Experimental CubeSandbox microVM Provider
+
+- [x] Research TencentCloud/CubeSandbox v0.6.0 control, data, template,
+  authentication, network and Kubernetes deployment contracts
+- [x] ADR-0052: keep gVisor supported/default and add only an operator-selected
+  Cube KVM experiment behind `SandboxProvider`
+- [x] Add a digest-pinned, credential-free Cube Tool template and prove its
+  Tool protocol, fixed toolchain, traversal rejection and content checkpoint
+  in a local compatibility gate
+- [x] Add bounded CubeAPI/CubeProxy clients, private traffic-token routing,
+  full assignment metadata/fencing checks, no-blind-replay behavior and exact
+  lifecycle cleanup
+- [x] Add fixed-target Compose relays and an operator deployment/rollback
+  runbook without exposing a general egress proxy
+- [x] Add a gated real-Cube acceptance test for two tenants, private/platform
+  and public network denial, credential absence, cancellation and orphan
+  inventory
+- [ ] Run and publish the real KVM acceptance/latency evidence on a dedicated
+  Cube cluster; the local Docker template gate is not isolation evidence
+- [ ] Review Cube upgrade/node-loss drills and upstream state/idempotency issues
+  before deciding whether to promote or remove the experiment
 
 ## Controlled public GitHub workspace slice
 

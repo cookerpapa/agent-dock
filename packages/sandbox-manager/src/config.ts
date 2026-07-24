@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 export type SandboxManagerConfig = {
+  provider: "kubernetes-gvisor" | "cubesandbox";
   host: string;
   port: number;
   serviceToken: string;
@@ -27,6 +28,16 @@ export type SandboxManagerConfig = {
     serviceName: string;
     servicePort: number;
     capabilityTtlMs: number;
+  };
+  cubeSandbox?: {
+    apiUrl: string;
+    apiKey: string;
+    templateId: string;
+    proxyNodeIp: string;
+    proxyPort: number;
+    proxyScheme: "http" | "https";
+    sandboxDomain: string;
+    requestTimeoutMs: number;
   };
 };
 
@@ -110,18 +121,46 @@ async function readPrivatePem(path: string): Promise<string> {
   }
 }
 
+async function readCubeApiKey(path: string): Promise<string> {
+  if (!isAbsolute(path) || path.includes("\0")) {
+    throw new TypeError("CubeSandbox API key path must be absolute");
+  }
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.size < 32 ||
+      metadata.size > 4_096
+    ) {
+      throw new TypeError("CubeSandbox API key file is not private and bounded");
+    }
+    const value = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
+    if (value.length < 32 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) {
+      throw new TypeError("CubeSandbox API key file is invalid");
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function loadSandboxManagerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SandboxManagerConfig> {
   if (
-    environment.AGENT_DOCK_SANDBOX_PROVIDER !== undefined ||
     environment.AGENT_DOCK_DOCKER_COMMAND !== undefined ||
     environment.AGENT_DOCK_REPOSITORY_IMPORT_NETWORK !== undefined ||
     Object.keys(environment).some((name) => name.startsWith("AGENT_DOCK_MICROVM_"))
   ) {
     throw new TypeError(
-      "Legacy Sandbox Provider configuration was removed; this build requires Kubernetes/runsc",
+      "Legacy Sandbox Provider configuration was removed; select a current trusted Provider",
     );
+  }
+  const provider = environment.AGENT_DOCK_SANDBOX_PROVIDER ?? "kubernetes-gvisor";
+  if (provider !== "kubernetes-gvisor" && provider !== "cubesandbox") {
+    throw new TypeError("AGENT_DOCK_SANDBOX_PROVIDER is invalid");
   }
   const kubeconfigPath = required(environment, "AGENT_DOCK_KUBECONFIG_PATH");
   if (!isAbsolute(kubeconfigPath) || kubeconfigPath.includes("\0")) {
@@ -132,7 +171,12 @@ export async function loadSandboxManagerConfig(
     throw new TypeError("AGENT_DOCK_KUBERNETES_IMAGE_PULL_POLICY is invalid");
   }
   const dependencyEgressKeyFile = environment.AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE;
+  const cubeProxyScheme = environment.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
+  if (cubeProxyScheme !== "http" && cubeProxyScheme !== "https") {
+    throw new TypeError("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME is invalid");
+  }
   return {
+    provider,
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
@@ -220,6 +264,48 @@ export async function loadSandboxManagerConfig(
               15 * 60_000,
               10_000,
               20 * 60_000,
+            ),
+          },
+        }),
+    ...(provider !== "cubesandbox"
+      ? {}
+      : {
+          cubeSandbox: {
+            apiUrl: bounded(
+              required(environment, "AGENT_DOCK_CUBESANDBOX_API_URL"),
+              "cubeSandboxApiUrl",
+              2_048,
+            ),
+            apiKey: await readCubeApiKey(
+              required(environment, "AGENT_DOCK_CUBESANDBOX_API_KEY_FILE"),
+            ),
+            templateId: bounded(
+              required(environment, "AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
+              "cubeSandboxTemplateId",
+              256,
+            ),
+            proxyNodeIp: bounded(
+              required(environment, "AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP"),
+              "cubeSandboxProxyNodeIp",
+              253,
+            ),
+            proxyPort: integer(
+              environment.AGENT_DOCK_CUBESANDBOX_PROXY_PORT,
+              cubeProxyScheme === "https" ? 443 : 80,
+              1,
+              65_535,
+            ),
+            proxyScheme: cubeProxyScheme,
+            sandboxDomain: bounded(
+              environment.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
+              "cubeSandboxDomain",
+              253,
+            ),
+            requestTimeoutMs: integer(
+              environment.AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS,
+              30_000,
+              1_000,
+              300_000,
             ),
           },
         }),

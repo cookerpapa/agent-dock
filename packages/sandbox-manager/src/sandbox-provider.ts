@@ -51,12 +51,12 @@ export type SandboxPolicy = Readonly<{
   network: SandboxNetworkPolicy;
   resources: SandboxResourceLimits;
   user: "1000:1000";
-  readOnlyRootFilesystem: true;
-  privileged: false;
-  dropAllCapabilities: true;
-  noNewPrivileges: true;
-  allowHostMounts: false;
-  allowDockerSocket: false;
+  readOnlyRootFilesystem: boolean;
+  privileged: boolean;
+  dropAllCapabilities: boolean;
+  noNewPrivileges: boolean;
+  allowHostMounts: boolean;
+  allowDockerSocket: boolean;
 }>;
 
 export const DEFAULT_TOOL_SANDBOX_POLICY: SandboxPolicy = Object.freeze({
@@ -103,23 +103,26 @@ export type SandboxHandle = Readonly<{
   environmentValidation: EnvironmentValidationReport;
 }>;
 
-export type SandboxEffectiveIsolation = Readonly<{
-  isolationBoundary: "gvisor";
-  runtime: "runsc";
-  user: string;
-  privileged: boolean;
-  readOnlyRootFilesystem: boolean;
-  networkMode: string;
-  mountCount: number;
-  hasDockerSocket: boolean;
-  pidLimit: number | null;
-  processLimit: number | null;
-  memoryBytes: number | null;
-  cpuNano: number | null;
-  droppedCapabilities: readonly string[];
-  securityOptions: readonly string[];
-  sandboxKernelRelease?: string;
-}>;
+type SandboxRuntimeIsolation =
+  | Readonly<{ isolationBoundary: "gvisor"; runtime: "runsc" }>
+  | Readonly<{ isolationBoundary: "microvm"; runtime: "cubesandbox-kvm" }>;
+
+export type SandboxEffectiveIsolation = SandboxRuntimeIsolation &
+  Readonly<{
+    user: string;
+    privileged: boolean;
+    readOnlyRootFilesystem: boolean;
+    networkMode: string;
+    mountCount: number;
+    hasDockerSocket: boolean;
+    pidLimit: number | null;
+    processLimit: number | null;
+    memoryBytes: number | null;
+    cpuNano: number | null;
+    droppedCapabilities: readonly string[];
+    securityOptions: readonly string[];
+    sandboxKernelRelease?: string;
+  }>;
 
 export type SandboxInspection =
   | Readonly<{
@@ -155,6 +158,14 @@ export type SandboxWriteFileInput = Readonly<{
 export interface SandboxProvider {
   readonly providerId: string;
   readonly cleanPrewarmCount?: number;
+  /** Provider-specific policy selected only by trusted deployment config. */
+  readonly defaultPolicy?: SandboxPolicy;
+  /**
+   * False when the runtime cannot atomically rebind persisted assignment
+   * metadata to a higher fencing token. Such Providers are destroyed at the
+   * Run boundary instead of entering the exact-Session warm pool.
+   */
+  readonly supportsWarmRebind?: boolean;
 
   checkHealth(): Promise<void>;
   create(spec: SandboxCreateSpec): Promise<SandboxHandle>;

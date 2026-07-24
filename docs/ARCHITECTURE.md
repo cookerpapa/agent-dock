@@ -259,13 +259,25 @@ It passes an immutable, provider-neutral handle to `SandboxProvider`; that
 handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
 identity without exposing a Docker client or provider SDK.
 ADR-0039 supersedes ADR-0038's direct-Docker lifecycle. The sole implementation
-is now `KubernetesGvisorSandboxProvider`: K3s/containerd maps
+in the supported production topology is `KubernetesGvisorSandboxProvider`:
+K3s/containerd maps
 `RuntimeClass/agent-dock-gvisor` to `runsc`, fixed to the KVM platform. Manager
 readiness validates the RuntimeClass, immutable NetworkPolicies, image and a
 real gVisor Pod. The Manager uses scoped Pod/log/attach/exec and NetworkPolicy
 read authority in two namespaces plus `get` on the one named RuntimeClass; it
 has no Docker/containerd socket. Direct-Docker providers, selectors and
 fallback paths were removed.
+
+ADR-0052 adds a separate operator-only CubeSandbox v0.6.0 experiment behind
+the same Provider contract. Cube is its own CubeAPI/CubeMaster/Cubelet KVM
+microVM plane, not another Kubernetes RuntimeClass. The experiment keeps Pi and
+all platform credentials trusted, sends only the closed Tool protocol into a
+credential-free microVM, disables warm reassignment until Cube can prove an
+atomic metadata/fence rebind, and retains AgentDock's external content
+checkpoint as the durability authority. `kubernetes-gvisor` remains the
+default and only supported production selection until the dedicated-cluster
+live gate passes. Browser, tenant and model inputs cannot choose either
+Provider.
 
 ADR-0031 adds the durable execution vocabulary above those boundaries. Public
 tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
@@ -475,8 +487,9 @@ sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 
 ### Sandbox
 
-The sandbox is the security and workspace boundary. The only implementation is
-`KubernetesGvisorSandboxProvider`. K3s/containerd selects gVisor `runsc` through
+The sandbox is the security and workspace boundary. The supported
+implementation is `KubernetesGvisorSandboxProvider`. K3s/containerd selects
+gVisor `runsc` through
 `RuntimeClass/agent-dock-gvisor`, with the KVM platform fixed on the node.
 Kubernetes owns placement, cgroup declarations, policy and Pod lifecycle;
 untrusted syscalls are handled by gVisor's userspace application kernel instead
@@ -490,6 +503,16 @@ resource and placement changes. The Runner is not deployed or exposed by this
 chart; it continues to connect outward through the authenticated Supervisor
 transport. Static rendering is checked in CI, while actual runsc/CNI behavior
 remains a live `sandbox:check` requirement.
+
+The CubeSandbox experiment reaches a separately operated Cube plane through
+fixed-target relays. CubeAPI creates one independent KVM guest per activation,
+while CubeProxy carries the private-token Tool protocol to port 49984. Its
+guest CoW root filesystem is writable, so the evidence contract does not
+pretend it has the gVisor Pod's read-only OCI rootfs. The microVM remains
+non-root for Tool execution, capability-free, credential-free, host-mount-free
+and deny-all outbound. See ADR-0052 and
+`docs/CUBESANDBOX_PROVIDER.md`; none of these claims is promoted until
+`cubesandbox:live-check` passes on dedicated hardware.
 
 There is no runtime selector. Ordinary Tool execution accepts only deny-all.
 An environment recipe may request dependency access to an immutable list of

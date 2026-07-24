@@ -1,22 +1,28 @@
-# Kubernetes gVisor Sandbox Provider
+# Sandbox Providers
 
 ## Supported boundary
 
-AgentDock has exactly one untrusted execution provider:
-`KubernetesGvisorSandboxProvider`. It creates Kubernetes Pods through the
+AgentDock has exactly one supported and live-validated untrusted execution
+provider: `KubernetesGvisorSandboxProvider`. It creates Kubernetes Pods through the
 official JavaScript client. Every Tool Pod selects
 `runtimeClassName: agent-dock-gvisor`; K3s/containerd maps that class to the
 `io.containerd.runsc.v1` shim, whose configuration fixes `platform = "kvm"`,
 `network = "sandbox"`, and disables host/software GSO on the validated WSL2
 network path.
 
-There is no runtime selector, runc/systrap fallback, direct-Docker provider,
-Docker Desktop sandbox path, or paid managed-provider branch. Missing KVM,
-RuntimeClass, network policy, image, RBAC, or live gVisor attestation makes the
-Manager unready.
+There is no tenant-, prompt- or model-controlled runtime selector,
+runc/systrap fallback, direct-Docker provider, Docker Desktop sandbox path, or
+paid managed-provider branch. Missing KVM, RuntimeClass, network policy, image,
+RBAC, or live gVisor attestation makes the default Manager unready.
 
 ADR-0030 owns the provider-neutral contract and ADR-0039 is the current
 execution-plane decision.
+
+The `experiment/cubesandbox-provider` branch also contains an operator-only
+`CubeSandboxProvider` for Tencent CubeSandbox v0.6.0 KVM microVMs. It is not a
+production fallback and is never selected by browser/model input. It remains
+unvalidated until a dedicated Cube cluster passes the opt-in live gate. See
+[`CUBESANDBOX_PROVIDER.md`](CUBESANDBOX_PROVIDER.md) and ADR-0052.
 
 ## Layering
 
