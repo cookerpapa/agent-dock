@@ -1,51 +1,51 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-25T04:52:08.261Z",
+  "checkedAt": "2026-07-25T10:21:06.960Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 3204,
-    "settledMs": 3627,
+    "firstTextMs": 1134,
+    "settledMs": 1436,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
       "requests": 1,
       "inputTokens": 65,
-      "outputTokens": 32,
+      "outputTokens": 25,
       "cacheReadTokens": 1280,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "firstCoding": {
-    "firstTextMs": 15099,
-    "settledMs": 17397,
+    "firstTextMs": 9724,
+    "settledMs": 12888,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "patchBytes": 3311,
+    "patchBytes": 1512,
     "usage": {
       "requests": 3,
-      "inputTokens": 323,
-      "outputTokens": 1277,
-      "cacheReadTokens": 6144,
+      "inputTokens": 115,
+      "outputTokens": 1000,
+      "cacheReadTokens": 5376,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 10028,
-    "settledMs": 11818,
+    "firstTextMs": 7669,
+    "settledMs": 8965,
     "toolCalls": 3,
     "cubeActivations": 1,
-    "patchBytes": 3517,
+    "patchBytes": 1664,
     "usage": {
       "requests": 4,
-      "inputTokens": 1683,
-      "outputTokens": 525,
-      "cacheReadTokens": 13696,
+      "inputTokens": 1162,
+      "outputTokens": 448,
+      "cacheReadTokens": 11264,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
@@ -54,7 +54,7 @@
     "distinctCubeMicroVms": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalFileBytes": 3250
+    "finalFileBytes": 1470
   },
   "multiTenant": {
     "crossTenantConversationHidden": true,
@@ -62,15 +62,15 @@
   },
   "semanticConversation": {
     "projectionCount": 3,
-    "projectedSourceEvents": 82,
+    "projectedSourceEvents": 78,
     "semanticItems": 8,
-    "replayAfterSequence": 82
+    "replayAfterSequence": 78
   },
   "totalUsage": {
     "requests": 8,
-    "inputTokens": 2071,
-    "outputTokens": 1834,
-    "cacheReadTokens": 21120,
+    "inputTokens": 1342,
+    "outputTokens": 1473,
+    "cacheReadTokens": 17920,
     "cacheWriteTokens": 0
   },
   "cleanup": {

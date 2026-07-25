@@ -269,7 +269,7 @@ export class SupervisorBootProvisioner {
         .forUpdate()
         .executeTakeFirstOrThrow();
       if (
-        host.maximum_capacity !== this.#maximumCapacity ||
+        host.maximum_capacity < this.#maximumCapacity ||
         host.management_base_url !== provisionedManagementBaseUrl
       ) {
         throw new SupervisorBootProvisionError(
@@ -278,6 +278,17 @@ export class SupervisorBootProvisioner {
           409,
           false,
         );
+      }
+      if (host.maximum_capacity > this.#maximumCapacity) {
+        await transaction
+          .updateTable("supervisor_hosts")
+          .set({
+            maximum_capacity: this.#maximumCapacity,
+            updated_at: now,
+          })
+          .where("supervisor_id", "=", provisionedSupervisorId)
+          .where("maximum_capacity", "=", host.maximum_capacity)
+          .executeTakeFirstOrThrow();
       }
       const conflict = await this.#findConflict(transaction, request);
       if (conflict !== undefined) {

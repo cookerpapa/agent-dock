@@ -2187,3 +2187,48 @@
   checkpoints use the v2 manifest media type and
   `pi-sessions/.../manifests/<sha256>.json` keys; older whole-NDJSON rows remain
   readable for online migration.
+
+## 2026-07-25 — Capacity-one direct Pi SDK production cutover
+
+- Replaced the per-Run `pi --mode rpc` child process in the production execution
+  path with Pi's pinned programmatic SDK. Each activation now constructs its own
+  `ModelRuntime`, native `SessionManager`, settings and inline trusted Tool
+  extension; model capabilities, Tool capabilities and project instructions are
+  activation-local objects rather than process-global environment variables.
+- Kept the trusted/untrusted boundary unchanged: Pi's Agent Loop executes in a
+  trusted Supervisor Worker, while every `read/write/edit/bash` operation still
+  crosses the narrow authenticated Tool RPC and runs in a CubeSandbox KVM
+  microVM. Pi builtin local tools and discovered extensions remain disabled.
+- Made each SDK Worker capacity one. Production runs two independent Worker
+  processes, so concurrency is horizontal without sharing simultaneous tenant
+  activations in one JavaScript heap. Cooperative cancellation aborts the model
+  and SDK session; if bounded disposal fails, the Worker marks itself poisoned,
+  stops accepting assignments and exits so another Worker can restore the last
+  committed checkpoint.
+- Preserved Pi's native JSONL as the conversation authority. SDK settlement
+  captures the complete native session, including branch and compaction entries,
+  into checkpoint-v2. Tests force threshold compaction, restore the artifact in a
+  fresh SDK activation and continue the conversation; cancellation and
+  credential/prompt non-disclosure are also covered.
+- The zero-token benchmark measured direct SDK activation at 5.61/6.99 ms
+  p50/p95 versus 630.60/673.17 ms for fresh RPC process readiness. RPC remains
+  only as an explicit compatibility/fault-test backend, not a production
+  fallback.
+- Production deployment initially rejected the capacity change because the
+  operator-pinned host policy still stored capacity 2. The live policy was
+  explicitly reduced to 1, and provisioning now automatically reconciles only
+  restrictive capacity changes; attempts to expand a stored host policy still
+  fail closed.
+- Real `deepseek-v4-flash` Worker-pool acceptance consumed 6 requests, 494 input,
+  1,339 output and 7,680 cache-read tokens. It stopped Worker 1 after a 2,090 ms
+  first Run; Worker 2 restored the native Pi artifact and marker and settled the
+  follow-up in 1,549 ms. Four more concurrent Runs were distributed 2/2 across
+  both capacity-one Workers.
+- Real Cube production acceptance consumed another 8 model requests. Pure chat
+  produced first text in 1,134 ms and settled in 1,436 ms with zero Tool calls
+  and zero Cube activations. Two coding Runs used 2 and 3 Tool calls in distinct
+  KVM guests, restored the Workspace across Runs, committed two immutable
+  versions, hid the other tenant's conversation and left zero test microVMs.
+  Sanitized evidence is stored in
+  `docs/reports/pi-worker-pool-acceptance-latest.{json,md}` and
+  `docs/reports/cubesandbox-production-acceptance-latest.{json,md}`.

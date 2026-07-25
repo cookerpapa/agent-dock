@@ -204,6 +204,43 @@ describe.sequential("production Supervisor boot provisioning", () => {
     ).rejects.toMatchObject({ code: "provision_policy_rejected", statusCode: 403 });
   });
 
+  it("automatically tightens a stored host capacity but never expands it", async () => {
+    const supervisorId = "production-supervisor-capacity-migration";
+    const original = new SupervisorBootProvisioner({
+      database,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      maximumCapacity: 4,
+      enrollmentToken: ENROLLMENT_TOKEN,
+    });
+    await original.provision(request({ supervisorId, capacity: 4 }).body);
+
+    const restricted = new SupervisorBootProvisioner({
+      database,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      maximumCapacity: 1,
+      enrollmentToken: ENROLLMENT_TOKEN,
+    });
+    await expect(
+      restricted.provision(request({ supervisorId, capacity: 1 }).body),
+    ).resolves.toMatchObject({ idempotent: false });
+    await expect(
+      database
+        .selectFrom("supervisor_hosts")
+        .select("maximum_capacity")
+        .where("supervisor_id", "=", supervisorId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ maximum_capacity: 1 });
+
+    await expect(
+      original.provision(request({ supervisorId, capacity: 1 }).body),
+    ).rejects.toMatchObject({
+      code: "provision_host_policy_conflict",
+      statusCode: 409,
+    });
+  });
+
   it("serves the bounded internal endpoint without exposing raw errors", async () => {
     const provisioner = new SupervisorBootProvisioner({
       database,

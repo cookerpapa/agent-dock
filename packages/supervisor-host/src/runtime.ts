@@ -88,8 +88,8 @@ export class SupervisorHostRuntimeError extends Error {
   readonly code: string;
   readonly retryable: boolean;
 
-  constructor(code: string, safeMessage: string, retryable: boolean) {
-    super(safeMessage);
+  constructor(code: string, safeMessage: string, retryable: boolean, options?: ErrorOptions) {
+    super(safeMessage, options);
     this.name = "SupervisorHostRuntimeError";
     this.code = code;
     this.retryable = retryable;
@@ -356,6 +356,7 @@ export class SupervisorHostRuntime {
         "supervisor_host_start_failed",
         "Supervisor host failed to start",
         true,
+        { cause: error },
       );
     }
   }
