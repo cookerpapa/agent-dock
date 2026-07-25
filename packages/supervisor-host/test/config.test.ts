@@ -71,6 +71,9 @@ describe("Supervisor host production configuration", () => {
       managementAdvertisedBaseUrl: "http://supervisor-production-1:4100/",
       sandboxManagerBaseUrl: "http://sandbox-manager:4300/",
       trustedWorkspaceDirectory: "/workspace",
+      checkpointReadCacheTtlMs: 600_000,
+      checkpointReadCacheMaximumEntries: 512,
+      checkpointReadCacheMaximumBytes: 32 * 1_024 * 1_024,
     });
   });
 

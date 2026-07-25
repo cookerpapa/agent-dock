@@ -29,6 +29,9 @@ export type SupervisorHostConfig = {
   trustedWorkspaceDirectory: string;
   bootStateDirectory: string;
   eventSpoolDirectory: string;
+  checkpointReadCacheTtlMs: number;
+  checkpointReadCacheMaximumEntries: number;
+  checkpointReadCacheMaximumBytes: number;
   modelGatewayHost: string;
   modelGatewayPort: number;
   modelGatewayAdvertisedBaseUrl: string;
@@ -308,6 +311,27 @@ export async function loadSupervisorHostConfig(
     trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),
     bootStateDirectory: required(environment, "AGENT_DOCK_BOOT_STATE_DIRECTORY"),
     eventSpoolDirectory: required(environment, "AGENT_DOCK_EVENT_SPOOL_DIRECTORY"),
+    checkpointReadCacheTtlMs: integerValue(
+      environment,
+      "AGENT_DOCK_CHECKPOINT_READ_CACHE_TTL_MS",
+      10 * 60_000,
+      1_000,
+      60 * 60_000,
+    ),
+    checkpointReadCacheMaximumEntries: integerValue(
+      environment,
+      "AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES",
+      512,
+      1,
+      16_384,
+    ),
+    checkpointReadCacheMaximumBytes: integerValue(
+      environment,
+      "AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES",
+      32 * 1_024 * 1_024,
+      1_024,
+      512 * 1_024 * 1_024,
+    ),
     modelGatewayHost: bounded(
       environment.AGENT_DOCK_MODEL_GATEWAY_HOST ?? "127.0.0.1",
       "AGENT_DOCK_MODEL_GATEWAY_HOST",

@@ -2,6 +2,7 @@ import { CancellationDispatcher } from "@agent-dock/control-plane/cancellation-d
 import {
   type CheckpointObjectStore,
   PostgresSandboxCheckpointStore,
+  TtlCheckpointObjectStore,
 } from "@agent-dock/control-plane/checkpoint-runtime";
 import { DurableEventStore } from "@agent-dock/control-plane/durable-event-store";
 import { LocalSupervisorExecutionBackend } from "@agent-dock/control-plane/local-supervisor-execution-backend";
@@ -287,9 +288,24 @@ export class SupervisorHostRuntime {
       };
       await this.#provisioningClient.provision(request);
 
+      const cachedCheckpointObjects = new TtlCheckpointObjectStore({
+        objectStore: this.#objectStore,
+        ttlMs: this.#config.checkpointReadCacheTtlMs,
+        maximumEntries: this.#config.checkpointReadCacheMaximumEntries,
+        maximumBytes: this.#config.checkpointReadCacheMaximumBytes,
+        ...(this.#metrics === undefined
+          ? {}
+          : {
+              observe: (event) => {
+                this.#metrics!.checkpointCacheAccess.inc({ result: event.result });
+                this.#metrics!.checkpointCacheEntries.set(event.entries);
+                this.#metrics!.checkpointCacheBytes.set(event.bytes);
+              },
+            }),
+      });
       const checkpointStore = new PostgresSandboxCheckpointStore({
         database: this.#database,
-        objectStore: this.#objectStore,
+        objectStore: cachedCheckpointObjects,
       });
       const githubGateway =
         this.#config.githubGatewayBaseUrl === undefined ||

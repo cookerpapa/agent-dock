@@ -1,0 +1,59 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-25T14:42:22.488Z",
+  "tenants": 6,
+  "runs": 12,
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "correctness": {
+    "completedRuns": 12,
+    "failedRuns": 0,
+    "markerRestores": 6,
+    "crossTenantApiDenials": 6,
+    "crossTenantMarkerLeaks": 0,
+    "unexpectedToolEvents": 0,
+    "maximumAttemptCount": 1
+  },
+  "latencyMs": {
+    "acceptance": {
+      "minimum": 23,
+      "p50": 27,
+      "p95": 39,
+      "maximum": 39
+    },
+    "firstText": {
+      "minimum": 1495,
+      "p50": 3542,
+      "p95": 13257,
+      "maximum": 13257
+    },
+    "settled": {
+      "minimum": 1805,
+      "p50": 5611,
+      "p95": 16525,
+      "maximum": 16525
+    },
+    "queueWait": {
+      "minimum": 260,
+      "p50": 2291,
+      "p95": 12255,
+      "maximum": 12255
+    }
+  },
+  "workers": {
+    "distinct": ["agent-dock-supervisor-2", "agent-dock-supervisor-1"],
+    "assignments": {
+      "agent-dock-supervisor-2": 6,
+      "agent-dock-supervisor-1": 6
+    }
+  },
+  "usage": {
+    "requests": 12,
+    "inputTokens": 1362,
+    "outputTokens": 2128,
+    "cacheReadTokens": 15360,
+    "cacheWriteTokens": 0
+  }
+}

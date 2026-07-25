@@ -323,6 +323,20 @@ use a Kubernetes Pod.
 Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
 thread.
 
+Each Pi Worker has a private bounded immutable-object read cache:
+
+```text
+AGENT_DOCK_CHECKPOINT_READ_CACHE_TTL_MS=600000
+AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES=512
+AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES=33554432
+```
+
+The cache avoids repeated MinIO reads during checkpoint restore and incremental
+save. It does not cache the PostgreSQL Session head, is not shared across
+Workers or tenants, and is discarded on Worker restart. Prometheus exports
+low-cardinality hit/miss/coalescing/eviction counters plus current entry and
+byte gauges.
+
 Persistent state is split into nine declared volumes:
 
 - `postgres-data`: tenants, encrypted model credentials, token usage, sessions,

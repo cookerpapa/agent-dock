@@ -350,6 +350,16 @@ prefix and an operator-owned management URL template. Artifact reads go
 directly to the shared object store rather than through one special Worker. See
 [Pi Worker pool and conversation persistence](PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md).
 
+Each Worker wraps its checkpoint object client in a bounded 10-minute,
+32 MiB LRU cache. The cache key is the validated immutable object key and
+returned byte arrays are copied, so one activation cannot mutate another
+activation's cached value. It can reuse a manifest and its content-addressed
+segments during restore and the following incremental save, but it never
+caches the Session's current PostgreSQL pointer. Every Run still resolves the
+head under the current lease/fence, validates object digests, and rechecks the
+revision after reconstruction. A cache hit is therefore an S3 transport
+optimization, not a second checkpoint authority or Session affinity mechanism.
+
 The host receives S3/database credentials, but no container-runtime,
 Kubernetes credential or host network. It composes the pinned Pi Runner, PostgreSQL workspace-import
 lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
@@ -618,6 +628,11 @@ Authoritative for cold artifacts:
 - large tool output;
 - patches, test reports, and generated artifacts;
 - crash diagnostic bundles.
+
+Trusted Workers may retain bounded in-memory copies of immutable object bytes
+for ten minutes. PostgreSQL remains authoritative for the selected checkpoint
+head, and object hashes remain authoritative for integrity; losing or evicting
+the cache only causes another object-store read.
 
 ### Supervisor delivery spool
 

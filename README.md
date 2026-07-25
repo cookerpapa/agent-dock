@@ -75,6 +75,9 @@ Untrusted demand-activated Tool microVM
 - Metadata and durable commands: PostgreSQL with Kysely
 - Session/workspace artifacts: S3-compatible object storage, with MinIO used as
   the disposable compatibility fixture and a private file adapter for the demo
+- Checkpoint restore cache: each trusted Pi Worker keeps a 10-minute, 32 MiB
+  bounded cache of immutable S3 objects; PostgreSQL still resolves and
+  revalidates the current checkpoint head on every Run
 - Workspace input: one built-in/empty source, one exact GitHub commit, or 2–8
   exact public/private repositories under disjoint named roots; every Run
   freezes the source set before queue acceptance
@@ -710,6 +713,14 @@ and exact Cube cleanup:
 
 ```bash
 AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 npm run production:semantic-check
+```
+
+Multi-tenant model scheduling and checkpoint restoration can be measured with
+an explicitly enabled real-token load:
+
+```bash
+AGENT_DOCK_LIVE_MULTI_TENANT_LOAD=1 \
+  npm run production:multi-tenant-model-load
 ```
 
 The bounded parallel candidate-race slice is independently reproducible. It

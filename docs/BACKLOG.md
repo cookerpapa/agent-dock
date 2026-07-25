@@ -280,3 +280,6 @@ extension-policy support would overstate the current boundary.
 - [x] Switch production to direct Pi SDK with capacity-one Worker replacement,
   instance-scoped remote-tool/model configuration, forced cancellation, native
   compaction, real-model, and credential-isolation parity
+- [x] Add a bounded 10-minute per-Worker immutable checkpoint object cache
+  without caching the PostgreSQL head, plus cache/restore metrics and a
+  reproducible multi-tenant real-model load gate

@@ -13,6 +13,10 @@ export class AgentDockMetrics {
   readonly modelCostMicrousd: Counter<"provider" | "model">;
   readonly toolDuration: Histogram<"tool" | "outcome">;
   readonly checkpointDuration: Histogram<"outcome">;
+  readonly checkpointRestoreDuration: Histogram<"outcome">;
+  readonly checkpointCacheAccess: Counter<"result">;
+  readonly checkpointCacheEntries: Gauge;
+  readonly checkpointCacheBytes: Gauge;
   readonly cancellationDuration: Histogram<"outcome">;
   readonly activeRuns: Gauge;
   readonly queuedRuns: Gauge;
@@ -80,6 +84,29 @@ export class AgentDockMetrics {
       help: "Checkpoint capture and commit duration",
       labelNames: ["outcome"],
       buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.checkpointRestoreDuration = new Histogram({
+      name: "agent_dock_checkpoint_restore_duration_seconds",
+      help: "Checkpoint metadata validation and object restoration duration",
+      labelNames: ["outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.checkpointCacheAccess = new Counter({
+      name: "agent_dock_checkpoint_cache_access_total",
+      help: "Worker-local immutable checkpoint cache operations",
+      labelNames: ["result"],
+      registers: [this.registry],
+    });
+    this.checkpointCacheEntries = new Gauge({
+      name: "agent_dock_checkpoint_cache_entries",
+      help: "Objects held by the Worker-local immutable checkpoint cache",
+      registers: [this.registry],
+    });
+    this.checkpointCacheBytes = new Gauge({
+      name: "agent_dock_checkpoint_cache_bytes",
+      help: "Bytes held by the Worker-local immutable checkpoint cache",
       registers: [this.registry],
     });
     this.cancellationDuration = new Histogram({

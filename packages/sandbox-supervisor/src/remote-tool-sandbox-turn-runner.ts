@@ -235,9 +235,18 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
 
     let loadedCheckpoint: LoadedSandboxCheckpoint | undefined;
     if (this.#checkpointStore !== undefined) {
+      const restoreStartedAt = performance.now();
       try {
         loadedCheckpoint = validateLoadedCheckpoint(await this.#checkpointStore.load(command));
+        this.#metrics?.checkpointRestoreDuration.observe(
+          { outcome: loadedCheckpoint === undefined ? "empty" : "completed" },
+          (performance.now() - restoreStartedAt) / 1_000,
+        );
       } catch (error: unknown) {
+        this.#metrics?.checkpointRestoreDuration.observe(
+          { outcome: "failed" },
+          (performance.now() - restoreStartedAt) / 1_000,
+        );
         throw safePiError(
           error,
           "checkpoint_load_failed",

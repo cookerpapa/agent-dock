@@ -2,10 +2,14 @@ export {
   FileCheckpointObjectStore,
   PostgresSandboxCheckpointStore,
   SandboxCheckpointStoreError,
+  TtlCheckpointObjectStore,
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
   type FileCheckpointObjectStoreOptions,
   type PostgresSandboxCheckpointStoreOptions,
+  type TtlCheckpointObjectStoreEvent,
+  type TtlCheckpointObjectStoreOptions,
+  type TtlCheckpointObjectStoreSnapshot,
 } from "./checkpoint-store.ts";
 export {
   createS3CheckpointObjectStoreFromEnvironment,

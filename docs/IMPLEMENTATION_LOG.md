@@ -2270,3 +2270,34 @@
   surviving Temporal Worker restored the native Pi checkpoint and marker,
   then four concurrent Runs were distributed 2/2 across the two pollers.
   Decoded Workflow history contains only bounded IDs and status results.
+
+## 2026-07-25 — bounded checkpoint read cache and multi-tenant model load gate
+
+- Added a private cache to each capacity-one Pi Worker with a ten-minute TTL,
+  512-entry limit and 32 MiB byte limit. It caches only immutable MinIO object
+  bytes and never caches the PostgreSQL Session head.
+- Kept correctness checks on every Run: PostgreSQL resolves the committed
+  pointer under the current lease/fence, restored manifest/segments retain
+  SHA-256 validation, and the revision is re-read after reconstruction.
+- Added defensive byte copies, concurrent-miss coalescing, LRU/TTL eviction,
+  delete invalidation and low-cardinality Prometheus cache/restore metrics.
+- Added an explicit real-token multi-tenant gate that registers independent
+  tenants, submits first/follow-up Runs concurrently, checks foreign Session
+  denial and marker isolation, records Worker distribution and p50/p95
+  acceptance/first-text/settlement/queue latency, and fails on retries,
+  Tool calls or terminal errors.
+- The accepted six-tenant/twelve-Run execution completed with zero failures,
+  zero cross-tenant marker leaks, one Attempt per Run and an exact 6/6 split
+  across the two Workers. It consumed 12 requests, 1,362 input, 2,128 output
+  and 15,360 provider cache-read tokens. First text was 3,542/13,257 ms
+  p50/p95; queue wait was 2,291/12,255 ms because twelve Runs intentionally
+  saturated two capacity-one Workers.
+- A preliminary execution completed the same 12 model requests but its final
+  evidence query referenced a nonexistent Attempt timestamp column. The query
+  was corrected to use the Run start time and the complete gate was rerun.
+  Across both executions the evaluation consumed 24 requests, 2,706 input,
+  4,170 output and 30,720 provider cache-read tokens.
+- Each Worker recorded 20 immutable-object cache hits and 4 misses (83.33%),
+  retained about 31 KiB, and completed all six follow-up restores below 25 ms.
+  A 20-iteration direct MinIO comparison measured restore p50/p95 at
+  4.488/10.375 ms without the cache and 0.073/0.278 ms with it.

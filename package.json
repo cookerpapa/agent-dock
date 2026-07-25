@@ -56,6 +56,7 @@
     "production:github-check": "node scripts/run-live-github-workspace-check.mjs",
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
+    "production:multi-tenant-model-load": "node scripts/run-live-multi-tenant-model-load.mjs",
     "production:parallel-check": "node scripts/run-live-candidate-race-check.mjs",
     "production:backup": "node scripts/production-backup.mjs",
     "production:restore": "node scripts/production-restore.mjs",
