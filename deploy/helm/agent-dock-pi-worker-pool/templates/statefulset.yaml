@@ -298,7 +298,7 @@ spec:
     - metadata:
         name: worker-state
         labels:
-          {{- include "agent-dock-pi-worker-pool.labels" . | nindent 10 }}
+          {{- include "agent-dock-pi-worker-pool.pvcLabels" . | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.state.accessModes | nindent 10 }}

@@ -20,6 +20,14 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 agent-dock.io/worker-pool: {{ .Values.workerPool.name | quote }}
 {{- end -}}
 
+{{- define "agent-dock-pi-worker-pool.pvcLabels" -}}
+app.kubernetes.io/name: agent-dock-pi-worker
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
+app.kubernetes.io/component: trusted-pi-worker-state
+app.kubernetes.io/part-of: agent-dock
+agent-dock.io/worker-pool: {{ .Values.workerPool.name | quote }}
+{{- end -}}
+
 {{- define "agent-dock-pi-worker-pool.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "agent-dock-pi-worker-pool.name" .) .Values.serviceAccount.name -}}

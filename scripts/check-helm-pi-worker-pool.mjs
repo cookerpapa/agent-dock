@@ -101,6 +101,32 @@ assert.equal(statefulSet.spec.updateStrategy.type, "OnDelete");
 assert.equal(statefulSet.spec.persistentVolumeClaimRetentionPolicy.whenDeleted, "Retain");
 assert.equal(statefulSet.spec.persistentVolumeClaimRetentionPolicy.whenScaled, "Retain");
 assert.deepEqual(statefulSet.spec.volumeClaimTemplates[0].spec.accessModes, ["ReadWriteOncePod"]);
+assert.equal(
+  statefulSet.spec.volumeClaimTemplates[0].metadata.labels["agent-dock.io/worker-build-id"],
+  undefined,
+  "A changing Build ID must not enter the immutable PVC template",
+);
+
+const alternateBuildRendered = requireSuccess(
+  command(helm, [
+    "template",
+    "pi-workers",
+    chart,
+    "--namespace",
+    "agent-dock-workers",
+    "--set",
+    "temporal.workerBuildId=alternate-build",
+  ]),
+  "Pi Worker alternate Build ID render",
+);
+const alternateStatefulSet = parseAllDocuments(alternateBuildRendered)
+  .map((document) => document.toJSON())
+  .find((resource) => resource?.kind === "StatefulSet");
+assert.deepEqual(
+  alternateStatefulSet.spec.volumeClaimTemplates,
+  statefulSet.spec.volumeClaimTemplates,
+  "Changing a Worker Build ID must leave the immutable PVC template unchanged",
+);
 
 const pod = statefulSet.spec.template.spec;
 assert.equal(pod.automountServiceAccountToken, false);

@@ -58,6 +58,10 @@ k3d node cannot. A Helm release being accepted is not treated as readiness:
 the cutover does not commit until the Kubernetes system plane, Worker Pods and
 Temporal registration are all ready.
 
+The operator also migrates the immutable StatefulSet claim template emitted by
+the first local chart revision. It recreates only the drained controller and
+Pods; retained Worker PVCs and all external conversation state remain intact.
+
 Inspect without exposing credentials:
 
 ```bash
