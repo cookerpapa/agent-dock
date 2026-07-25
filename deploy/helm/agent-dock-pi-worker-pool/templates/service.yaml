@@ -38,4 +38,8 @@ spec:
       protocol: TCP
       port: 4100
       targetPort: management
+    - name: metrics
+      protocol: TCP
+      port: 9465
+      targetPort: metrics
 {{- end }}

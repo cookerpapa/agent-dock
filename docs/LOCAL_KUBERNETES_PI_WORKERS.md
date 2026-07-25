@@ -1,0 +1,83 @@
+# Local single-node Kubernetes Pi Workers
+
+This profile moves only the trusted Pi Worker pool into a Docker-managed,
+single-node k3d/K3s cluster:
+
+```text
+Browser
+  -> Compose Control Plane
+  -> Compose PostgreSQL + Temporal + MinIO
+  -> k3d/K3s Pi Worker StatefulSet
+  -> Compose Sandbox Manager
+  -> retained host K3s / CubeSandbox KVM Tool guest
+```
+
+It deliberately does not move conversation state into Kubernetes. PostgreSQL
+stores product/control state, MinIO stores Pi JSONL segments/manifests, and a
+Worker PVC stores only that Worker replica's boot ledger and unacknowledged
+event spool.
+
+## Prerequisites
+
+- the existing production Compose stack and Cube plane are healthy;
+- Docker is available to the current user;
+- no Run is active during the short cutover;
+- at least 4 GiB of Docker memory is available for the k3d server and two
+  capacity-one Workers.
+
+No root K3s credential or passwordless sudo is required. The pinned k3d binary
+is fetched from the official release and checksum-verified automatically.
+
+## Cut over
+
+```bash
+npm run kubernetes:pi-workers:up
+```
+
+The command:
+
+1. refuses a dirty source tree or non-terminal Run;
+2. creates the pinned single-node cluster and private kubeconfig;
+3. joins the k3d server to the narrow Compose networks;
+4. creates selector-free Services and EndpointSlices for trusted dependencies;
+5. builds and imports an exact-revision Supervisor image;
+6. saves the current Control Plane Worker policy;
+7. stops/removes Compose Workers and recreates only the Control Plane;
+8. installs two Kubernetes Worker replicas;
+9. makes the exact Temporal Worker Build ID current;
+10. verifies Pod readiness, Control Plane management reachability, enrollment
+    and Temporal version metadata.
+
+Inspect without exposing credentials:
+
+```bash
+npm run kubernetes:pi-workers:status
+npm run kubernetes:pi-workers:check
+```
+
+The local kubeconfig and switch state are private runtime files under
+`deploy/production/runtime/kubernetes/` and are excluded from Git.
+
+## Roll back
+
+Wait for all Runs to settle, then:
+
+```bash
+npm run kubernetes:pi-workers:down
+```
+
+This restores the saved Compose enrollment policy, starts two Compose Workers
+and deletes the disposable k3d cluster. Committed conversations and Workspaces
+remain in PostgreSQL/MinIO.
+
+## Scope
+
+Passing this profile proves the Kubernetes control/data path on one machine. It
+does not prove:
+
+- node-loss rescheduling;
+- multi-node `ReadWriteOncePod` storage attachment;
+- PostgreSQL, S3 or Temporal high availability;
+- cross-zone networking or capacity.
+
+Those remain separate multi-node acceptance evidence.

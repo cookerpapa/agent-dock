@@ -131,7 +131,11 @@ spec:
             - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT
               value: "4100"
             - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL
+              {{- if .Values.management.ingress.enabled }}
+              value: {{ printf "%s://$(POD_NAME).%s" .Values.management.ingress.scheme .Values.management.ingress.hostSuffix | quote }}
+              {{- else }}
               value: {{ printf "http://$(POD_NAME).$(POD_NAMESPACE).svc.%s:4100" .Values.workerPool.clusterDomain | quote }}
+              {{- end }}
             - name: AGENT_DOCK_SUPERVISOR_CAPACITY
               value: {{ .Values.workerPool.capacity | quote }}
             - name: AGENT_DOCK_TEMPORAL_ADDRESS

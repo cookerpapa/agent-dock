@@ -37,7 +37,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
   AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
-  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: http://{supervisorId}:4100
+  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:-http://{supervisorId}:4100}
   AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
   AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
   AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
@@ -477,6 +477,7 @@ services:
     logging: *bounded-logging
 
   supervisor-host:
+    profiles: [compose-pi-workers]
     image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
@@ -619,6 +620,7 @@ services:
     logging: *bounded-logging
 
   supervisor-host-1:
+    profiles: [compose-pi-workers]
     extends:
       service: supervisor-host
     environment:
@@ -912,10 +914,6 @@ services:
       observability-volume-bootstrap:
         condition: service_completed_successfully
       control-plane:
-        condition: service_healthy
-      supervisor-host:
-        condition: service_healthy
-      supervisor-host-1:
         condition: service_healthy
       sandbox-manager:
         condition: service_healthy

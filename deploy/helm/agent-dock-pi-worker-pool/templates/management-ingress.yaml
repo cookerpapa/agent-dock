@@ -1,0 +1,39 @@
+{{- if .Values.management.ingress.enabled }}
+{{- $root := . }}
+{{- $poolName := include "agent-dock-pi-worker-pool.name" . }}
+{{- range $ordinal := until (int .Values.workerPool.replicas) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-%d" $poolName $ordinal }}
+  labels:
+    {{- include "agent-dock-pi-worker-pool.labels" $root | nindent 4 }}
+    agent-dock.io/worker-ordinal: {{ $ordinal | quote }}
+spec:
+  {{- if $root.Values.management.ingress.className }}
+  ingressClassName: {{ $root.Values.management.ingress.className | quote }}
+  {{- end }}
+  rules:
+    - host: {{ printf "%s-%d.%s" $poolName $ordinal $root.Values.management.ingress.hostSuffix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-%d" $poolName $ordinal }}
+                port:
+                  name: management
+    - host: {{ printf "%s-%d.metrics.%s" $poolName $ordinal $root.Values.management.ingress.hostSuffix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-%d" $poolName $ordinal }}
+                port:
+                  name: metrics
+---
+{{- end }}
+{{- end }}

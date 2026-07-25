@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, lstat, open } from "node:fs/promises";
+import { access, lstat, open, readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +34,30 @@ const environmentFile = resolve(runtimeDirectory, ".env");
 const input = process.argv.slice(2);
 if (input.length === 0) throw new Error("A Docker Compose command is required");
 const [command, ...commandArguments] = input;
-const allowsStaleCubeTemplate = new Set(["down", "stop", "kill", "rm", "ps", "logs"]).has(command);
+const positionalCommandArguments = commandArguments.filter((argument) => !argument.startsWith("-"));
+const recreatesOnlyControlPlane =
+  command === "up" &&
+  positionalCommandArguments.length === 1 &&
+  positionalCommandArguments[0] === "control-plane";
+const runtimeEnvironment = Object.fromEntries(
+  (await readFile(environmentFile, "utf8"))
+    .split(/\r?\n/u)
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => {
+      const delimiter = line.indexOf("=");
+      if (delimiter < 1) throw new Error("Production environment contains a malformed entry");
+      return [line.slice(0, delimiter), line.slice(delimiter + 1)];
+    }),
+);
+const piWorkerDeployment =
+  process.env.AGENT_DOCK_PI_WORKER_DEPLOYMENT ??
+  runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ??
+  "compose";
+if (piWorkerDeployment !== "compose" && piWorkerDeployment !== "kubernetes") {
+  throw new Error("AGENT_DOCK_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
+}
+const allowsStaleCubeTemplate =
+  recreatesOnlyControlPlane || new Set(["down", "stop", "kill", "rm", "ps", "logs"]).has(command);
 await access(environmentFile);
 if (composeOverride !== undefined) await access(composeOverride);
 
@@ -182,7 +205,12 @@ if (requestedProvider === "cubesandbox") {
   };
 }
 
-const profileArguments = command === "build" ? ["--profile", "image-only"] : [];
+const profileArguments = [
+  ...(command === "build" ? ["--profile", "image-only"] : []),
+  ...(piWorkerDeployment === "compose" || new Set(["down", "stop", "kill", "rm"]).has(command)
+    ? ["--profile", "compose-pi-workers"]
+    : []),
+];
 const serviceArguments =
   command === "build" && commandArguments.length === 0
     ? [

@@ -4,6 +4,13 @@ workerPool:
   capacity: 1
   clusterDomain: cluster.local
 
+management:
+  ingress:
+    enabled: false
+    className: ""
+    hostSuffix: workers.agent-dock.local
+    scheme: http
+
 image:
   repository: agent-dock/supervisor-host
   tag: production

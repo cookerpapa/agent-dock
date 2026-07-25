@@ -117,6 +117,7 @@ only after a measured requirement appears.
 - [Network matrix](docs/NETWORK_MATRIX.md)
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
 - [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
+- [Local Kubernetes Pi Worker cutover](docs/LOCAL_KUBERNETES_PI_WORKERS.md)
 - [Release evidence process](docs/RELEASE_PROCESS.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Long-term Cloud Agent Platform plan](docs/PLATFORM_PRODUCT_PLAN.md)
@@ -187,6 +188,7 @@ only after a measured requirement appears.
 - [ADR-0056: Temporal as the sole Run scheduler](docs/adr/0056-temporal-as-sole-run-scheduler.md)
 - [ADR-0057: capacity-one Pi Workers and global Tool admission](docs/adr/0057-capacity-one-pi-workers-and-global-tool-admission.md)
 - [ADR-0058: Kubernetes Pi Worker pool and external conversation state](docs/adr/0058-kubernetes-pi-worker-pool-and-external-conversation-state.md)
+- [ADR-0059: single-node Kubernetes Pi Worker cutover](docs/adr/0059-single-node-kubernetes-pi-worker-cutover.md)
 
 ## Current executable spikes
 

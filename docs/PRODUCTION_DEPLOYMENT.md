@@ -325,6 +325,13 @@ That chart does not move Pi into Cube: Tool Calls still cross the authenticated
 Manager boundary into Cube microVMs. Adding replicas increases model/Agent Loop
 concurrency, while the independent physical Tool limit protects host resources:
 
+For a rootless single-machine cutover that keeps the current Compose
+PostgreSQL/MinIO/Temporal/Control Plane and retained Cube KVM plane, follow
+[`LOCAL_KUBERNETES_PI_WORKERS.md`](LOCAL_KUBERNETES_PI_WORKERS.md). It creates
+a separate pinned k3d cluster for trusted Workers and includes automatic
+Compose rollback. This is an integration profile, not multi-node availability
+evidence.
+
 ```text
 AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES=2
 ```

@@ -10,7 +10,11 @@ scrape_configs:
   - job_name: agent-dock-trusted-runner
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:
-      - targets: [supervisor-host:9465, supervisor-host-1:9465]
+      - targets:
+          - supervisor-host:9465
+          - supervisor-host-1:9465
+          - agent-dock-pi-worker-local-v1-0.metrics.workers.agent-dock.local:80
+          - agent-dock-pi-worker-local-v1-1.metrics.workers.agent-dock.local:80
   - job_name: agent-dock-sandbox-manager
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:

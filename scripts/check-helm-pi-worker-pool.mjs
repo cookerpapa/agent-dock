@@ -89,7 +89,7 @@ for (const ordinal of [0, 1]) {
   });
   assert.deepEqual(
     managementService.spec.ports.map((port) => port.port),
-    [4100],
+    [4100, 9465],
   );
 }
 
@@ -210,5 +210,56 @@ assert.match(nextBuild, /name: agent-dock-pi-worker-next-v2/);
 assert.match(nextBuild, /value: "revision-abcdef"/);
 assert.match(nextBuild, new RegExp(`agent-dock/supervisor-host@sha256:${"a".repeat(64)}`));
 assert.match(nextBuild, /type: OnDelete/);
+
+const localIngress = requireSuccess(
+  command(helm, [
+    "template",
+    "pi-workers-local",
+    chart,
+    "--set",
+    "workerPool.name=local-v1",
+    "--set",
+    "management.ingress.enabled=true",
+    "--set",
+    "management.ingress.className=traefik",
+    "--set",
+    "management.ingress.hostSuffix=workers.agent-dock.local",
+  ]),
+  "Pi Worker local management ingress render",
+);
+const localResources = parseAllDocuments(localIngress)
+  .map((document, index) => {
+    assert.equal(document.errors.length, 0, `Local rendered document ${index} is invalid YAML`);
+    return document.toJSON();
+  })
+  .filter((document) => document !== null);
+const localStatefulSet = localResources.find(
+  (resource) =>
+    resource.kind === "StatefulSet" && resource.metadata?.name === "agent-dock-pi-worker-local-v1",
+);
+assert.ok(localStatefulSet);
+const localEnvironment = Object.fromEntries(
+  localStatefulSet.spec.template.spec.containers[0].env
+    .filter((entry) => entry.value !== undefined)
+    .map((entry) => [entry.name, String(entry.value)]),
+);
+assert.equal(
+  localEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL,
+  "http://$(POD_NAME).workers.agent-dock.local",
+);
+const localIngresses = localResources.filter((resource) => resource.kind === "Ingress");
+assert.deepEqual(
+  localIngresses.flatMap((resource) => resource.spec.rules.map((rule) => rule.host)).sort(),
+  [
+    "agent-dock-pi-worker-local-v1-0.metrics.workers.agent-dock.local",
+    "agent-dock-pi-worker-local-v1-0.workers.agent-dock.local",
+    "agent-dock-pi-worker-local-v1-1.metrics.workers.agent-dock.local",
+    "agent-dock-pi-worker-local-v1-1.workers.agent-dock.local",
+  ],
+);
+assert.equal(
+  localIngresses.every((resource) => resource.spec.ingressClassName === "traefik"),
+  true,
+);
 
 console.log("helm_pi_worker_pool_check_passed");
