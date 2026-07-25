@@ -10,12 +10,27 @@ const securityPatches = [
   {
     name: "brace-expansion",
     sourcePackage: "pi-security-brace-expansion",
-    version: "5.0.7",
+    version: "5.0.8",
+    targetRoot: join(piRoot, "node_modules", "brace-expansion"),
   },
   {
     name: "protobufjs",
     sourcePackage: "pi-security-protobufjs",
     version: "7.6.5",
+    targetRoot: join(piRoot, "node_modules", "protobufjs"),
+  },
+  {
+    name: "find-my-way",
+    sourcePackage: "platform-security-find-my-way",
+    version: "9.7.0",
+    targetRoot: join(
+      repositoryRoot,
+      "node_modules",
+      "@nestjs",
+      "platform-fastify",
+      "node_modules",
+      "find-my-way",
+    ),
   },
 ];
 
@@ -44,7 +59,7 @@ if (piVersion !== "0.80.10") {
 function inspectPatches() {
   return securityPatches.map((securityPatch) => ({
     ...securityPatch,
-    actualVersion: readPackageVersion(join(piRoot, "node_modules", securityPatch.name)),
+    actualVersion: readPackageVersion(securityPatch.targetRoot),
   }));
 }
 
@@ -74,7 +89,7 @@ if (missingPatches.length > 0) {
       );
     }
 
-    const targetRoot = join(piRoot, "node_modules", securityPatch.name);
+    const targetRoot = securityPatch.targetRoot;
     const temporaryRoot = `${targetRoot}.agent-dock-${process.pid}`;
     rmSync(temporaryRoot, { recursive: true, force: true });
     cpSync(sourceRoot, temporaryRoot, {

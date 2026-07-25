@@ -12,15 +12,17 @@ import {
 } from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
 import {
   FileCheckpointObjectStore,
+  PI_SESSION_MANIFEST_MEDIA_TYPE,
   PostgresSandboxCheckpointStore,
   S3CheckpointObjectStore,
+  decodePiSessionManifest,
   type S3CheckpointObjectStoreOptions,
 } from "../src/index.ts";
 
@@ -117,16 +119,19 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
 }
 
 function piSession(label: string): Uint8Array {
+  const labels = label === "second" ? ["first", "second"] : [label];
   return Buffer.from(
     [
       JSON.stringify({ type: "session", version: 3, id: "pi-checkpoint", cwd: "/workspace" }),
-      JSON.stringify({
-        type: "message",
-        id: `assistant-${label}`,
-        parentId: null,
-        timestamp: "2026-07-19T00:00:00.000Z",
-        message: { role: "assistant", content: [{ type: "text", text: label }] },
-      }),
+      ...labels.map((entry, index) =>
+        JSON.stringify({
+          type: "message",
+          id: `assistant-${entry}`,
+          parentId: index === 0 ? null : `assistant-${labels[index - 1]}`,
+          timestamp: "2026-07-19T00:00:00.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: entry }] },
+        }),
+      ),
       "",
     ].join("\n"),
   );
@@ -574,7 +579,34 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
     await expect(freshStore.load(command(2))).resolves.toMatchObject({ revision: first.revision });
     await insertCompletedEvent(2);
-    await expect(freshStore.load(command(2))).resolves.toMatchObject({ revision: second.revision });
+    await expect(freshStore.load(command(2))).resolves.toMatchObject({
+      revision: second.revision,
+      piSession: piSession("second"),
+    });
+    const piArtifacts = await database
+      .selectFrom("artifacts")
+      .select(["object_key", "media_type"])
+      .where("kind", "=", "pi_session_snapshot")
+      .orderBy("created_at")
+      .execute();
+    expect(piArtifacts).toHaveLength(2);
+    expect(
+      piArtifacts.every((artifact) => artifact.media_type === PI_SESSION_MANIFEST_MEDIA_TYPE),
+    ).toBe(true);
+    const firstManifest = decodePiSessionManifest(
+      await readFile(resolve(objectRoot, piArtifacts[0]!.object_key)),
+    );
+    const secondManifest = decodePiSessionManifest(
+      await readFile(resolve(objectRoot, piArtifacts[1]!.object_key)),
+    );
+    expect(firstManifest.mode).toBe("rebase");
+    expect(secondManifest.mode).toBe("append");
+    expect(secondManifest.previousManifestSha256).toBe(
+      createHash("sha256")
+        .update(await readFile(resolve(objectRoot, piArtifacts[0]!.object_key)))
+        .digest("hex"),
+    );
+    expect(secondManifest.segments[0]).toEqual(firstManifest.segments[0]);
 
     await expect(
       freshStore.save(command(2), first.revision, {

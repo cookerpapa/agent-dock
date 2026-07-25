@@ -595,12 +595,12 @@ transition order.
 
 Authoritative for model conversation history and Pi's session tree. Only one
 runner may write a particular live session at a time. Stable snapshots are
-uploaded at safe turn boundaries. ADR-0055 retains the whole-file snapshot as
-the production v1 and defines a v2 physical representation: immutable,
-tenant/session-scoped content-addressed JSONL segments plus an immutable
-manifest and a fenced PostgreSQL head. Restore must reconstruct byte-identical
-JSONL before Pi sees it; semantic Web projections and a workflow history are
-never used to synthesize Pi state.
+uploaded at safe turn boundaries. ADR-0055 implements a v2 physical
+representation: immutable, tenant/session-scoped content-addressed JSONL
+segments plus an immutable manifest and a fenced PostgreSQL head. Whole-file v1
+artifacts remain readable for online migration. Restore reconstructs and
+verifies byte-identical JSONL before Pi sees it; semantic Web projections and a
+workflow history are never used to synthesize Pi state.
 
 ### Object storage
 
@@ -984,12 +984,14 @@ portable extensions are eligible for a shared embedded worker.
 
 Flink or Kafka may later consume AgentDock events for analytics, audit pipelines,
 cost aggregation, or batch workloads. They are not the interactive session
-coordinator. ADR-0055 selects Temporal as the preferred future post-admission
-Run orchestrator because its Task Queue/Worker/Workflow/Activity model matches
-the now-proven horizontal Pi Worker requirements. Production retains the
-PostgreSQL dispatcher until a separate Temporal parity and fault-injection gate
-passes. A cutover must replace the superseded matching authority; it may not
-run Temporal and the custom dispatcher as competing schedulers.
+coordinator. ADR-0055 evaluates Temporal as the strongest mature future
+candidate because its Task Queue/Worker/Workflow/Activity model matches the
+horizontal Pi Worker requirements. The zero-token fault spike passed, but the
+current Run maps to one long Activity and does not remove enough AgentDock
+protocol to justify another production subsystem. Production retains the
+PostgreSQL dispatcher. A future accepted cutover must replace the superseded
+matching authority; it may not run Temporal and the custom dispatcher as
+competing schedulers.
 
 PostgreSQL continues to own HTTP acceptance, tenant admission/fairness,
 same-Session mailbox order, public projections, usage, and the committed

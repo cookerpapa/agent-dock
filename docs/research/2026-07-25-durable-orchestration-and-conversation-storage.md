@@ -18,8 +18,8 @@ PostgreSQL
   product transactions, tenant admission/fairness, semantic projections,
   usage, audit, and the committed checkpoint head
 
-Temporal
-  post-admission durable Run orchestration and horizontally polled Worker tasks
+Temporal (deferred candidate, not deployed)
+  possible future post-admission durable Run orchestration
 
 S3-compatible object storage
   content-addressed Pi JSONL segments/manifests, Workspaces, and large artifacts
@@ -34,17 +34,19 @@ CubeSandbox
   untrusted Tool microVM scheduling and lifecycle
 ```
 
-Temporal is the best-fit mature open-source durable workflow engine for a
-future controlled migration. It must replace the matching part of the current
-dispatcher rather than become a second scheduler. The current PostgreSQL
-Run/Attempt/Lease/Fencing path remains production authority until a parity and
-fault-injection gate passes.
+Temporal is the best-fit mature open-source durable workflow engine if a future
+controlled migration becomes worthwhile. The executable spike passed its core
+mechanism tests, but the present AgentDock Run reduces to one long Pi Activity.
+Temporal would therefore add a service and a second persistence boundary while
+leaving Tool idempotency, fencing, tenant fairness, Session ordering, event
+streaming, and checkpoint CAS in AgentDock. Production remains on the current
+PostgreSQL Run/Attempt/Lease/Fencing authority.
 
 Conversation state should not be moved into Temporal. AgentDock's current split
 is sound: PostgreSQL stores queryable product/control state and Pi's exact JSONL
-is the native resume authority. The current whole-file snapshot is a safe v1;
-the storage-efficient v2 should upload only content-addressed, line-aligned
-JSONL suffix segments and commit an immutable manifest through the existing
+is the native resume authority. The original whole-file snapshot remains a
+read-compatible v1; production writes now use content-addressed, line-aligned
+JSONL suffix segments and commit an immutable v2 manifest through the existing
 PostgreSQL revision/fence CAS.
 
 ## What Temporal is
@@ -184,6 +186,80 @@ Only after this gate passes may a deployment choose the Temporal dispatcher.
 Cutover must make Temporal the sole post-admission Run orchestration authority
 and retire the superseded custom matching path.
 
+## Executed Temporal spike and decision
+
+The pinned official TypeScript SDK `1.21.1` and Temporal CLI `1.8.1` spike is
+under `spikes/temporal-run-orchestration`. It uses one Workflow per synthetic
+Run and one cancellable Activity per Pi attempt. The observed zero-token run
+proved:
+
+- four 400 ms Runs were load-balanced across two independent capacity-one
+  Workers in 2,446 ms;
+- killing Worker A during attempt 1 caused Worker B to run attempt 2 with a
+  fencing token increase from 100 to 101;
+- Workflow cancellation was acknowledged only after Activity cleanup;
+- a persistent development service restart recovered and completed work;
+- duplicate Workflow IDs were rejected;
+- the inspected 14-event history contained bounded references and neither the
+  raw-prompt nor credential sentinel.
+
+This is strong evidence that Temporal's mechanisms work. It is not evidence
+that migrating today is a net improvement:
+
+- the Activity body would still contain the complete Pi Run and AgentDock
+  fencing protocol;
+- model and arbitrary Tool side effects cannot be blindly replayed;
+- PostgreSQL remains necessary for transactional admission, Session order,
+  projections, usage, and checkpoint heads;
+- self-hosting adds Temporal persistence, upgrades, backup, observability, and
+  Worker versioning;
+- the development-service restart in this local probe took 13,081 ms.
+
+The decision is therefore **defer production adoption**. Re-run the migration
+gate if a Run becomes a genuinely multi-stage durable workflow with long human
+waits, external PR/check orchestration, or enough custom retry/timer code that
+Temporal removes more code than it adds. Never operate Temporal and the current
+dispatcher as competing authorities.
+
+## Agent-loop execution research
+
+Pi provides two mature public integration paths:
+
+1. direct `AgentSession` SDK embedding;
+2. the JSONL RPC subprocess.
+
+Pi's official SDK documentation prefers direct embedding for same-process
+TypeScript applications and explicitly describes RPC as appropriate when
+process isolation is wanted. OpenClaw provides a large open-source example of
+the direct pattern: it creates a per-attempt AgentSession, injects model and
+tool adapters, forwards cancellation, flushes transcript state, and disposes
+the session.
+
+AgentDock's existing direct-SDK rehydration probe also passed 1,000 cold logical
+Sessions with only ten active runtimes, and the new 20-sample benchmark measured:
+
+| Boundary | p50 | p95 |
+| --- | ---: | ---: |
+| Direct SDK activation, extension command, dispose | 5.61 ms | 6.99 ms |
+| Fresh Pi RPC child through `get_state` | 630.60 ms | 673.17 ms |
+
+The SDK is clearly better for activation density. It is not yet a better
+multi-tenant production failure boundary in this implementation:
+
+- the remote-tool extension currently receives per-Run capability data through
+  a child-process environment; process environment cannot safely configure two
+  concurrent in-process tenants;
+- `session.abort()` is cooperative, while the RPC runner can terminate and
+  verify the complete Pi process group;
+- a fatal SDK/extension failure can affect every concurrent activation in one
+  Worker, while a child crash is scoped to one Run.
+
+The production decision remains RPC. The safe SDK migration shape is a
+capacity-one trusted Worker process that receives instance-scoped model/tool
+objects, creates one AgentSession, and is forcibly replaced if cooperative
+abort misses its deadline. Only remote-tool, native compaction, real-model,
+cancellation, crash, and credential-leak parity can authorize that switch.
+
 ## Conversation storage: separate three representations
 
 ### 1. Semantic product projection
@@ -287,6 +363,40 @@ segment when measured segment count/restore latency crosses a threshold.
 Consolidation is an optimization; old manifests remain immutable until
 retention and GC permit removal.
 
+## Implemented checkpoint-v2 evidence
+
+The production checkpoint adapter now writes
+`agent-dock.pi-session-manifest.v2`. Old NDJSON artifact rows remain readable,
+so deployment is an online forward migration: the next settled Run reads v1
+and writes v2. New objects are scoped as:
+
+```text
+pi-sessions/<tenant>/<session>/segments/<sha256>.jsonl
+pi-sessions/<tenant>/<session>/manifests/<sha256>.json
+```
+
+S3/MinIO creation is conditional (`If-None-Match: *`) with SHA-256 checksums.
+An already existing object is re-read and verified rather than overwritten.
+Restore verifies descriptor size, line count and hash for every segment and
+then verifies the whole reconstructed JSONL. Prefix mismatch produces an
+explicit rebase; chains beyond 32 segments consolidate.
+
+The reproducible 120-turn local benchmark reports:
+
+```text
+v1 complete snapshots:        33,897,660 bytes
+v2 segments + manifests:       1,439,612 bytes
+reduction:                          95.75%
+final session:                  560,167 bytes
+final segment/object reads:            27
+local reconstruction p50/p95: 6.185 / 11.807 ms
+```
+
+The latency figure measures in-process integrity and concatenation, not MinIO
+network latency. A grace-period orphan collector and remote S3 p50/p95 remain
+retention/operations follow-ups; failed commits intentionally never delete
+possibly shared content-addressed objects.
+
 ## Why not another conversation framework
 
 - LangGraph-style checkpointers serialize that framework's graph state, not
@@ -331,6 +441,10 @@ between those general systems and Pi's documented byte format.
 - Pi Session file format and compaction:
   <https://pi.dev/docs/latest/session-format> and
   <https://pi.dev/docs/latest/compaction>
+- Pi SDK and RPC integration boundaries:
+  <https://pi.dev/docs/latest/sdk> and <https://pi.dev/docs/latest/rpc>
+- OpenClaw direct embedded AgentSession reference (pinned observation):
+  <https://github.com/openclaw/openclaw/blob/e4d61702373db2cbfadf754e1625720a45b490ca/src/worker/embedded-agent.runtime.ts>
 - Microsoft event-sourcing guidance:
   <https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing>
 - AWS event-sourcing and S3 integrity/conditional-write guidance:

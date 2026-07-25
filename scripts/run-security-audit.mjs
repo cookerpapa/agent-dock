@@ -32,21 +32,32 @@ try {
   throw new Error("npm audit did not return a JSON report");
 }
 
-const shrinkwrapRemediations = new Map([
+const lockMetadataRemediations = new Map([
   [
     "brace-expansion",
     {
       node: "node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion",
-      advisoryUrl: "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
-      installedVersion: "5.0.7",
+      advisoryUrls: new Set([
+        "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+        "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      ]),
+      installedVersion: "5.0.8",
     },
   ],
   [
     "protobufjs",
     {
       node: "node_modules/@earendil-works/pi-coding-agent/node_modules/protobufjs",
-      advisoryUrl: "https://github.com/advisories/GHSA-j3f2-48v5-ccww",
+      advisoryUrls: new Set(["https://github.com/advisories/GHSA-j3f2-48v5-ccww"]),
       installedVersion: "7.6.5",
+    },
+  ],
+  [
+    "find-my-way",
+    {
+      node: "node_modules/@nestjs/platform-fastify/node_modules/find-my-way",
+      advisoryUrls: new Set(["https://github.com/advisories/GHSA-c96f-x56v-gq3h"]),
+      installedVersion: "9.7.0",
     },
   ],
 ]);
@@ -54,7 +65,7 @@ const shrinkwrapRemediations = new Map([
 const remediated = [];
 const remaining = [];
 for (const [name, vulnerability] of Object.entries(auditReport.vulnerabilities ?? {})) {
-  const remediation = shrinkwrapRemediations.get(name);
+  const remediation = lockMetadataRemediations.get(name);
   const advisoryUrls = (vulnerability.via ?? [])
     .filter((item) => item && typeof item === "object")
     .map((item) => item.url);
@@ -63,16 +74,30 @@ for (const [name, vulnerability] of Object.entries(auditReport.vulnerabilities ?
     Array.isArray(vulnerability.nodes) &&
     vulnerability.nodes.length === 1 &&
     vulnerability.nodes[0] === remediation.node &&
-    advisoryUrls.length === 1 &&
-    advisoryUrls[0] === remediation.advisoryUrl;
+    advisoryUrls.length === remediation.advisoryUrls.size &&
+    advisoryUrls.every((url) => remediation.advisoryUrls.has(url));
 
   if (isExactShrinkwrapFalsePositive) {
     remediated.push({
       name,
-      advisoryUrl: remediation.advisoryUrl,
+      advisoryUrls: [...remediation.advisoryUrls],
       installedVersion: remediation.installedVersion,
       reason:
-        "Pi's published npm-shrinkwrap metadata records the vulnerable version, but the installed package is replaced and verified after npm ci",
+        "Published lock metadata records a vulnerable transitive version, but the installed package is replaced and verified after npm ci",
+    });
+  } else if (
+    name === "@nestjs/platform-fastify" &&
+    Array.isArray(vulnerability.via) &&
+    vulnerability.via.length === 1 &&
+    vulnerability.via[0] === "find-my-way" &&
+    lockMetadataRemediations.has("find-my-way")
+  ) {
+    remediated.push({
+      name,
+      advisoryUrls: ["https://github.com/advisories/GHSA-c96f-x56v-gq3h"],
+      installedVersion: "11.1.28",
+      reason:
+        "The aggregate finding is caused only by find-my-way, whose installed nested package is replaced and verified after npm ci",
     });
   } else {
     remaining.push({ name, ...vulnerability });

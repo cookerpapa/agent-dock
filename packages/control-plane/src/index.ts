@@ -98,6 +98,21 @@ export {
   type PostgresSandboxCheckpointStoreOptions,
 } from "./checkpoint-store.ts";
 export {
+  PI_SESSION_MANIFEST_FORMAT,
+  PI_SESSION_MANIFEST_MAX_SEGMENTS,
+  PI_SESSION_MANIFEST_MEDIA_TYPE,
+  PI_SESSION_SEGMENT_TARGET_BYTES,
+  PiSessionManifestError,
+  decodePiSessionManifest,
+  preparePiSessionManifest,
+  restorePiSessionManifest,
+  type PiSessionManifest,
+  type PiSessionSegment,
+  type PiSessionSegmentDescriptor,
+  type PreparedPiSessionManifest,
+  type PreviousPiSessionManifest,
+} from "./pi-session-manifest.ts";
+export {
   createS3CheckpointObjectStoreFromEnvironment,
   S3CheckpointObjectStore,
   type S3CheckpointEnvironment,

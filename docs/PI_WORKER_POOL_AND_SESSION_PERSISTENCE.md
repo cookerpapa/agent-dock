@@ -158,7 +158,8 @@ maintaining a second, subtly different conversation implementation. It also
 allows true Worker replacement: no active Run means no Pi child, and any healthy
 Worker can restore the next Run.
 
-The main trade-off is checkpoint size. If long-session storage becomes material,
-the safe optimization is content-addressed or incremental JSONL segments plus a
-manifest. Reconstructing history from UI messages would be an incompatible
-optimization because it would lose Pi-specific state.
+Long-session storage uses the safe optimization described in ADR-0055:
+tenant/session-scoped content-addressed, line-aligned JSONL segments plus an
+immutable manifest. Whole-file v1 checkpoints remain readable. Reconstructing
+history from UI messages remains incompatible because it would lose Pi-specific
+branch, compact, tool, model, and extension state.

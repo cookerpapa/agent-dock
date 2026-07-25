@@ -247,16 +247,25 @@ extension-policy support would overstate the current boundary.
   patterns using official sources
 - [x] ADR-0055: adopt-before-build policy, Temporal migration boundary, and
   content-addressed Pi segment manifests
-- [ ] Build an isolated pinned Temporal TypeScript spike with one Workflow per
+- [x] Build an isolated pinned Temporal TypeScript spike with one Workflow per
   Run, two polling Pi Activity Workers, cancellation, heartbeat, retry/fence,
   service/Worker failure, history-secret scan, and rollback evidence
-- [ ] Measure the spike against the current PostgreSQL dispatcher for queue
-  latency, throughput, database load, Worker replacement, and operational cost
-- [ ] Cut over only if the acceptance gate passes; make Temporal the sole
-  post-admission orchestration authority and delete the superseded matching
-  path in the same milestone
-- [ ] Implement `agent-dock.pi-session-manifest.v2` with line-aligned
+- [x] Record Temporal distribution/recovery latency and operational boundary;
+  defer production cutover because the current Run maps to one long Activity
+  and does not remove enough AgentDock protocol to justify another service
+- [ ] If Run orchestration becomes genuinely multi-stage, compare real
+  Pi/Tool/SQL/S3 Activity latency, throughput, database load, backup, upgrade,
+  Worker versioning, and rollback before reconsidering Temporal
+- [ ] On a future accepted gate only, make Temporal the sole post-admission
+  authority and delete the superseded matching path in the same milestone
+- [x] Implement `agent-dock.pi-session-manifest.v2` with line-aligned
   tenant-scoped content-addressed segments and S3 create-if-absent/checksums
-- [ ] Prove byte-identical v1/v2 restore, native Pi compact/branch recovery,
-  non-append rebase, corruption rejection, stale-fence rejection, orphan GC,
-  periodic consolidation, and stored-byte/restore-latency benchmarks
+- [x] Prove byte-identical v1/v2 restore, non-append rebase, corruption
+  rejection, stale-fence inheritance, periodic consolidation, and local
+  stored-byte/reconstruction benchmarks
+- [ ] Add grace-period orphan GC plus remote MinIO p50/p95 and native
+  compact/branch recovery through the production v2 object path
+- [x] Benchmark direct Pi SDK activation against RPC without model tokens
+- [ ] Switch to direct Pi SDK only after capacity-one Worker replacement,
+  instance-scoped remote-tool/model configuration, forced cancellation, native
+  compaction, real-model, and credential-isolation parity

@@ -23,6 +23,16 @@ import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
 import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
+import {
+  PI_SESSION_MANIFEST_MEDIA_TYPE,
+  PiSessionManifestError,
+  decodePiSessionManifest,
+  preparePiSessionManifest,
+  restorePiSessionManifest,
+  type PiSessionManifest,
+} from "./pi-session-manifest.ts";
+
+const PINNED_PI_VERSION = "0.80.10";
 
 export interface CheckpointObjectStore {
   put(objectKey: string, bytes: Uint8Array): Promise<void>;
@@ -46,6 +56,7 @@ type ArtifactReference = {
   objectKey: string;
   sha256: string;
   sizeBytes: number;
+  mediaType?: string;
 };
 
 type CheckpointMetadata = {
@@ -53,6 +64,19 @@ type CheckpointMetadata = {
   workspace?: ArtifactReference;
   revision: string;
   workspaceRevision?: string;
+};
+
+type LoadedPiSessionState = {
+  bytes: Uint8Array;
+  manifest?: PiSessionManifest;
+  manifestSha256?: string;
+};
+
+type PreparedPiSessionArtifact = {
+  artifactId: string;
+  reference: ArtifactReference;
+  fileName: string;
+  mediaType: string;
 };
 
 export class SandboxCheckpointStoreError extends PiRpcTurnError {
@@ -216,17 +240,16 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     });
     if (metadata === undefined) return undefined;
 
-    const [piSession, workspace] = await Promise.all([
-      this.#objectStore.get(metadata.piSession.objectKey),
+    const [piState, workspace] = await Promise.all([
+      this.#loadPiSession(command, metadata.piSession),
       metadata.workspace === undefined
         ? Promise.resolve(undefined)
         : this.#objectStore.get(metadata.workspace.objectKey),
     ]);
-    this.#verifyObject(piSession, metadata.piSession, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session");
     if (workspace !== undefined && metadata.workspace !== undefined) {
       this.#verifyObject(workspace, metadata.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "workspace");
     }
-    validatePiSessionSnapshot(piSession);
+    validatePiSessionSnapshot(piState.bytes);
     if (workspace !== undefined) validateWorkspaceSnapshot(workspace);
 
     await this.#database.transaction().execute(async (transaction) => {
@@ -241,7 +264,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     });
     return {
       revision: metadata.revision,
-      piSession,
+      piSession: piState.bytes,
       ...(workspace === undefined ? {} : { workspace }),
       ...(metadata.workspaceRevision === undefined
         ? {}
@@ -255,20 +278,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     piSession: Uint8Array,
   ): Promise<SavedSandboxCheckpoint> {
     validatePiSessionSnapshot(piSession);
-    const artifactId = this.#idGenerator();
-    const prefix = [
-      "checkpoints",
-      command.payload.tenantId,
-      command.payload.sessionId,
-      command.payload.turnId,
-    ].map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "-"));
-    const reference: ArtifactReference = {
-      objectKey: `${prefix.join("/")}/${artifactId}-pi-${sha256(piSession)}.jsonl`,
-      sha256: sha256(piSession),
-      sizeBytes: piSession.byteLength,
-    };
-    validateCheckpointObjectKey(reference.objectKey);
-    await this.#objectStore.put(reference.objectKey, piSession);
+    const piArtifact = await this.#preparePiSessionArtifact(command, baseRevision, piSession);
+    const { artifactId, reference } = piArtifact;
     let saved: SavedSandboxCheckpoint | undefined;
     try {
       saved = await this.#database.transaction().execute(async (transaction) => {
@@ -294,8 +305,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             object_key: reference.objectKey,
             sha256: reference.sha256,
             size_bytes: reference.sizeBytes,
-            file_name: "pi-session.jsonl",
-            media_type: "application/x-ndjson",
+            file_name: piArtifact.fileName,
+            media_type: piArtifact.mediaType,
           })
           .executeTakeFirstOrThrow();
         const updated = await transaction
@@ -325,7 +336,9 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         };
       });
     } catch (error: unknown) {
-      await this.#objectStore.delete(reference.objectKey).catch(() => undefined);
+      // Content-addressed Pi segments/manifests may already be referenced by a
+      // committed checkpoint. A later orphan collector, not a failed writer,
+      // decides when an unreferenced object is safe to remove.
       throw error;
     }
     return saved;
@@ -407,7 +420,12 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     }
     validatePiSessionSnapshot(checkpoint.piSession);
     validateWorkspaceSnapshot(checkpoint.workspace);
-    const piArtifactId = this.#idGenerator();
+    const piArtifact = await this.#preparePiSessionArtifact(
+      command,
+      baseRevision,
+      checkpoint.piSession,
+    );
+    const piArtifactId = piArtifact.artifactId;
     const workspaceArtifactId = this.#idGenerator();
     const rawPatchBytes =
       checkpoint.workspacePatch === undefined
@@ -424,11 +442,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       command.payload.sessionId,
       command.payload.turnId,
     ].map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "-"));
-    const piReference: ArtifactReference = {
-      objectKey: `${prefix.join("/")}/${piArtifactId}-pi-${sha256(checkpoint.piSession)}.jsonl`,
-      sha256: sha256(checkpoint.piSession),
-      sizeBytes: checkpoint.piSession.byteLength,
-    };
+    const piReference = piArtifact.reference;
     const workspaceReference: ArtifactReference = {
       objectKey: `${prefix.join("/")}/${workspaceArtifactId}-workspace-${sha256(checkpoint.workspace)}.json`,
       sha256: sha256(checkpoint.workspace),
@@ -453,21 +467,16 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     validateCheckpointObjectKey(workspaceReference.objectKey);
     if (patchReference !== undefined) validateCheckpointObjectKey(patchReference.objectKey);
 
-    await this.#objectStore.put(piReference.objectKey, checkpoint.piSession);
     try {
       await this.#objectStore.put(workspaceReference.objectKey, checkpoint.workspace);
     } catch (error: unknown) {
-      await this.#objectStore.delete(piReference.objectKey).catch(() => undefined);
       throw error;
     }
     if (patchReference !== undefined && patchBytes !== undefined) {
       try {
         await this.#objectStore.put(patchReference.objectKey, patchBytes);
       } catch (error: unknown) {
-        await Promise.allSettled([
-          this.#objectStore.delete(piReference.objectKey),
-          this.#objectStore.delete(workspaceReference.objectKey),
-        ]);
+        await Promise.allSettled([this.#objectStore.delete(workspaceReference.objectKey)]);
         throw error;
       }
     }
@@ -497,8 +506,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             object_key: piReference.objectKey,
             sha256: piReference.sha256,
             size_bytes: piReference.sizeBytes,
-            file_name: "pi-session.jsonl",
-            media_type: "application/x-ndjson",
+            file_name: piArtifact.fileName,
+            media_type: piArtifact.mediaType,
           },
           {
             id: workspaceArtifactId,
@@ -625,7 +634,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       });
     } catch (error: unknown) {
       await Promise.allSettled([
-        this.#objectStore.delete(piReference.objectKey),
         this.#objectStore.delete(workspaceReference.objectKey),
         ...(patchReference === undefined
           ? []
@@ -670,7 +678,12 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
                 .onRef("terminal.session_id", "=", "artifact.session_id")
                 .onRef("terminal.turn_id", "=", "artifact.turn_id"),
             )
-            .select(["artifact.object_key", "artifact.sha256", "artifact.size_bytes"])
+            .select([
+              "artifact.object_key",
+              "artifact.sha256",
+              "artifact.size_bytes",
+              "artifact.media_type",
+            ])
             .where("artifact.tenant_id", "=", command.payload.tenantId)
             .where("artifact.session_id", "=", command.payload.sessionId)
             .where("artifact.kind", "=", "pi_session_snapshot")
@@ -686,7 +699,12 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             .onRef("terminal.session_id", "=", "artifact.session_id")
             .onRef("terminal.turn_id", "=", "artifact.turn_id"),
         )
-        .select(["artifact.object_key", "artifact.sha256", "artifact.size_bytes"])
+        .select([
+          "artifact.object_key",
+          "artifact.sha256",
+          "artifact.size_bytes",
+          "artifact.media_type",
+        ])
         .where("artifact.tenant_id", "=", command.payload.tenantId)
         .where("artifact.session_id", "=", command.payload.sessionId)
         .where("artifact.kind", "=", "pi_session_snapshot")
@@ -767,11 +785,135 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         objectKey: pi.object_key,
         sha256: pi.sha256,
         sizeBytes: safeSize(pi.size_bytes, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session checkpoint"),
+        ...(pi.media_type === null ? {} : { mediaType: pi.media_type }),
       },
       ...(workspaceReference === undefined ? {} : { workspace: workspaceReference }),
       revision: revisionFor(pi.object_key, workspaceReference?.objectKey),
       ...(workspaceReference === undefined ? {} : { workspaceRevision: workspaceReference.sha256 }),
     };
+  }
+
+  async #preparePiSessionArtifact(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    piSession: Uint8Array,
+  ): Promise<PreparedPiSessionArtifact> {
+    let previous: LoadedPiSessionState | undefined;
+    if (baseRevision !== null) {
+      const metadata = await this.#database
+        .transaction()
+        .execute(async (transaction) =>
+          this.#loadMetadata(transaction, command, validDate(this.#clock)),
+        );
+      if (metadata?.revision !== baseRevision) {
+        throw new SandboxCheckpointStoreError(
+          "checkpoint_conflict",
+          "Settled checkpoint base revision is stale",
+          false,
+        );
+      }
+      previous = await this.#loadPiSession(command, metadata.piSession);
+      validatePiSessionSnapshot(previous.bytes);
+    }
+
+    const prepared = preparePiSessionManifest(piSession, PINNED_PI_VERSION, previous);
+    await Promise.all(
+      prepared.newSegments.map(async (segment) => {
+        const objectKey = this.#piSegmentObjectKey(command, segment.descriptor.sha256);
+        await this.#putContentAddressed(objectKey, segment.bytes);
+      }),
+    );
+    const objectKey = this.#piManifestObjectKey(command, prepared.manifestSha256);
+    await this.#putContentAddressed(objectKey, prepared.manifestBytes);
+    return {
+      artifactId: this.#idGenerator(),
+      reference: {
+        objectKey,
+        sha256: prepared.manifestSha256,
+        sizeBytes: prepared.manifestBytes.byteLength,
+        mediaType: PI_SESSION_MANIFEST_MEDIA_TYPE,
+      },
+      fileName: "pi-session.manifest.json",
+      mediaType: PI_SESSION_MANIFEST_MEDIA_TYPE,
+    };
+  }
+
+  async #loadPiSession(
+    command: ExecuteTurnCommandMessage,
+    reference: ArtifactReference,
+  ): Promise<LoadedPiSessionState> {
+    const stored = await this.#objectStore.get(reference.objectKey);
+    this.#verifyObject(stored, reference, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session");
+    if (reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE) {
+      return { bytes: stored };
+    }
+    try {
+      const manifest = decodePiSessionManifest(stored);
+      if (manifest.piVersion !== PINNED_PI_VERSION) {
+        throw new PiSessionManifestError("Pi session manifest version is incompatible");
+      }
+      const bytes = await restorePiSessionManifest(manifest, async (descriptor) =>
+        this.#objectStore.get(this.#piSegmentObjectKey(command, descriptor.sha256)),
+      );
+      return {
+        bytes,
+        manifest,
+        manifestSha256: reference.sha256,
+      };
+    } catch (error: unknown) {
+      if (!(error instanceof PiSessionManifestError)) throw error;
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_corrupt",
+        "Pi session checkpoint failed integrity validation",
+        false,
+      );
+    }
+  }
+
+  async #putContentAddressed(objectKey: string, bytes: Uint8Array): Promise<void> {
+    validateCheckpointObjectKey(objectKey);
+    try {
+      await this.#objectStore.put(objectKey, bytes);
+      return;
+    } catch (error: unknown) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : undefined;
+      if (code !== "EEXIST" && code !== "checkpoint_object_exists") throw error;
+    }
+    const existing = await this.#objectStore.get(objectKey);
+    if (existing.byteLength !== bytes.byteLength || sha256(existing) !== sha256(bytes)) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_corrupt",
+        "Content-addressed checkpoint object did not match its key",
+        false,
+      );
+    }
+  }
+
+  #piSegmentObjectKey(command: ExecuteTurnCommandMessage, digest: string): string {
+    return validateCheckpointObjectKey(
+      [
+        "pi-sessions",
+        command.payload.tenantId,
+        command.payload.sessionId,
+        "segments",
+        `${digest}.jsonl`,
+      ].join("/"),
+    );
+  }
+
+  #piManifestObjectKey(command: ExecuteTurnCommandMessage, digest: string): string {
+    return validateCheckpointObjectKey(
+      [
+        "pi-sessions",
+        command.payload.tenantId,
+        command.payload.sessionId,
+        "manifests",
+        `${digest}.json`,
+      ].join("/"),
+    );
   }
 
   async #lockSession(

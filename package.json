@@ -12,8 +12,9 @@
     "spikes/*"
   ],
   "dependencies": {
-    "pi-security-brace-expansion": "npm:brace-expansion@5.0.7",
-    "pi-security-protobufjs": "npm:protobufjs@7.6.5"
+    "pi-security-brace-expansion": "npm:brace-expansion@5.0.8",
+    "pi-security-protobufjs": "npm:protobufjs@7.6.5",
+    "platform-security-find-my-way": "npm:find-my-way@9.7.0"
   },
   "scripts": {
     "postinstall": "node scripts/harden-pi-dependencies.mjs",
@@ -40,6 +41,7 @@
     "image:closure-check": "node scripts/check-supervisor-image-closure.mjs",
     "kubernetes:image-sync": "node scripts/sync-kubernetes-tool-image.mjs",
     "object-store:check": "node scripts/run-minio-check.mjs",
+    "benchmark:pi-session-storage": "node scripts/run-pi-session-storage-benchmark.mjs",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:build": "node scripts/production-compose.mjs build",
@@ -66,7 +68,9 @@
     "spike:pi": "npm run spike --workspace @agent-dock/pi-extension-compat-spike",
     "spike:embedded": "npm run spike --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "spike:density": "npm run density --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "spike:runtime-benchmark": "npm run runtime-benchmark --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "spike:live-model": "npm run live-model --workspace @agent-dock/pi-embedded-rehydrate-spike",
+    "spike:temporal": "npm run spike --workspace @agent-dock/temporal-run-orchestration-spike",
     "fake-model:start": "npm run start --workspace @agent-dock/fake-model-server",
     "db:migrate": "npm run migrate --workspace @agent-dock/database",
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",

@@ -24,10 +24,14 @@ compaction entries, so an incremental representation can preserve exact bytes.
    `AGENTS.md`. Established-company or foundation-backed open source is
    preferred after requirements, license, maintenance, security, operational
    cost, and exit strategy are evaluated.
-2. Temporal is the preferred target for post-admission durable Run
-   orchestration. It is not added to production until a separate TypeScript
-   spike passes the parity, fault, security, performance, backup, upgrade, and
-   rollback gate in the accompanying research.
+2. Temporal is the preferred mature candidate if post-admission Run
+   orchestration outgrows the current bounded protocol. The pinned TypeScript
+   spike proves Task Queue distribution, heartbeat retry, cancellation,
+   Worker/service recovery, bounded history, and duplicate Workflow-ID
+   rejection. It also shows that the current Run maps almost entirely to one
+   long Pi Activity, so Temporal does not yet remove enough application
+   protocol to justify another production service and consistency boundary.
+   Production adoption is deferred rather than assumed.
 3. There must be no dual orchestration authority. Until cutover, the existing
    PostgreSQL Run/Attempt dispatcher is authoritative. After cutover, Temporal
    owns post-admission Workflow/Activity progress and the superseded matching
@@ -43,7 +47,7 @@ compaction entries, so an incremental representation can preserve exact bytes.
    versions, status, and immutable references. Prompt text, model deltas, Pi
    JSONL, Tool output, Workspace bytes, and credentials remain in the existing
    PostgreSQL/S3 authorities.
-7. Pi JSONL remains the native conversation authority. A v2 checkpoint will use
+7. Pi JSONL remains the native conversation authority. The v2 checkpoint uses
    tenant/session-scoped, line-aligned, SHA-256-addressed immutable segments plus
    an immutable manifest containing the ordered segment list and whole-session
    digest.
@@ -55,14 +59,26 @@ compaction entries, so an incremental representation can preserve exact bytes.
    starting Pi. A non-append Pi output creates an explicit new base/rebase
    manifest. AgentDock never silently derives native state from Web
    conversation projections.
-10. Periodic segment consolidation is driven by measured restore latency/object
-    count. It does not alter the logical Session or Pi compaction semantics.
+10. Segment chains consolidate after 32 segments. This is a physical
+    representation change only and does not alter the logical Session or Pi
+    compaction semantics.
+11. Direct Pi SDK execution remains an evaluated optimization, not the
+    production default. It reduces warm activation p50 from 630.60 ms for a
+    fresh RPC child through `get_state` to 5.61 ms for a direct SDK activation
+    including one extension command and dispose. The current RPC child still
+    provides per-Run environment isolation, hard process-group cancellation,
+    and a smaller crash/extension-failure radius. A switch requires
+    instance-scoped model/tool configuration and a one-Run trusted Worker
+    process boundary or equivalent forced-replacement proof.
 
 ## Consequences
 
 - Mature durable-workflow machinery can eventually replace custom matching,
   Worker polling, retry timers, and orchestration replay without replacing
   AgentDock's tenant policy or safety fences.
+- The present PostgreSQL dispatcher remains the sole production authority;
+  Temporal is retained as executable migration evidence, not a dormant second
+  scheduler.
 - Temporal adds a distributed service, schema, deterministic-code/versioning
   discipline, and operational burden. The acceptance gate prevents an
   architecture-only dependency.
@@ -75,14 +91,24 @@ compaction entries, so an incremental representation can preserve exact bytes.
 - PostgreSQL, S3-compatible storage, Pi, Temporal, Kubernetes, and Cube each
   have one explicit responsibility. None becomes a universal state store.
 
-## Evidence required before implementation claims
+## Evidence
 
 - Temporal spike and migration gate described in
   `docs/research/2026-07-25-durable-orchestration-and-conversation-storage.md`;
-- v1/v2 checkpoint compatibility and byte-identical restore;
-- native Pi branch/compaction recovery through a v2 manifest;
-- prefix-mismatch rebase and corrupt/missing/reordered segment rejection;
-- stale fence/base revision cannot publish a new head;
-- concurrent idempotent segment upload and orphan GC;
-- measured stored bytes, restore requests, p50/p95 restore latency, and
-  whole-file-vs-segment comparison.
+- zero-token Temporal fault probe: two Workers, killed-Worker retry with fence
+  100 to 101, cancellation cleanup, duplicate-ID rejection, service restart,
+  and no raw prompt/credential in Event History;
+- v1/v2 checkpoint compatibility, append/rebase, byte-identical restore,
+  corrupt/missing/reordered segment rejection, S3 conditional-create
+  collision validation, and existing fenced base-revision commit tests;
+- 120-turn local storage benchmark: 33,897,660 v1 cumulative bytes versus
+  1,439,612 v2 segment/manifest bytes, a 95.75% reduction; final 560,167-byte
+  session restored byte-identically from 26 segments, with local in-memory
+  p50/p95 reconstruction of 6.185/11.807 ms;
+- zero-token Pi runtime benchmark: direct SDK activation p50/p95 5.61/6.99 ms
+  versus fresh RPC process readiness p50/p95 630.60/673.17 ms.
+
+Still required before a Temporal cutover or a claim of complete retention
+operations: a real Pi/Tool Activity comparison, production backup/upgrade and
+rollback drill, S3-network restore latency, grace-period orphan collection, and
+native compact/branch restoration through the production v2 object path.

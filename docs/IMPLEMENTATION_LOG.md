@@ -2142,3 +2142,39 @@
   the existing fenced PostgreSQL head CAS. The current complete JSONL snapshot
   remains the production v1 until byte-identical compact/branch restore,
   rebase/corruption/GC behavior, and storage/latency benchmarks pass.
+
+## 2026-07-25 — Runtime, Temporal, and Pi checkpoint-v2 validation
+
+- Added a pinned official Temporal TypeScript spike with one bounded Workflow
+  per Run and two capacity-one polling Worker processes. It proves
+  load-balancing, Activity heartbeat/cancellation, killed-Worker retry with a
+  newer fence, service restart, duplicate Workflow-ID rejection, and a bounded
+  history without raw prompt/credential sentinels.
+- The measured four 400 ms activities completed across both Workers in
+  2,446 ms; killed attempt 1 was recovered as attempt 2 with fence 100 -> 101;
+  the development-service restart recovery took 13,081 ms. This proves
+  Temporal mechanics but also confirms that the current AgentDock Run would be
+  one long Activity. Production stays on the PostgreSQL dispatcher; no dual
+  scheduler was introduced.
+- Added a direct Pi SDK versus RPC zero-token benchmark. Twenty samples measured
+  5.61/6.99 ms SDK p50/p95 including an extension command and dispose, versus
+  630.60/673.17 ms for fresh RPC child readiness. RPC remains production
+  because it supplies per-Run environment isolation, verified process-group
+  termination, and a smaller failure radius; direct SDK requires a
+  capacity-one replaceable Worker and instance-scoped configuration first.
+- Implemented `agent-dock.pi-session-manifest.v2` in the production checkpoint
+  adapter. It stores tenant/session-scoped SHA-256 line segments and immutable
+  manifests, supports online v1 reads, conditional/idempotent S3 puts,
+  append/rebase, 32-segment consolidation, per-segment and whole-file
+  verification, and the existing fenced checkpoint-head CAS.
+- The 120-turn local benchmark reduced cumulative stored bytes from 33,897,660
+  to 1,439,612 (95.75%). The final 560,167-byte JSONL restored
+  byte-identically from 26 segments; in-memory integrity/concatenation
+  p50/p95 was 6.185/11.807 ms. Orphan GC and remote MinIO latency remain
+  explicit operations follow-ups.
+- Updated the verified post-install dependency hardening boundary for the new
+  brace-expansion 5.0.8 and find-my-way 9.7.0 releases. Published nested lock
+  metadata still names older exact versions, so CI copies the pinned safe
+  packages into the reviewed Pi/Nest transitive locations, verifies installed
+  versions after `npm ci`, and reports the corresponding npm-audit metadata
+  findings as remediated only when node identity and advisory sets match.

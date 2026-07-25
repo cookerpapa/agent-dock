@@ -508,20 +508,24 @@ retirement maintenance, and graceful drain. The client performs bounded
 same-boot reconnect after transient transport loss. The default project source
 is one trusted sample fixture; a project may instead name a normalized public
 GitHub `owner/repository` plus an exact 40-hex commit. At each successful settled
-boundary, trusted Pi JSONL and a bounded, hashed regular-file workspace manifest
-captured through the private tool channel are stored before `turn.completed`;
+boundary, trusted Pi JSONL is stored as tenant/session-scoped,
+content-addressed line segments plus an immutable manifest, while a bounded,
+hashed regular-file workspace manifest is captured through the private tool
+channel before `turn.completed`;
 the next turn restores both into a fresh Pi activation and a different
 ephemeral Tool Sandbox. Production therefore supports a genuine same-session
 follow-up without keeping an idle Pi process or Sandbox alive.
 
 The ephemeral demo still uses a private host directory coupled to its temporary
-database. The production storage boundary now also has an S3-compatible adapter:
+database. The production storage boundary has an S3-compatible adapter:
 PostgreSQL retains the fenced logical pointers and independent hashes, while the
-bucket retains immutable Pi/workspace bytes. A test discards the writer and
-restores through a fresh client against disposable MinIO, so this path no longer
-depends on one Supervisor host directory. The production Compose topology now
-uses that adapter against persistent MinIO and keeps credentials only in the
-trusted Supervisor host. For a GitHub source, one expiring PostgreSQL lease
+bucket retains immutable Pi segment/manifest and Workspace bytes. Whole-file Pi
+v1 artifacts remain readable and the next settled Run migrates them forward. A
+test discards the writer and restores through a fresh client against disposable
+MinIO, so this path no longer depends on one Supervisor host directory. The
+production Compose topology uses that adapter against persistent MinIO and
+keeps credentials only in the trusted Supervisor host. For a GitHub source, one
+expiring PostgreSQL lease
 elects a disposable, credential-free importer through the Sandbox Manager. It
 fetches only the pinned commit from a separate gVisor Pod whose NetworkPolicy
 permits DNS and public HTTPS but excludes private/cluster/node ranges, rejects
