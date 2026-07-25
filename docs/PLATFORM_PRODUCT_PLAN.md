@@ -16,15 +16,16 @@ workspaces, code-review delivery, usage tracking, and automated evaluation.
 
 ### Milestone 1: trusted Runner and Sandbox Provider
 
-Status: complete for the supported single-node Kubernetes + gVisor/KVM
-private-host claim under ADR-0039, with demand activation, exact Session warm
-reuse, split checkpoints, and batched event delivery under ADR-0040.
+Status: complete for the supported single-node CubeSandbox/KVM private-host
+claim under ADR-0053, with demand activation, split checkpoints, and batched
+event delivery under ADR-0040.
 
 - trusted Pi Runner and model boundary;
-- least-privilege Kubernetes Sandbox Manager with no runtime socket;
+- authenticated Sandbox Manager with no runtime socket;
 - provider-neutral handles, policy, lifecycle, inspection, and cleanup;
-- sole `KubernetesGvisorSandboxProvider` with offline Tool Pods and fail-closed
-  RuntimeClass/containerd/runsc attestation;
+- primary `CubeSandboxProvider` with offline KVM Tool guests, fixed Cube relays,
+  and fail-closed current-commit template attestation;
+- retained Kubernetes/gVisor implementation only for importer/regression use;
 - credential, namespace, cgroup, filesystem, network, cancellation, and Pi
   integration evidence;
 - threat model, network matrix, Provider and Run lifecycle documentation.
@@ -33,11 +34,12 @@ The original ordinary-Docker implementation was removed under ADR-0038, and
 ADR-0039 then removed direct-Docker lifecycle ownership. The Provider interface
 alone is not treated as runtime evidence.
 
-ADR-0040 removes Pod provisioning from pure-chat Runs, materializes the Pod on
-the first Tool Call, rebinds only an exact Session/revision under a newer fence,
-and evicts warm Pods by idle TTL and bounded LRU. It also separates Pi and
-Workspace checkpoints and decouples Pi event production from PostgreSQL through
-a bounded asynchronous batch publisher with cumulative ACK.
+ADR-0040 removes physical provisioning from pure-chat Runs and materializes an
+execution environment on the first Tool Call. ADR-0053 deliberately disables
+warm rebind for Cube v0.6.0: each RunAttempt owns one guest and later Runs cold
+restore the external checkpoint. Pi and Workspace checkpoints remain separate,
+and Pi event production is decoupled from PostgreSQL through a bounded
+asynchronous batch publisher with cumulative ACK.
 
 ### Milestone 2: durable Run protocol
 
@@ -64,8 +66,8 @@ system must not claim exactly-once arbitrary shell execution.
 
 ### Milestone 3: versioned Workspace and GitHub-native delivery
 
-Status: complete for the optional GitHub App integration and Kubernetes/gVisor
-production topology under ADR-0032/ADR-0039.
+Status: complete for the optional GitHub App integration and Cube primary
+production topology under ADR-0032/ADR-0053.
 
 - checkpoint history, compare, fork, rollback, archive, and patch download;
 - structured files/diff/test/artifact surfaces;
@@ -119,34 +121,36 @@ Implemented with durable Run trace identities, W3C propagation across every
 trusted HTTP/process boundary, bearer-protected low-cardinality Prometheus
 metrics, redacted JSON logs, a tenant-scoped owner operations API, persisted
 Jaeger, and a provisioned Grafana dashboard. Reproducible reports cover ten
-full-loop coding repairs, ten fault invariants, the gVisor/Pi security gate, and
-10/50/100 simultaneous Session/API load. Reports explicitly separate
+full-loop coding repairs, ten fault invariants, the gVisor importer/regression
+gate, the Cube KVM Tool gate, and 10/50/100 simultaneous Session/API load.
+Reports explicitly separate
 infrastructure correctness from model intelligence and active-Run capacity.
 
 Only reproduced measurements belong in the résumé.
 
 ### Milestone 6: stronger Sandbox boundary
 
-Status: complete under ADR-0039; ADR-0038 remains historical evidence for the
-initial mandatory-gVisor decision.
+Status: complete for the single-node KVM claim under ADR-0053; ADR-0038 and
+ADR-0039 remain evidence for the retained gVisor importer boundary.
 
-- `KubernetesGvisorSandboxProvider` is the only concrete implementation;
-- K3s/containerd maps `RuntimeClass/agent-dock-gvisor` only to `runsc` with the
-  KVM platform and no fallback;
-- the Manager has namespace-scoped Pod/log/attach/exec authority plus one named
-  RuntimeClass read, but no Docker or containerd socket;
-- Tool and public-import workloads use fixed, Manager-generated Pod templates;
-- Tool Pods have default-deny ingress/egress while the fixed-purpose importer
-  receives only the public HTTPS/DNS policy required for exact-commit import;
-- actual guest process exhaustion supplements outer cgroup inspection;
-- the security/lifecycle suite, checkpoint path, pinned Pi repair and complete
-  production topology pass through gVisor;
-- direct-Docker, Docker Desktop/LinuxKit, provider selectors and legacy whole-Pi
-  container execution were deleted.
+- `CubeSandboxProvider` is the sole ordinary production Tool implementation;
+- CubeAPI/CubeMaster/Cubelet/CubeShim create an independent KVM guest per
+  materialized RunAttempt;
+- a digest-pinned READY template binds the exact AgentDock Git revision and
+  closed Tool policy;
+- the Manager has no Docker/containerd socket and reaches Cube only through
+  credential-free fixed-target relays;
+- Tool guests have deny-all outbound networking, no platform credential or
+  host mount, and bounded CPU/memory/process/disk/time/output;
+- real KVM evidence covers guest/host kernel distinction, two-tenant Workspace
+  isolation, cancellation and zero-orphan cleanup;
+- gVisor remains the fixed-purpose exact-commit importer and deterministic
+  regression backend, never an ordinary Tool fallback;
+- direct-Docker, Docker Desktop/LinuxKit and legacy whole-Pi container
+  execution were deleted.
 
-ADR-0035 and ADR-0038's direct-Docker mechanics remain only as historical
-decision evidence and are superseded. Full public-SaaS, multi-node Kubernetes
-and arbitrary dependency-egress claims remain excluded.
+Full public-SaaS, dedicated multi-node Cube, node-loss/upgrade and arbitrary
+dependency-egress claims remain excluded.
 
 ### Milestone 7: product completion and public demonstration
 

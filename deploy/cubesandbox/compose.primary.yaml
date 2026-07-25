@@ -18,7 +18,7 @@ services:
       AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS: "30000"
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_CUBESANDBOX_API_KEY_HOST_FILE:?set a private CubeAPI bearer-token file}
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cubesandbox-api-key
         target: /run/agent-dock-secrets/cubesandbox-api-key
         read_only: true
     networks:
@@ -99,19 +99,6 @@ services:
     mem_limit: 64m
     cpus: 0.25
     stop_grace_period: 10s
-
-  cube-tool-image:
-    profiles: [image-only]
-    image: ${AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE:-agent-dock/cubesandbox-tool:${AGENT_DOCK_IMAGE_VERSION:-production}}
-    build:
-      context: ../..
-      dockerfile: deploy/cubesandbox/Dockerfile.tool
-      args:
-        AGENT_DOCK_VERSION: ${AGENT_DOCK_IMAGE_VERSION:-production}
-        AGENT_DOCK_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
-      network: host
-    network_mode: none
-    restart: "no"
 
 networks:
   cube-control:

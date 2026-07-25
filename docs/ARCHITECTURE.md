@@ -175,14 +175,14 @@ the trusted Runner with an explicit remote `bash/edit/read/write` allowlist.
 Manager and worker exchange a private, closed, versioned protocol over the
 Kubernetes attach stream. A successful terminal capture includes a bounded
 workspace snapshot and validated unified diff. Cancellation aborts Pi and the
-current Tool RPC, then requires process-group teardown and exact Pod absence.
+current Tool RPC, then requires process-group teardown and exact runtime absence.
 
 This is a real sandbox/workspace transport. The Web demo still chooses the local
 control-plane adapter; the production entry point composes the same boundary
 through a two-phase outbound WebSocket, authenticated boot provisioning, bounded
 remote dispatch lanes, and exact owner/inventory management. PostgreSQL event
 persistence, cumulative ACK, SSE replay, cross-replica high-water notification,
-and Kubernetes/gVisor execution are executable. Each production control-plane replica owns
+and remote sandbox execution are executable. Each production control-plane replica owns
 one dedicated PostgreSQL listener; notifications wake a process-local hub, while
 event bodies are always read from the durable table. The trusted Supervisor host
 uses a private, crash-safe file spool that syncs every event before enqueue,
@@ -197,18 +197,18 @@ tool side effects.
 
 ADR-0029 supersedes that original production placement. The legacy whole-Pi
 ordinary-Docker adapter and demo have now been removed. In the supported
-deployment, pinned Pi RPC and the model
-gateway run in the trusted Agent Runner. Pi's built-in local tools are disabled;
-one fixed image-owned extension implements `read`, `write`, `edit`, and `bash`
-with Pi's public operation interfaces and sends a narrow authenticated RPC to a
-separate Sandbox Manager. The Manager first creates only a logical reservation.
-The first actual Tool Call materializes a credential-free Kubernetes gVisor Pod;
-pure-chat Runs never touch Kubernetes. A materialized Pod is bound to one exact
-tenant/project/workspace/session and may be rebound, under a strictly newer
-fence, across later Runs in that Session. Settlement captures only dirty
-Workspace state and keeps a healthy Pod warm until its idle TTL, LRU pressure,
-failure, cancellation, revision mismatch, or process shutdown requires
-deletion. See ADR-0040.
+deployment, pinned Pi RPC and the model gateway run in the trusted Agent Worker
+pool. Pi's built-in local tools are disabled; one fixed image-owned extension
+implements `read`, `write`, `edit`, and `bash` with Pi's public operation
+interfaces and sends a narrow authenticated RPC to a separate Sandbox Manager.
+The Manager first creates only a logical reservation. The first actual Tool
+Call asks the primary `CubeSandboxProvider` to materialize a credential-free
+KVM microVM; pure-chat Runs never touch Cube. A microVM is bound to one exact
+tenant/project/workspace/session/RunAttempt. Cube v0.6.0 does not expose the
+atomic metadata CAS required for a safe higher-fence rebind, so settlement
+captures dirty Workspace state and destroys the guest. A later coding Run
+restores that committed checkpoint into a newly scheduled guest. See ADR-0040
+and ADR-0053.
 
 ADR-0042 adds a durable environment plane without moving image policy into the
 Agent. Every Project owns one active member of an append-only environment
@@ -228,21 +228,20 @@ Git binaries. It then executes the bounded recipe in the untrusted Workspace;
 each command has an immutable ID, normalized working directory, timeout and
 explicit network class. Raw setup output is not copied into the trusted control
 plane: validation retains only phase, exit code, duration and output SHA-256.
-The Provider combines this
-toolchain report with its live gVisor/runsc, final deny-all network, non-root and
-read-only-rootfs inspection. Successful Tool settlement stores that evidence
-under Project environment, Run and Attempt identity. Pure chat creates no Pod
-and therefore keeps the environment in `pending` until a real Tool Run proves
-it. Session-warm reuse additionally requires the exact environment snapshot;
-an environment change always destroys the stale Pod instead of rebinding it.
+The Provider combines this toolchain report with its live
+`cubesandbox-kvm`, guest-kernel, final deny-all network and non-root
+inspection. Cube's CoW guest root is writable, so the evidence does not falsely
+claim a read-only OCI rootfs. Successful Tool settlement stores that evidence
+under Project environment, Run and Attempt identity. Pure chat creates no
+microVM and therefore keeps the environment in `pending` until a real Tool Run
+proves it. Every activation must match the exact environment snapshot; an
+environment change cannot reuse an older guest.
 
-ADR-0045 adds an orthogonal clean prewarm pool for the first Tool Call. These
-Pods contain only the fixed image and empty memory-backed volumes, carry no
-tenant/Workspace/Attempt metadata, and remain default-deny behind runsc. Claim
-is an atomic UID/resourceVersion-fenced metadata transition and consumes the
-Pod permanently. Used Pods can enter only the existing exact-Session warm set,
-never the shared clean pool. Startup clears orphaned clean Pods before a
-singleton Manager refills its configured target.
+ADR-0045 records the former gVisor clean-prewarm design. ADR-0053 disables that
+pool for primary Tool execution: Cube v0.6.0 cannot prove the metadata CAS
+needed to bind a precreated guest safely to an exact tenant/Attempt. The
+production prewarm target is therefore zero, and a guest that has ever run
+tenant code is always destroyed rather than reassigned.
 
 ADR-0043 extends this resource with owner-controlled configuration-as-code.
 Editing a recipe creates an inactive append-only candidate. A candidate must
@@ -258,26 +257,22 @@ replay checks, exact assignment authorization, and the fixed deployment policy.
 It passes an immutable, provider-neutral handle to `SandboxProvider`; that
 handle binds tenant, session, turn, attempt, lease, fence, and opaque runtime
 identity without exposing a Docker client or provider SDK.
-ADR-0039 supersedes ADR-0038's direct-Docker lifecycle. The sole implementation
-in the supported production topology is `KubernetesGvisorSandboxProvider`:
-K3s/containerd maps
-`RuntimeClass/agent-dock-gvisor` to `runsc`, fixed to the KVM platform. Manager
-readiness validates the RuntimeClass, immutable NetworkPolicies, image and a
-real gVisor Pod. The Manager uses scoped Pod/log/attach/exec and NetworkPolicy
-read authority in two namespaces plus `get` on the one named RuntimeClass; it
-has no Docker/containerd socket. Direct-Docker providers, selectors and
-fallback paths were removed.
+ADR-0039 superseded ADR-0038's direct-Docker lifecycle and remains the
+restricted exact-commit importer boundary. K3s/containerd maps
+`RuntimeClass/agent-dock-gvisor` to `runsc`, fixed to the KVM platform. The
+Manager's importer client uses scoped Pod/log/attach/exec and NetworkPolicy
+read authority in its dedicated namespace plus `get` on the one named
+RuntimeClass; it has no Docker/containerd socket.
 
-ADR-0052 adds a separate operator-only CubeSandbox v0.6.0 experiment behind
-the same Provider contract. Cube is its own CubeAPI/CubeMaster/Cubelet KVM
-microVM plane, not another Kubernetes RuntimeClass. The experiment keeps Pi and
-all platform credentials trusted, sends only the closed Tool protocol into a
-credential-free microVM, disables warm reassignment until Cube can prove an
-atomic metadata/fence rebind, and retains AgentDock's external content
-checkpoint as the durability authority. `kubernetes-gvisor` remains the
-default and only supported production selection until the dedicated-cluster
-live gate passes. Browser, tenant and model inputs cannot choose either
-Provider.
+ADR-0052 introduced CubeSandbox v0.6.0 behind the same Provider contract, and
+ADR-0053 promotes it to the sole ordinary Tool execution Provider. Cube is its
+own CubeAPI/CubeMaster/Cubelet/CubeShim KVM microVM plane, not another
+Kubernetes RuntimeClass. Pi and all platform credentials stay trusted; only
+the closed Tool protocol enters a credential-free guest. AgentDock's external,
+content-verified checkpoint remains the durability authority. The gVisor
+Provider can be selected only by the explicit deterministic acceptance gate
+and is not a production fallback. Browser, tenant and model inputs cannot
+choose either Provider.
 
 ADR-0031 adds the durable execution vocabulary above those boundaries. Public
 tenant-scoped APIs expose a stable Run plus bounded Attempt history. PostgreSQL
@@ -373,27 +368,29 @@ and idempotent bootstrap services. The host receives a distinct checkpoint
 identity limited to bucket location/list and object get/put for one bucket; its
 policy does not grant object deletion.
 
-The supported deployment adds a K3s/gVisor execution plane to a Compose-hosted
-trusted product plane with persistent PostgreSQL and MinIO, explicit
-migration/bootstrap jobs, one control-plane replica, one trusted Pi Runner, one
-scoped-kubeconfig Sandbox Manager, a credential-free Kubernetes API relay, one
-credential-free provider egress bridge plus a Unix-socket-only host relay, one
-optional credential-owning GitHub Gateway, static Web ingress, isolated
-networks, private secret-file mounts, health checks, bounded resources/logs,
-and seven declared volumes. Only Web publishes a
-loopback port. This topology is complete for the bounded private multi-tenant
-fixture and controlled public GitHub commits with either a deterministic model
-or owner-configured DeepSeek. Private GitHub import and PR delivery are present
-but require an operator-owned GitHub App and a separate live acceptance; the
-default deployment deliberately has no such authority. It does not imply
-arbitrary Git hosts/providers/extensions, public SaaS, multi-node Kubernetes, or direct
-Internet hardening. The running control plane is
+The supported deployment adds a pinned CubeSandbox KVM execution plane to a
+Compose-hosted trusted product plane with persistent PostgreSQL and MinIO,
+explicit migration/bootstrap jobs, one control-plane replica, a bounded Pi
+Worker pool, one authenticated Sandbox Manager, credential-free fixed-target
+CubeAPI/CubeProxy relays, a credential-free provider egress bridge plus a
+Unix-socket-only host relay, one optional credential-owning GitHub Gateway,
+static Web ingress, isolated networks, private secret-file mounts, health
+checks and bounded resources/logs. K3s/gVisor remains installed for the
+restricted repository importer. Only Web publishes a loopback port. This
+topology is complete for the bounded private multi-tenant fixture and
+controlled public GitHub commits with either a deterministic model or
+owner-configured DeepSeek. The bundled single-node Cube profile is local
+validation evidence, not a multi-node production claim. Private GitHub import
+and PR delivery are present but require an operator-owned GitHub App and a
+separate live acceptance; the default deployment deliberately has no such
+authority. It does not imply arbitrary Git hosts/providers/extensions, public
+SaaS, multi-node Cube/Kubernetes, or direct Internet hardening. The running control plane is
 tenant-neutral: it mounts no tenant API token and reads no default tenant or
 profile. A verified bearer credential creates request scope, while one shared
 Supervisor pool executes globally fair tenant work. Optional loopback
 self-registration changes tenant admission convenience, not that threat model.
 See ADR-0023, ADR-0025, ADR-0026, ADR-0027, ADR-0028, ADR-0029, ADR-0030,
-ADR-0031, ADR-0032, ADR-0039, ADR-0040, and the production runbook.
+ADR-0031, ADR-0032, ADR-0039, ADR-0040, ADR-0053, and the production runbook.
 
 ### Model profiles and credentials
 
@@ -487,55 +484,45 @@ sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
 
 ### Sandbox
 
-The sandbox is the security and workspace boundary. The supported
-implementation is `KubernetesGvisorSandboxProvider`. K3s/containerd selects
-gVisor `runsc` through
-`RuntimeClass/agent-dock-gvisor`, with the KVM platform fixed on the node.
-Kubernetes owns placement, cgroup declarations, policy and Pod lifecycle;
-untrusted syscalls are handled by gVisor's userspace application kernel instead
-of directly by the host kernel.
+The sandbox is the security and workspace boundary. The supported ordinary
+Tool implementation is `CubeSandboxProvider`. A fixed-target trusted relay
+reaches CubeAPI for lifecycle calls; CubeMaster schedules the activation to a
+Cubelet, and CubeShim starts a distinct KVM guest. CubeProxy carries the
+private-token Tool protocol to the single exposed guest port 49984. The
+Manager, Runner and model credential never enter that guest.
 
-The Kubernetes boundary is installed from the versioned
-`deploy/helm/agent-dock-execution-plane` chart. Its closed values contract keeps
-the `runsc` RuntimeClass, namespace identities, scoped RBAC, default-deny graph
-and internal-only proxy topology fixed while allowing bounded proxy image,
-resource and placement changes. The Runner is not deployed or exposed by this
-chart; it continues to connect outward through the authenticated Supervisor
-transport. Static rendering is checked in CI, while actual runsc/CNI behavior
-remains a live `sandbox:check` requirement.
+The Cube Tool template is built from the exact AgentDock Git revision, pushed
+by digest to the private in-cluster registry, registered through CubeMaster,
+and accepted only after its status is `READY`. Production startup verifies the
+private cluster/template evidence, pinned Cube v0.6.0 commit, Pod MTU 1450,
+image revision, digest and template specification hash. Its guest CoW root
+filesystem is writable, so the evidence contract does not pretend it has a
+read-only OCI rootfs. Tool execution remains non-root, capability-free,
+credential-free, host-mount-free and deny-all outbound. The live KVM gate
+proves different guest/host kernels, two-tenant Workspace isolation, forbidden
+platform and public egress, bounded output/path handling, cancellation and
+zero orphans.
 
-The CubeSandbox experiment reaches a separately operated Cube plane through
-fixed-target relays. CubeAPI creates one independent KVM guest per activation,
-while CubeProxy carries the private-token Tool protocol to port 49984. Its
-guest CoW root filesystem is writable, so the evidence contract does not
-pretend it has the gVisor Pod's read-only OCI rootfs. The microVM remains
-non-root for Tool execution, capability-free, credential-free, host-mount-free
-and deny-all outbound. See ADR-0052 and
-`docs/CUBESANDBOX_PROVIDER.md`; none of these claims is promoted until
-`cubesandbox:live-check` passes on dedicated hardware.
+There is no runtime selector and no lower-security Tool fallback. Cube ordinary
+Tool execution currently accepts only deny-all, offline environment recipes.
+Recipes with `dependencyHosts` fail closed until Cube has an accepted
+temporary-egress/bootstrap-to-fresh-offline-guest design.
 
-There is no runtime selector. Ordinary Tool execution accepts only deny-all.
-An environment recipe may request dependency access to an immutable list of
-exact HTTPS hosts. The Manager signs a short-lived activation-scoped Ed25519
-capability; a dedicated credential-free CONNECT proxy resolves each request,
-rejects every non-public answer, enforces host/port/connection/byte/duration
-limits, and never joins a platform network. Only the individual recipe command
-receives proxy variables. When setup completes, the Worker kills its process
-group; the Manager snapshots the Workspace, deletes and confirms absence of the
-UID-fenced bootstrap Pod, then restores into a newly created gVisor Pod that
-never had proxy reachability. Offline verification completes in that second
-Pod before its handle is exposed, so warm reuse and all Agent tools remain
-deny-all without relying on runtime NetworkPolicy relabelling. GitHub import remains a separate
-credential-free gVisor Pod in `agent-dock-importers`. It has no DNS or general
-public route: its fixed NetworkPolicy reaches only the capability proxy, and a
-per-import signed grant permits the exact `github.com:443` target with bounded
-time, connections and bytes. Imported repository hooks or code are never executed.
+K3s/gVisor remains a different fixed-purpose boundary for repository import.
+The versioned `deploy/helm/agent-dock-execution-plane` chart keeps the `runsc`
+RuntimeClass, namespace identity, scoped RBAC, default-deny graph and
+internal-only dependency proxy fixed. A public import runs in a separate
+credential-free gVisor Pod in `agent-dock-importers`; its NetworkPolicy reaches
+only the capability proxy, and a per-import signed grant permits the exact
+`github.com:443` target with bounded time, connections and bytes. Imported
+repository hooks or code are never executed. This gVisor path is not available
+to ordinary Agent Tool Calls.
 See
 `docs/SANDBOX_PROVIDER.md`, `docs/NETWORK_MATRIX.md`, and `docs/THREAT_MODEL.md`.
 
 Minimum controls:
 
-- non-root user and read-only root filesystem;
+- non-root user and an immutable registered base-image digest;
 - isolated writable workspace;
 - dropped Linux capabilities and `RuntimeDefault` seccomp;
 - CPU, memory, PID, disk, execution-time, and output limits;
@@ -641,7 +628,7 @@ recovery. See ADR-0024.
    immutable workspace seed, and loads settled session/workspace state.
 7. The selected execution backend reserves Tool authority, activates Pi with the
    fixed remote-tool extension, and executes the agent loop. The first Tool Call
-   atomically materializes or rebinds the exact Session's warm gVisor Pod.
+   asks CubeMaster to schedule a new exact-RunAttempt KVM Tool microVM.
 8. The supervisor spools sequenced events locally, coalesces adjacent text
    deltas, and publishes bounded batches without blocking Pi on each database
    transaction; the control plane persists each batch and returns one cumulative
@@ -656,7 +643,7 @@ recovery. See ADR-0024.
 Steps 1-11 are executable for the bounded sample or controlled-GitHub workspace
 path through the local integration boundary: the control plane acquires a real PostgreSQL
 lease/fence, persists ACK before run,
-activates a hardened Kubernetes/gVisor workspace only on the first Tool Call,
+activates a Cube KVM workspace only on the first Tool Call,
 and receives public text, tool, and terminal events from pinned Pi. Step 8 stores
 each contiguous batch plus command/lease/fence identity, advances the session
 cursor and next sequence atomically, and returns the cumulative ACK only after
@@ -665,9 +652,9 @@ log, including the bounded final patch, is available through SSE and resumes
 after a browser reconnect with `Last-Event-ID`. Step 9 separates Pi and Workspace
 checkpoints: Pi JSONL is saved at every settled Run, while a safe regular-file
 Workspace manifest is captured only after Tool execution. Both are content-
-hashed and stored outside the Tool Sandbox under the current fence. A compatible
-healthy Tool Pod may remain warm; a cold activation restores the committed
-Workspace revision.
+hashed and stored outside the Tool Sandbox under the current fence. The settled
+guest is destroyed; a later coding Run restores the committed Workspace
+revision into a new Cube activation.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
 Runner or Tool Sandbox failure after upload but before terminal publication
 falls back to the previous settled pair. The demo adapter uses a private host directory. The

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalReviewBundleManifestJson } from "@agent-dock/protocol";
+import { OfficialCubeSandboxRuntimeClient } from "../packages/sandbox-manager/src/index.ts";
 import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
@@ -19,8 +21,35 @@ const runtimeDirectory = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
+
+async function readPrivate(path, maximumBytes, label) {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.size < 1 ||
+      metadata.size > maximumBytes
+    ) {
+      throw new Error(`${label} is not a private bounded file`);
+    }
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseJson(value, label) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${label} is not valid JSON`);
+  }
+}
+
 const environment = Object.fromEntries(
-  (await readFile(resolve(runtimeDirectory, ".env"), "utf8"))
+  (await readPrivate(resolve(runtimeDirectory, ".env"), 64 * 1_024, "Production environment"))
     .split(/\r?\n/)
     .filter((line) => line.length > 0)
     .map((line) => {
@@ -56,6 +85,29 @@ const baseUrl = new URL(
 const token = (await readFile(resolve(runtimeDirectory, "secrets/api-token"), "utf8")).trim();
 const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
 const api = new AgentDockApi(fetchFromProduction, token);
+const cubeCluster = parseJson(
+  await readPrivate(
+    resolve(runtimeDirectory, "cubesandbox/cluster.json"),
+    64 * 1_024,
+    "Cube cluster evidence",
+  ),
+  "Cube cluster evidence",
+);
+const cube = new OfficialCubeSandboxRuntimeClient({
+  apiUrl: `http://${cubeCluster.api.host}:${String(cubeCluster.api.port)}`,
+  apiKey: (
+    await readPrivate(
+      resolve(runtimeDirectory, "secrets/cubesandbox-api-key"),
+      4_096,
+      "Cube API key",
+    )
+  ).replace(/\r?\n$/, ""),
+  proxyNodeIp: cubeCluster.proxy.host,
+  proxyPort: cubeCluster.proxy.port,
+  proxyScheme: "http",
+  sandboxDomain: cubeCluster.sandboxDomain,
+  requestTimeoutMs: 30_000,
+});
 const kubeconfigPath = resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig");
 const executionEnvironment = {
   ...process.env,
@@ -262,120 +314,66 @@ async function managedKubernetesPods(namespace) {
   return value.items;
 }
 
-function warmSandboxIdentity(pod, sessionId) {
-  const metadata = pod?.metadata;
-  const annotations = metadata?.annotations;
-  assert.equal(annotations?.["agent-dock.io/session-id"], sessionId);
-  assert.equal(pod?.spec?.runtimeClassName, "agent-dock-gvisor");
-  for (const value of [
-    metadata?.name,
-    metadata?.uid,
-    annotations?.["agent-dock.io/activation-id"],
-    annotations?.["agent-dock.io/attempt-id"],
-    annotations?.["agent-dock.io/environment-version-id"],
-    annotations?.["agent-dock.io/environment-image-revision"],
-    annotations?.["agent-dock.io/sandbox-id"],
-  ]) {
-    assert.equal(typeof value, "string");
-    assert(value.length > 0);
-  }
-  const fencingToken = Number(annotations["agent-dock.io/fencing-token"]);
-  assert(Number.isSafeInteger(fencingToken) && fencingToken > 0);
+function managedCubeForSession(instances, sessionId) {
+  return instances.filter(
+    (instance) =>
+      instance.metadata["agentdock.managed"] === "true" &&
+      instance.metadata["agentdock.provider"] === "cubesandbox" &&
+      instance.metadata["agentdock.session_id"] === sessionId,
+  );
+}
+
+function observeCubeSession(sessionId) {
+  const controller = new AbortController();
+  const observed = new Map();
+  let failure;
+  const task = (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        for (const instance of managedCubeForSession(await cube.list(), sessionId)) {
+          const activationId = instance.metadata["agentdock.activation_id"];
+          if (activationId !== undefined) {
+            observed.set(activationId, {
+              activationId,
+              sandboxId: instance.sandboxId,
+              attemptId: instance.metadata["agentdock.attempt_id"],
+              turnId: instance.metadata["agentdock.turn_id"],
+              fencingToken: Number(instance.metadata["agentdock.fencing_token"]),
+              imageRevision: instance.metadata["agentdock.image_revision"],
+            });
+          }
+        }
+      } catch (error) {
+        failure = error;
+        controller.abort();
+        return;
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    }
+  })();
   return {
-    name: metadata.name,
-    uid: metadata.uid,
-    activationId: annotations["agent-dock.io/activation-id"],
-    attemptId: annotations["agent-dock.io/attempt-id"],
-    environmentVersionId: annotations["agent-dock.io/environment-version-id"],
-    environmentImageRevision: annotations["agent-dock.io/environment-image-revision"],
-    sandboxId: annotations["agent-dock.io/sandbox-id"],
-    fencingToken,
+    values() {
+      return [...observed.values()];
+    },
+    async stop() {
+      controller.abort();
+      await task;
+      if (failure !== undefined) throw failure;
+      return [...observed.values()];
+    },
   };
 }
 
-async function waitForWarmSessionSandbox(sessionId) {
-  const deadline = Date.now() + 15_000;
-  while (true) {
-    const matches = (await managedKubernetesPods("agent-dock-sandboxes")).filter(
-      (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
-    );
-    if (matches.length === 1) return warmSandboxIdentity(matches[0], sessionId);
-    if (matches.length > 1) throw new Error("A Session owns more than one warm Tool Sandbox");
-    if (Date.now() >= deadline) {
-      throw new Error("The completed coding Session did not retain one warm Tool Sandbox");
-    }
+async function waitForNoCubeSession(sessionId) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (managedCubeForSession(await cube.list(), sessionId).length === 0) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
   }
+  throw new Error("Settled GitHub Session retained a Cube microVM");
 }
 
-async function sandboxManagerInventory(request) {
-  const encodedRequest = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
-  const script = [
-    "const {readFile}=await import('node:fs/promises');",
-    "const token=(await readFile('/run/agent-dock-secrets/sandbox-manager-token','utf8')).trim();",
-    "const request=JSON.parse(Buffer.from(process.env.AGENT_DOCK_ACCEPTANCE_REQUEST,'base64url').toString('utf8'));",
-    "const response=await fetch('http://sandbox-manager:4300/internal/v1/sandbox-inventory',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(request)});",
-    "const body=await response.text();",
-    "if(!response.ok){process.stderr.write(body);process.exit(1)}",
-    "process.stdout.write(body);",
-  ].join("");
-  return JSON.parse(
-    await capture(
-      process.execPath,
-      [
-        "scripts/production-compose.mjs",
-        "exec",
-        "-T",
-        "-e",
-        `AGENT_DOCK_ACCEPTANCE_REQUEST=${encodedRequest}`,
-        "supervisor-host",
-        "node",
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      60_000,
-    ),
-  );
-}
-
-async function terminateWarmSessionSandbox(sessionId, sandbox) {
-  const listed = await sandboxManagerInventory({
-    protocolVersion: 1,
-    type: "assignments.list",
-    requestId: crypto.randomUUID(),
-    sandboxId: sandbox.sandboxId,
-  });
-  assert.equal(listed.type, "assignments.listed");
-  const matches = listed.assignments.filter((assignment) => assignment.sessionId === sessionId);
-  assert.equal(
-    matches.length,
-    1,
-    "Sandbox inventory did not contain exactly one Session assignment",
-  );
-  assert.equal(matches[0].containerId, sandbox.uid);
-  const absent = await sandboxManagerInventory({
-    protocolVersion: 1,
-    type: "assignment.terminate_and_confirm",
-    requestId: crypto.randomUUID(),
-    sandboxId: sandbox.sandboxId,
-    assignment: matches[0],
-  });
-  assert.equal(absent.type, "assignment.absent");
-  assert.equal(absent.containerId, sandbox.uid);
-
-  const deadline = Date.now() + 15_000;
-  while (true) {
-    const survivors = (await managedKubernetesPods("agent-dock-sandboxes")).filter(
-      (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
-    );
-    if (survivors.length === 0) break;
-    if (Date.now() >= deadline) throw new Error("Warm Tool Sandbox termination was not observed");
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-  }
-  assert.equal((await managedKubernetesPods("agent-dock-importers")).length, 0);
-}
-
+await cube.checkHealth();
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 const suffix = `${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
@@ -387,7 +385,7 @@ const project = await api.createProject(`GitHub import acceptance ${suffix}`, {
 assert.equal(project.source.kind, "github_public");
 assert.equal(project.source.status, "pending");
 const session = await api.createSession(project);
-
+const cubeObserver = observeCubeSession(session.sessionId);
 const first = await runTurn(
   session.sessionId,
   [
@@ -415,11 +413,16 @@ assert(
   ),
 );
 assert(firstReviewBundle.manifest.changes.changedPaths.includes("test.sh"));
-const firstWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
+await waitForNoCubeSession(session.sessionId);
+const firstCubeMatches = cubeObserver
+  .values()
+  .filter((sandbox) => sandbox.turnId === first.accepted.turnId);
+assert.equal(firstCubeMatches.length, 1, "First GitHub Run did not use exactly one Cube microVM");
+const firstCube = firstCubeMatches[0];
 assert.equal(
-  firstWarmSandbox.environmentImageRevision,
+  firstCube.imageRevision,
   project.environment.imageRevision,
-  "Warm Sandbox did not run the deployed immutable environment revision",
+  "Cube microVM did not run the deployed immutable environment revision",
 );
 
 const second = await runTurn(
@@ -446,13 +449,17 @@ assert(
     "src/main/java/junit_project/Calculator.java",
   ),
 );
-const secondWarmSandbox = await waitForWarmSessionSandbox(session.sessionId);
-assert.equal(secondWarmSandbox.name, firstWarmSandbox.name);
-assert.equal(secondWarmSandbox.uid, firstWarmSandbox.uid);
-assert.equal(secondWarmSandbox.activationId, firstWarmSandbox.activationId);
-assert.equal(secondWarmSandbox.environmentVersionId, firstWarmSandbox.environmentVersionId);
-assert.notEqual(secondWarmSandbox.attemptId, firstWarmSandbox.attemptId);
-assert(secondWarmSandbox.fencingToken > firstWarmSandbox.fencingToken);
+await waitForNoCubeSession(session.sessionId);
+const observedCubeSandboxes = await cubeObserver.stop();
+const secondCubeMatches = observedCubeSandboxes.filter(
+  (sandbox) => sandbox.turnId === second.accepted.turnId,
+);
+assert.equal(secondCubeMatches.length, 1, "Second GitHub Run did not use exactly one Cube microVM");
+const secondCube = secondCubeMatches[0];
+assert.notEqual(secondCube.activationId, firstCube.activationId);
+assert.notEqual(secondCube.sandboxId, firstCube.sandboxId);
+assert.notEqual(secondCube.attemptId, firstCube.attemptId);
+assert(secondCube.fencingToken > firstCube.fencingToken);
 
 const conversation = await api.getConversation(session.sessionId);
 assert.equal(conversation.project.source.kind, "github_public");
@@ -521,7 +528,9 @@ assert.equal(
   firstReviewBundle.manifest.usage.outputTokens + secondReviewBundle.manifest.usage.outputTokens,
   outputTokens,
 );
-await terminateWarmSessionSandbox(session.sessionId, secondWarmSandbox);
+assert.equal((await managedKubernetesPods("agent-dock-importers")).length, 0);
+await waitForNoCubeSession(session.sessionId);
+await cube.close();
 
 const report = {
   accepted: true,
@@ -568,13 +577,13 @@ const report = {
     semanticItems,
     replayAfterSequence: conversation.replayAfterSequence,
   },
-  warmReuse: {
-    podUid: secondWarmSandbox.uid,
-    activationId: secondWarmSandbox.activationId,
-    firstFence: firstWarmSandbox.fencingToken,
-    secondFence: secondWarmSandbox.fencingToken,
-    environmentVersionId: secondWarmSandbox.environmentVersionId,
-    imageRevision: secondWarmSandbox.environmentImageRevision,
+  cubeExecution: {
+    firstActivationId: firstCube.activationId,
+    secondActivationId: secondCube.activationId,
+    distinctMicroVms: firstCube.sandboxId !== secondCube.sandboxId,
+    firstFence: firstCube.fencingToken,
+    secondFence: secondCube.fencingToken,
+    imageRevision: secondCube.imageRevision,
     cleaned: true,
   },
   sourceSnapshot: sourceAfterSecond.split("|").slice(0, 4).join("|"),
@@ -598,13 +607,13 @@ await writeFile(
     `- Input/output tokens: ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)}`,
     `- Semantic transcript: ${String(report.semanticConversation.projectedSourceEvents)} projected source events -> ${String(report.semanticConversation.semanticItems)} UI items`,
     `- Durable replay high-water: ${String(report.semanticConversation.replayAfterSequence)} / ${String(report.semanticConversation.durableEvents)} events`,
-    `- Warm Pod reused: ${report.warmReuse.podUid}`,
-    `- Fencing token advanced: ${String(report.warmReuse.firstFence)} -> ${String(report.warmReuse.secondFence)}`,
+    `- Distinct Cube KVM microVMs: ${String(report.cubeExecution.distinctMicroVms)}`,
+    `- Fencing token advanced: ${String(report.cubeExecution.firstFence)} -> ${String(report.cubeExecution.secondFence)}`,
     `- First Review Bundle: ${report.firstTurn.reviewBundleId} (${report.firstTurn.reviewBundleSha256})`,
     `- Second Review Bundle: ${report.secondTurn.reviewBundleId} (${report.secondTurn.reviewBundleSha256})`,
-    `- Exact Sandbox cleanup: ${String(report.warmReuse.cleaned)}`,
+    `- Exact Sandbox cleanup: ${String(report.cubeExecution.cleaned)}`,
     "",
-    "Both turns changed the imported Java repository, executed tools inside the credential-free gVisor Sandbox, committed immutable Review Bundles and semantic conversation projections, persisted real token usage, resumed SSE from the durable high-water mark without historical delta replay, reused the same physical Pod with a newer writer fence, and then destroyed that exact assignment.",
+    "Both turns changed the imported Java repository, executed tools inside separate credential-free Cube KVM microVMs, committed immutable Review Bundles and semantic conversation projections, persisted real token usage, resumed SSE from the durable high-water mark without historical delta replay, restored the committed Workspace for the follow-up, and left no Tool microVM or importer behind.",
     "",
   ].join("\n"),
   "utf8",

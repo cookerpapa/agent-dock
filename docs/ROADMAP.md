@@ -1,9 +1,11 @@
 # Implementation roadmap
 
 This file preserves the original aspirational phase roadmap, including optional
-subagents and a future multi-node release. The single-node Kubernetes +
-gVisor execution plane and demand-activated warm-Sandbox/event-batching upgrade
-are now implemented under ADR-0039 and ADR-0040. The
+subagents and a future multi-node release. The former single-node Kubernetes +
+gVisor Tool plane and demand-activated warm-Sandbox/event-batching upgrade were
+implemented under ADR-0039 and ADR-0040; ADR-0053 now makes the pinned
+CubeSandbox KVM plane the ordinary Tool runtime while retaining gVisor only for
+repository import and deterministic regression. The
 dependency-ordered Cloud Platform Milestones 1–7 implemented for the current
 private single-host product are tracked in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md) and now include the
@@ -12,9 +14,10 @@ transactional semantic conversation projections under ADR-0049. Do not
 interpret completion of that product plan as a claim that the complete optional
 Phase 5 autonomous subagent tree or a validated multi-node release exists. A
 bounded, human-initiated Candidate Race slice is implemented under ADR-0051.
-An operator-only Tencent CubeSandbox v0.6.0 Provider experiment is implemented
-under ADR-0052 on `experiment/cubesandbox-provider`; it does not replace the
-supported gVisor plane until its dedicated-cluster KVM gate is run and reviewed.
+Tencent CubeSandbox v0.6.0 was evaluated under ADR-0052 and promoted under
+ADR-0053 after its real KVM gate proved two-tenant Workspace isolation,
+deny-all egress, cancellation and zero-orphan cleanup. The bundled single-node
+profile remains local evidence rather than a multi-node production claim.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -165,32 +168,28 @@ Exit criteria: cross-tenant filesystem access, host credential access, runaway
 processes, and unapproved dangerous actions are blocked in repeatable tests.
 
 Current status: the tool-execution boundary is complete for the supported
-single-host slice. ADR-0029 splits the trusted Pi Runner from the Sandbox
+single-host slice. ADR-0029 splits the trusted Pi Worker pool from the Sandbox
 Manager; Pi's built-ins are disabled and replaced through public operation
-APIs. ADR-0039 moves lifecycle ownership behind a least-privilege Kubernetes
-client, with no application-held Docker or containerd socket. ADR-0040 adds a
-logical reservation so pure chat receives no Pod; the first Tool Call activates
-a credential-free, networkless, non-root gVisor Pod that is warm-reused only by
-the exact Session under newer fencing authority. Production
-acceptance proves remote `bash/edit`, checkpoint/diff capture, cancellation,
-exact cleanup, scoped Kubernetes authority, and secret absence. The old
-whole-Pi ordinary-Docker runner and its demo/test protocol have been removed.
-ADR-0045 can satisfy that first Tool activation from a small pool of
-never-assigned, empty, default-deny gVisor Pods. Claim is single-consumption and
-UID/resourceVersion fenced; a Pod that has seen tenant code can only remain
-warm for that exact Session or be destroyed, never re-enter the clean pool.
+APIs. ADR-0053 makes CubeSandbox the primary physical Provider. A logical
+reservation means pure chat creates no guest; the first Tool Call schedules a
+credential-free, networkless, non-root KVM microVM for one exact RunAttempt.
+Production acceptance proves remote `bash/edit`, checkpoint/diff capture,
+cancellation, exact cleanup, secret absence and two-tenant guest isolation. A
+completed Run destroys its guest, and a follow-up restores the committed
+Workspace into a new activation because Cube v0.6.0 cannot prove a safe
+higher-fence metadata rebind. The gVisor Provider and clean-prewarm design
+remain historical/regression code paths rather than ordinary production Tool
+fallbacks.
 User/project extensions, interactive approvals, and mutually hostile public
 tenants are still outside the claim. The owner explicitly deferred extension
 and approval work, so those items are not represented as silently complete.
 
 ADR-0030 adds the long-term Provider seam: one provider-neutral Manager owns
 capabilities and identity while the concrete Provider owns runtime operations.
-ADR-0039 supersedes the direct-Docker lifecycle with
-`KubernetesGvisorSandboxProvider`: K3s/containerd maps a fixed RuntimeClass to
-`runsc`/KVM, while namespace RBAC and immutable Pod templates constrain the
-Manager. The gate proves guest identity, resources, default-deny networking,
-`/proc` and credential isolation, cross-tenant workspaces, bounded output,
-cancellation, cleanup and the real Pi repair path.
+`CubeSandboxProvider` now owns ordinary physical lifecycle through bounded
+CubeAPI/CubeProxy clients and fixed relays. K3s/containerd maps the retained
+importer RuntimeClass to `runsc`/KVM. Both gates prove their actual physical
+boundary rather than inferring isolation from configuration.
 
 ADR-0040 removes eager per-Run Pod creation and per-event remote ACK blocking.
 It separates conversation and Workspace checkpoints, uses exact Session-scoped
@@ -203,11 +202,11 @@ now proportional to semantic text/Tool items; only active unprojected events
 remain on the initial SSE replay path.
 
 ADR-0042 makes the Project development environment durable and auditable. Runs
-snapshot an append-only environment version; Manager policy and in-gVisor
+snapshot an append-only environment version; Manager policy and in-guest
 toolchain preflight fail closed on drift; successful Tool checkpoints persist
-concrete runtime evidence; and warm reuse now also requires exact environment
-identity. Arbitrary user Dockerfiles remain intentionally outside this slice
-until a separate trusted image-build and provenance plane exists.
+concrete Cube runtime evidence. Cube activations are not warm-rebound.
+Arbitrary user Dockerfiles remain intentionally outside this slice until a
+separate trusted image-build and provenance plane exists.
 
 This bounded tool-sandbox slice is resume-ready.
 
@@ -301,14 +300,14 @@ Exit criteria: another developer can deploy the system and reproduce the main
 demo and failure tests from the documentation.
 
 Current status: the single-node deployment and evidence subset is complete.
-The host installer provisions K3s, containerd, `runsc`/KVM, RuntimeClass, scoped
-RBAC and NetworkPolicy; production deployment imports the pinned Tool image and
-runs the normal browser flow through Kubernetes Pods. The execution resources
-are packaged in a closed Helm chart with fixed runtime/RBAC/network identities,
-two proxy replicas and a PDB. CI, SBOM/image scanning, encrypted backup/restore,
+The host installer provisions the retained K3s/gVisor importer and the pinned
+Cube v0.6.0 local KVM plane. Production registers a digest-pinned,
+current-commit Cube Tool template and runs the normal browser flow through
+demand-created guests. CI, SBOM/image scanning, encrypted backup/restore,
 architecture/threat-model documentation and reproducible security/production
-gates exist. A multi-node cluster, external CSI/CNI operating profile and demo
-video remain future work and are not implied by the single-host release.
+gates exist. A dedicated multi-node Cube profile, external storage/network
+operating profile and demo video remain future work and are not implied by the
+single-host release.
 
 ## Expected calendar time
 

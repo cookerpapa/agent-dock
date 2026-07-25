@@ -94,7 +94,7 @@ extension-policy support would overstate the current boundary.
 - [x] Prove the production topology across control-plane reconnect/scale, Supervisor fresh boot/retirement, S3 restore, cancellation, secret audit, and cleanup
 - [ ] Design mTLS/SPIFFE credentials for a future multi-host Kubernetes topology
 
-## Trusted Pi Runner and remote Tool Sandbox slice
+## Trusted Pi Runner and remote Tool Sandbox slice (gVisor Tool history; superseded by ADR-0053)
 
 - [x] ADR-0029: keep Pi/model auth trusted and route untrusted tools to a separate sandbox
 - [x] Add closed Manager/tool-worker protocols with activation capabilities and exact assignment identity
@@ -131,12 +131,12 @@ extension-policy support would overstate the current boundary.
 - [x] Fence Pod assignment/deletion with tenant/session/Turn/Attempt annotations and Kubernetes UID preconditions
 - [x] Prove full production restart/scale/backup recovery through the Kubernetes gVisor execution plane
 
-## Experimental CubeSandbox microVM Provider
+## Primary CubeSandbox microVM Provider
 
 - [x] Research TencentCloud/CubeSandbox v0.6.0 control, data, template,
   authentication, network and Kubernetes deployment contracts
-- [x] ADR-0052: keep gVisor supported/default and add only an operator-selected
-  Cube KVM experiment behind `SandboxProvider`
+- [x] ADR-0052: evaluate an operator-selected Cube KVM Provider behind
+  `SandboxProvider`
 - [x] Add a digest-pinned, credential-free Cube Tool template and prove its
   Tool protocol, fixed toolchain, traversal rejection and content checkpoint
   in a local compatibility gate
@@ -148,10 +148,16 @@ extension-policy support would overstate the current boundary.
 - [x] Add a gated real-Cube acceptance test for two tenants, private/platform
   and public network denial, credential absence, cancellation and orphan
   inventory
-- [ ] Run and publish the real KVM acceptance/latency evidence on a dedicated
-  Cube cluster; the local Docker template gate is not isolation evidence
+- [x] ADR-0053: promote Cube to ordinary Tool execution, retain Pi/model state
+  in the trusted Worker pool, and keep gVisor only for import/regression
+- [x] Install the pinned local KVM plane, register a current-commit immutable
+  template, and pass the real two-tenant/deny-all/cancellation/zero-orphan gate
+- [x] Diagnose and enforce the WSL/K3s MTU path (`agentdock0=1500`,
+  Flannel/Pod=1450) so CubeProxy responses cannot be black-holed
+- [x] Make normal production commands fail closed on Cube cluster/template
+  evidence and reserve stale-template tolerance only for inspection/teardown
 - [ ] Review Cube upgrade/node-loss drills and upstream state/idempotency issues
-  before deciding whether to promote or remove the experiment
+  before claiming a dedicated multi-node public deployment
 
 ## Controlled public GitHub workspace slice
 

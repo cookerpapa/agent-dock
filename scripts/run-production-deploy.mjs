@@ -25,6 +25,7 @@ function run(script, args = []) {
 }
 
 await run("scripts/init-production.mjs");
+await run("scripts/init-cubesandbox-runtime.mjs");
 await run("scripts/production-compose.mjs", ["build"]);
 await run("scripts/sync-kubernetes-tool-image.mjs");
 await run("scripts/production-compose.mjs", ["up", "--detach", "--wait", "--remove-orphans"]);

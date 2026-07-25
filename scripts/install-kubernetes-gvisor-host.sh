@@ -132,6 +132,12 @@ kubelet-arg:
 node-label:
   - agent-dock.io/sandbox-runtime=gvisor
 EOF
+if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
+  cat >>/etc/rancher/k3s/config.yaml <<'EOF'
+node-ip: "10.255.255.254"
+flannel-iface: "agentdock0"
+EOF
+fi
 
 cat >/etc/containerd/runsc.toml <<'EOF'
 [runsc_config]
@@ -214,6 +220,22 @@ cat >/usr/local/libexec/agent-dock-prepare-k3s-wsl <<'EOF'
 #!/bin/sh
 set -eu
 
+# BEGIN AGENT_DOCK_WSL_NODE_INTERFACE
+# AgentDock gives K3s a stable WSL node address on an MTU-bounded
+# dummy interface. Binding Flannel to loopback would inherit its 65536-byte
+# MTU and create a black-hole for ordinary Ethernet-sized Pod traffic.
+if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
+  if ! ip link show dev agentdock0 >/dev/null 2>&1; then
+    ip link add name agentdock0 type dummy
+  fi
+  ip link set dev agentdock0 mtu 1500 up
+  ip address replace 10.255.255.254/32 dev agentdock0
+  if ip -4 -o address show dev lo | grep -q ' 10.255.255.254/32 '; then
+    ip address del 10.255.255.254/32 dev lo
+  fi
+fi
+# END AGENT_DOCK_WSL_NODE_INTERFACE
+
 # Kubernetes bidirectional hostPath propagation and CubeSandbox's node
 # bootstrap require the host root mount to be recursively shared.
 mount --make-rshared /
@@ -280,6 +302,11 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 /usr/local/bin/k3s kubectl wait --for=condition=Ready node --all --timeout=120s >/dev/null
+if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
+  grep -qx 'FLANNEL_MTU=1450' /run/flannel/subnet.env
+  [[ "$(< /sys/class/net/flannel.1/mtu)" == "1450" ]]
+  [[ "$(< /sys/class/net/cni0/mtu)" == "1450" ]]
+fi
 /usr/local/bin/helm upgrade --install agent-dock-execution-plane \
   "${REPOSITORY_ROOT}/deploy/helm/agent-dock-execution-plane" \
   --namespace default \

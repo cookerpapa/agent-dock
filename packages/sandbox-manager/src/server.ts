@@ -217,7 +217,10 @@ export class SandboxManagerServer {
       await reply.code(200).send({ status: "ok" });
     });
     this.#server.get(SANDBOX_MANAGER_READY_PATH, async (_request, reply) => {
-      this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
+      this.#metrics?.sandboxPrewarm.set(
+        { provider: this.#manager.providerId },
+        this.#manager.cleanPrewarmCount,
+      );
       await reply.code(this.#ready ? 200 : 503).send({
         status: this.#ready ? "ready" : "not_ready",
       });
@@ -244,9 +247,12 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.create(message),
           });
-          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxActive.set(
+            { provider: this.#manager.providerId },
+            this.#manager.activeCount,
+          );
           this.#metrics?.sandboxPrewarm.set(
-            { provider: "gvisor" },
+            { provider: this.#manager.providerId },
             this.#manager.cleanPrewarmCount,
           );
           await reply.code(200).send(reserved);
@@ -273,9 +279,12 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.release(message),
           });
-          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxActive.set(
+            { provider: this.#manager.providerId },
+            this.#manager.activeCount,
+          );
           this.#metrics?.sandboxPrewarm.set(
-            { provider: "gvisor" },
+            { provider: this.#manager.providerId },
             this.#manager.cleanPrewarmCount,
           );
           await reply.code(200).send(released);
@@ -289,9 +298,12 @@ export class SandboxManagerServer {
             kind: "sandbox",
             run: () => this.#manager.stop(message.activationId, message.assignment),
           });
-          this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
+          this.#metrics?.sandboxActive.set(
+            { provider: this.#manager.providerId },
+            this.#manager.activeCount,
+          );
           this.#metrics?.sandboxPrewarm.set(
-            { provider: "gvisor" },
+            { provider: this.#manager.providerId },
             this.#manager.cleanPrewarmCount,
           );
           await reply.code(200).send({
@@ -346,8 +358,14 @@ export class SandboxManagerServer {
           kind: "tool",
           run: () => this.#manager.execute(capability, message, controller.signal),
         });
-        this.#metrics?.sandboxActive.set({ provider: "gvisor" }, this.#manager.activeCount);
-        this.#metrics?.sandboxPrewarm.set({ provider: "gvisor" }, this.#manager.cleanPrewarmCount);
+        this.#metrics?.sandboxActive.set(
+          { provider: this.#manager.providerId },
+          this.#manager.activeCount,
+        );
+        this.#metrics?.sandboxPrewarm.set(
+          { provider: this.#manager.providerId },
+          this.#manager.cleanPrewarmCount,
+        );
         await reply.code(200).send(response);
       } catch (error: unknown) {
         await this.#failure(reply, error);

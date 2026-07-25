@@ -3,8 +3,8 @@
 This runbook deploys AgentDock's currently supported production slice on one
 Linux Docker host. The result is a durable, authenticated, private multi-tenant
 service with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral
-remote control plane, one shared trusted Pi Agent Runner, separate one-shot Tool
-Sandboxes, and a static Web UI. Multiple tenants can share this runtime without
+remote control plane, a bounded trusted Pi Worker pool, separate one-shot Cube
+KVM Tool microVMs, and a static Web UI. Multiple tenants can share this runtime without
 sharing their API resources, event streams, quotas, or checkpoint namespaces.
 The loopback product enables capacity-bounded browser account registration so
 the isolation can be exercised from separate browser contexts; an operator can
@@ -43,11 +43,10 @@ Controlled public GitHub import and immutable workspace seeds are recorded in
 The trusted Pi Runner and remote Tool Sandbox split is recorded in
 [ADR-0029](adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md).
 The provider-neutral runtime boundary is recorded in
-[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md), the gVisor-only
-decision in [ADR-0038](adr/0038-gvisor-only-tool-execution.md), and the current
-Kubernetes-managed execution plane in
-[ADR-0039](adr/0039-kubernetes-gvisor-execution-plane.md) and
-[ADR-0040](adr/0040-demand-activated-warm-sandboxes-and-batched-events.md).
+[ADR-0030](adr/0030-pluggable-sandbox-provider-boundary.md). ADR-0038 and
+ADR-0039 record the retained Kubernetes/gVisor importer path; the primary Cube
+KVM Tool execution decision is
+[ADR-0053](adr/0053-cubesandbox-primary-execution-plane.md).
 Versioned environments and capability-scoped dependency setup are recorded in
 [ADR-0042](adr/0042-versioned-project-environment-plane.md) and
 [ADR-0044](adr/0044-capability-scoped-dependency-egress.md).
@@ -63,8 +62,9 @@ recovery, and release evidence are recorded in
 - Ubuntu amd64 with systemd and working `/dev/kvm`. On WSL2, enable nested
   virtualization and use the native WSL services rather than Docker Desktop's
   sandbox runtime.
-- Docker Engine/Compose for the trusted product plane, plus K3s/containerd and
-  gVisor `runsc`/KVM for the untrusted execution plane. The validated host uses
+- Docker Engine/Compose for the trusted product plane; K3s/containerd and
+  gVisor `runsc`/KVM for the restricted importer; and the pinned CubeSandbox
+  v0.6.0 control/execution plane for ordinary Tool microVMs. The validated host uses
   Docker Engine `29.6.2`, Compose `5.1.3`, K3s `v1.36.2+k3s1`, containerd
   `2.3.2-k3s2`, and `runsc release-20260714.0`.
 - Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
@@ -76,7 +76,14 @@ recovery, and release evidence are recorded in
   generated runtime directory or administer Docker/K3s/containerd is inside the
   trusted computing base. No application service receives a runtime socket.
 
-Install and attest the host first:
+Install the exact lockfile without package lifecycle scripts:
+
+```bash
+npm ci --ignore-scripts
+npm run dependencies:harden
+```
+
+Install and attest the retained importer boundary first:
 
 ```bash
 sudo AGENT_DOCK_HOST_USER="$USER" ./scripts/install-kubernetes-gvisor-host.sh
@@ -96,14 +103,38 @@ configuration retains `network = "sandbox"` but disables host/software GSO;
 the public importer pins Git HTTP/1.1. `npm run sandbox:check` performs a real
 exact-commit import so this compatibility path cannot silently regress.
 
+Initialize and install Cube next. The cluster installer requires root because
+it reads the K3s control-plane kubeconfig, verifies KVM and mutates the node
+network:
+
+```bash
+npm run production:init
+npm run cubesandbox:init
+sudo --preserve-env=PATH node scripts/install-cubesandbox-k3s.mjs
+```
+
+The bundled WSL2 profile creates `agentdock0` with MTU 1500 and enforces
+Flannel/Pod MTU 1450. It writes private cluster evidence and rejects an
+unauthenticated, unpinned or incorrectly routed Cube plane. This single-node
+profile is local validation only; dedicated control/compute nodes, XFS storage
+and failure/upgrade drills are required before a public production claim.
+
+Commit the AgentDock source, then build and register the Tool template for that
+exact commit:
+
+```bash
+sudo --preserve-env=PATH node scripts/register-cubesandbox-tool-template.mjs
+```
+
+Production start fails closed unless the READY template's Git revision, image
+digest and specification hash match the running product revision.
+
 ## First deployment
 
-Install the exact lockfile without running package lifecycle scripts, then run
+After the host, Cube cluster and current-commit template gates above pass, run
 the idempotent deployment entry point:
 
 ```bash
-npm ci --ignore-scripts
-npm run dependencies:harden
 npm run production:deploy
 ```
 
@@ -117,12 +148,13 @@ AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32 \
 npm run production:deploy
 ```
 
-The first invocation creates `deploy/production/runtime/`, generates private
-random credentials and stable logical IDs, builds all seven pinned application
-images, migrates and bootstraps PostgreSQL, creates a private checkpoint bucket,
-and waits for every long-running service to become healthy. A completed runtime
-directory is reused on later invocations. A non-empty partial directory is
-rejected rather than silently replacing credentials.
+Initialization creates `deploy/production/runtime/`, generates private random
+credentials and stable logical IDs, and preserves them across later
+invocations. Deployment validates the pinned Cube cluster and READY template,
+builds the trusted application images, migrates and bootstraps PostgreSQL,
+creates a private checkpoint bucket, and waits for every long-running service
+to become healthy. A non-empty partial runtime directory is rejected rather
+than silently replacing credentials.
 
 The default ingress is `http://127.0.0.1:8080`. Open it, create a username and
 password, and continue directly to the conversation product. Login persists in
@@ -216,11 +248,11 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
                                                    |
                                              Sandbox Manager
                                                    |
-                                            scoped Kubernetes API
+                                  fixed CubeAPI / CubeProxy relays
                                                    |
-                                      K3s -> containerd -> runsc/KVM
+                              CubeMaster -> Cubelet -> CubeShim/KVM
                                                    |
-                               demand-activated warm Tool Pod (default-deny)
+                           demand-activated one-shot Tool microVM (deny-all)
 ```
 
 The optional `github-gateway` is the only service that reads the GitHub App
@@ -255,27 +287,28 @@ routes `read/write/edit/bash` through the private `sandbox-control` network. Pi
 and the loopback Model Gateway receive a turn capability; that environment is
 never forwarded to remote bash.
 
-The separate `sandbox-manager` runs non-root with a private least-privilege
-kubeconfig. It has no Docker/containerd socket, database, S3, provider,
-enrollment, GitHub or tenant credential and exposes only authenticated bounded
-lifecycle/tool/inventory operations. It constructs only
-`KubernetesGvisorSandboxProvider`; the former provider selector and direct
-Docker implementations do not exist. A credential-free relay gives this
-internal-network service TCP reachability to the host API without receiving the
-kubeconfig. Readiness starts a real gVisor Pod and every activation is
-re-inspected for RuntimeClass, Pod UID and guest-kernel identity. Capability
-authorization and assignment fencing remain above the Provider implementation.
-Tool Pods are demand-activated on the first Tool Call, not for pure chat. A
-healthy Pod is dedicated to one exact tenant/project/workspace/session and may
-remain warm across later Runs under a fresh fence until idle TTL/LRU eviction.
-The Manager also maintains two optional tenant-free `clean-prewarm` gVisor Pods.
-They contain empty volumes and no assignment, are consumed exactly once by a
-first Tool activation, and can never be returned after tenant code runs.
-They run as UID/GID `1000:1000`, with
-`runtimeClassName: agent-dock-gvisor`, default-deny network,
-no ServiceAccount token, host namespace/path/device/socket, inherited
-credential, published port or writable root filesystem, and are removed after
-failure, cancellation, timeout, revision mismatch, eviction, or shutdown.
+The separate `sandbox-manager` runs non-root. It has no Docker/containerd
+socket, database, S3, model, enrollment, GitHub or tenant credential and
+exposes only authenticated bounded lifecycle/tool/inventory operations. It
+constructs `CubeSandboxProvider` for ordinary Tool execution. Two
+credential-free relays can dial only the configured private CubeAPI and
+CubeProxy endpoints; they cannot select another destination. The Cube API key
+is a mode-0600 Manager-only file, and the returned per-guest traffic token
+never reaches Pi, the model or Tool code.
+
+Capability authorization and assignment fencing remain above the Provider.
+Tool microVMs are demand-activated on the first Tool Call, not for pure chat.
+Every guest is dedicated to one exact
+tenant/project/workspace/session/RunAttempt, runs Tool code as UID/GID
+`1000:1000`, has no platform credential, host mount/runtime socket or public
+network, and is removed after completion, failure, cancellation or timeout.
+Cube v0.6.0 lacks the metadata CAS required for safe warm rebind, so the
+production clean-prewarm target is zero and no used guest is ever reassigned.
+A later coding Run restores the committed Workspace into a new microVM.
+
+The Manager retains a private least-privilege kubeconfig only for the separate
+exact-commit gVisor importer. That authority cannot make an ordinary Tool Call
+use a Kubernetes Pod.
 Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
 thread.
 
@@ -451,10 +484,11 @@ never guesses current provider pricing.
 The trusted Supervisor decrypts the exact snapshotted version and gives its
 in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
 capability. The capability is revoked when the activation settles and never
-crosses the remote-tool RPC boundary. Tool Pods have no network at all.
+crosses the remote-tool RPC boundary. Tool microVMs have no outbound network.
 Treat the Supervisor, Sandbox Manager, PostgreSQL, private runtime directory,
-K3s/containerd/runsc and host authority as the trusted computing base; this is not a mutually
-hostile public-SaaS sandbox.
+Cube control/compute plane, K3s/containerd/runsc importer plane and host
+authority as the trusted computing base; this is not a mutually hostile
+public-SaaS deployment.
 
 ## Controlled GitHub workspaces
 
@@ -541,9 +575,9 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 - `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
   exited successfully;
 - no `tool-sandbox-image` service is running;
-- no assigned `workload=tool-sandbox`, dependency-bootstrap or importer Pod
-  remains after explicit Session retirement; up to the configured two
-  tenant-free `workload=clean-prewarm` Pods remain as steady-state capacity;
+- no AgentDock Cube activation remains after Run settlement and no
+  dependency-bootstrap or importer Pod remains after its operation;
+- the Cube clean-prewarm target is zero;
 - one current Supervisor boot is ready for the configured stable Supervisor ID.
 
 `production:up` includes Compose orphan cleanup. An upgrade from the former
@@ -690,7 +724,8 @@ Compose environment variables, command arguments, Git, issue trackers, or logs.
 ## Reproducible production acceptance
 
 Before the full topology gate, the isolated execution plane can be reproduced
-without model tokens:
+without model tokens. This is the retained gVisor importer/regression boundary,
+not the primary Cube Tool gate:
 
 ```bash
 npm run sandbox:check
@@ -702,13 +737,23 @@ effective Pod/resource policy, network isolation, `/proc`/credential
 absence, cross-tenant workspaces, path/symlink defense, bounded output,
 cancellation, cleanup, and the real Pi remote-tool repair loop.
 
+The primary boundary requires the registered current-commit template and the
+real KVM gate:
+
+```bash
+npm run cubesandbox:template-check
+npm run cubesandbox:live-check
+```
+
 Run the destructive acceptance topology separately from a real deployment:
 
 ```bash
 npm run production:check
 ```
 
-The command creates a random project name, private temporary runtime, random
+The command explicitly selects the deterministic gVisor test Provider so it can
+run in isolated CI without mutating or depending on a persistent Cube cluster.
+Normal `production:up` does not use that override. The command creates a random project name, private temporary runtime, random
 loopback port, fresh volumes, and fresh credentials. It builds images, starts
 real PostgreSQL and MinIO, enables bounded self-registration, and proves invalid
 and duplicate requests, atomic owner creation, plus a real concurrent race at
@@ -784,23 +829,24 @@ quota and modify the configured tenant by adding a project/session; it is
 therefore guarded and excluded from routine CI. During release validation,
 confirm the Pi runtime remains inside the trusted non-root Supervisor, that no
 application owns a Docker/containerd socket, that the Manager's Kubernetes
-credential remains limited to two execution namespaces plus one named
-RuntimeClass read, and that the transient Tool Pod has
-default-deny networking and no credential-bearing environment or mount. Rotate or
-revoke a temporary test key afterward. Any broader claim requires its own ADR,
-threat model, and acceptance evidence.
+credential remains limited to the importer resources, and that each transient
+Cube Tool guest has deny-all outbound networking and no credential-bearing
+environment or mount. Rotate or revoke a temporary test key afterward. Any
+broader claim requires its own ADR, threat model, and acceptance evidence.
 
 To validate the semantic conversation read model and trusted provider relay
 without depending on GitHub import, run the focused live gate:
 
 ```bash
-AGENT_DOCK_LIVE_SEMANTIC_CHECK=1 npm run production:semantic-check
+AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 npm run production:semantic-check
 ```
 
-It submits one real-model pure-chat Run and requires zero Tool Sandbox
-activations, then submits a second Run that creates and verifies a file in a
-real gVisor Tool Pod. It checks positive provider token usage, one terminal
+It submits one real-model pure-chat Run and requires zero Cube activation, then
+submits two coding Runs in the same Session. Each coding Run executes tools in
+a different Cube KVM guest; the second restores and modifies the first Run's
+committed Workspace. It checks positive provider token usage, one terminal
 semantic projection per Turn, source-event-to-transcript compaction, replay at
-the durable high-water mark, and exact Sandbox assignment cleanup. The
+the durable high-water mark, Cube inventory cleanup and cold multi-round
+Workspace continuity. The
 redacted result is written to
-`docs/reports/semantic-conversation-acceptance-latest.{json,md}`.
+`docs/reports/cubesandbox-production-acceptance-latest.{json,md}`.

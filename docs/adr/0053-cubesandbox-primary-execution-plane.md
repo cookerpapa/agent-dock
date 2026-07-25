@@ -121,6 +121,12 @@ recommended production topology. The install profile therefore:
   address while preserving the virtual Host header;
 - keeps CubeEgress enabled and every Agent Tool VM deny-all by default.
 
+On WSL, K3s receives its stable `/32` node address through a dedicated
+`agentdock0` dummy interface with MTU 1500. Flannel and Pod MTU must both be
+1450. Binding Flannel to the 65536-byte loopback interface is rejected: it
+advertises an unusable jumbo MSS and black-holes ordinary responses between
+CubeProxy and CubeNode once they exceed the physical path MTU.
+
 This profile must not be described as a multi-node production deployment.
 Production requires dedicated control and compute nodes, dedicated XFS
 storage, private routing/firewalls and repeatable node-loss/upgrade drills.
@@ -153,8 +159,9 @@ Cube becomes the running default only after the exact v0.6.0 deployment passes:
 6. traversal, symlink, output, process, memory and timeout limits;
 7. cancellation and exact orphan cleanup;
 8. content checkpoint and cold restore;
-9. two real Pi/model Tool Runs;
-10. sanitized latency and resource evidence.
+9. chat-only execution with zero Cube microVM creation;
+10. two real Pi/model Tool Runs, including a same-Session Workspace restore;
+11. sanitized latency and resource evidence.
 
 Failure of any gate keeps the currently running product on its last validated
 configuration; it must not be hidden by falling back to local process or

@@ -963,25 +963,32 @@ export async function runToolWorker(): Promise<void> {
         return;
       }
       if (message.type === "worker.capture") {
-        if (active !== undefined) {
-          throw new ToolWorkerError(
-            "tool_operation_overlap",
-            "Tool capture overlapped an operation",
-          );
+        try {
+          if (active !== undefined) {
+            throw new ToolWorkerError(
+              "tool_operation_overlap",
+              "Tool capture overlapped an operation",
+            );
+          }
+          await writeOutput({
+            toolWorkerProtocolVersion: 1,
+            type: "worker.captured",
+            activationId,
+            requestId: message.requestId,
+            workspace: encodeWorkspaceSnapshotBlob(
+              await captureWorkspaceSnapshot(TOOL_WORKSPACE_DIRECTORY),
+            ),
+            workspacePatch: await collectGitWorkspacePatch(
+              TOOL_WORKSPACE_DIRECTORY,
+              safeToolEnvironment(),
+            ),
+          });
+        } catch (error: unknown) {
+          // Preserve request correlation for a capture-specific failure. Without
+          // it, the bridge can only fail the entire worker and the caller loses
+          // the distinction between an invalid Workspace and a dead runtime.
+          await fail(error, { requestId: message.requestId });
         }
-        await writeOutput({
-          toolWorkerProtocolVersion: 1,
-          type: "worker.captured",
-          activationId,
-          requestId: message.requestId,
-          workspace: encodeWorkspaceSnapshotBlob(
-            await captureWorkspaceSnapshot(TOOL_WORKSPACE_DIRECTORY),
-          ),
-          workspacePatch: await collectGitWorkspacePatch(
-            TOOL_WORKSPACE_DIRECTORY,
-            safeToolEnvironment(),
-          ),
-        });
         return;
       }
 

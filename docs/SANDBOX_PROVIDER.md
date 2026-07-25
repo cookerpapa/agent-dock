@@ -2,118 +2,111 @@
 
 ## Supported boundary
 
-AgentDock has exactly one supported and live-validated untrusted execution
-provider: `KubernetesGvisorSandboxProvider`. It creates Kubernetes Pods through the
-official JavaScript client. Every Tool Pod selects
-`runtimeClassName: agent-dock-gvisor`; K3s/containerd maps that class to the
-`io.containerd.runsc.v1` shim, whose configuration fixes `platform = "kvm"`,
-`network = "sandbox"`, and disables host/software GSO on the validated WSL2
-network path.
+AgentDock has one supported ordinary Tool execution Provider:
+`CubeSandboxProvider`. It creates independent KVM guests through the pinned
+Tencent CubeSandbox v0.6.0 CubeAPI/CubeMaster/Cubelet/CubeShim plane.
 
-There is no tenant-, prompt- or model-controlled runtime selector,
-runc/systrap fallback, direct-Docker provider, Docker Desktop sandbox path, or
-paid managed-provider branch. Missing KVM, RuntimeClass, network policy, image,
-RBAC, or live gVisor attestation makes the default Manager unready.
+`KubernetesGvisorSandboxProvider` remains executable only for:
 
-ADR-0030 owns the provider-neutral contract and ADR-0039 is the current
-execution-plane decision.
+- the exact-commit repository importer and dependency bootstrap boundary;
+- the explicit deterministic production regression gate.
 
-The `experiment/cubesandbox-provider` branch also contains an operator-only
-`CubeSandboxProvider` for Tencent CubeSandbox v0.6.0 KVM microVMs. It is not a
-production fallback and is never selected by browser/model input. It remains
-unvalidated until a dedicated Cube cluster passes the opt-in live gate. See
-[`CUBESANDBOX_PROVIDER.md`](CUBESANDBOX_PROVIDER.md) and ADR-0052.
+It is not an ordinary production Tool fallback. There is no tenant-, prompt-,
+browser- or model-controlled runtime selector, local-process Provider,
+ordinary-runc Provider, Docker Desktop path or paid managed-provider branch.
+Missing KVM, Cube authentication, closed network policy, current-commit READY
+template or live runtime evidence makes production unready.
+
+ADR-0030 owns the provider-neutral contract, ADR-0052 records the Cube
+evaluation, and ADR-0053 is the current execution-plane decision.
 
 ## Layering
 
 ```text
-Trusted Pi Runner
+Trusted Pi Worker pool
     | authenticated Tool RPC + activation capability
     v
 ToolSandboxManager
     | authorization, replay control, assignment fencing
     v
-KubernetesGvisorSandboxProvider
-    | scoped Kubernetes API: Pod/log/attach/exec + one RuntimeClass read
+CubeSandboxProvider
+    | fixed CubeAPI lifecycle + private-token CubeProxy data path
     v
-K3s -> containerd -> runsc/KVM
+CubeMaster -> Cubelet -> CubeShim/KVM
     v
-Untrusted Tool Pod
-    | /workspace + /tmp; no platform credential or network
+Untrusted Tool microVM
+    | /workspace; no platform credential or outbound network
 ```
 
-The Manager has a private kubeconfig limited to Pod operations in two
-namespaces, NetworkPolicy inspection there, and `get` on one named
-RuntimeClass; it has no Docker or containerd socket. The Runner and Tool Pod
-receive neither. A credential-free
-TCP relay connects the Manager's internal Compose network to the host K3s API;
-the relay has no volume, secret, Kubernetes credential, or application API.
+The Pi Worker has no Cube credential or Kubernetes credential. The Manager
+holds a mode-0600 CubeAPI key and reaches CubeAPI/CubeProxy through
+credential-free fixed-target relays. The relays cannot dial a destination
+selected by a request. The guest receives neither the API key nor its private
+traffic token.
+
+The Manager separately holds a least-privilege kubeconfig for importer Pods. It
+has no Docker/containerd socket. No Tool or importer workload receives a
+ServiceAccount token.
 
 ## Provider contract
 
-The provider implements:
+The Provider implements:
 
+- `checkHealth` and a real KVM runtime probe;
 - `create`, `exec`, `readFile`, `writeFile`, `snapshot` and `inspect`;
-- idempotent `stop`/`destroy` with UID-preconditioned deletion;
+- cancellation plus idempotent `stop`/`destroy`;
 - exact assignment inventory and orphan reconciliation;
-- a separate credential-free exact-commit public GitHub importer;
-- `checkHealth` and `close`.
+- `close`.
 
-The immutable handle binds API version, tenant, session, turn, Run Attempt,
-Supervisor boot, command, lease, fence, Pod name and Pod UID. Identity is copied
-to Pod annotations. Every operation re-reads and compares that identity; a stale
-handle cannot exec into or delete a replacement Pod.
+The immutable handle binds API version, tenant, project, Workspace, Session,
+Turn, RunAttempt, Supervisor boot, logical sandbox, command, lease, fence,
+activation and opaque physical runtime identity. The model never receives a
+native Cube sandbox ID. Before every Tool operation, the Provider re-reads the
+instance and verifies the complete metadata assignment. Reused operation or
+capture IDs fail closed.
 
-The browser, prompt, repository and model cannot supply a PodSpec, image,
-RuntimeClass, ServiceAccount, volume, node selector, command wrapper, security
-context or network policy.
+If Cube transport fails after arbitrary Bash might have started, the result is
+`UNKNOWN`, the guest is destroyed and the command is not blindly replayed.
 
-## Demand-activated Session lifecycle
+The browser, prompt, repository and model cannot supply a template, image,
+native sandbox ID, network policy, resource shape, mount, device, command
+wrapper or runtime configuration.
 
-A Run first receives only a logical capability reservation. No Pod is created
-until the first authenticated `read`, `write`, `edit` or `bash` operation.
-`AGENTS.md` is read from the already validated committed Workspace snapshot in
-the trusted Runner, so loading repository instructions does not accidentally
-activate a Pod. Every Tool call in that Run uses the same image-owned worker and
-`/workspace`.
+## Demand-activated Run lifecycle
+
+A Run first receives only a logical capability reservation. No guest is
+created until the first authenticated `read`, `write`, `edit` or `bash`
+operation. Repository instructions are loaded from the already committed
+Workspace snapshot in the trusted Worker, so reading `AGENTS.md` does not
+accidentally activate Cube.
 
 ```text
-chat: reserve -> Pi/model -> save Pi JSONL -> release unused reservation
+chat:
+  reserve -> Pi/model -> save Pi JSONL -> release unused reservation
+  Cube activations = 0
 
-code: reserve -> first Tool -> create/restore/attach gVisor Pod
-      -> many Tools -> capture Workspace/Pi -> retain exact-session warm Pod
-      -> later Run rebinds higher fence on same Pod UID
-      -> idle TTL/revision mismatch/failure/cancel/shutdown -> delete Pod
+code:
+  reserve -> first Tool -> create/restore Cube KVM guest
+  -> many Tools -> capture Workspace/Pi
+  -> commit content checkpoint under Attempt/fence
+  -> destroy guest
+
+later code Run:
+  new Attempt/fence -> new Cube guest -> restore committed Workspace
 ```
 
-When enabled, `create` in the coding path may be a single-consumption claim of
-a ready `clean-prewarm` Pod rather than a fresh Pod. Before claim it has no
-tenant or Workspace identity/data and has never executed tenant code. Claim
-atomically changes the exact UID/resourceVersion to `tool-sandbox`, after which
-normal restore and validation run. A claimed Pod follows only exact-Session
-warm reuse or destruction; it can never return to the clean pool. Pure chat
-still creates and claims nothing. Production keeps two clean Pods for at most
-five minutes (`AGENT_DOCK_CLEAN_PREWARM_TARGET=2`,
-`AGENT_DOCK_CLEAN_PREWARM_TTL_MS=300000`). See ADR-0045.
+Cube v0.6.0 does not expose the online metadata compare-and-swap required to
+atomically rebind a live guest to a newer Attempt/fence. Consequently:
 
-Successful tool-using Runs retain at most the configured number of exact
-tenant/project/workspace/session Pods for the configured idle TTL. Reuse
-requires an exact committed Workspace content revision. Capability rotation,
-higher writer fence, and UID/resourceVersion-preconditioned annotation patching
-bind the existing Pod to the new Attempt. Revision mismatch, failure,
-cancellation and timeout delete it. Cold conversations consume no Pod or Pi
-process, and Pod survival is never a durability mechanism.
-
-Production defaults retain at most four warm Pods for 15 minutes
-(`AGENT_DOCK_MAXIMUM_WARM_SANDBOXES=4`,
-`AGENT_DOCK_SANDBOX_WARM_TTL_MS=900000`). Eviction destroys the Pod; recovery
-always uses the committed object-store checkpoint.
+- `supportsWarmRebind=false`;
+- production clean-prewarm target is zero;
+- every completed, failed, cancelled or timed-out guest is destroyed;
+- a used guest is never sanitized and reassigned to another tenant;
+- guest survival is never a durability mechanism.
 
 ## Versioned Project environment
 
-The fixed image is selected by the operator, but its identity is no longer
-implicit. Every accepted Run carries one immutable Project environment
-snapshot:
+Every accepted Run carries one immutable Project environment snapshot:
 
 ```text
 environmentVersionId / versionNumber
@@ -121,116 +114,89 @@ profileKey = agent-dock-fullstack
 profileVersion = 1
 imageRevision = immutable deployment revision
 specSha256 = canonical profile specification
+recipeSha256 = canonical offline recipe
 ```
 
 `ToolSandboxManager` accepts the request only when the profile and image
-revision exactly match its own startup configuration. The model cannot supply
-an image location. Before readiness, the worker compares the expected Run
-revision with a read-only revision file baked into the physical image; the
-Manager cannot make a stale image pass merely by injecting a new environment
-variable. It then probes the fixed Node.js 24, Java 17, Python 3.11 and Git 2
-toolchain. The Provider combines the report with live `runsc`/gVisor, deny-all
-networking, UID/GID 1000:1000 and read-only-rootfs evidence.
+revision match its startup configuration. Production also validates that the
+Cube template evidence binds the exact AgentDock Git revision, pushed image
+digest, READY template ID and closed specification SHA-256.
 
-A recipe may temporarily request exact-host HTTPS dependency access. The
-Manager signs an activation-scoped capability for a dedicated CONNECT proxy;
-the disposable bootstrap Pod still has no DNS or general Internet route.
-Recipe process groups are terminated after each command. Before the Provider
-returns a handle, it captures the Workspace, deletes the bootstrap Pod with a
-UID precondition, confirms absence, and restores into a newly created gVisor
-Pod that never possessed the dependency label or capability. Verification and
-all Agent tools run in that second Pod. Persisted validation therefore reports
-the final `deny_all` state, and a warm Pod never retains dependency egress or a
-networked runtime identity.
+During initialization, the Tool Worker compares the expected revision with the
+value baked into the image and probes Node.js 24, Java 17, Python 3.11 and Git
+2. The Provider combines that report with real `cubesandbox-kvm`,
+guest-kernel, deny-all network, UID/GID 1000:1000, no-new-privileges and
+zero-effective-capability evidence. Cube's CoW guest root is writable, so the
+report does not falsely claim a read-only OCI rootfs.
 
-The evidence is returned with a Tool Workspace capture and committed as an
-append-only validation row bound to Project environment, Run and Attempt. A
-healthy warm Pod may be rebound only when both the Workspace revision and full
-environment snapshot are identical. A profile/image rollout or validation
-mismatch destroys the old activation and fails closed before repository code
-runs. Chat-only Runs retain only the durable environment snapshot and never
-materialize a Pod for validation.
+Cube ordinary Tool execution currently accepts only offline environment
+recipes. `dependencyHosts` is rejected until a temporary-egress setup guest,
+content capture, exact destruction and fresh offline guest transition is
+implemented and live-validated. The retained gVisor bootstrap path does not
+silently become a Cube Tool fallback.
 
-## Fixed Tool policy
+## Fixed Cube Tool policy
 
 ```text
-runtimeClass: agent-dock-gvisor (runsc/KVM)
-namespace: agent-dock-sandboxes
-network: default-deny ingress and egress; DNS disabled
-service account: untrusted-tool; token automount disabled
-user: 1000:1000, non-root
-root filesystem: read-only
-privileged / host PID / IPC / network: false
-capabilities: drop ALL
-allowPrivilegeEscalation: false
-seccomp: RuntimeDefault
-hostPath / devices / sockets: forbidden
-CPU: 1 core
-memory: 768 MiB
-ephemeral storage: 256 MiB
-guest RLIMIT_NPROC: 128
+upstream: TencentCloud/CubeSandbox v0.6.0
+template: immutable READY ID + image digest + current Git revision
+network: allow_internet_access=false; allowPublicTraffic=false
+Tool service: private-token port 49984 only
+user: 1000:1000
+privileged: false
+capabilities: zero effective / drop ALL
+allowPrivilegeEscalation: false / no-new-privileges
+host mounts / Docker socket / Kubernetes token: forbidden
+CPU: 1 logical core policy; 2 vCPU template ceiling
+memory: 768 MiB policy; 2000 MiB template ceiling
+guest process limit: 128
 open files: 1024
-/tmp: 64 MiB memory-backed emptyDir
-/workspace: 128 MiB memory-backed emptyDir
+CoW writable layer / Workspace bound: 1 GiB
 tool output: 1 MiB
 command timeout: at most 300 seconds
-turn wall clock / Pod active deadline: 900 seconds
+turn wall clock: 900 seconds
 ```
 
-Kubernetes API normalization may omit secure default booleans or canonicalize
-resource quantities. Acceptance inspects the effective Pod and also tests the
-limits from inside the gVisor workload.
+The template replaces Cube's inherited entrypoint. Root `envd` is not started,
+because it would expose an unmediated second command/file channel. Port 49983
+must not have a listener.
 
-## Public exact-commit importer
+## Repository importer
 
-Repository import is not Agent tool egress. A second fixed-purpose gVisor Pod
-runs in `agent-dock-importers`; it receives a normalized GitHub repository plus
-exact commit, no prompt and no credential, and never runs repository code. It
-has no DNS and can reach only the capability proxy ClusterIP. A per-import
-Ed25519 capability permits only `github.com:443` and bounds time, connections,
-concurrency and bytes; the proxy rejects every non-public DNS answer. Redirects,
-hooks, credential helpers,
-submodules, LFS and interactive authentication are disabled. The importer is
-deleted after returning a bounded manifest. Git is pinned to HTTP/1.1 because
-HTTP/2 pack negotiation reproducibly failed through this host's gVisor/K3s
-path. Only `/workspace` is declared a safe Git directory to accommodate the
-root-owned, group-writable Kubernetes `emptyDir`; global trust is not disabled.
-The exact-commit fetch is safe to retry and uses a 20-second low-speed
-threshold, a 45-second attempt deadline and at most three attempts inside the
-180-second Pod lifetime; protocol, identity and snapshot-policy failures are
-not retried.
+Repository import is not Agent Tool egress. A fixed-purpose gVisor Pod runs in
+`agent-dock-importers`; it receives a normalized GitHub repository plus exact
+commit, no prompt and no credential, and never runs repository code. It has no
+DNS and can reach only the capability proxy ClusterIP. A per-import Ed25519
+capability permits only `github.com:443` and bounds time, connections,
+concurrency and bytes; the proxy rejects every non-public DNS answer.
+Redirects, hooks, credential helpers, submodules, LFS and interactive
+authentication are disabled. The importer is deleted after returning a
+bounded manifest.
 
-## Runtime attestation and RBAC
+This path uses `RuntimeClass/agent-dock-gvisor -> runsc/KVM` and scoped
+Kubernetes RBAC. It remains separately attested by `npm run sandbox:check`.
 
-Readiness requires the expected RuntimeClass handler, both pre-created network
-policies, the exact Tool image, and a real Pod whose kernel identifies as
-gVisor. It does not trust configuration text or an Agent's description of its
-environment.
-
-The dedicated Manager ServiceAccount can create/get/list/watch/delete Pods and
-use logs/attach/exec in both execution namespaces; only the Tool namespace also
-allows Pod metadata `patch` for fenced warm rebinding. It cannot read
-Secrets, mutate NetworkPolicies/RBAC/ServiceAccounts, inspect nodes, use host
-namespaces, or create workloads elsewhere. Tool/import Pods use a separate
-ServiceAccount with no RBAC authority.
-
-## Host installation and acceptance
+## Runtime acceptance
 
 ```bash
-sudo AGENT_DOCK_HOST_USER="$USER" \
-  ./scripts/install-kubernetes-gvisor-host.sh
-newgrp docker
-npm run sandbox:check
-npm run production:check
+npm run cubesandbox:template-check
+npm run cubesandbox:live-check
+AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 npm run production:semantic-check
 ```
 
-The first gate proves real gVisor identity, host/process/credential/network and
-cross-tenant isolation, a real exact-commit public GitHub import,
-traversal/symlink rejection, resource/output/timeout bounds, cancellation,
-cleanup, checkpoint restore and a real Pi remote-tool repair. The production
-gate additionally proves registration isolation,
-restart/scale behavior, fencing, Run cancellation, Workspace versions,
-observability and encrypted backup/restore.
+The local template gate proves protocol/toolchain compatibility but explicitly
+does not claim KVM isolation. The live gate proves a distinct guest kernel,
+two-tenant same-path Workspace isolation, credential absence, platform/public
+network denial, path/output/resource bounds, cancellation and zero-orphan
+cleanup. The real production gate then consumes model tokens and proves:
 
-See [`deploy/host/README.md`](../deploy/host/README.md) and
-[`reports/gvisor-sandbox-latest.md`](reports/gvisor-sandbox-latest.md).
+- pure chat creates zero Cube guest;
+- two coding Runs in one Session use different guests;
+- the second Run restores and modifies the first checkpoint;
+- provider usage and semantic projections commit;
+- cross-tenant conversation reads return 404;
+- no test-session guest remains.
+
+See [`deploy/cubesandbox/README.md`](../deploy/cubesandbox/README.md),
+[`CUBESANDBOX_PROVIDER.md`](CUBESANDBOX_PROVIDER.md), and
+[`THREAT_MODEL.md`](THREAT_MODEL.md).

@@ -6,15 +6,16 @@ AgentDock's supported security claim is a private, single-node, multi-tenant
 deployment for repositories selected by the deployment owner. Prompts,
 model-generated commands, repository files, build scripts, and tool output are
 untrusted. The host administrator, deployed images, Control Plane, Trusted Pi
-Runner, Model Gateway, Sandbox Manager, PostgreSQL, and object store are trusted.
+Runner, Model Gateway, Sandbox Manager, Cube control/compute plane, PostgreSQL,
+and object store are trusted.
 
-All untrusted tool and public-repository import workloads use gVisor `runsc`
-with the KVM platform. This interposes a userspace application kernel and
-materially reduces direct host-kernel syscall exposure compared with ordinary
-containers. It does not make the current loopback product a hostile public
-code-execution SaaS: public identity, abuse controls, dependency egress,
-capacity admission, patch operations and independent review remain outside the
-claim.
+Ordinary Tool workloads run in independent CubeSandbox KVM guests. Public
+repository import remains a separate fixed-purpose gVisor `runsc`/KVM workload.
+Neither path is an ordinary shared-kernel Docker-container boundary. This does
+not make the current loopback product a hostile public code-execution SaaS:
+public identity, abuse controls, Cube control-plane hardening, capacity
+admission, arbitrary dependency egress and independent review remain outside
+the claim.
 
 ## Assets
 
@@ -28,7 +29,8 @@ claim.
 - Pi JSONL conversation history;
 - tenant workspace contents and resulting patches;
 - encrypted coordinated backups and their independently stored passphrases;
-- the Kubernetes node, K3s control plane/containerd, `runsc`, and host kernel.
+- Cube API/scheduler/compute state, KVM, the Kubernetes importer node,
+  K3s/containerd, `runsc`, and the host kernel.
 
 ## Trust zones
 
@@ -47,21 +49,22 @@ Untrusted browser input / repository / model output
        capability-scoped Tool RPC
           v
        Sandbox Manager (trusted TCB)
-                 |
-       scoped Kubernetes API
-                 v
-       K3s/containerd/runsc
-                 |
-      Tool Pod (untrusted, default-deny network)
+          |                         |
+ fixed CubeAPI/Proxy relays     scoped Kubernetes API
+          v                         v
+ CubeMaster/Cubelet/KVM       gVisor importer Pod
+          |
+ Tool microVM (untrusted, deny-all outbound)
 ```
 
-The Sandbox Manager is deliberately small and holds a least-privilege
-Kubernetes credential. It can create/exec/delete restricted Pods and inspect
-NetworkPolicy in the two execution namespaces, plus read the one named gVisor
-RuntimeClass, but cannot read Secrets, mutate RBAC/NetworkPolicy, use host
-namespaces or manage nodes. No application service receives a Docker or
-containerd socket. Tool Pods receive neither a ServiceAccount token nor any
-platform credential.
+The Sandbox Manager is deliberately small. It holds the CubeAPI key and a
+least-privilege Kubernetes credential only for the importer. Fixed-target
+credential-free relays prevent request-controlled Cube destinations. The
+Manager can create/inspect/delete restricted importer Pods but cannot read
+Secrets, mutate RBAC/NetworkPolicy, use host namespaces or manage nodes. No
+application service receives a Docker/containerd socket. Tool guests receive
+neither a Kubernetes ServiceAccount token, CubeAPI key nor any platform
+credential.
 
 ## Adversaries and assumptions
 
@@ -79,8 +82,8 @@ In scope:
 
 Assumed trusted or out of scope for the current claim:
 
-- a malicious host administrator or compromised K3s/containerd control plane;
-- a gVisor, KVM, Kubernetes-node runtime or host-kernel escape;
+- a malicious host administrator or compromised Cube/K3s control plane;
+- a CubeShim/RustVMM/KVM, gVisor, Kubernetes-node runtime or host-kernel escape;
 - arbitrary user-supplied Pi extensions running beside model credentials;
 - public anonymous hostile tenants, billing abuse, and Internet-scale denial of
   service;
@@ -94,17 +97,17 @@ Assumed trusted or out of scope for the current claim:
 | Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
 | Runner's provider route exposes host networking or arbitrary egress | Runner joins internal model egress only; a TCP-to-Unix-socket relay permits exact provider TCP/443, holds no model key and does not terminate TLS | production topology inspection, relay allowlist tests and real-provider acceptance |
-| Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool Pod has no ServiceAccount token; Manager RBAC is namespace-scoped except read-only access to the one named RuntimeClass | production topology, RBAC and Pod-spec inspection |
-| Accepted Run silently changes tool image or warm Pod after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-Pod toolchain preflight; exact-environment warm reuse | migration/protocol tests, Manager rejection/reuse tests, gVisor environment evidence and real-token Run |
-| Model chooses an unreviewed image or Pod policy | image/profile/RuntimeClass/PodSpec remain operator configuration and closed protocols reject extra client fields | protocol schemas, fixed Pod-template tests and Manager policy mismatch tests |
-| Ordinary Tool reaches internal services or Internet | Tool namespace has default-deny ingress/egress and DNS disabled; dependency setup occurs in a capability-scoped disposable Pod that is destroyed before a never-networked Agent Pod restores the Workspace | cluster/service/node/public TCP probes, live dependency install, bootstrap-absence assertion, offline Bash, and network matrix |
-| Cross-tenant workspace read | one memory-backed workspace per exact tenant/project/workspace/session activation; warm reuse never crosses that key; immutable handle, rotating capability and Pod UID/fence checks | simultaneous two-tenant and warm-rebind integration tests |
-| A used runtime is sanitized and reassigned to another tenant | shared prewarm contains only never-assigned empty Pods; claim is single-consumption; claimed, failed and expired Pods have no path back to the clean pool | pre-claim metadata inspection, same-UID claim test, pool replenishment with a different Pod, and exact cleanup |
+| Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool guest has no Kubernetes/Cube credential; Cube lifecycle is available only through the bounded Manager and fixed relays | production topology, Cube request-shape tests, live guest credential probes |
+| Accepted Run silently changes Tool image after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-guest toolchain preflight; READY template evidence binds Git revision, image digest and spec hash | migration/protocol tests, production startup gate, Cube environment evidence and real-token Run |
+| Model chooses an unreviewed image or runtime policy | template/profile/network/resources remain operator configuration and closed protocols reject extra client fields | protocol schemas, template contract tests and Manager policy mismatch tests |
+| Ordinary Tool reaches internal services or Internet | every Cube create request disables Internet/public traffic; guest probes require CubeAPI, platform endpoints and public addresses to fail; dependency-network recipes are rejected | live Cube endpoint/public TCP probes, offline Bash, and network matrix |
+| Cross-tenant workspace read | one newly created microVM per exact tenant/project/workspace/session/RunAttempt; immutable handle, rotating capability, full Cube metadata and fence checks | simultaneous two-tenant same-path canaries and Cube KVM gate |
+| A used runtime is sanitized and reassigned to another tenant | Cube prewarm/rebind is disabled; every settled, failed, cancelled or timed-out guest is destroyed and later Runs cold-restore an external checkpoint | Provider no-warm tests, exact cleanup and zero-orphan inventory gate |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
 | Capability theft/replay | random bearer stored only as SHA-256 digest; exact activation binding; operation-ID replay set | Manager unit/integration tests |
 | Stale worker commits state | lease ID, attempt ID, fencing token, checkpoint revision CAS, fenced event commit | PostgreSQL and production recovery tests |
-| Runaway resource use | Kubernetes resource limits/cgroups plus guest `RLIMIT_NPROC`, file limits, memory-backed volume quotas and command/output/Turn bounds | effective Pod inspection, actual fork exhaustion and in-guest probes |
-| Cancel leaves descendants | process-group abort followed by UID-preconditioned Pod deletion/absence confirmation | long background-process cancellation test |
+| Runaway resource use | Cube template CPU/memory/disk limits plus guest `RLIMIT_NPROC`, file limits and command/output/Turn bounds | template fingerprint, actual process exhaustion and in-guest probes |
+| Cancel leaves descendants | process-group abort followed by exact Cube activation destruction and absence confirmation | long background-process cancellation and zero-orphan test |
 | Partial checkpoint becomes current | upload/hash/manifest validation followed by fenced pointer CAS; terminal event is commit marker | checkpoint corruption and two-turn restore tests |
 | Old/failed Attempt publishes a Workspace version | staged version is bound to Run/Attempt and settled in the fenced terminal transaction; failures abandon it and restore prior pointers | version consistency and stale-attempt tests |
 | GitHub token reaches repository code | only the Gateway owns App key/tokens; private import returns canonical bytes and write-back consumes a trusted artifact | Gateway contract and Tool-Sandbox environment/network tests |
@@ -113,7 +116,7 @@ Assumed trusted or out of scope for the current claim:
 | Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
 | Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
 | Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
-| Untrusted syscalls attack the host-kernel surface | RuntimeClass maps every untrusted Pod to `runsc`/KVM; readiness and activations attest a real gVisor kernel; no fallback exists | RuntimeClass/handler check, guest/host identity comparison and real Pi tests |
+| Untrusted Tool syscalls attack the host kernel | ordinary Tool code runs behind a distinct KVM guest kernel; no runc/local-process fallback exists | Cubelet/KVM gate, guest/host kernel identity comparison and real Pi tests |
 | Backup is tampered with, partially restored, or overwrites live state | AES-GCM authenticated payload, scrypt key derivation, per-authority hashes, safe archive paths, exact image IDs, new empty project/runtime only | crypto tamper/wrong-key check and complete production restore drill |
 | Repository or Artifact preview executes active content in the browser | React-escaped bounded UTF-8 text only; binary is labelled; no HTML/script/live-preview embedding | Web component/API tests and production bundle/product flow |
 | Fixable severe image vulnerability ships unnoticed | immutable-pinned scanner, complete HIGH/CRITICAL report, CycloneDX SBOM, zero-fixable-HIGH/CRITICAL gate | CI image matrix and local release-evidence command |
@@ -146,7 +149,7 @@ public HTTPS request uses Node's environment-aware proxy dispatcher to reach a
 private bridge, which forwards to a Unix-socket-only host relay. The relay
 accepts only the operator-owned DeepSeek hostname on TCP/443 and transports
 opaque TLS bytes; it never receives the request headers inside TLS or the model
-key. Tool Pods cannot route to Compose networks. The host relay is trusted
+key. Cube Tool guests cannot route to Compose networks. The host relay is trusted
 transport code and its host-network blast radius is constrained by non-root
 execution, no TCP listener, no platform secrets, dropped capabilities,
 read-only rootfs and bounded resources.
@@ -155,8 +158,9 @@ read-only rootfs and bounded resources.
 
 Before exposing arbitrary untrusted repositories to the public Internet:
 
-1. complete a production gVisor/KVM capacity and security review on the actual
-   Linux host rather than relying on the validated WSL2 demonstration host;
+1. move Cube from the validated single-node WSL2/KVM profile to dedicated
+   control/compute nodes and complete node-loss, storage, upgrade, density and
+   security review;
 2. add verified identity, password recovery/MFA, distributed login and
    registration abuse/rate controls, audit retention, and incident response
    around the existing tenant model budgets;
@@ -174,12 +178,14 @@ platform secret, database network, Kubernetes credential, or Tool-Pod authority.
 
 ```bash
 npm run sandbox:check
+npm run cubesandbox:live-check
 npm run production:check
 npm run release:evidence
 ```
 
-The first command attests the gVisor/KVM boundary and runs the real Pi remote
-tool path. The second creates and removes a complete disposable production
-topology, tests multi-tenant behavior, and restores a coordinated encrypted
-backup before continuing a Run. The third produces checksummed SBOM and image
-vulnerability evidence from clean revision-labelled images.
+The first command retains the gVisor importer/regression proof. The second
+attests real Cube KVM guests, two-tenant isolation, deny-all egress,
+cancellation and cleanup. The third creates and removes a deterministic
+disposable topology, tests multi-tenant behavior, and restores a coordinated
+encrypted backup before continuing a Run. The fourth produces checksummed SBOM
+and image vulnerability evidence from clean revision-labelled images.

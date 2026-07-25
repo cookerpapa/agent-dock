@@ -1,4 +1,4 @@
-# Experimental CubeSandbox Provider
+# Primary CubeSandbox Provider
 
 ## Research conclusion
 
@@ -11,28 +11,39 @@ those components; it does not make Cube available as another
 The useful integration is therefore:
 
 ```text
-AgentDock SandboxProvider API
-        ├── KubernetesGvisorSandboxProvider (default)
-        └── CubeSandboxProvider (operator-only experiment)
+Trusted Pi Worker pool
+        │ narrow Tool RPC
+        ▼
+AgentDock Sandbox Manager
+        ├── CubeSandboxProvider (ordinary Tool execution)
+        └── Kubernetes/gVisor importer (exact-commit acquisition only)
+                │
+                ▼
+CubeAPI -> CubeMaster -> Cubelet -> CubeShim/KVM
 ```
 
-See ADR-0052 for the decision and
+The upstream Pi example places Pi itself inside Cube. AgentDock deliberately
+does not copy that placement: Pi, model authentication and durable conversation
+state remain trusted; only the untrusted Tool Worker and Workspace enter the
+guest.
+
+See ADR-0052 for the evaluation, ADR-0053 for the promotion decision, and
 [`deploy/cubesandbox/README.md`](../deploy/cubesandbox/README.md) for the
 operator path.
 
 ## Comparison
 
-| Property | Kubernetes + gVisor | CubeSandbox experiment |
+| Property | Retained Kubernetes + gVisor path | Primary CubeSandbox path |
 | --- | --- | --- |
 | Runtime boundary | runsc userspace application kernel | independent KVM guest kernel |
 | Orchestrator | Kubernetes Pod + RuntimeClass | CubeAPI/CubeMaster/Cubelet |
-| AgentDock status | supported and live-validated | opt-in, not live-validated here |
+| AgentDock status | importer and deterministic regression only | ordinary Tool execution, live KVM validated |
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
 | Workspace durability | AgentDock content checkpoint | same AgentDock content checkpoint |
-| Exact-Session warm rebind | UID/resourceVersion + higher fence | disabled until metadata CAS is proved |
+| Exact-Session warm rebind | implemented in former Tool Provider | disabled until Cube metadata CAS is proved |
 | Tool network | Kubernetes default deny | Cube create request forces Internet/public deny |
-| Repository import | signed-capability gVisor importer | same importer in first version |
-| Dependency setup | disposable networked bootstrap then fresh offline Pod | rejected in first version |
+| Repository import | signed-capability gVisor importer | delegates to that importer |
+| Dependency setup | disposable networked bootstrap then fresh offline Pod | rejects dependency-network recipes |
 | Native snapshot | not required | optional future optimization, never commit authority |
 
 ## Provider path
@@ -48,7 +59,7 @@ operator path.
 
 The implementation uses a minimal, bounded client for the official v0.6 REST
 contract. The upstream Node SDK source exists but was not published under the
-declared npm package at the time of this experiment, so this branch does not
+declared npm package at the time of integration, so AgentDock does not
 pretend that an unavailable dependency is installable. The client is isolated
 behind `CubeSandboxRuntimeClient`, which can be replaced with an official
 published SDK later without changing Pi or the Manager contract.
@@ -135,9 +146,15 @@ target `49984 /health`. The base image's inherited OCI metadata still declares
 49983, so the compatibility gate verifies that the port is unreachable and no
 unmediated command daemon was started.
 
-## What is and is not proven on this machine
+## Acceptance evidence
 
-Proven:
+The pinned v0.6.0 plane is installed on this machine with `/dev/kvm`.
+The production MTU invariant is explicit: a stable `agentdock0` node interface
+uses MTU 1500 and Flannel/Pod traffic uses MTU 1450. Binding Flannel to WSL's
+65536-byte loopback interface was rejected after it was shown to black-hole
+ordinary CubeProxy responses larger than the physical path MTU.
+
+The live gate has proven:
 
 - Provider control/data request shape and private traffic-token routing;
 - metadata identity, fencing and replay checks;
@@ -146,16 +163,20 @@ Proven:
 - actual file write, Python execution, traversal rejection and content-hashed
   checkpoint through the template service;
 - fixed-target control/data relays.
+- a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
+- simultaneous tenant canaries remaining in different Workspaces;
+- no model/platform credential, Kubernetes token or Docker socket in the guest;
+- denial of CubeAPI, platform endpoints and public Internet from the guest;
+- output, path, symlink, command-time and process limits;
+- cancellation destroying the affected microVM;
+- content capture and exact zero-orphan cleanup.
 
-Not proven:
+This does not prove a multi-node production deployment. Cube control-node loss,
+compute-node loss, rolling upgrade, storage failure, density and long-duration
+soak drills remain release gates for a public service.
 
-- that a real Cubelet started the image under the Cube KVM hypervisor;
-- guest/host or cross-microVM isolation;
-- Cube network denial and resource accounting;
-- cancellation/orphan cleanup during real node/control-plane failure;
-- production latency and density.
-
-Those claims require the dedicated-cluster live gate in ADR-0052.
+The latest sanitized measurements are recorded in
+[`reports/cubesandbox-kvm-acceptance-latest.md`](reports/cubesandbox-kvm-acceptance-latest.md).
 
 ## Upstream evidence reviewed
 
@@ -175,6 +196,6 @@ Before promoting native snapshot/rollback to a durability primitive, reproduce
 and close the failure modes represented by upstream issue
 [#804](https://github.com/TencentCloud/CubeSandbox/issues/804),
 [#985](https://github.com/TencentCloud/CubeSandbox/issues/985) and
-[#1105](https://github.com/TencentCloud/CubeSandbox/issues/1105). The experiment
-therefore treats a Cube VM as disposable and keeps AgentDock's external,
+[#1105](https://github.com/TencentCloud/CubeSandbox/issues/1105). AgentDock
+therefore treats a Cube VM as disposable and keeps its external,
 content-verified checkpoint commit as the source of truth.

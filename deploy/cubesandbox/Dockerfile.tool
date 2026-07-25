@@ -2,36 +2,27 @@
 
 ARG CUBE_BASE_IMAGE=ghcr.io/tencentcloud/cubesandbox-base:2026.16@sha256:34ea312a63a5534e66ab17005c23d7fbaf33c38bccd5411ee402d901e63a3193
 ARG PYTHON_BASE_IMAGE=python:3.11.13-slim-bullseye@sha256:9e25f400253a5fa3191813d6a67eb801ca1e6f012b3bd2588fa6920b59e3eba6
+ARG NODE_BASE_IMAGE=node:24.18.0-bullseye-slim@sha256:aca89821b1f09df223227ff2abe075fc3161f05604d3b61309f46820a5938020
 FROM ${PYTHON_BASE_IMAGE} AS python-runtime
+FROM ${NODE_BASE_IMAGE} AS node-runtime
 
 FROM ${CUBE_BASE_IMAGE}
 
-ARG AGENT_DOCK_VERSION=development
-ARG AGENT_DOCK_REVISION=development
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NODE_MAJOR=24
-
-LABEL org.opencontainers.image.title="AgentDock CubeSandbox tool template" \
-      org.opencontainers.image.description="Credential-free AgentDock Tool Worker for CubeSandbox KVM microVMs" \
-      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
-      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         bash \
         ca-certificates \
-        curl \
         git \
-        gnupg \
         openjdk-17-jdk-headless \
         util-linux \
-    && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get install --yes --no-install-recommends nodejs \
-    && ln -s /usr/bin/node /usr/local/bin/node \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=python-runtime /usr/local /usr/local
-RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+COPY --from=node-runtime /usr/local /usr/local
+RUN ln -sf /usr/local/bin/python3 /usr/bin/python3 \
+    && ln -sf /usr/local/bin/node /usr/bin/node
 
 RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 agent-dock; fi \
     && if ! getent passwd 1000 >/dev/null; then \
@@ -40,9 +31,7 @@ RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 agent-dock; fi \
     && install -d -o 1000 -g 1000 -m 0700 \
          /workspace \
          /tmp/agent-dock-tool-home \
-         /opt/agent-dock \
-    && printf '%s\n' "${AGENT_DOCK_REVISION}" > /opt/agent-dock/image-revision \
-    && chmod 0444 /opt/agent-dock/image-revision
+         /opt/agent-dock
 
 WORKDIR /app
 
@@ -61,6 +50,15 @@ COPY --chown=1000:1000 \
   /opt/agent-dock/sample-java-repair
 COPY deploy/cubesandbox/tool-entrypoint.sh /usr/local/bin/agent-dock-cube-tool
 RUN chmod 0555 /usr/local/bin/agent-dock-cube-tool
+
+ARG AGENT_DOCK_VERSION=development
+ARG AGENT_DOCK_REVISION=development
+LABEL org.opencontainers.image.title="AgentDock CubeSandbox tool template" \
+      org.opencontainers.image.description="Credential-free AgentDock Tool Worker for CubeSandbox KVM microVMs" \
+      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
+      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
+RUN printf '%s\n' "${AGENT_DOCK_REVISION}" > /opt/agent-dock/image-revision \
+    && chmod 0444 /opt/agent-dock/image-revision
 
 ENV NODE_ENV=production \
     HOME=/tmp/agent-dock-tool-home

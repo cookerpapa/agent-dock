@@ -29,6 +29,9 @@ const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
 const secretValuesPath = resolve(runtimeDirectory, "cubesandbox/secret-values.yaml");
 const authorizerImage = "agent-dock/cube-api-authorizer:local";
 const wslStableNodeIp = "10.255.255.254";
+const wslStableNodeInterface = "agentdock0";
+const wslStableNodeMtu = 1_500;
+const wslFlannelMtu = 1_450;
 const noProxyEntries = [
   process.env.NO_PROXY,
   process.env.no_proxy,
@@ -136,21 +139,107 @@ function localIpv4Addresses(value) {
   );
 }
 
+async function readOptional(path) {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function stableWslInterfacePreparation() {
+  return `# AgentDock gives K3s a stable WSL node address on an MTU-bounded
+# dummy interface. Binding Flannel to loopback would inherit its 65536-byte
+# MTU and create a black-hole for ordinary Ethernet-sized Pod traffic.
+if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
+  if ! ip link show dev ${wslStableNodeInterface} >/dev/null 2>&1; then
+    ip link add name ${wslStableNodeInterface} type dummy
+  fi
+  ip link set dev ${wslStableNodeInterface} mtu ${wslStableNodeMtu} up
+  ip address replace ${wslStableNodeIp}/32 dev ${wslStableNodeInterface}
+  if ip -4 -o address show dev lo | grep -q ' ${wslStableNodeIp}/32 '; then
+    ip address del ${wslStableNodeIp}/32 dev lo
+  fi
+fi`;
+}
+
+async function persistStableWslInterfacePreparation() {
+  const helper = await readOptional(k3sWslPreparePath);
+  if (helper === undefined) return false;
+  const start = "# BEGIN AGENT_DOCK_WSL_NODE_INTERFACE";
+  const end = "# END AGENT_DOCK_WSL_NODE_INTERFACE";
+  const block = `${start}\n${stableWslInterfacePreparation()}\n${end}`;
+  const expression = new RegExp(`${start}[\\s\\S]*?${end}`, "u");
+  const updated = expression.test(helper)
+    ? helper.replace(expression, block)
+    : helper.replace(/^set -eu$/mu, `set -eu\n\n${block}`);
+  if (updated === helper) return false;
+  if (!updated.includes(block)) {
+    throw new Error(`${k3sWslPreparePath} has an unexpected format`);
+  }
+  const temporaryPath = `${k3sWslPreparePath}.agent-dock.tmp`;
+  const mode = (await stat(k3sWslPreparePath)).mode & 0o777;
+  await writeFile(temporaryPath, updated, { mode });
+  await rename(temporaryPath, k3sWslPreparePath);
+  return true;
+}
+
+async function currentLink(name) {
+  try {
+    const links = JSON.parse(await capture("ip", ["-j", "link", "show", "dev", name]));
+    return Array.isArray(links) ? links[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function ensureStableWslNodeAddress() {
   const release = await readFile("/proc/sys/kernel/osrelease", "utf8");
-  if (!release.toLowerCase().includes("microsoft-standard-wsl")) return;
-
-  const localAddresses = localIpv4Addresses(await capture("ip", ["-j", "-4", "address"]));
-  if (!localAddresses.has(wslStableNodeIp)) {
-    throw new Error(`WSL stable loopback address ${wslStableNodeIp} is unavailable`);
+  if (!release.toLowerCase().includes("microsoft-standard-wsl")) {
+    return { isWsl: false, changed: false, podNetworkMtu: undefined };
   }
+
+  const existingLink = await currentLink(wslStableNodeInterface);
+  const existingInterfaceAddresses =
+    existingLink === undefined
+      ? new Set()
+      : localIpv4Addresses(
+          await capture("ip", ["-j", "-4", "address", "show", "dev", wslStableNodeInterface]),
+        );
+  const loopbackAddresses = localIpv4Addresses(
+    await capture("ip", ["-j", "-4", "address", "show", "dev", "lo"]),
+  );
+  const interfaceChanged =
+    existingLink === undefined ||
+    existingLink.mtu !== wslStableNodeMtu ||
+    !existingInterfaceAddresses.has(wslStableNodeIp) ||
+    loopbackAddresses.has(wslStableNodeIp);
+
+  if (existingLink === undefined) {
+    await run("ip", ["link", "add", "name", wslStableNodeInterface, "type", "dummy"]);
+  }
+  await run("ip", [
+    "link",
+    "set",
+    "dev",
+    wslStableNodeInterface,
+    "mtu",
+    String(wslStableNodeMtu),
+    "up",
+  ]);
+  await run("ip", ["address", "replace", `${wslStableNodeIp}/32`, "dev", wslStableNodeInterface]);
+  if (loopbackAddresses.has(wslStableNodeIp)) {
+    await run("ip", ["address", "del", `${wslStableNodeIp}/32`, "dev", "lo"]);
+  }
+  const helperChanged = await persistStableWslInterfacePreparation();
 
   const original = await readFile(k3sConfigPath, "utf8");
   const nodeIpLine = `node-ip: "${wslStableNodeIp}"`;
   const withNodeIp = /^node-ip:/mu.test(original)
     ? original.replace(/^node-ip:.*$/mu, nodeIpLine)
     : `${original.trimEnd()}\n${nodeIpLine}\n`;
-  const flannelInterfaceLine = 'flannel-iface: "lo"';
+  const flannelInterfaceLine = `flannel-iface: "${wslStableNodeInterface}"`;
   const updated = /^flannel-iface:/mu.test(withNodeIp)
     ? withNodeIp.replace(/^flannel-iface:.*$/mu, flannelInterfaceLine)
     : `${withNodeIp.trimEnd()}\n${flannelInterfaceLine}\n`;
@@ -166,7 +255,17 @@ async function ensureStableWslNodeAddress() {
   } catch {
     currentNodeIp = undefined;
   }
-  if (updated === original && currentNodeIp === wslStableNodeIp) return;
+  const flannelEnvironment = await readOptional("/run/flannel/subnet.env");
+  const currentFlannelMtu = flannelEnvironment?.match(/^FLANNEL_MTU=(\d+)$/mu)?.[1];
+  if (
+    updated === original &&
+    currentNodeIp === wslStableNodeIp &&
+    !interfaceChanged &&
+    !helperChanged &&
+    currentFlannelMtu === String(wslFlannelMtu)
+  ) {
+    return { isWsl: true, changed: false, podNetworkMtu: wslFlannelMtu };
+  }
 
   const temporaryPath = `${k3sConfigPath}.agent-dock.tmp`;
   const mode = (await stat(k3sConfigPath)).mode & 0o777;
@@ -187,7 +286,19 @@ async function ensureStableWslNodeAddress() {
       const ready = node?.status?.conditions?.some(
         (condition) => condition.type === "Ready" && condition.status === "True",
       );
-      if (internalIp === wslStableNodeIp && ready) return;
+      const currentEnvironment = await readOptional("/run/flannel/subnet.env");
+      const mtu = currentEnvironment?.match(/^FLANNEL_MTU=(\d+)$/mu)?.[1];
+      const flannelLink = await currentLink("flannel.1");
+      const cniLink = await currentLink("cni0");
+      if (
+        internalIp === wslStableNodeIp &&
+        ready &&
+        mtu === String(wslFlannelMtu) &&
+        flannelLink?.mtu === wslFlannelMtu &&
+        cniLink?.mtu === wslFlannelMtu
+      ) {
+        return { isWsl: true, changed: true, podNetworkMtu: wslFlannelMtu };
+      }
     } catch (error) {
       lastError = error;
     }
@@ -196,6 +307,51 @@ async function ensureStableWslNodeAddress() {
   throw new Error(
     `K3s did not become Ready on ${wslStableNodeIp}${lastError ? `: ${lastError.message}` : ""}`,
   );
+}
+
+async function restartCubeWorkloadsAfterNetworkChange() {
+  for (const kind of ["deployment", "statefulset", "daemonset"]) {
+    await run("kubectl", ["-n", "cube-system", "rollout", "restart", kind]);
+  }
+  const resources = (
+    await capture("kubectl", [
+      "-n",
+      "cube-system",
+      "get",
+      "deployment,statefulset,daemonset",
+      "-o",
+      "name",
+    ])
+  )
+    .split("\n")
+    .filter((value) => value.length > 0);
+  for (const resource of resources) {
+    await run("kubectl", ["-n", "cube-system", "rollout", "status", resource, "--timeout=600s"]);
+  }
+}
+
+async function assertCubePodMtu(expectedMtu) {
+  if (expectedMtu === undefined) return;
+  for (const deployment of [
+    "agent-dock-cube-api-authorizer",
+    "agent-dock-cube-template-registry",
+    "cube-api",
+    "cube-master",
+    "cube-proxy",
+  ]) {
+    const mtu = await capture("kubectl", [
+      "-n",
+      "cube-system",
+      "exec",
+      `deployment/${deployment}`,
+      "--",
+      "cat",
+      "/sys/class/net/eth0/mtu",
+    ]);
+    if (mtu !== String(expectedMtu)) {
+      throw new Error(`CubeSandbox ${deployment} Pod MTU was ${mtu}; expected ${expectedMtu}`);
+    }
+  }
 }
 
 async function ensureSharedRootMount() {
@@ -481,7 +637,7 @@ await capture("test", ["-r", secretValuesPath]);
 await capture("test", ["-c", "/dev/kvm"]);
 await capture("which", ["mkfs.xfs"]);
 await capture("which", ["helm"]);
-await ensureStableWslNodeAddress();
+const nodeNetwork = await ensureStableWslNodeAddress();
 await ensureSharedRootMount();
 await ensureBpfFilesystem();
 await ensureWslK3sServiceRoute();
@@ -578,7 +734,11 @@ try {
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }
+if (nodeNetwork.changed) {
+  await restartCubeWorkloadsAfterNetworkChange();
+}
 await installTemplateRegistry();
+await assertCubePodMtu(nodeNetwork.podNetworkMtu);
 
 const services = JSON.parse(
   await capture("kubectl", ["-n", "cube-system", "get", "services", "-o", "json"]),
@@ -606,6 +766,7 @@ const cluster = {
   proxy: serviceAddress("cube-proxy", "http"),
   sandboxDomain: "cube.app",
   pvmHostBootstrap: false,
+  ...(nodeNetwork.podNetworkMtu === undefined ? {} : { podNetworkMtu: nodeNetwork.podNetworkMtu }),
 };
 const evidencePath = resolve(runtimeDirectory, "cubesandbox/cluster.json");
 await writeFile(evidencePath, `${JSON.stringify(cluster, null, 2)}\n`, { mode: 0o600 });

@@ -1,247 +1,193 @@
-# CubeSandbox Provider experiment
+# CubeSandbox primary execution plane
 
-This directory is the operator path for the optional
-`CubeSandboxProvider`. The supported deployment remains Kubernetes + gVisor.
-Cube is selected only by trusted deployment configuration; a browser user,
-tenant, model response or Tool Call cannot choose it.
+This directory is the operator path for AgentDock's ordinary Tool runtime.
+`CubeSandboxProvider` is selected only by trusted deployment configuration; a
+browser user, tenant, model response or Tool Call cannot choose it or request a
+lower-security fallback.
 
-The integration is pinned and researched against
-[`TencentCloud/CubeSandbox` v0.6.0](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0).
-Cube's Kubernetes delivery is a separate Cube control/execution plane, not a
-Kubernetes `RuntimeClass` for the existing AgentDock Tool Pod.
-
-## Safety boundary
-
-Do not install Cube on AgentDock's current single-node production K3s host.
-The upstream chart uses privileged host preparation, requires KVM/PVM and an
-XFS `/data/cubelet`, and may install a host kernel and reboot a PVM compute
-node. A compute DaemonSet upgrade can interrupt every sandbox on that node.
-
-Use a dedicated cluster with, at minimum:
-
-- Kubernetes 1.24 or later and Helm 3.10 or later;
-- a separate control node and dedicated compute node;
-- 4 CPU / 8 GiB or more for control and 16 CPU / 32 GiB or more for compute;
-- KVM on bare metal, or a deliberately prepared PVM compute node;
-- XFS-backed `/data/cubelet` for production;
-- private network reachability from the AgentDock host to CubeAPI and
-  CubeProxy.
-
-Read the upstream
-[Helm install guide](https://cubesandbox.com/guide/kubernetes/install),
-[architecture](https://cubesandbox.com/guide/kubernetes/architecture) and
-[upgrade guide](https://cubesandbox.com/guide/kubernetes/upgrade) before
-mutating a host.
-
-## 1. Install a pinned dedicated Cube plane
-
-Clone and verify the exact upstream release:
-
-```bash
-git clone --branch v0.6.0 --depth 1 \
-  https://github.com/TencentCloud/CubeSandbox.git
-cd CubeSandbox
-test "$(git rev-parse HEAD)" = "8721dd151971ce3c2966482bbd32904ad98f378e"
-```
-
-Follow the upstream guide to label dedicated control/compute nodes and create
-`runtime-values.yaml`. Create a random API key in a private file without a
-trailing newline:
-
-```bash
-umask 077
-openssl rand -hex 32 | tr -d '\n' > /secure/agent-dock-cube-api-key
-kubectl create namespace cube-system --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n cube-system create secret generic agent-dock-cube-api \
-  --from-file=api-key=/secure/agent-dock-cube-api-key
-```
-
-Merge this directory's
-[`agent-dock-values.example.yaml`](./agent-dock-values.example.yaml) after the
-upstream runtime values. It enables CubeAPI's simple-key authentication from a
-Kubernetes Secret. CubeAPI accepts unauthenticated management requests when
-neither `CUBE_API_KEY` nor `AUTH_CALLBACK_URL` is configured, so an
-unauthenticated deployment is not accepted by AgentDock.
-
-```bash
-helm upgrade --install cube ./deploy/kubernetes/chart \
-  --namespace cube-system \
-  --create-namespace \
-  --values runtime-values.yaml \
-  --values /path/to/agent-dock/deploy/cubesandbox/agent-dock-values.example.yaml \
-  --wait \
-  --timeout 90m
-
-kubectl get pods -n cube-system -o wide
-helm test cube -n cube-system --timeout 20m --logs
-```
-
-Expose only the following over private routing or dedicated internal
-LoadBalancer Services:
+The integration is pinned to
+[`TencentCloud/CubeSandbox` v0.6.0](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0)
+at commit `8721dd151971ce3c2966482bbd32904ad98f378e`. Cube is a separate
+CubeAPI/CubeMaster/Cubelet/CubeShim KVM control and execution plane, not a
+Kubernetes `RuntimeClass`.
 
 ```text
-CubeAPI:   TCP 3000
-CubeProxy: TCP 80 or 443
+Browser
+   │
+Control Plane
+   │ durable Run
+Trusted Pi Worker pool
+   │ narrow Tool RPC
+Sandbox Manager
+   │ fixed-target CubeAPI/CubeProxy relays
+CubeMaster / Cubelet
+   │
+per-RunAttempt KVM Tool microVM
 ```
 
-Do not expose CubeProxy's admin port, CubeMaster, MySQL, Redis, Cubelet or the
-Kubernetes API. Restrict both allowed source addresses to the AgentDock host.
-If traffic crosses an untrusted network, use a private tunnel or properly
-validated TLS. The supplied fixed relays deliberately do not implement a
-general-purpose proxy.
+Pi, model authentication and conversation state remain in the trusted Worker
+pool. Only the credential-free Tool Worker and Workspace enter Cube.
 
-## 2. Build and validate the AgentDock Tool image
+## Deployment profiles
 
-From the AgentDock experiment branch:
+The checked-in installer supports a single-node local validation profile on
+the current WSL2/K3s host. It is useful for development and produces real KVM
+isolation evidence, but it is not a multi-node production claim.
+
+A public or business-critical deployment should follow the upstream
+[installation](https://cubesandbox.com/guide/kubernetes/install),
+[architecture](https://cubesandbox.com/guide/kubernetes/architecture) and
+[upgrade](https://cubesandbox.com/guide/kubernetes/upgrade) guidance and use:
+
+- separate control and dedicated compute nodes;
+- KVM on bare metal or a deliberately prepared PVM compute node;
+- XFS-backed `/data/cubelet`;
+- private CubeAPI/CubeProxy routing and firewalls;
+- rehearsed control-node, compute-node, storage and rolling-upgrade drills.
+
+Only CubeAPI TCP 3000 and CubeProxy TCP 80/443 should be privately reachable
+from AgentDock. Do not expose CubeMaster, MySQL, Redis, Cubelet, CubeProxy admin
+ports or the Kubernetes API.
+
+## 1. Initialize private runtime state
+
+Run the normal production initializer first. The Cube initializer creates a
+mode-0600 Cube API key with the same non-root owner as the other application
+secrets:
 
 ```bash
-export AGENT_DOCK_IMAGE_REVISION="$(git rev-parse HEAD)"
-export AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE="registry.example/agent-dock-cube-tool:${AGENT_DOCK_IMAGE_REVISION}"
-
-docker build --network host \
-  --file deploy/cubesandbox/Dockerfile.tool \
-  --build-arg "AGENT_DOCK_VERSION=experiment" \
-  --build-arg "AGENT_DOCK_REVISION=${AGENT_DOCK_IMAGE_REVISION}" \
-  --tag "${AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE}" \
-  .
-
-npm run cubesandbox:template-check
-docker push "${AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE}"
+npm run production:init
+npm run cubesandbox:init
 ```
 
-The image pins the upstream Cube base image by OCI digest and contains the
-credential-free AgentDock Tool Worker with Node 24, Java 17, Python 3.11 and
-Git 2. The local template check executes a real file-write/counting-sort/test
-and content checkpoint. It intentionally prints
-`"isolationValidated": false`: Docker compatibility does not prove Cube KVM
-isolation.
+No key, traffic token or provider credential belongs in `.env`, source
+control, Pi messages or a Tool microVM.
 
-## 3. Register the immutable Cube template
+## 2. Install the pinned local Cube plane
 
-Run the pinned `cubemastercli` from the Cube control plane. Prefer the pushed
-image's digest (`image@sha256:...`) rather than a mutable tag:
+Installation mutates K3s and requires root. On the validated WSL2 host it also
+creates a stable `agentdock0` dummy node interface with MTU 1500 and enforces
+Flannel/Pod MTU 1450:
 
 ```bash
-kubectl exec -n cube-system deploy/cube-cubemastercli -- \
-  sh -lc 'cubemastercli \
-    --address "$CUBEMASTERCLI_ADDRESS" \
-    --port "$CUBEMASTERCLI_PORT" \
-    tpl create-from-image \
-    --image "registry.example/agent-dock-cube-tool@sha256:<manifest-digest>" \
-    --writable-layer-size 1G \
-    --expose-port 49984 \
-    --probe 49984 \
-    --probe-path /health'
+sudo --preserve-env=PATH \
+  node scripts/install-cubesandbox-k3s.mjs
 ```
 
-Record the returned `job_id` and `template_id`, then wait for READY:
+The installer:
+
+- verifies `/dev/kvm`, K3s, Helm and the exact upstream checkout;
+- rejects an unauthenticated CubeAPI;
+- installs the pinned chart and private template registry;
+- rolls Cube components after a node-network change;
+- verifies Cube workload interface MTU instead of trusting YAML alone;
+- writes private, bounded cluster evidence to
+  `deploy/production/runtime/cubesandbox/cluster.json`.
+
+Do not bind Flannel to WSL's loopback device. Its 65536-byte MTU advertises an
+unusable jumbo MSS and black-holes ordinary CubeProxy responses once packets
+exceed the real path MTU.
+
+## 3. Commit, build and register the immutable Tool template
+
+Template identity is tied to a clean, committed AgentDock revision. After code
+and documentation are committed:
 
 ```bash
-kubectl exec -n cube-system deploy/cube-cubemastercli -- \
-  sh -lc 'cubemastercli \
-    --address "$CUBEMASTERCLI_ADDRESS" \
-    --port "$CUBEMASTERCLI_PORT" \
-    tpl watch --job-id <job-id>'
+sudo --preserve-env=PATH \
+  node scripts/register-cubesandbox-tool-template.mjs
 ```
 
-Preserve the READY output's template ID, template-spec fingerprint and
-artifact SHA-256 with the release evidence. Register only port 49984 and use it
-as the readiness probe. The image deliberately replaces Cube's inherited
-entrypoint so root `envd` is not started: it would otherwise create a second
-command/file channel outside AgentDock's Tool Broker. The inherited OCI
-metadata still declares port 49983, so the compatibility gate verifies that
-there is no listener on that port.
+The registration command:
 
-## 4. Run the live KVM gate before selecting Cube
+1. builds `deploy/cubesandbox/Dockerfile.tool` from the exact Git revision;
+2. runs the local Tool protocol compatibility gate;
+3. pushes the image to the private registry and resolves its digest;
+4. registers only port 49984 and probe `49984 /health`;
+5. waits for CubeMaster to report the template `READY`;
+6. records the revision, image digest, template ID and spec SHA-256 in the
+   private `runtime/cubesandbox/template.json`.
 
-The live gate refuses a superficial network test. In addition to CubeAPI, set
-at least two real AgentDock platform endpoints that are reachable from the
-trusted test host but must be unreachable from a Tool microVM, for example the
-Control Plane and PostgreSQL private addresses:
+The image contains Node 24, Java 17, Python 3.11 and Git 2. It replaces Cube's
+inherited entrypoint so root `envd` is not started; otherwise that daemon would
+create a second command/file channel outside AgentDock's Tool Broker.
+
+## 4. Run the real KVM gate
+
+The live gate requires CubeAPI plus at least two real platform endpoints that
+are reachable from the trusted host but forbidden from a Tool guest:
 
 ```bash
-export AGENT_DOCK_IMAGE_REVISION="<revision embedded in the Tool image>"
-export AGENT_DOCK_CUBESANDBOX_API_URL="http://<private-cube-api>:3000"
-export AGENT_DOCK_CUBESANDBOX_API_KEY_FILE="/secure/agent-dock-cube-api-key"
-export AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID="<ready-template-id>"
-export AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP="<private-cube-proxy>"
-export AGENT_DOCK_CUBESANDBOX_PROXY_PORT="80"
-export AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME="http"
-export AGENT_DOCK_CUBESANDBOX_DOMAIN="cube.app"
-export AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS="<control-plane-host>:8080,<postgres-host>:5432"
-
+AGENT_DOCK_CUBESANDBOX_TEST=1 \
+AGENT_DOCK_IMAGE_REVISION="$(git rev-parse HEAD)" \
+AGENT_DOCK_CUBESANDBOX_API_URL="http://<cube-api>:3000" \
+AGENT_DOCK_CUBESANDBOX_API_KEY_FILE="deploy/production/runtime/secrets/cubesandbox-api-key" \
+AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID="<ready-template-id>" \
+AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP="<cube-proxy>" \
+AGENT_DOCK_CUBESANDBOX_PROXY_PORT=80 \
+AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS="<control-plane>:8080,<postgres>:5432" \
 npm run cubesandbox:live-check
 ```
 
-The gate creates real microVMs for two tenants and verifies:
+The gate creates real microVMs for two tenants and proves:
 
-- a distinct guest kernel and the `cubesandbox-kvm` evidence contract;
-- uid/gid 1000, no new privileges and no effective capabilities;
+- a guest kernel distinct from the host and `cubesandbox-kvm` evidence;
+- uid/gid 1000, no new privileges and zero effective capabilities;
 - no Docker socket, Kubernetes token or platform/model credential;
-- different content at the same Workspace path in the two microVMs;
-- no public Internet, CubeAPI, Control Plane or PostgreSQL connection;
+- same-path canaries remain different across tenant Workspaces;
+- CubeAPI, platform endpoints and public Internet are denied;
+- path, symlink, output, timeout and process limits;
 - content-hashed Workspace capture;
-- cancellation destroys the executing microVM;
-- no AgentDock activation remains in Cube inventory.
+- cancellation destroys the executing guest;
+- zero remaining AgentDock activation in Cube inventory.
 
-Do not set `isolationValidated=true` in release material unless this command
-passes against the dedicated Cube plane.
+The local Docker template check is compatibility evidence only. It must never
+be reported as KVM isolation evidence.
 
-## 5. Select Cube for the Compose product plane
+## 5. Deploy the product
 
-Keep the normal production runtime secrets and kubeconfig: exact-commit
-repository import deliberately remains on the existing restricted gVisor
-importer for this experiment. Add these values to
-`deploy/production/runtime/.env`:
-
-```dotenv
-AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID=<ready-template-id>
-AGENT_DOCK_CUBESANDBOX_DOMAIN=cube.app
-AGENT_DOCK_CUBESANDBOX_API_KEY_HOST_FILE=/secure/agent-dock-cube-api-key
-AGENT_DOCK_CUBESANDBOX_API_NODE_IP=<private-cube-api>
-AGENT_DOCK_CUBESANDBOX_API_NODE_PORT=3000
-AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP=<private-cube-proxy>
-AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT=80
-AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE=registry.example/agent-dock-cube-tool:<revision>
-```
-
-Validate the merged topology before changing running services:
+Normal production commands now select Cube automatically:
 
 ```bash
-npm run cubesandbox:config
-npm run cubesandbox:build
-npm run cubesandbox:up
-npm run cubesandbox:ps
+npm run production:config
+npm run production:build
+npm run production:up
+npm run production:ps
 ```
 
-The override starts two credential-free fixed-target relays. The Sandbox
-Manager remains on internal Compose networks, holds the Cube API key from the
-mode-0600 file, and forces every Cube create request to:
+`production:deploy` also initializes Cube's private runtime state. Startup
+fails closed when cluster evidence, template status, image digest, template
+specification or AgentDock Git revision does not match.
 
-```json
-{
-  "allow_internet_access": false,
-  "network": {
-    "allowPublicTraffic": false
-  }
-}
-```
+The primary Compose overlay starts two credential-free fixed-target relays.
+The Sandbox Manager remains on internal networks, holds the Cube API key from
+the private file, and forces every create request to disable Internet and public
+traffic. The per-microVM Cube traffic token remains inside the trusted Provider.
 
-The private per-microVM traffic token stays inside the trusted Provider and is
-never sent to Pi, the model or Tool code.
+The K3s/gVisor plane remains available only to the exact-commit importer and
+the explicit deterministic production gate. It is not an ordinary Tool
+fallback. Cube currently rejects project recipes with `dependencyHosts` until
+temporary setup egress followed by a demonstrably fresh offline guest is
+implemented and accepted.
 
-## Rollback
+## Lifecycle and rollback
 
 Cube is not a data authority. Conversation state and content-verified
-Workspace checkpoints remain in AgentDock's PostgreSQL/object-storage commit
-path. To return to the supported gVisor execution plane:
+Workspace checkpoints commit through PostgreSQL/object storage. Cube v0.6.0
+does not provide the metadata CAS required for safe higher-fence warm rebind,
+so each completed, failed, cancelled or timed-out Tool Run destroys its guest;
+a later Run restores the committed Workspace into a new guest.
+
+Operational inspection and teardown remain available even if the source
+revision has advanced beyond the last registered template:
 
 ```bash
-npm run cubesandbox:down
-npm run production:up
+npm run production:ps
+npm run production:logs
+npm run production:down
 ```
 
-Do not delete the Cube cluster until Cube inventory contains no active
-AgentDock activation. Uninstalling the upstream chart does not revert node
-labels, taints, `/data/cubelet` data or a PVM host-kernel change; follow the
-upstream uninstall and host recovery documentation separately.
+Starting or restarting requires a READY template for the current commit.
+Before uninstalling Cube, verify its inventory has no AgentDock activation.
+Removing the chart does not automatically revert node labels, taints,
+`/data/cubelet` data or any PVM host-kernel change.

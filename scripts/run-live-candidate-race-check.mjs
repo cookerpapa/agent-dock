@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { classifyStructuredTestCommand } from "../packages/control-plane/src/structured-test-command.ts";
+import { OfficialCubeSandboxRuntimeClient } from "../packages/sandbox-manager/src/index.ts";
 import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 if (process.env.AGENT_DOCK_LIVE_PARALLEL_CHECK !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_PARALLEL_CHECK=1 to acknowledge real model and gVisor usage",
+    "Set AGENT_DOCK_LIVE_PARALLEL_CHECK=1 to acknowledge real model and Cube KVM usage",
   );
 }
 
@@ -19,8 +21,35 @@ const runtimeDirectory = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
+
+async function readPrivate(path, maximumBytes, label) {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.size < 1 ||
+      metadata.size > maximumBytes
+    ) {
+      throw new Error(`${label} is not a private bounded file`);
+    }
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseJson(value, label) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${label} is not valid JSON`);
+  }
+}
+
 const environment = Object.fromEntries(
-  (await readFile(resolve(runtimeDirectory, ".env"), "utf8"))
+  (await readPrivate(resolve(runtimeDirectory, ".env"), 64 * 1_024, "Production environment"))
     .split(/\r?\n/)
     .filter((line) => line.length > 0)
     .map((line) => {
@@ -42,12 +71,32 @@ const baseUrl = new URL(
 const token = (await readFile(resolve(runtimeDirectory, "secrets/api-token"), "utf8")).trim();
 const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
 const api = new AgentDockApi(fetchFromProduction, token);
-const kubeconfigPath = resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig");
+const cubeCluster = parseJson(
+  await readPrivate(
+    resolve(runtimeDirectory, "cubesandbox/cluster.json"),
+    64 * 1_024,
+    "Cube cluster evidence",
+  ),
+  "Cube cluster evidence",
+);
+const cube = new OfficialCubeSandboxRuntimeClient({
+  apiUrl: `http://${cubeCluster.api.host}:${String(cubeCluster.api.port)}`,
+  apiKey: (
+    await readPrivate(
+      resolve(runtimeDirectory, "secrets/cubesandbox-api-key"),
+      4_096,
+      "Cube API key",
+    )
+  ).replace(/\r?\n$/, ""),
+  proxyNodeIp: cubeCluster.proxy.host,
+  proxyPort: cubeCluster.proxy.port,
+  proxyScheme: "http",
+  sandboxDomain: cubeCluster.sandboxDomain,
+  requestTimeoutMs: 30_000,
+});
 const executionEnvironment = {
   ...process.env,
-  NO_PROXY: [process.env.NO_PROXY, "agent-dock-kubernetes", "127.0.0.1", "localhost"]
-    .filter(Boolean)
-    .join(","),
+  NO_PROXY: [process.env.NO_PROXY, "127.0.0.1", "localhost"].filter(Boolean).join(","),
 };
 const terminalRunStates = new Set(["completed", "failed", "cancelled", "timed_out", "superseded"]);
 const terminalRaceStates = new Set(["awaiting_decision", "completed", "failed", "cancelled"]);
@@ -113,51 +162,6 @@ async function waitForRun(runId, timeoutMs = 600_000) {
   }
 }
 
-async function managedSandboxPods() {
-  const value = JSON.parse(
-    await capture(
-      "kubectl",
-      [
-        "--kubeconfig",
-        kubeconfigPath,
-        "get",
-        "pods",
-        "--namespace",
-        "agent-dock-sandboxes",
-        "--selector",
-        "agent-dock.io/managed=true",
-        "--output=json",
-      ],
-      60_000,
-    ),
-  );
-  assert(value !== null && typeof value === "object" && Array.isArray(value.items));
-  return value.items;
-}
-
-function podIdentity(pod, sessionId) {
-  const metadata = pod?.metadata;
-  const annotations = metadata?.annotations;
-  assert.equal(annotations?.["agent-dock.io/session-id"], sessionId);
-  assert.equal(pod?.spec?.runtimeClassName, "agent-dock-gvisor");
-  for (const value of [
-    metadata?.name,
-    metadata?.uid,
-    annotations?.["agent-dock.io/activation-id"],
-    annotations?.["agent-dock.io/sandbox-id"],
-  ]) {
-    assert.equal(typeof value, "string");
-    assert(value.length > 0);
-  }
-  return {
-    name: metadata.name,
-    uid: metadata.uid,
-    activationId: annotations["agent-dock.io/activation-id"],
-    supervisorSandboxId: annotations["agent-dock.io/sandbox-id"],
-    runtimeClassName: pod.spec.runtimeClassName,
-  };
-}
-
 function effectiveTestResults(tests) {
   const latestByInvocation = new Map();
   for (const test of tests) {
@@ -167,77 +171,50 @@ function effectiveTestResults(tests) {
   return [...latestByInvocation.values()];
 }
 
-async function sessionSandboxPods(sessionId) {
-  return (await managedSandboxPods()).filter(
-    (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === sessionId,
+function managedCubeForSession(instances, sessionId) {
+  return instances.filter(
+    (instance) =>
+      instance.metadata["agentdock.managed"] === "true" &&
+      instance.metadata["agentdock.provider"] === "cubesandbox" &&
+      instance.metadata["agentdock.session_id"] === sessionId,
   );
 }
 
-async function sandboxManagerInventory(request) {
-  const encodedRequest = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
-  const script = [
-    "const {readFile}=await import('node:fs/promises');",
-    "const token=(await readFile('/run/agent-dock-secrets/sandbox-manager-token','utf8')).trim();",
-    "const request=JSON.parse(Buffer.from(process.env.AGENT_DOCK_ACCEPTANCE_REQUEST,'base64url').toString('utf8'));",
-    "const response=await fetch('http://sandbox-manager:4300/internal/v1/sandbox-inventory',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(request)});",
-    "const body=await response.text();",
-    "if(!response.ok){process.stderr.write(body);process.exit(1)}",
-    "process.stdout.write(body);",
-  ].join("");
-  return JSON.parse(
-    await capture(
-      process.execPath,
-      [
-        "scripts/production-compose.mjs",
-        "exec",
-        "-T",
-        "-e",
-        `AGENT_DOCK_ACCEPTANCE_REQUEST=${encodedRequest}`,
-        "supervisor-host",
-        "node",
-        "--input-type=module",
-        "--eval",
-        script,
-      ],
-      60_000,
-    ),
-  );
-}
-
-async function terminateSessionSandbox(sessionId, sandbox) {
-  const listed = await sandboxManagerInventory({
-    protocolVersion: 1,
-    type: "assignments.list",
-    requestId: randomUUID(),
-    sandboxId: sandbox.supervisorSandboxId,
-  });
-  assert.equal(listed.type, "assignments.listed");
-  const matches = listed.assignments.filter((assignment) => assignment.sessionId === sessionId);
-  assert.equal(matches.length, 1, "Sandbox inventory did not contain the Session assignment");
-  assert.equal(matches[0].containerId, sandbox.uid);
-  const absent = await sandboxManagerInventory({
-    protocolVersion: 1,
-    type: "assignment.terminate_and_confirm",
-    requestId: randomUUID(),
-    sandboxId: sandbox.supervisorSandboxId,
-    assignment: matches[0],
-  });
-  assert.equal(absent.type, "assignment.absent");
-  assert.equal(absent.containerId, sandbox.uid);
+function cubeIdentity(instance, sessionId) {
+  const metadata = instance.metadata;
+  assert.equal(metadata["agentdock.session_id"], sessionId);
+  for (const value of [
+    instance.sandboxId,
+    metadata["agentdock.activation_id"],
+    metadata["agentdock.sandbox_id"],
+  ]) {
+    assert.equal(typeof value, "string");
+    assert(value.length > 0);
+  }
+  return {
+    nativeSandboxId: instance.sandboxId,
+    activationId: metadata["agentdock.activation_id"],
+    supervisorSandboxId: metadata["agentdock.sandbox_id"],
+    runtime: "cubesandbox-kvm",
+  };
 }
 
 async function cleanupSession(sessionId, strict) {
   try {
-    const pods = await sessionSandboxPods(sessionId);
-    for (const pod of pods) await terminateSessionSandbox(sessionId, podIdentity(pod, sessionId));
-    assert.equal((await sessionSandboxPods(sessionId)).length, 0);
-    return pods.length;
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const instances = managedCubeForSession(await cube.list(), sessionId);
+      if (instances.length === 0) return 0;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+    }
+    throw new Error("Candidate Session retained a Cube microVM");
   } catch (error) {
     if (strict) throw error;
     return 0;
   }
 }
 
+await cube.checkHealth();
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 const suffix = `${new Date().toISOString()}-${randomUUID().slice(0, 8)}`;
@@ -309,19 +286,17 @@ try {
   let simultaneousCandidateSandboxes = false;
   const raceDeadline = Date.now() + 900_000;
   while (!terminalRaceStates.has(race.state)) {
-    const pods = await managedSandboxPods();
-    let activeCandidatePods = 0;
+    const instances = await cube.list();
+    let activeCandidateMicroVms = 0;
     for (const candidate of race.candidates) {
-      const matches = pods.filter(
-        (pod) => pod?.metadata?.annotations?.["agent-dock.io/session-id"] === candidate.sessionId,
-      );
+      const matches = managedCubeForSession(instances, candidate.sessionId);
       if (matches.length > 1) throw new Error("Candidate Session owns multiple Tool Sandboxes");
       if (matches.length === 1) {
-        activeCandidatePods += 1;
-        observedSandboxes.set(candidate.candidateId, podIdentity(matches[0], candidate.sessionId));
+        activeCandidateMicroVms += 1;
+        observedSandboxes.set(candidate.candidateId, cubeIdentity(matches[0], candidate.sessionId));
       }
     }
-    if (activeCandidatePods === race.candidates.length) {
+    if (activeCandidateMicroVms === race.candidates.length) {
       simultaneousCandidateSandboxes = true;
     }
     if (Date.now() >= raceDeadline) throw new Error("Candidate race timed out");
@@ -339,15 +314,15 @@ try {
     ),
     JSON.stringify(race.candidates),
   );
-  assert.equal(observedSandboxes.size, 2, "Both candidates did not enter gVisor");
+  assert.equal(observedSandboxes.size, 2, "Both candidates did not enter Cube KVM");
   assert(
     simultaneousCandidateSandboxes,
     "Both candidate Tool Sandboxes were never observed simultaneously",
   );
   assert.equal(
-    new Set([...observedSandboxes.values()].map((sandbox) => sandbox.uid)).size,
+    new Set([...observedSandboxes.values()].map((sandbox) => sandbox.nativeSandboxId)).size,
     2,
-    "Candidate Sessions reused one physical gVisor Pod",
+    "Candidate Sessions reused one physical Cube microVM",
   );
   assert.equal(
     new Set([...observedSandboxes.values()].map((sandbox) => sandbox.activationId)).size,
@@ -496,7 +471,7 @@ try {
       `${String(candidate.usage.inputTokens)}/${String(candidate.usage.outputTokens)} input/output tokens, ` +
       `${String(candidate.tests.length)} test attempt(s) / ` +
       `${String(candidate.effectiveTests.length)} green effective result(s), ` +
-      `gVisor Pod ${candidate.sandbox.uid}, activation ${candidate.sandbox.activationId}`,
+      `Cube microVM ${candidate.sandbox.nativeSandboxId}, activation ${candidate.sandbox.activationId}`,
   );
   await writeFile(
     resolve(reportDirectory, "parallel-candidate-race-acceptance-latest.md"),
@@ -507,14 +482,14 @@ try {
       `- Provider/model: ${report.model.provider} / ${report.model.modelId}`,
       `- Candidate concurrency: ${String(report.race.maximumConcurrentCandidates)}`,
       `- Candidate execution intervals overlapped: ${String(report.race.executionIntervalsOverlapped)}`,
-      `- Distinct gVisor Pods observed simultaneously: ${String(report.race.simultaneousCandidateSandboxes)}`,
+      `- Distinct Cube KVM guests observed simultaneously: ${String(report.race.simultaneousCandidateSandboxes)}`,
       `- Shared trusted Supervisor with isolated Tool activations: ${String(report.race.sharedTrustedSupervisor)}`,
       ...candidateLines,
       `- Recommended/promoted candidate: ${report.promotion.winnerCandidateId}`,
       `- Promotion preserved parent Pi context: ${String(report.promotion.parentPiArtifactPreserved)}`,
       `- Exact Sandbox cleanup: ${String(report.cleanup.exactAssignmentsDestroyed)}`,
       "",
-      "One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct gVisor Pods, produced immutable Review Bundles with green tests, passed deterministic acceptance, and remained isolated until an explicit CAS promotion copied only the selected Workspace into the parent Session.",
+      "One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct Cube KVM microVMs, produced immutable Review Bundles with green tests, passed deterministic acceptance, and remained isolated until an explicit CAS promotion copied only the selected Workspace into the parent Session.",
       "",
     ].join("\n"),
     "utf8",
@@ -522,4 +497,5 @@ try {
   process.stdout.write(`${JSON.stringify(report)}\n`);
 } finally {
   for (const sessionId of sessionsForCleanup) await cleanupSession(sessionId, false);
+  await cube.close();
 }

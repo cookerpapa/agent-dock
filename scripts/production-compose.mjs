@@ -1,14 +1,31 @@
 import { execFileSync, spawn } from "node:child_process";
-import { access, lstat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, open } from "node:fs/promises";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
+const requestedProvider = process.env.AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER ?? "cubesandbox";
+if (
+  requestedProvider !== "cubesandbox" &&
+  !(
+    requestedProvider === "kubernetes-gvisor" &&
+    process.env.AGENT_DOCK_TEST_KUBERNETES_GVISOR_PROVIDER === "1"
+  )
+) {
+  throw new Error(
+    "Production Tool execution requires CubeSandbox; Kubernetes/gVisor is available only to the explicit deterministic test gate",
+  );
+}
+const configuredOverride = process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE;
 const composeOverride =
-  process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE === undefined
-    ? undefined
-    : resolve(repositoryRoot, process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE);
+  configuredOverride === undefined
+    ? requestedProvider === "cubesandbox"
+      ? resolve(repositoryRoot, "deploy/cubesandbox/compose.primary.yaml")
+      : undefined
+    : resolve(repositoryRoot, configuredOverride);
 const runtimeDirectory = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
@@ -16,6 +33,8 @@ const runtimeDirectory = resolve(
 const environmentFile = resolve(runtimeDirectory, ".env");
 const input = process.argv.slice(2);
 if (input.length === 0) throw new Error("A Docker Compose command is required");
+const [command, ...commandArguments] = input;
+const allowsStaleCubeTemplate = new Set(["down", "stop", "kill", "rm", "ps", "logs"]).has(command);
 await access(environmentFile);
 if (composeOverride !== undefined) await access(composeOverride);
 
@@ -43,6 +62,9 @@ const applicationSecretNames = [
   "sandbox-manager-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
+  ...(requestedProvider === "cubesandbox" && !allowsStaleCubeTemplate
+    ? ["cubesandbox-api-key"]
+    : []),
 ];
 const applicationSecrets = await Promise.all(
   applicationSecretNames.map((name) => lstat(resolve(runtimeDirectory, "secrets", name))),
@@ -63,7 +85,103 @@ if (
   throw new Error("Production application secrets must share one private non-root owner");
 }
 
-const [command, ...commandArguments] = input;
+async function readPrivateRuntimeJson(path, label) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    throw new Error(`${label} is unavailable`);
+  }
+  let value;
+  try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      (metadata.mode & 0o077) !== 0 ||
+      metadata.uid !== applicationOwner.uid ||
+      metadata.gid !== applicationOwner.gid ||
+      metadata.size < 2 ||
+      metadata.size > 64 * 1_024
+    ) {
+      throw new Error(`${label} must be a bounded private runtime file`);
+    }
+    value = await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${label} is not valid JSON`);
+  }
+}
+
+let cubeEnvironment = {};
+if (requestedProvider === "cubesandbox") {
+  const clusterPath = resolve(runtimeDirectory, "cubesandbox/cluster.json");
+  const templatePath = resolve(runtimeDirectory, "cubesandbox/template.json");
+  const cluster = allowsStaleCubeTemplate
+    ? await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence").catch(
+        () => undefined,
+      )
+    : await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence");
+  const template = allowsStaleCubeTemplate
+    ? await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence").catch(
+        () => undefined,
+      )
+    : await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence");
+  const invalidClusterEvidence =
+    cluster?.formatVersion !== 1 ||
+    cluster?.cubeCommit !== "8721dd151971ce3c2966482bbd32904ad98f378e" ||
+    cluster?.podNetworkMtu !== 1_450 ||
+    isIP(cluster?.api?.host ?? "") !== 4 ||
+    !Number.isSafeInteger(cluster?.api?.port) ||
+    cluster.api.port < 1 ||
+    cluster.api.port > 65_535 ||
+    isIP(cluster?.proxy?.host ?? "") !== 4 ||
+    !Number.isSafeInteger(cluster?.proxy?.port) ||
+    cluster.proxy.port < 1 ||
+    cluster.proxy.port > 65_535 ||
+    cluster?.sandboxDomain !== "cube.app";
+  if (!allowsStaleCubeTemplate && invalidClusterEvidence) {
+    throw new Error("CubeSandbox cluster evidence is not the validated primary profile");
+  }
+  const invalidTemplateEvidence =
+    template?.formatVersion !== 1 ||
+    template?.cubeCommit !== cluster?.cubeCommit ||
+    !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "") ||
+    !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
+    !/^[a-f0-9]{64}$/.test(template?.templateSpecSha256 ?? "");
+  if (!allowsStaleCubeTemplate && invalidTemplateEvidence) {
+    throw new Error("CubeSandbox READY template evidence is invalid");
+  }
+  if (
+    !allowsStaleCubeTemplate &&
+    template !== undefined &&
+    template.imageRevision !== imageRevision
+  ) {
+    throw new Error(
+      "CubeSandbox READY template does not match this AgentDock Git revision; register a fresh immutable template",
+    );
+  }
+  cubeEnvironment = {
+    AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:
+      invalidTemplateEvidence || template === undefined
+        ? "tpl-000000000000000000000000"
+        : template.templateId,
+    AGENT_DOCK_CUBESANDBOX_DOMAIN:
+      invalidClusterEvidence || cluster === undefined ? "cube.app" : cluster.sandboxDomain,
+    AGENT_DOCK_CUBESANDBOX_API_NODE_IP:
+      invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.api.host,
+    AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:
+      invalidClusterEvidence || cluster === undefined ? "3000" : String(cluster.api.port),
+    AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:
+      invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.proxy.host,
+    AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:
+      invalidClusterEvidence || cluster === undefined ? "80" : String(cluster.proxy.port),
+  };
+}
+
 const profileArguments = command === "build" ? ["--profile", "image-only"] : [];
 const serviceArguments =
   command === "build" && commandArguments.length === 0
@@ -76,7 +194,6 @@ const serviceArguments =
         "tool-sandbox-image",
         "dependency-egress-proxy-image",
         "provider-egress-relay-image",
-        ...(composeOverride === undefined ? [] : ["cube-tool-image"]),
       ]
     : commandArguments;
 const args = [
@@ -99,6 +216,7 @@ await new Promise((resolvePromise, rejectPromise) => {
       AGENT_DOCK_IMAGE_REVISION: imageRevision,
       AGENT_DOCK_APPLICATION_UID: String(applicationOwner.uid),
       AGENT_DOCK_APPLICATION_GID: String(applicationOwner.gid),
+      ...cubeEnvironment,
     },
     stdio: "inherit",
   });
