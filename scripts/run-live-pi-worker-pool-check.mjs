@@ -242,6 +242,13 @@ async function activeWorkers() {
           );
           return { supervisorId, workerIdentity: `${supervisorId}/${bootId}` };
         });
+  if (workerDeployment === "kubernetes") {
+    // Deployment-versioned Temporal queues intentionally omit poller identity
+    // from this CLI response. Kubernetes readiness is reached only after the
+    // Temporal Worker starts, while the active owner connection below proves
+    // the same boot is still enrolled in the Control Plane.
+    return connected.map(({ supervisorId }) => supervisorId);
+  }
   const taskQueue = JSON.parse(
     await capture(process.execPath, [
       "scripts/production-compose.mjs",
