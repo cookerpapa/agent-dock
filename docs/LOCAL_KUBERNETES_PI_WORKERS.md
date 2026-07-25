@@ -62,6 +62,12 @@ The operator also migrates the immutable StatefulSet claim template emitted by
 the first local chart revision. It recreates only the drained controller and
 Pods; retained Worker PVCs and all external conversation state remain intact.
 
+Each Kubernetes Secret key is mounted as an individual read-only `subPath`
+file. The trusted Worker can therefore retain its `O_NOFOLLOW`, owner/mode and
+size checks instead of weakening secret-file validation to accommodate
+Kubernetes projected-volume symlinks. Secret rotation requires a controlled
+Worker rollout.
+
 Inspect without exposing credentials:
 
 ```bash

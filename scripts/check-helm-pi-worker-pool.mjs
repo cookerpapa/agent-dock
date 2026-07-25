@@ -188,6 +188,26 @@ assert.equal(
   secret.items.some((item) => item.path === "aws-credentials"),
   true,
 );
+const secretMounts = worker.volumeMounts.filter((mount) => mount.name === "secrets");
+assert.deepEqual(secretMounts.map((mount) => mount.subPath).sort(), [
+  "aws-credentials",
+  "database-url",
+  "github-gateway-token",
+  "metrics-token",
+  "model-credential-master-key",
+  "sandbox-manager-token",
+  "supervisor-enrollment-token",
+  "supervisor-management-token",
+]);
+assert.equal(
+  secretMounts.every(
+    (mount) =>
+      mount.readOnly === true &&
+      mount.mountPath === `/run/agent-dock-secrets/${String(mount.subPath)}`,
+  ),
+  true,
+  "Kubernetes Secret keys must be mounted as individual files so O_NOFOLLOW remains enforceable",
+);
 
 const networkPolicy = find("NetworkPolicy", name);
 assert.deepEqual(new Set(networkPolicy.spec.policyTypes), new Set(["Ingress", "Egress"]));

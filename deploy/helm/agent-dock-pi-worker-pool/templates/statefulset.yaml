@@ -260,7 +260,38 @@ spec:
             - name: temporary
               mountPath: /tmp
             - name: secrets
-              mountPath: /run/agent-dock-secrets
+              mountPath: /run/agent-dock-secrets/database-url
+              subPath: database-url
+              readOnly: true
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/aws-credentials
+              subPath: aws-credentials
+              readOnly: true
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/supervisor-enrollment-token
+              subPath: supervisor-enrollment-token
+              readOnly: true
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/supervisor-management-token
+              subPath: supervisor-management-token
+              readOnly: true
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/sandbox-manager-token
+              subPath: sandbox-manager-token
+              readOnly: true
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/model-credential-master-key
+              subPath: model-credential-master-key
+              readOnly: true
+            {{- if .Values.services.githubGateway.enabled }}
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/github-gateway-token
+              subPath: github-gateway-token
+              readOnly: true
+            {{- end }}
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/metrics-token
+              subPath: metrics-token
               readOnly: true
       volumes:
         - name: workspace
