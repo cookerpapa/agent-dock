@@ -26,6 +26,18 @@ const environment = {
   KUBECONFIG: kubeconfig,
   PATH: `${nodeDirectory}:${process.env.PATH ?? ""}`,
 };
+const dockerProxyBuildArguments = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+].flatMap((name) =>
+  typeof environment[name] === "string" && environment[name].length > 0
+    ? ["--build-arg", name]
+    : [],
+);
 
 if (process.getuid?.() !== 0) {
   throw new Error(
@@ -257,6 +269,7 @@ await run("docker", [
   "build",
   "--network",
   "host",
+  ...dockerProxyBuildArguments,
   "--file",
   "deploy/cubesandbox/Dockerfile.tool",
   "--build-arg",
