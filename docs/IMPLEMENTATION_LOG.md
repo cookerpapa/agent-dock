@@ -2111,8 +2111,8 @@
 - Added a real-model Worker-pool acceptance gate. It stopped the Worker that
   handled the first Run, restored the next Run on the surviving Worker, and
   recovered a random marker from the prior Pi checkpoint. Four simultaneous
-  follow-up Sessions then distributed `1,2,1,2` across the two connections.
-  Six real DeepSeek requests consumed 502 input, 1,275 output, and 7,680
+  follow-up Sessions occupied both independent Worker connections.
+  The latest six real DeepSeek requests consumed 496 input, 1,252 output, and 7,680
   cache-read tokens; sanitized evidence is stored in
   `docs/reports/pi-worker-pool-acceptance-latest.{json,md}`.
 - Fixed Compose network-alias inheritance so the second Worker cannot answer
@@ -2178,3 +2178,12 @@
   packages into the reviewed Pi/Nest transitive locations, verifies installed
   versions after `npm ci`, and reports the corresponding npm-audit metadata
   findings as remediated only when node identity and advisory sets match.
+- Deployed commit `6afeb96` without replacing the existing PostgreSQL/MinIO
+  volumes. A six-request real DeepSeek acceptance stopped the first owning
+  Worker, restored the native Pi checkpoint on the surviving Worker, recovered
+  the previous-turn marker, and exercised four concurrent Runs across both
+  Worker connections. The first/follow-up settled times were 5,603/3,873 ms.
+  Production artifact inspection confirms all six newly committed Pi
+  checkpoints use the v2 manifest media type and
+  `pi-sessions/.../manifests/<sha256>.json` keys; older whole-NDJSON rows remain
+  readable for online migration.

@@ -397,6 +397,17 @@ network latency. A grace-period orphan collector and remote S3 p50/p95 remain
 retention/operations follow-ups; failed commits intentionally never delete
 possibly shared content-addressed objects.
 
+Production validation on commit `6afeb96` used six real
+`deepseek-v4-flash` requests. After the first Run settled, its owning Worker
+was stopped. The peer Worker restored the native Pi state, recovered the
+previous-turn marker and committed another v2 checkpoint. Four additional Runs
+then occupied both Worker connections. Direct PostgreSQL inspection confirmed
+that the six new `pi_session_snapshot` artifacts use
+`application/vnd.agent-dock.pi-session-manifest+json` and immutable
+`pi-sessions/.../manifests/<sha256>.json` object keys. This verifies the
+production read/write path and cross-Worker restore, while the separate pinned
+Pi integration test remains the evidence for threshold compaction fidelity.
+
 ## Why not another conversation framework
 
 - LangGraph-style checkpointers serialize that framework's graph state, not
