@@ -25,6 +25,15 @@ const helm =
 
 const clusterName = "agent-dock-workers";
 const k3sImage = "rancher/k3s:v1.35.5-k3s1";
+const k3sSystemImages = [
+  "rancher/mirrored-pause:3.6",
+  "rancher/local-path-provisioner:v0.0.36",
+  "rancher/mirrored-coredns-coredns:1.14.3",
+  "rancher/mirrored-library-busybox:1.37.0",
+  "rancher/klipper-helm:v0.10.0-build20260513",
+  "rancher/klipper-lb:v0.4.17",
+  "rancher/mirrored-library-traefik:3.6.13",
+];
 const serverContainer = `k3d-${clusterName}-server-0`;
 const loadBalancerContainer = `k3d-${clusterName}-serverlb`;
 const workerNamespace = "agent-dock-workers";
@@ -264,6 +273,8 @@ async function ensureCluster() {
       "4g",
       "--port",
       "127.0.0.1:18080:80@loadbalancer",
+      "--k3s-arg",
+      "--disable=metrics-server@server:*",
       "--kubeconfig-update-default=false",
       "--kubeconfig-switch-context=false",
       "--wait",
@@ -273,6 +284,115 @@ async function ensureCluster() {
   }
   const kubeconfig = await capture(k3d, ["kubeconfig", "get", clusterName]);
   await writePrivate(runtimeKubeconfigPath, `${kubeconfig}\n`);
+  await ensureK3sSystemImages();
+  await waitForK3sSystemPlane();
+}
+
+async function imageExistsInK3d(image) {
+  return capture("docker", ["exec", serverContainer, "crictl", "inspecti", image])
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function importDockerImageIntoK3d(image, pull) {
+  if (await imageExistsInK3d(image)) return;
+  const importDirectory = join(runtimeDirectory, "kubernetes", "image-import");
+  const publicDockerConfig = join(runtimeDirectory, "kubernetes", "public-docker-config");
+  await mkdir(importDirectory, { recursive: true, mode: 0o700 });
+  await mkdir(publicDockerConfig, { recursive: true, mode: 0o700 });
+  if (pull) {
+    // Public cluster bootstrap images do not require registry credentials. An
+    // isolated config also avoids making local credential-helper availability a
+    // prerequisite for an unattended cutover.
+    await run("docker", ["pull", image], {
+      environment: childEnvironment({ DOCKER_CONFIG: publicDockerConfig }),
+    });
+  }
+  const imageKey = image.replaceAll(/[^a-zA-Z0-9_.-]/gu, "-");
+  const archive = join(importDirectory, `${String(process.pid)}-${imageKey}.tar`);
+  const remoteArchive = `/tmp/agent-dock-${String(process.pid)}-${imageKey}.tar`;
+  try {
+    await run("docker", ["save", "--output", archive, image]);
+    await run("docker", ["cp", archive, `${serverContainer}:${remoteArchive}`]);
+    await run("docker", [
+      "exec",
+      serverContainer,
+      "ctr",
+      "--namespace",
+      "k8s.io",
+      "images",
+      "import",
+      remoteArchive,
+    ]);
+  } finally {
+    await rm(archive, { force: true });
+    await run("docker", ["exec", serverContainer, "rm", "-f", remoteArchive]).catch(
+      () => undefined,
+    );
+  }
+}
+
+async function ensureK3sSystemImages() {
+  for (const image of k3sSystemImages) {
+    await importDockerImageIntoK3d(image, true);
+  }
+}
+
+async function waitForKubernetesResource(namespace, resource, timeoutMs = 180_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (
+      await kubectlCapture(["--namespace", namespace, "get", resource])
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      return;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error(`Kubernetes resource ${namespace}/${resource} was not created`);
+}
+
+async function waitForK3sSystemPlane() {
+  await kubectlRun([
+    "--namespace",
+    "kube-system",
+    "wait",
+    "--for=condition=Ready",
+    "pod",
+    "--selector",
+    "k8s-app=kube-dns",
+    "--timeout=3m",
+  ]);
+  await kubectlRun([
+    "--namespace",
+    "kube-system",
+    "wait",
+    "--for=condition=Ready",
+    "pod",
+    "--selector",
+    "app=local-path-provisioner",
+    "--timeout=3m",
+  ]);
+  await waitForKubernetesResource("kube-system", "deployment/traefik");
+  await kubectlRun([
+    "--namespace",
+    "kube-system",
+    "rollout",
+    "status",
+    "deployment/traefik",
+    "--timeout=3m",
+  ]);
+  await kubectlRun([
+    "--namespace",
+    "kube-system",
+    "wait",
+    "--for=condition=Ready",
+    "pod",
+    "--selector",
+    "svccontroller.k3s.cattle.io/svcname=traefik",
+    "--timeout=3m",
+  ]);
 }
 
 async function dockerInspect(container) {
@@ -635,7 +755,7 @@ async function buildAndImportWorkerImage(revision) {
     image,
     ".",
   ]);
-  await run(k3d, ["image", "import", "--cluster", clusterName, image]);
+  await importDockerImageIntoK3d(image, false);
   return { image, tag };
 }
 
@@ -649,7 +769,6 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     chartPath,
     "--namespace",
     workerNamespace,
-    "--wait",
     "--timeout",
     "7m",
     "--set",
@@ -712,10 +831,70 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     `networkPolicy.externalEgressCidrs=${JSON.stringify(externalCidrs)}`,
   ];
   await run(helm, arguments_, { environment: kubeEnvironment() });
+  await kubectlRun([
+    "--namespace",
+    workerNamespace,
+    "delete",
+    "pod",
+    "--selector",
+    `agent-dock.io/worker-pool=${poolName}`,
+    "--wait=true",
+    "--timeout=2m",
+  ]);
+  await kubectlRun([
+    "--namespace",
+    workerNamespace,
+    "wait",
+    "--for=condition=Ready",
+    "pod",
+    "--selector",
+    `agent-dock.io/worker-pool=${poolName}`,
+    "--timeout=7m",
+  ]);
 }
 
 async function setTemporalCurrentVersion(revision) {
   const temporal = await composeContainer("temporal");
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const deployment = await capture("docker", [
+      "exec",
+      temporal,
+      "temporal",
+      "worker",
+      "deployment",
+      "describe",
+      "--address",
+      "127.0.0.1:7233",
+      "--namespace",
+      "agent-dock",
+      "--deployment-name",
+      "agent-dock-pi-workers",
+      "--output",
+      "json",
+    ]).catch(() => undefined);
+    if (deployment?.includes(revision)) break;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+  }
+  const deployment = await capture("docker", [
+    "exec",
+    temporal,
+    "temporal",
+    "worker",
+    "deployment",
+    "describe",
+    "--address",
+    "127.0.0.1:7233",
+    "--namespace",
+    "agent-dock",
+    "--deployment-name",
+    "agent-dock-pi-workers",
+    "--output",
+    "json",
+  ]).catch(() => undefined);
+  if (!deployment?.includes(revision)) {
+    throw new Error("Kubernetes Pi Worker Build ID did not register with Temporal");
+  }
   await run("docker", [
     "exec",
     temporal,

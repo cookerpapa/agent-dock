@@ -24,6 +24,11 @@ available.
    trusted Pi Workers. CubeSandbox remains on the retained host K3s/KVM plane.
 2. The repository downloads k3d from its official release and verifies the
    pinned Linux AMD64 SHA-256 before installation under `.cache/tools`.
+   Version-matched K3s system images are pulled by the host Docker daemon and
+   imported into the nested containerd image store before readiness checks.
+   This supports desktop-proxy environments without injecting a host proxy
+   endpoint into cluster workloads. The K3s image and bootstrap image set are
+   updated as one pinned compatibility unit.
 3. The existing Compose PostgreSQL, MinIO, Temporal, Control Plane, Sandbox
    Manager, GitHub Gateway, provider relay and Jaeger remain authoritative.
    The k3d server joins only their narrow Docker networks.
@@ -49,6 +54,10 @@ available.
 9. Conversation state does not move into k3d. PostgreSQL remains the product
    authority and MinIO retains Pi-native JSONL manifests/segments. Deleting the
    local Worker cluster must not delete a committed conversation.
+10. Helm acceptance is not a cutover gate. The operator explicitly waits for
+    CoreDNS, local-path provisioning, Traefik, all Worker readiness probes and
+    Temporal Build ID visibility before advancing the Worker Deployment
+    version. Any failure restores the saved Compose Worker policy.
 
 ## Consequences
 

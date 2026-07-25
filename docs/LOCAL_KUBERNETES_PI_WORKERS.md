@@ -37,16 +37,26 @@ npm run kubernetes:pi-workers:up
 The command:
 
 1. refuses a dirty source tree or non-terminal Run;
-2. creates the pinned single-node cluster and private kubeconfig;
+2. creates the pinned single-node cluster and private kubeconfig, imports the
+   version-matched K3s system images through Docker's configured registry
+   transport, and waits for DNS, storage and private ingress readiness;
 3. joins the k3d server to the narrow Compose networks;
 4. creates selector-free Services and EndpointSlices for trusted dependencies;
 5. builds and imports an exact-revision Supervisor image;
 6. saves the current Control Plane Worker policy;
 7. stops/removes Compose Workers and recreates only the Control Plane;
-8. installs two Kubernetes Worker replicas;
-9. makes the exact Temporal Worker Build ID current;
-10. verifies Pod readiness, Control Plane management reachability, enrollment
-    and Temporal version metadata.
+8. installs two Kubernetes Worker replicas and explicitly waits for both
+   application readiness probes;
+9. waits until Temporal observes the exact Worker Build ID, then makes it
+   current;
+10. verifies Control Plane management reachability, enrollment and Temporal
+    version metadata.
+
+The explicit system-image import matters on developer machines whose Docker
+daemon can reach public registries through a desktop proxy but whose nested
+k3d node cannot. A Helm release being accepted is not treated as readiness:
+the cutover does not commit until the Kubernetes system plane, Worker Pods and
+Temporal registration are all ready.
 
 Inspect without exposing credentials:
 
