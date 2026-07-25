@@ -214,6 +214,11 @@ cat >/usr/local/libexec/agent-dock-prepare-k3s-wsl <<'EOF'
 #!/bin/sh
 set -eu
 
+# Kubernetes bidirectional hostPath propagation and CubeSandbox's node
+# bootstrap require the host root mount to be recursively shared.
+mount --make-rshared /
+mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf
+
 # Docker Desktop currently exposes this WSL mount with an unescaped space in
 # the `path=C:\Program Files\...` mount option. Kubernetes' mount parser treats
 # that malformed /proc/mounts row as seven fields and kubelet refuses to start.
@@ -229,10 +234,32 @@ if awk 'NF != 6 { print; invalid=1 } END { exit invalid ? 0 : 1 }' /proc/mounts 
 fi
 EOF
 chmod 0755 /usr/local/libexec/agent-dock-prepare-k3s-wsl
+cat >/usr/local/libexec/agent-dock-route-k3s-services <<'EOF'
+#!/bin/sh
+set -eu
+
+if ! grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
+  exit 0
+fi
+
+for attempt in $(seq 1 300); do
+  address=$(ip -4 -o address show dev cni0 2>/dev/null | sed -n 's/.* inet \([^/]*\)\/.*/\1/p' | head -n 1)
+  if [ -n "${address}" ]; then
+    ip route replace 10.43.0.0/16 dev cni0 src "${address}"
+    exit 0
+  fi
+  sleep 0.1
+done
+
+echo "cni0 did not become ready" >&2
+exit 1
+EOF
+chmod 0755 /usr/local/libexec/agent-dock-route-k3s-services
 cat >/etc/systemd/system/k3s.service.d/agent-dock-containerd-socket.conf <<EOF
 [Service]
 ExecStartPre=/usr/local/libexec/agent-dock-prepare-k3s-wsl
 ExecStartPost=/bin/sh -eu -c 'for attempt in \$(seq 1 100); do test -S /run/k3s/containerd/containerd.sock && break; sleep 0.1; done; chgrp ${DOCKER_GROUP} /run/k3s/containerd/containerd.sock; chmod 0660 /run/k3s/containerd/containerd.sock'
+ExecStartPost=/usr/local/libexec/agent-dock-route-k3s-services
 EOF
 
 systemctl daemon-reload

@@ -181,7 +181,26 @@ function output(response: ToolSandboxOperationResponse): string {
     response.operation !== "bash.exec" ||
     response.exitCode !== 0
   ) {
-    throw new Error("CubeSandbox live command did not succeed");
+    const diagnostic =
+      response.type === "tool_sandbox.operation_result" && response.operation === "bash.exec"
+        ? {
+            type: response.type,
+            operation: response.operation,
+            exitCode: response.exitCode,
+            output: Buffer.from(response.output, "base64").toString("utf8").slice(0, 2_048),
+          }
+        : response.type === "tool_sandbox.operation_result"
+          ? {
+              type: response.type,
+              operation: response.operation,
+            }
+          : {
+              type: response.type,
+              code: response.code,
+              message: response.message,
+              retryable: response.retryable,
+            };
+    throw new Error(`CubeSandbox live command did not succeed: ${JSON.stringify(diagnostic)}`);
   }
   return Buffer.from(response.output, "base64").toString("utf8");
 }
@@ -374,7 +393,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
               first.capability,
               operation(
                 first.activationId,
-                "node -e \"fetch('https://example.com',{signal:AbortSignal.timeout(3000)}).then(()=>process.exit(93)).catch(()=>process.exit(0))\"",
+                "node -e \"const s=require('node:net').createConnection({host:'1.1.1.1',port:443});const denied=()=>{s.destroy();process.exit(0)};s.setTimeout(3000,denied);s.once('error',denied);s.once('connect',()=>process.exit(93))\"",
                 10_000,
               ),
             ),

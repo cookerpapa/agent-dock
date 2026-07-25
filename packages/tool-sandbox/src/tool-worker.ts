@@ -869,6 +869,9 @@ export async function runToolWorker(): Promise<void> {
   let active:
     { operationId: string; controller: AbortController; promise: Promise<void> } | undefined;
   const seenOperationIds = new Set<string>();
+  const releaseActive = (operationId: string): void => {
+    if (active?.operationId === operationId) active = undefined;
+  };
 
   const fail = async (
     error: unknown,
@@ -1017,13 +1020,18 @@ export async function runToolWorker(): Promise<void> {
         const response = await executeOperation(request, controller.signal).catch(
           (error: unknown) => failureResponse(request, error),
         );
+        // Clear the execution slot before publishing the terminal response.
+        // The trusted caller is allowed to issue an immediate capture as soon
+        // as it receives that response; publishing first creates a race where
+        // the next input observes the already-finished operation as active.
+        releaseActive(request.operationId);
         await writeOutput({
           toolWorkerProtocolVersion: 1,
           type: "worker.operation_result",
           response,
         });
       })().finally(() => {
-        if (active?.operationId === request.operationId) active = undefined;
+        releaseActive(request.operationId);
       });
       active = { operationId: request.operationId, controller, promise };
     })().catch(async (error: unknown) => {
