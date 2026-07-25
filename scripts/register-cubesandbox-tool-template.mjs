@@ -12,7 +12,8 @@ const runtimeDirectory = resolve(
   repositoryRoot,
   process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
-const kubeconfig = process.env.KUBECONFIG ?? "/etc/rancher/k3s/k3s.yaml";
+const explicitKubeconfig = process.env.KUBECONFIG;
+const kubeconfig = explicitKubeconfig ?? "/etc/rancher/k3s/k3s.yaml";
 const registryHost = "localhost:5000";
 const registryRepository = `${registryHost}/agent-dock/cubesandbox-tool`;
 const clusterRegistryRepository =
@@ -39,9 +40,9 @@ const dockerProxyBuildArguments = [
     : [],
 );
 
-if (process.getuid?.() !== 0) {
+if (process.getuid?.() !== 0 && explicitKubeconfig === undefined) {
   throw new Error(
-    "CubeSandbox template registration must run as root because it reads the K3s control-plane kubeconfig",
+    "Non-root CubeSandbox template registration requires an explicit readable KUBECONFIG",
   );
 }
 

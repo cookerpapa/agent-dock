@@ -216,14 +216,59 @@ async function runEvidence(runId) {
 
 async function activeWorkers() {
   const output = await psql(
-    `select distinct supervisor_id
+    `select distinct supervisor_id || '|' || boot_id::text || '|' || accepting_assignments::text
        from supervisor_connections
       where state = 'active'
-        and accepting_assignments
         and expires_at > now()
-      order by supervisor_id`,
+      order by 1`,
   );
-  return output.length === 0 ? [] : output.split("\n");
+  const connected =
+    output.length === 0
+      ? []
+      : output.split("\n").map((row) => {
+          const [supervisorId, bootId, acceptingAssignments] = row.split("|");
+          assert.equal(
+            acceptingAssignments,
+            "false",
+            `${supervisorId} still exposes the superseded WebSocket matcher`,
+          );
+          return { supervisorId, workerIdentity: `${supervisorId}/${bootId}` };
+        });
+  const taskQueue = JSON.parse(
+    await capture(process.execPath, [
+      "scripts/production-compose.mjs",
+      "exec",
+      "-T",
+      "temporal",
+      "temporal",
+      "task-queue",
+      "describe",
+      "--namespace",
+      "agent-dock",
+      "--task-queue",
+      "agent-dock-pi-runs-v1",
+      "--address",
+      "127.0.0.1:7233",
+      "--output",
+      "json",
+    ]),
+  );
+  const activityPollers = new Set(
+    taskQueue.pollers
+      .filter((poller) => poller.taskQueueType === "activity")
+      .map((poller) => poller.identity),
+  );
+  const workflowPollers = new Set(
+    taskQueue.pollers
+      .filter((poller) => poller.taskQueueType === "workflow")
+      .map((poller) => poller.identity),
+  );
+  return connected
+    .filter(
+      ({ workerIdentity }) =>
+        activityPollers.has(workerIdentity) && workflowPollers.has(workerIdentity),
+    )
+    .map(({ supervisorId }) => supervisorId);
 }
 
 async function waitForWorkers(expectedCount) {

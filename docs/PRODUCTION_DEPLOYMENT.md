@@ -3,7 +3,7 @@
 This runbook deploys AgentDock's currently supported production slice on one
 Linux Docker host. The result is a durable, authenticated, private multi-tenant
 service with PostgreSQL metadata, MinIO checkpoint bytes, a tenant-neutral
-remote control plane, a bounded trusted Pi Worker pool, separate one-shot Cube
+remote control plane, a self-hosted Temporal scheduler, a bounded trusted Pi Worker pool, separate one-shot Cube
 KVM Tool microVMs, and a static Web UI. Multiple tenants can share this runtime without
 sharing their API resources, event streams, quotas, or checkpoint namespaces.
 The loopback product enables capacity-bounded browser account registration so
@@ -47,6 +47,8 @@ The provider-neutral runtime boundary is recorded in
 ADR-0039 record the retained Kubernetes/gVisor importer path; the primary Cube
 KVM Tool execution decision is
 [ADR-0053](adr/0053-cubesandbox-primary-execution-plane.md).
+The production Temporal cutover and no-dual-scheduler rule are recorded in
+[ADR-0056](adr/0056-temporal-as-sole-run-scheduler.md).
 Versioned environments and capability-scoped dependency setup are recorded in
 [ADR-0042](adr/0042-versioned-project-environment-plane.md) and
 [ADR-0044](adr/0044-capability-scoped-dependency-egress.md).
@@ -69,8 +71,8 @@ recovery, and release evidence are recorded in
   `2.3.2-k3s2`, and `runsc release-20260714.0`.
 - Node.js `24.18.0` and npm `11.16.0` for the verified repository toolchain. The built
   application images pin their own Node and service image digests.
-- Enough local CPU, memory, and storage for PostgreSQL, MinIO, seven application
-  images, and up to two concurrent workers. The Compose file declares explicit
+- Enough local CPU, memory, and storage for PostgreSQL, MinIO, Temporal, the
+  trusted application images, and up to two concurrent workers. The Compose file declares explicit
   per-service limits; capacity should be measured against the intended host.
 - A private checkout and a trusted operator account. Anyone who can read the
   generated runtime directory or administer Docker/K3s/containerd is inside the
@@ -124,6 +126,10 @@ exact commit:
 
 ```bash
 sudo --preserve-env=PATH node scripts/register-cubesandbox-tool-template.mjs
+
+# Or use a private, explicitly supplied administrative kubeconfig:
+KUBECONFIG=/secure/path/k3s-admin.kubeconfig \
+  node scripts/register-cubesandbox-tool-template.mjs
 ```
 
 Production start fails closed unless the READY template's Git revision, image
@@ -234,7 +240,12 @@ browser -> web/Caddy -> authenticated /v1 API -> control-plane
        GitHub webhook -> HMAC Gateway |              |
                                       |              +-> PostgreSQL
                                       |              +-> GitHub Gateway RPC
-                                      |              +-> outbound Supervisor WebSocket
+                                      |              +-> bounded outbox relay
+                                      |                         |
+                                      |                         v
+                                      |                    Temporal Server
+                                      |                         |
+                                      |                common Pi Task Queue
                                       v
                               trusted Pi Agent Runner -> MinIO checkpoints
                                       |         |
@@ -263,9 +274,9 @@ the Tool Sandbox is not attached to its network. With the default empty App ID
 and placeholder key, liveness remains healthy but private import, installation
 registration, and PR delivery return `github_app_not_configured`.
 
-The database, object store, Supervisor management endpoint, boot-provisioning
-route, readiness endpoints, and outbound Supervisor transport stay on isolated
-Compose networks. Caddy returns `404` for `/internal/*` and `/health/*`; it only
+The database, object store, Temporal endpoint, Supervisor management endpoint,
+boot-provisioning route, readiness endpoints, and outbound Supervisor transport
+stay on isolated Compose networks. Caddy returns `404` for `/internal/*` and `/health/*`; it only
 proxies `/v1/*` and serves static assets. Liveness is exposed as `/healthz` and
 contains no dependency detail.
 
@@ -326,7 +337,8 @@ Persistent state is split into nine declared volumes:
 - `grafana-data`: dashboard/operator state;
 - `jaeger-data`: retained trace evidence.
 
-PostgreSQL metadata and MinIO objects form one logical checkpoint. The boot and
+PostgreSQL metadata, Temporal's `temporal` and `temporal_visibility` databases,
+and MinIO objects form one logical checkpoint. The boot and
 spool volumes are also required for honest owner-stop proof and event recovery;
 the observability volumes preserve the operator evidence shown by the deployed
 product. Do not treat any subset as the supported complete recovery point.
@@ -571,15 +583,16 @@ MFA, distributed rate limiting, enterprise RBAC, billing, or abuse protection.
 
 Use `npm run production:ps` for the first health view. Expected steady state:
 
-- `postgres`, `minio`, `control-plane`, `sandbox-manager`, `supervisor-host`,
-  and `web` are healthy;
+- `postgres`, `minio`, `temporal`, `control-plane`, `sandbox-manager`, both
+  `supervisor-host` replicas, and `web` are healthy;
 - `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
   exited successfully;
 - no `tool-sandbox-image` service is running;
 - no AgentDock Cube activation remains after Run settlement and no
   dependency-bootstrap or importer Pod remains after its operation;
 - the Cube clean-prewarm target is zero;
-- one current Supervisor boot is ready for the configured stable Supervisor ID.
+- one current Supervisor boot per configured stable Supervisor ID is ready and
+  both identities poll `agent-dock-pi-runs-v1` for Workflow and Activity Tasks.
 
 `production:up` includes Compose orphan cleanup. An upgrade from the former
 repository-egress topology therefore removes its exited network-bootstrap
@@ -587,17 +600,18 @@ container; after its empty obsolete network is removed once, no compatibility
 service or network remains.
 
 The Supervisor is ready only after the authenticated Sandbox Manager,
-PostgreSQL, MinIO, provisioning, spool recovery, and its current outbound
-WebSocket are ready. A transient
-control-plane restart may make a committed command's outcome ambiguous. The
-system then fails that command/session as `connection_closed`, never replays its
-possible side effects, quarantines a permanently stale final spool event with a
-checksummed rejection record, reconnects the same Supervisor boot, and accepts
-future work in a new session. This is intentional at-least-once delivery safety,
-not a transparent exactly-once claim.
+PostgreSQL, MinIO, provisioning, spool recovery, its current outbound
+management WebSocket, and its Temporal pollers are ready. A transient Control
+Plane restart does not remove Workflow history: the restarted outbox relay
+adopts the deterministic Workflow ID. A Pi Worker failure after durable start
+is still ambiguous and is fenced rather than blindly replaying possible model
+or Tool side effects. This is intentional at-least-once scheduling safety, not
+a transparent exactly-once claim.
 
 The bundled topology starts two independent Pi Workers, each advertising a
-default capacity of two and using a separate boot/spool volume. Enrollment
+default capacity of one and using a separate boot/spool volume. Each Worker
+polls the same Temporal Task Queue; the authenticated WebSocket advertises
+`acceptingAssignments=false` and is not a second matcher. Enrollment
 admits identities under `AGENT_DOCK_SUPERVISOR_ID_PREFIX`; private management
 routing must match `AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE`. Additional
 Workers can be deployed as independent containers or StatefulSet Pods as long
@@ -609,7 +623,9 @@ replicas as an availability SLA.
 Alert operationally on prolonged unhealthy/restarting services, a growing
 retirement queue, repeated `connection_closed` failures, non-empty active spool
 after recovery, quarantine growth, PostgreSQL/MinIO capacity, and managed Tool
-Pods that outlive their command deadline. Quarantine is retained
+microVMs that outlive their command deadline. Also alert on Temporal
+unavailability, Task Queue backlog age, missing Worker pollers, repeated
+Activity retries and Workflow history growth. Quarantine is retained
 as audit evidence and has no automatic garbage collection in this slice.
 
 ## Backup and restore
@@ -681,7 +697,9 @@ npm run production:ps
 ```
 
 `production:deploy` rebuilds pinned images and runs the idempotent migration and
-bootstrap jobs before the long-running services become ready. Recreating the
+bootstrap jobs before the long-running services become ready. Temporal schema
+and namespace initialization must succeed before the Control Plane starts.
+Recreating the
 Supervisor host intentionally creates a fresh boot/sandbox generation; the old
 boot is fenced and retired, and settled sessions restore from PostgreSQL/MinIO.
 
@@ -690,6 +708,11 @@ safe schema rollback by itself. Restore the coordinated pre-upgrade recovery
 point when a migration is incompatible, or use a migration-specific rollback
 procedure that has been separately tested. Never point an older binary at an
 unknown newer schema merely because its container starts.
+
+Temporal rollback is never a live feature flag. Stop admission, drain or
+cancel active Runs, stop the topology, and restore the coordinated pre-cutover
+PostgreSQL/MinIO recovery point plus the pre-cutover image revision. Never
+enable the legacy WebSocket matcher while Temporal Workers are polling.
 
 ## Credential rotation
 

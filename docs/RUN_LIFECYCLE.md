@@ -25,8 +25,10 @@ side effects.
 
 ## Attempt identity and claim
 
-The dispatcher claims work with PostgreSQL locking, creates an immutable-numbered
-`RunAttempt`, and obtains:
+The Control Plane's outbox relay starts one deterministic Temporal Workflow per
+accepted Run. Temporal assigns its Activity to one capacity-bounded Pi Worker;
+the Activity then claims only the named PostgreSQL command, creates an
+immutable-numbered `RunAttempt`, and obtains:
 
 ```text
 runId / attemptId / attemptNumber
@@ -34,7 +36,7 @@ commandId / turnId
 leaseId
 fencingToken
 lease expiry
-Supervisor boot and connection generation
+Supervisor boot and Temporal Worker identity
 ```
 
 `attemptId` is independent from `leaseId`. Lease acquisition binds the exact
@@ -43,19 +45,25 @@ A retry before durable acknowledgement terminates the old Attempt and creates a
 new one. Once execution is acknowledged, a crash is ambiguous and the Run fails
 instead of blindly replaying commands.
 
-## Two-phase start
+## Durable Workflow start
 
-1. Control Plane sends `command.turn.execute` as a preparation.
-2. Supervisor validates capacity/identity and returns a side-effect-free ACK.
-3. Control Plane commits `ACKNOWLEDGED/RUNNING` under the current lease/fence.
-4. Control Plane sends `command.commit`.
+1. The relay starts `agent-dock-run-v1-{runId}` with only tenant, Session, Run
+   and command UUIDs. `USE_EXISTING` makes outbox redelivery idempotent.
+2. Temporal matches `executeRunCommand` to the common
+   `agent-dock-pi-runs-v1` Task Queue.
+3. The Activity's exact PostgreSQL claim rechecks Session FIFO, tenant
+   concurrency, Run state and command identity. Ineligible work returns
+   `deferred`; the Workflow waits on a durable timer.
+4. The selected Supervisor acquires the lease/fence and commits
+   `ACKNOWLEDGED/RUNNING` before starting Pi.
 5. Trusted Runner durably advances the Attempt through restore/run/checkpoint
    phases while resolving model and workspace state.
 6. `ToolSandboxManager` reserves one logical activation and rotating capability;
-   it does not create a Pod.
-7. Trusted Runner starts pinned Pi with only the fixed remote-tool extension.
+   it does not create a microVM.
+7. Trusted Runner creates a pinned embedded Pi SDK session with only the fixed
+   remote-tool implementation.
 8. The first actual Tool operation makes the Provider create/restore/attest the
-   gVisor Pod. Before the first repository command, the worker verifies the
+   Cube KVM microVM. Before the first repository command, the worker verifies the
    accepted image revision and expected Node.js/Java/Python/Git toolchain, then
    executes the accepted environment version's bounded setup and verification
    recipe. A chat-only Run skips this step entirely.
@@ -98,9 +106,11 @@ egress. A selected fallback reuses that reservation; completion snapshots the
 actual provider/model/rates/tokens/cost. The Pi process is also bounded by the
 Turn's wall-clock and remaining Tool-call snapshot.
 
-One shared Supervisor heartbeat reports all active assignments. PostgreSQL
-renews only the exact current lease/fence, current RunAttempt, boot, command
-lifecycle, and event cursor. Lease loss revokes execution authority.
+Temporal Activity heartbeats prove that the Worker is still polling and allow
+timely cancellation delivery. A separate shared Supervisor heartbeat renews
+only the exact current PostgreSQL lease/fence, current RunAttempt, boot,
+command lifecycle and event cursor. Losing either authority aborts execution;
+Temporal retry still cannot bypass the newer PostgreSQL fence.
 
 Pi's first text delta is emitted immediately. Later adjacent text deltas for the
 same content block are coalesced for at most 50 ms or 2 KiB. Every public event
@@ -131,9 +141,9 @@ At `agent_settled`:
    settles the staged version, and records the Attempt revision. A failure
    abandons the staged version and restores the previous settled pointers.
 7. `turn.completed` is durably published as the commit marker.
-8. Manager revokes the capability. A successful exact-revision coding Session
-   may retain the Pod as a bounded warm cache; every failure/cancel/mismatch
-   path confirms runtime absence.
+8. Manager revokes the capability. Cube v0.6.0 activations are destroyed after
+   the Run because the provider does not expose the metadata CAS needed for a
+   safe higher-fence rebind. Every terminal path confirms runtime absence.
 
 If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not
@@ -169,11 +179,13 @@ rather than pretending process state can be rewound.
 
 ## Cancellation
 
-Cancellation is its own durable command. After its ACK is committed, the
-Supervisor aborts Pi's model request and the active Tool RPC. Bash receives
-process-group termination; Provider cleanup then removes and confirms absence of
-the entire Tool Sandbox. Only after that proof may `turn.cancelled` settle the
-Turn and release capacity.
+Cancellation is its own durable command. The outbox relay requests cancellation
+of the exact Temporal Workflow. Temporal delivers Activity cancellation to the
+Worker that owns the live Pi SDK session; that Worker invokes the exact local
+cancellation dispatcher, aborts Pi's model request and the active Tool RPC.
+Bash receives process-group termination; Provider cleanup then removes and
+confirms absence of the entire Tool Sandbox. Only after that proof may
+`turn.cancelled` settle the Turn and release capacity.
 
 Natural completion wins if it commits before cancellation's linearization
 point. A cleanup failure fails closed and retains/quarantines capacity for
@@ -184,8 +196,10 @@ reconciliation.
 | Failure | Behavior |
 | --- | --- |
 | Browser disconnect | reconnect with `Last-Event-ID`; replay durable suffix |
-| Control Plane replica loss | outbox claim expires; another replica may claim pre-ACK work |
-| Supervisor socket loss | same boot reconnects only after local assignments settle |
+| Control Plane replica loss | another relay adopts the deterministic existing Workflow ID |
+| Temporal service loss | accepted Runs remain in PostgreSQL; persisted Workflow history resumes after service recovery |
+| Supervisor management socket loss | same boot reconnects for liveness; it is not the Run-matching channel |
+| Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
 | Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
 | Tool Sandbox exit | active operation fails; capability is revoked; runtime is removed |
@@ -195,10 +209,9 @@ reconciliation.
 
 ## Terminal invariant
 
-Every terminal path revokes the per-Attempt capability. Failed, cancelled,
-timed-out, lease-revoked and shutdown paths additionally prove exact Provider
-absence. A successful coding Run may instead transfer the same exact-session
-Pod to the bounded warm cache; the next Attempt must present the committed
-Workspace revision and a higher fence before use. Orphan cleanup matches
-Supervisor, boot, sandbox, command, session, turn, lease, fence, Pod UID and
-runtime identity before destruction.
+Every terminal path revokes the per-Attempt capability and proves exact
+Provider absence. Orphan cleanup matches Supervisor, boot, sandbox, command,
+session, turn, lease, fence and Cube runtime identity before destruction.
+Temporal completion is not the application commit marker: the fenced
+PostgreSQL terminal state, committed checkpoint head and durable terminal event
+remain authoritative.

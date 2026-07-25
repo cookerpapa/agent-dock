@@ -353,7 +353,25 @@ export class OutboxDispatcher {
   }
 
   async dispatchNext(): Promise<DispatchNextResult> {
-    const claim = await this.#claimNext();
+    return this.#dispatch();
+  }
+
+  /**
+   * Executes one durable command selected by the external orchestration
+   * authority. Unlike dispatchNext(), this method never chooses between
+   * tenants, Sessions, or Runs.
+   */
+  async dispatchCommand(commandId: string): Promise<DispatchNextResult> {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(commandId)
+    ) {
+      throw new TypeError("commandId must be a UUID");
+    }
+    return this.#dispatch(commandId.toLowerCase());
+  }
+
+  async #dispatch(commandId?: string): Promise<DispatchNextResult> {
+    const claim = await this.#claimNext(commandId);
     if (!claim) return { status: "idle" };
 
     const observedAt = safeDate(this.#clock).valueOf();
@@ -531,7 +549,7 @@ export class OutboxDispatcher {
     });
   }
 
-  async #claimNext(): Promise<ClaimedTurn | undefined> {
+  async #claimNext(commandId?: string): Promise<ClaimedTurn | undefined> {
     const now = safeDate(this.#clock);
     const leaseUntil = new Date(now.valueOf() + this.#claimLeaseMs);
 
@@ -629,6 +647,11 @@ export class OutboxDispatcher {
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
         .where("command.kind", "=", "turn.execute")
+        .where(
+          commandId === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`${sql.ref("command.id")} = ${commandId}`,
+        )
         .where(
           this.#supervisorAffinity === undefined
             ? sql<boolean>`true`

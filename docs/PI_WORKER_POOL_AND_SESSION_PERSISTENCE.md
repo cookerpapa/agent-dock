@@ -9,7 +9,7 @@ exactly one active Run slot, but do not retain one Pi runtime per Session:
 many durable Sessions
         |
         v
-PostgreSQL Run queue
+PostgreSQL admission + Temporal Task Queue
         |
         +----> Pi Worker A (one SDK activation)
         +----> Pi Worker B (one SDK activation)
@@ -28,7 +28,9 @@ Every Worker has:
 - an independent fsynced boot ledger;
 - an independent durable event spool;
 - a declared capacity of exactly one active SDK Session;
-- an outbound authenticated WebSocket to the Control Plane;
+- a Temporal Workflow/Activity poller on the common Pi Task Queue;
+- an outbound authenticated management/liveness WebSocket to the Control Plane
+  that does not assign production Runs;
 - a private management address validated against an operator URL template.
 
 Shared durable authorities are PostgreSQL, S3-compatible object storage, the
@@ -91,10 +93,13 @@ Run.
 For a later user message:
 
 ```text
-Control Plane creates RunAttempt
+Control Plane commits Run/outbox and starts its Temporal Workflow
         |
         v
-any available Pi Worker claims it
+Temporal assigns the exact-command Activity to any available Pi Worker
+        |
+        v
+Worker creates the eligible fenced RunAttempt
         |
         v
 download latest committed pi-session.jsonl

@@ -194,6 +194,12 @@ export {
   type TurnExecutionResult,
 } from "./outbox-dispatcher.ts";
 export {
+  TemporalRunOrchestrator,
+  type TemporalRunOrchestratorActivity,
+  type TemporalRunOrchestratorOptions,
+  type TemporalRunOrchestratorState,
+} from "./temporal-run-orchestrator.ts";
+export {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SessionLeaseCoordinatorOptions,

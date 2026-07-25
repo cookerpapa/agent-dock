@@ -17,6 +17,8 @@ COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
 COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.json
+COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
+COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestration/tsconfig.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN npm ci --omit=dev --ignore-scripts \
     && node scripts/harden-pi-dependencies.mjs \
@@ -62,6 +64,9 @@ COPY packages/sandbox-supervisor/src packages/sandbox-supervisor/src
 COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
 COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.json
 COPY packages/supervisor-host/src packages/supervisor-host/src
+COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
+COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestration/tsconfig.json
+COPY packages/temporal-orchestration/src packages/temporal-orchestration/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN cd /app/packages/sandbox-manager \

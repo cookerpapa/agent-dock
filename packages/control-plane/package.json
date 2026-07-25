@@ -5,9 +5,15 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./cancellation-dispatcher": "./src/cancellation-dispatcher.ts",
     "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
+    "./durable-event-store": "./src/durable-event-store.ts",
+    "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
-    "./run-attempt-runtime": "./src/run-attempt-runtime.ts"
+    "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
+    "./outbox-dispatcher": "./src/outbox-dispatcher.ts",
+    "./run-attempt-runtime": "./src/run-attempt-runtime.ts",
+    "./session-lease-coordinator": "./src/session-lease-coordinator.ts"
   },
   "scripts": {
     "bootstrap": "tsx src/bootstrap-main.ts",
@@ -23,12 +29,15 @@
     "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
+    "@agent-dock/temporal-orchestration": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
     "@aws-sdk/client-s3": "3.1090.0",
     "@fastify/websocket": "11.3.0",
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-fastify": "11.1.28",
+    "@temporalio/client": "1.21.1",
+    "@temporalio/common": "1.21.1",
     "fastify": "5.10.0",
     "kysely": "0.29.4",
     "pg": "8.22.0",

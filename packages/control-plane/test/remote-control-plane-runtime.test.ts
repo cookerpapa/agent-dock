@@ -186,6 +186,7 @@ describe.sequential("remote control-plane runtime composition", () => {
     let activeMaintenance = 0;
     let maxActiveMaintenance = 0;
     const runtime = new RemoteSupervisorWorkerRuntime({
+      legacyDispatchEnabled: true,
       database,
       bindingSource: {
         async listRemoteDispatchBindings() {
@@ -266,6 +267,7 @@ describe.sequential("remote control-plane runtime composition", () => {
       resolveDiscovery = resolvePromise;
     });
     const runtime = new RemoteSupervisorWorkerRuntime({
+      legacyDispatchEnabled: true,
       database,
       bindingSource: {
         async listRemoteDispatchBindings() {
@@ -331,6 +333,7 @@ describe.sequential("remote control-plane runtime composition", () => {
       leaseCoordinator: {} as RemoteSupervisorDispatchBinding["leaseCoordinator"],
     }));
     const runtime = new RemoteSupervisorWorkerRuntime({
+      legacyDispatchEnabled: true,
       database,
       bindingSource: {
         async listRemoteDispatchBindings() {
@@ -429,6 +432,7 @@ describe.sequential("remote control-plane runtime composition", () => {
         },
         gateway: { registrationTimeoutMs: 2_000 },
         worker: {
+          legacyDispatchEnabled: true,
           bindingDiscoveryIntervalMs: 25,
           maintenanceIntervalMs: 100,
           idlePollMs: 25,

@@ -27,6 +27,7 @@ import {
   createRemoteControlPlaneRuntime,
   type RemoteControlPlaneRuntime,
 } from "./remote-control-plane-runtime.ts";
+import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -57,6 +58,7 @@ export async function startControlPlane(): Promise<void> {
   });
   const objectStore = createS3CheckpointObjectStoreFromEnvironment();
   let runtime: RemoteControlPlaneRuntime | undefined;
+  let temporalOrchestrator: TemporalRunOrchestrator | undefined;
   try {
     await verifyBootstrap(database);
     const modelCredentialVault = new TenantModelCredentialVault(config.modelCredentialMasterKey);
@@ -82,6 +84,20 @@ export async function startControlPlane(): Promise<void> {
       sessionTtlMs: config.webSessionTtlMs,
     });
     await objectStore.checkHealth();
+    temporalOrchestrator = new TemporalRunOrchestrator({
+      database,
+      address: config.temporalAddress,
+      namespace: config.temporalNamespace,
+      taskQueue: config.temporalTaskQueue,
+      onActivity: (activity) =>
+        operationalLog({
+          service: "agent-dock-control-plane",
+          level: activity.type === "orchestrator.failure" ? "error" : "info",
+          event: activity.type,
+          attributes: { ...activity },
+        }),
+    });
+    await temporalOrchestrator.start();
     const managementClients = new Map<string, HttpSupervisorManagementClient>();
     const resolveManagementClient = async (identity: {
       supervisorId: string;
@@ -132,7 +148,11 @@ export async function startControlPlane(): Promise<void> {
       webSessionAuthenticator: webAuthentication,
       readiness: async () => {
         if (runtime?.state !== "running") return false;
-        await sql`select 1`.execute(database);
+        await Promise.all([
+          sql`select 1`.execute(database),
+          temporalOrchestrator?.checkHealth() ??
+            Promise.reject(new Error("Temporal orchestration is unavailable")),
+        ]);
         return true;
       },
     });
@@ -182,6 +202,7 @@ export async function startControlPlane(): Promise<void> {
     const close = async (): Promise<void> => {
       if (closing) return;
       closing = true;
+      await temporalOrchestrator?.stop();
       await runtime?.close();
       objectStore.destroy();
       await database.destroy();
@@ -195,6 +216,7 @@ export async function startControlPlane(): Promise<void> {
     process.once("SIGINT", closeAfterSignal);
     process.once("SIGTERM", closeAfterSignal);
   } catch (error: unknown) {
+    await temporalOrchestrator?.stop().catch(() => undefined);
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);
     objectStore.destroy();

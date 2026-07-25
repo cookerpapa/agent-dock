@@ -253,11 +253,22 @@ extension-policy support would overstate the current boundary.
 - [x] Record Temporal distribution/recovery latency and operational boundary;
   defer production cutover because the current Run maps to one long Activity
   and does not remove enough AgentDock protocol to justify another service
-- [ ] If Run orchestration becomes genuinely multi-stage, compare real
-  Pi/Tool/SQL/S3 Activity latency, throughput, database load, backup, upgrade,
-  Worker versioning, and rollback before reconsidering Temporal
-- [ ] On a future accepted gate only, make Temporal the sole post-admission
-  authority and delete the superseded matching path in the same milestone
+- [x] ADR-0056: accept Temporal as the sole post-admission scheduler after an
+  explicit project-owner decision; retain PostgreSQL only for application
+  admission, FIFO, attempts, leases/fences and commit correctness
+- [x] Start one deterministic bounded-reference Workflow per Run, poll one
+  common Task Queue from two capacity-bounded Pi Workers, and disable the
+  superseded production WebSocket matching lanes
+- [x] Route durable cancellation to the exact Workflow/Activity, heartbeat
+  active work, and preserve ambiguous-side-effect fencing rather than claiming
+  exactly-once execution
+- [x] Deploy pinned self-hosted Temporal with internal-only networking,
+  PostgreSQL persistence, namespace retention, readiness and coordinated cold
+  backup/rollback documentation
+- [x] Prove real-token pure-chat, multi-round Cube coding, cross-Worker Pi
+  checkpoint recovery, two-Worker concurrency and secret-free Workflow history
+- [ ] Add Temporal Worker Build ID/versioning deployment gates before a
+  multi-node rolling-upgrade claim
 - [x] Implement `agent-dock.pi-session-manifest.v2` with line-aligned
   tenant-scoped content-addressed segments and S3 create-if-absent/checksums
 - [x] Prove byte-identical v1/v2 restore, non-append rebase, corruption

@@ -33,6 +33,7 @@ export {
   type SupervisorHostRuntimeState,
   type SupervisorHostTerminalReason,
   type SupervisorSandboxManager,
+  type SupervisorTemporalWorker,
 } from "./runtime.ts";
 export {
   TenantModelGateway,
@@ -47,3 +48,8 @@ export {
   type PostgresWorkspaceSeedResolverOptions,
   type PrivateGitHubWorkspaceImporter,
 } from "./workspace-seed.ts";
+export {
+  TemporalPiWorker,
+  type TemporalPiWorkerOptions,
+  type TemporalPiWorkerState,
+} from "./temporal-pi-worker.ts";

@@ -167,6 +167,81 @@ async function psql(query) {
   ]);
 }
 
+function decodeTemporalPayloads(value, decoded = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) decodeTemporalPayloads(item, decoded);
+    return decoded;
+  }
+  if (typeof value !== "object" || value === null) return decoded;
+  if (Array.isArray(value.payloads)) {
+    for (const payload of value.payloads) {
+      if (typeof payload?.data === "string") {
+        decoded.push(Buffer.from(payload.data, "base64").toString("utf8"));
+      }
+    }
+  }
+  for (const child of Object.values(value)) decodeTemporalPayloads(child, decoded);
+  return decoded;
+}
+
+async function temporalWorkflowEvidence(accepted) {
+  const workflowId = `agent-dock-run-v1-${accepted.runId}`;
+  const history = parseJson(
+    await capture(
+      process.execPath,
+      [
+        "scripts/production-compose.mjs",
+        "exec",
+        "-T",
+        "temporal",
+        "temporal",
+        "workflow",
+        "show",
+        "--namespace",
+        "agent-dock",
+        "--workflow-id",
+        workflowId,
+        "--address",
+        "127.0.0.1:7233",
+        "--output",
+        "json",
+      ],
+      30_000,
+    ),
+    "Temporal Workflow history",
+  );
+  const decoded = decodeTemporalPayloads(history);
+  const allowedKeys = new Set([
+    "schemaVersion",
+    "tenantId",
+    "sessionId",
+    "runId",
+    "commandId",
+    "status",
+    "attempt",
+    "failureCode",
+    "retryAfterMs",
+  ]);
+  for (const payload of decoded) {
+    assert(Buffer.byteLength(payload, "utf8") <= 2_048);
+    const parsed = parseJson(payload, "Temporal Workflow payload");
+    assert(
+      Object.keys(parsed).every((key) => allowedKeys.has(key)),
+      `Temporal history contains a forbidden payload field: ${Object.keys(parsed).join(",")}`,
+    );
+  }
+  assert(decoded.some((payload) => payload.includes(accepted.runId)));
+  assert(
+    history.events.some((event) => event.eventType === "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"),
+  );
+  return {
+    workflowId,
+    historyEvents: history.events.length,
+    decodedPayloads: decoded.length,
+    boundedReferencesOnly: true,
+  };
+}
+
 function wait(delayMs, signal) {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolvePromise) => {
@@ -490,6 +565,11 @@ try {
 
   await waitForNoCubeSession(session.sessionId);
   await waitForNoCubeSession(foreignSession.sessionId);
+  const temporalWorkflows = await Promise.all(
+    [chat.accepted, firstCoding.accepted, followUp.accepted].map((accepted) =>
+      temporalWorkflowEvidence(accepted),
+    ),
+  );
   const usage = totalUsage(chatUsage.totals, firstUsage.totals, followUpUsage.totals);
   const report = {
     accepted: true,
@@ -535,6 +615,11 @@ try {
       semanticItems,
       replayAfterSequence: conversation.replayAfterSequence,
     },
+    temporal: {
+      scheduler: "Temporal",
+      taskQueue: "agent-dock-pi-runs-v1",
+      workflows: temporalWorkflows,
+    },
     totalUsage: usage,
     cleanup: { sessionMicroVmCount: 0, foreignSessionMicroVmCount: 0 },
   };
@@ -564,10 +649,11 @@ try {
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
         `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
+        `- Temporal Workflows / bounded-reference histories: ${String(report.temporal.workflows.length)} / ${String(report.temporal.workflows.filter((workflow) => workflow.boundedReferencesOnly).length)}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Remaining test-session Cube microVMs: ${String(report.cleanup.sessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two later coding Runs in the same Session used different KVM guests; the follow-up restored, read and modified the first Run's committed counting-sort file. Provider usage, semantic projections, cross-tenant API denial and exact Cube cleanup were all verified.",
+        "A real-model chat Run completed without touching Cube. Two later coding Runs in the same Session used different KVM guests; the follow-up restored, read and modified the first Run's committed counting-sort file. All three Runs completed through Temporal, whose decoded histories contained only bounded references/status. Provider usage, semantic projections, cross-tenant API denial and exact Cube cleanup were all verified.",
         "",
       ].join("\n"),
       "utf8",

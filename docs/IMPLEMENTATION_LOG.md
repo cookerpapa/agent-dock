@@ -2232,3 +2232,41 @@
   Sanitized evidence is stored in
   `docs/reports/pi-worker-pool-acceptance-latest.{json,md}` and
   `docs/reports/cubesandbox-production-acceptance-latest.{json,md}`.
+
+## 2026-07-25 — Temporal sole-scheduler production cutover
+
+- Accepted ADR-0056 and replaced production PostgreSQL-to-WebSocket Worker
+  matching with self-hosted Temporal Server 1.29.1. The transactional outbox
+  relay now starts or cancels one deterministic Workflow per Run and never
+  chooses a Worker.
+- Added a pure deterministic Workflow package whose history carries only
+  schema version plus tenant, Session, Run and command UUIDs. Prompt text,
+  Pi JSONL, `messages[]`, model/Tool output, credentials and Workspace bytes
+  remain in PostgreSQL/MinIO and trusted Worker memory.
+- Both capacity-one Supervisor processes now poll the common
+  `agent-dock-pi-runs-v1` Task Queue. The Activity performs an exact command
+  claim, rechecks PostgreSQL FIFO/concurrency rules, acquires the existing
+  RunAttempt lease/fence and executes the embedded Pi SDK. Later same-Session
+  work defers through a durable Workflow timer.
+- Temporal cancellation reaches the Worker that owns the Activity and invokes
+  the exact local cancellation dispatcher. Activity heartbeat/retry handles
+  infrastructure delivery only; ambiguous model, Bash and checkpoint side
+  effects remain protected by Tool IDs, fencing and CAS.
+- Production Supervisors explicitly advertise
+  `acceptingAssignments=false`; the legacy WebSocket matching lanes do not
+  start. The socket remains for authenticated boot identity, liveness and
+  management. Temporal and its visibility database share the coordinated cold
+  PostgreSQL backup boundary.
+- Fixed the multi-network Temporal container to bind all container interfaces
+  while broadcasting its private Temporal-network address. Readiness fails
+  closed if Temporal, either Worker poller or the application dependencies are
+  unavailable.
+- Real DeepSeek/Cube acceptance completed three Workflows, including pure chat
+  and two coding Runs, with 9 requests, 1,842 input, 1,968 output and 23,040
+  cache-read tokens. Pure chat settled in 2,155 ms without a Cube activation;
+  both coding Runs restored Workspace state in distinct KVM guests and left
+  zero microVMs.
+- A second six-request fault gate stopped the first owning Worker. The
+  surviving Temporal Worker restored the native Pi checkpoint and marker,
+  then four concurrent Runs were distributed 2/2 across the two pollers.
+  Decoded Workflow history contains only bounded IDs and status results.

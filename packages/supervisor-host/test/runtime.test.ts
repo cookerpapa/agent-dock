@@ -22,6 +22,7 @@ import {
   SupervisorHostRuntime,
   type SupervisorHostConfig,
   type SupervisorSandboxManager,
+  type SupervisorTemporalWorker,
 } from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "90000000-0000-4000-8000-000000000001";
@@ -33,6 +34,21 @@ let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
 let database: Kysely<Database>;
 let connectionString: string;
+
+function temporalWorker(): SupervisorTemporalWorker {
+  let state: SupervisorTemporalWorker["state"] = "idle";
+  return {
+    get state() {
+      return state;
+    },
+    async start() {
+      state = "running";
+    },
+    async stop() {
+      state = "stopped";
+    },
+  };
+}
 
 beforeAll(async () => {
   pglite = await PGlite.create();
@@ -171,6 +187,9 @@ describe("SupervisorHostRuntime", () => {
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
       maxConcurrentSessions: 2,
+      temporalAddress: "temporal.test:7233",
+      temporalNamespace: "agent-dock-test",
+      temporalTaskQueue: "agent-dock-pi-runs-test",
       piExecutionMode: "rpc",
       sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
       sandboxManagerRequestTimeoutMs: 300_000,
@@ -199,6 +218,7 @@ describe("SupervisorHostRuntime", () => {
           database,
           objectStore: objectStore(),
           sandboxManager: sandboxManager(),
+          temporalWorkerFactory: temporalWorker,
         }),
     ).toThrow("Embedded Pi SDK Workers require exactly one concurrent Session");
     let first: SupervisorHostRuntime | undefined;
@@ -209,6 +229,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         sandboxManager: sandboxManager(),
+        temporalWorkerFactory: temporalWorker,
       });
       await first.start();
       expect(first.state).toBe("ready");
@@ -222,6 +243,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         sandboxManager: sandboxManager(),
+        temporalWorkerFactory: temporalWorker,
       });
       await second.start();
       expect(second.state).toBe("ready");

@@ -317,7 +317,7 @@ credential-free importer.
 
 Responsibilities:
 
-- start and supervise a pinned `pi --mode rpc` child process;
+- instantiate a pinned, capacity-one Pi SDK `AgentSession` for the active Run;
 - disable Pi's local built-ins and load only the fixed remote-tool extension;
 - translate typed Pi commands/events into the versioned AgentDock contract;
 - proxy extension UI requests and responses between Pi and the web client;
@@ -336,14 +336,16 @@ fsynced ledger preserves bounded current/recent generations so owner-stop proof
 cannot be invented after a restart. The host probes the Sandbox Manager,
 PostgreSQL, and S3,
 provisions the boot through a file-backed enrollment credential, recovers its
-event spool while drained, then becomes ready only after the outbound WebSocket
-is registered.
+event spool while drained, registers its outbound management WebSocket, then
+becomes ready only after its Temporal Workflow and Activity pollers are
+running.
 
-The Control Plane discovers all active Supervisor connections and creates one
-execution/cancellation lane per capacity-one SDK Worker. A Session is not pinned
-to a Worker: each active Run restores the latest Pi-native JSONL checkpoint on
-any available replica, creates and disposes an in-process `AgentSessionRuntime`,
-and releases that slot after settlement. Authenticated boot enrollment validates both a Supervisor ID
+Every Supervisor polls the common Temporal Task Queue with Activity concurrency
+equal to its capacity-one SDK slots. The Control Plane never selects a
+Supervisor for a Run. A Session is not pinned to a Worker: each active Run
+restores the latest Pi-native JSONL checkpoint on the Worker selected by
+Temporal, creates and disposes an in-process `AgentSessionRuntime`, and releases
+that slot after settlement. Authenticated boot enrollment validates both a Supervisor ID
 prefix and an operator-owned management URL template. Artifact reads go
 directly to the shared object store rather than through one special Worker. See
 [Pi Worker pool and conversation persistence](PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md).
@@ -642,9 +644,13 @@ recovery. See ADR-0024.
 2. The control plane locks the session and stores the turn, positioned execute
    command, outbox record, and advanced mailbox counter transactionally.
 3. The API returns `202 Accepted`.
-4. The session coordinator acquires the session execution lease.
-5. The scheduler assigns or creates a sandbox runner.
-6. The supervisor validates the fencing token, resolves and reverifies the
+4. The bounded outbox relay starts one deterministic Temporal Workflow for the
+   Run. Duplicate relay scans adopt the existing Workflow ID.
+5. Temporal matches the Workflow Activity to a capacity-bounded Pi Worker on
+   the common Task Queue. The Activity claims only its named command; PostgreSQL
+   mailbox/concurrency checks may defer it on a durable Workflow timer.
+6. The selected Worker creates the RunAttempt and session execution lease. The
+   supervisor validates the fencing token, resolves and reverifies the
    immutable workspace seed, and loads settled session/workspace state.
 7. The selected execution backend reserves Tool authority, activates Pi with the
    fixed remote-tool extension, and executes the agent loop. The first Tool Call
@@ -658,7 +664,8 @@ recovery. See ADR-0024.
    continues from its earliest unprojected SSE sequence.
 10. On `agent_settled`, the runner always saves Pi conversation state but captures
    a Workspace snapshot only when a materialized Tool Sandbox may have changed it.
-11. The control plane completes the turn and schedules the next mailbox command.
+11. The control plane completes the turn. A later mailbox Workflow becomes
+    eligible without any Session-resident process.
 
 Steps 1-11 are executable for the bounded sample or controlled-GitHub workspace
 path through the local integration boundary: the control plane acquires a real PostgreSQL
@@ -782,7 +789,7 @@ publication and the file spool quarantines the immutable delivery copy. All
 other authentication, generation, schema, sequence, conflict, and service
 failures retain fail-closed socket/error behavior. See ADR-0024.
 
-When `command.two_phase.v1` is advertised, the connection also multiplexes
+The legacy pre-Temporal remote matcher used `command.two_phase.v1` to multiplex
 execute/cancel preparations, command ACK/commit/release/result, and event
 publish/ACK. A preparation is side-effect free. The dispatcher persists its
 acknowledged lifecycle before `command.commit` may invoke `run`; a failed
@@ -790,19 +797,22 @@ transaction best-effort sends `command.release`. Results are independently
 bounded because runtime failures may precede a terminal public event. Event
 authority is checked against both the current connection generation and the
 sandbox holding the session lease before `DurableEventStore` commits it. Only
-then is `event.ack` sent. Socket loss releases uncommitted work and locally
+then is `event.ack` sent. This protocol remains covered as a compatibility and
+transport invariant, but production Supervisors advertise
+`acceptingAssignments=false`; Run matching and cancellation delivery come from
+Temporal. Socket loss releases uncommitted legacy work and locally
 revokes committed assignments, while durable timeout/owner retirement remains
 the external fence. See ADR-0017.
 
-Remote dispatcher claims can carry an exact sandbox/control-plane affinity.
+Legacy remote dispatcher claims can carry an exact sandbox/control-plane affinity.
 Execute eligibility requires a local active, unexpired, assignment-accepting
 connection plus sandbox capacity; guarded lease acquisition repeats those
 checks after the outbox lock. Cancellation eligibility instead joins the target
 session lease to its sandbox's current connection owner and intentionally
 ignores the drain flag. A wrong or stale owner returns `idle` without consuming
 an outbox attempt. Same-boot reconnect changes this ownership through the
-existing connection-generation transaction, so the current topology needs no
-second command broker. See ADR-0019.
+existing connection-generation transaction. It is not activated beside
+Temporal in the current topology. See ADR-0019 and ADR-0056.
 
 ### Event and command semantics
 
@@ -924,12 +934,12 @@ and dispatch generation per strategy. Candidate Sessions are hidden from the
 ordinary conversation list but remain directly inspectable from the parent
 race.
 
-The existing global dispatcher remains the only execution scheduler. It
-preserves tenant fairness and same-Session FIFO, and additionally admits a
+Temporal is the only execution scheduler. PostgreSQL eligibility checks
+preserve tenant limits and same-Session FIFO, and additionally admit a
 candidate only while its orchestration is `running` and fewer sibling Runs than
 the race limit are active. Each child Session therefore follows the normal
-lazy activation path into its own exact-identity gVisor Sandbox; candidates
-never share a writable Workspace or a used Pod.
+lazy activation path into its own exact-identity Cube microVM; candidates never
+share a writable Workspace or a used microVM.
 
 After a candidate Run settles, the control plane evaluates its immutable,
 hash-verified Review Bundle. The deterministic gate can require a non-empty
@@ -985,25 +995,73 @@ session entries), `workspace` (reconstructed from durable files), or
 `process-bound` (heap, subprocess, socket, or browser state). Only trusted
 portable extensions are eligible for a shared embedded worker.
 
-## 9. Durable orchestration direction
+## 9. Durable Run orchestration
 
-Flink or Kafka may later consume AgentDock events for analytics, audit pipelines,
-cost aggregation, or batch workloads. They are not the interactive session
-coordinator. ADR-0055 evaluates Temporal as the strongest mature future
-candidate because its Task Queue/Worker/Workflow/Activity model matches the
-horizontal Pi Worker requirements. The zero-token fault spike passed, but the
-current Run maps to one long Activity and does not remove enough AgentDock
-protocol to justify another production subsystem. Production retains the
-PostgreSQL dispatcher. A future accepted cutover must replace the superseded
-matching authority; it may not run Temporal and the custom dispatcher as
-competing schedulers.
+ADR-0056 makes Temporal the sole post-admission production Run scheduler.
+Flink or Kafka may later consume AgentDock events for analytics, audit
+pipelines, cost aggregation, or batch workloads; they are not interactive
+session coordinators.
 
-PostgreSQL continues to own HTTP acceptance, tenant admission/fairness,
-same-Session mailbox order, public projections, usage, and the committed
-checkpoint head. Temporal carries only bounded IDs, hashes, state, and object
-references. Pi transcripts, Tool output, Workspace bytes, model deltas, and
-credentials never enter Workflow Event History. Kubernetes scales trusted
-Worker processes, while Cube remains the untrusted Tool microVM scheduler.
+```text
+HTTP acceptance transaction
+        |
+        v
+PostgreSQL command + Run + outbox
+        |
+        v
+bounded outbox relay
+        |
+        v
+Temporal Workflow: agent-dock-run-v1-{runId}
+        |
+        v
+Task Queue: agent-dock-pi-runs-v1
+        |
+        +----> Supervisor/Pi Worker 1 (capacity one)
+        `----> Supervisor/Pi Worker 2 (capacity one)
+                         |
+                         v
+              exact-command Activity
+                         |
+                         v
+         RunAttempt + lease/fence + Pi SDK
+                         |
+                         v
+                 Cube Tool microVM
+```
+
+The relay starts or cancels a deterministic Workflow ID and never chooses a
+Worker. Each Supervisor process polls the common Task Queue with Activity
+concurrency equal to its configured Pi capacity. The former WebSocket
+execute/cancel matcher is not started in production and every Supervisor
+advertises `acceptingAssignments=false`; its authenticated socket remains only
+for boot identity, liveness, management and compatibility event transport.
+
+PostgreSQL continues to own transactional HTTP acceptance, tenant admission
+limits, same-Session mailbox order, Run/Attempt state, leases/fences, public
+projections, usage, and the committed checkpoint head. The exact-command
+Activity revalidates these invariants after Task Queue delivery. A later
+same-Session command therefore returns `deferred` and its Workflow sleeps on a
+durable timer rather than creating a concurrent writer.
+
+Temporal owns Task Queue matching, Worker distribution, Activity heartbeat
+timeouts, bounded infrastructure retries, cancellation delivery and durable
+retry timers. It is not a conversation database and cannot restore Pi by
+itself. Workflow history carries only schema version plus tenant, Session, Run
+and command UUIDs and bounded status results. Pi transcripts, prompt text,
+`messages[]`, Tool output, Workspace bytes, model deltas and credentials never
+enter Workflow Event History.
+
+User cancellation first commits the existing cancellation command. The relay
+cancels the exact Workflow; Temporal requests Activity cancellation from the
+owning Worker, which invokes the exact local cancellation dispatcher against
+the live Pi activation. Activity retry does not imply exactly-once Bash or
+model calls: Tool IDs, RunAttempt fencing, checkpoint CAS and the
+ambiguous-after-start failure rule remain authoritative.
+
+Kubernetes or Compose scales the trusted Worker processes. Cube remains the
+untrusted Tool microVM scheduler and is activated lazily only when Pi emits a
+Tool Call. Chat-only Runs use Temporal but never create a Cube Sandbox.
 
 ## 10. Web presentation
 

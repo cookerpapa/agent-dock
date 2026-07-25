@@ -22,6 +22,9 @@ export type ProductionControlPlaneConfig = {
   host: string;
   port: number;
   maximumLanesPerSupervisor: number;
+  temporalAddress: string;
+  temporalNamespace: string;
+  temporalTaskQueue: string;
   platformModelSourceTenantId: string;
   environmentImageRevision: string;
   webSessionCookieSecure: boolean;
@@ -255,6 +258,21 @@ export async function loadProductionControlPlaneConfig(
       8,
       1,
       256,
+    ),
+    temporalAddress: bounded(
+      required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
+      "AGENT_DOCK_TEMPORAL_ADDRESS",
+      512,
+    ),
+    temporalNamespace: bounded(
+      environment.AGENT_DOCK_TEMPORAL_NAMESPACE ?? "agent-dock",
+      "AGENT_DOCK_TEMPORAL_NAMESPACE",
+      255,
+    ),
+    temporalTaskQueue: bounded(
+      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-v1",
+      "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
+      255,
     ),
     platformModelSourceTenantId: parseUuidPathParameter(
       required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),

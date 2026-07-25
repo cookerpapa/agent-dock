@@ -38,6 +38,9 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
   AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: http://{supervisorId}:4100
+  AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
+  AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
+  AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
   AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
   AWS_EC2_METADATA_DISABLED: "true"
   AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
@@ -141,6 +144,57 @@ services:
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
+    logging: *bounded-logging
+
+  temporal:
+    image: temporalio/auto-setup@sha256:5b3502a3b685f9eff1b925af90c57c9e3dbeccbef367cc28a2a9712c63379312
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: [/bin/bash, -eu, -o, pipefail, -c]
+    command:
+      - |
+        export POSTGRES_PWD="$$(cat /run/agent-dock-secrets/postgres-password)"
+        exec /etc/temporal/entrypoint.sh autosetup
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: agent_dock
+      POSTGRES_SEEDS: postgres
+      DEFAULT_NAMESPACE: agent-dock
+      DEFAULT_NAMESPACE_RETENTION: 30d
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/production-sql.yaml
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CLI_ADDRESS: temporal:7233
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/postgres-password
+        target: /run/agent-dock-secrets/postgres-password
+        read_only: true
+      - type: bind
+        source: ../temporal/dynamicconfig
+        target: /etc/temporal/config/dynamicconfig
+        read_only: true
+    networks:
+      - database
+      - temporal
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1g
+    cpus: 2.0
+    stop_grace_period: 30s
     logging: *bounded-logging
 
   minio:
@@ -288,6 +342,8 @@ services:
         condition: service_completed_successfully
       minio-bootstrap:
         condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
     environment: *control-plane-runtime-environment
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
     volumes: *control-plane-runtime-secrets
@@ -298,6 +354,7 @@ services:
       - object-storage
       - github-control
       - observability
+      - temporal
     healthcheck:
       test:
         [
@@ -443,7 +500,7 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
+      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,temporal,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
       AWS_EC2_METADATA_DISABLED: "true"
@@ -460,6 +517,9 @@ services:
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1:4100
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
+      AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
+      AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
+      AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
       AGENT_DOCK_PI_EXECUTION_MODE: embedded-sdk
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
@@ -532,6 +592,7 @@ services:
       model-egress: {}
       github-control: {}
       observability: {}
+      temporal: {}
     healthcheck:
       test:
         [
@@ -573,6 +634,7 @@ services:
       model-egress: {}
       github-control: {}
       observability: {}
+      temporal: {}
 
   supervisor-volume-bootstrap:
     image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
@@ -1047,6 +1109,8 @@ networks:
     internal: true
   provider-egress: {}
   observability:
+    internal: true
+  temporal:
     internal: true
   observability-edge: {}
 

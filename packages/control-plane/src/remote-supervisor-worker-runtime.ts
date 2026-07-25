@@ -69,6 +69,11 @@ export type RemoteSupervisorWorkerRuntimeOptions = {
   maintenanceRetirementLimit?: number;
   onActivity?: (activity: RemoteSupervisorWorkerActivity) => void;
   metrics?: AgentDockMetrics;
+  /**
+   * Test-only compatibility for the pre-Temporal PostgreSQL matcher. Production
+   * must leave this false so that Temporal owns all Run assignment.
+   */
+  legacyDispatchEnabled?: boolean;
 };
 
 export type RemoteSupervisorWorkerRuntimeState = "idle" | "running" | "stopping" | "stopped";
@@ -140,6 +145,7 @@ export class RemoteSupervisorWorkerRuntime {
   readonly #maintenanceRetirementLimit: number;
   readonly #onActivity: ((activity: RemoteSupervisorWorkerActivity) => void) | undefined;
   readonly #metrics: AgentDockMetrics | undefined;
+  readonly #legacyDispatchEnabled: boolean;
   readonly #bindings = new Map<string, BindingWorker>();
   readonly #retiringWorkers = new Set<Promise<void>>();
   #state: RemoteSupervisorWorkerRuntimeState = "idle";
@@ -177,6 +183,7 @@ export class RemoteSupervisorWorkerRuntime {
     );
     this.#onActivity = options.onActivity;
     this.#metrics = options.metrics;
+    this.#legacyDispatchEnabled = options.legacyDispatchEnabled ?? false;
   }
 
   get state(): RemoteSupervisorWorkerRuntimeState {
@@ -195,7 +202,7 @@ export class RemoteSupervisorWorkerRuntime {
     this.#controller = new AbortController();
     const signal = this.#controller.signal;
     this.#runPromise = Promise.all([
-      this.#runBindingDiscovery(signal),
+      ...(this.#legacyDispatchEnabled ? [this.#runBindingDiscovery(signal)] : []),
       this.#runMaintenance(signal),
     ]).then(() => {
       this.#state = "stopped";

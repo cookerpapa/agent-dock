@@ -226,6 +226,15 @@ async function serviceContainerIds(service) {
   return output.length === 0 ? [] : output.split(/\r?\n/).filter(Boolean);
 }
 
+async function supervisorContainerForId(selectedSupervisorId) {
+  const index = supervisorIds.indexOf(selectedSupervisorId);
+  assert.notEqual(index, -1, `Unknown production-check Supervisor ${selectedSupervisorId}`);
+  const service = index === 0 ? "supervisor-host" : `supervisor-host-${String(index)}`;
+  const ids = await serviceContainerIds(service);
+  assert.equal(ids.length, 1, `Expected one container for ${selectedSupervisorId}`);
+  return ids[0];
+}
+
 async function waitForHealthyService(service, expectedCount = 1, timeoutMs = 90_000) {
   return waitFor(
     async () => {
@@ -539,7 +548,11 @@ async function assertCheckpointObjects(sessionId, expectedCount, tenantId) {
     assert(["pi_session_snapshot", "workspace_snapshot", "patch"].includes(kind));
     assert.match(objectKey, /^[a-zA-Z0-9/_.-]+$/);
     if (tenantId !== undefined) {
-      assert.equal(objectKey.startsWith(`checkpoints/${tenantId}/${sessionId}/`), true);
+      const expectedPrefix =
+        kind === "pi_session_snapshot"
+          ? `pi-sessions/${tenantId}/${sessionId}/manifests/`
+          : `checkpoints/${tenantId}/${sessionId}/`;
+      assert.equal(objectKey.startsWith(expectedPrefix), true);
     }
     await composeCapture([
       "exec",
@@ -553,6 +566,94 @@ async function assertCheckpointObjects(sessionId, expectedCount, tenantId) {
       `agent-dock-checkpoints/production/v1/${objectKey}`,
     ]);
   }
+}
+
+function decodeTemporalPayloads(value, decoded = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) decodeTemporalPayloads(item, decoded);
+    return decoded;
+  }
+  if (typeof value !== "object" || value === null) return decoded;
+  if (Array.isArray(value.payloads)) {
+    for (const payload of value.payloads) {
+      if (typeof payload?.data !== "string") continue;
+      decoded.push(Buffer.from(payload.data, "base64").toString("utf8"));
+    }
+  }
+  for (const child of Object.values(value)) decodeTemporalPayloads(child, decoded);
+  return decoded;
+}
+
+async function assertTemporalWorkerPool(expectedWorkers) {
+  const output = await composeCapture([
+    "exec",
+    "-T",
+    "temporal",
+    "temporal",
+    "task-queue",
+    "describe",
+    "--namespace",
+    "agent-dock",
+    "--task-queue",
+    "agent-dock-pi-runs-v1",
+    "--address",
+    "127.0.0.1:7233",
+    "--output",
+    "json",
+  ]);
+  const taskQueue = JSON.parse(output);
+  const workflowWorkers = new Set(
+    taskQueue.pollers
+      .filter((poller) => poller.taskQueueType === "workflow")
+      .map((poller) => poller.identity.split("/")[0]),
+  );
+  const activityWorkers = new Set(
+    taskQueue.pollers
+      .filter((poller) => poller.taskQueueType === "activity")
+      .map((poller) => poller.identity.split("/")[0]),
+  );
+  assert.deepEqual([...workflowWorkers].sort(), [...expectedWorkers].sort());
+  assert.deepEqual([...activityWorkers].sort(), [...expectedWorkers].sort());
+  const legacyMatchers = Number(
+    await psql(
+      `select count(*) from supervisor_connections
+        where state = 'active'
+          and accepting_assignments`,
+    ),
+  );
+  assert.equal(legacyMatchers, 0);
+}
+
+async function assertTemporalRunWorkflow(run, forbiddenText) {
+  const workflowId = `agent-dock-run-v1-${run.runId}`;
+  const output = await composeCapture([
+    "exec",
+    "-T",
+    "temporal",
+    "temporal",
+    "workflow",
+    "show",
+    "--namespace",
+    "agent-dock",
+    "--workflow-id",
+    workflowId,
+    "--address",
+    "127.0.0.1:7233",
+    "--output",
+    "json",
+  ]);
+  const history = JSON.parse(output);
+  const decoded = decodeTemporalPayloads(history);
+  assert(decoded.length > 0);
+  assert(decoded.every((payload) => Buffer.byteLength(payload, "utf8") <= 2_048));
+  const payloadText = decoded.join("\n");
+  assert(payloadText.includes(run.runId));
+  assert(payloadText.includes(run.commandId));
+  assert.equal(payloadText.includes(forbiddenText), false);
+  assert.equal(/"(prompt|messages|credential|apiKey|token)"\s*:/.test(payloadText), false);
+  assert(
+    history.events.some((event) => event.eventType === "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"),
+  );
 }
 
 async function assertCursor(sessionId, expected) {
@@ -1578,6 +1679,7 @@ async function main() {
   await assertExecutionBoundary();
   await assertTenantNeutralControlPlaneRuntime();
   await assertObjectStorePolicy(applicationAccessKey);
+  await assertTemporalWorkerPool(supervisorIds);
 
   const health = await http("/healthz", {}, 200);
   assert.equal(health.text.trim(), "ok");
@@ -1815,6 +1917,7 @@ async function main() {
     tenantBToken,
   );
   assert.equal(tenantBStream.events.at(-1).type, "turn.completed");
+  await assertTemporalRunWorkflow(repairB, repairPrompt);
   await assertCursor(sessionB.sessionId, tenantBStream.cursor);
   await assertCheckpointObjects(sessionB.sessionId, 3, tenantBId);
   const tenantBVersions = await http(
@@ -1919,12 +2022,9 @@ async function main() {
     404,
   );
 
-  const bootBeforeReconnect = await latestBoot();
-  assert.equal(bootBeforeReconnect.state, "ready");
-  const supervisorContainer = (await serviceContainerIds("supervisor-host"))[0];
-  const supervisorStartedAt = await containerStartedAt(supervisorContainer);
+  const primaryBootBeforeReconnect = await latestBoot();
+  assert.equal(primaryBootBeforeReconnect.state, "ready");
 
-  report("repair_with_control_plane_restart", { bootId: bootBeforeReconnect.bootId });
   const project = (await post("/v1/projects", { name: sharedProjectName }, 201)).body;
   const interruptedSession = (
     await post(
@@ -1961,18 +2061,33 @@ async function main() {
     ),
   );
   assert(Number.isSafeInteger(interruptedFence) && interruptedFence > 0);
+  const interruptedSandboxId = await psql(
+    `select sandbox_id from session_leases where session_id = ${sqlLiteral(
+      interruptedSession.sessionId,
+    )}`,
+  );
+  const interruptedIdentity = await sandboxIdentity(interruptedSandboxId);
+  const interruptedBootBeforeReconnect = await latestBoot(interruptedIdentity.supervisorId);
+  assert.equal(interruptedBootBeforeReconnect.sandboxId, interruptedSandboxId);
+  assert.equal(interruptedBootBeforeReconnect.state, "leased");
+  const supervisorContainer = await supervisorContainerForId(interruptedIdentity.supervisorId);
+  const supervisorStartedAt = await containerStartedAt(supervisorContainer);
+  report("repair_with_control_plane_restart", {
+    supervisorId: interruptedIdentity.supervisorId,
+    bootId: interruptedBootBeforeReconnect.bootId,
+  });
   await composeRun(["restart", "control-plane"]);
   await waitForHealthyService("control-plane");
   await waitForHealthyService("supervisor-host");
   assert.equal(await containerStartedAt(supervisorContainer), supervisorStartedAt);
-  const bootAfterReconnect = await latestBoot();
-  assert.equal(bootAfterReconnect.bootId, bootBeforeReconnect.bootId);
+  const bootAfterReconnect = await latestBoot(interruptedIdentity.supervisorId);
+  assert.equal(bootAfterReconnect.bootId, interruptedBootBeforeReconnect.bootId);
   await waitFor(
     async () =>
       Number(
         await psql(
           `select count(*) from supervisor_connections where sandbox_id = ${sqlLiteral(
-            bootBeforeReconnect.sandboxId,
+            interruptedBootBeforeReconnect.sandboxId,
           )} and state = 'superseded' and close_reason = 'reconnected'`,
         ),
       ) >= 1,
@@ -1983,13 +2098,19 @@ async function main() {
       (await psql(`select state from turns where id = ${sqlLiteral(repair.turnId)}`)) === "failed",
     "interrupted committed turn failure",
   );
+  // Temporal owns dispatch, so the disconnected event transport is observed by
+  // the in-process Activity as a durable event delivery failure. The legacy
+  // WebSocket dispatcher used to surface the same interruption as
+  // `connection_closed`.
   assert.equal(
     await psql(`select failure_code from turns where id = ${sqlLiteral(repair.turnId)}`),
-    "connection_closed",
+    "invalid_event_delivery",
   );
+  // The failed Run releases its writer lease. The durable Session remains
+  // usable for a later Run instead of inheriting a terminal transport failure.
   assert.equal(
     await psql(`select state from sessions where id = ${sqlLiteral(interruptedSession.sessionId)}`),
-    "failed",
+    "idle",
   );
   assert.equal(
     await psql(
@@ -2008,7 +2129,7 @@ async function main() {
     "1",
   );
 
-  const quarantineRoot = `/var/lib/agent-dock/spool-volume/state/quarantine/${bootBeforeReconnect.bootId}`;
+  const quarantineRoot = `/var/lib/agent-dock/spool-volume/state/quarantine/${interruptedBootBeforeReconnect.bootId}`;
   const rejectionPath = await waitFor(async () => {
     try {
       const value = await capture("docker", [
@@ -2071,7 +2192,7 @@ async function main() {
     "test",
     "!",
     "-e",
-    `/var/lib/agent-dock/spool-volume/state/active/${bootBeforeReconnect.bootId}/${quarantinedAssignmentDirectory}`,
+    `/var/lib/agent-dock/spool-volume/state/active/${interruptedBootBeforeReconnect.bootId}/${quarantinedAssignmentDirectory}`,
   ]);
 
   report("repair_after_same_boot_reconnect", { bootId: bootAfterReconnect.bootId });
@@ -2160,31 +2281,31 @@ async function main() {
   await waitForHealthyService("control-plane", 1);
   await assertTenantNeutralControlPlaneRuntime();
   await waitForHealthyService("supervisor-host");
-  assert.equal((await latestBoot()).bootId, bootBeforeReconnect.bootId);
+  assert.equal((await latestBoot()).bootId, primaryBootBeforeReconnect.bootId);
 
   report("restart_supervisor_host");
   await composeRun(["restart", "supervisor-host"]);
   await waitForHealthyService("supervisor-host");
-  const freshBoot = await waitForLatestBootDifferent(bootBeforeReconnect);
+  const freshBoot = await waitForLatestBootDifferent(primaryBootBeforeReconnect);
   await waitFor(
     async () =>
       (await psql(
         `select coalesce((select state from sandbox_retirements where sandbox_id = ${sqlLiteral(
-          bootBeforeReconnect.sandboxId,
+          primaryBootBeforeReconnect.sandboxId,
         )}), '')`,
       )) === "completed",
     "old Supervisor retirement",
   );
   assert.equal(
     await psql(
-      `select state from sandboxes where id = ${sqlLiteral(bootBeforeReconnect.sandboxId)}`,
+      `select state from sandboxes where id = ${sqlLiteral(primaryBootBeforeReconnect.sandboxId)}`,
     ),
     "terminated",
   );
   assert.equal(
     await psql(
       `select count(*) from supervisor_boot_credentials where sandbox_id = ${sqlLiteral(
-        bootBeforeReconnect.sandboxId,
+        primaryBootBeforeReconnect.sandboxId,
       )} and revoked_at is not null`,
     ),
     "1",
@@ -2387,7 +2508,7 @@ async function main() {
     projectName,
     repairedSessionId: session.sessionId,
     secondTenantSessionId: sessionB.sessionId,
-    oldBootId: bootBeforeReconnect.bootId,
+    oldBootId: primaryBootBeforeReconnect.bootId,
     freshBootId: freshBoot.bootId,
     durableEvents: 22,
     registeredTenants: 4,

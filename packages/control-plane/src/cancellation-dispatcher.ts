@@ -248,7 +248,26 @@ export class CancellationDispatcher {
   }
 
   async dispatchNext(): Promise<CancellationDispatchNextResult> {
-    const claim = await this.#claimNext();
+    return this.#dispatch();
+  }
+
+  /**
+   * Executes the cancellation for one exact execution command. Temporal uses
+   * this on the same Activity Worker that owns the live Pi runtime.
+   */
+  async dispatchTargetCommand(targetCommandId: string): Promise<CancellationDispatchNextResult> {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        targetCommandId,
+      )
+    ) {
+      throw new TypeError("targetCommandId must be a UUID");
+    }
+    return this.#dispatch(targetCommandId.toLowerCase());
+  }
+
+  async #dispatch(targetCommandId?: string): Promise<CancellationDispatchNextResult> {
+    const claim = await this.#claimNext(targetCommandId);
     if (claim === undefined) return { status: "idle" };
 
     let started = false;
@@ -329,7 +348,7 @@ export class CancellationDispatcher {
     };
   }
 
-  async #claimNext(): Promise<ClaimedCancellation | undefined> {
+  async #claimNext(targetCommandId?: string): Promise<ClaimedCancellation | undefined> {
     const now = safeDate(this.#clock);
     const leaseUntil = new Date(now.valueOf() + this.#claimLeaseMs);
     return this.#database.transaction().execute(async (transaction) => {
@@ -427,6 +446,11 @@ export class CancellationDispatcher {
         .where("cancellation.kind", "=", "turn.cancel")
         .where("cancellation.state", "in", ["pending", "dispatched"])
         .where("target.kind", "=", "turn.execute")
+        .where(
+          targetCommandId === undefined
+            ? sql<boolean>`true`
+            : sql<boolean>`${sql.ref("target.id")} = ${targetCommandId}`,
+        )
         .where(
           this.#supervisorAffinity === undefined
             ? sql<boolean>`true`

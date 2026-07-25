@@ -133,6 +133,45 @@ afterAll(async () => {
 });
 
 describe.sequential("global tenant scheduling", () => {
+  it("dispatches only the command named by a Temporal Activity while preserving Session FIFO", async () => {
+    const store = await seedTenant({
+      tenantId: "90000000-0000-4000-8000-000000000001",
+      bindingId: "90000000-0000-4000-8000-000000000002",
+      profileId: "90000000-0000-4000-8000-000000000003",
+      slug: "temporal-target",
+      maximumConcurrentTurns: 1,
+    });
+    const turns = await createQueuedTurns(store, 2, "temporal-target");
+    const executed: string[] = [];
+    const dispatcher = new OutboxDispatcher({
+      database,
+      backend: {
+        async execute(request, lifecycle) {
+          executed.push(request.commandId);
+          await lifecycle.started();
+          return { stopReason: "temporal-target-test" };
+        },
+      },
+    });
+
+    await expect(dispatcher.dispatchCommand(turns[1]!.commandId)).resolves.toEqual({
+      status: "idle",
+    });
+    expect(executed).toEqual([]);
+    await expect(dispatcher.dispatchCommand(turns[0]!.commandId)).resolves.toMatchObject({
+      status: "completed",
+      commandId: turns[0]!.commandId,
+    });
+    await expect(dispatcher.dispatchCommand(turns[1]!.commandId)).resolves.toMatchObject({
+      status: "completed",
+      commandId: turns[1]!.commandId,
+    });
+    expect(executed).toEqual([turns[0]!.commandId, turns[1]!.commandId]);
+    await expect(dispatcher.dispatchCommand("not-a-command")).rejects.toThrow(
+      "commandId must be a UUID",
+    );
+  });
+
   it("serves a later tenant before an existing tenant drains its backlog", async () => {
     const storeA = await seedTenant({
       tenantId: IDS.tenantA,

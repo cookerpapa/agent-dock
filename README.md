@@ -29,12 +29,18 @@ Browser / CLI
     | REST + SSE
     v
 TypeScript Control Plane (NestJS)
-    |-- session mailbox and turn scheduler
+    |-- transactional admission, session mailbox and outbox relay
     |-- sandbox leases and fencing tokens
     |-- approvals, quotas, usage, event index
     |-- PostgreSQL + MinIO/S3
     |
-    | versioned command/event protocol
+    | bounded Run IDs only
+    v
+Temporal Server
+    |-- one durable Workflow per accepted Run
+    |-- Task Queue fairness, retry timers, cancellation and Worker matching
+    |
+    | common capacity-bounded Task Queue
     v
 Trusted TypeScript Agent Runner
     |-- capacity-one Pi SDK AgentSession and model capability
@@ -61,7 +67,10 @@ Untrusted demand-activated Tool microVM
 - Control plane: TypeScript, Node.js, NestJS with the Fastify adapter
 - Runner: horizontally scalable, capacity-one TypeScript Workers embedding the
   pinned Pi SDK; no per-message Pi process
-- Internal protocol: versioned TypeBox schemas over an outbound WebSocket
+- Run orchestration: pinned self-hosted Temporal Server 1.29.1 and TypeScript
+  SDK 1.21.1; one Workflow per Run and one Activity per active Pi execution
+- Internal management/event protocol: versioned TypeBox schemas over an
+  outbound WebSocket; this channel does not assign production Runs
 - Browser event delivery: SSE with resumable sequence numbers
 - Metadata and durable commands: PostgreSQL with Kysely
 - Session/workspace artifacts: S3-compatible object storage, with MinIO used as
@@ -79,7 +88,7 @@ Untrusted demand-activated Tool microVM
 - Observability: OpenTelemetry, Prometheus, Grafana, Loki, Tempo
 - Tests: Vitest, Testcontainers, k6, Toxiproxy
 
-Kafka, Flink, Redis, Temporal, billing, RAG, mobile applications, and IDE
+Kafka, Flink, Redis, billing, RAG, mobile applications, and IDE
 plugins are not part of the initial implementation. They should be introduced
 only after a measured requirement appears.
 
@@ -309,9 +318,10 @@ AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32 \
 npm run production:deploy
 ```
 
-It starts persistent PostgreSQL and MinIO, an authenticated remote control
-plane, a bounded trusted non-root Pi Worker pool, a separate authenticated
-Sandbox Manager, the Web ingress, and Cube's KVM execution plane. No
+It starts persistent PostgreSQL and MinIO, an internal Temporal service, an
+authenticated remote control plane, a bounded trusted non-root Pi Worker pool,
+a separate authenticated Sandbox Manager, the Web ingress, and Cube's KVM
+execution plane. No
 application service owns a Docker/containerd socket. Pi and the tenant model
 credential remain in the trusted Runner; `read/write/edit/bash` cross a narrow
 RPC boundary into a host-mount-free, credential-free Tool microVM with
@@ -394,7 +404,8 @@ and controlled GitHub repositories pinned to exact commits (one repository or
 an explicitly configured GitHub App),
 with either the deterministic fake or an owner-configured DeepSeek model.
 Request identity, roles, encrypted per-tenant provider credentials,
-resource/event/checkpoint isolation, quotas, fair global dispatch, token usage,
+resource/event/checkpoint isolation, PostgreSQL admission quotas, Temporal
+Task Queue fairness, token usage,
 opt-in loopback self-registration, and tenant-scoped conversation discovery
 share one bounded Supervisor pool. Cold conversations retain durable Pi and
 workspace checkpoints but consume no Pi child process, Tool Sandbox, dedicated
@@ -402,8 +413,8 @@ thread, or timer. The Web Session inspector exposes immutable Workspace
 history/files/compare, safe Artifact previews, Runs/Attempts, tests,
 usage/context, workspace operations, owner activity, and optional GitHub PR
 delivery. It can also fork one immutable Workspace baseline into two to four
-isolated candidate Sessions, admit them through the existing tenant-fair
-dispatcher with a race-local concurrency cap, compare immutable Review Bundles,
+isolated candidate Sessions, admit them through the same PostgreSQL policy and
+Temporal Task Queue with a race-local concurrency cap, compare immutable Review Bundles,
 and CAS-promote an accepted candidate only after an explicit human decision.
 Cold encrypted backup/restore and checksummed release evidence are executable
 operator paths. It is not an arbitrary Git host, untrusted extension host,

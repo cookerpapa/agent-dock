@@ -13,6 +13,8 @@ COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
+COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
+COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestration/tsconfig.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN npm ci --omit=dev --ignore-scripts \
     && node scripts/harden-pi-dependencies.mjs \
@@ -50,6 +52,9 @@ COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/sandbox-supervisor/src packages/sandbox-supervisor/src
+COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
+COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestration/tsconfig.json
+COPY packages/temporal-orchestration/src packages/temporal-orchestration/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN rm -rf /usr/local/lib/node_modules/npm \

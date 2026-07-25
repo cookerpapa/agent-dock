@@ -20,6 +20,9 @@ export type SupervisorHostConfig = {
   managementPort: number;
   managementAdvertisedBaseUrl: string;
   maxConcurrentSessions: number;
+  temporalAddress: string;
+  temporalNamespace: string;
+  temporalTaskQueue: string;
   piExecutionMode: "rpc" | "embedded-sdk";
   sandboxManagerBaseUrl: string;
   sandboxManagerRequestTimeoutMs: number;
@@ -274,6 +277,21 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
     maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 2, 1, 256),
+    temporalAddress: bounded(
+      required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
+      "AGENT_DOCK_TEMPORAL_ADDRESS",
+      512,
+    ),
+    temporalNamespace: bounded(
+      environment.AGENT_DOCK_TEMPORAL_NAMESPACE ?? "agent-dock",
+      "AGENT_DOCK_TEMPORAL_NAMESPACE",
+      255,
+    ),
+    temporalTaskQueue: bounded(
+      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-v1",
+      "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
+      255,
+    ),
     piExecutionMode: piExecutionMode(environment.AGENT_DOCK_PI_EXECUTION_MODE),
     sandboxManagerBaseUrl: internalServiceBaseUrl(
       required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
