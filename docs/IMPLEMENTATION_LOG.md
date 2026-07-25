@@ -2327,3 +2327,25 @@
   queued pair in 33.0–33.2 seconds. Eight provider requests consumed 1,108
   input, 625 output and 10,752 cache-read tokens. Evidence is stored in
   `docs/reports/tool-sandbox-admission-latest.{json,md}`.
+
+## 2026-07-26: Kubernetes trusted Pi Worker pool
+
+- Added ADR-0058 and the `agent-dock-pi-worker-pool` Helm chart.
+- Each capacity-one Pi SDK Worker now has a deployable StatefulSet identity,
+  private `ReadWriteOncePod` boot/spool claim, per-Pod management Service,
+  restricted trusted-plane network policy, PDB and topology spreading.
+- Added Temporal Worker Deployment name/Build ID configuration with pinned Run
+  Workflow behavior; new builds use separate blue/green Helm releases.
+- Kept PostgreSQL plus S3-compatible Pi JSONL segments/manifests as the shared
+  conversation authority. Worker PVCs contain no committed user conversation.
+- Evaluated Temporal Worker Controller v1.8.0 and CloudNativePG v1.30.0. The
+  former is deferred until private spool state can fit a Deployment lifecycle;
+  the latter is a recommended external PostgreSQL HA option rather than a
+  dependency bundled into the Worker chart.
+- Added deterministic Helm policy checks plus Supervisor configuration/runtime
+  tests for Kubernetes Secret projection and Temporal deployment identity.
+- Validated the complete repository typecheck/test/Pi recovery suite after
+  dependency hardening, both Helm chart policy gates, production Web build,
+  image dependency closure, encrypted-backup tamper checks and the HIGH-level
+  security audit. Live multi-node Kubernetes, node-loss and storage-failover
+  validation intentionally remain open evidence rather than implied claims.

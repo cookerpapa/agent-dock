@@ -267,7 +267,7 @@ extension-policy support would overstate the current boundary.
   backup/rollback documentation
 - [x] Prove real-token pure-chat, multi-round Cube coding, cross-Worker Pi
   checkpoint recovery, two-Worker concurrency and secret-free Workflow history
-- [ ] Add Temporal Worker Build ID/versioning deployment gates before a
+- [x] Add Temporal Worker Build ID/versioning deployment gates before a
   multi-node rolling-upgrade claim
 - [x] Implement `agent-dock.pi-session-manifest.v2` with line-aligned
   tenant-scoped content-addressed segments and S3 create-if-absent/checksums
@@ -286,3 +286,15 @@ extension-policy support would overstate the current boundary.
 - [x] Preserve capacity-one embedded Pi Worker failure domains while adding
   deployment-global FIFO CubeSandbox admission, cancellation-safe waiters and
   active/waiting/limit metrics
+- [x] Add a closed Kubernetes StatefulSet Helm chart for capacity-one trusted
+  Pi Workers with stable Supervisor identity, private boot/spool PVCs,
+  per-Pod management routing and no runtime/Kubernetes authority
+- [x] Keep conversation authority outside Worker Pods in PostgreSQL plus
+  S3-compatible Pi-native checkpoints and document the recovery contract
+- [x] Enable Temporal Worker Deployment name/Build ID and pinned Run Workflow
+  routing in the Kubernetes profile
+- [x] Document why Temporal Worker Controller is deferred while the private
+  event spool requires stable per-replica storage
+- [ ] Prove the Kubernetes Pi Worker chart on a real multi-node cluster with
+  node loss, version ramp/rollback, external PostgreSQL/S3 failover and
+  real-token concurrent Runs

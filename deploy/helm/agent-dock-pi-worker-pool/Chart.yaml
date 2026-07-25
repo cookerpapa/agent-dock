@@ -1,0 +1,11 @@
+apiVersion: v2
+name: agent-dock-pi-worker-pool
+description: Capacity-one trusted Pi SDK Workers for AgentDock
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+annotations:
+  agent-dock.io/state-authority: "postgresql-and-s3"
+  agent-dock.io/scheduler: "temporal"
+  agent-dock.io/tool-runtime: "remote-cubesandbox"

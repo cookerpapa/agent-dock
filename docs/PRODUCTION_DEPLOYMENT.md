@@ -317,10 +317,13 @@ Cube v0.6.0 lacks the metadata CAS required for safe warm rebind, so the
 production clean-prewarm target is zero and no used guest is ever reassigned.
 A later coding Run restores the committed Workspace into a new microVM.
 
-The bundled Pi Workers are trusted Docker Compose services; they are not
+The bundled local Pi Workers are trusted Docker Compose services; they are not
 running inside the Cube K3s cluster. Replicas poll the same Temporal Task Queue
-with capacity one each. Adding replicas increases model/Agent Loop concurrency,
-while the independent physical Tool limit protects host resources:
+with capacity one each. ADR-0058 additionally provides
+`deploy/helm/agent-dock-pi-worker-pool` for a private Kubernetes trusted plane.
+That chart does not move Pi into Cube: Tool Calls still cross the authenticated
+Manager boundary into Cube microVMs. Adding replicas increases model/Agent Loop
+concurrency, while the independent physical Tool limit protects host resources:
 
 ```text
 AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES=2
@@ -646,11 +649,20 @@ polls the same Temporal Task Queue; the authenticated WebSocket advertises
 `acceptingAssignments=false` and is not a second matcher. Enrollment
 admits identities under `AGENT_DOCK_SUPERVISOR_ID_PREFIX`; private management
 routing must match `AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE`. Additional
-Workers can be deployed as independent containers or StatefulSet Pods as long
-as each has a unique ID, independently durable boot/spool storage, and a
-management address matching that template. The bundled ingress and database
-sizing remain a single-host deployment; load-test before treating extra
-replicas as an availability SLA.
+Workers can be deployed as independent containers or through the versioned
+Worker-pool chart. Its Pod name is the Supervisor ID, each ordinal has
+independently durable boot/spool storage, and a same-name ClusterIP Service
+makes this template valid across blue/green pools:
+
+```text
+http://{supervisorId}.agent-dock-workers.svc.cluster.local:4100
+```
+
+The chart requires external PostgreSQL/S3/Temporal and trusted-service
+endpoints. Conversation state does not live on the Worker PVC. The bundled
+ingress, PostgreSQL, MinIO and Cube sizing remain a single-host deployment;
+load-test and prove external-store/node failover before treating extra replicas
+as an availability SLA.
 
 Alert operationally on prolonged unhealthy/restarting services, a growing
 retirement queue, repeated `connection_closed` failures, non-empty active spool

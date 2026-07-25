@@ -1,0 +1,109 @@
+workerPool:
+  name: primary-v1
+  replicas: 2
+  capacity: 1
+  clusterDomain: cluster.local
+
+image:
+  repository: agent-dock/supervisor-host
+  tag: production
+  digest: ""
+  pullPolicy: Never
+
+services:
+  controlPlaneUrl: http://control-plane.agent-dock-system.svc.cluster.local:3000
+  sandboxManagerUrl: http://sandbox-manager.agent-dock-system.svc.cluster.local:4300
+  githubGateway:
+    enabled: true
+    url: http://github-gateway.agent-dock-system.svc.cluster.local:4400
+  providerProxyUrl: http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129
+  otlpTracesEndpoint: http://jaeger.agent-dock-system.svc.cluster.local:4318/v1/traces
+
+temporal:
+  address: temporal.agent-dock-system.svc.cluster.local:7233
+  namespace: agent-dock
+  taskQueue: agent-dock-pi-runs-v1
+  workerDeploymentName: agent-dock-pi-workers
+  workerBuildId: development
+
+conversationStorage:
+  existingSecret: agent-dock-pi-worker-secrets
+  databaseUrlKey: database-url
+  awsCredentialsKey: aws-credentials
+  s3:
+    bucket: agent-dock-checkpoints
+    region: us-east-1
+    endpoint: http://minio.agent-dock-system.svc.cluster.local:9000
+    keyPrefix: production/v1
+    forcePathStyle: true
+    allowInsecureEndpoint: true
+    maxAttempts: 4
+
+credentials:
+  supervisorEnrollmentTokenKey: supervisor-enrollment-token
+  supervisorManagementTokenKey: supervisor-management-token
+  sandboxManagerTokenKey: sandbox-manager-token
+  modelCredentialMasterKeyKey: model-credential-master-key
+  githubGatewayTokenKey: github-gateway-token
+  metricsTokenKey: metrics-token
+
+runtime:
+  allowInsecureInternalHttp: true
+  checkpointCache:
+    ttlMs: 600000
+    maximumEntries: 512
+    maximumBytes: 33554432
+  timeouts:
+    sandboxManagerRequestMs: 300000
+    modelUpstreamRequestMs: 120000
+    modelRequestMs: 150000
+    turnMs: 600000
+  repositoryImport:
+    leaseMs: 240000
+    waitMs: 300000
+
+state:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOncePod
+  size: 1Gi
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 384Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+ephemeral:
+  workspaceSizeLimit: 128Mi
+  temporarySizeLimit: 128Mi
+
+networkPolicy:
+  enabled: true
+  trustedNamespaceLabel:
+    key: agent-dock.io/trusted-plane
+    value: "true"
+  trustedTcpPorts:
+    - 443
+    - 3000
+    - 3129
+    - 4300
+    - 4400
+    - 4318
+    - 5432
+    - 7233
+    - 9000
+  externalEgressCidrs: []
+
+disruptionBudget:
+  minAvailable: 1
+
+placement:
+  nodeSelector: {}
+  tolerations: []
+
+serviceAccount:
+  create: true
+  name: ""

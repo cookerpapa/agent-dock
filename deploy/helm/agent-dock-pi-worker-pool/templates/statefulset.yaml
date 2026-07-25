@@ -1,0 +1,306 @@
+{{- $name := include "agent-dock-pi-worker-pool.name" . -}}
+{{- if ge (int .Values.disruptionBudget.minAvailable) (int .Values.workerPool.replicas) -}}
+{{- fail "disruptionBudget.minAvailable must be lower than workerPool.replicas" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "agent-dock-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: {{ .Values.workerPool.replicas }}
+  podManagementPolicy: Parallel
+  minReadySeconds: 5
+  revisionHistoryLimit: 5
+  updateStrategy:
+    type: OnDelete
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      {{- include "agent-dock-pi-worker-pool.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agent-dock-pi-worker-pool.labels" . | nindent 8 }}
+      annotations:
+        agent-dock.io/conversation-authority: external-postgresql-and-s3
+        agent-dock.io/temporal-worker-deployment: {{ .Values.temporal.workerDeploymentName | quote }}
+    spec:
+      serviceAccountName: {{ include "agent-dock-pi-worker-pool.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: false
+      hostPID: false
+      shareProcessNamespace: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "agent-dock-pi-worker-pool.selectorLabels" . | nindent 14 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "agent-dock-pi-worker-pool.selectorLabels" . | nindent 20 }}
+      {{- with .Values.placement.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.placement.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: pi-worker
+          image: {{ include "agent-dock-pi-worker-pool.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: management
+              containerPort: 4100
+              protocol: TCP
+            - name: metrics
+              containerPort: 9465
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_ENV
+              value: production
+            - name: NODE_USE_ENV_PROXY
+              value: "1"
+            {{- if .Values.services.providerProxyUrl }}
+            - name: HTTP_PROXY
+              value: {{ .Values.services.providerProxyUrl | quote }}
+            - name: HTTPS_PROXY
+              value: {{ .Values.services.providerProxyUrl | quote }}
+            {{- end }}
+            - name: NO_PROXY
+              value: {{ printf "127.0.0.1,localhost,.svc,.svc.%s" .Values.workerPool.clusterDomain | quote }}
+            - name: AWS_SHARED_CREDENTIALS_FILE
+              value: /run/agent-dock-secrets/aws-credentials
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: DATABASE_URL_FILE
+              value: /run/agent-dock-secrets/database-url
+            - name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP
+              value: {{ .Values.runtime.allowInsecureInternalHttp | quote }}
+            - name: AGENT_DOCK_CONTROL_PLANE_URL
+              value: {{ .Values.services.controlPlaneUrl | quote }}
+            - name: AGENT_DOCK_SUPERVISOR_ID
+              value: $(POD_NAME)
+            - name: AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE
+              value: /run/agent-dock-secrets/supervisor-enrollment-token
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE
+              value: /run/agent-dock-secrets/supervisor-management-token
+            - name: AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE
+              value: /run/agent-dock-secrets/sandbox-manager-token
+            - name: AGENT_DOCK_SANDBOX_MANAGER_URL
+              value: {{ .Values.services.sandboxManagerUrl | quote }}
+            - name: AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS
+              value: {{ .Values.runtime.timeouts.sandboxManagerRequestMs | quote }}
+            - name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE
+              value: /run/agent-dock-secrets/model-credential-master-key
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST
+              value: 0.0.0.0
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT
+              value: "4100"
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL
+              value: {{ printf "http://$(POD_NAME).$(POD_NAMESPACE).svc.%s:4100" .Values.workerPool.clusterDomain | quote }}
+            - name: AGENT_DOCK_SUPERVISOR_CAPACITY
+              value: {{ .Values.workerPool.capacity | quote }}
+            - name: AGENT_DOCK_TEMPORAL_ADDRESS
+              value: {{ .Values.temporal.address | quote }}
+            - name: AGENT_DOCK_TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: AGENT_DOCK_TEMPORAL_TASK_QUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+            - name: AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED
+              value: "true"
+            - name: AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME
+              value: {{ .Values.temporal.workerDeploymentName | quote }}
+            - name: AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID
+              value: {{ .Values.temporal.workerBuildId | quote }}
+            - name: AGENT_DOCK_PI_EXECUTION_MODE
+              value: embedded-sdk
+            - name: AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY
+              value: /workspace
+            - name: AGENT_DOCK_BOOT_STATE_DIRECTORY
+              value: /var/lib/agent-dock/boot
+            - name: AGENT_DOCK_EVENT_SPOOL_DIRECTORY
+              value: /var/lib/agent-dock/spool
+            - name: AGENT_DOCK_CHECKPOINT_READ_CACHE_TTL_MS
+              value: {{ .Values.runtime.checkpointCache.ttlMs | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES
+              value: {{ .Values.runtime.checkpointCache.maximumEntries | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES
+              value: {{ .Values.runtime.checkpointCache.maximumBytes | quote }}
+            - name: AGENT_DOCK_MODEL_GATEWAY_HOST
+              value: 127.0.0.1
+            - name: AGENT_DOCK_MODEL_GATEWAY_PORT
+              value: "4200"
+            - name: AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL
+              value: http://127.0.0.1:4200
+            - name: AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS
+              value: "600000"
+            - name: AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN
+              value: "32"
+            - name: AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS
+              value: {{ .Values.runtime.timeouts.modelUpstreamRequestMs | quote }}
+            - name: AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS
+              value: {{ .Values.runtime.timeouts.modelRequestMs | quote }}
+            - name: AGENT_DOCK_PI_TURN_TIMEOUT_MS
+              value: {{ .Values.runtime.timeouts.turnMs | quote }}
+            - name: AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS
+              value: {{ .Values.runtime.repositoryImport.leaseMs | quote }}
+            - name: AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS
+              value: {{ .Values.runtime.repositoryImport.waitMs | quote }}
+            {{- if .Values.services.githubGateway.enabled }}
+            - name: AGENT_DOCK_GITHUB_GATEWAY_URL
+              value: {{ .Values.services.githubGateway.url | quote }}
+            - name: AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE
+              value: /run/agent-dock-secrets/github-gateway-token
+            {{- end }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_BUCKET
+              value: {{ .Values.conversationStorage.s3.bucket | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_REGION
+              value: {{ .Values.conversationStorage.s3.region | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_ENDPOINT
+              value: {{ .Values.conversationStorage.s3.endpoint | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX
+              value: {{ .Values.conversationStorage.s3.keyPrefix | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE
+              value: {{ .Values.conversationStorage.s3.forcePathStyle | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT
+              value: {{ .Values.conversationStorage.s3.allowInsecureEndpoint | quote }}
+            - name: AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS
+              value: {{ .Values.conversationStorage.s3.maxAttempts | quote }}
+            - name: AGENT_DOCK_METRICS_HOST
+              value: 0.0.0.0
+            - name: AGENT_DOCK_METRICS_PORT
+              value: "9465"
+            - name: AGENT_DOCK_METRICS_TOKEN_FILE
+              value: /run/agent-dock-secrets/metrics-token
+            {{- if .Values.services.otlpTracesEndpoint }}
+            - name: AGENT_DOCK_OTLP_TRACES_ENDPOINT
+              value: {{ .Values.services.otlpTracesEndpoint | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 40
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "kill -TERM 1; sleep 5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: worker-state
+              mountPath: /var/lib/agent-dock
+            - name: workspace
+              mountPath: /workspace
+            - name: temporary
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/agent-dock-secrets
+              readOnly: true
+      volumes:
+        - name: workspace
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.ephemeral.workspaceSizeLimit }}
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.ephemeral.temporarySizeLimit }}
+        - name: secrets
+          secret:
+            secretName: {{ .Values.conversationStorage.existingSecret }}
+            defaultMode: 288
+            items:
+              - key: {{ .Values.conversationStorage.databaseUrlKey }}
+                path: database-url
+              - key: {{ .Values.conversationStorage.awsCredentialsKey }}
+                path: aws-credentials
+              - key: {{ .Values.credentials.supervisorEnrollmentTokenKey }}
+                path: supervisor-enrollment-token
+              - key: {{ .Values.credentials.supervisorManagementTokenKey }}
+                path: supervisor-management-token
+              - key: {{ .Values.credentials.sandboxManagerTokenKey }}
+                path: sandbox-manager-token
+              - key: {{ .Values.credentials.modelCredentialMasterKeyKey }}
+                path: model-credential-master-key
+              {{- if .Values.services.githubGateway.enabled }}
+              - key: {{ .Values.credentials.githubGatewayTokenKey }}
+                path: github-gateway-token
+              {{- end }}
+              - key: {{ .Values.credentials.metricsTokenKey }}
+                path: metrics-token
+  volumeClaimTemplates:
+    - metadata:
+        name: worker-state
+        labels:
+          {{- include "agent-dock-pi-worker-pool.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.state.accessModes | nindent 10 }}
+        {{- if .Values.state.storageClassName }}
+        storageClassName: {{ .Values.state.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.state.size }}

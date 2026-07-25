@@ -185,12 +185,25 @@ Temporal Task Queue
 └── Pi Worker N, one active SDK session
 ```
 
-The supported single-host profile currently runs those replicas as Docker
-Compose services. Kubernetes is not required for this horizontal-scaling
-property: replaceability comes from external durable state plus a common Task
-Queue. A future Kubernetes Deployment would automate replica placement,
-restart and autoscaling, but would run the same capacity-one trusted Worker
+The supported single-host profile runs those replicas as Docker Compose
+services. Kubernetes is not required for this horizontal-scaling property:
+replaceability comes from external durable state plus a common Task Queue.
+ADR-0058 now provides a separate Kubernetes Worker-pool Helm chart for the same
 contract.
+
+The chart deliberately uses a StatefulSet rather than a Deployment. A Pod
+ordinal is the stable Supervisor ID and its private `ReadWriteOncePod` claim
+retains only the boot ledger and not-yet-ACKed/quarantined event spool. It does
+not retain the user's conversation. Pi JSONL segments/manifests remain in S3,
+and PostgreSQL remains the authority for the checkpoint head, fence, mailbox,
+Run and semantic projection. Therefore a later Session Run can still land on
+any healthy Worker.
+
+Kubernetes Worker code changes use Temporal Worker Deployment name plus an
+immutable Build ID. A second Helm release starts the new build; the operator
+promotes or ramps it only after pollers are healthy and leaves the old pool
+until its pinned Run Workflows drain. This avoids treating an in-place Pod
+rolling update as a safe Workflow-code upgrade.
 
 Pi Worker count and Tool Sandbox count are separate capacity controls. A pure
 chat Run consumes a Worker without materializing Cube. Coding Runs acquire the

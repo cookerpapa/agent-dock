@@ -315,9 +315,12 @@ Cube v0.6.0 local KVM plane. Production registers a digest-pinned,
 current-commit Cube Tool template and runs the normal browser flow through
 demand-created guests. CI, SBOM/image scanning, encrypted backup/restore,
 architecture/threat-model documentation and reproducible security/production
-gates exist. A dedicated multi-node Cube profile, external storage/network
-operating profile and demo video remain future work and are not implied by the
-single-host release.
+gates exist. ADR-0058 adds a separate closed Helm chart for capacity-one trusted
+Pi Workers with stable per-Worker spool/PVC identity, external
+PostgreSQL/S3 conversation state and Temporal Build-ID routing. A dedicated
+multi-node Cube profile, live multi-node Worker/node-loss evidence, external
+storage HA/network operating profile and demo video remain future work and are
+not implied by the single-host release.
 
 ## Expected calendar time
 

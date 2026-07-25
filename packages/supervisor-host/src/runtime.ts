@@ -415,6 +415,15 @@ export class SupervisorHostRuntime {
         taskQueue: this.#config.temporalTaskQueue,
         identity: `${identity.supervisorId}/${identity.bootId}`,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
+        ...(this.#config.temporalWorkerDeploymentName === undefined ||
+        this.#config.temporalWorkerBuildId === undefined
+          ? {}
+          : {
+              workerDeployment: {
+                deploymentName: this.#config.temporalWorkerDeploymentName,
+                buildId: this.#config.temporalWorkerBuildId,
+              },
+            }),
         executionDispatcher: new OutboxDispatcher({
           database: this.#database,
           backend: localBackend,

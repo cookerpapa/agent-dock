@@ -28,6 +28,10 @@ export type TemporalPiWorkerOptions = {
   taskQueue: string;
   identity: string;
   maximumConcurrentRuns: number;
+  workerDeployment?: {
+    deploymentName: string;
+    buildId: string;
+  };
   executionDispatcher: OutboxDispatcher;
   cancellationDispatcher: CancellationDispatcher;
 };
@@ -61,6 +65,12 @@ export class TemporalPiWorker {
   readonly #taskQueue: string;
   readonly #identity: string;
   readonly #maximumConcurrentRuns: number;
+  readonly #workerDeployment:
+    | {
+        deploymentName: string;
+        buildId: string;
+      }
+    | undefined;
   readonly #executionDispatcher: OutboxDispatcher;
   readonly #cancellationDispatcher: CancellationDispatcher;
   #state: TemporalPiWorkerState = "idle";
@@ -78,6 +88,17 @@ export class TemporalPiWorker {
       options.maximumConcurrentRuns,
       "maximumConcurrentRuns",
     );
+    this.#workerDeployment =
+      options.workerDeployment === undefined
+        ? undefined
+        : {
+            deploymentName: bounded(
+              options.workerDeployment.deploymentName,
+              "workerDeployment.deploymentName",
+              127,
+            ),
+            buildId: bounded(options.workerDeployment.buildId, "workerDeployment.buildId", 255),
+          };
     this.#executionDispatcher = options.executionDispatcher;
     this.#cancellationDispatcher = options.cancellationDispatcher;
   }
@@ -102,6 +123,15 @@ export class TemporalPiWorker {
           executeRunCommand: (input: TemporalRunWorkflowInput) => this.#execute(input),
         },
         identity: this.#identity,
+        ...(this.#workerDeployment === undefined
+          ? {}
+          : {
+              workerDeploymentOptions: {
+                version: this.#workerDeployment,
+                useWorkerVersioning: true as const,
+                defaultVersioningBehavior: "PINNED" as const,
+              },
+            }),
         maxConcurrentActivityTaskExecutions: this.#maximumConcurrentRuns,
         maxConcurrentWorkflowTaskExecutions: Math.max(8, this.#maximumConcurrentRuns * 4),
         shutdownGraceTime: "30 seconds",

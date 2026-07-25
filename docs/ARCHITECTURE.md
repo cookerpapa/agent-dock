@@ -360,12 +360,22 @@ head under the current lease/fence, validates object digests, and rechecks the
 revision after reconstruction. A cache hit is therefore an S3 transport
 optimization, not a second checkpoint authority or Session affinity mechanism.
 
-The production Worker pool is presently a set of Docker Compose replicas, not
-Kubernetes Pods. Horizontal correctness comes from capacity-one Worker
-processes polling one Temporal Task Queue and restoring all durable state from
-PostgreSQL/MinIO. Kubernetes can later manage those trusted replicas without
-changing the execution protocol; it is already used only inside the separate
-Cube/K3s execution plane and retained gVisor importer path.
+The default local product still runs the Worker pool as Docker Compose
+replicas. ADR-0058 also supplies a closed, versioned Kubernetes chart for the
+same trusted Worker contract. It uses one capacity-one StatefulSet Pod per
+stable Supervisor ID, one private `ReadWriteOncePod` claim for that Worker's
+boot ledger/event spool, per-Pod management Services, topology spreading,
+restricted NetworkPolicy, and Temporal Worker Deployment Build IDs. The
+StatefulSet is not a Session store: PostgreSQL and S3 remain the shared
+authorities, so another Worker can resume the next Run. Cube/K3s remains the
+separate untrusted Tool execution plane.
+
+New Worker code is installed as a second Helm release and Temporal Worker
+Deployment Version rather than rolled through the existing StatefulSet.
+Pinned Run Workflows drain on the old build before its pool is removed. This
+chart makes node-level placement and scale-out deployable; a multi-node
+availability claim still requires external PostgreSQL/S3 HA and real node-loss,
+version-ramp, rollback, and load evidence.
 
 The host receives S3/database credentials, but no container-runtime,
 Kubernetes credential or host network. It composes the pinned Pi Runner, PostgreSQL workspace-import
@@ -1090,9 +1100,11 @@ the live Pi activation. Activity retry does not imply exactly-once Bash or
 model calls: Tool IDs, RunAttempt fencing, checkpoint CAS and the
 ambiguous-after-start failure rule remain authoritative.
 
-Kubernetes or Compose scales the trusted Worker processes. Cube remains the
-untrusted Tool microVM scheduler and is activated lazily only when Pi emits a
-Tool Call. Chat-only Runs use Temporal but never create a Cube Sandbox.
+Kubernetes or Compose scales the trusted Worker processes. The Kubernetes
+profile uses StatefulSet identity only for the Worker-private boot/event spool;
+PostgreSQL/S3 hold all resumable conversation state. Cube remains the untrusted
+Tool microVM scheduler and is activated lazily only when Pi emits a Tool Call.
+Chat-only Runs use Temporal but never create a Cube Sandbox.
 
 ## 10. Web presentation
 

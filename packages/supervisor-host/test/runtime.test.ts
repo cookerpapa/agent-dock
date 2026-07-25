@@ -23,6 +23,7 @@ import {
   type SupervisorHostConfig,
   type SupervisorSandboxManager,
   type SupervisorTemporalWorker,
+  type TemporalPiWorkerOptions,
 } from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "90000000-0000-4000-8000-000000000001";
@@ -173,6 +174,11 @@ describe("SupervisorHostRuntime", () => {
     });
     gateway.install(server);
     const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const temporalWorkerOptions: TemporalPiWorkerOptions[] = [];
+    const temporalWorkerFactory = (options: TemporalPiWorkerOptions): SupervisorTemporalWorker => {
+      temporalWorkerOptions.push(options);
+      return temporalWorker();
+    };
     const baseConfig: SupervisorHostConfig = {
       supervisorId: SUPERVISOR_ID,
       controlPlaneBaseUrl: address,
@@ -190,6 +196,8 @@ describe("SupervisorHostRuntime", () => {
       temporalAddress: "temporal.test:7233",
       temporalNamespace: "agent-dock-test",
       temporalTaskQueue: "agent-dock-pi-runs-test",
+      temporalWorkerDeploymentName: "agent-dock-pi-workers",
+      temporalWorkerBuildId: "runtime-test-build",
       piExecutionMode: "rpc",
       sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
       sandboxManagerRequestTimeoutMs: 300_000,
@@ -221,7 +229,7 @@ describe("SupervisorHostRuntime", () => {
           database,
           objectStore: objectStore(),
           sandboxManager: sandboxManager(),
-          temporalWorkerFactory: temporalWorker,
+          temporalWorkerFactory,
         }),
     ).toThrow("Embedded Pi SDK Workers require exactly one concurrent Session");
     let first: SupervisorHostRuntime | undefined;
@@ -232,7 +240,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         sandboxManager: sandboxManager(),
-        temporalWorkerFactory: temporalWorker,
+        temporalWorkerFactory,
       });
       await first.start();
       expect(first.state).toBe("ready");
@@ -246,7 +254,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         sandboxManager: sandboxManager(),
-        temporalWorkerFactory: temporalWorker,
+        temporalWorkerFactory,
       });
       await second.start();
       expect(second.state).toBe("ready");
@@ -267,6 +275,17 @@ describe("SupervisorHostRuntime", () => {
         .where("revoked_at", "is", null)
         .executeTakeFirstOrThrow();
       expect(activeCredential.boot_id).toBe(secondIdentity.bootId);
+      expect(temporalWorkerOptions).toHaveLength(2);
+      expect(temporalWorkerOptions.map((options) => options.workerDeployment)).toEqual([
+        {
+          deploymentName: "agent-dock-pi-workers",
+          buildId: "runtime-test-build",
+        },
+        {
+          deploymentName: "agent-dock-pi-workers",
+          buildId: "runtime-test-build",
+        },
+      ]);
 
       const ledger = JSON.parse(await readFile(join(root, "boot", "boot-ledger.json"), "utf8")) as {
         state: { history: Array<{ bootId: string; status: string }> };

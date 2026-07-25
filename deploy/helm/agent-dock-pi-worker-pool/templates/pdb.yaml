@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agent-dock-pi-worker-pool.name" . }}
+  labels:
+    {{- include "agent-dock-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.disruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "agent-dock-pi-worker-pool.selectorLabels" . | nindent 6 }}

@@ -23,6 +23,8 @@ export type SupervisorHostConfig = {
   temporalAddress: string;
   temporalNamespace: string;
   temporalTaskQueue: string;
+  temporalWorkerDeploymentName?: string;
+  temporalWorkerBuildId?: string;
   piExecutionMode: "rpc" | "embedded-sdk";
   sandboxManagerBaseUrl: string;
   sandboxManagerRequestTimeoutMs: number;
@@ -165,9 +167,18 @@ async function readSecretFile(path: string, name: string): Promise<string> {
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const metadata = await handle.stat();
+    const effectiveUserId = process.geteuid?.();
+    const effectiveGroups = new Set([process.getegid?.(), ...(process.getgroups?.() ?? [])]);
+    const readableByOwner =
+      effectiveUserId !== undefined &&
+      metadata.uid === effectiveUserId &&
+      (metadata.mode & 0o400) !== 0;
+    const readableByPrivateGroup =
+      effectiveGroups.has(metadata.gid) && (metadata.mode & 0o040) !== 0;
     if (
       !metadata.isFile() ||
-      (metadata.mode & 0o077) !== 0 ||
+      (metadata.mode & 0o137) !== 0 ||
+      (!readableByOwner && !readableByPrivateGroup) ||
       metadata.size < 1 ||
       metadata.size > MAX_SECRET_BYTES
     ) {
@@ -229,6 +240,24 @@ export async function loadSupervisorHostConfig(
   if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
     throw new TypeError("GitHub Gateway URL and service token must be configured together");
   }
+  const temporalWorkerVersioningEnabled = booleanValue(
+    environment,
+    "AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED",
+  );
+  const temporalWorkerDeployment = temporalWorkerVersioningEnabled
+    ? {
+        temporalWorkerDeploymentName: bounded(
+          required(environment, "AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME"),
+          "AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME",
+          127,
+        ),
+        temporalWorkerBuildId: bounded(
+          required(environment, "AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID"),
+          "AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID",
+          255,
+        ),
+      }
+    : {};
   return {
     supervisorId: bounded(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
@@ -295,6 +324,7 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
       255,
     ),
+    ...temporalWorkerDeployment,
     piExecutionMode: piExecutionMode(environment.AGENT_DOCK_PI_EXECUTION_MODE),
     sandboxManagerBaseUrl: internalServiceBaseUrl(
       required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),

@@ -37,7 +37,7 @@
     "cubesandbox:ps": "node scripts/cubesandbox-compose.mjs ps",
     "cubesandbox:logs": "node scripts/cubesandbox-compose.mjs logs --follow",
     "cubesandbox:down": "node scripts/cubesandbox-compose.mjs down",
-    "helm:check": "node scripts/check-helm-execution-plane.mjs",
+    "helm:check": "node scripts/check-helm-execution-plane.mjs && node scripts/check-helm-pi-worker-pool.mjs",
     "image:closure-check": "node scripts/check-supervisor-image-closure.mjs",
     "kubernetes:image-sync": "node scripts/sync-kubernetes-tool-image.mjs",
     "object-store:check": "node scripts/run-minio-check.mjs",

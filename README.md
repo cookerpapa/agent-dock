@@ -132,6 +132,7 @@ only after a measured requirement appears.
 - [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
 - [`cloud-agent-platform` comparison](docs/research/2026-07-23-cloud-agent-platform-comparison.md)
 - [Durable orchestration and conversation-storage research](docs/research/2026-07-25-durable-orchestration-and-conversation-storage.md)
+- [Kubernetes Pi Workers and shared conversation-state research](docs/research/2026-07-26-kubernetes-pi-workers-and-shared-conversation-state.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
@@ -185,6 +186,7 @@ only after a measured requirement appears.
 - [ADR-0055: mature orchestration adoption and segmented Pi checkpoints](docs/adr/0055-durable-orchestration-and-segmented-pi-checkpoints.md)
 - [ADR-0056: Temporal as the sole Run scheduler](docs/adr/0056-temporal-as-sole-run-scheduler.md)
 - [ADR-0057: capacity-one Pi Workers and global Tool admission](docs/adr/0057-capacity-one-pi-workers-and-global-tool-admission.md)
+- [ADR-0058: Kubernetes Pi Worker pool and external conversation state](docs/adr/0058-kubernetes-pi-worker-pool-and-external-conversation-state.md)
 
 ## Current executable spikes
 
