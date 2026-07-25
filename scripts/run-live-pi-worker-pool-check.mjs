@@ -63,6 +63,14 @@ const token = (
 ).trim();
 const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
 const api = new AgentDockApi(fetchFromProduction, token);
+const workerDeployment = environment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ?? "compose";
+if (workerDeployment !== "compose" && workerDeployment !== "kubernetes") {
+  throw new Error("Production Pi Worker deployment mode is invalid");
+}
+const kubernetesKubeconfig = resolve(runtimeDirectory, "kubernetes/pi-worker-local.kubeconfig");
+const kubernetesNamespace = "agent-dock-workers";
+const kubernetesStatefulSet = "agent-dock-pi-worker-local-v1";
+const kubernetesScaleDownWorker = `${kubernetesStatefulSet}-1`;
 
 function capture(command, args, timeoutMs = 120_000) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -287,6 +295,52 @@ function composeService(supervisorId) {
   throw new Error(`No production Compose service mapping for ${supervisorId}`);
 }
 
+async function stopWorker(supervisorId) {
+  if (workerDeployment === "compose") {
+    const service = composeService(supervisorId);
+    await capture(process.execPath, ["scripts/production-compose.mjs", "stop", service]);
+    return { mode: "compose", service };
+  }
+  assert.equal(
+    supervisorId,
+    kubernetesScaleDownWorker,
+    "The selected Kubernetes failover owner must be StatefulSet ordinal 1",
+  );
+  await capture("kubectl", [
+    "--kubeconfig",
+    kubernetesKubeconfig,
+    "--namespace",
+    kubernetesNamespace,
+    "scale",
+    "statefulset",
+    kubernetesStatefulSet,
+    "--replicas=1",
+  ]);
+  return { mode: "kubernetes" };
+}
+
+async function restoreWorker(stoppedWorker) {
+  if (stoppedWorker.mode === "compose") {
+    await capture(process.execPath, [
+      "scripts/production-compose.mjs",
+      "start",
+      stoppedWorker.service,
+    ]);
+  } else {
+    await capture("kubectl", [
+      "--kubeconfig",
+      kubernetesKubeconfig,
+      "--namespace",
+      kubernetesNamespace,
+      "scale",
+      "statefulset",
+      kubernetesStatefulSet,
+      "--replicas=2",
+    ]);
+  }
+  await waitForWorkers(2);
+}
+
 function sumUsage(results) {
   return results.reduce(
     (total, result) => ({
@@ -305,19 +359,36 @@ const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 
 const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-const marker = `PI-POOL-${suffix.toUpperCase()}`;
-const project = await api.createProject(`Pi Worker pool acceptance ${suffix}`, { kind: "empty" });
-const session = await api.createSession(project);
-let stoppedService;
+let stoppedWorker;
 
 try {
-  const first = await runTurn(
-    session.sessionId,
-    `Remember this marker for my next message: ${marker}. Do not call tools. Reply exactly ACK.`,
+  const candidateCount = workerDeployment === "kubernetes" ? 2 : 1;
+  const candidates = await Promise.all(
+    Array.from({ length: candidateCount }, async (_, index) => {
+      const marker = `PI-POOL-${suffix.toUpperCase()}-${String(index + 1)}`;
+      const project = await api.createProject(`Pi Worker pool acceptance ${suffix}-${index + 1}`, {
+        kind: "empty",
+      });
+      const session = await api.createSession(project);
+      const turn = await runTurn(
+        session.sessionId,
+        `Remember this marker for my next message: ${marker}. Do not call tools. Reply exactly ACK.`,
+      );
+      return {
+        marker,
+        session,
+        turn,
+        evidence: await runEvidence(turn.runId),
+      };
+    }),
   );
-  const firstEvidence = await runEvidence(first.runId);
-  stoppedService = composeService(firstEvidence.supervisorId);
-  await capture(process.execPath, ["scripts/production-compose.mjs", "stop", stoppedService]);
+  const selected =
+    workerDeployment === "kubernetes"
+      ? candidates.find(({ evidence }) => evidence.supervisorId === kubernetesScaleDownWorker)
+      : candidates[0];
+  assert(selected, "No first-turn candidate ran on the removable Kubernetes Worker");
+  const { marker, session, turn: first, evidence: firstEvidence } = selected;
+  stoppedWorker = await stopWorker(firstEvidence.supervisorId);
   const survivingWorkers = await waitForWorkers(1);
   assert(!survivingWorkers.includes(firstEvidence.supervisorId));
 
@@ -334,9 +405,8 @@ try {
     "Cross-Worker follow-up did not restore a Pi session artifact",
   );
 
-  await capture(process.execPath, ["scripts/production-compose.mjs", "start", stoppedService]);
-  await waitForWorkers(2);
-  stoppedService = undefined;
+  await restoreWorker(stoppedWorker);
+  stoppedWorker = undefined;
 
   const concurrent = await Promise.all(
     Array.from({ length: 4 }, async (_, index) => {
@@ -359,12 +429,17 @@ try {
   const concurrentWorkerIds = [...new Set(concurrent.map(({ evidence }) => evidence.supervisorId))];
   assert.deepEqual(concurrentWorkerIds.sort(), initialWorkers.sort());
 
-  const allTurns = [first, followUp, ...concurrent.map(({ turn }) => turn)];
+  const allTurns = [
+    ...candidates.map(({ turn }) => turn),
+    followUp,
+    ...concurrent.map(({ turn }) => turn),
+  ];
   const totalUsage = sumUsage(allTurns);
   const report = {
     accepted: true,
     checkedAt: new Date().toISOString(),
     model: { provider: model.provider, modelId: model.modelId },
+    workerDeployment,
     workers: initialWorkers,
     failover: {
       firstWorker: firstEvidence.supervisorId,
@@ -374,6 +449,7 @@ try {
       markerRecovered: followUp.text.includes(marker),
       firstSettledMs: first.settledMs,
       followUpSettledMs: followUp.settledMs,
+      candidateRuns: candidates.length,
     },
     concurrency: {
       runs: concurrent.length,
@@ -399,6 +475,7 @@ try {
       "",
       `- Checked at: ${report.checkedAt}`,
       `- Provider/model: ${report.model.provider} / ${report.model.modelId}`,
+      `- Worker deployment: ${report.workerDeployment}`,
       `- Active Workers: ${report.workers.join(", ")}`,
       `- Cross-Worker restore: ${report.failover.firstWorker} -> ${report.failover.followUpWorker}`,
       `- Pi session artifact restored: ${String(report.failover.piSessionArtifactRestored)}`,
@@ -414,12 +491,7 @@ try {
   );
   process.stdout.write(`${JSON.stringify(report)}\n`);
 } finally {
-  if (stoppedService !== undefined) {
-    await capture(process.execPath, [
-      "scripts/production-compose.mjs",
-      "start",
-      stoppedService,
-    ]).catch(() => undefined);
-    await waitForWorkers(2).catch(() => undefined);
+  if (stoppedWorker !== undefined) {
+    await restoreWorker(stoppedWorker).catch(() => undefined);
   }
 }
