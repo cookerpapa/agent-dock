@@ -60,6 +60,17 @@ export {
 } from "./pi-rpc-turn-runner.ts";
 
 export {
+  PiSdkIsolationFailure,
+  PiSdkTurnRunner,
+  type PiSdkTurnRunnerOptions,
+} from "./pi-sdk-turn-runner.ts";
+
+export {
+  createTrustedRemoteToolsExtension,
+  type TrustedRemoteToolsRuntimeConfiguration,
+} from "./trusted-remote-tools-extension.ts";
+
+export {
   LocalSandboxSupervisor,
   LocalSandboxSupervisorError,
   type AppliedHeartbeatResult,

@@ -23,6 +23,11 @@ import {
   type PiRpcTurnResult,
 } from "./pi-rpc-turn-runner.ts";
 import {
+  PiSdkTurnRunner,
+  type PiSdkIsolationFailure,
+  type PiSdkTurnRunnerOptions,
+} from "./pi-sdk-turn-runner.ts";
+import {
   validateLoadedCheckpoint,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -39,6 +44,7 @@ import type {
   TrustedModelRuntimeLeaseResolver,
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
+import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extension.ts";
 
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -86,6 +92,8 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   turnTimeoutMs?: number;
   idGenerator?: () => string;
   metrics?: AgentDockMetrics;
+  piExecutionMode?: "rpc" | "embedded-sdk";
+  onPiSdkIsolationFailure?: (error: PiSdkIsolationFailure) => Promise<void> | void;
 };
 
 function assignment(
@@ -149,6 +157,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #turnTimeoutMs: number | undefined;
   readonly #idGenerator: () => string;
   readonly #metrics: AgentDockMetrics | undefined;
+  readonly #piExecutionMode: "rpc" | "embedded-sdk";
+  readonly #onPiSdkIsolationFailure:
+    ((error: PiSdkIsolationFailure) => Promise<void> | void) | undefined;
 
   constructor(options: RemoteToolSandboxTurnRunnerOptions) {
     this.#manager = options.manager;
@@ -166,6 +177,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#turnTimeoutMs = options.turnTimeoutMs;
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
     this.#metrics = options.metrics;
+    this.#piExecutionMode = options.piExecutionMode ?? "rpc";
+    this.#onPiSdkIsolationFailure = options.onPiSdkIsolationFailure;
   }
 
   async run(
@@ -378,64 +391,98 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         }
       }
 
-      const runner = new PiRpcTurnRunner({
+      const resolveModelRuntime: PiSdkTurnRunnerOptions["resolveModelRuntime"] = (model) =>
+        usesEmbeddedFake
+          ? {
+              provider: model.provider,
+              modelId: model.modelId,
+              baseUrl: fakeModel!.baseUrl,
+              api: "openai-completions",
+              apiKey: FAKE_MODEL_API_KEY,
+            }
+          : {
+              provider: modelRuntimeLease!.runtime.provider,
+              modelId: modelRuntimeLease!.runtime.modelId,
+              baseUrl: modelRuntimeLease!.runtime.baseUrl,
+              api: "openai-completions",
+              apiKey: modelRuntimeLease!.runtime.capability,
+              ...(modelRuntimeLease!.runtime.reasoning === undefined
+                ? {}
+                : { reasoning: modelRuntimeLease!.runtime.reasoning }),
+              ...(modelRuntimeLease!.runtime.contextWindow === undefined
+                ? {}
+                : { contextWindow: modelRuntimeLease!.runtime.contextWindow }),
+              ...(modelRuntimeLease!.runtime.maxTokens === undefined
+                ? {}
+                : { maxTokens: modelRuntimeLease!.runtime.maxTokens }),
+            };
+      const onSettled: NonNullable<PiSdkTurnRunnerOptions["onSettled"]> = async ({ piSession }) => {
+        if (activation === undefined) {
+          throw new PiRpcTurnError(
+            "tool_sandbox_unavailable",
+            "Tool Sandbox was unavailable at settlement",
+            true,
+          );
+        }
+        if (this.#runAttemptPhaseObserver !== undefined) {
+          try {
+            await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
+          } catch (error: unknown) {
+            throw safePiError(
+              error,
+              "run_phase_persist_failed",
+              "Run checkpoint phase could not be persisted",
+            );
+          }
+        }
+        const checkpointStartedAt = performance.now();
+        const captured = await this.#manager.capture(activation.activationId, toolAssignment);
+        if (this.#checkpointStore !== undefined) {
+          try {
+            const saved =
+              captured.type === "tool_sandbox.unused"
+                ? await this.#checkpointStore.saveConversation(
+                    command,
+                    loadedCheckpoint?.revision ?? null,
+                    piSession,
+                  )
+                : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
+                    piSession,
+                    workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
+                    environment: captured.environment,
+                    ...(captured.workspacePatch === undefined
+                      ? {}
+                      : { workspacePatch: captured.workspacePatch }),
+                  });
+            capturedPatch =
+              captured.type === "tool_sandbox.captured" ? captured.workspacePatch : undefined;
+            retainedWorkspaceRevision = saved.workspaceRevision;
+            await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
+            this.#metrics?.checkpointDuration.observe(
+              { outcome: "completed" },
+              (performance.now() - checkpointStartedAt) / 1_000,
+            );
+          } catch (error: unknown) {
+            this.#metrics?.checkpointDuration.observe(
+              { outcome: "failed" },
+              (performance.now() - checkpointStartedAt) / 1_000,
+            );
+            throw safePiError(
+              error,
+              "checkpoint_save_failed",
+              "The settled checkpoint could not be committed",
+            );
+          }
+        } else if (captured.type === "tool_sandbox.captured") {
+          capturedPatch = captured.workspacePatch;
+          retainedWorkspaceRevision = captured.workspace.sha256;
+        } else {
+          retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
+        }
+      };
+      const commonRunnerOptions = {
         resolveWorkspaceDirectory: () => this.#trustedWorkspaceDirectory,
-        resolveModelRuntime: (model) =>
-          usesEmbeddedFake
-            ? {
-                provider: model.provider,
-                modelId: model.modelId,
-                baseUrl: fakeModel!.baseUrl,
-                api: "openai-completions",
-                apiKey: FAKE_MODEL_API_KEY,
-              }
-            : {
-                provider: modelRuntimeLease!.runtime.provider,
-                modelId: modelRuntimeLease!.runtime.modelId,
-                baseUrl: modelRuntimeLease!.runtime.baseUrl,
-                api: "openai-completions",
-                apiKey: modelRuntimeLease!.runtime.capability,
-                ...(modelRuntimeLease!.runtime.reasoning === undefined
-                  ? {}
-                  : { reasoning: modelRuntimeLease!.runtime.reasoning }),
-                ...(modelRuntimeLease!.runtime.contextWindow === undefined
-                  ? {}
-                  : { contextWindow: modelRuntimeLease!.runtime.contextWindow }),
-                ...(modelRuntimeLease!.runtime.maxTokens === undefined
-                  ? {}
-                  : { maxTokens: modelRuntimeLease!.runtime.maxTokens }),
-              },
-        disableBuiltinTools: true,
-        trustedExtensionPaths: [this.#trustedExtensionPath],
-        trustedEnvironment: {
-          AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: this.#manager.operationUrl,
-          AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID: activation.activationId,
-          AGENT_DOCK_TRUSTED_TOOL_CAPABILITY: activation.capability,
-          AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: String(
-            command.payload.budgets?.remainingToolCalls ?? 128,
-          ),
-          AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
-            command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
-          ),
-          ...(projectInstructions === undefined
-            ? {}
-            : {
-                AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
-                  projectInstructions,
-                  "utf8",
-                ).toString("base64"),
-              }),
-          ...(downstreamTrace === undefined
-            ? {}
-            : {
-                AGENT_DOCK_TRUSTED_TRACEPARENT: downstreamTrace.traceparent,
-                ...(downstreamTrace.tracestate === undefined
-                  ? {}
-                  : {
-                      AGENT_DOCK_TRUSTED_TRACESTATE: downstreamTrace.tracestate,
-                    }),
-              }),
-        },
+        resolveModelRuntime,
         collectWorkspacePatch: () => capturedPatch,
         ...(this.#checkpointStore?.saveToolOutput === undefined
           ? {}
@@ -444,70 +491,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 this.#checkpointStore!.saveToolOutput!(command, output),
             }),
         ...(loadedCheckpoint === undefined ? {} : { restorePiSession: loadedCheckpoint.piSession }),
-        onSettled: async ({ piSession }) => {
-          if (activation === undefined) {
-            throw new PiRpcTurnError(
-              "tool_sandbox_unavailable",
-              "Tool Sandbox was unavailable at settlement",
-              true,
-            );
-          }
-          if (this.#runAttemptPhaseObserver !== undefined) {
-            try {
-              await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
-            } catch (error: unknown) {
-              throw safePiError(
-                error,
-                "run_phase_persist_failed",
-                "Run checkpoint phase could not be persisted",
-              );
-            }
-          }
-          const checkpointStartedAt = performance.now();
-          const captured = await this.#manager.capture(activation.activationId, toolAssignment);
-          if (this.#checkpointStore !== undefined) {
-            try {
-              const saved =
-                captured.type === "tool_sandbox.unused"
-                  ? await this.#checkpointStore.saveConversation(
-                      command,
-                      loadedCheckpoint?.revision ?? null,
-                      piSession,
-                    )
-                  : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
-                      piSession,
-                      workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
-                      environment: captured.environment,
-                      ...(captured.workspacePatch === undefined
-                        ? {}
-                        : { workspacePatch: captured.workspacePatch }),
-                    });
-              capturedPatch =
-                captured.type === "tool_sandbox.captured" ? captured.workspacePatch : undefined;
-              retainedWorkspaceRevision = saved.workspaceRevision;
-              await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
-              this.#metrics?.checkpointDuration.observe(
-                { outcome: "completed" },
-                (performance.now() - checkpointStartedAt) / 1_000,
-              );
-            } catch (error: unknown) {
-              this.#metrics?.checkpointDuration.observe(
-                { outcome: "failed" },
-                (performance.now() - checkpointStartedAt) / 1_000,
-              );
-              throw safePiError(
-                error,
-                "checkpoint_save_failed",
-                "The settled checkpoint could not be committed",
-              );
-            }
-          } else if (captured.type === "tool_sandbox.captured") {
-            capturedPatch = captured.workspacePatch;
-            retainedWorkspaceRevision = captured.workspace.sha256;
-          } else {
-            retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
-          }
-        },
+        onSettled,
         ...(this.#requestTimeoutMs === undefined
           ? {
               requestTimeoutMs: usesEmbeddedFake
@@ -528,7 +512,68 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 command.payload.budgets?.maximumRunDurationMs ?? Number.MAX_SAFE_INTEGER,
               ),
             }),
-      });
+      };
+      const runner =
+        this.#piExecutionMode === "embedded-sdk"
+          ? new PiSdkTurnRunner({
+              ...commonRunnerOptions,
+              createInlineExtensions: ({ toolOutputDirectory }) => [
+                createTrustedRemoteToolsExtension({
+                  operationUrl: this.#manager.operationUrl,
+                  activationId: activation!.activationId,
+                  capability: activation!.capability,
+                  remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
+                  maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+                  toolOutputDirectory,
+                  ...(projectInstructions === undefined ? {} : { projectInstructions }),
+                  ...(downstreamTrace === undefined
+                    ? {}
+                    : {
+                        traceparent: downstreamTrace.traceparent,
+                        ...(downstreamTrace.tracestate === undefined
+                          ? {}
+                          : { tracestate: downstreamTrace.tracestate }),
+                      }),
+                }),
+              ],
+              ...(this.#onPiSdkIsolationFailure === undefined
+                ? {}
+                : { onIsolationFailure: this.#onPiSdkIsolationFailure }),
+            })
+          : new PiRpcTurnRunner({
+              ...commonRunnerOptions,
+              disableBuiltinTools: true,
+              trustedExtensionPaths: [this.#trustedExtensionPath],
+              trustedEnvironment: {
+                AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: this.#manager.operationUrl,
+                AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID: activation.activationId,
+                AGENT_DOCK_TRUSTED_TOOL_CAPABILITY: activation.capability,
+                AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: String(
+                  command.payload.budgets?.remainingToolCalls ?? 128,
+                ),
+                AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
+                  command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+                ),
+                ...(projectInstructions === undefined
+                  ? {}
+                  : {
+                      AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
+                        projectInstructions,
+                        "utf8",
+                      ).toString("base64"),
+                    }),
+                ...(downstreamTrace === undefined
+                  ? {}
+                  : {
+                      AGENT_DOCK_TRUSTED_TRACEPARENT: downstreamTrace.traceparent,
+                      ...(downstreamTrace.tracestate === undefined
+                        ? {}
+                        : {
+                            AGENT_DOCK_TRUSTED_TRACESTATE: downstreamTrace.tracestate,
+                          }),
+                    }),
+              },
+            });
       const result = await runner.run(command, publishEvent, signal);
       completedSuccessfully = true;
       return result;

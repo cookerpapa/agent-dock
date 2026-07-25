@@ -4,7 +4,7 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import {
   createBashTool,
   createEditTool,
@@ -57,7 +57,7 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function runtimeConfiguration(): {
+export type TrustedRemoteToolsRuntimeConfiguration = {
   operationUrl: string;
   activationId: string;
   capability: string;
@@ -67,8 +67,12 @@ function runtimeConfiguration(): {
   projectInstructions?: string;
   traceparent?: string;
   tracestate?: string;
-} {
-  const operationUrl = requiredEnvironment(OPERATION_URL_ENV);
+};
+
+function validateRuntimeConfiguration(
+  candidate: TrustedRemoteToolsRuntimeConfiguration,
+): TrustedRemoteToolsRuntimeConfiguration {
+  const operationUrl = candidate.operationUrl;
   const parsed = new URL(operationUrl);
   if (
     (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
@@ -79,14 +83,14 @@ function runtimeConfiguration(): {
   ) {
     throw new Error("Trusted Tool Sandbox operation URL is invalid");
   }
-  const activationId = requiredEnvironment(ACTIVATION_ID_ENV);
-  const capability = requiredEnvironment(CAPABILITY_ENV);
-  const remainingToolCalls = Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV));
-  const maximumToolOutputBytes = Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV));
-  const configuredToolOutputDirectory = requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV);
-  const encodedProjectInstructions = process.env[PROJECT_INSTRUCTIONS_BASE64_ENV];
-  const traceparent = process.env[TRACEPARENT_ENV];
-  const tracestate = process.env[TRACESTATE_ENV];
+  const activationId = candidate.activationId;
+  const capability = candidate.capability;
+  const remainingToolCalls = candidate.remainingToolCalls;
+  const maximumToolOutputBytes = candidate.maximumToolOutputBytes;
+  const configuredToolOutputDirectory = candidate.toolOutputDirectory;
+  const projectInstructions = candidate.projectInstructions;
+  const traceparent = candidate.traceparent;
+  const tracestate = candidate.tracestate;
   const toolOutputDirectory = resolve(configuredToolOutputDirectory);
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -105,24 +109,13 @@ function runtimeConfiguration(): {
   ) {
     throw new Error("Trusted Tool Sandbox identity is invalid");
   }
-  let projectInstructions: string | undefined;
-  if (encodedProjectInstructions !== undefined) {
-    const decoded = Buffer.from(encodedProjectInstructions, "base64");
-    if (
-      encodedProjectInstructions.length > 24_000 ||
-      decoded.toString("base64") !== encodedProjectInstructions ||
-      decoded.byteLength > MAX_PROJECT_INSTRUCTIONS_BYTES + 64
-    ) {
-      throw new Error("Trusted project instructions are invalid");
-    }
-    try {
-      projectInstructions = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
-    } catch {
-      throw new Error("Trusted project instructions are invalid");
-    }
-    if (projectInstructions.includes("\0") || projectInstructions.trim().length === 0) {
-      throw new Error("Trusted project instructions are invalid");
-    }
+  if (
+    projectInstructions !== undefined &&
+    (Buffer.byteLength(projectInstructions, "utf8") > MAX_PROJECT_INSTRUCTIONS_BYTES ||
+      projectInstructions.includes("\0") ||
+      projectInstructions.trim().length === 0)
+  ) {
+    throw new Error("Trusted project instructions are invalid");
   }
   if (
     traceparent !== undefined &&
@@ -147,6 +140,41 @@ function runtimeConfiguration(): {
     ...(traceparent === undefined ? {} : { traceparent }),
     ...(tracestate === undefined ? {} : { tracestate }),
   };
+}
+
+function runtimeConfigurationFromEnvironment(): TrustedRemoteToolsRuntimeConfiguration {
+  const encodedProjectInstructions = process.env[PROJECT_INSTRUCTIONS_BASE64_ENV];
+  let projectInstructions: string | undefined;
+  if (encodedProjectInstructions !== undefined) {
+    const decoded = Buffer.from(encodedProjectInstructions, "base64");
+    if (
+      encodedProjectInstructions.length > 24_000 ||
+      decoded.toString("base64") !== encodedProjectInstructions ||
+      decoded.byteLength > MAX_PROJECT_INSTRUCTIONS_BYTES + 64
+    ) {
+      throw new Error("Trusted project instructions are invalid");
+    }
+    try {
+      projectInstructions = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+    } catch {
+      throw new Error("Trusted project instructions are invalid");
+    }
+  }
+  return validateRuntimeConfiguration({
+    operationUrl: requiredEnvironment(OPERATION_URL_ENV),
+    activationId: requiredEnvironment(ACTIVATION_ID_ENV),
+    capability: requiredEnvironment(CAPABILITY_ENV),
+    remainingToolCalls: Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV)),
+    maximumToolOutputBytes: Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV)),
+    toolOutputDirectory: requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV),
+    ...(projectInstructions === undefined ? {} : { projectInstructions }),
+    ...(process.env[TRACEPARENT_ENV] === undefined
+      ? {}
+      : { traceparent: process.env[TRACEPARENT_ENV] }),
+    ...(process.env[TRACESTATE_ENV] === undefined
+      ? {}
+      : { tracestate: process.env[TRACESTATE_ENV] }),
+  });
 }
 
 function boundedOutput(value: Buffer, maximumBytes: number): Buffer {
@@ -199,8 +227,10 @@ function errorForPi(error: unknown, timeoutSeconds?: number): Error {
   return new Error("Tool Sandbox request failed");
 }
 
-export default function trustedRemoteTools(pi: ExtensionAPI): void {
-  const runtime = runtimeConfiguration();
+function registerTrustedRemoteTools(
+  pi: ExtensionAPI,
+  runtime: TrustedRemoteToolsRuntimeConfiguration,
+): void {
   let remainingToolCalls = runtime.remainingToolCalls;
 
   const consumeToolCall = (): void => {
@@ -454,4 +484,15 @@ export default function trustedRemoteTools(pi: ExtensionAPI): void {
     consumeToolCall();
     return { operations: bashOperations(randomUUID()) };
   });
+}
+
+export function createTrustedRemoteToolsExtension(
+  configuration: TrustedRemoteToolsRuntimeConfiguration,
+): InlineExtension {
+  const runtime = validateRuntimeConfiguration(configuration);
+  return (pi) => registerTrustedRemoteTools(pi, runtime);
+}
+
+export default function trustedRemoteTools(pi: ExtensionAPI): void {
+  registerTrustedRemoteTools(pi, runtimeConfigurationFromEnvironment());
 }

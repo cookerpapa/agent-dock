@@ -2,8 +2,8 @@
 
 ## What is pooled
 
-A Pi Worker is a trusted, long-lived host process. It owns a bounded number of
-active Run slots, but it does not retain one Pi process per Session:
+A Pi Worker is a trusted, long-lived host process. Production Workers each own
+exactly one active Run slot, but do not retain one Pi runtime per Session:
 
 ```text
 many durable Sessions
@@ -11,14 +11,15 @@ many durable Sessions
         v
 PostgreSQL Run queue
         |
-        +----> Pi Worker A (N active slots)
-        +----> Pi Worker B (N active slots)
-        +----> Pi Worker C (N active slots)
+        +----> Pi Worker A (one SDK activation)
+        +----> Pi Worker B (one SDK activation)
+        +----> Pi Worker C (one SDK activation)
 ```
 
-For one active Run, the selected Worker starts one temporary pinned Pi RPC child
-process. When the Run settles, that child exits. A later Run for the same
-Session may run on another Worker.
+For one active Run, the selected Worker constructs one temporary pinned Pi SDK
+`AgentSessionRuntime` in the Worker process. When the Run settles, the runtime
+is disposed. No operating-system process is created per message. A later Run
+for the same Session may run on another Worker.
 
 Every Worker has:
 
@@ -26,7 +27,7 @@ Every Worker has:
 - a fresh boot and sandbox identity per process start;
 - an independent fsynced boot ledger;
 - an independent durable event spool;
-- a declared maximum number of concurrent active Sessions;
+- a declared capacity of exactly one active SDK Session;
 - an outbound authenticated WebSocket to the Control Plane;
 - a private management address validated against an operator URL template.
 
@@ -78,10 +79,12 @@ upload immutable object to MinIO/S3
 commit checkpoint metadata and Run settlement
 ```
 
-The current implementation uploads the whole JSONL snapshot after each settled
-Run. It does not append every token to PostgreSQL and does not store one mutable
-database `messages[]` column. Whole-file snapshots cost more bytes, but make one
-checkpoint self-contained and restore atomic.
+The current v2 implementation stores line-aligned, content-addressed JSONL
+segments and commits an immutable manifest after each settled Run. It does not
+append every token to PostgreSQL and does not store one mutable database
+`messages[]` column. Restore verifies every segment and the whole-session digest.
+Legacy whole-file v1 snapshots remain readable and migrate on the next settled
+Run.
 
 ## How the next turn resumes
 
@@ -97,10 +100,10 @@ any available Pi Worker claims it
 download latest committed pi-session.jsonl
         |
         v
-write private temporary session.jsonl
+reconstruct and verify private temporary session.jsonl
         |
         v
-start pinned Pi RPC --session <that file>
+SessionManager.open(...) + createAgentSessionRuntime(...)
         |
         v
 Pi rebuilds its active context
@@ -155,8 +158,16 @@ inside the private Pi checkpoint and is not exposed through public SSE.
 
 The design preserves the native semantics of the Agent runtime instead of
 maintaining a second, subtly different conversation implementation. It also
-allows true Worker replacement: no active Run means no Pi child, and any healthy
-Worker can restore the next Run.
+allows true Worker replacement: no active Run means no Pi `AgentSession`, and
+any healthy Worker can restore the next Run.
+
+The capacity-one rule is the SDK crash boundary. An ordinary prompt normally
+cannot terminate the Worker, but it can cause model parsing, extension handlers,
+tool registration and cancellation paths to execute. A programming defect,
+native dependency failure or memory exhaustion could terminate the process.
+Because only one active activation is admitted, that failure cannot take down a
+second concurrently running tenant Session. The container runtime restarts the
+Worker and the Control Plane reassigns future work from committed state.
 
 Long-session storage uses the safe optimization described in ADR-0055:
 tenant/session-scoped content-addressed, line-aligned JSONL segments plus an

@@ -266,6 +266,6 @@ extension-policy support would overstate the current boundary.
 - [ ] Add grace-period orphan GC plus remote MinIO p50/p95 and native
   compact/branch recovery through the production v2 object path
 - [x] Benchmark direct Pi SDK activation against RPC without model tokens
-- [ ] Switch to direct Pi SDK only after capacity-one Worker replacement,
+- [x] Switch production to direct Pi SDK with capacity-one Worker replacement,
   instance-scoped remote-tool/model configuration, forced cancellation, native
   compaction, real-model, and credential-isolation parity

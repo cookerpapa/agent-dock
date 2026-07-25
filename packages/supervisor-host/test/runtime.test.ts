@@ -171,6 +171,7 @@ describe("SupervisorHostRuntime", () => {
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
       maxConcurrentSessions: 2,
+      piExecutionMode: "rpc",
       sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
       sandboxManagerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
@@ -187,6 +188,19 @@ describe("SupervisorHostRuntime", () => {
       repositoryImportLeaseMs: 240_000,
       repositoryImportWaitMs: 300_000,
     };
+    expect(
+      () =>
+        new SupervisorHostRuntime({
+          config: {
+            ...baseConfig,
+            piExecutionMode: "embedded-sdk",
+            maxConcurrentSessions: 2,
+          },
+          database,
+          objectStore: objectStore(),
+          sandboxManager: sandboxManager(),
+        }),
+    ).toThrow("Embedded Pi SDK Workers require exactly one concurrent Session");
     let first: SupervisorHostRuntime | undefined;
     let second: SupervisorHostRuntime | undefined;
     try {

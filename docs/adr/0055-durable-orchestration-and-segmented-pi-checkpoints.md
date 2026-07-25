@@ -62,14 +62,21 @@ compaction entries, so an incremental representation can preserve exact bytes.
 10. Segment chains consolidate after 32 segments. This is a physical
     representation change only and does not alter the logical Session or Pi
     compaction semantics.
-11. Direct Pi SDK execution remains an evaluated optimization, not the
-    production default. It reduces warm activation p50 from 630.60 ms for a
-    fresh RPC child through `get_state` to 5.61 ms for a direct SDK activation
-    including one extension command and dispose. The current RPC child still
-    provides per-Run environment isolation, hard process-group cancellation,
-    and a smaller crash/extension-failure radius. A switch requires
-    instance-scoped model/tool configuration and a one-Run trusted Worker
-    process boundary or equivalent forced-replacement proof.
+11. Production Pi execution uses the direct SDK inside a capacity-one,
+    replaceable Supervisor Host. Every Run creates and disposes one
+    `AgentSessionRuntime`, but no longer creates an operating-system process.
+    Model credentials and remote-tool activation capabilities are
+    activation-local in-memory objects rather than process environment
+    variables. A failed cooperative abort or runtime disposal poisons and
+    retires the whole Worker boot; a peer Worker restores the committed native
+    Pi checkpoint under a newer Attempt/fence. Horizontal capacity comes from
+    more Worker processes, never concurrent tenant activations inside one SDK
+    Worker.
+12. The pinned RPC runner remains a compatibility and fault-test adapter, not
+    the production execution path. The measured reason for the switch is a
+    direct SDK activation p50 of 5.61 ms versus 630.60 ms for a fresh RPC child
+    through `get_state`, while capacity-one Worker replacement retains a
+    process-level crash boundary between simultaneously active Sessions.
 
 ## Consequences
 
@@ -84,6 +91,10 @@ compaction entries, so an incremental representation can preserve exact bytes.
   architecture-only dependency.
 - The v2 Pi format changes physical checkpoint storage, not Pi's logical
   Session format or public APIs.
+- A cold Session consumes no `AgentSession`. An active Run consumes one SDK
+  activation in one capacity-one Worker. A Worker crash can fail that Run, but
+  cannot corrupt another concurrently active tenant because no second
+  activation is admitted to that process.
 - Stored transcript bytes approach the size of the append-only Session plus
   bounded manifest overhead rather than repeated complete prefixes.
 - Restore may issue multiple object reads; consolidation, streaming, and Worker
@@ -107,6 +118,9 @@ compaction entries, so an incremental representation can preserve exact bytes.
   p50/p95 reconstruction of 6.185/11.807 ms;
 - zero-token Pi runtime benchmark: direct SDK activation p50/p95 5.61/6.99 ms
   versus fresh RPC process readiness p50/p95 630.60/673.17 ms.
+- direct SDK integration tests: stream/event parity, activation-local
+  credential isolation, cooperative cancellation, byte-identical JSONL
+  rehydration and threshold compaction across fresh activations.
 
 Still required before a Temporal cutover or a claim of complete retention
 operations: a real Pi/Tool Activity comparison, production backup/upgrade and

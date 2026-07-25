@@ -1,7 +1,7 @@
 # AgentDock
 
 AgentDock is an unofficial, cloud-oriented coding-agent runtime built around
-the Pi RPC runtime. The goal is not to wrap Pi in a web page, but to build the control
+the Pi SDK and native Session format. The goal is not to wrap Pi in a web page, but to build the control
 plane and execution infrastructure required to run coding agents safely and
 reliably for multiple users.
 
@@ -37,7 +37,7 @@ TypeScript Control Plane (NestJS)
     | versioned command/event protocol
     v
 Trusted TypeScript Agent Runner
-    |-- pinned Pi RPC child process and model capability
+    |-- capacity-one Pi SDK AgentSession and model capability
     |-- event spool and session snapshots
     |-- no runtime socket/Kubernetes credential/local untrusted tools
     |-- fixed model TLS via internal bridge -> Unix socket -> host egress relay
@@ -59,7 +59,8 @@ Untrusted demand-activated Tool microVM
 ## Initial technology choices
 
 - Control plane: TypeScript, Node.js, NestJS with the Fastify adapter
-- Runner: TypeScript supervisor plus a pinned `pi --mode rpc` child process
+- Runner: horizontally scalable, capacity-one TypeScript Workers embedding the
+  pinned Pi SDK; no per-message Pi process
 - Internal protocol: versioned TypeBox schemas over an outbound WebSocket
 - Browser event delivery: SSE with resumable sequence numbers
 - Metadata and durable commands: PostgreSQL with Kysely

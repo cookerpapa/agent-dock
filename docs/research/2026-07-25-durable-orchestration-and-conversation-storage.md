@@ -243,8 +243,8 @@ Sessions with only ten active runtimes, and the new 20-sample benchmark measured
 | Direct SDK activation, extension command, dispose | 5.61 ms | 6.99 ms |
 | Fresh Pi RPC child through `get_state` | 630.60 ms | 673.17 ms |
 
-The SDK is clearly better for activation density. It is not yet a better
-multi-tenant production failure boundary in this implementation:
+The SDK is clearly better for activation density. The initial review identified
+three production gaps:
 
 - the remote-tool extension currently receives per-Run capability data through
   a child-process environment; process environment cannot safely configure two
@@ -254,11 +254,15 @@ multi-tenant production failure boundary in this implementation:
 - a fatal SDK/extension failure can affect every concurrent activation in one
   Worker, while a child crash is scoped to one Run.
 
-The production decision remains RPC. The safe SDK migration shape is a
-capacity-one trusted Worker process that receives instance-scoped model/tool
-objects, creates one AgentSession, and is forcibly replaced if cooperative
-abort misses its deadline. Only remote-tool, native compaction, real-model,
-cancellation, crash, and credential-leak parity can authorize that switch.
+The follow-up milestone implemented that migration shape. Production now uses
+capacity-one trusted Worker processes. Each activation receives an
+instance-scoped `ModelRuntime` credential and remote-tool extension object,
+creates one `AgentSessionRuntime`, and disposes it after settlement. No second
+tenant activation can run in that process. If cooperative abort or disposal
+misses its deadline, the Worker boot is poisoned and the container is replaced;
+the peer Worker resumes only from the latest committed Pi checkpoint. The RPC
+adapter remains for upstream compatibility and process-kill fault tests, not as
+the production Run path.
 
 ## Conversation storage: separate three representations
 

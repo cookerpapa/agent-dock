@@ -55,12 +55,14 @@ describe("Supervisor host production configuration", () => {
       AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
       AGENT_DOCK_SUPERVISOR_CAPACITY: "3",
+      AGENT_DOCK_PI_EXECUTION_MODE: "rpc",
       AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
     });
     expect(config).toMatchObject({
       supervisorId: "supervisor-production-1",
       supervisorWebSocketUrl: "ws://control-plane:3000/internal/v1/supervisor",
       maxConcurrentSessions: 3,
+      piExecutionMode: "rpc",
       managementPort: 4100,
       managementAdvertisedBaseUrl: "http://supervisor-production-1:4100/",
       sandboxManagerBaseUrl: "http://sandbox-manager:4300/",

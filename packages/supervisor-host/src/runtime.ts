@@ -17,6 +17,7 @@ import {
   LocalSandboxSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
+  type PiSdkIsolationFailure,
   type AgentTurnScenario,
   type AgentTurnScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
@@ -132,6 +133,12 @@ export class SupervisorHostRuntime {
   #terminalFailureCode: string | undefined;
 
   constructor(options: SupervisorHostRuntimeOptions) {
+    if (
+      options.config.piExecutionMode === "embedded-sdk" &&
+      options.config.maxConcurrentSessions !== 1
+    ) {
+      throw new TypeError("Embedded Pi SDK Workers require exactly one concurrent Session");
+    }
     this.#config = options.config;
     this.#database =
       options.database ??
@@ -309,6 +316,8 @@ export class SupervisorHostRuntime {
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
         workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),
         turnTimeoutMs: this.#config.piTurnTimeoutMs,
+        piExecutionMode: this.#config.piExecutionMode,
+        onPiSdkIsolationFailure: (error) => this.#retireForPiSdkIsolationFailure(error),
         ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
       const spoolStore = new FileEventSpoolStore({
@@ -376,6 +385,14 @@ export class SupervisorHostRuntime {
       this.#state = "failed";
       this.#settleTerminal("connection_failed");
     }
+  }
+
+  #retireForPiSdkIsolationFailure(error: PiSdkIsolationFailure): void {
+    if (this.#state === "draining" || this.#state === "stopped") return;
+    this.#terminalFailureCode = error.code;
+    this.#state = "failed";
+    this.#client?.setAcceptingAssignments(false);
+    this.#settleTerminal("connection_failed");
   }
 
   #settleTerminal(reason: SupervisorHostTerminalReason): void {

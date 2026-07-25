@@ -62,7 +62,7 @@ function command(): ExecuteTurnCommandMessage {
         versionNumber: 1,
         profileKey: "agent-dock-fullstack",
         profileVersion: "1",
-        imageRevision: "development",
+        imageRevision: process.env.AGENT_DOCK_TOOL_SANDBOX_IMAGE_REVISION ?? "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
         recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
         recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
@@ -102,6 +102,7 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
         },
         trustedWorkspaceDirectory: trustedWorkspace,
         scenario: "text",
+        piExecutionMode: "embedded-sdk",
       });
       const events: EventPublishMessage[] = [];
       await runner.run(
@@ -133,7 +134,7 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
     }
   }, 120_000);
 
-  it("repairs code through RPC while the Kubernetes Pod stays offline and credential-free", async () => {
+  it("repairs code through the embedded SDK while the Kubernetes Pod stays offline and credential-free", async () => {
     const trustedWorkspace = await mkdtemp(join(tmpdir(), "agent-dock-trusted-runner-"));
     const runtimeClient = new OfficialKubernetesRuntimeClient(kubeconfigPath);
     const provider = new KubernetesGvisorSandboxProvider({
@@ -258,6 +259,7 @@ describe.skipIf(!enabled)("trusted Pi Runner with remote Kubernetes gVisor Tool 
         trustedWorkspaceDirectory: trustedWorkspace,
         scenario: "java_repair",
         turnTimeoutMs: 60_000,
+        piExecutionMode: "embedded-sdk",
       });
       try {
         await runner.run(

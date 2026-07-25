@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import trustedRemoteTools from "../src/trusted-remote-tools-extension.ts";
+import trustedRemoteTools, {
+  createTrustedRemoteToolsExtension,
+} from "../src/trusted-remote-tools-extension.ts";
 
 const ENVIRONMENT = {
   AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: "http://127.0.0.1:4999/v1/tool-operations",
@@ -28,6 +30,35 @@ afterEach(() => {
 });
 
 describe("trusted remote tools extension governance", () => {
+  it("binds SDK tool identity from an activation-local object instead of process.env", () => {
+    const registered: ToolDefinition[] = [];
+    const handlers = new Map<string, (...args: never[]) => unknown>();
+    const extension = createTrustedRemoteToolsExtension({
+      operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
+      activationId: "10000000-0000-4000-8000-000000000099",
+      capability: `adts_${"z".repeat(43)}`,
+      remainingToolCalls: 0,
+      maximumToolOutputBytes: 1_024,
+      toolOutputDirectory: "/tmp/agent-dock-sdk-tool-output-test",
+      projectInstructions: "SDK activation-local instructions.",
+    });
+    if (typeof extension !== "function") throw new Error("Expected an inline extension factory");
+    extension({
+      registerTool(tool: ToolDefinition) {
+        registered.push(tool);
+      },
+      on(name: string, handler: (...args: never[]) => unknown) {
+        handlers.set(name, handler);
+      },
+    } as unknown as ExtensionAPI);
+
+    expect(registered.map((tool) => tool.name).sort()).toEqual(["bash", "edit", "read", "write"]);
+    expect(handlers.has("before_agent_start")).toBe(true);
+    expect(process.env.AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID).not.toBe(
+      "10000000-0000-4000-8000-000000000099",
+    );
+  });
+
   it("rejects a Pi tool call before RPC when the durable run budget is exhausted", async () => {
     for (const [name, value] of Object.entries(ENVIRONMENT)) {
       original.set(name, process.env[name]);

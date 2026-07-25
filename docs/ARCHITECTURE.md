@@ -11,8 +11,8 @@ session-tree format inside an execution worker or active sandbox.
 AgentDock must not fork Pi unless a required capability cannot be implemented
 through the public RPC protocol, SDK, or extensions. Raw Pi RPC messages are
 hidden behind a supervisor adapter so that upstream upgrades do not leak into
-the control-plane domain model. ADR-0005 permits direct SDK embedding only as an
-execution-side backend for trusted portable extensions. Pi and extension code
+the control-plane domain model. ADR-0055 selects direct SDK embedding as the
+capacity-one execution-side backend for fixed trusted extensions. Pi and extension code
 never load into the NestJS control-plane process.
 
 ## 2. Components
@@ -94,15 +94,18 @@ post-ACK failure settles command, turn, and session state transactionally. The
 deterministic backend used by tests stores no prompt or credential data in its
 execution records.
 
-The third Phase 1 slice connects that dispatcher to a local supervisor adapter.
+The third Phase 1 slice originally connected that dispatcher to a local
+RPC-supervisor adapter.
 `command.turn.execute` now carries the immutable turn model snapshot and opaque
 credential-binding version. A database coordinator reserves sandbox capacity,
 increments the session fencing token, and creates a lease. The supervisor's
 side-effect-free `prepare` returns an exact command ACK; the dispatcher validates
 the lease and persists that ACK before `run` can send the prompt to Pi. The
-supervisor owns a pinned Pi `0.80.10` RPC child, isolated temporary agent config,
-strict LF-delimited JSONL, bounded diagnostics, process-group shutdown, and the
-reviewed Pi-to-AgentDock text/tool/terminal event mapping. Completion and
+supervisor owned a pinned Pi `0.80.10` RPC child, isolated temporary agent
+config, strict LF-delimited JSONL, bounded diagnostics, process-group shutdown,
+and the reviewed Pi-to-AgentDock text/tool/terminal event mapping. ADR-0055
+supersedes the production execution mechanism with a capacity-one SDK Worker
+while retaining this RPC adapter for compatibility and fault tests. Completion and
 post-ACK failure release the matching lease and capacity in the settlement
 transaction; a stale lease or event fence is rejected.
 
@@ -197,8 +200,8 @@ tool side effects.
 
 ADR-0029 supersedes that original production placement. The legacy whole-Pi
 ordinary-Docker adapter and demo have now been removed. In the supported
-deployment, pinned Pi RPC and the model gateway run in the trusted Agent Worker
-pool. Pi's built-in local tools are disabled; one fixed image-owned extension
+deployment, the pinned Pi SDK and model gateway run in the trusted Agent Worker
+pool. Every Worker admits one active SDK runtime at a time. Pi's built-in local tools are disabled; one fixed image-owned extension
 implements `read`, `write`, `edit`, and `bash` with Pi's public operation
 interfaces and sends a narrow authenticated RPC to a separate Sandbox Manager.
 The Manager first creates only a logical reservation. The first actual Tool
@@ -336,11 +339,11 @@ provisions the boot through a file-backed enrollment credential, recovers its
 event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
 
-The Control Plane discovers all active Supervisor connections and creates a
-bounded execution/cancellation lane set per connection. A Session is not pinned
+The Control Plane discovers all active Supervisor connections and creates one
+execution/cancellation lane per capacity-one SDK Worker. A Session is not pinned
 to a Worker: each active Run restores the latest Pi-native JSONL checkpoint on
-any available replica, starts a temporary Pi RPC child, and releases that slot
-after settlement. Authenticated boot enrollment validates both a Supervisor ID
+any available replica, creates and disposes an in-process `AgentSessionRuntime`,
+and releases that slot after settlement. Authenticated boot enrollment validates both a Supervisor ID
 prefix and an operator-owned management URL template. Artifact reads go
 directly to the shared object store rather than through one special Worker. See
 [Pi Worker pool and conversation persistence](PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md).
@@ -466,12 +469,11 @@ The durable session identity is independent from its current execution
 mechanism. The execution layer supports three explicit recovery tiers:
 
 - `embedded-rehydrate` recreates a short-lived Pi SDK `AgentSession` from Pi
-  JSONL for each activation. It is restricted to trusted portable extensions
-  inside an execution worker/sandbox. Because this path bypasses Pi's CLI entry
-  point, the worker installs a pinned, environment-aware Undici dispatcher before
-  model calls rather than relying on ambient Node fetch behavior;
+  JSONL for each activation and is the production path. It is restricted to
+  fixed trusted extensions. Model credentials and Tool capabilities are
+  instance-scoped objects, and the Worker admits one activation at a time;
 - `isolated-process` starts pinned Pi RPC in an isolated process or sandbox and
-  remains the default compatibility path;
+  remains the compatibility and fault-test path;
 - `hibernate` delegates full process/filesystem checkpointing to an optional
   external sandbox backend.
 
@@ -479,18 +481,21 @@ Every backend consumes the same durable command, lease, fencing, event, and
 snapshot contracts. Recovery claims distinguish event replay, semantic session
 restore, workflow-step restore, workspace restore, and process-memory restore.
 
-The embedded rehydrate spike demonstrates that several logical sessions can
-share one worker process while every activation constructs and disposes its own
-Pi runtime. It does not authorize untrusted extension code in that shared
-process.
+The embedded rehydrate tests demonstrate byte-identical native Session and
+threshold-compaction restoration across fresh activations. Production does not
+run several tenant activations concurrently in one process and does not
+authorize user-controlled extension code in that process.
 
-### Pi RPC process
+### Pi SDK Worker
 
-The trusted Pi process uses native session, command, compaction, retry, and
-event behavior. Production disables extension discovery and loads only the
-fixed remote-tool extension. User/project extensions remain unsupported until
-their execution and permission boundary is separately implemented. Inactive
-sessions retain only checkpoint bytes; no Pi process or Tool Sandbox remains.
+The trusted capacity-one Worker uses Pi's native session, command, compaction,
+retry, and event behavior through the direct SDK. Production disables extension
+discovery and binds only the fixed remote-tool extension from an
+activation-local configuration object. If cooperative abort or runtime disposal
+cannot be confirmed, the boot is poisoned and the whole Worker is replaced.
+User/project extensions remain unsupported until their execution and permission
+boundary is separately implemented. Inactive sessions retain only checkpoint
+bytes; no Pi `AgentSession` or Tool Sandbox remains.
 
 ### Sandbox
 
