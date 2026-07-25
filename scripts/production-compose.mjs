@@ -57,7 +57,8 @@ if (piWorkerDeployment !== "compose" && piWorkerDeployment !== "kubernetes") {
   throw new Error("AGENT_DOCK_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
 }
 const allowsStaleCubeTemplate =
-  recreatesOnlyControlPlane || new Set(["down", "stop", "kill", "rm", "ps", "logs"]).has(command);
+  recreatesOnlyControlPlane ||
+  new Set(["down", "stop", "kill", "rm", "ps", "logs", "exec"]).has(command);
 await access(environmentFile);
 if (composeOverride !== undefined) await access(composeOverride);
 
