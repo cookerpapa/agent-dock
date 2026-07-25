@@ -317,6 +317,24 @@ Cube v0.6.0 lacks the metadata CAS required for safe warm rebind, so the
 production clean-prewarm target is zero and no used guest is ever reassigned.
 A later coding Run restores the committed Workspace into a new microVM.
 
+The bundled Pi Workers are trusted Docker Compose services; they are not
+running inside the Cube K3s cluster. Replicas poll the same Temporal Task Queue
+with capacity one each. Adding replicas increases model/Agent Loop concurrency,
+while the independent physical Tool limit protects host resources:
+
+```text
+AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES=2
+```
+
+Logical Sandbox reservations and chat-only Runs do not count against this
+limit. On the first Tool operation, excess coding Runs enter a
+cancellation-aware FIFO wait in the singleton Sandbox Manager. Watch
+`agent_dock_sandbox_admission_active`,
+`agent_dock_sandbox_admission_waiting` and
+`agent_dock_sandbox_admission_limit` before raising it. The limit must be sized
+against Cube template CPU/memory plus host and trusted-service headroom, not
+against Pi Worker count.
+
 The Manager retains a private least-privilege kubeconfig only for the separate
 exact-commit gVisor importer. That authority cannot make an ordinary Tool Call
 use a Kubernetes Pod.

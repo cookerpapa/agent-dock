@@ -99,6 +99,9 @@ function backend(): SandboxManagerBackend {
       };
     },
     activeCount: 0,
+    admittedCount: 0,
+    admissionWaitingCount: 0,
+    maximumActiveSandboxes: 2,
     cleanPrewarmCount: 0,
     async stop() {},
     async execute(capability, request) {
@@ -215,6 +218,15 @@ describe("Sandbox Manager authenticated RPC", () => {
     );
     expect(exportedMetrics).toContain(
       'agent_dock_tool_duration_seconds_count{service="sandbox-manager-test",tool="bash.exec",outcome="completed"} 1',
+    );
+    expect(exportedMetrics).toContain(
+      'agent_dock_sandbox_admission_active{provider="test-provider",service="sandbox-manager-test"} 0',
+    );
+    expect(exportedMetrics).toContain(
+      'agent_dock_sandbox_admission_limit{provider="test-provider",service="sandbox-manager-test"} 2',
+    );
+    expect(exportedMetrics).toContain(
+      'agent_dock_sandbox_admission_waiting{provider="test-provider",service="sandbox-manager-test"} 0',
     );
   });
 });

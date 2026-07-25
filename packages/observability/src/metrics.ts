@@ -21,6 +21,9 @@ export class AgentDockMetrics {
   readonly activeRuns: Gauge;
   readonly queuedRuns: Gauge;
   readonly sandboxActive: Gauge<"provider">;
+  readonly sandboxAdmissionActive: Gauge<"provider">;
+  readonly sandboxAdmissionLimit: Gauge<"provider">;
+  readonly sandboxAdmissionWaiting: Gauge<"provider">;
   readonly sandboxPrewarm: Gauge<"provider">;
 
   constructor(serviceName: string, collectProcessMetrics = false) {
@@ -129,6 +132,24 @@ export class AgentDockMetrics {
     this.sandboxActive = new Gauge({
       name: "agent_dock_sandbox_active",
       help: "Active sandboxes owned by Provider",
+      labelNames: ["provider"],
+      registers: [this.registry],
+    });
+    this.sandboxAdmissionActive = new Gauge({
+      name: "agent_dock_sandbox_admission_active",
+      help: "Materialized Tool Sandboxes currently holding global admission",
+      labelNames: ["provider"],
+      registers: [this.registry],
+    });
+    this.sandboxAdmissionLimit = new Gauge({
+      name: "agent_dock_sandbox_admission_limit",
+      help: "Maximum materialized Tool Sandboxes admitted by this Manager",
+      labelNames: ["provider"],
+      registers: [this.registry],
+    });
+    this.sandboxAdmissionWaiting = new Gauge({
+      name: "agent_dock_sandbox_admission_waiting",
+      help: "Tool Sandbox materializations waiting for global admission",
       labelNames: ["provider"],
       registers: [this.registry],
     });

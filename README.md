@@ -128,6 +128,7 @@ only after a measured requirement appears.
 - [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
 - [Strong Sandbox Provider selection](docs/research/2026-07-20-strong-sandbox-provider-selection.md)
 - [CubeSandbox KVM acceptance evidence](docs/reports/cubesandbox-kvm-acceptance-latest.md)
+- [Tool Sandbox admission and Worker capacity evidence](docs/reports/tool-sandbox-admission-latest.md)
 - [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
 - [`cloud-agent-platform` comparison](docs/research/2026-07-23-cloud-agent-platform-comparison.md)
 - [Durable orchestration and conversation-storage research](docs/research/2026-07-25-durable-orchestration-and-conversation-storage.md)
@@ -182,6 +183,8 @@ only after a measured requirement appears.
 - [ADR-0053: CubeSandbox primary Tool execution plane](docs/adr/0053-cubesandbox-primary-execution-plane.md)
 - [ADR-0054: horizontal Pi Worker pool and native session checkpoints](docs/adr/0054-horizontal-pi-worker-pool-and-native-session-checkpoints.md)
 - [ADR-0055: mature orchestration adoption and segmented Pi checkpoints](docs/adr/0055-durable-orchestration-and-segmented-pi-checkpoints.md)
+- [ADR-0056: Temporal as the sole Run scheduler](docs/adr/0056-temporal-as-sole-run-scheduler.md)
+- [ADR-0057: capacity-one Pi Workers and global Tool admission](docs/adr/0057-capacity-one-pi-workers-and-global-tool-admission.md)
 
 ## Current executable spikes
 

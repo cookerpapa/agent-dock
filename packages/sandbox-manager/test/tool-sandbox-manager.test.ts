@@ -23,6 +23,8 @@ import {
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
+const SECOND_ACTIVATION_ID = "20000000-0000-4000-8000-000000000020";
+const SECOND_CAPABILITY = `adts_${"d".repeat(43)}`;
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-provider-test",
   projectId: "project-provider-test",
@@ -78,6 +80,7 @@ const createRequest: ToolSandboxCreateRequest = {
 
 function providerFixture() {
   let createSpec: SandboxCreateSpec | undefined;
+  let createCount = 0;
   let stopped = false;
   const exec = vi.fn<SandboxProvider["exec"]>(async (_handle, request) => ({
     managerProtocolVersion: 1,
@@ -96,6 +99,7 @@ function providerFixture() {
     providerId: "gvisor",
     async checkHealth() {},
     async create(spec) {
+      createCount += 1;
       createSpec = spec;
       return {
         providerApiVersion: 1,
@@ -165,6 +169,9 @@ function providerFixture() {
     get createSpec() {
       return createSpec;
     },
+    get createCount() {
+      return createCount;
+    },
     get stopped() {
       return stopped;
     },
@@ -233,6 +240,95 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
   });
 
+  it("queues materialization behind the global active Sandbox admission limit", async () => {
+    const fixture = providerFixture();
+    const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
+    const capabilities = [CAPABILITY, SECOND_CAPABILITY];
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => activationIds.shift()!,
+      capabilityGenerator: () => capabilities.shift()!,
+      maximumActiveSandboxes: 1,
+    });
+    const secondAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-second",
+      sessionId: "session-provider-test-second",
+      turnId: "turn-provider-test-second",
+      attemptId: "20000000-0000-4000-8000-000000000003",
+      leaseId: "20000000-0000-4000-8000-000000000003",
+      fencingToken: 6,
+    };
+    const first = await manager.create(createRequest);
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "20000000-0000-4000-8000-000000000011",
+      assignment: secondAssignment,
+    });
+    await manager.execute(first.capability, operation("20000000-0000-4000-8000-000000000012"));
+    const waiting = manager.execute(second.capability, {
+      ...operation("20000000-0000-4000-8000-000000000013"),
+      activationId: second.activationId,
+    });
+    await vi.waitFor(() => expect(manager.admissionWaitingCount).toBe(1));
+    expect(manager.admittedCount).toBe(1);
+    expect(fixture.createCount).toBe(1);
+
+    await manager.stop(first.activationId, assignment);
+    await expect(waiting).resolves.toMatchObject({ exitCode: 0 });
+    expect(manager.admissionWaitingCount).toBe(0);
+    expect(manager.admittedCount).toBe(1);
+    expect(fixture.createCount).toBe(2);
+    await manager.stop(second.activationId, secondAssignment);
+    expect(manager.admittedCount).toBe(0);
+  });
+
+  it("removes an aborted Tool Sandbox admission waiter without consuming capacity", async () => {
+    const fixture = providerFixture();
+    const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
+    const capabilities = [CAPABILITY, SECOND_CAPABILITY];
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => activationIds.shift()!,
+      capabilityGenerator: () => capabilities.shift()!,
+      maximumActiveSandboxes: 1,
+    });
+    const secondAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-aborted",
+      sessionId: "session-provider-test-aborted",
+      turnId: "turn-provider-test-aborted",
+      attemptId: "30000000-0000-4000-8000-000000000003",
+      leaseId: "30000000-0000-4000-8000-000000000003",
+      fencingToken: 7,
+    };
+    const first = await manager.create(createRequest);
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "30000000-0000-4000-8000-000000000011",
+      assignment: secondAssignment,
+    });
+    await manager.execute(first.capability, operation("30000000-0000-4000-8000-000000000012"));
+    const controller = new AbortController();
+    const waiting = manager.execute(
+      second.capability,
+      {
+        ...operation("30000000-0000-4000-8000-000000000013"),
+        activationId: second.activationId,
+      },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(manager.admissionWaitingCount).toBe(1));
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ code: "tool_sandbox_admission_cancelled" });
+    expect(manager.admissionWaitingCount).toBe(0);
+    expect(manager.admittedCount).toBe(1);
+    expect(fixture.createCount).toBe(1);
+    await manager.stop(second.activationId, secondAssignment);
+    await manager.stop(first.activationId, assignment);
+    expect(manager.admittedCount).toBe(0);
+  });
+
   it("reuses one exact-session runtime across fenced attempts without reprovisioning", async () => {
     const fixture = providerFixture();
     const manager = new ToolSandboxManager({
@@ -292,9 +388,13 @@ describe("provider-backed Tool Sandbox Manager", () => {
       code: "cleanup_failed",
     });
     expect(manager.activeCount).toBe(0);
+    expect(manager.admittedCount).toBe(1);
     await expect(
       manager.execute(CAPABILITY, operation("10000000-0000-4000-8000-000000000015")),
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
+    fixture.provider.destroyActivation = async () => {};
+    await manager.stop(ACTIVATION_ID, assignment);
+    expect(manager.admittedCount).toBe(0);
   });
 
   it("rejects unknown runtime selectors instead of accepting a fallback", async () => {
@@ -329,6 +429,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         runtimeClassName: "agent-dock-gvisor",
         imagePullPolicy: "Never",
         cleanPrewarmTarget: 2,
+        maximumActiveSandboxes: 2,
         cleanPrewarmTtlMs: 300_000,
         dependencyEgress: {
           namespace: "agent-dock-egress",

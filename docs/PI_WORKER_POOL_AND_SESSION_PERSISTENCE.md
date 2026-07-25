@@ -174,6 +174,31 @@ Because only one active activation is admitted, that failure cannot take down a
 second concurrently running tenant Session. The container runtime restarts the
 Worker and the Control Plane reassigns future work from committed state.
 
+Capacity one does not mean the platform can run only one Agent. Production
+replicates the complete Worker process, and all replicas poll the same Temporal
+Task Queue:
+
+```text
+Temporal Task Queue
+├── Pi Worker 1, one active SDK session
+├── Pi Worker 2, one active SDK session
+└── Pi Worker N, one active SDK session
+```
+
+The supported single-host profile currently runs those replicas as Docker
+Compose services. Kubernetes is not required for this horizontal-scaling
+property: replaceability comes from external durable state plus a common Task
+Queue. A future Kubernetes Deployment would automate replica placement,
+restart and autoscaling, but would run the same capacity-one trusted Worker
+contract.
+
+Pi Worker count and Tool Sandbox count are separate capacity controls. A pure
+chat Run consumes a Worker without materializing Cube. Coding Runs acquire the
+Sandbox Manager's bounded FIFO admission on their first Tool operation. The
+single-host default permits two simultaneous Cube guests, so additional Pi
+Workers can continue model-only work without allowing a burst of 2 GiB guests
+to exhaust the host.
+
 Long-session storage uses the safe optimization described in ADR-0055:
 tenant/session-scoped content-addressed, line-aligned JSONL segments plus an
 immutable manifest. Whole-file v1 checkpoints remain readable. Reconstructing

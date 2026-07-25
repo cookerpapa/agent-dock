@@ -360,6 +360,13 @@ head under the current lease/fence, validates object digests, and rechecks the
 revision after reconstruction. A cache hit is therefore an S3 transport
 optimization, not a second checkpoint authority or Session affinity mechanism.
 
+The production Worker pool is presently a set of Docker Compose replicas, not
+Kubernetes Pods. Horizontal correctness comes from capacity-one Worker
+processes polling one Temporal Task Queue and restoring all durable state from
+PostgreSQL/MinIO. Kubernetes can later manage those trusted replicas without
+changing the execution protocol; it is already used only inside the separate
+Cube/K3s execution plane and retained gVisor importer path.
+
 The host receives S3/database credentials, but no container-runtime,
 Kubernetes credential or host network. It composes the pinned Pi Runner, PostgreSQL workspace-import
 lease/seed resolver, local Supervisor, PostgreSQL checkpoint metadata adapter,
@@ -517,6 +524,15 @@ reaches CubeAPI for lifecycle calls; CubeMaster schedules the activation to a
 Cubelet, and CubeShim starts a distinct KVM guest. CubeProxy carries the
 private-token Tool protocol to the single exposed guest port 49984. The
 Manager, Runner and model credential never enter that guest.
+
+Before `CubeSandboxProvider.create`, the singleton production Manager acquires
+a FIFO physical-admission permit. Logical reservation and pure chat consume no
+permit. Production defaults to two admitted guests; later coding Runs wait
+without creating partial microVM resources. Cancellation removes queued
+waiters, and a failed cleanup retains its permit until absence is confirmed.
+Prometheus exposes admitted, waiting and limit gauges. This is
+deployment-global only while the supported topology contains one Manager; a
+future replicated Manager requires a fenced distributed permit authority.
 
 The Cube Tool template is built from the exact AgentDock Git revision, pushed
 by digest to the private in-cluster registry, registered through CubeMaster,

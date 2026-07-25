@@ -17,6 +17,7 @@ export type SandboxManagerConfig = {
   importerServiceAccountName: string;
   imagePullPolicy: "Always" | "IfNotPresent" | "Never";
   repositoryImportTimeoutMs: number;
+  maximumActiveSandboxes: number;
   warmTtlMs: number;
   maximumWarmActivations: number;
   cleanPrewarmTarget: number;
@@ -218,6 +219,12 @@ export async function loadSandboxManagerConfig(
       180_000,
       1_000,
       300_000,
+    ),
+    maximumActiveSandboxes: integer(
+      environment.AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES,
+      2,
+      1,
+      1_000,
     ),
     warmTtlMs: integer(
       environment.AGENT_DOCK_SANDBOX_WARM_TTL_MS,

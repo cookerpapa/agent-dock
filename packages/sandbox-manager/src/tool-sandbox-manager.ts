@@ -30,6 +30,7 @@ export type ToolSandboxManagerOptions = {
   provider: SandboxProvider;
   idGenerator?: () => string;
   capabilityGenerator?: () => string;
+  maximumActiveSandboxes?: number;
   warmTtlMs?: number;
   maximumWarmActivations?: number;
   clock?: () => number;
@@ -55,8 +56,18 @@ type WarmActivation = {
   lastUsedAt: number;
 };
 
+type AdmissionWaiter = {
+  activationId: string;
+  assignment: ToolSandboxAssignment;
+  signal?: AbortSignal;
+  resolve: () => void;
+  reject: (error: SandboxManagerError) => void;
+  abort?: () => void;
+};
+
 const DEFAULT_WARM_TTL_MS = 15 * 60_000;
 const DEFAULT_MAXIMUM_WARM_ACTIVATIONS = 4;
+const DEFAULT_MAXIMUM_ACTIVE_SANDBOXES = 2;
 
 function positiveInteger(value: number, name: string, maximum: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
@@ -170,16 +181,35 @@ function sameRuntimeAssignment(
   );
 }
 
+function sameSupervisorAssignment(
+  left: ToolSandboxAssignment,
+  right: SupervisorRuntimeAssignment,
+): boolean {
+  return (
+    left.supervisorId === right.supervisorId &&
+    left.bootId === right.bootId &&
+    left.sandboxId === right.sandboxId &&
+    left.commandId === right.commandId &&
+    left.sessionId === right.sessionId &&
+    left.turnId === right.turnId &&
+    left.leaseId === right.leaseId &&
+    left.fencingToken === right.fencingToken
+  );
+}
+
 export class ToolSandboxManager {
   readonly #provider: SandboxProvider;
   readonly #idGenerator: () => string;
   readonly #capabilityGenerator: () => string;
+  readonly #maximumActiveSandboxes: number;
   readonly #warmTtlMs: number;
   readonly #maximumWarmActivations: number;
   readonly #clock: () => number;
   readonly #imageRevision: string;
   readonly #activations = new Map<string, ManagedActivation>();
   readonly #warm = new Map<string, WarmActivation>();
+  readonly #admitted = new Map<string, ToolSandboxAssignment>();
+  readonly #admissionWaiters: AdmissionWaiter[] = [];
   readonly #reaper: NodeJS.Timeout;
 
   constructor(options: ToolSandboxManagerOptions) {
@@ -190,6 +220,11 @@ export class ToolSandboxManager {
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#capabilityGenerator =
       options.capabilityGenerator ?? (() => `adts_${randomBytes(32).toString("base64url")}`);
+    this.#maximumActiveSandboxes = positiveInteger(
+      options.maximumActiveSandboxes ?? DEFAULT_MAXIMUM_ACTIVE_SANDBOXES,
+      "maximumActiveSandboxes",
+      1_000,
+    );
     this.#warmTtlMs = positiveInteger(
       options.warmTtlMs ?? DEFAULT_WARM_TTL_MS,
       "warmTtlMs",
@@ -218,6 +253,18 @@ export class ToolSandboxManager {
       (activation) => activation.handle !== undefined || activation.materializing !== undefined,
     ).length;
     return activeHandles + this.#warm.size;
+  }
+
+  get admittedCount(): number {
+    return this.#admitted.size;
+  }
+
+  get admissionWaitingCount(): number {
+    return this.#admissionWaiters.length;
+  }
+
+  get maximumActiveSandboxes(): number {
+    return this.#maximumActiveSandboxes;
   }
 
   get reservedCount(): number {
@@ -271,6 +318,7 @@ export class ToolSandboxManager {
     ) {
       this.#warm.delete(key);
       await this.#provider.stop(inherited.handle);
+      this.#releaseAdmission(inherited.handle.activationId);
       inherited = undefined;
     }
     if (inherited !== undefined) this.#warm.delete(key);
@@ -327,7 +375,7 @@ export class ToolSandboxManager {
       );
     }
     activation.seenOperationIds.add(request.operationId);
-    const handle = await this.#materialize(request.activationId, activation);
+    const handle = await this.#materialize(request.activationId, activation, signal);
     return this.#provider.exec(handle, request, signal);
   }
 
@@ -362,7 +410,7 @@ export class ToolSandboxManager {
     let retained = false;
     let handle = activation.handle;
     if (activation.materializing !== undefined) {
-      handle = await activation.materializing;
+      handle = await activation.materializing.catch(() => undefined);
     }
     if (
       request.disposition === "keep_warm" &&
@@ -373,6 +421,7 @@ export class ToolSandboxManager {
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {
         await this.#provider.stop(previous.handle);
+        this.#releaseAdmission(previous.handle.activationId);
       }
       const now = this.#now();
       this.#warm.set(key, {
@@ -386,6 +435,9 @@ export class ToolSandboxManager {
       await this.#enforceWarmLimit();
     } else if (handle !== undefined) {
       await this.#provider.stop(handle);
+      this.#releaseAdmission(handle.activationId);
+    } else {
+      this.#releaseAdmission(request.activationId);
     }
     return {
       managerProtocolVersion: 1,
@@ -408,6 +460,7 @@ export class ToolSandboxManager {
     const activation = this.#activations.get(activationId);
     if (activation === undefined) {
       await this.#provider.destroyActivation(activationId, assignment);
+      this.#releaseAdmission(activationId);
       return;
     }
     if (!sameAssignment(activation.assignment, assignment)) {
@@ -422,7 +475,12 @@ export class ToolSandboxManager {
       activation.materializing === undefined
         ? activation.handle
         : await activation.materializing.catch(() => undefined);
-    if (handle !== undefined) await this.#provider.stop(handle);
+    if (handle !== undefined) {
+      await this.#provider.stop(handle);
+      this.#releaseAdmission(handle.activationId);
+    } else {
+      this.#releaseAdmission(activationId);
+    }
   }
 
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
@@ -436,10 +494,20 @@ export class ToolSandboxManager {
         : sameRuntimeAssignment(activation.handle, assignment),
     );
     if (managed !== undefined) this.#revoke(managed[0], managed[1]);
+    const admittedActivationIds = [...this.#admitted.entries()]
+      .filter(([, admittedAssignment]) => sameSupervisorAssignment(admittedAssignment, assignment))
+      .map(([activationId]) => activationId);
+    const terminatedWarmActivationIds: string[] = [];
     for (const [key, warm] of this.#warm) {
-      if (sameRuntimeAssignment(warm.handle, assignment)) this.#warm.delete(key);
+      if (sameRuntimeAssignment(warm.handle, assignment)) {
+        this.#warm.delete(key);
+        terminatedWarmActivationIds.push(warm.handle.activationId);
+      }
     }
     await this.#provider.terminateAndConfirmAbsent(assignment);
+    if (managed !== undefined) this.#releaseAdmission(managed[0]);
+    for (const activationId of admittedActivationIds) this.#releaseAdmission(activationId);
+    for (const activationId of terminatedWarmActivationIds) this.#releaseAdmission(activationId);
   }
 
   async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
@@ -456,6 +524,17 @@ export class ToolSandboxManager {
       this.#revoke(activationId, activation);
     }
     this.#warm.clear();
+    for (const waiter of this.#admissionWaiters.splice(0)) {
+      this.#removeAbortListener(waiter);
+      waiter.reject(
+        new SandboxManagerError(
+          "tool_sandbox_admission_closed",
+          "Tool Sandbox admission closed",
+          true,
+        ),
+      );
+    }
+    this.#admitted.clear();
     await this.#provider.close();
   }
 
@@ -466,6 +545,7 @@ export class ToolSandboxManager {
       if (this.#warm.get(key) !== warm) continue;
       this.#warm.delete(key);
       await this.#provider.stop(warm.handle);
+      this.#releaseAdmission(warm.handle.activationId);
     }
   }
 
@@ -502,44 +582,75 @@ export class ToolSandboxManager {
   #revoke(activationId: string, activation: ManagedActivation): void {
     activation.capabilityDigest.fill(0);
     this.#activations.delete(activationId);
+    this.#cancelAdmissionWaiter(activationId);
   }
 
-  async #materialize(activationId: string, activation: ManagedActivation): Promise<SandboxHandle> {
+  async #materialize(
+    activationId: string,
+    activation: ManagedActivation,
+    signal?: AbortSignal,
+  ): Promise<SandboxHandle> {
     if (activation.materializedForCurrentAssignment && activation.handle !== undefined) {
       return activation.handle;
     }
     if (activation.materializing !== undefined) return activation.materializing;
     const materializing = (async (): Promise<SandboxHandle> => {
-      let handle = activation.handle;
-      if (handle !== undefined) {
-        try {
-          handle = await this.#provider.rebind(handle, activation.assignment);
-        } catch (error: unknown) {
-          await this.#provider.stop(handle);
-          handle = undefined;
-          if (error instanceof SandboxManagerError && !error.retryable) throw error;
+      await this.#acquireAdmission(activationId, activation.assignment, signal);
+      let releaseAdmissionOnFailure = true;
+      try {
+        if (this.#activations.get(activationId) !== activation || signal?.aborted) {
+          throw new SandboxManagerError(
+            "tool_sandbox_admission_cancelled",
+            "Tool Sandbox admission was cancelled",
+            false,
+          );
         }
+        let handle = activation.handle;
+        if (handle !== undefined) {
+          try {
+            handle = await this.#provider.rebind(handle, activation.assignment);
+          } catch (error: unknown) {
+            try {
+              await this.#provider.stop(handle);
+              delete activation.handle;
+            } catch (cleanupError: unknown) {
+              releaseAdmissionOnFailure = false;
+              throw cleanupError;
+            }
+            handle = undefined;
+            if (error instanceof SandboxManagerError && !error.retryable) throw error;
+          }
+        }
+        if (handle === undefined) handle = await this.#provider.create(activation.spec);
+        if (
+          !handleMatches(
+            handle,
+            this.#provider,
+            activationId,
+            activation.assignment,
+            activation.spec.environment,
+          )
+        ) {
+          try {
+            await this.#provider.destroy(handle);
+          } catch (cleanupError: unknown) {
+            activation.handle = handle;
+            releaseAdmissionOnFailure = false;
+            throw cleanupError;
+          }
+          throw new SandboxManagerError(
+            "sandbox_provider_protocol_error",
+            "Sandbox Provider returned a mismatched handle",
+            false,
+          );
+        }
+        activation.handle = handle;
+        activation.materializedForCurrentAssignment = true;
+        return handle;
+      } catch (error: unknown) {
+        if (releaseAdmissionOnFailure) this.#releaseAdmission(activationId);
+        throw error;
       }
-      if (handle === undefined) handle = await this.#provider.create(activation.spec);
-      if (
-        !handleMatches(
-          handle,
-          this.#provider,
-          activationId,
-          activation.assignment,
-          activation.spec.environment,
-        )
-      ) {
-        await this.#provider.destroy(handle).catch(() => undefined);
-        throw new SandboxManagerError(
-          "sandbox_provider_protocol_error",
-          "Sandbox Provider returned a mismatched handle",
-          false,
-        );
-      }
-      activation.handle = handle;
-      activation.materializedForCurrentAssignment = true;
-      return handle;
     })();
     activation.materializing = materializing;
     try {
@@ -557,6 +668,89 @@ export class ToolSandboxManager {
       if (oldest === undefined) return;
       this.#warm.delete(oldest[0]);
       await this.#provider.stop(oldest[1].handle);
+      this.#releaseAdmission(oldest[1].handle.activationId);
+    }
+  }
+
+  #acquireAdmission(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.#admitted.has(activationId)) return Promise.resolve();
+    if (signal?.aborted) {
+      return Promise.reject(
+        new SandboxManagerError(
+          "tool_sandbox_admission_cancelled",
+          "Tool Sandbox admission was cancelled",
+          false,
+        ),
+      );
+    }
+    if (this.#admitted.size < this.#maximumActiveSandboxes) {
+      this.#admitted.set(activationId, assignment);
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolvePromise, rejectPromise) => {
+      const waiter: AdmissionWaiter = {
+        activationId,
+        assignment,
+        ...(signal === undefined ? {} : { signal }),
+        resolve: resolvePromise,
+        reject: rejectPromise,
+      };
+      if (signal !== undefined) {
+        waiter.abort = () => {
+          const index = this.#admissionWaiters.indexOf(waiter);
+          if (index >= 0) this.#admissionWaiters.splice(index, 1);
+          this.#removeAbortListener(waiter);
+          rejectPromise(
+            new SandboxManagerError(
+              "tool_sandbox_admission_cancelled",
+              "Tool Sandbox admission was cancelled",
+              false,
+            ),
+          );
+        };
+        signal.addEventListener("abort", waiter.abort, { once: true });
+      }
+      this.#admissionWaiters.push(waiter);
+    });
+  }
+
+  #releaseAdmission(activationId: string): void {
+    if (!this.#admitted.delete(activationId)) return;
+    while (this.#admissionWaiters.length > 0) {
+      const waiter = this.#admissionWaiters.shift();
+      if (waiter === undefined) return;
+      this.#removeAbortListener(waiter);
+      if (waiter.signal?.aborted) continue;
+      this.#admitted.set(waiter.activationId, waiter.assignment);
+      waiter.resolve();
+      return;
+    }
+  }
+
+  #cancelAdmissionWaiter(activationId: string): void {
+    const index = this.#admissionWaiters.findIndex(
+      (waiter) => waiter.activationId === activationId,
+    );
+    if (index < 0) return;
+    const [waiter] = this.#admissionWaiters.splice(index, 1);
+    if (waiter === undefined) return;
+    this.#removeAbortListener(waiter);
+    waiter.reject(
+      new SandboxManagerError(
+        "tool_sandbox_admission_cancelled",
+        "Tool Sandbox admission was cancelled",
+        false,
+      ),
+    );
+  }
+
+  #removeAbortListener(waiter: AdmissionWaiter): void {
+    if (waiter.signal !== undefined && waiter.abort !== undefined) {
+      waiter.signal.removeEventListener("abort", waiter.abort);
     }
   }
 

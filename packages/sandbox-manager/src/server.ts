@@ -43,6 +43,9 @@ export type SandboxManagerBackend = Pick<
   | "confirmAbsent"
   | "close"
   | "activeCount"
+  | "admittedCount"
+  | "admissionWaitingCount"
+  | "maximumActiveSandboxes"
   | "cleanPrewarmCount"
   | "providerId"
 >;
@@ -92,6 +95,7 @@ export class SandboxManagerServer {
   readonly #manager: SandboxManagerBackend;
   readonly #server: FastifyInstance;
   readonly #metrics: AgentDockMetrics | undefined;
+  readonly #capacityMetrics: NodeJS.Timeout;
   #address: string | undefined;
   #ready = false;
 
@@ -111,6 +115,8 @@ export class SandboxManagerServer {
       requestTimeout: 320_000,
       keepAliveTimeout: 5_000,
     });
+    this.#capacityMetrics = setInterval(() => this.#recordCapacityMetrics(), 1_000);
+    this.#capacityMetrics.unref();
     this.#installRoutes();
   }
 
@@ -121,14 +127,7 @@ export class SandboxManagerServer {
   async listen(): Promise<string> {
     if (this.#address !== undefined) throw new Error("Sandbox Manager is already listening");
     await this.#manager.checkHealth();
-    this.#metrics?.sandboxActive.set(
-      { provider: this.#manager.providerId },
-      this.#manager.activeCount,
-    );
-    this.#metrics?.sandboxPrewarm.set(
-      { provider: this.#manager.providerId },
-      this.#manager.cleanPrewarmCount,
-    );
+    this.#recordCapacityMetrics();
     this.#address = await this.#server.listen({ host: this.#host, port: this.#port });
     this.#ready = true;
     return this.#address;
@@ -136,11 +135,21 @@ export class SandboxManagerServer {
 
   async close(): Promise<void> {
     this.#ready = false;
+    clearInterval(this.#capacityMetrics);
     await this.#manager.close();
     if (this.#address !== undefined) {
       this.#address = undefined;
       await this.#server.close();
     }
+  }
+
+  #recordCapacityMetrics(): void {
+    const labels = { provider: this.#manager.providerId };
+    this.#metrics?.sandboxActive.set(labels, this.#manager.activeCount);
+    this.#metrics?.sandboxAdmissionActive.set(labels, this.#manager.admittedCount);
+    this.#metrics?.sandboxAdmissionLimit.set(labels, this.#manager.maximumActiveSandboxes);
+    this.#metrics?.sandboxAdmissionWaiting.set(labels, this.#manager.admissionWaitingCount);
+    this.#metrics?.sandboxPrewarm.set(labels, this.#manager.cleanPrewarmCount);
   }
 
   #authorized(value: string | undefined): boolean {

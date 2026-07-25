@@ -2301,3 +2301,29 @@
   retained about 31 KiB, and completed all six follow-up restores below 25 ms.
   A 20-iteration direct MinIO comparison measured restore p50/p95 at
   4.488/10.375 ms without the cache and 0.073/0.278 ms with it.
+
+## 2026-07-25 — capacity-one Workers and global Cube admission
+
+- Evaluated packing multiple SDK activations into each Pi Worker, but retained
+  the enforced capacity-one process boundary. A poisoned SDK session retires
+  its entire process; capacity greater than one would make an unrelated active
+  tenant collateral damage.
+- Confirmed that Worker horizontal scaling is independent of Kubernetes:
+  replaceable Docker Compose replicas poll one Temporal Task Queue and restore
+  PostgreSQL/MinIO state. Kubernetes remains a future operational deployment
+  option for trusted Workers, while Cube's K3s/KVM plane executes untrusted
+  Tool workloads.
+- Added a bounded FIFO admission gate before physical CubeSandbox
+  materialization. Production admits two Tool guests, keeps pure chat outside
+  the gate, removes cancelled waiters, rechecks ownership after admission and
+  releases permits only after confirmed cleanup.
+- Added Prometheus gauges for admitted Tool guests, queued materializations and
+  the configured limit. Unit tests cover queued wake-up and cancellation
+  without a capacity leak; the full repository check remains green.
+- A four-Run real-model gate used four distinct Temporal Pi Workers and one
+  12-second Bash execution per Run. It observed exactly two active and two
+  waiting Cube guests, then completed all Runs in one Attempt with zero
+  residual admission. The first pair settled in 17.7–17.8 seconds and the
+  queued pair in 33.0–33.2 seconds. Eight provider requests consumed 1,108
+  input, 625 output and 10,752 cache-read tokens. Evidence is stored in
+  `docs/reports/tool-sandbox-admission-latest.{json,md}`.

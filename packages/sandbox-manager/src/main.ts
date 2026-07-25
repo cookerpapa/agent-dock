@@ -58,6 +58,7 @@ if (config.provider === "cubesandbox") {
 const manager = new ToolSandboxManager({
   provider,
   imageRevision: config.imageRevision,
+  maximumActiveSandboxes: config.maximumActiveSandboxes,
   warmTtlMs: config.warmTtlMs,
   maximumWarmActivations: config.maximumWarmActivations,
 });

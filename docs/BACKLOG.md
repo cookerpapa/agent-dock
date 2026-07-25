@@ -283,3 +283,6 @@ extension-policy support would overstate the current boundary.
 - [x] Add a bounded 10-minute per-Worker immutable checkpoint object cache
   without caching the PostgreSQL head, plus cache/restore metrics and a
   reproducible multi-tenant real-model load gate
+- [x] Preserve capacity-one embedded Pi Worker failure domains while adding
+  deployment-global FIFO CubeSandbox admission, cancellation-safe waiters and
+  active/waiting/limit metrics
