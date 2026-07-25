@@ -298,5 +298,5 @@ extension-policy support would overstate the current boundary.
 - [ ] Prove the Kubernetes Pi Worker chart on a real multi-node cluster with
   node loss, version ramp/rollback, external PostgreSQL/S3 failover and
   real-token concurrent Runs
-- [ ] Run the local single-node k3d Pi Worker cutover, real-token chat/Tool/
+- [x] Run the local single-node k3d Pi Worker cutover, real-token chat/Tool/
   restore/failover acceptance, and record measured evidence

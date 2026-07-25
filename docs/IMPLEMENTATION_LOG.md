@@ -2349,3 +2349,45 @@
   image dependency closure, encrypted-backup tamper checks and the HIGH-level
   security audit. Live multi-node Kubernetes, node-loss and storage-failover
   validation intentionally remain open evidence rather than implied claims.
+
+## 2026-07-26: local Kubernetes cutover and live acceptance
+
+- Created the disposable single-server `agent-dock-workers` k3d/K3s cluster
+  and moved the two capacity-one trusted Pi SDK Workers from Compose into a
+  Kubernetes StatefulSet. Temporal remains the only Run scheduler and both
+  Pods poll the same versioned Task Queue.
+- Kept the execution planes separate: the trusted Worker cluster has no host
+  K3s credential or Cube runtime authority, while CubeSandbox continues to
+  execute untrusted Tools in KVM microVMs. Narrow selector-free Services and
+  exact EndpointSlices bridge only PostgreSQL, Temporal, MinIO, Control Plane,
+  Sandbox Manager, provider relay and management ingress.
+- Preserved the external conversation authority. PostgreSQL stores the
+  committed Session/checkpoint pointer and MinIO stores immutable Pi-native
+  JSONL segments/manifests. A Worker Pod PVC is limited to its private boot
+  ledger and unacknowledged event spool, so deleting or moving a Worker does
+  not move or lose the committed conversation.
+- Hardened the cutover around failures observed on the real machine: pinned
+  K3s system-image import, Kubernetes system-plane readiness, application and
+  Temporal registration gates, upgrade-safe StatefulSet claim templates,
+  individual `subPath` Secret files compatible with `O_NOFOLLOW`, Pod
+  inventory waits, non-interactive Temporal version promotion, and automatic
+  Helm rollback to the previously serving Worker revision.
+- A real DeepSeek `deepseek-v4-flash` acceptance stopped the Worker that owned
+  the first turn and resumed the same Session on the surviving Pod. The
+  restored Pi artifact and previous-turn marker were both verified; the two
+  turns settled in 1,547 ms and 1,784 ms. Four additional concurrent Runs used
+  both Workers, took 4,496–11,345 ms, and the complete gate consumed 7 model
+  requests, 585 input, 1,407 output and 8,960 provider-cache-read tokens.
+- A separate real-token semantic gate verified pure chat without a Cube
+  activation (1,083 ms first text, 1,299 ms settled), two-round Tool execution
+  in distinct Cube microVMs with Workspace restoration, cross-tenant denial,
+  bounded Temporal histories and zero remaining guests. It consumed 8 model
+  requests, 1,979 input, 1,723 output and 18,944 cache-read tokens.
+- Re-ran the native forced-threshold Pi compaction integration test through a
+  fresh SDK activation and the v2 Pi session manifest integrity suite. This
+  validates that recovery uses Pi's native JSONL session tree, including its
+  compaction entry, rather than rebuilding `messages[]` from UI projections.
+- This proves a functional single-machine Kubernetes deployment and the
+  multi-node-ready control/data contract. It does not yet claim real
+  multi-node node-loss, storage failover or cross-zone high availability;
+  those remain an explicit open acceptance item.
