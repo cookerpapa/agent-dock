@@ -1,0 +1,80 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-25T04:52:08.261Z",
+  "upstream": "TencentCloud/CubeSandbox@v0.6.0",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "pureChat": {
+    "firstTextMs": 3204,
+    "settledMs": 3627,
+    "toolCalls": 0,
+    "cubeActivations": 0,
+    "usage": {
+      "requests": 1,
+      "inputTokens": 65,
+      "outputTokens": 32,
+      "cacheReadTokens": 1280,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    }
+  },
+  "firstCoding": {
+    "firstTextMs": 15099,
+    "settledMs": 17397,
+    "toolCalls": 2,
+    "cubeActivations": 1,
+    "patchBytes": 3311,
+    "usage": {
+      "requests": 3,
+      "inputTokens": 323,
+      "outputTokens": 1277,
+      "cacheReadTokens": 6144,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    }
+  },
+  "followUpCoding": {
+    "firstTextMs": 10028,
+    "settledMs": 11818,
+    "toolCalls": 3,
+    "cubeActivations": 1,
+    "patchBytes": 3517,
+    "usage": {
+      "requests": 4,
+      "inputTokens": 1683,
+      "outputTokens": 525,
+      "cacheReadTokens": 13696,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    }
+  },
+  "multiRound": {
+    "distinctCubeMicroVms": true,
+    "workspaceRestored": true,
+    "workspaceVersions": 2,
+    "finalFileBytes": 3250
+  },
+  "multiTenant": {
+    "crossTenantConversationHidden": true,
+    "lowerLevelCubeTenantGate": 2
+  },
+  "semanticConversation": {
+    "projectionCount": 3,
+    "projectedSourceEvents": 82,
+    "semanticItems": 8,
+    "replayAfterSequence": 82
+  },
+  "totalUsage": {
+    "requests": 8,
+    "inputTokens": 2071,
+    "outputTokens": 1834,
+    "cacheReadTokens": 21120,
+    "cacheWriteTokens": 0
+  },
+  "cleanup": {
+    "sessionMicroVmCount": 0,
+    "foreignSessionMicroVmCount": 0
+  }
+}

@@ -2054,3 +2054,42 @@
 - 边界：这次实现的是有界 fan-out/fan-in、确定性验收和人工 promotion，
   不是无限递归 subagent tree 或通用 task DAG；CubeSandbox/microVM provider
   仍是可选的未来执行后端，不把它虚构为已完成能力。
+
+## 2026-07-25 — CubeSandbox Primary Tool Execution Plane
+
+- 架构：普通用户消息仍由可信 Control Plane、Supervisor Host 与 Pi Worker 池执行
+  Agent Loop，模型凭据、对话状态、RunAttempt、Lease 与 Fencing 均不进入
+  Sandbox。Pi 的 `read/write/edit/bash/git` 调用经既有 narrow Tool RPC 到
+  Sandbox Manager，再映射为一个绑定 tenant/session/run/attempt/fence 的
+  CubeSandbox KVM microVM；Cube 负责 microVM 生命周期与执行代理，AgentDock
+  继续负责多租户授权、调度、公平性、幂等、checkpoint 和最终清理。
+- 主方案：production 默认 Provider 已切换为 CubeSandbox，不保留普通 Tool
+  execution 的 runc/runsc 兼容分支。gVisor 只保留在受信 exact-commit importer
+  与确定性回归测试中，不承担 Agent 生成代码的生产执行。Cube API key、cluster
+  endpoint 和 template evidence 只由 Sandbox Manager 读取，Pi Worker、Tool
+  guest、Web 和模型上下文均不可见。
+- 供应链：固定上游 `TencentCloud/CubeSandbox@v0.6.0`
+  (`8721dd151971ce3c2966482bbd32904ad98f378e`)；生产模板从当前 clean Git
+  revision 构建并推送私有 registry，记录 image digest、template ID 与精确源码
+  revision。部署在证据缺失、模板 revision 不匹配或 API key 权限不安全时
+  fail closed。
+- 实际部署：在本机 K3s/KVM 安装 CubeSandbox，并将 Pod 网络 MTU 固定为 1450
+  以匹配 WSL2 路径；Control Plane 通过 loopback relay 访问 Cube API/Proxy，
+  Tool guest 没有平台网络、模型凭据、数据库凭据或 Kubernetes/Docker 管理面
+  权限。镜像验证覆盖非 root、no-new-privileges、零 capability、固定
+  Node/Java/Python/Git 工具链及路径穿越拒绝。
+- KVM 隔离门禁：真实 Cube guest 在 7,911 ms 内完成两次隔离执行，guest kernel
+  与 host 不同，3 个受禁端点及公网访问均失败；取消会销毁 microVM，最终
+  orphan count 为 0。
+- 真实产品验收：production Web/API 使用 `deepseek-v4-flash` 完成一轮纯聊天和
+  同一 Session 的两轮 counting-sort coding。纯聊天 0 Tool/0 Cube activation；
+  两轮编码分别执行 2/3 次 Tool Call、各创建并销毁一个不同 KVM guest，第二轮从
+  durable Workspace 恢复第一轮文件并产生第二个 immutable version。8 次真实模型
+  请求消耗 2,071 input、1,834 output、21,120 cache-read tokens；82 个 durable
+  events 投影为 8 个 semantic items，跨租户 conversation/API 访问被拒，结束后
+  两个验收租户的残留 microVM 均为 0。脱敏证据保存在
+  `docs/reports/cubesandbox-production-acceptance-latest.{json,md}`。
+- 验收边界修正：SSE `turn.completed` 表示 Agent 已 settled，而 durable Run
+  `completed` 才表示 Workspace head 与 Run state 已在最终事务中提交。真实验收
+  现在显式等待第二个边界后再读取 Workspace version，避免把合法的短暂提交窗口
+  误报为数据丢失。

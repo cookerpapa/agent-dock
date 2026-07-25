@@ -171,7 +171,6 @@ function wait(delayMs, signal) {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolvePromise) => {
     const timer = setTimeout(settle, delayMs);
-    timer.unref();
     function settle() {
       clearTimeout(timer);
       signal?.removeEventListener("abort", settle);
@@ -236,6 +235,25 @@ async function waitForNoCubeSession(sessionId) {
   throw new Error("Cube inventory retained a settled Session microVM");
 }
 
+async function waitForDurableRunCompletion(runId) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const run = await api.getRun(runId);
+    if (run.state === "completed") return run;
+    if (["failed", "cancelled", "timed_out", "superseded"].includes(run.state)) {
+      throw new Error(
+        `Run ${run.runId} ended as ${run.state}${
+          run.failure === undefined
+            ? ""
+            : ` (${run.failure.code}: ${run.failure.message ?? "no detail"})`
+        }`,
+      );
+    }
+    await wait(100);
+  }
+  throw new Error("Agent settled, but the durable Run did not commit within its deadline");
+}
+
 async function runTurn(sessionId, prompt, afterSequence, expectTools) {
   const observer = observeCubeSession(sessionId);
   const submittedAt = performance.now();
@@ -246,7 +264,6 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
     timeoutFailure = new Error("Live Cube production turn timed out");
     controller.abort(timeoutFailure);
   }, 10 * 60_000);
-  timer.unref();
   const events = [];
   let firstTextAt;
   let terminal;
@@ -320,6 +337,7 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
     } else {
       assert.equal(toolCalls, 0, "Pure chat unexpectedly executed a Tool");
     }
+    await waitForDurableRunCompletion(accepted.runId);
     await waitForNoCubeSession(sessionId);
     const activations = await observer.stop();
     return {
