@@ -608,10 +608,23 @@ async function restoreComposeWorkers(previous) {
 async function buildAndImportWorkerImage(revision) {
   const tag = `kubernetes-${revision.slice(0, 12)}`;
   const image = `agent-dock/supervisor-host:${tag}`;
+  const proxyBuildArguments = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+  ].flatMap((name) =>
+    typeof process.env[name] === "string" && process.env[name].length > 0
+      ? ["--build-arg", name]
+      : [],
+  );
   await run("docker", [
     "build",
     "--network",
     "host",
+    ...proxyBuildArguments,
     "--file",
     "packages/supervisor-host/Dockerfile",
     "--build-arg",
