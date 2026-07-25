@@ -13,12 +13,13 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 ARG AGENT_DOCK_VERSION=development
 ARG AGENT_DOCK_REVISION=unknown
 LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
-      org.opencontainers.image.description="Narrow Kubernetes lifecycle service for credential-free gVisor tool sandboxes" \
+      org.opencontainers.image.description="Narrow lifecycle service for credential-free isolated tool sandboxes" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
+COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/dependency-egress-proxy/package.json packages/dependency-egress-proxy/package.json
@@ -32,7 +33,9 @@ COPY packages/sandbox-manager/tsconfig.json packages/sandbox-manager/tsconfig.js
 COPY packages/sandbox-manager/src packages/sandbox-manager/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
-RUN rm -rf /usr/local/lib/node_modules/npm \
+RUN cd /app/packages/sandbox-manager \
+    && node --input-type=module --eval "await import('undici')" \
+    && rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 STOPSIGNAL SIGTERM
 USER 1000:1000
