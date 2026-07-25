@@ -394,10 +394,10 @@ const bindAddress = boundedEnvironmentValue(
   /^[a-zA-Z0-9:._-]+$/,
   128,
 );
-const supervisorId = boundedEnvironmentValue(
-  "AGENT_DOCK_SUPERVISOR_ID",
-  "agent-dock-supervisor-1",
-  /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/,
+const supervisorIdPrefix = boundedEnvironmentValue(
+  "AGENT_DOCK_SUPERVISOR_ID_PREFIX",
+  "agent-dock-worker-",
+  /^[a-z0-9](?:[-a-z0-9]{0,62})-$/,
 );
 const publicRegistrationEnabled = booleanEnvironmentValue(
   "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED",
@@ -497,7 +497,7 @@ const environment = [
   `AGENT_DOCK_API_CREDENTIAL_ID=${identities.apiCredentialId}`,
   `AGENT_DOCK_CREDENTIAL_BINDING_ID=${identities.credentialBindingId}`,
   `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID=${identities.modelProfileId}`,
-  `AGENT_DOCK_SUPERVISOR_ID=${supervisorId}`,
+  `AGENT_DOCK_SUPERVISOR_ID_PREFIX=${supervisorIdPrefix}`,
   "AGENT_DOCK_SUPERVISOR_CAPACITY=2",
   "AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR=8",
   `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,

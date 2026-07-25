@@ -183,6 +183,126 @@ describe("PiRpcTurnRunner integration", () => {
     }
   }, 30_000);
 
+  it("persists a native Pi compaction entry and restores it in a fresh worker process", async () => {
+    const fakeModel = new FakeModelServer({ promptTokens: 3_500 });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-compaction-test-"));
+    let checkpoint: Uint8Array | undefined;
+    const firstEvents: EventPublishMessage[] = [];
+    try {
+      await fakeModel.start();
+      const compactingCommand: ExecuteTurnCommandMessage = {
+        ...command,
+        messageId: "11111111-1111-4111-8111-111111111121",
+        payload: {
+          ...command.payload,
+          commandId: "22222222-2222-4222-8222-222222222231",
+          idempotencyKey: "runner-native-compaction",
+          turnId: "turn-compaction-1",
+          input: { kind: "prompt", text: `first compactable turn ${"seed ".repeat(1_200)}` },
+          budgets: {
+            maximumModelRequests: 8,
+            maximumCostMicrousd: 1_000_000,
+            dailyTokenBudget: 1_000_000,
+            monthlyCostMicrousdBudget: 1_000_000,
+            maximumToolCalls: 8,
+            remainingToolCalls: 8,
+            maximumToolOutputBytes: 64 * 1_024,
+            maximumRunDurationMs: 60_000,
+            compactionReserveTokens: 1_024,
+            compactionKeepRecentTokens: 1_024,
+          },
+        },
+      };
+      const runnerOptions = {
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model: ExecuteTurnCommandMessage["payload"]["model"]) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions" as const,
+          apiKey: FAKE_MODEL_API_KEY,
+          contextWindow: 4_096,
+          maxTokens: 512,
+        }),
+      };
+      await new PiRpcTurnRunner({
+        ...runnerOptions,
+        onSettled: ({ piSession }) => {
+          checkpoint = piSession;
+        },
+      }).run(compactingCommand, (event) => {
+        firstEvents.push(event);
+      });
+
+      const triggerCommand: ExecuteTurnCommandMessage = {
+        ...compactingCommand,
+        messageId: "11111111-1111-4111-8111-111111111122",
+        payload: {
+          ...compactingCommand.payload,
+          commandId: "22222222-2222-4222-8222-222222222232",
+          idempotencyKey: "runner-native-compaction-followup",
+          turnId: "turn-compaction-2",
+          fencingToken: 8,
+          nextEventSeq: 20,
+          input: {
+            kind: "prompt",
+            text: `second compactable turn ${"recent ".repeat(1_200)}`,
+          },
+        },
+      };
+      const compactionEvents: EventPublishMessage[] = [];
+      await new PiRpcTurnRunner({
+        ...runnerOptions,
+        restorePiSession: checkpoint!,
+        onSettled: ({ piSession }) => {
+          checkpoint = piSession;
+        },
+      }).run(triggerCommand, (event) => {
+        compactionEvents.push(event);
+      });
+      const checkpointText = Buffer.from(checkpoint!).toString("utf8");
+      const compactionEntry = checkpointText
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type?: string; id?: string })
+        .find((entry) => entry.type === "compaction");
+      expect(compactionEntry?.id).toBeTypeOf("string");
+      expect(compactionEvents.map((event) => event.payload.event.type)).toEqual(
+        expect.arrayContaining(["context.compaction.started", "context.compaction.completed"]),
+      );
+      expect(firstEvents.some((event) => event.payload.event.type === "turn.completed")).toBe(true);
+
+      const restoredCommand: ExecuteTurnCommandMessage = {
+        ...triggerCommand,
+        messageId: "11111111-1111-4111-8111-111111111123",
+        payload: {
+          ...triggerCommand.payload,
+          commandId: "22222222-2222-4222-8222-222222222233",
+          idempotencyKey: "runner-native-compaction-restored",
+          turnId: "turn-compaction-3",
+          fencingToken: 9,
+          nextEventSeq: 40,
+          input: { kind: "prompt", text: "Prove the compacted session survived a new worker." },
+        },
+      };
+      let restoredCheckpoint: Uint8Array | undefined;
+      await new PiRpcTurnRunner({
+        ...runnerOptions,
+        restorePiSession: checkpoint!,
+        onSettled: ({ piSession }) => {
+          restoredCheckpoint = piSession;
+        },
+      }).run(restoredCommand, () => undefined);
+      const restoredText = Buffer.from(restoredCheckpoint!).toString("utf8");
+      expect(restoredText).toContain(`"id":"${compactionEntry!.id!}"`);
+      expect(restoredText.length).toBeGreaterThan(checkpointText.length);
+      expect(fakeModel.observations.length).toBeGreaterThanOrEqual(4);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("runs pinned Pi against the loopback fake model and emits only public events", async () => {
     const fakeModel = new FakeModelServer();
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-test-"));

@@ -325,8 +325,9 @@ Responsibilities:
 
 ### Trusted Supervisor host and production topology
 
-`@agent-dock/supervisor-host` is the exclusive process owner for one stable
-Supervisor identity. Every process start generates a fresh boot, sandbox, and
+`@agent-dock/supervisor-host` is deployed as a horizontal Pi Worker pool. Each
+replica exclusively owns one stable, DNS-compatible Supervisor identity and an
+independent boot ledger/event spool. Every process start generates a fresh boot, sandbox, and
 memory-only connection secret; network reconnects retain that boot. A private
 fsynced ledger preserves bounded current/recent generations so owner-stop proof
 cannot be invented after a restart. The host probes the Sandbox Manager,
@@ -334,6 +335,15 @@ PostgreSQL, and S3,
 provisions the boot through a file-backed enrollment credential, recovers its
 event spool while drained, then becomes ready only after the outbound WebSocket
 is registered.
+
+The Control Plane discovers all active Supervisor connections and creates a
+bounded execution/cancellation lane set per connection. A Session is not pinned
+to a Worker: each active Run restores the latest Pi-native JSONL checkpoint on
+any available replica, starts a temporary Pi RPC child, and releases that slot
+after settlement. Authenticated boot enrollment validates both a Supervisor ID
+prefix and an operator-owned management URL template. Artifact reads go
+directly to the shared object store rather than through one special Worker. See
+[Pi Worker pool and conversation persistence](PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md).
 
 The host receives S3/database credentials, but no container-runtime,
 Kubernetes credential or host network. It composes the pinned Pi Runner, PostgreSQL workspace-import

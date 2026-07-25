@@ -15,9 +15,9 @@ export type ProductionControlPlaneConfig = {
   modelCredentialMasterKey: string;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
-  supervisorId: string;
+  supervisorIdPrefix: string;
   supervisorMaximumCapacity: number;
-  supervisorManagementBaseUrl: string;
+  supervisorManagementBaseUrlTemplate: string;
   allowInsecureInternalHttp: boolean;
   host: string;
   port: number;
@@ -95,12 +95,31 @@ function managementUrl(value: string, allowInsecure: boolean): string {
     parsed.hash ||
     (parsed.pathname !== "/" && parsed.pathname !== "")
   ) {
-    throw new TypeError("AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL is invalid");
+    throw new TypeError("Supervisor management URL is invalid");
   }
   if (parsed.protocol === "http:" && !allowInsecure) {
     throw new TypeError("Plain HTTP Supervisor management requires explicit opt-in");
   }
   return parsed.toString();
+}
+
+function managementUrlTemplate(value: string, allowInsecure: boolean): string {
+  if (value.split("{supervisorId}").length !== 2) {
+    throw new TypeError(
+      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE must contain {supervisorId} exactly once",
+    );
+  }
+  managementUrl(value.replace("{supervisorId}", "pi-worker-validation"), allowInsecure);
+  return value;
+}
+
+function supervisorIdPrefixValue(value: string): string {
+  if (!/^[a-z0-9](?:[-a-z0-9]{0,62})-$/.test(value)) {
+    throw new TypeError(
+      "AGENT_DOCK_SUPERVISOR_ID_PREFIX must be a lowercase DNS-label prefix ending in a hyphen",
+    );
+  }
+  return value;
 }
 
 async function readSecretFile(path: string, name: string): Promise<string> {
@@ -213,9 +232,8 @@ export async function loadProductionControlPlaneConfig(
           githubGatewayBaseUrl: managementUrl(githubGatewayBaseUrl, allowInsecureInternalHttp),
           githubGatewayServiceToken,
         }),
-    supervisorId: bounded(
-      required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
-      "AGENT_DOCK_SUPERVISOR_ID",
+    supervisorIdPrefix: supervisorIdPrefixValue(
+      required(environment, "AGENT_DOCK_SUPERVISOR_ID_PREFIX"),
     ),
     supervisorMaximumCapacity: integerValue(
       environment,
@@ -224,8 +242,8 @@ export async function loadProductionControlPlaneConfig(
       1,
       256,
     ),
-    supervisorManagementBaseUrl: managementUrl(
-      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL"),
+    supervisorManagementBaseUrlTemplate: managementUrlTemplate(
+      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE"),
       allowInsecureInternalHttp,
     ),
     allowInsecureInternalHttp,

@@ -27,6 +27,7 @@ describe("Supervisor internal management protocol", () => {
         credentialId: IDS.credential,
         credentialSha256: "a".repeat(64),
         maxConcurrentSessions: 2,
+        managementBaseUrl: "http://supervisor-host-1:4100",
       }),
     ).toMatchObject({ bootId: IDS.boot, maxConcurrentSessions: 2 });
   });
@@ -43,6 +44,7 @@ describe("Supervisor internal management protocol", () => {
         credentialId: IDS.credential,
         credentialSha256: "a".repeat(64),
         maxConcurrentSessions: 257,
+        managementBaseUrl: "http://supervisor-host-1:4100",
         ownerUrl: "http://attacker.invalid",
       }),
     ).toThrow(AgentDockInternalProtocolError);

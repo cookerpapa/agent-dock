@@ -18,6 +18,7 @@ export type SupervisorHostConfig = {
   databaseUrl: string;
   managementHost: string;
   managementPort: number;
+  managementAdvertisedBaseUrl: string;
   maxConcurrentSessions: number;
   sandboxManagerBaseUrl: string;
   sandboxManagerRequestTimeoutMs: number;
@@ -259,6 +260,11 @@ export async function loadSupervisorHostConfig(
       4100,
       1,
       65_535,
+    ),
+    managementAdvertisedBaseUrl: internalServiceBaseUrl(
+      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL"),
+      allowInsecureInternalHttp,
+      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
     maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 2, 1, 256),
     sandboxManagerBaseUrl: internalServiceBaseUrl(

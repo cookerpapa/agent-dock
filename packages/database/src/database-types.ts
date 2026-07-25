@@ -598,6 +598,7 @@ export interface SupervisorBootCredentialTable {
 export interface SupervisorHostTable {
   supervisor_id: string;
   maximum_capacity: number;
+  management_base_url: string;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

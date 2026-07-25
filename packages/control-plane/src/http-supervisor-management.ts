@@ -27,6 +27,10 @@ export type HttpSupervisorManagementClientOptions = {
   idGenerator?: () => string;
 };
 
+export type SupervisorManagementClientResolver = (
+  identity: SupervisorBootIdentity,
+) => Promise<HttpSupervisorManagementClient>;
+
 export class HttpSupervisorManagementError extends Error {
   readonly code: string;
   readonly retryable: boolean;
@@ -266,6 +270,20 @@ export class HttpSupervisorOwnerBoundary implements SupervisorOwnerBoundary {
   }
 }
 
+export class RoutedHttpSupervisorOwnerBoundary implements SupervisorOwnerBoundary {
+  readonly #resolveClient: SupervisorManagementClientResolver;
+
+  constructor(resolveClient: SupervisorManagementClientResolver) {
+    this.#resolveClient = resolveClient;
+  }
+
+  async stopAndConfirm(identity: SupervisorBootIdentity): Promise<void> {
+    await new HttpSupervisorOwnerBoundary(await this.#resolveClient(identity)).stopAndConfirm(
+      identity,
+    );
+  }
+}
+
 export class HttpSandboxAssignmentInventory implements SandboxAssignmentInventory {
   readonly #client: HttpSupervisorManagementClient;
   readonly #sandboxId: string;
@@ -325,5 +343,29 @@ export class HttpSandboxAssignmentInventory implements SandboxAssignmentInventor
         false,
       );
     }
+  }
+}
+
+export class RoutedHttpSandboxAssignmentInventory implements SandboxAssignmentInventory {
+  readonly #identity: SupervisorBootIdentity;
+  readonly #resolveClient: SupervisorManagementClientResolver;
+
+  constructor(resolveClient: SupervisorManagementClientResolver, identity: SupervisorBootIdentity) {
+    this.#resolveClient = resolveClient;
+    this.#identity = identity;
+  }
+
+  async listAssignments(): Promise<readonly SandboxRuntimeAssignment[]> {
+    return new HttpSandboxAssignmentInventory(
+      await this.#resolveClient(this.#identity),
+      this.#identity.sandboxId,
+    ).listAssignments();
+  }
+
+  async terminateAndConfirmAbsent(assignment: SandboxRuntimeAssignment): Promise<void> {
+    await new HttpSandboxAssignmentInventory(
+      await this.#resolveClient(this.#identity),
+      this.#identity.sandboxId,
+    ).terminateAndConfirmAbsent(assignment);
   }
 }

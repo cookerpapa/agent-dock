@@ -234,7 +234,10 @@ export {
   HttpSupervisorManagementClient,
   HttpSupervisorManagementError,
   HttpSupervisorOwnerBoundary,
+  RoutedHttpSandboxAssignmentInventory,
+  RoutedHttpSupervisorOwnerBoundary,
   type HttpSupervisorManagementClientOptions,
+  type SupervisorManagementClientResolver,
 } from "./http-supervisor-management.ts";
 export {
   CONTROL_PLANE_LIVE_PATH,

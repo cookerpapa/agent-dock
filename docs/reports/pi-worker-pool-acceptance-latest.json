@@ -1,0 +1,36 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-07-25T06:51:18.270Z",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "workers": ["agent-dock-supervisor-1", "agent-dock-supervisor-2"],
+  "failover": {
+    "firstWorker": "agent-dock-supervisor-2",
+    "followUpWorker": "agent-dock-supervisor-1",
+    "differentWorker": true,
+    "piSessionArtifactRestored": true,
+    "markerRecovered": true,
+    "firstSettledMs": 4097,
+    "followUpSettledMs": 3273
+  },
+  "concurrency": {
+    "runs": 4,
+    "workerIds": [
+      "agent-dock-supervisor-1",
+      "agent-dock-supervisor-2",
+      "agent-dock-supervisor-1",
+      "agent-dock-supervisor-2"
+    ],
+    "distinctWorkers": 2,
+    "settledMs": [13403, 11903, 6795, 7797]
+  },
+  "totalUsage": {
+    "requests": 6,
+    "inputTokens": 502,
+    "outputTokens": 1275,
+    "cacheReadTokens": 7680,
+    "cacheWriteTokens": 0
+  }
+}

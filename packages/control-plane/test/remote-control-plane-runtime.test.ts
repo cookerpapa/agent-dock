@@ -317,6 +317,68 @@ describe.sequential("remote control-plane runtime composition", () => {
     expect(activities.some((activity) => activity.type === "binding.started")).toBe(false);
   });
 
+  it("creates an independent bounded dispatch lane set for every connected worker", async () => {
+    const activities: RemoteSupervisorWorkerActivity[] = [];
+    const bindings = [1, 2].map((worker): RemoteSupervisorDispatchBinding => ({
+      sandboxId: `82000000-0000-4000-8000-00000000000${String(worker)}`,
+      connectionId: `83000000-0000-4000-8000-00000000000${String(worker)}`,
+      maxConcurrentSessions: worker,
+      supervisorAffinity: {
+        sandboxId: `82000000-0000-4000-8000-00000000000${String(worker)}`,
+        controlPlaneInstanceId: IDS.controlPlane,
+      },
+      backend: {} as RemoteSupervisorDispatchBinding["backend"],
+      leaseCoordinator: {} as RemoteSupervisorDispatchBinding["leaseCoordinator"],
+    }));
+    const runtime = new RemoteSupervisorWorkerRuntime({
+      database,
+      bindingSource: {
+        async listRemoteDispatchBindings() {
+          return bindings;
+        },
+      },
+      maintenanceRunner: {
+        async runMaintenanceCycle() {
+          return {
+            connections: {
+              scannedConnections: 2,
+              expiredConnections: 0,
+              expiredConnectionIds: [],
+            },
+            retirements: [],
+          };
+        },
+      },
+      maxLanesPerConnection: 2,
+      bindingDiscoveryIntervalMs: 10,
+      maintenanceIntervalMs: 10,
+      idlePollMs: 10,
+      failurePollMs: 10,
+      onActivity(activity) {
+        activities.push(activity);
+      },
+    });
+    runtime.start();
+    await waitFor(() => runtime.activeBindingCount === 2);
+    expect(
+      activities.flatMap((activity) =>
+        activity.type === "binding.started"
+          ? [
+              {
+                sandboxId: activity.sandboxId,
+                executionLanes: activity.executionLanes,
+              },
+            ]
+          : [],
+      ),
+    ).toEqual([
+      { sandboxId: bindings[0]!.sandboxId, executionLanes: 1 },
+      { sandboxId: bindings[1]!.sandboxId, executionLanes: 2 },
+    ]);
+    await runtime.stop();
+    expect(runtime.activeBindingCount).toBe(0);
+  });
+
   it("automatically executes, cancels, maintains, and drains a real remote Supervisor", async () => {
     await seed();
     const activities: RemoteSupervisorWorkerActivity[] = [];

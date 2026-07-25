@@ -11,7 +11,9 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
 const suffix = randomBytes(5).toString("hex");
 const projectName = `agent-dock-check-${suffix}`;
-const supervisorId = `agent-dock-check-supervisor-${suffix}`;
+const supervisorIdPrefix = `agent-dock-check-${suffix}-`;
+const supervisorId = `${supervisorIdPrefix}1`;
+const supervisorIds = [`${supervisorIdPrefix}1`, `${supervisorIdPrefix}2`];
 const runtimeDirectory = await mkdtemp(join(tmpdir(), `agent-dock-production-${suffix}-`));
 const hostKubeconfigPath = resolve(
   repositoryRoot,
@@ -41,7 +43,7 @@ const processEnvironment = {
   AGENT_DOCK_GRAFANA_PORT: String(grafanaPort),
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: "true",
   AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: "4",
-  AGENT_DOCK_SUPERVISOR_ID: supervisorId,
+  AGENT_DOCK_SUPERVISOR_ID_PREFIX: supervisorIdPrefix,
   AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER: "kubernetes-gvisor",
   AGENT_DOCK_TEST_KUBERNETES_GVISOR_PROVIDER: "1",
   COMPOSE_PROJECT_NAME: projectName,
@@ -491,10 +493,10 @@ async function psql(query) {
   );
 }
 
-async function latestBoot() {
+async function latestBoot(selectedSupervisorId = supervisorId) {
   const row = await psql(
     `select id::text || '|' || boot_id::text || '|' || state from sandboxes where supervisor_id = ${sqlLiteral(
-      supervisorId,
+      selectedSupervisorId,
     )} order by created_at desc limit 1`,
   );
   const [sandboxId, bootId, state] = row.split("|");
@@ -503,9 +505,21 @@ async function latestBoot() {
   return { sandboxId, bootId, state };
 }
 
-async function waitForLatestBootDifferent(previous) {
+async function sandboxIdentity(sandboxId) {
+  const row = await psql(
+    `select supervisor_id || '|' || boot_id::text from sandboxes where id = ${sqlLiteral(
+      sandboxId,
+    )}::uuid`,
+  );
+  const [resolvedSupervisorId, bootId] = row.split("|");
+  assert(supervisorIds.includes(resolvedSupervisorId));
+  assert.match(bootId, /^[0-9a-f-]{36}$/i);
+  return { supervisorId: resolvedSupervisorId, bootId };
+}
+
+async function waitForLatestBootDifferent(previous, selectedSupervisorId = supervisorId) {
   return waitFor(async () => {
-    const current = await latestBoot();
+    const current = await latestBoot(selectedSupervisorId);
     return current.bootId !== previous.bootId && current.state === "ready" ? current : false;
   }, "fresh Supervisor boot");
 }
@@ -578,11 +592,33 @@ async function managedWorkerIds(filters = []) {
     .filter((pod) => {
       const annotations = pod.metadata?.annotations ?? {};
       return (
-        annotations["agent-dock.io/supervisor-id"] === supervisorId &&
+        supervisorIds.includes(annotations["agent-dock.io/supervisor-id"]) &&
         requested.every(([key, value]) => annotations[key] === value)
       );
     })
     .map((pod) => pod.metadata.name);
+}
+
+async function managedWorkerSupervisorId(workerId) {
+  const pod = JSON.parse(
+    await kubernetesCapture([
+      "get",
+      "pod",
+      workerId,
+      "--namespace",
+      "agent-dock-sandboxes",
+      "--output=json",
+    ]),
+  );
+  const selectedSupervisorId = pod.metadata?.annotations?.["agent-dock.io/supervisor-id"];
+  assert(supervisorIds.includes(selectedSupervisorId));
+  return selectedSupervisorId;
+}
+
+function supervisorService(selectedSupervisorId) {
+  const index = supervisorIds.indexOf(selectedSupervisorId);
+  assert(index >= 0, `unknown Supervisor ${selectedSupervisorId}`);
+  return index === 0 ? "supervisor-host" : "supervisor-host-1";
 }
 
 async function waitForWorker(commandId) {
@@ -764,6 +800,7 @@ async function assertApplicationIdentity() {
     "database-bootstrap",
     "control-plane",
     "supervisor-host",
+    "supervisor-host-1",
     "sandbox-manager",
     "kubernetes-api-relay",
     "github-gateway",
@@ -793,32 +830,43 @@ async function assertExecutionBoundary() {
     assert.equal(Object.hasOwn(platformContainer.NetworkSettings.Networks ?? {}, "bridge"), false);
   }
   const supervisorId = (await serviceContainerIds("supervisor-host"))[0];
+  const supervisorReplicaId = (await serviceContainerIds("supervisor-host-1"))[0];
   const managerId = (await serviceContainerIds("sandbox-manager"))[0];
   const relayId = (await serviceContainerIds("kubernetes-api-relay"))[0];
   const githubGatewayId = (await serviceContainerIds("github-gateway"))[0];
   const providerHostRelayId = (await serviceContainerIds("provider-host-egress-relay"))[0];
   const providerBridgeRelayId = (await serviceContainerIds("provider-egress-relay"))[0];
   assert(supervisorId);
+  assert(supervisorReplicaId);
   assert(managerId);
   assert(relayId);
   assert(githubGatewayId);
   assert(providerHostRelayId);
   assert(providerBridgeRelayId);
-  const [supervisor, manager, relay, githubGateway, providerHostRelay, providerBridgeRelay] =
-    await Promise.all(
-      [
-        supervisorId,
-        managerId,
-        relayId,
-        githubGatewayId,
-        providerHostRelayId,
-        providerBridgeRelayId,
-      ].map(async (id) => JSON.parse(await capture("docker", ["inspect", id])).at(0)),
-    );
+  const [
+    supervisor,
+    supervisorReplica,
+    manager,
+    relay,
+    githubGateway,
+    providerHostRelay,
+    providerBridgeRelay,
+  ] = await Promise.all(
+    [
+      supervisorId,
+      supervisorReplicaId,
+      managerId,
+      relayId,
+      githubGatewayId,
+      providerHostRelayId,
+      providerBridgeRelayId,
+    ].map(async (id) => JSON.parse(await capture("docker", ["inspect", id])).at(0)),
+  );
   const hasDockerSocket = (container) =>
     (container.Mounts ?? []).some((mount) => mount.Destination === "/var/run/docker.sock");
   for (const container of [
     supervisor,
+    supervisorReplica,
     manager,
     relay,
     githubGateway,
@@ -1351,6 +1399,7 @@ async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBT
       "minio",
       "control-plane",
       "supervisor-host",
+      "supervisor-host-1",
       "sandbox-manager",
       "kubernetes-api-relay",
       "github-gateway",
@@ -1400,11 +1449,16 @@ async function performRecoveryDrill({ sessionId, secondTenantSessionId, tenantBT
   const restoredWarmWorkerIds = await managedWorkerIds([
     `label=agent-dock.command-id=${restoredFollowUp.commandId}`,
   ]);
-  assert.deepEqual(await managedWorkerIds(), restoredWarmWorkerIds);
   assert.equal(restoredWarmWorkerIds.length, 1);
-  await composeRunFor(restoredDeployment, ["restart", "supervisor-host"]);
-  await waitForHealthyServiceIn(restoredDeployment, "supervisor-host", 1, 120_000);
-  await waitFor(async () => (await managedWorkerIds()).length === 0, "restored worker removal");
+  const restoredOwnerService = supervisorService(
+    await managedWorkerSupervisorId(restoredWarmWorkerIds[0]),
+  );
+  await composeRunFor(restoredDeployment, ["restart", restoredOwnerService]);
+  await waitForHealthyServiceIn(restoredDeployment, restoredOwnerService, 1, 120_000);
+  await waitFor(
+    async () => !(await managedWorkerIds()).includes(restoredWarmWorkerIds[0]),
+    "restored owned worker removal",
+  );
   report("recovery_drill_passed", {
     backupSizeBytes,
     restoredProjectName,
@@ -1507,6 +1561,7 @@ async function main() {
     waitForHealthyService("minio"),
     waitForHealthyService("control-plane"),
     waitForHealthyService("supervisor-host"),
+    waitForHealthyService("supervisor-host-1"),
     waitForHealthyService("sandbox-manager"),
     waitForHealthyService("kubernetes-api-relay"),
     waitForHealthyService("github-gateway"),
@@ -1533,12 +1588,12 @@ async function main() {
       const body = await response.json();
       const targets = body?.data?.activeTargets;
       return Array.isArray(targets) &&
-        targets.length === 3 &&
+        targets.length === 4 &&
         targets.every((target) => target.health === "up")
         ? targets
         : false;
     },
-    "three healthy Prometheus scrape targets",
+    "four healthy Prometheus scrape targets",
     60_000,
   );
   const grafanaHealth = await fetch(`http://127.0.0.1:${String(grafanaPort)}/api/health`);
@@ -2184,10 +2239,11 @@ async function main() {
     (attempt) => attempt.attemptId === cancellationRun.currentAttemptId,
   );
   assert(cancellationAttempt !== undefined);
+  const cancellationRuntimeIdentity = await sandboxIdentity(cancellationAttempt.sandboxId);
   await assertWorkerSecurity(workerId, secretValues, {
     tenantId: identityA.body.tenantId,
-    supervisorId,
-    bootId: freshBoot.bootId,
+    supervisorId: cancellationRuntimeIdentity.supervisorId,
+    bootId: cancellationRuntimeIdentity.bootId,
     sandboxId: cancellationAttempt.sandboxId,
     commandId: cancellationTurn.commandId,
     sessionId: cancellationSession.sessionId,
@@ -2225,14 +2281,22 @@ async function main() {
   const retainedWarmWorkerIds = await managedWorkerIds([
     `label=agent-dock.command-id=${postRestart.commandId}`,
   ]);
-  assert.deepEqual(await managedWorkerIds(), retainedWarmWorkerIds);
   assert.equal(retainedWarmWorkerIds.length, 1);
+  const retainedOwnerId = await managedWorkerSupervisorId(retainedWarmWorkerIds[0]);
+  const retainedOwnerService = supervisorService(retainedOwnerId);
+  const retainedOwnerBoot = await latestBoot(retainedOwnerId);
 
-  report("retire_retained_warm_worker", { bootId: freshBoot.bootId });
-  await composeRun(["restart", "supervisor-host"]);
-  await waitForHealthyService("supervisor-host");
-  await waitForLatestBootDifferent(freshBoot);
-  await waitFor(async () => (await managedWorkerIds()).length === 0, "all worker removal");
+  report("retire_retained_warm_worker", {
+    bootId: retainedOwnerBoot.bootId,
+    supervisorId: retainedOwnerId,
+  });
+  await composeRun(["restart", retainedOwnerService]);
+  await waitForHealthyService(retainedOwnerService);
+  await waitForLatestBootDifferent(retainedOwnerBoot, retainedOwnerId);
+  await waitFor(
+    async () => !(await managedWorkerIds()).includes(retainedWarmWorkerIds[0]),
+    "owned worker removal",
+  );
 
   const replay = await readSessionEventsUntil(session.sessionId, 0, (event) => event.seq === 22);
   assert.equal(replay.events.length, 22);
@@ -2327,7 +2391,7 @@ async function main() {
     freshBootId: freshBoot.bootId,
     durableEvents: 22,
     registeredTenants: 4,
-    prometheusTargets: 3,
+    prometheusTargets: 4,
     jaegerServices: jaegerServices.length,
     productWorkspaceVersion: productEvidence.currentVersion.versionNumber,
     productAuditEvents: productEvidence.auditEvents,

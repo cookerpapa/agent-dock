@@ -43,6 +43,7 @@ export type FakeModelServerOptions = {
   apiKey?: string;
   defaultScenario?: FakeModelScenario;
   maxRequestBytes?: number;
+  promptTokens?: number;
 };
 
 type ChatCompletionRequest = {
@@ -170,6 +171,7 @@ function usageChunk(
   created: number,
   model: string,
   completionTokens: number,
+  promptTokens: number,
 ): Record<string, unknown> {
   return {
     id: requestId,
@@ -178,9 +180,9 @@ function usageChunk(
     model,
     choices: [],
     usage: {
-      prompt_tokens: 12,
+      prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
-      total_tokens: 12 + completionTokens,
+      total_tokens: promptTokens + completionTokens,
       prompt_tokens_details: {
         cached_tokens: 2,
       },
@@ -363,6 +365,7 @@ export class FakeModelServer {
   readonly #apiKey: string;
   readonly #defaultScenario: FakeModelScenario;
   readonly #maxRequestBytes: number;
+  readonly #promptTokens: number;
   readonly #server: Server;
   readonly #sockets = new Set<Socket>();
   readonly #heldResponses = new Map<ServerResponse, MutableObservation>();
@@ -383,6 +386,7 @@ export class FakeModelServer {
       options.maxRequestBytes ?? 1_048_576,
       "maxRequestBytes",
     );
+    this.#promptTokens = parsePositiveSafeInteger(options.promptTokens ?? 12, "promptTokens");
     this.#server = createServer((request, response) => {
       void this.#handle(request, response).catch((error: unknown) => {
         if (response.headersSent) {
@@ -743,7 +747,7 @@ export class FakeModelServer {
       completionChunk(requestId, created, model, { content: text.slice(splitAt) }),
     );
     writeEvent(response, completionChunk(requestId, created, model, {}, "stop"));
-    writeEvent(response, usageChunk(requestId, created, model, 5));
+    writeEvent(response, usageChunk(requestId, created, model, 5, this.#promptTokens));
     writeDone(response);
     response.end();
   }
@@ -812,7 +816,7 @@ export class FakeModelServer {
       }),
     );
     writeEvent(response, completionChunk(requestId, created, model, {}, "tool_calls"));
-    writeEvent(response, usageChunk(requestId, created, model, 4));
+    writeEvent(response, usageChunk(requestId, created, model, 4, this.#promptTokens));
     writeDone(response);
     response.end();
   }

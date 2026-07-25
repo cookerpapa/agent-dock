@@ -126,7 +126,8 @@ describe("SupervisorHostRuntime", () => {
     const server = Fastify({ logger: false });
     const provisioner = new SupervisorBootProvisioner({
       database,
-      allowedSupervisorId: SUPERVISOR_ID,
+      allowedSupervisorIdPrefix: "supervisor-host-runtime-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
       maximumCapacity: 2,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
@@ -168,6 +169,7 @@ describe("SupervisorHostRuntime", () => {
       databaseUrl: connectionString,
       managementHost: "127.0.0.1",
       managementPort: 0,
+      managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
       maxConcurrentSessions: 2,
       sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
       sandboxManagerRequestTimeoutMs: 300_000,

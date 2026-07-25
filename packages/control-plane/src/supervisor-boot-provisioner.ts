@@ -20,7 +20,8 @@ const DEFAULT_MAX_BODY_BYTES = 16 * 1_024;
 
 export type SupervisorBootProvisionerOptions = {
   database: Kysely<Database>;
-  allowedSupervisorId: string;
+  allowedSupervisorIdPrefix: string;
+  managementBaseUrlTemplate: string;
   maximumCapacity: number;
   enrollmentToken: string;
   credentialTtlMs?: number;
@@ -78,10 +79,51 @@ function validDate(clock: () => Date): Date {
   return value;
 }
 
-function nonEmpty(value: string, name: string): string {
-  if (value.trim().length === 0 || value.length > 256) {
-    throw new TypeError(`${name} must be a bounded non-empty string`);
+function supervisorIdPrefix(value: string): string {
+  if (!/^[a-z0-9](?:[-a-z0-9]{0,62})-$/.test(value)) {
+    throw new TypeError(
+      "allowedSupervisorIdPrefix must be a lowercase DNS-label prefix ending in a hyphen",
+    );
   }
+  return value;
+}
+
+function supervisorId(value: string, prefix: string): string {
+  if (
+    !value.startsWith(prefix) ||
+    !/^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$/.test(value) ||
+    value.length > 63
+  ) {
+    throw new SupervisorBootProvisionError(
+      "provision_policy_rejected",
+      "Supervisor provision request is outside deployment policy",
+      403,
+      false,
+    );
+  }
+  return value;
+}
+
+function managementUrl(value: string): string {
+  const parsed = new URL(value);
+  if (
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "/" && parsed.pathname !== "")
+  ) {
+    throw new TypeError("Supervisor management base URL is invalid");
+  }
+  return parsed.toString();
+}
+
+function managementUrlTemplate(value: string): string {
+  if (value.split("{supervisorId}").length !== 2) {
+    throw new TypeError("managementBaseUrlTemplate must contain {supervisorId} exactly once");
+  }
+  managementUrl(value.replace("{supervisorId}", "pi-worker-validation"));
   return value;
 }
 
@@ -125,6 +167,7 @@ function sameProvision(
   request: SupervisorBootProvisionRequest,
   credential: CredentialRow,
   sandbox: { max_concurrent_sessions: number } | undefined,
+  host: { management_base_url: string } | undefined,
 ): boolean {
   return (
     credential.credential_id === request.credentialId &&
@@ -133,13 +176,15 @@ function sameProvision(
     credential.sandbox_id === request.sandboxId &&
     credential.supervisor_id === request.supervisorId &&
     credential.boot_id === request.bootId &&
-    sandbox?.max_concurrent_sessions === request.maxConcurrentSessions
+    sandbox?.max_concurrent_sessions === request.maxConcurrentSessions &&
+    host?.management_base_url === managementUrl(request.managementBaseUrl)
   );
 }
 
 export class SupervisorBootProvisioner {
   readonly #database: Kysely<Database>;
-  readonly #allowedSupervisorId: string;
+  readonly #allowedSupervisorIdPrefix: string;
+  readonly #managementBaseUrlTemplate: string;
   readonly #maximumCapacity: number;
   readonly #enrollmentDigest: Buffer;
   readonly #credentialTtlMs: number;
@@ -147,7 +192,8 @@ export class SupervisorBootProvisioner {
 
   constructor(options: SupervisorBootProvisionerOptions) {
     this.#database = options.database;
-    this.#allowedSupervisorId = nonEmpty(options.allowedSupervisorId, "allowedSupervisorId");
+    this.#allowedSupervisorIdPrefix = supervisorIdPrefix(options.allowedSupervisorIdPrefix);
+    this.#managementBaseUrlTemplate = managementUrlTemplate(options.managementBaseUrlTemplate);
     this.#maximumCapacity = positiveInteger(options.maximumCapacity, "maximumCapacity", 256);
     this.#enrollmentDigest = tokenDigest(boundedToken(options.enrollmentToken, "enrollmentToken"));
     this.#credentialTtlMs = positiveInteger(
@@ -183,8 +229,16 @@ export class SupervisorBootProvisioner {
         false,
       );
     }
+    const provisionedSupervisorId = supervisorId(
+      request.supervisorId,
+      this.#allowedSupervisorIdPrefix,
+    );
+    const provisionedManagementBaseUrl = managementUrl(request.managementBaseUrl);
+    const expectedManagementBaseUrl = managementUrl(
+      this.#managementBaseUrlTemplate.replace("{supervisorId}", provisionedSupervisorId),
+    );
     if (
-      request.supervisorId !== this.#allowedSupervisorId ||
+      provisionedManagementBaseUrl !== expectedManagementBaseUrl ||
       request.maxConcurrentSessions > this.#maximumCapacity
     ) {
       throw new SupervisorBootProvisionError(
@@ -200,8 +254,9 @@ export class SupervisorBootProvisioner {
       await transaction
         .insertInto("supervisor_hosts")
         .values({
-          supervisor_id: this.#allowedSupervisorId,
+          supervisor_id: provisionedSupervisorId,
           maximum_capacity: this.#maximumCapacity,
+          management_base_url: provisionedManagementBaseUrl,
           created_at: now,
           updated_at: now,
         })
@@ -209,11 +264,14 @@ export class SupervisorBootProvisioner {
         .executeTakeFirst();
       const host = await transaction
         .selectFrom("supervisor_hosts")
-        .select("maximum_capacity")
-        .where("supervisor_id", "=", this.#allowedSupervisorId)
+        .select(["maximum_capacity", "management_base_url"])
+        .where("supervisor_id", "=", provisionedSupervisorId)
         .forUpdate()
         .executeTakeFirstOrThrow();
-      if (host.maximum_capacity !== this.#maximumCapacity) {
+      if (
+        host.maximum_capacity !== this.#maximumCapacity ||
+        host.management_base_url !== provisionedManagementBaseUrl
+      ) {
         throw new SupervisorBootProvisionError(
           "provision_host_policy_conflict",
           "Stored Supervisor host policy does not match deployment configuration",
@@ -228,8 +286,13 @@ export class SupervisorBootProvisioner {
           .select(["max_concurrent_sessions"])
           .where("id", "=", conflict.sandbox_id)
           .executeTakeFirst();
+        const conflictingHost = await transaction
+          .selectFrom("supervisor_hosts")
+          .select("management_base_url")
+          .where("supervisor_id", "=", request.supervisorId)
+          .executeTakeFirst();
         if (
-          sameProvision(request, conflict, sandbox) &&
+          sameProvision(request, conflict, sandbox, conflictingHost) &&
           conflict.revoked_at === null &&
           new Date(conflict.expires_at).valueOf() > now.valueOf()
         ) {

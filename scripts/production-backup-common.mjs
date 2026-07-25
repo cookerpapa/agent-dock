@@ -18,6 +18,8 @@ export const BACKUP_VOLUMES = [
   "minio-data",
   "supervisor-boot",
   "supervisor-spool",
+  "supervisor-1-boot",
+  "supervisor-1-spool",
   "prometheus-data",
   "grafana-data",
   "jaeger-data",

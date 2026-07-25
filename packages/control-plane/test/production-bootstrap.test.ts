@@ -194,16 +194,17 @@ describe.sequential("production bootstrap and configuration", () => {
         "model-master-key",
         Buffer.alloc(32, 5).toString("base64url"),
       ),
-      AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
+      AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: "http://supervisor-host:4100",
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: "http://{supervisorId}:4100",
       AGENT_DOCK_IMAGE_REVISION: "sha-0123456789abcdef",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
       HOST: "0.0.0.0",
     };
     const runtime = await loadProductionControlPlaneConfig(environment);
     expect(runtime).toMatchObject({
-      supervisorManagementBaseUrl: "http://supervisor-host:4100/",
+      supervisorIdPrefix: "pi-worker-",
+      supervisorManagementBaseUrlTemplate: "http://{supervisorId}:4100",
       host: "0.0.0.0",
       port: 3000,
       platformModelSourceTenantId: CONFIG.tenantId,

@@ -31,13 +31,22 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
   AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
-  AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
+  AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
   AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR: ${AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR:-8}
   AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
   AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
-  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL: http://supervisor-host:4100
+  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: http://{supervisorId}:4100
+  AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
+  AWS_EC2_METADATA_DISABLED: "true"
+  AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
+  AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
+  AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
+  AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX: production/v1
+  AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
+  AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
+  AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
   AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
   AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: ${AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED:-true}
@@ -87,6 +96,10 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
     target: /run/agent-dock-secrets/metrics-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
+    target: /run/agent-dock-secrets/aws-credentials
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
@@ -282,6 +295,7 @@ services:
       - api
       - database
       - management
+      - object-storage
       - github-control
       - observability
     healthcheck:
@@ -429,13 +443,13 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,supervisor-host
+      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
       AWS_EC2_METADATA_DISABLED: "true"
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
       AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
-      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID:-agent-dock-supervisor-1}
+      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
@@ -444,6 +458,7 @@ services:
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1:4100
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-2}
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
@@ -507,13 +522,15 @@ services:
         target: /run/agent-dock-secrets/metrics-token
         read_only: true
     networks:
-      - management
-      - database
-      - object-storage
-      - sandbox-control
-      - model-egress
-      - github-control
-      - observability
+      management:
+        aliases:
+          - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
+      database: {}
+      object-storage: {}
+      sandbox-control: {}
+      model-egress: {}
+      github-control: {}
+      observability: {}
     healthcheck:
       test:
         [
@@ -536,6 +553,26 @@ services:
     stop_grace_period: 45s
     logging: *bounded-logging
 
+  supervisor-host-1:
+    extends:
+      service: supervisor-host
+    environment:
+      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2:4100
+    volumes:
+      - supervisor-1-boot:/var/lib/agent-dock/boot-volume
+      - supervisor-1-spool:/var/lib/agent-dock/spool-volume
+    networks:
+      management:
+        aliases: !override
+          - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2
+      database: {}
+      object-storage: {}
+      sandbox-control: {}
+      model-egress: {}
+      github-control: {}
+      observability: {}
+
   supervisor-volume-bootstrap:
     image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
     restart: "no"
@@ -543,13 +580,15 @@ services:
     command:
       - |
         owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
-        chown -R "$${owner}" /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume
-        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume -type d -exec chmod 0700 {} +
-        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume -type f -exec chmod 0600 {} +
+        chown -R "$${owner}" /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1
+        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1 -type d -exec chmod 0700 {} +
+        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1 -type f -exec chmod 0600 {} +
     user: "0:0"
     volumes:
       - supervisor-boot:/var/lib/agent-dock/boot-volume
       - supervisor-spool:/var/lib/agent-dock/spool-volume
+      - supervisor-1-boot:/var/lib/agent-dock/boot-volume-1
+      - supervisor-1-spool:/var/lib/agent-dock/spool-volume-1
     network_mode: none
     read_only: true
     init: true
@@ -809,6 +848,8 @@ services:
         condition: service_healthy
       supervisor-host:
         condition: service_healthy
+      supervisor-host-1:
+        condition: service_healthy
       sandbox-manager:
         condition: service_healthy
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
@@ -1013,6 +1054,8 @@ volumes:
   minio-data: {}
   supervisor-boot: {}
   supervisor-spool: {}
+  supervisor-1-boot: {}
+  supervisor-1-spool: {}
   prometheus-data: {}
   grafana-data: {}
   jaeger-data: {}

@@ -250,6 +250,7 @@ export class SupervisorHostRuntime {
         credentialId: this.#idGenerator(),
         credentialSha256: createHash("sha256").update(secret).digest("hex"),
         maxConcurrentSessions: this.#config.maxConcurrentSessions,
+        managementBaseUrl: this.#config.managementAdvertisedBaseUrl,
       };
       await this.#provisioningClient.provision(request);
 

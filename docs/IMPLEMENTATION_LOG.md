@@ -2093,3 +2093,29 @@
   `completed` 才表示 Workspace head 与 Run state 已在最终事务中提交。真实验收
   现在显式等待第二个边界后再读取 Workspace version，避免把合法的短暂提交窗口
   误报为数据丢失。
+# 2026-07-25: Horizontal Pi Worker pool and native compact recovery
+
+- Replaced the exact single-Supervisor enrollment policy with a bounded Worker
+  ID prefix and operator-owned management URL template.
+- Registered and persisted each Worker's private management endpoint, then
+  routed exact-boot retirement to the owning Worker.
+- Moved Control Plane artifact reads to the shared S3-compatible store.
+- Production now starts two trusted Pi Workers with independent boot ledgers,
+  event spools, identities, capacity, and failure domains.
+- Added multi-connection lane tests and a real pinned-Pi test that forces native
+  threshold compaction, captures its JSONL entry, restores it in a fresh Pi RPC
+  process, and continues the conversation.
+- Recorded the precise PostgreSQL projection versus Pi JSONL checkpoint
+  persistence contract in ADR-0054 and
+  `docs/PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md`.
+- Added a real-model Worker-pool acceptance gate. It stopped the Worker that
+  handled the first Run, restored the next Run on the surviving Worker, and
+  recovered a random marker from the prior Pi checkpoint. Four simultaneous
+  follow-up Sessions then distributed `1,2,1,2` across the two connections.
+  Six real DeepSeek requests consumed 502 input, 1,275 output, and 7,680
+  cache-read tokens; sanitized evidence is stored in
+  `docs/reports/pi-worker-pool-acceptance-latest.{json,md}`.
+- Fixed Compose network-alias inheritance so the second Worker cannot answer
+  the first Worker's exact management address. The full production drill now
+  restarts the owning replica, preserves the peer replica's prewarm resources,
+  and verifies exact old-boot retirement.

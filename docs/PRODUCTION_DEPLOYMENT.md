@@ -312,15 +312,16 @@ use a Kubernetes Pod.
 Cold sessions consume no Pi process, Tool Sandbox, socket, timer, or dedicated
 thread.
 
-Persistent state is split into seven declared volumes:
+Persistent state is split into nine declared volumes:
 
 - `postgres-data`: tenants, encrypted model credentials, token usage, sessions,
   commands, leases, events, checkpoint metadata, Supervisor generations, and
   retirement work;
 - `minio-data`: immutable Pi JSONL and workspace checkpoint bytes;
-- `supervisor-boot`: fsynced current/recent boot ownership ledger;
-- `supervisor-spool`: active unacknowledged event publications and permanently
-  stale quarantine evidence;
+- `supervisor-boot` and `supervisor-1-boot`: independent fsynced current/recent
+  boot ownership ledgers for the two bundled Pi Workers;
+- `supervisor-spool` and `supervisor-1-spool`: independent active
+  unacknowledged event publications and permanently stale quarantine evidence;
 - `prometheus-data`: retained platform time-series evidence;
 - `grafana-data`: dashboard/operator state;
 - `jaeger-data`: retained trace evidence.
@@ -595,11 +596,15 @@ checksummed rejection record, reconnects the same Supervisor boot, and accepts
 future work in a new session. This is intentional at-least-once delivery safety,
 not a transparent exactly-once claim.
 
-One Supervisor process advertises a default capacity of two. Do not scale the
-`supervisor-host` service while it uses one stable `AGENT_DOCK_SUPERVISOR_ID` and
-shared boot volume. Control-plane replicas can be tested with Compose scaling,
-but the bundled ingress and database sizing remain a single-host deployment;
-load-test before treating extra replicas as an availability SLA.
+The bundled topology starts two independent Pi Workers, each advertising a
+default capacity of two and using a separate boot/spool volume. Enrollment
+admits identities under `AGENT_DOCK_SUPERVISOR_ID_PREFIX`; private management
+routing must match `AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE`. Additional
+Workers can be deployed as independent containers or StatefulSet Pods as long
+as each has a unique ID, independently durable boot/spool storage, and a
+management address matching that template. The bundled ingress and database
+sizing remain a single-host deployment; load-test before treating extra
+replicas as an availability SLA.
 
 Alert operationally on prolonged unhealthy/restarting services, a growing
 retirement queue, repeated `connection_closed` failures, non-empty active spool
@@ -773,7 +778,7 @@ portability and secret absence, and replays 22 durable ordered events. It then
 exercises the built Web/Session inspector API surface, safe file and patch
 reads, Run usage/tests/context, owner activity, and fork/archive/rollback. The
 gate finally shuts the populated stack down, creates an authenticated encrypted
-seven-volume backup, restores it under a new random Compose project, verifies
+nine-volume backup, restores it under a new random Compose project, verifies
 both tenants and all 22 events, completes another Pi turn, and removes both
 projects' exact containers, networks, volumes, and runtime paths.
 

@@ -22,6 +22,7 @@ describe("Supervisor host production configuration", () => {
     roots.push(root);
     const config = await loadSupervisorHostConfig({
       AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: "http://supervisor-production-1:4100",
       AGENT_DOCK_CONTROL_PLANE_URL: "http://control-plane:3000",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
@@ -61,6 +62,7 @@ describe("Supervisor host production configuration", () => {
       supervisorWebSocketUrl: "ws://control-plane:3000/internal/v1/supervisor",
       maxConcurrentSessions: 3,
       managementPort: 4100,
+      managementAdvertisedBaseUrl: "http://supervisor-production-1:4100/",
       sandboxManagerBaseUrl: "http://sandbox-manager:4300/",
       trustedWorkspaceDirectory: "/workspace",
     });
@@ -83,6 +85,7 @@ describe("Supervisor host production configuration", () => {
     await expect(
       loadSupervisorHostConfig({
         AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
+        AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: "https://supervisor-production-1:4100",
         AGENT_DOCK_CONTROL_PLANE_URL: "https://control-plane.example.test",
         AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: enrollment,
         AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: await secret(

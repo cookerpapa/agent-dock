@@ -5,10 +5,11 @@ import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { sql } from "kysely";
 import {
-  HttpSandboxAssignmentInventory,
   HttpSupervisorManagementClient,
-  HttpSupervisorOwnerBoundary,
+  RoutedHttpSandboxAssignmentInventory,
+  RoutedHttpSupervisorOwnerBoundary,
 } from "./http-supervisor-management.ts";
+import { createS3CheckpointObjectStoreFromEnvironment } from "./s3-checkpoint-object-store.ts";
 import { PostgresSessionEventNotifications } from "./postgres-session-event-notifications.ts";
 import {
   PostgresSupervisorCredentialAuthorizer,
@@ -54,6 +55,7 @@ export async function startControlPlane(): Promise<void> {
   const notifications = new PostgresSessionEventNotifications({
     connectionString: config.databaseUrl,
   });
+  const objectStore = createS3CheckpointObjectStoreFromEnvironment();
   let runtime: RemoteControlPlaneRuntime | undefined;
   try {
     await verifyBootstrap(database);
@@ -79,11 +81,35 @@ export async function startControlPlane(): Promise<void> {
       secureCookie: config.webSessionCookieSecure,
       sessionTtlMs: config.webSessionTtlMs,
     });
-    const managementClient = new HttpSupervisorManagementClient({
-      baseUrl: config.supervisorManagementBaseUrl,
-      managementToken: config.supervisorManagementToken,
-      allowInsecureHttp: config.allowInsecureInternalHttp,
-    });
+    await objectStore.checkHealth();
+    const managementClients = new Map<string, HttpSupervisorManagementClient>();
+    const resolveManagementClient = async (identity: {
+      supervisorId: string;
+      bootId: string;
+      sandboxId: string;
+    }): Promise<HttpSupervisorManagementClient> => {
+      const host = await database
+        .selectFrom("supervisor_hosts as host")
+        .innerJoin("sandboxes as sandbox", "sandbox.supervisor_id", "host.supervisor_id")
+        .select("host.management_base_url")
+        .where("sandbox.id", "=", identity.sandboxId)
+        .where("sandbox.supervisor_id", "=", identity.supervisorId)
+        .where("sandbox.boot_id", "=", identity.bootId)
+        .executeTakeFirst();
+      if (host === undefined) {
+        throw new Error("Supervisor management identity is not registered");
+      }
+      let client = managementClients.get(host.management_base_url);
+      if (client === undefined) {
+        client = new HttpSupervisorManagementClient({
+          baseUrl: host.management_base_url,
+          managementToken: config.supervisorManagementToken,
+          allowInsecureHttp: config.allowInsecureInternalHttp,
+        });
+        managementClients.set(host.management_base_url, client);
+      }
+      return client;
+    };
     const githubGateway =
       config.githubGatewayBaseUrl === undefined || config.githubGatewayServiceToken === undefined
         ? undefined
@@ -94,7 +120,8 @@ export async function startControlPlane(): Promise<void> {
           });
     const provisioner = new SupervisorBootProvisioner({
       database,
-      allowedSupervisorId: config.supervisorId,
+      allowedSupervisorIdPrefix: config.supervisorIdPrefix,
+      managementBaseUrlTemplate: config.supervisorManagementBaseUrlTemplate,
       maximumCapacity: config.supervisorMaximumCapacity,
       enrollmentToken: config.supervisorEnrollmentToken,
     });
@@ -114,9 +141,9 @@ export async function startControlPlane(): Promise<void> {
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),
-      supervisorOwnerBoundary: new HttpSupervisorOwnerBoundary(managementClient),
+      supervisorOwnerBoundary: new RoutedHttpSupervisorOwnerBoundary(resolveManagementClient),
       assignmentInventoryFactory: (identity) =>
-        new HttpSandboxAssignmentInventory(managementClient, identity.sandboxId),
+        new RoutedHttpSandboxAssignmentInventory(resolveManagementClient, identity),
       supervisorProvisioningGateway: provisioningGateway,
       productionHttpGateway: httpGateway,
       publicRegistration: registrationConfiguration,
@@ -124,7 +151,7 @@ export async function startControlPlane(): Promise<void> {
       modelCredentialVault,
       platformOperatorTenantId: config.platformModelSourceTenantId,
       environmentImageRevision: config.environmentImageRevision,
-      artifactReader: { get: (objectKey) => managementClient.readArtifact(objectKey) },
+      artifactReader: { get: (objectKey) => objectStore.get(objectKey) },
       ...(githubGateway === undefined ? {} : { githubGateway }),
       ...(config.githubGatewayServiceToken === undefined
         ? {}
@@ -156,6 +183,7 @@ export async function startControlPlane(): Promise<void> {
       if (closing) return;
       closing = true;
       await runtime?.close();
+      objectStore.destroy();
       await database.destroy();
       await observability.close();
     };
@@ -169,6 +197,7 @@ export async function startControlPlane(): Promise<void> {
   } catch (error: unknown) {
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);
+    objectStore.destroy();
     await database.destroy();
     await observability.close().catch(() => undefined);
     throw error;

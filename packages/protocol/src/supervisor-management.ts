@@ -29,6 +29,7 @@ export const SupervisorBootProvisionRequestSchema = Type.Object(
     credentialId: UuidSchema,
     credentialSha256: Sha256Schema,
     maxConcurrentSessions: Type.Integer({ minimum: 1, maximum: 256 }),
+    managementBaseUrl: Type.String({ minLength: 8, maxLength: 2_048 }),
   },
   { additionalProperties: false },
 );

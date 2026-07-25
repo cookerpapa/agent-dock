@@ -34,20 +34,24 @@ function credential() {
   };
 }
 
-function request(options: { capacity?: number } = {}) {
+function request(
+  options: { capacity?: number; supervisorId?: string; managementBaseUrl?: string } = {},
+) {
   const connectionCredential = credential();
+  const supervisorId = options.supervisorId ?? SUPERVISOR_ID;
   return {
     connectionCredential,
     body: {
       protocolVersion: 1 as const,
       type: "supervisor.boot.provision" as const,
       requestId: uuid(),
-      supervisorId: SUPERVISOR_ID,
+      supervisorId,
       bootId: uuid(),
       sandboxId: uuid(),
       credentialId: connectionCredential.id,
       credentialSha256: connectionCredential.sha256,
       maxConcurrentSessions: options.capacity ?? 2,
+      managementBaseUrl: options.managementBaseUrl ?? `http://${supervisorId}:4100`,
     },
   };
 }
@@ -79,7 +83,8 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const now = new Date("2026-07-19T10:00:00.000Z");
     const provisioner = new SupervisorBootProvisioner({
       database,
-      allowedSupervisorId: SUPERVISOR_ID,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       credentialTtlMs: 60_000,
@@ -131,7 +136,8 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const now = new Date("2026-07-19T11:00:00.000Z");
     const provisioner = new SupervisorBootProvisioner({
       database,
-      allowedSupervisorId: SUPERVISOR_ID,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       clock: () => now,
@@ -172,10 +178,37 @@ describe.sequential("production Supervisor boot provisioning", () => {
     expect(activeCredentials).toHaveLength(1);
   });
 
+  it("enrolls independent worker identities and rejects management endpoint spoofing", async () => {
+    const provisioner = new SupervisorBootProvisioner({
+      database,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      maximumCapacity: 4,
+      enrollmentToken: ENROLLMENT_TOKEN,
+    });
+    const workerA = request({ supervisorId: "production-supervisor-a" });
+    const workerB = request({ supervisorId: "production-supervisor-b" });
+    await expect(
+      Promise.all([provisioner.provision(workerA.body), provisioner.provision(workerB.body)]),
+    ).resolves.toHaveLength(2);
+    await expect(
+      provisioner.provision(
+        request({
+          supervisorId: "production-supervisor-c",
+          managementBaseUrl: "http://metadata.internal:4100",
+        }).body,
+      ),
+    ).rejects.toMatchObject({ code: "provision_policy_rejected", statusCode: 403 });
+    await expect(
+      provisioner.provision(request({ supervisorId: "unexpected-worker" }).body),
+    ).rejects.toMatchObject({ code: "provision_policy_rejected", statusCode: 403 });
+  });
+
   it("serves the bounded internal endpoint without exposing raw errors", async () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
-      allowedSupervisorId: SUPERVISOR_ID,
+      allowedSupervisorIdPrefix: "production-supervisor-",
+      managementBaseUrlTemplate: "http://{supervisorId}:4100",
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       clock: () => new Date("2026-07-19T12:00:00.000Z"),
