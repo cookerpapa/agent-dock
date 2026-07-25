@@ -75,6 +75,11 @@ npm run kubernetes:pi-workers:status
 npm run kubernetes:pi-workers:check
 ```
 
+Re-running `up` while Kubernetes is already active performs a drained in-place
+Worker revision upgrade without overwriting the original Compose rollback
+state. If the new revision fails its readiness or Temporal gates, the operator
+rolls the Helm release and Pods back to the previously deployed revision.
+
 The local kubeconfig and switch state are private runtime files under
 `deploy/production/runtime/kubernetes/` and are excluded from Git.
 

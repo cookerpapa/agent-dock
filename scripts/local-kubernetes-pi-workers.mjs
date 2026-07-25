@@ -944,6 +944,48 @@ async function setTemporalCurrentVersion(revision) {
   ]);
 }
 
+async function currentHelmRevision() {
+  const status = await capture(
+    helm,
+    ["status", releaseName, "--namespace", workerNamespace, "--output", "json"],
+    { environment: kubeEnvironment() },
+  ).catch(() => undefined);
+  if (status === undefined) return undefined;
+  const revision = JSON.parse(status).version;
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error("Current Pi Worker Helm revision is invalid");
+  }
+  return revision;
+}
+
+async function rollbackKubernetesWorkerPool(revision) {
+  await run(
+    helm,
+    ["rollback", releaseName, String(revision), "--namespace", workerNamespace, "--timeout", "7m"],
+    { environment: kubeEnvironment() },
+  );
+  await kubectlRun([
+    "--namespace",
+    workerNamespace,
+    "delete",
+    "pod",
+    "--selector",
+    `agent-dock.io/worker-pool=${poolName}`,
+    "--wait=true",
+    "--timeout=2m",
+  ]);
+  await kubectlRun([
+    "--namespace",
+    workerNamespace,
+    "wait",
+    "--for=condition=Ready",
+    "pod",
+    "--selector",
+    `agent-dock.io/worker-pool=${poolName}`,
+    "--timeout=7m",
+  ]);
+}
+
 async function checkDeployment(expectedRevision) {
   await ensureK3d();
   const runtimeEnvironment = await readRuntimeEnvironment();
@@ -1053,9 +1095,13 @@ async function up() {
   await ensureCluster();
   const resolvedTargets = await bridgeComposeServices();
   const { tag } = await buildAndImportWorkerImage(revision);
+  const upgradingKubernetes = runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes";
+  const previousHelmRevision = upgradingKubernetes ? await currentHelmRevision() : undefined;
   let previous;
   try {
-    previous = await switchControlPlaneToKubernetes(runtimeEnvironment, revision);
+    if (!upgradingKubernetes) {
+      previous = await switchControlPlaneToKubernetes(runtimeEnvironment, revision);
+    }
     await deployWorkerPool(revision, tag, resolvedTargets, runtimeEnvironment);
     await setTemporalCurrentVersion(revision);
     await checkDeployment(revision);
@@ -1063,6 +1109,10 @@ async function up() {
     if (previous !== undefined) {
       await restoreComposeWorkers(previous).catch((rollbackError) => {
         process.stderr.write(`Automatic Compose rollback failed: ${String(rollbackError)}\n`);
+      });
+    } else if (previousHelmRevision !== undefined) {
+      await rollbackKubernetesWorkerPool(previousHelmRevision).catch((rollbackError) => {
+        process.stderr.write(`Automatic Kubernetes rollback failed: ${String(rollbackError)}\n`);
       });
     }
     throw error;
