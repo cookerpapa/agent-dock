@@ -789,6 +789,30 @@ async function migrateLegacyMutableClaimTemplate() {
   ]);
 }
 
+async function waitForWorkerPodInventory(timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  const expected = new Set(workerIds);
+  while (Date.now() < deadline) {
+    const pods = await kubectlCapture([
+      "--namespace",
+      workerNamespace,
+      "get",
+      "pods",
+      "--selector",
+      `agent-dock.io/worker-pool=${poolName}`,
+      "--output",
+      "json",
+    ])
+      .then((output) => JSON.parse(output).items)
+      .catch(() => []);
+    if (pods.length === workerReplicas && pods.every((pod) => expected.has(pod.metadata?.name))) {
+      return;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  throw new Error(`Kubernetes did not create all ${String(workerReplicas)} expected Worker Pods`);
+}
+
 async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvironment) {
   await applyWorkerSecret();
   await migrateLegacyMutableClaimTemplate();
@@ -872,6 +896,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--wait=true",
     "--timeout=2m",
   ]);
+  await waitForWorkerPodInventory();
   await kubectlRun([
     "--namespace",
     workerNamespace,
@@ -974,6 +999,7 @@ async function rollbackKubernetesWorkerPool(revision) {
     "--wait=true",
     "--timeout=2m",
   ]);
+  await waitForWorkerPodInventory();
   await kubectlRun([
     "--namespace",
     workerNamespace,
