@@ -2387,6 +2387,13 @@
   fresh SDK activation and the v2 Pi session manifest integrity suite. This
   validates that recovery uses Pi's native JSONL session tree, including its
   compaction entry, rather than rebuilding `messages[]` from UI projections.
+- A final revision rollout exposed a short Traefik endpoint-propagation race
+  after both StatefulSet Pods became Ready. The release automatically rolled
+  back, but the observation also exposed that Temporal current-version
+  promotion preceded the management-route gate. The operator now retries
+  management reachability and enrollment, validates all serving paths before
+  promotion, confirms the exact current Build ID, and restores both Helm and
+  Temporal routing state on any post-promotion failure.
 - This proves a functional single-machine Kubernetes deployment and the
   multi-node-ready control/data contract. It does not yet claim real
   multi-node node-loss, storage failover or cross-zone high availability;

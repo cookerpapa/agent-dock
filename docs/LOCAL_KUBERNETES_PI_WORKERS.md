@@ -79,6 +79,10 @@ Re-running `up` while Kubernetes is already active performs a drained in-place
 Worker revision upgrade without overwriting the original Compose rollback
 state. If the new revision fails its readiness or Temporal gates, the operator
 rolls the Helm release and Pods back to the previously deployed revision.
+Traffic promotion happens only after the Pod, management-route, enrollment and
+Temporal-registration gates pass. If a failure occurs after promotion, the
+operator restores both the previous Helm revision and Temporal current Build
+ID, so routing cannot remain pointed at an unavailable Worker revision.
 
 The local kubeconfig and switch state are private runtime files under
 `deploy/production/runtime/kubernetes/` and are excluded from Git.

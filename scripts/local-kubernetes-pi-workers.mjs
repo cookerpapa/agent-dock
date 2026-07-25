@@ -909,30 +909,9 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
   ]);
 }
 
-async function setTemporalCurrentVersion(revision) {
+async function temporalDeploymentDescription() {
   const temporal = await composeContainer("temporal");
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    const deployment = await capture("docker", [
-      "exec",
-      temporal,
-      "temporal",
-      "worker",
-      "deployment",
-      "describe",
-      "--address",
-      "127.0.0.1:7233",
-      "--namespace",
-      "agent-dock",
-      "--name",
-      "agent-dock-pi-workers",
-      "--output",
-      "json",
-    ]).catch(() => undefined);
-    if (deployment?.includes(revision)) break;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
-  }
-  const deployment = await capture("docker", [
+  const output = await capture("docker", [
     "exec",
     temporal,
     "temporal",
@@ -947,8 +926,30 @@ async function setTemporalCurrentVersion(revision) {
     "agent-dock-pi-workers",
     "--output",
     "json",
-  ]).catch(() => undefined);
-  if (!deployment?.includes(revision)) {
+  ]);
+  return JSON.parse(output);
+}
+
+function temporalDeploymentContainsBuild(deployment, revision) {
+  return deployment.versionSummaries?.some((version) => version.BuildID === revision) === true;
+}
+
+async function currentTemporalBuildId() {
+  const deployment = await temporalDeploymentDescription().catch(() => undefined);
+  const buildId = deployment?.routingConfig?.currentVersionBuildID;
+  return typeof buildId === "string" && buildId.length > 0 ? buildId : undefined;
+}
+
+async function setTemporalCurrentVersion(revision) {
+  const temporal = await composeContainer("temporal");
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const deployment = await temporalDeploymentDescription().catch(() => undefined);
+    if (deployment !== undefined && temporalDeploymentContainsBuild(deployment, revision)) break;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+  }
+  const deployment = await temporalDeploymentDescription().catch(() => undefined);
+  if (deployment === undefined || !temporalDeploymentContainsBuild(deployment, revision)) {
     throw new Error("Kubernetes Pi Worker Build ID did not register with Temporal");
   }
   await run("docker", [
@@ -968,6 +969,12 @@ async function setTemporalCurrentVersion(revision) {
     revision,
     "--yes",
   ]);
+  const confirmationDeadline = Date.now() + 30_000;
+  while (Date.now() < confirmationDeadline) {
+    if ((await currentTemporalBuildId()) === revision) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error("Temporal did not confirm the promoted Kubernetes Pi Worker Build ID");
 }
 
 async function currentHelmRevision() {
@@ -1013,7 +1020,54 @@ async function rollbackKubernetesWorkerPool(revision) {
   ]);
 }
 
-async function checkDeployment(expectedRevision) {
+async function waitForManagementRoutes(controlPlane, timeoutMs = 120_000) {
+  for (const workerId of workerIds) {
+    const target = `http://${workerId}.${managementHostSuffix}/health/ready`;
+    const deadline = Date.now() + timeoutMs;
+    let result;
+    while (Date.now() < deadline) {
+      result = await capture("docker", [
+        "exec",
+        controlPlane,
+        "node",
+        "--input-type=module",
+        "--eval",
+        `const response=await fetch(${JSON.stringify(target)}); if(!response.ok) process.exit(2); console.log(response.status)`,
+      ]).catch(() => undefined);
+      if (result === "200") break;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+    }
+    if (result !== "200") throw new Error(`Control Plane cannot reach ${workerId}`);
+  }
+}
+
+async function waitForWorkerEnrollment(postgres, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  let enrolled = 0;
+  while (Date.now() < deadline) {
+    enrolled = Number(
+      await capture("docker", [
+        "exec",
+        postgres,
+        "psql",
+        "--no-psqlrc",
+        "--tuples-only",
+        "--no-align",
+        "--username",
+        "agent_dock",
+        "--dbname",
+        "agent_dock",
+        "--command",
+        `select count(*) from supervisor_hosts where supervisor_id like '${workerPrefix}%'`,
+      ]),
+    );
+    if (enrolled >= workerReplicas) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error(`Expected ${workerReplicas} enrolled Kubernetes Workers, found ${enrolled}`);
+}
+
+async function checkDeployment(expectedRevision, { requireCurrent = true, emit = true } = {}) {
   await ensureK3d();
   const runtimeEnvironment = await readRuntimeEnvironment();
   if (runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT !== "kubernetes") {
@@ -1042,72 +1096,31 @@ async function checkDeployment(expectedRevision) {
   }
 
   const controlPlane = await composeContainer("control-plane");
-  for (const workerId of workerIds) {
-    const target = `http://${workerId}.${managementHostSuffix}/health/ready`;
-    const result = await capture("docker", [
-      "exec",
-      controlPlane,
-      "node",
-      "--input-type=module",
-      "--eval",
-      `const response=await fetch(${JSON.stringify(target)}); if(!response.ok) process.exit(2); console.log(response.status)`,
-    ]);
-    if (result !== "200") throw new Error(`Control Plane cannot reach ${workerId}`);
-  }
+  await waitForManagementRoutes(controlPlane);
 
   const postgres = await composeContainer("postgres");
-  const enrolled = Number(
-    await capture("docker", [
-      "exec",
-      postgres,
-      "psql",
-      "--no-psqlrc",
-      "--tuples-only",
-      "--no-align",
-      "--username",
-      "agent_dock",
-      "--dbname",
-      "agent_dock",
-      "--command",
-      `select count(*) from supervisor_hosts where supervisor_id like '${workerPrefix}%'`,
-    ]),
-  );
-  if (enrolled < workerReplicas) {
-    throw new Error(`Expected ${workerReplicas} enrolled Kubernetes Workers, found ${enrolled}`);
-  }
+  await waitForWorkerEnrollment(postgres);
 
   const revision = expectedRevision ?? (await repositoryRevision());
-  const temporal = await composeContainer("temporal");
-  const deployment = await capture("docker", [
-    "exec",
-    temporal,
-    "temporal",
-    "worker",
-    "deployment",
-    "describe",
-    "--address",
-    "127.0.0.1:7233",
-    "--namespace",
-    "agent-dock",
-    "--name",
-    "agent-dock-pi-workers",
-    "--output",
-    "json",
-  ]);
-  if (!deployment.includes(revision)) {
+  const deployment = await temporalDeploymentDescription();
+  if (!temporalDeploymentContainsBuild(deployment, revision)) {
     throw new Error("Temporal Worker Deployment does not contain the expected Build ID");
   }
+  if (requireCurrent && deployment.routingConfig?.currentVersionBuildID !== revision) {
+    throw new Error("Temporal Worker Deployment is not routing new Runs to the expected Build ID");
+  }
 
-  process.stdout.write(
-    `${JSON.stringify({
-      kubernetesPiWorkers: "ready",
-      cluster: clusterName,
-      replicas: workerReplicas,
-      workerIds,
-      buildId: revision,
-      composePiWorkers: (await composeWorkerContainers()).length,
-    })}\n`,
-  );
+  if (emit)
+    process.stdout.write(
+      `${JSON.stringify({
+        kubernetesPiWorkers: "ready",
+        cluster: clusterName,
+        replicas: workerReplicas,
+        workerIds,
+        buildId: revision,
+        composePiWorkers: (await composeWorkerContainers()).length,
+      })}\n`,
+    );
 }
 
 async function up() {
@@ -1124,12 +1137,14 @@ async function up() {
   const { tag } = await buildAndImportWorkerImage(revision);
   const upgradingKubernetes = runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes";
   const previousHelmRevision = upgradingKubernetes ? await currentHelmRevision() : undefined;
+  const previousTemporalBuildId = await currentTemporalBuildId();
   let previous;
   try {
     if (!upgradingKubernetes) {
       previous = await switchControlPlaneToKubernetes(runtimeEnvironment, revision);
     }
     await deployWorkerPool(revision, tag, resolvedTargets, runtimeEnvironment);
+    await checkDeployment(revision, { requireCurrent: false, emit: false });
     await setTemporalCurrentVersion(revision);
     await checkDeployment(revision);
   } catch (error) {
@@ -1140,6 +1155,13 @@ async function up() {
     } else if (previousHelmRevision !== undefined) {
       await rollbackKubernetesWorkerPool(previousHelmRevision).catch((rollbackError) => {
         process.stderr.write(`Automatic Kubernetes rollback failed: ${String(rollbackError)}\n`);
+      });
+    }
+    if (previousTemporalBuildId !== undefined) {
+      await setTemporalCurrentVersion(previousTemporalBuildId).catch((rollbackError) => {
+        process.stderr.write(
+          `Automatic Temporal routing rollback failed: ${String(rollbackError)}\n`,
+        );
       });
     }
     throw error;
