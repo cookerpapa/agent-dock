@@ -966,6 +966,7 @@ async function setTemporalCurrentVersion(revision) {
     "agent-dock-pi-workers",
     "--build-id",
     revision,
+    "--yes",
   ]);
 }
 
