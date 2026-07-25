@@ -240,3 +240,23 @@ extension-policy support would overstate the current boundary.
 - [x] Expose candidate strategy, progress, evidence, recommendation, inspection, cancellation, and promotion in the authenticated Web inspector
 - [ ] Add model-invoked recursive spawn/send/wait collaboration tools, inherited context modes, and tree budgets
 - [ ] Add public identity, recovery, abuse controls, billing, and a separate hostile Internet-SaaS review before public exposure
+
+## Durable orchestration and Pi checkpoint v2
+
+- [x] Research mature durable workflow engines and conversation-storage
+  patterns using official sources
+- [x] ADR-0055: adopt-before-build policy, Temporal migration boundary, and
+  content-addressed Pi segment manifests
+- [ ] Build an isolated pinned Temporal TypeScript spike with one Workflow per
+  Run, two polling Pi Activity Workers, cancellation, heartbeat, retry/fence,
+  service/Worker failure, history-secret scan, and rollback evidence
+- [ ] Measure the spike against the current PostgreSQL dispatcher for queue
+  latency, throughput, database load, Worker replacement, and operational cost
+- [ ] Cut over only if the acceptance gate passes; make Temporal the sole
+  post-admission orchestration authority and delete the superseded matching
+  path in the same milestone
+- [ ] Implement `agent-dock.pi-session-manifest.v2` with line-aligned
+  tenant-scoped content-addressed segments and S3 create-if-absent/checksums
+- [ ] Prove byte-identical v1/v2 restore, native Pi compact/branch recovery,
+  non-append rebase, corruption rejection, stale-fence rejection, orphan GC,
+  periodic consolidation, and stored-byte/restore-latency benchmarks

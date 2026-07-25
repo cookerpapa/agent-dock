@@ -45,9 +45,37 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
 - Do not add Kafka, Flink, Redis, Temporal, or Kubernetes merely to make the
-  architecture look larger. Add infrastructure only with a demonstrated need.
+  architecture look larger. Add infrastructure only with a demonstrated need,
+  then apply the adopt-before-build policy below.
 - Pin Pi and other important dependency versions and provide upgrade contract tests.
 - Never commit secrets, generated credentials, session transcripts, or user repositories.
+
+## Adopt before build
+
+Infrastructure is not a creativity contest. Before implementing a distributed
+queue, workflow engine, scheduler, event store, sandbox runtime, identity
+system, policy engine, telemetry pipeline, or storage protocol:
+
+1. Survey actively maintained open-source implementations using official
+   documentation, source, releases, license, and failure semantics.
+2. Prefer a well-supported project from an established company, standards body,
+   or neutral foundation when it satisfies AgentDock's measured requirements.
+   Fit, security boundaries, operational cost, and exit strategy matter more
+   than GitHub stars or vendor reputation alone.
+3. Record build-versus-adopt evidence in a research note or ADR. A custom
+   implementation is allowed only when no candidate preserves the required
+   invariants, or when integration would create more correctness and
+   operational risk than the bounded code being retained.
+4. Put adopted infrastructure behind an AgentDock-owned port/adapter, pin its
+   version or image digest, add contract and failure tests, and document
+   rollback/export. Do not leak a vendor SDK into the public API or core domain.
+5. Assign exactly one durable authority to each concern. Never run a framework
+   and a home-grown replacement as competing schedulers, workflow histories, or
+   checkpoint heads after cutover.
+6. Keep large transcripts, tool output, Workspace bytes, credentials, and model
+   payloads out of workflow-engine histories. Durable workflows carry bounded
+   IDs, hashes, status, and immutable object references; PostgreSQL/S3 retain
+   the corresponding product state and bytes.
 
 ## Vibe-coding discipline
 

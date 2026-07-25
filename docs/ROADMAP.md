@@ -18,6 +18,10 @@ Tencent CubeSandbox v0.6.0 was evaluated under ADR-0052 and promoted under
 ADR-0053 after its real KVM gate proved two-tenant Workspace isolation,
 deny-all egress, cancellation and zero-orphan cleanup. The bundled single-node
 profile remains local evidence rather than a multi-node production claim.
+ADR-0055 now records the adopt-before-build policy, selects Temporal as the
+preferred post-admission durable Run orchestrator only after an executable
+migration gate, and defines content-addressed incremental Pi JSONL manifests as
+the checkpoint-v2 direction. Neither is an implemented production claim yet.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the

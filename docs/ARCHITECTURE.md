@@ -595,7 +595,12 @@ transition order.
 
 Authoritative for model conversation history and Pi's session tree. Only one
 runner may write a particular live session at a time. Stable snapshots are
-uploaded at safe turn boundaries.
+uploaded at safe turn boundaries. ADR-0055 retains the whole-file snapshot as
+the production v1 and defines a v2 physical representation: immutable,
+tenant/session-scoped content-addressed JSONL segments plus an immutable
+manifest and a fenced PostgreSQL head. Restore must reconstruct byte-identical
+JSONL before Pi sees it; semantic Web projections and a workflow history are
+never used to synthesize Pi state.
 
 ### Object storage
 
@@ -975,12 +980,23 @@ session entries), `workspace` (reconstructed from durable files), or
 `process-bound` (heap, subprocess, socket, or browser state). Only trusted
 portable extensions are eligible for a shared embedded worker.
 
-## 9. Deferred infrastructure
+## 9. Durable orchestration direction
 
 Flink or Kafka may later consume AgentDock events for analytics, audit pipelines,
 cost aggregation, or batch workloads. They are not the interactive session
-coordinator. Redis or a dedicated workflow engine is deferred until PostgreSQL
-queue/lease behavior is measured and shown to be insufficient.
+coordinator. ADR-0055 selects Temporal as the preferred future post-admission
+Run orchestrator because its Task Queue/Worker/Workflow/Activity model matches
+the now-proven horizontal Pi Worker requirements. Production retains the
+PostgreSQL dispatcher until a separate Temporal parity and fault-injection gate
+passes. A cutover must replace the superseded matching authority; it may not
+run Temporal and the custom dispatcher as competing schedulers.
+
+PostgreSQL continues to own HTTP acceptance, tenant admission/fairness,
+same-Session mailbox order, public projections, usage, and the committed
+checkpoint head. Temporal carries only bounded IDs, hashes, state, and object
+references. Pi transcripts, Tool output, Workspace bytes, model deltas, and
+credentials never enter Workflow Event History. Kubernetes scales trusted
+Worker processes, while Cube remains the untrusted Tool microVM scheduler.
 
 ## 10. Web presentation
 

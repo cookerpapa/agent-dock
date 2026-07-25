@@ -2119,3 +2119,26 @@
   the first Worker's exact management address. The full production drill now
   restarts the owning replica, preserves the peer replica's prewarm resources,
   and verifies exact old-boot retirement.
+
+## 2026-07-25 — Durable orchestration and conversation-storage selection
+
+- Added an adopt-before-build repository rule: evaluate active open-source
+  infrastructure from established companies/foundations before implementing a
+  distributed subsystem, select on semantics rather than stars, keep an
+  AgentDock adapter/exit path, and assign one durable authority per concern.
+- Compared Temporal, Cadence, Dapr Workflow, Argo Workflows, Conductor, and the
+  current PostgreSQL dispatcher using official docs, repositories, licenses,
+  releases, TypeScript support, failure semantics, and operational topology.
+- ADR-0055 selects Temporal as the preferred future post-admission Run
+  orchestrator, but production remains on the current dispatcher until an
+  isolated parity/fault/security/performance/rollback gate passes. Temporal
+  must replace, not duplicate, the matching authority.
+- The target uses one bounded Workflow per Run. PostgreSQL retains transactional
+  HTTP acceptance, tenant fairness, Session mailbox order, product projections,
+  usage and checkpoint heads; Kubernetes scales Pi Workers; Cube schedules Tool
+  microVMs. Temporal histories carry only bounded IDs/hashes/references.
+- Selected a Pi checkpoint-v2 direction using tenant/session-scoped,
+  line-aligned content-addressed JSONL segments plus immutable manifests and
+  the existing fenced PostgreSQL head CAS. The current complete JSONL snapshot
+  remains the production v1 until byte-identical compact/branch restore,
+  rebase/corruption/GC behavior, and storage/latency benchmarks pass.

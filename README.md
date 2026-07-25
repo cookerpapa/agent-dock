@@ -117,6 +117,7 @@ only after a measured requirement appears.
 - [CubeSandbox KVM acceptance evidence](docs/reports/cubesandbox-kvm-acceptance-latest.md)
 - [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
 - [`cloud-agent-platform` comparison](docs/research/2026-07-23-cloud-agent-platform-comparison.md)
+- [Durable orchestration and conversation-storage research](docs/research/2026-07-25-durable-orchestration-and-conversation-storage.md)
 - [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
 - [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
 - [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
@@ -166,6 +167,8 @@ only after a measured requirement appears.
 - [ADR-0051: bounded parallel candidate races](docs/adr/0051-parallel-candidate-races.md)
 - [ADR-0052: CubeSandbox KVM microVM Provider experiment](docs/adr/0052-cubesandbox-microvm-provider-experiment.md)
 - [ADR-0053: CubeSandbox primary Tool execution plane](docs/adr/0053-cubesandbox-primary-execution-plane.md)
+- [ADR-0054: horizontal Pi Worker pool and native session checkpoints](docs/adr/0054-horizontal-pi-worker-pool-and-native-session-checkpoints.md)
+- [ADR-0055: mature orchestration adoption and segmented Pi checkpoints](docs/adr/0055-durable-orchestration-and-segmented-pi-checkpoints.md)
 
 ## Current executable spikes
 
