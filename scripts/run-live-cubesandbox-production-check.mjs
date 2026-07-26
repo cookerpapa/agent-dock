@@ -113,6 +113,7 @@ const cube = new OfficialCubeSandboxRuntimeClient({
   proxyPort: cluster.proxy.port,
   proxyScheme: "http",
   sandboxDomain: cluster.sandboxDomain,
+  egressProxyIp: environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
   requestTimeoutMs: 30_000,
 });
 
