@@ -11,6 +11,7 @@ import {
 import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
+  parseCubeWorkspaceCheckpoint,
   parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { stat } from "node:fs/promises";
@@ -48,8 +49,17 @@ import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extens
 
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
-function projectInstructionsFromSnapshot(snapshot: Uint8Array | undefined): string | undefined {
+export function projectInstructionsFromSnapshot(
+  snapshot: Uint8Array | undefined,
+): string | undefined {
   if (snapshot === undefined) return undefined;
+  if (parseCubeWorkspaceCheckpoint(snapshot) !== undefined) {
+    // Provider-native checkpoints intentionally contain only a bounded file
+    // index and recovery authority. Their file bytes are available only after
+    // the Tool Sandbox has restored the snapshot, so they cannot be inspected
+    // in the trusted Runner before lazy activation.
+    return undefined;
+  }
   const file = parseWorkspaceSnapshot(snapshot).find((entry) => entry.path === "AGENTS.md");
   if (file === undefined) return undefined;
   const bounded = file.content.subarray(0, MAX_PROJECT_INSTRUCTIONS_BYTES);
