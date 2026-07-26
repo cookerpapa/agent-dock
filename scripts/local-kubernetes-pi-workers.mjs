@@ -465,7 +465,14 @@ async function kubectlRun(args, input) {
 
 async function applyManifest(resources) {
   await kubectlRun(
-    ["apply", "--server-side", "--field-manager=agent-dock-local-workers", "-f", "-"],
+    [
+      "apply",
+      "--server-side",
+      "--force-conflicts",
+      "--field-manager=agent-dock-local-workers",
+      "-f",
+      "-",
+    ],
     resources.map((resource) => stringify(resource)).join("---\n"),
   );
 }
