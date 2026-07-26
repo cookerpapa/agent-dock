@@ -16,7 +16,9 @@ const switchStatePath = join(runtimeDirectory, "kubernetes", "pi-worker-local-sw
 const chartPath = join(repositoryRoot, "deploy/helm/agent-dock-pi-worker-pool");
 const k3d =
   process.env.AGENT_DOCK_K3D_BIN ?? join(repositoryRoot, ".cache", "tools", "k3d-v5.9.0", "k3d");
-const kubectl = process.env.AGENT_DOCK_KUBECTL_BIN ?? "kubectl";
+const kubectl =
+  process.env.AGENT_DOCK_KUBECTL_BIN ??
+  (await executable("/usr/local/bin/kubectl").catch(() => "kubectl"));
 const helm =
   process.env.AGENT_DOCK_HELM_BIN ??
   (await executable("helm").catch(() =>
