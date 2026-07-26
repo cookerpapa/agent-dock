@@ -396,8 +396,21 @@ await run("npm", ["run", "cubesandbox:template-check"], {
 
 const forward = await startRegistryForward();
 let digest;
+const isolatedDockerConfig = await mkdtemp(join(tmpdir(), "agent-dock-docker-config-"));
 try {
-  await run("docker", ["push", imageTag]);
+  const configHandle = await open(join(isolatedDockerConfig, "config.json"), "wx", 0o600);
+  try {
+    await configHandle.writeFile("{}\n", "utf8");
+    await configHandle.sync();
+  } finally {
+    await configHandle.close();
+  }
+  await run("docker", ["push", imageTag], {
+    environment: {
+      ...environment,
+      DOCKER_CONFIG: isolatedDockerConfig,
+    },
+  });
   const repoDigests = parseJson(
     await capture("docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", imageTag]),
     "Docker RepoDigests",
@@ -412,6 +425,7 @@ try {
   }
 } finally {
   await forward.stop();
+  await rm(isolatedDockerConfig, { recursive: true, force: true });
 }
 
 const clusterImage = `${clusterRegistryRepository}@${digest}`;

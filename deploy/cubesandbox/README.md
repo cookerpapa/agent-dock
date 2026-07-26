@@ -111,9 +111,11 @@ node scripts/register-cubesandbox-tool-template.mjs
 The CLI must be built from the pinned Cube v0.6.0 revision. The script invokes
 Cube's `tpl create-from-image`, `tpl watch` and `tpl list` contracts directly.
 It binds an ephemeral raw TCP relay to `127.0.0.1:5000` only while pushing the
-image, then closes it. CubeMaster, the registry and their management ports
-remain private; this path deliberately avoids granting the AgentDock runtime
-or its Sandbox Manager broader Kubernetes RBAC.
+image, uses a temporary empty Docker client configuration because this private
+registry needs no interactive credential helper, then destroys both temporary
+resources. CubeMaster, the registry and their management ports remain private;
+this path deliberately avoids granting the AgentDock runtime or its Sandbox
+Manager broader Kubernetes RBAC.
 
 The registration command:
 

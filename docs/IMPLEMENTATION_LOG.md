@@ -2448,7 +2448,9 @@
   credentials.
 - The private template registry is reached through a short-lived raw TCP relay
   bound only to `127.0.0.1`; the relay transports registry TLS unchanged and is
-  closed after the digest-pinned image push.
+  closed after the digest-pinned image push. The push uses a temporary empty
+  Docker client configuration so an unrelated desktop credential helper cannot
+  enter this unauthenticated private-registry path.
 - Retained the existing kubeconfig-based operator path for installations where
   the official CLI is managed in-cluster. Direct mode is explicit and
   fail-closed: CubeMaster address, pinned CLI and registry address must all be
