@@ -11,7 +11,6 @@ import {
 import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
-  parseCubeWorkspaceCheckpoint,
   parseKopiaWorkspaceCheckpoint,
   parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
@@ -54,10 +53,7 @@ export function projectInstructionsFromSnapshot(
   snapshot: Uint8Array | undefined,
 ): string | undefined {
   if (snapshot === undefined) return undefined;
-  if (
-    parseCubeWorkspaceCheckpoint(snapshot) !== undefined ||
-    parseKopiaWorkspaceCheckpoint(snapshot) !== undefined
-  ) {
+  if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) {
     // Provider-native checkpoints intentionally contain only a bounded file
     // index and recovery authority. Their file bytes are available only after
     // the Tool Sandbox has restored the snapshot, so they cannot be inspected

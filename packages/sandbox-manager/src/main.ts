@@ -5,7 +5,6 @@ import { KubernetesGvisorSandboxProvider } from "./kubernetes-gvisor-sandbox-pro
 import type { SandboxProvider } from "./sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
-import { createHash } from "node:crypto";
 import { HttpWorkspaceDataMover } from "./workspace-data-mover.ts";
 
 const config = await loadSandboxManagerConfig();
@@ -59,15 +58,10 @@ if (config.provider === "cubesandbox") {
       host: cube.egressProxyHost,
       port: cube.egressProxyPort,
     },
-    checkpointEncryptionKey: createHash("sha256")
-      .update("agent-dock.cube-workspace-checkpoint-key.v1\0")
-      .update(config.serviceToken)
-      .digest(),
     workspaceDataMover: new HttpWorkspaceDataMover({
       baseUrl: cube.workspaceDataMoverUrl,
       serviceToken: cube.workspaceDataMoverToken,
     }),
-    ...(cube.snapshotGc === undefined ? {} : { snapshotGc: cube.snapshotGc }),
   });
 } else {
   provider = createGvisorProvider(config.cleanPrewarmTarget);
@@ -86,7 +80,6 @@ const server = new SandboxManagerServer({
   ...(config.materializerToken === undefined
     ? {}
     : { materializerToken: config.materializerToken }),
-  ...(config.snapshotGcToken === undefined ? {} : { snapshotGcToken: config.snapshotGcToken }),
   manager,
   metrics: observability.metrics,
 });

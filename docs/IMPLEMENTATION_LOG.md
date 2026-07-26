@@ -2701,3 +2701,33 @@
   acceptance additionally erases the source Session's local POSIX contents
   while leaving its mover sidecar intact before demanding a fresh-VM restore
   from Kopia; a sidecar is deliberately never treated as proof of live bytes.
+
+## 2026-07-27 — Session-resident Cube runtime and legacy checkpoint removal
+
+- Audited CubeSandbox v0.6 source and confirmed that the binary Volume Plugin
+  is a mount contract, while `CommitSandbox` rejects the host-path/shared
+  directories used for AgentDock's external `/workspace`. Native Cube snapshots
+  therefore cannot be the complete version authority for this topology.
+- Adopted ADR-0068: one exact Session may retain one running Cube for the
+  15-minute idle window. A settled Run revokes its Tool capability and closes
+  its Tool Worker, but preserves user background processes. The next Run rotates
+  the handoff secret under a strictly higher fence and starts a fresh Worker.
+- Checkpointing is now a two-phase trusted protocol. The guest closes the Tool
+  Worker, records and freezes exact UID-1000 PID/start-time identities, flushes
+  and indexes `/workspace`, the trusted Data Mover creates an immutable Kopia
+  snapshot, and the guest resumes only those identities. Any ambiguous cleanup
+  destroys the VM.
+- The live POSIX Volume remains the interactive execution copy. Its trusted
+  sidecar permits reuse only for the exact Session and requested committed
+  Kopia base, preserving later background writes; selecting another
+  WorkspaceVersion performs empty-then-restore and cannot be overridden by
+  stale live bytes.
+- Removed the Cube-native Workspace checkpoint codec, encrypted recovery
+  authority, snapshot clone/materializer branches, snapshot inventory/GC
+  protocol and services, deployment token/state, and all migration tests for
+  that format. No compatibility path remains; incompatible development data is
+  reset during deployment.
+- Unit/type evidence covers Kopia-only restore, background-safe checkpoint
+  completion, exact-Session warm rebind, live-volume reuse and explicit
+  rollback. The one unrelated concurrent WebSocket test that flaked in the
+  workspace-wide run passed on isolated rerun.

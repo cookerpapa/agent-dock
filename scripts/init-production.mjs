@@ -171,31 +171,6 @@ async function ensureSandboxMaterializerToken(runtimeDirectory) {
   return true;
 }
 
-async function ensureCubeSnapshotGcToken(runtimeDirectory) {
-  const path = resolve(runtimeDirectory, "secrets/cube-snapshot-gc-token");
-  try {
-    const existing = (await readPrivateFile(path)).trim();
-    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
-      throw new Error("Production Cube snapshot GC token is invalid");
-    }
-    return false;
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  await writePrivateFile(path, `${randomSecret()}\n`);
-  const application = applicationIdentity();
-  if (application.changeOwnership) await chown(path, application.uid, application.gid);
-  return true;
-}
-
-async function ensureSandboxManagerStateDirectory(runtimeDirectory) {
-  const path = resolve(runtimeDirectory, "state/sandbox-manager");
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  await chmod(path, 0o700);
-  const application = applicationIdentity();
-  if (application.changeOwnership) await chown(path, application.uid, application.gid);
-}
-
 async function ensureWorkspaceDataMoverState(runtimeDirectory) {
   const application = applicationIdentity();
   for (const relativePath of [
@@ -448,8 +423,6 @@ if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
   const sandboxMaterializerTokenCreated = await ensureSandboxMaterializerToken(runtimeDirectory);
-  const cubeSnapshotGcTokenCreated = await ensureCubeSnapshotGcToken(runtimeDirectory);
-  await ensureSandboxManagerStateDirectory(runtimeDirectory);
   await ensureWorkspaceDataMoverState(runtimeDirectory);
   const workspaceDataMoverSecretsCreated = await ensureWorkspaceDataMoverSecrets(runtimeDirectory);
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
@@ -465,7 +438,6 @@ if (await validateExisting(runtimeDirectory)) {
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
       sandboxMaterializerTokenCreated,
-      cubeSnapshotGcTokenCreated,
       workspaceDataMoverSecretsCreated,
       cubeEgressConfigTokenCreated,
       dependencyEgressIssuerCreated,
@@ -488,7 +460,6 @@ if (existingEntries.length > 0) {
 const secretsDirectory = resolve(runtimeDirectory, "secrets");
 await mkdir(secretsDirectory, { mode: 0o700 });
 await chmod(secretsDirectory, 0o700);
-await ensureSandboxManagerStateDirectory(runtimeDirectory);
 await ensureWorkspaceDataMoverState(runtimeDirectory);
 
 const postgresPassword = randomSecret();
@@ -587,7 +558,6 @@ await writePrivateFile(
   resolve(secretsDirectory, "sandbox-materializer-token"),
   `${randomSecret()}\n`,
 );
-await writePrivateFile(resolve(secretsDirectory, "cube-snapshot-gc-token"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "workspace-data-mover-token"),
   `${randomSecret()}\n`,

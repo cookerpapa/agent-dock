@@ -1,7 +1,17 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
@@ -267,14 +277,28 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     return this.#withVolumeLock(identity.volumeId, async () => {
       await this.#ensureReady();
       const directory = await this.#ensureVolumeDirectory(identity.volumeId);
-      // A sidecar records the last successful operation for diagnostics, but it
-      // is never proof that the POSIX bytes still exist. Cold activation always
-      // rebuilds the volume from the committed immutable snapshot.
-      await this.#emptyDirectory(directory);
       if (snapshotId === undefined) {
+        await this.#emptyDirectory(directory);
         await this.#removeState(identity.volumeId);
         return { restored: false };
       }
+      // The sidecar is outside the user mount and is written only after a
+      // successful immutable snapshot. Reusing this exact-Session live volume
+      // preserves writes made by retained background processes after that
+      // snapshot. A rollback requests a different snapshot ID and therefore
+      // always takes the empty-then-restore path below.
+      const state = await this.#readState(identity.volumeId);
+      if (
+        state !== undefined &&
+        state.tenantId === identity.tenantId &&
+        state.workspaceId === identity.workspaceId &&
+        state.sessionId === identity.sessionId &&
+        state.volumeId === identity.volumeId &&
+        state.snapshotId === snapshotId
+      ) {
+        return { restored: false };
+      }
+      await this.#emptyDirectory(directory);
       try {
         await this.#kopia([
           "snapshot",
@@ -538,6 +562,45 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       await rename(temporary, path);
     } finally {
       await rm(temporary, { force: true }).catch(() => undefined);
+    }
+  }
+
+  async #readState(volumeId: string): Promise<VolumeState | undefined> {
+    let value: unknown;
+    try {
+      value = JSON.parse(await readFile(this.#statePath(volumeId), "utf8")) as unknown;
+    } catch {
+      return undefined;
+    }
+    if (
+      !isRecord(value) ||
+      Object.keys(value).sort().join("\0") !==
+        ["schemaVersion", "sessionId", "snapshotId", "tenantId", "volumeId", "workspaceId"]
+          .sort()
+          .join("\0") ||
+      value.schemaVersion !== 1 ||
+      typeof value.tenantId !== "string" ||
+      typeof value.workspaceId !== "string" ||
+      typeof value.sessionId !== "string" ||
+      typeof value.volumeId !== "string" ||
+      typeof value.snapshotId !== "string"
+    ) {
+      return undefined;
+    }
+    try {
+      const identity = validatedIdentity({
+        tenantId: value.tenantId,
+        workspaceId: value.workspaceId,
+        sessionId: value.sessionId,
+        volumeId: value.volumeId,
+      });
+      return {
+        schemaVersion: 1,
+        ...identity,
+        snapshotId: validatedSnapshotId(value.snapshotId),
+      };
+    } catch {
+      return undefined;
     }
   }
 

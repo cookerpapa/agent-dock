@@ -188,27 +188,20 @@ extension-policy support would overstate the current boundary.
 - [x] Add a trusted GitHub App credential boundary for private exact-commit import and Pull Request write-back
 - [ ] Isolate and policy-gate project/user extensions before enabling them
 
-## Cube-native large Workspace persistence
+## Session-resident Cube and versioned Workspace persistence
 
-- [x] Research Kopia, Restic, REAPI CAS and Cube v0.6 snapshots before changing the persistence boundary
-- [x] Seal the Tool guest and prove zero Tool-UID processes before snapshotting
+- [x] Research Cube v0.6 native snapshot and Volume Plugin implementation limits
+- [x] Bind one live POSIX Volume and running Cube VM to one exact Session
+- [x] Revoke per-Run Tool authority without killing the Session's background processes
+- [x] Freeze exact PID/start-time identities during Workspace flush and Kopia snapshot, then resume them
 - [x] Capture a content-hashed index and Git patch without base64-buffering repository contents
-- [x] Persist an encrypted tenant/Workspace/environment/fence-bound Cube snapshot reference through existing MinIO and PostgreSQL CAS
+- [x] Publish only a tenant/Workspace/Session/environment/fence-bound Kopia reference through PostgreSQL Fence/CAS
+- [x] Preserve post-checkpoint live-volume writes for the same committed base while making explicit rollback restore immutable bytes
 - [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
-- [x] Keep legacy portable manifests readable and return explicit `artifact_unavailable` for unsupported historical content reads
-- [x] Add fail-closed reference-aware Cube snapshot garbage collection; every
-  retained Artifact remains live until a separate Workspace-version retention
-  policy is introduced
-- [x] Add a separately authorized, admission-controlled read-only Cube snapshot
-  materializer for bounded historical regular-file download
-- [ ] Add a streaming snapshot exporter for whole-version GitHub delivery and
-  portable backup
-- [x] Replace new Cube-native snapshots with the Cube Volume Plugin, a
-  Session-bound POSIX Workspace, a trusted Kopia/S3 Data Mover, and
-  PostgreSQL Fence/CAS publication
+- [x] Remove Cube-native Workspace checkpoint codecs, recovery authority, materializer, GC service, deployment secrets and compatibility tests
 - [x] Prove fresh-VM recovery after deleting the local POSIX Workspace copy
-- [ ] Prove whole-host/node loss against a genuinely off-node or replicated
-  POSIX and S3 deployment before claiming disaster recovery
+- [ ] Add a streaming Kopia snapshot exporter for whole-version GitHub delivery and portable backup
+- [ ] Prove whole-host/node loss against a genuinely off-node or replicated POSIX and S3 deployment before claiming disaster recovery
 
 ## Phase 4 private multi-tenant slice
 

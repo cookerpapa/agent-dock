@@ -71,6 +71,6 @@ EXPOSE 49984
 # starts envd, which would be a second unmediated command/file channel inside
 # the guest. The one root-owned AgentDock supervisor authenticates every
 # mutable request, starts Tool Workers and user commands as uid 1000, and
-# enforces the seal/rebind boundary before Cube pause/resume.
+# enforces the checkpoint/rebind boundary while the Session Cube stays running.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/agent-dock-cube-tool"]

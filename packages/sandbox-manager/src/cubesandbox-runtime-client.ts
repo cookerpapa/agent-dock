@@ -1,5 +1,4 @@
 import { Agent, buildConnector, fetch, type Dispatcher } from "undici";
-import { setTimeout as delay } from "node:timers/promises";
 
 export const CUBESANDBOX_TOOL_SERVICE_PORT = 49_984;
 
@@ -38,11 +37,6 @@ export type CubeSandboxInstance = Readonly<{
   memoryMB?: number;
 }>;
 
-export type CubeSandboxSnapshot = Readonly<{
-  snapshotId: string;
-  names: readonly string[];
-}>;
-
 export type CubeSandboxVolume = Readonly<{
   volumeId: string;
   name: string;
@@ -77,11 +71,6 @@ export interface CubeSandboxRuntimeClient {
   create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance>;
   read(sandboxId: string): Promise<CubeSandboxInstance | undefined>;
   list(): Promise<readonly CubeSandboxInstance[]>;
-  pause(instance: CubeSandboxInstance, timeoutMs?: number): Promise<CubeSandboxInstance>;
-  connect(instance: CubeSandboxInstance, timeoutSeconds: number): Promise<CubeSandboxInstance>;
-  createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot>;
-  listSnapshots(): Promise<readonly CubeSandboxSnapshot[]>;
-  deleteSnapshot(snapshotId: string): Promise<void>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
   close(): Promise<void>;
@@ -183,23 +172,6 @@ function parseInstance(value: unknown, fallbackDomain: string): CubeSandboxInsta
     ...(cpuCount === undefined ? {} : { cpuCount }),
     ...(memoryMB === undefined ? {} : { memoryMB }),
   });
-}
-
-function parseSnapshot(value: unknown): CubeSandboxSnapshot {
-  const candidate = record(value, "CubeSandbox snapshot");
-  const snapshotId = bounded(candidate.snapshotID, "CubeSandbox snapshot ID", 256);
-  const names =
-    candidate.names === undefined
-      ? []
-      : Array.isArray(candidate.names) &&
-          candidate.names.length <= 16 &&
-          candidate.names.every((item) => typeof item === "string")
-        ? candidate.names.map((item) => bounded(item, "CubeSandbox snapshot name", 128))
-        : undefined;
-  if (names === undefined) {
-    throw new CubeRuntimeClientError("CubeSandbox snapshot names were invalid");
-  }
-  return Object.freeze({ snapshotId, names: Object.freeze(names) });
 }
 
 function parseVolume(value: unknown): CubeSandboxVolume {
@@ -375,7 +347,11 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
           allowOut: [`${this.#egressProxyIp}/32`],
           denyOut: ["0.0.0.0/0"],
         },
-        lifecycle: { on_timeout: "pause", auto_resume: false },
+        // AgentDock owns the shorter Session warm TTL and explicit destroy.
+        // Cube's timeout is only the fail-safe orphan reaper. A timed-out VM
+        // must not become an untracked paused guest because this provider no
+        // longer reconnects physical runtimes across manager loss.
+        lifecycle: { on_timeout: "kill", auto_resume: false },
       }),
     });
     const instance = parseInstance(
@@ -419,110 +395,6 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       throw new CubeRuntimeClientError("CubeSandbox inventory response was invalid");
     }
     return values.map((value) => parseInstance(value, this.#sandboxDomain));
-  }
-
-  async pause(instance: CubeSandboxInstance, timeoutMs = 30_000): Promise<CubeSandboxInstance> {
-    const sandboxId = instance.sandboxId;
-    const id = encodeURIComponent(bounded(sandboxId, "CubeSandbox ID", 256));
-    const response = await this.#control(`/sandboxes/${id}/pause`, { method: "POST" });
-    await response.body?.cancel().catch(() => undefined);
-    const deadline = Date.now() + positiveInteger(timeoutMs, 30_000, 1_000, 300_000);
-    while (Date.now() < deadline) {
-      const current = await this.read(sandboxId);
-      if (current === undefined) {
-        throw new CubeRuntimeClientError("CubeSandbox disappeared while pausing");
-      }
-      if (current.state === "paused") {
-        return Object.freeze({
-          ...current,
-          ...(instance.trafficAccessToken === undefined
-            ? {}
-            : { trafficAccessToken: instance.trafficAccessToken }),
-        });
-      }
-      if (current.state !== "running" && current.state !== "pausing") {
-        throw new CubeRuntimeClientError("CubeSandbox entered an invalid pause state");
-      }
-      await delay(250);
-    }
-    throw new CubeRuntimeClientError("CubeSandbox pause did not converge");
-  }
-
-  async connect(
-    instance: CubeSandboxInstance,
-    timeoutSeconds: number,
-  ): Promise<CubeSandboxInstance> {
-    const id = encodeURIComponent(bounded(instance.sandboxId, "CubeSandbox ID", 256));
-    const response = await this.#control(`/sandboxes/${id}/connect`, {
-      method: "POST",
-      body: JSON.stringify({
-        timeout: positiveInteger(timeoutSeconds, 900, 1, 24 * 60 * 60),
-      }),
-    });
-    const connected = parseInstance(
-      parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox connect"),
-      this.#sandboxDomain,
-    );
-    if (connected.sandboxId !== instance.sandboxId) {
-      throw new CubeRuntimeClientError("CubeSandbox connect returned the wrong identity");
-    }
-    return Object.freeze({
-      ...connected,
-      ...(instance.trafficAccessToken === undefined
-        ? {}
-        : { trafficAccessToken: instance.trafficAccessToken }),
-    });
-  }
-
-  async createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot> {
-    const id = encodeURIComponent(bounded(instance.sandboxId, "CubeSandbox ID", 256));
-    const safeName = bounded(name, "CubeSandbox snapshot name", 128);
-    const response = await this.#control(`/sandboxes/${id}/snapshots`, {
-      method: "POST",
-      body: JSON.stringify({ name: safeName }),
-    });
-    const value = record(
-      parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox snapshot create"),
-      "CubeSandbox snapshot create",
-    );
-    return parseSnapshot(value);
-  }
-
-  async listSnapshots(): Promise<readonly CubeSandboxSnapshot[]> {
-    const snapshots: CubeSandboxSnapshot[] = [];
-    let nextToken: string | undefined;
-    for (let page = 0; page < 100; page += 1) {
-      const query =
-        nextToken === undefined
-          ? "/snapshots?limit=100"
-          : `/snapshots?limit=100&nextToken=${encodeURIComponent(nextToken)}`;
-      const response = await this.#control(query);
-      const body = parseJson(
-        await readBoundedResponse(response, 4 * 1_024 * 1_024),
-        "CubeSandbox snapshot inventory",
-      );
-      const values = Array.isArray(body)
-        ? body
-        : Array.isArray((body as { snapshots?: unknown })?.snapshots)
-          ? (body as { snapshots: unknown[] }).snapshots
-          : undefined;
-      if (values === undefined || values.length > 100) {
-        throw new CubeRuntimeClientError("CubeSandbox snapshot inventory was invalid");
-      }
-      snapshots.push(...values.map(parseSnapshot));
-      const header = response.headers.get("x-next-token");
-      if (header === null || header.length === 0) {
-        return Object.freeze(snapshots);
-      }
-      nextToken = bounded(header, "CubeSandbox snapshot continuation token", 4_096);
-    }
-    throw new CubeRuntimeClientError("CubeSandbox snapshot inventory exceeded its page limit");
-  }
-
-  async deleteSnapshot(snapshotId: string): Promise<void> {
-    const id = encodeURIComponent(bounded(snapshotId, "CubeSandbox snapshot ID", 256));
-    const response = await this.#control(`/templates/${id}`, { method: "DELETE" }, true);
-    await response.body?.cancel().catch(() => undefined);
   }
 
   async destroy(sandboxId: string): Promise<void> {

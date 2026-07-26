@@ -8,7 +8,6 @@ export type SandboxManagerConfig = {
   port: number;
   serviceToken: string;
   materializerToken?: string;
-  snapshotGcToken?: string;
   toolImage: string;
   imageRevision: string;
   kubeconfigPath: string;
@@ -45,12 +44,6 @@ export type SandboxManagerConfig = {
     requestTimeoutMs: number;
     workspaceDataMoverUrl: string;
     workspaceDataMoverToken: string;
-    snapshotGc?: {
-      statePath: string;
-      deletionEnabled: boolean;
-      graceMs: number;
-      maximumDeletesPerScan: number;
-    };
   };
 };
 
@@ -80,13 +73,6 @@ function integer(
     throw new TypeError("Sandbox Manager numeric configuration is invalid");
   }
   return parsed;
-}
-
-function boolean(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  throw new TypeError("Sandbox Manager boolean configuration is invalid");
 }
 
 async function readSecret(path: string): Promise<string> {
@@ -206,11 +192,6 @@ export async function loadSandboxManagerConfig(
           materializerToken: await readSecret(
             environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE,
           ),
-        }),
-    ...(environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE === undefined
-      ? {}
-      : {
-          snapshotGcToken: await readSecret(environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE),
         }),
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
     imageRevision: bounded(
@@ -364,37 +345,6 @@ export async function loadSandboxManagerConfig(
             workspaceDataMoverToken: await readSecret(
               required(environment, "AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE"),
             ),
-            ...(environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE === undefined
-              ? {}
-              : {
-                  snapshotGc: {
-                    statePath: (() => {
-                      const value = required(environment, "AGENT_DOCK_CUBE_SNAPSHOT_GC_STATE_PATH");
-                      if (!isAbsolute(value) || value.includes("\0")) {
-                        throw new TypeError(
-                          "AGENT_DOCK_CUBE_SNAPSHOT_GC_STATE_PATH must be absolute",
-                        );
-                      }
-                      return value;
-                    })(),
-                    deletionEnabled: boolean(
-                      environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_DELETE_ENABLED,
-                      false,
-                    ),
-                    graceMs: integer(
-                      environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_GRACE_MS,
-                      24 * 60 * 60_000,
-                      24 * 60 * 60_000,
-                      30 * 24 * 60 * 60_000,
-                    ),
-                    maximumDeletesPerScan: integer(
-                      environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_MAXIMUM_DELETES,
-                      25,
-                      1,
-                      100,
-                    ),
-                  },
-                }),
           },
         }),
   };

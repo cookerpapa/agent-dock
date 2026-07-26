@@ -545,8 +545,10 @@ Cube Tool Run, the guest is sealed and a content-hashed file index plus Git
 patch are captured. The trusted Data Mover snapshots the flushed POSIX
 Workspace into Kopia, and only its identity/fence-bound reference crosses the
 private Tool channel before `turn.completed`. A warm exact-Session activation
-may be sealed, paused and reused; after eviction or failure a fresh Cube VM
-mounts the volume restored from the committed Kopia snapshot. Production
+stays running for the bounded idle TTL: the old Run's Tool capability and
+Worker are revoked, user background processes remain alive, and the next Run
+rotates authority under a higher fence. After eviction or failure a fresh Cube
+VM mounts the volume restored from the committed Kopia snapshot. Production
 therefore supports genuine same-session follow-up without keeping an idle Pi
 process alive or making the Cube node copy authoritative.
 

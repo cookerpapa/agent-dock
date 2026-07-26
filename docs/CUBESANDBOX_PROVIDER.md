@@ -41,11 +41,11 @@ operator path.
 | AgentDock status | importer and deterministic regression only | ordinary Tool execution, live KVM validated |
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
 | Workspace durability | AgentDock portable content manifest | Cube Volume Plugin + POSIX Workspace + trusted Kopia snapshot |
-| Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
+| Exact-Session warm rebind | implemented in former Tool Provider | running Session VM + rotated Tool authority and higher AgentDock fence |
 | Tool network | Kubernetes default deny | one trusted web gateway; every direct route denied |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
 | Dependency setup | disposable exact-host bootstrap | promotes regular files into a proxy-mediated Cube VM |
-| Native snapshot | not required | legacy restore only; new checkpoints use ADR-0067 Kopia references |
+| Native snapshot | not required | not used; plugin-mounted Workspaces use ADR-0067/0068 Kopia references |
 
 ## Provider path
 
@@ -91,22 +91,24 @@ Manager-only handoff secret, immutable binding digest and current fencing
 token. The root-owned guest supervisor checks them before forwarding work to a
 uid-1000 Tool Worker.
 
-At a warm Run boundary the supervisor stops the Worker, kills and verifies the
-absence of every uid-1000 process, then Cube explicitly pauses the VM. A later
-exact-Session Run must present a strictly higher fence to connect, rotate the
-secret and start a fresh Worker against the preserved Workspace. The traffic
-token alone is insufficient after rebind. Any ambiguous transition destroys
-the VM and falls back to the committed AgentDock checkpoint.
+At a warm Run boundary the supervisor revokes the old Run capability and stops
+only its Tool Worker. User background processes remain in the exact
+Session-bound VM. A later exact-Session Run must present a strictly higher
+fence, rotate the secret and start a fresh Tool Worker against that preserved
+environment. The traffic token alone is insufficient after rebind. Any
+ambiguous transition destroys the VM and falls back to the committed AgentDock
+checkpoint.
 
-At an ordinary durable checkpoint, the same sealed boundary captures a
-content-hashed file index and Git patch, terminates every Tool process, and
-flushes `/workspace`. Cube mounts that path from an `agentdock-posix` Volume
-Plugin volume. A separately authenticated trusted Data Mover snapshots the
-quiescent POSIX directory into Kopia's encrypted, content-addressed repository
-in the dedicated MinIO bucket. The bounded checkpoint contains the Kopia
-snapshot ID, deterministic Session volume ID, file index, environment binding,
-activation and fence; it contains neither repository credentials nor Workspace
-file bytes.
+At an ordinary durable checkpoint, the root-owned supervisor closes the Tool
+Worker, briefly freezes the remaining uid-1000 processes, captures a
+content-hashed file index and Git patch, and flushes `/workspace`. Cube mounts
+that path from an `agentdock-posix` Volume Plugin volume. A separately
+authenticated trusted Data Mover snapshots the quiescent POSIX directory into
+Kopia's encrypted, content-addressed repository in the dedicated MinIO bucket,
+then the supervisor resumes the exact PID/start-time identities. The bounded
+checkpoint contains the Kopia snapshot ID, deterministic Session volume ID,
+file index, environment binding, activation and fence; it contains neither
+repository credentials nor Workspace file bytes.
 
 PostgreSQL publishes that immutable candidate only under the current
 RunAttempt fence and Workspace-head CAS. A cold restore first asks the Data
@@ -114,8 +116,9 @@ Mover to restore the committed Kopia snapshot into the exact bound POSIX
 volume, then creates a fresh base-template Cube VM with that volume mounted.
 The new Tool Worker starts only under a strictly higher fence. A stale or
 wrong-tenant Attempt therefore cannot select a snapshot, publish a new head, or
-rebind another Session's volume. Legacy ADR-0064 Cube snapshot references
-remain readable for migration, but no new Run creates them. See ADR-0067.
+rebind another Session's volume. Cube-native Workspace snapshot references are
+not accepted; incompatible development data is discarded. See ADR-0067 and
+ADR-0068.
 
 ## Network and credential boundary
 
@@ -200,12 +203,13 @@ The live gate has proven:
 
 - Provider control/data request shape and private traffic-token routing;
 - metadata identity, fencing and replay checks;
-- Manager lifecycle, capture, sealed pause/connect and higher-fence rebind;
+- Manager lifecycle, two-phase checkpoint/resume and higher-fence rebind;
 - exact Tool image versions;
 - actual file write, Python execution, traversal rejection and content-hashed
   checkpoint through the template service;
 - Kopia snapshot creation from a sealed POSIX Workspace, source-VM destruction,
   local-copy deletion, and cold restore into a fresh higher-fence activation;
+- background process and loopback Web-service continuity across a completed Run;
 - fixed-target control/data relays.
 - a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
 - simultaneous tenant canaries remaining in different Workspaces;

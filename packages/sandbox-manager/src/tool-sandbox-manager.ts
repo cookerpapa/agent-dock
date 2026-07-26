@@ -12,8 +12,6 @@ import type {
   ToolSandboxReleaseResponse,
   SandboxManagerMaterializeFileRequest,
   SandboxManagerMaterializeFileResponse,
-  SandboxManagerSnapshotGcRequest,
-  SandboxManagerSnapshotGcResponse,
 } from "@agent-dock/protocol";
 import {
   canonicalEnvironmentRecipeJson,
@@ -85,7 +83,7 @@ function workspaceKey(assignment: ToolSandboxAssignment): string {
   // not to the ephemeral Pi worker that happened to execute the previous Run.
   // RunAttempt ownership is transferred by the monotonically increasing fence
   // in provider.rebind(); keeping supervisor identity in this key would strand
-  // the paused VM whenever Temporal schedules the next Run on another worker.
+  // the running Session VM whenever Temporal schedules the next Run elsewhere.
   return [
     assignment.tenantId,
     assignment.projectId,
@@ -418,9 +416,9 @@ export class ToolSandboxManager {
       handle !== undefined &&
       this.#provider.supportsWarmRebind !== false
     ) {
-      if (this.#provider.suspendForWarm !== undefined) {
+      if (this.#provider.retainForWarm !== undefined) {
         try {
-          handle = await this.#provider.suspendForWarm(handle);
+          handle = await this.#provider.retainForWarm(handle);
         } catch {
           await this.#provider.stop(handle).catch(() => undefined);
           this.#releaseAdmission(handle.activationId);
@@ -574,19 +572,6 @@ export class ToolSandboxManager {
     } finally {
       if (releaseAdmission) this.#releaseAdmission(request.requestId);
     }
-  }
-
-  async reconcileSnapshots(
-    request: SandboxManagerSnapshotGcRequest,
-  ): Promise<SandboxManagerSnapshotGcResponse> {
-    if (this.#provider.reconcileSnapshots === undefined) {
-      throw new SandboxManagerError(
-        "snapshot_gc_unavailable",
-        "The configured Sandbox Provider cannot reconcile snapshot references",
-        false,
-      );
-    }
-    return this.#provider.reconcileSnapshots(request);
   }
 
   async close(): Promise<void> {

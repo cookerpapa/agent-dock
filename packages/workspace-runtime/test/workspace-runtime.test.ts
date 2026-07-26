@@ -5,16 +5,14 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   captureWorkspaceSnapshot,
-  captureCubeWorkspaceIndex,
+  captureWorkspaceIndex,
   collectGitWorkspacePatch,
-  createCubeWorkspaceCheckpoint,
   createKopiaWorkspaceCheckpoint,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   createWorkspaceSnapshot,
   mergeWorkspaceSnapshots,
   parseWorkspaceSnapshot,
-  parseCubeWorkspaceCheckpoint,
   parseKopiaWorkspaceCheckpoint,
   restoreWorkspaceSnapshot,
   workspaceSnapshotMetadata,
@@ -132,7 +130,7 @@ describe("shared workspace runtime", () => {
     ).toThrow(/root/);
   });
 
-  it("indexes a large Cube Workspace without embedding file bytes or dropping nested Git state", async () => {
+  it("indexes a large Workspace without embedding file bytes or dropping nested Git state", async () => {
     const root = await temporaryDirectory("agent-dock-cube-workspace-index-");
     await mkdir(resolve(root, ".git"));
     await writeFile(resolve(root, ".git/HEAD"), "ref: refs/heads/main\n");
@@ -145,45 +143,19 @@ describe("shared workspace runtime", () => {
       ),
     );
 
-    const index = await captureCubeWorkspaceIndex(root);
+    const index = await captureWorkspaceIndex(root);
     const files = index.files;
     expect(index.portable).toBe(true);
     expect(files).toHaveLength(601);
     expect(files[0]?.path).toBe("nested/.git/config");
     expect(files.some((file) => file.path === ".git/HEAD")).toBe(false);
-    const encoded = createCubeWorkspaceCheckpoint({
-      snapshotId: "cube-snapshot-large",
-      sourceSandboxId: "cube-sandbox-large",
-      activationId: "10000000-0000-4000-8000-000000000001",
-      tenantId: "tenant-large",
-      workspaceId: "workspace-large",
-      bindingSha256: "a".repeat(64),
-      fencingToken: 7,
-      imageRevision: "development",
-      environmentSpecSha256: "b".repeat(64),
-      files,
-      authority: {
-        keyVersion: 1,
-        nonce: "c".repeat(16),
-        ciphertext: "d".repeat(64),
-        authTag: "e".repeat(22),
-      },
-    });
-    const parsed = parseCubeWorkspaceCheckpoint(encoded);
-    expect(parsed?.files).toHaveLength(601);
-    expect(workspaceSnapshotMetadata(encoded)).toEqual(parsed?.files);
-    expect(encoded.byteLength).toBeLessThan(256 * 1_024);
-    expect(Buffer.from(encoded).toString("utf8")).not.toContain(
-      Buffer.from("599\n").toString("base64"),
-    );
-    expect(() => parseWorkspaceSnapshot(encoded)).toThrow(/portable file bytes/);
   });
 
-  it("indexes symlinks without following them and selects a native Cube snapshot", async () => {
+  it("indexes symlinks without following them", async () => {
     const root = await temporaryDirectory("agent-dock-cube-workspace-link-");
     await writeFile(resolve(root, "target.txt"), "target\n");
     await symlink("target.txt", resolve(root, "link.txt"));
-    const index = await captureCubeWorkspaceIndex(root);
+    const index = await captureWorkspaceIndex(root);
     expect(index.portable).toBe(false);
     expect(index.files.map((file) => file.path)).toEqual(["link.txt", "target.txt"]);
     const link = index.files[0];

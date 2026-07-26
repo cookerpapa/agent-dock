@@ -19,21 +19,14 @@ export {
 
 export { WorkspaceRuntimeError } from "./workspace-error.ts";
 export {
-  CUBE_WORKSPACE_CHECKPOINT_FORMAT,
-  MAX_CUBE_WORKSPACE_CHECKPOINT_FILES,
-  MAX_CUBE_WORKSPACE_FILE_BYTES,
-  MAX_CUBE_WORKSPACE_TOTAL_BYTES,
-  captureCubeWorkspaceIndex,
-  createCubeWorkspaceCheckpoint,
-  cubeWorkspaceCheckpointAad,
-  parseCubeWorkspaceCheckpoint,
-  type CubeWorkspaceIndex,
-  type CreateCubeWorkspaceCheckpointInput,
-  type CubeWorkspaceCheckpoint,
-  type CubeWorkspaceCheckpointAuthority,
+  MAX_WORKSPACE_INDEX_FILES,
+  MAX_WORKSPACE_INDEX_FILE_BYTES,
+  MAX_WORKSPACE_INDEX_TOTAL_BYTES,
+  captureWorkspaceIndex,
+  type WorkspaceIndex,
   type WorkspaceSnapshotFileMetadata,
-  validateCubeWorkspaceFileList,
-} from "./cube-workspace-checkpoint.ts";
+  validateWorkspaceFileList,
+} from "./workspace-index.ts";
 export {
   KOPIA_WORKSPACE_CHECKPOINT_FORMAT,
   createKopiaWorkspaceCheckpoint,

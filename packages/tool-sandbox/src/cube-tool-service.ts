@@ -8,22 +8,13 @@ import {
   type ToolWorkerInput,
   type ToolWorkerOutput,
 } from "@agent-dock/protocol";
-import {
-  MAX_WORKSPACE_SNAPSHOT_FILES,
-  MAX_WORKSPACE_SNAPSHOT_FILE_BYTES,
-  captureCubeWorkspaceIndex,
-  captureWorkspaceSnapshot,
-  collectGitWorkspacePatch,
-  encodeWorkspaceSnapshotBlob,
-} from "@agent-dock/workspace-runtime";
+import { captureWorkspaceIndex, collectGitWorkspacePatch } from "@agent-dock/workspace-runtime";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { open, readFile, readdir, realpath } from "node:fs/promises";
-import { constants } from "node:fs";
-import { posix, resolve } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 
@@ -34,8 +25,6 @@ const TOOL_UID = 1_000;
 const TOOL_GID = 1_000;
 const HANDOFF_SECRET_PATTERN = /^adch_[A-Za-z0-9_-]{43}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const MAX_MATERIALIZED_FILE_BYTES = 512 * 1_024;
-const WORKSPACE_ROOT = "/workspace";
 
 type Pending<T> = {
   resolve(value: T): void;
@@ -186,90 +175,6 @@ function parseRebind(value: unknown): HandoffAuthority & { activationId: string 
     bindingSha256: input.bindingSha256,
     activationId: input.activationId,
   };
-}
-
-function parseMaterializeFile(value: unknown): string {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new CubeToolServiceError(400, "Workspace file request was invalid");
-  }
-  const input = value as Record<string, unknown>;
-  const path = input.path;
-  if (
-    Object.keys(input).length !== 1 ||
-    typeof path !== "string" ||
-    path.length < 1 ||
-    path.length > 512 ||
-    path.startsWith("/") ||
-    path.includes("\\") ||
-    /[\u0000-\u001f\u007f]/.test(path) ||
-    posix.normalize(path) !== path ||
-    path.split("/").some((segment) => segment.length < 1 || segment === "." || segment === "..")
-  ) {
-    throw new CubeToolServiceError(400, "Workspace file request was invalid");
-  }
-  return path;
-}
-
-async function materializeWorkspaceFile(path: string): Promise<{
-  path: string;
-  content: string;
-  sha256: string;
-  executable: boolean;
-  sizeBytes: number;
-}> {
-  if (!sealed || bridge !== undefined || initialized === undefined) {
-    throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
-  }
-  const absolutePath = resolve(WORKSPACE_ROOT, path);
-  const parent = absolutePath.slice(0, absolutePath.lastIndexOf("/")) || WORKSPACE_ROOT;
-  let resolvedParent: string;
-  try {
-    resolvedParent = await realpath(parent);
-  } catch {
-    throw new CubeToolServiceError(404, "Workspace file was not found");
-  }
-  if (resolvedParent !== WORKSPACE_ROOT && !resolvedParent.startsWith(`${WORKSPACE_ROOT}/`)) {
-    throw new CubeToolServiceError(403, "Workspace file escaped its root");
-  }
-  let handle;
-  try {
-    handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    throw new CubeToolServiceError(404, "Workspace file was not found");
-  }
-  try {
-    const before = await handle.stat();
-    if (!before.isFile() || before.size > MAX_MATERIALIZED_FILE_BYTES) {
-      throw new CubeToolServiceError(413, "Workspace file was outside its preview byte limit");
-    }
-    const content = Buffer.alloc(before.size);
-    let offset = 0;
-    while (offset < before.size) {
-      const read = await handle.read(content, offset, before.size - offset, offset);
-      if (read.bytesRead < 1) {
-        throw new CubeToolServiceError(409, "Workspace file changed while it was read");
-      }
-      offset += read.bytesRead;
-    }
-    const after = await handle.stat();
-    if (
-      after.size !== before.size ||
-      after.ino !== before.ino ||
-      after.mtimeMs !== before.mtimeMs ||
-      after.ctimeMs !== before.ctimeMs
-    ) {
-      throw new CubeToolServiceError(409, "Workspace file changed while it was read");
-    }
-    return {
-      path,
-      content: content.toString("base64"),
-      sha256: createHash("sha256").update(content).digest("hex"),
-      executable: (after.mode & 0o111) !== 0,
-      sizeBytes: content.byteLength,
-    };
-  } finally {
-    await handle.close();
-  }
 }
 
 function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
@@ -584,6 +489,88 @@ async function toolProcessIds(): Promise<number[]> {
   return output.sort((left, right) => left - right);
 }
 
+type FrozenToolProcess = Readonly<{
+  pid: number;
+  startTime: string;
+}>;
+
+async function processStartTime(pid: number): Promise<string | undefined> {
+  const stat = await readFile(`/proc/${String(pid)}/stat`, "utf8").catch(() => undefined);
+  if (stat === undefined) return undefined;
+  const commandEnd = stat.lastIndexOf(")");
+  if (commandEnd < 1) return undefined;
+  // /proc/<pid>/stat field 3 starts after the closing command parenthesis.
+  // starttime is field 22, therefore index 19 in this remainder.
+  const startTime = stat
+    .slice(commandEnd + 1)
+    .trim()
+    .split(/\s+/)[19];
+  return startTime !== undefined && /^[0-9]+$/.test(startTime) ? startTime : undefined;
+}
+
+async function processIsStopped(processIdentity: FrozenToolProcess): Promise<boolean> {
+  if ((await processStartTime(processIdentity.pid)) !== processIdentity.startTime) return false;
+  const status = await readFile(`/proc/${String(processIdentity.pid)}/status`, "utf8").catch(
+    () => undefined,
+  );
+  return status !== undefined && /^State:\s+(?:T|t)\b/m.test(status);
+}
+
+async function resumeToolProcesses(processes: readonly FrozenToolProcess[]): Promise<number> {
+  let resumed = 0;
+  for (const processIdentity of processes) {
+    if ((await processStartTime(processIdentity.pid)) !== processIdentity.startTime) continue;
+    try {
+      process.kill(processIdentity.pid, "SIGCONT");
+      resumed += 1;
+    } catch (error: unknown) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "ESRCH"
+      ) {
+        throw error;
+      }
+    }
+  }
+  return resumed;
+}
+
+async function freezeToolProcesses(): Promise<readonly FrozenToolProcess[]> {
+  const processes = (
+    await Promise.all(
+      (await toolProcessIds()).map(async (pid): Promise<FrozenToolProcess | undefined> => {
+        const startTime = await processStartTime(pid);
+        return startTime === undefined ? undefined : { pid, startTime };
+      }),
+    )
+  ).filter((entry): entry is FrozenToolProcess => entry !== undefined);
+  try {
+    for (const processIdentity of processes) {
+      if ((await processStartTime(processIdentity.pid)) !== processIdentity.startTime) continue;
+      process.kill(processIdentity.pid, "SIGSTOP");
+    }
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+      if (
+        (
+          await Promise.all(
+            processes.map(async (processIdentity) => processIsStopped(processIdentity)),
+          )
+        ).every(Boolean)
+      ) {
+        return Object.freeze(processes);
+      }
+      await delay(10);
+    }
+    throw new CubeToolServiceError(500, "Tool processes could not be quiesced");
+  } catch (error: unknown) {
+    await resumeToolProcesses(processes).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function killAllToolProcesses(): Promise<void> {
   for (const signal of ["SIGTERM", "SIGKILL"] as const) {
     for (const pid of await toolProcessIds()) {
@@ -607,7 +594,7 @@ async function killAllToolProcesses(): Promise<void> {
   }
 }
 
-async function sealToolBoundary(): Promise<void> {
+async function closeToolWorker(): Promise<void> {
   const current = readyBridge();
   if (current.busy) {
     throw new CubeToolServiceError(409, "Tool Worker was busy");
@@ -615,7 +602,18 @@ async function sealToolBoundary(): Promise<void> {
   sealed = true;
   bridge = undefined;
   await current.close();
+}
+
+async function sealToolBoundary(): Promise<void> {
+  await closeToolWorker();
   await killAllToolProcesses();
+}
+
+async function prepareCheckpointBoundary(): Promise<readonly FrozenToolProcess[]> {
+  await closeToolWorker();
+  const processes = await freezeToolProcesses();
+  checkpointFrozenProcesses = processes;
+  return processes;
 }
 
 type InitializedToolState = {
@@ -630,6 +628,7 @@ let bridge: ToolWorkerBridge | undefined = new ToolWorkerBridge();
 let authority: HandoffAuthority | undefined;
 let initialized: InitializedToolState | undefined;
 let sealed = false;
+let checkpointFrozenProcesses: readonly FrozenToolProcess[] | undefined;
 
 function requireAuthority(request: IncomingMessage): HandoffAuthority {
   const candidate = parseAuthority(request);
@@ -747,62 +746,60 @@ const server = createServer((request, response) => {
       ) {
         throw new CubeToolServiceError(400, "Tool checkpoint request was invalid");
       }
-      await sealToolBoundary();
-      // The trusted data mover snapshots the host-side POSIX mount after this
-      // response. Flush the guest view only after all Tool-UID processes are
-      // gone so the indexed bytes and the Kopia snapshot share one quiescent
-      // boundary.
-      await exec("/bin/sync", ["-f", "/workspace"]);
-      const [workspaceIndex, workspacePatch] = await Promise.all([
-        captureCubeWorkspaceIndex("/workspace"),
-        collectGitWorkspacePatch(
-          "/workspace",
-          {
-            HOME: "/tmp/agent-dock-tool-home",
-            LANG: "C.UTF-8",
-            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-          },
-          { uid: TOOL_UID, gid: TOOL_GID },
-        ),
-      ]);
-      const files = workspaceIndex.files;
-      let portableWorkspace: ReturnType<typeof encodeWorkspaceSnapshotBlob> | undefined;
-      if (
-        workspaceIndex.portable &&
-        files.length <= MAX_WORKSPACE_SNAPSHOT_FILES &&
-        files.every((file) => file.sizeBytes <= MAX_WORKSPACE_SNAPSHOT_FILE_BYTES)
-      ) {
-        try {
-          portableWorkspace = encodeWorkspaceSnapshotBlob(
-            await captureWorkspaceSnapshot("/workspace"),
-          );
-        } catch (error: unknown) {
-          if (
-            !(error instanceof Error) ||
-            error.message !== "Workspace manifest is outside its byte limit"
-          ) {
-            throw error;
-          }
-        }
+      const frozenProcesses = await prepareCheckpointBoundary();
+      try {
+        // The trusted data mover snapshots the host-side POSIX mount while
+        // these exact PID/start-time identities remain stopped.
+        await exec("/bin/sync", ["-f", "/workspace"]);
+        const [workspaceIndex, workspacePatch] = await Promise.all([
+          captureWorkspaceIndex("/workspace"),
+          collectGitWorkspacePatch(
+            "/workspace",
+            {
+              HOME: "/tmp/agent-dock-tool-home",
+              LANG: "C.UTF-8",
+              PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            },
+            { uid: TOOL_UID, gid: TOOL_GID },
+          ),
+        ]);
+        authority = {
+          ...previous,
+          secret: recoverySecret,
+        };
+        sendJson(response, 200, {
+          sealed: true,
+          fencingToken: previous.fencingToken,
+          frozenToolProcesses: frozenProcesses,
+          files: workspaceIndex.files,
+          workspacePatch,
+        });
+      } catch (error: unknown) {
+        checkpointFrozenProcesses = undefined;
+        await resumeToolProcesses(frozenProcesses).catch(() => undefined);
+        throw error;
       }
-      authority = {
-        ...previous,
-        secret: recoverySecret,
-      };
-      sendJson(response, 200, {
-        sealed: true,
-        fencingToken: previous.fencingToken,
-        remainingToolProcesses: 0,
-        files,
-        workspacePatch,
-        ...(portableWorkspace === undefined ? {} : { portableWorkspace }),
-      });
       return;
     }
-    if (url.pathname === "/v1/materialize-file") {
+    if (url.pathname === "/v1/checkpoint/complete") {
       requireAuthority(request);
-      const path = parseMaterializeFile(await readJson(request));
-      sendJson(response, 200, await materializeWorkspaceFile(path));
+      const body = await readJson(request);
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 0 ||
+        checkpointFrozenProcesses === undefined
+      ) {
+        throw new CubeToolServiceError(409, "Tool checkpoint completion was invalid");
+      }
+      const frozenProcesses = checkpointFrozenProcesses;
+      checkpointFrozenProcesses = undefined;
+      const resumedToolProcesses = await resumeToolProcesses(frozenProcesses);
+      sendJson(response, 200, {
+        completed: true,
+        resumedToolProcesses,
+      });
       return;
     }
     if (url.pathname === "/v1/seal") {
@@ -817,7 +814,12 @@ const server = createServer((request, response) => {
     }
     if (url.pathname === "/v1/rebind") {
       const previous = requireAuthority(request);
-      if (!sealed || bridge !== undefined || initialized === undefined) {
+      if (
+        !sealed ||
+        bridge !== undefined ||
+        initialized === undefined ||
+        checkpointFrozenProcesses !== undefined
+      ) {
         throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
       }
       const next = parseRebind(await readJson(request));
@@ -878,6 +880,11 @@ function close(): Promise<void> {
     const current = bridge;
     bridge = undefined;
     await current?.close().catch(() => undefined);
+    if (checkpointFrozenProcesses !== undefined) {
+      const frozenProcesses = checkpointFrozenProcesses;
+      checkpointFrozenProcesses = undefined;
+      await resumeToolProcesses(frozenProcesses).catch(() => undefined);
+    }
     await killAllToolProcesses().catch(() => undefined);
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

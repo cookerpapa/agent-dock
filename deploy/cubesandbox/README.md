@@ -217,12 +217,14 @@ CubeMaster, every Cubelet and the Data Mover. Kopia's S3 target must be
 off-node or replicated before claiming whole-host recovery.
 
 Conversation state and content-verified Workspace checkpoints commit through
-PostgreSQL/object storage. For an exact
-Session, the root-owned Tool supervisor can seal the guest, kill every Tool UID
-process and pause it. A later higher-fence Run connects, rotates the private
-handoff secret and starts a fresh Worker. Failed, cancelled, timed-out or
-ambiguous transitions destroy the guest; a later Run restores the committed
-Kopia snapshot into the POSIX volume before a fresh base-template guest starts.
+PostgreSQL/object storage. For an exact Session, the root-owned Tool supervisor
+closes the old Run's Tool Worker, briefly freezes user processes while the
+trusted Data Mover snapshots `/workspace`, resumes those exact process
+identities, and retains the running VM for the bounded warm TTL. A later
+higher-fence Run rotates the private handoff secret and starts a fresh Tool
+Worker. Failed, cancelled, timed-out or ambiguous transitions destroy the
+guest; a later Run restores the committed Kopia snapshot into the POSIX volume
+before a fresh base-template guest starts.
 
 Operational inspection and teardown remain available even if the source
 revision has advanced beyond the last registered template:

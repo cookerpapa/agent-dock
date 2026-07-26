@@ -260,46 +260,6 @@ export const SandboxManagerMaterializeFileResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerSnapshotGcRequestSchema = Type.Object(
-  {
-    ...ToolSandboxEnvelope,
-    type: Type.Literal("workspace.snapshot_gc"),
-    requestId: UuidSchema,
-    scanId: UuidSchema,
-    referencedSnapshotIds: Type.Array(
-      Type.String({
-        minLength: 1,
-        maxLength: 256,
-        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
-      }),
-      { maxItems: 10_000, uniqueItems: true },
-    ),
-  },
-  { additionalProperties: false },
-);
-
-export const SandboxManagerSnapshotGcResponseSchema = Type.Object(
-  {
-    ...ToolSandboxEnvelope,
-    type: Type.Literal("workspace.snapshot_gc_reconciled"),
-    requestId: UuidSchema,
-    scanId: UuidSchema,
-    managedSnapshots: Type.Integer({ minimum: 0, maximum: 1_000_000 }),
-    referencedSnapshots: Type.Integer({ minimum: 0, maximum: 10_000 }),
-    candidates: Type.Integer({ minimum: 0, maximum: 1_000_000 }),
-    deletedSnapshotIds: Type.Array(
-      Type.String({
-        minLength: 1,
-        maxLength: 256,
-        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
-      }),
-      { maxItems: 100, uniqueItems: true },
-    ),
-    deletionEnabled: Type.Boolean(),
-  },
-  { additionalProperties: false },
-);
-
 export const SandboxManagerRequestSchema = Type.Union([
   ToolSandboxCreateRequestSchema,
   ToolSandboxCaptureRequestSchema,
@@ -540,10 +500,6 @@ export type SandboxManagerMaterializeFileRequest = Static<
 export type SandboxManagerMaterializeFileResponse = Static<
   typeof SandboxManagerMaterializeFileResponseSchema
 >;
-export type SandboxManagerSnapshotGcRequest = Static<typeof SandboxManagerSnapshotGcRequestSchema>;
-export type SandboxManagerSnapshotGcResponse = Static<
-  typeof SandboxManagerSnapshotGcResponseSchema
->;
 export type SandboxManagerRequest = Static<typeof SandboxManagerRequestSchema>;
 export type SandboxManagerResponse = Static<typeof SandboxManagerResponseSchema>;
 export type ToolSandboxOperationRequest = Static<typeof ToolSandboxOperationRequestSchema>;
@@ -597,22 +553,6 @@ export function parseSandboxManagerMaterializeFileResponse(
     SandboxManagerMaterializeFileResponseSchema,
     value,
     "Sandbox Manager materialize file response",
-  );
-}
-
-export function parseSandboxManagerSnapshotGcRequest(
-  value: unknown,
-): SandboxManagerSnapshotGcRequest {
-  return parse(SandboxManagerSnapshotGcRequestSchema, value, "Sandbox Manager snapshot GC request");
-}
-
-export function parseSandboxManagerSnapshotGcResponse(
-  value: unknown,
-): SandboxManagerSnapshotGcResponse {
-  return parse(
-    SandboxManagerSnapshotGcResponseSchema,
-    value,
-    "Sandbox Manager snapshot GC response",
   );
 }
 

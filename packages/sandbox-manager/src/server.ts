@@ -1,7 +1,6 @@
 import {
   parseSandboxManagerRequest,
   parseSandboxManagerMaterializeFileRequest,
-  parseSandboxManagerSnapshotGcRequest,
   parseSupervisorManagementRequest,
   parseToolSandboxOperationRequest,
   type InternalServiceError,
@@ -17,7 +16,6 @@ import {
   SANDBOX_MANAGER_OPERATION_PATH,
   SANDBOX_MANAGER_READY_PATH,
   SANDBOX_MANAGER_SERVICE_PATH,
-  SANDBOX_MANAGER_SNAPSHOT_GC_PATH,
 } from "./client.ts";
 import { SandboxManagerError } from "./sandbox-provider.ts";
 import type { ToolSandboxManager } from "./tool-sandbox-manager.ts";
@@ -29,7 +27,6 @@ export type SandboxManagerServerOptions = {
   port: number;
   serviceToken: string;
   materializerToken?: string;
-  snapshotGcToken?: string;
   manager: SandboxManagerBackend;
   bodyLimit?: number;
   metrics?: AgentDockMetrics;
@@ -45,7 +42,6 @@ export type SandboxManagerBackend = Pick<
   | "execute"
   | "importGitHub"
   | "materializeFile"
-  | "reconcileSnapshots"
   | "listAssignments"
   | "terminateAndConfirmAbsent"
   | "confirmAbsent"
@@ -101,7 +97,6 @@ export class SandboxManagerServer {
   readonly #port: number;
   readonly #serviceDigest: Buffer;
   readonly #materializerDigest: Buffer | undefined;
-  readonly #snapshotGcDigest: Buffer | undefined;
   readonly #manager: SandboxManagerBackend;
   readonly #server: FastifyInstance;
   readonly #metrics: AgentDockMetrics | undefined;
@@ -121,10 +116,6 @@ export class SandboxManagerServer {
       options.materializerToken === undefined
         ? undefined
         : digest(validServiceToken(options.materializerToken));
-    this.#snapshotGcDigest =
-      options.snapshotGcToken === undefined
-        ? undefined
-        : digest(validServiceToken(options.snapshotGcToken));
     this.#manager = options.manager;
     this.#metrics = options.metrics;
     this.#server = Fastify({
@@ -183,16 +174,6 @@ export class SandboxManagerServer {
       token !== undefined &&
       this.#materializerDigest !== undefined &&
       timingSafeEqual(this.#materializerDigest, candidate)
-    );
-  }
-
-  #snapshotGcAuthorized(value: string | undefined): boolean {
-    const token = bearer(value);
-    const candidate = token === undefined ? Buffer.alloc(32) : digest(token);
-    return (
-      token !== undefined &&
-      this.#snapshotGcDigest !== undefined &&
-      timingSafeEqual(this.#snapshotGcDigest, candidate)
     );
   }
 
@@ -402,33 +383,6 @@ export class SandboxManagerServer {
             operation: "materialize_file",
             kind: "sandbox",
             run: () => this.#manager.materializeFile(message),
-          }),
-        );
-      } catch (error: unknown) {
-        await this.#failure(reply, error);
-      }
-    });
-
-    this.#server.post(SANDBOX_MANAGER_SNAPSHOT_GC_PATH, async (request, reply) => {
-      if (!this.#snapshotGcAuthorized(request.headers.authorization)) {
-        await reply.code(401).send({
-          error: {
-            code: "invalid_snapshot_gc_credential",
-            message: "Workspace snapshot garbage-collection request is not authorized",
-            retryable: false,
-          },
-        } satisfies InternalServiceError);
-        return;
-      }
-      try {
-        const message = parseSandboxManagerSnapshotGcRequest(request.body);
-        await reply.code(200).send(
-          await this.#observed({
-            request,
-            spanName: "workspace.snapshot_gc",
-            operation: "snapshot_gc",
-            kind: "sandbox",
-            run: () => this.#manager.reconcileSnapshots(message),
           }),
         );
       } catch (error: unknown) {

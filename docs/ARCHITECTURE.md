@@ -209,13 +209,14 @@ Call asks the primary `CubeSandboxProvider` to materialize a credential-free
 KVM microVM; pure-chat Runs never touch Cube. A microVM is bound to one exact
 tenant/project/workspace/session identity and one current RunAttempt. At a
 successful warm boundary, a root-owned guest supervisor stops the non-root Tool
-Worker, kills and verifies the absence of every UID 1000 process, then Cube
-pauses the microVM. A later higher-fence Attempt reconnects the same activation,
-rotates the handoff secret and starts a fresh Tool Worker against the retained
-Workspace. Cube still does not own business fencing: any identity mismatch,
-stale authority or ambiguous pause/connect/rebind destroys the guest and the
-next Attempt cold-restores the committed checkpoint. See ADR-0040, ADR-0053
-and ADR-0060.
+Worker, briefly freezes remaining user processes while the trusted Data Mover
+snapshots the POSIX Workspace, resumes those exact processes and retains the
+running microVM for the bounded idle TTL. A later higher-fence Attempt rotates
+the handoff secret and starts a fresh Tool Worker against the retained
+environment. Cube still does not own business fencing: any identity mismatch,
+stale authority or ambiguous checkpoint/rebind destroys the guest and the next
+Attempt cold-restores the committed checkpoint. See ADR-0040, ADR-0053,
+ADR-0067 and ADR-0068.
 
 ADR-0042 adds a durable environment plane without moving image policy into the
 Agent. Every Project owns one active member of an append-only environment

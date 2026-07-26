@@ -33,8 +33,6 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/agent-dock-secrets/cube-egress-config-token
   AGENT_DOCK_SANDBOX_MANAGER_URL: http://sandbox-manager:4300
   AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
-  AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE: /run/agent-dock-secrets/cube-snapshot-gc-token
-  AGENT_DOCK_CUBE_SNAPSHOT_GC_INTERVAL_MS: "21600000"
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
@@ -109,10 +107,6 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
     target: /run/agent-dock-secrets/sandbox-materializer-token
-    read_only: true
-  - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cube-snapshot-gc-token
-    target: /run/agent-dock-secrets/cube-snapshot-gc-token
     read_only: true
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
@@ -821,11 +815,6 @@ services:
       AGENT_DOCK_MAXIMUM_WARM_SANDBOXES: "4"
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
-      AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE: /run/agent-dock-secrets/cube-snapshot-gc-token
-      AGENT_DOCK_CUBE_SNAPSHOT_GC_STATE_PATH: /var/lib/agent-dock/snapshot-gc/state.json
-      AGENT_DOCK_CUBE_SNAPSHOT_GC_DELETE_ENABLED: "true"
-      AGENT_DOCK_CUBE_SNAPSHOT_GC_GRACE_MS: "86400000"
-      AGENT_DOCK_CUBE_SNAPSHOT_GC_MAXIMUM_DELETES: "25"
       AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: http://workspace-data-mover:4500
       AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
       AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
@@ -862,16 +851,9 @@ services:
         target: /run/agent-dock-secrets/sandbox-materializer-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cube-snapshot-gc-token
-        target: /run/agent-dock-secrets/cube-snapshot-gc-token
-        read_only: true
-      - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-data-mover-token
         target: /run/agent-dock-secrets/workspace-data-mover-token
         read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/sandbox-manager
-        target: /var/lib/agent-dock/snapshot-gc
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/dependency-egress-private-key.pem
         target: /run/agent-dock-secrets/dependency-egress-private-key.pem

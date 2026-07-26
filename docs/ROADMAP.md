@@ -43,6 +43,10 @@ Session-bound POSIX execution copies, a trusted Kopia/S3 Data Mover and
 PostgreSQL Fence/CAS head publication. The local-copy-loss drill is
 implemented; replicated/off-host POSIX and object storage plus a whole-host
 failure drill remain release work.
+ADR-0068 removes the legacy Cube-native checkpoint format and pause/connect
+handoff. An exact Session now owns a running Cube for the idle TTL, with
+two-phase freeze/snapshot/resume, per-Run Tool authority rotation and Kopia-only
+durable recovery.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the

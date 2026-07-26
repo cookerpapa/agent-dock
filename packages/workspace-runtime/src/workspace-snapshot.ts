@@ -4,10 +4,7 @@ import { constants, type Stats } from "node:fs";
 import { chmod, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import { TextDecoder } from "node:util";
-import {
-  parseCubeWorkspaceCheckpoint,
-  type WorkspaceSnapshotFileMetadata,
-} from "./cube-workspace-checkpoint.ts";
+import type { WorkspaceSnapshotFileMetadata } from "./workspace-index.ts";
 import { parseKopiaWorkspaceCheckpoint } from "./kopia-workspace-checkpoint.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
@@ -165,10 +162,7 @@ export async function captureWorkspaceSnapshot(workspaceDirectory: string): Prom
 }
 
 export function parseWorkspaceSnapshot(snapshot: Uint8Array): WorkspaceSnapshotFileContent[] {
-  if (
-    parseCubeWorkspaceCheckpoint(snapshot) !== undefined ||
-    parseKopiaWorkspaceCheckpoint(snapshot) !== undefined
-  ) {
+  if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) {
     throw snapshotError("Provider Workspace checkpoint does not contain portable file bytes");
   }
   if (snapshot.byteLength < 1 || snapshot.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {
@@ -323,14 +317,11 @@ export async function restoreWorkspaceSnapshot(
 }
 
 export function validateWorkspaceSnapshot(snapshot: Uint8Array): void {
-  if (parseCubeWorkspaceCheckpoint(snapshot) !== undefined) return;
   if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) return;
   parseWorkspaceSnapshot(snapshot);
 }
 
 export function workspaceSnapshotMetadata(snapshot: Uint8Array): WorkspaceSnapshotMetadata[] {
-  const cube = parseCubeWorkspaceCheckpoint(snapshot);
-  if (cube !== undefined) return cube.files.map((file) => ({ ...file }));
   const kopia = parseKopiaWorkspaceCheckpoint(snapshot);
   if (kopia !== undefined) return kopia.files.map((file) => ({ ...file }));
   return parseWorkspaceSnapshot(snapshot).map((file) => ({

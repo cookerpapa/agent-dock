@@ -16,8 +16,6 @@ export type ProductionControlPlaneConfig = {
   cubeEgressConfigToken: string;
   sandboxManagerBaseUrl: string;
   sandboxMaterializerToken: string;
-  sandboxSnapshotGcToken: string;
-  sandboxSnapshotGcIntervalMs: number;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
   supervisorIdPrefix: string;
@@ -260,18 +258,6 @@ export async function loadProductionControlPlaneConfig(
       environment,
       "AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN",
       allowInlineSecrets,
-    ),
-    sandboxSnapshotGcToken: await secret(
-      environment,
-      "AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN",
-      allowInlineSecrets,
-    ),
-    sandboxSnapshotGcIntervalMs: integerValue(
-      environment,
-      "AGENT_DOCK_CUBE_SNAPSHOT_GC_INTERVAL_MS",
-      6 * 60 * 60_000,
-      5 * 60_000,
-      24 * 60 * 60_000,
     ),
     ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined
       ? {}

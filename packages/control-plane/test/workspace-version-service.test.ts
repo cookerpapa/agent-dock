@@ -3,7 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { GitHubGatewayClient, GitHubGatewayRequest } from "@agent-dock/github-gateway";
 import {
-  createCubeWorkspaceCheckpoint,
+  createKopiaWorkspaceCheckpoint,
   createWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
@@ -280,14 +280,15 @@ describe.sequential("versioned Workspace service", () => {
     });
   });
 
-  it("lists and compares Cube-native versions without pretending their file bytes are portable", async () => {
+  it("lists and compares Kopia versions without pretending their file bytes are portable", async () => {
     const readme = Buffer.from("provider-native\n");
-    const checkpoint = createCubeWorkspaceCheckpoint({
-      snapshotId: "cube-snapshot-version-three",
-      sourceSandboxId: "cube-sandbox-version-three",
+    const checkpoint = createKopiaWorkspaceCheckpoint({
+      snapshotId: "kopia-snapshot-version-three",
+      volumeId: `adw-${"f".repeat(48)}`,
       activationId: "20000000-0000-4000-8000-000000000001",
       tenantId: IDS.tenant,
       workspaceId: IDS.workspace,
+      sessionId: IDS.session,
       bindingSha256: "a".repeat(64),
       fencingToken: 3,
       imageRevision: "development",
@@ -300,12 +301,7 @@ describe.sequential("versioned Workspace service", () => {
           sha256: hash(readme),
         },
       ],
-      authority: {
-        keyVersion: 1,
-        nonce: "c".repeat(16),
-        ciphertext: "d".repeat(64),
-        authTag: "e".repeat(22),
-      },
+      recipeCommands: [],
     });
     objects.set("checkpoints/workspace-3", checkpoint);
     await database

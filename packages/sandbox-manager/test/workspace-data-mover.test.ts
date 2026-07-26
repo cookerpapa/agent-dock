@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   HttpWorkspaceDataMover,
@@ -120,5 +123,89 @@ describe("trusted Workspace Data Mover", () => {
         bindingSha256: "a".repeat(64),
       }),
     ).rejects.toMatchObject({ code: "workspace_snapshot_fence_invalid", retryable: false });
+  });
+
+  it("keeps post-checkpoint writes for the same Session head and restores an explicit rollback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agent-dock-data-mover-"));
+    const workspaceRoot = join(root, "workspaces");
+    const stateRoot = join(root, "state");
+    const kopiaBinary = join(root, "fake-kopia.mjs");
+    await writeFile(
+      kopiaBinary,
+      `#!${process.execPath}
+import { mkdir, writeFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+if (args[0] === "repository" && args[1] === "status") {
+  process.stdout.write("{}\\n");
+  process.exit(0);
+}
+if (args[0] === "snapshot" && args[1] === "create") {
+  process.stdout.write(JSON.stringify({ id: "snapshot-one" }) + "\\n");
+  process.exit(0);
+}
+if (args[0] === "snapshot" && args[1] === "restore") {
+  const source = args.at(-2);
+  const target = args.at(-1);
+  await mkdir(target, { recursive: true });
+  await writeFile(target + "/restored.txt", "restored from " + source + "\\n");
+  process.exit(0);
+}
+process.exit(2);
+`,
+      { mode: 0o700 },
+    );
+    await chmod(kopiaBinary, 0o700);
+    const mover = new KopiaWorkspaceDataMover({
+      workspaceRoot,
+      stateRoot,
+      kopiaBinary,
+      kopiaConfigPath: join(stateRoot, "repository.config"),
+      kopiaCacheDirectory: join(stateRoot, "cache"),
+      repositoryPassword: "p".repeat(32),
+      s3: {
+        bucket: "unused",
+        endpoint: "127.0.0.1:9000",
+        region: "us-east-1",
+        prefix: "unused",
+        accessKey: "unused-access",
+        secretAccessKey: "unused-secret",
+        disableTls: true,
+      },
+    });
+    const volume = join(workspaceRoot, `agentdock-posix-${identity.volumeId}`);
+    try {
+      await expect(mover.prepare(identity)).resolves.toEqual({ restored: false });
+      await mkdir(volume, { recursive: true });
+      await writeFile(join(volume, "committed.txt"), "committed\n");
+      await expect(
+        mover.snapshot({
+          ...identity,
+          activationId: "10000000-0000-4000-8000-000000000010",
+          fencingToken: 7,
+          bindingSha256: "a".repeat(64),
+        }),
+      ).resolves.toEqual({ snapshotId: "snapshot-one" });
+
+      await writeFile(join(volume, "background-write.txt"), "after checkpoint\n");
+      await expect(mover.prepare({ ...identity, snapshotId: "snapshot-one" })).resolves.toEqual({
+        restored: false,
+      });
+      await expect(readFile(join(volume, "background-write.txt"), "utf8")).resolves.toBe(
+        "after checkpoint\n",
+      );
+
+      await expect(mover.prepare({ ...identity, snapshotId: "snapshot-two" })).resolves.toEqual({
+        restored: true,
+      });
+      await expect(readFile(join(volume, "restored.txt"), "utf8")).resolves.toBe(
+        "restored from snapshot-two\n",
+      );
+      await expect(readFile(join(volume, "background-write.txt"), "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await mover.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

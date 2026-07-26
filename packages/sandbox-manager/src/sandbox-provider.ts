@@ -6,8 +6,6 @@ import type {
   SandboxCheckpointBlob,
   SandboxManagerMaterializeFileRequest,
   SandboxManagerMaterializeFileResponse,
-  SandboxManagerSnapshotGcRequest,
-  SandboxManagerSnapshotGcResponse,
   SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCaptureResponse,
@@ -176,10 +174,11 @@ export interface SandboxProvider {
   checkHealth(): Promise<void>;
   create(spec: SandboxCreateSpec): Promise<SandboxHandle>;
   /**
-   * Quiesce a runtime before it enters the exact-Session warm pool. Providers
-   * that do not need a physical suspend may omit this hook.
+   * Revoke the completed Run boundary before an exact-Session runtime enters
+   * the warm pool. A Provider may keep the physical runtime running; this hook
+   * must not preserve the old RunAttempt's Tool authority.
    */
-  suspendForWarm?(handle: SandboxHandle): Promise<SandboxHandle>;
+  retainForWarm?(handle: SandboxHandle): Promise<SandboxHandle>;
   rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle>;
   exec(
     handle: SandboxHandle,
@@ -208,10 +207,6 @@ export interface SandboxProvider {
     request: SandboxManagerMaterializeFileRequest,
     signal?: AbortSignal,
   ): Promise<SandboxManagerMaterializeFileResponse>;
-  reconcileSnapshots?(
-    request: SandboxManagerSnapshotGcRequest,
-  ): Promise<SandboxManagerSnapshotGcResponse>;
-
   /** Used only when the Manager restarted before it could reconstruct a handle. */
   destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;
 

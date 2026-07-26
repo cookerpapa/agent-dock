@@ -375,7 +375,6 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         importGitHub: async () => {
           throw new Error("Repository import is outside the Cube live Provider gate");
         },
-        checkpointEncryptionKey: Buffer.alloc(32, 0x4c),
         workspaceDataMover: new HttpWorkspaceDataMover({
           baseUrl: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
           serviceToken: await readPrivateKey(
@@ -570,6 +569,32 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
 
         const secondRuntimeBefore = (await manager.listAssignments(secondAssignment.sandboxId))[0];
         expect(secondRuntimeBefore).toBeDefined();
+        const backgroundProgram = [
+          "const fs=require('node:fs')",
+          "const http=require('node:http')",
+          "fs.writeFileSync('background-state','started\\n')",
+          "setInterval(()=>fs.appendFileSync('background-state','tick\\n'),200)",
+          "http.createServer((_request,response)=>response.end('preview-alive')).listen(43123,'0.0.0.0')",
+        ].join(";");
+        expect(
+          output(
+            await manager.execute(
+              second.capability,
+              operation(
+                second.activationId,
+                `nohup node -e ${JSON.stringify(backgroundProgram)} >/tmp/agentdock-preview.log 2>&1 & echo $! > background.pid; sleep 1; kill -0 "$(cat background.pid)"; node -e "fetch('http://127.0.0.1:43123').then(async r=>process.stdout.write(await r.text()))"`,
+                15_000,
+              ),
+            ),
+          ),
+        ).toBe("preview-alive");
+        const backgroundPid = output(
+          await manager.execute(
+            second.capability,
+            operation(second.activationId, "cat background.pid"),
+          ),
+        ).trim();
+        expect(backgroundPid).toMatch(/^[1-9][0-9]*$/);
         const secondCaptured = await manager.capture(
           second.activationId,
           secondAssignment,
@@ -606,6 +631,18 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           assignment: reboundAssignment,
           workspaceRevision: warmRevision,
         });
+        expect(
+          output(
+            await manager.execute(
+              second.capability,
+              operation(
+                second.activationId,
+                `test "$(cat background.pid)" = "${backgroundPid}"; kill -0 "${backgroundPid}"; test "$(grep -c tick background-state)" -gt 0; node -e "fetch('http://127.0.0.1:43123').then(async r=>process.stdout.write(await r.text()))"`,
+                15_000,
+              ),
+            ),
+          ),
+        ).toBe("preview-alive");
         expect(
           output(
             await manager.execute(
@@ -654,6 +691,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             forbiddenEndpointCount: config.forbiddenEndpoints.length,
             publicInternetReachable: true,
             privateAndPlatformEgressDenied: true,
+            backgroundProcessSurvivedRunBoundary: true,
             cancellationDestroyedMicroVm: true,
             orphanCount: 0,
           },

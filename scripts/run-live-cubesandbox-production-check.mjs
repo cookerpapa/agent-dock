@@ -346,17 +346,17 @@ async function waitForNoCubeSession(sessionId) {
   throw new Error("Cube inventory retained a settled Session microVM");
 }
 
-async function waitForPausedCubeSession(sessionId) {
+async function waitForRunningCubeSession(sessionId) {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const retained = managedForSession(await cube.list(), sessionId);
-    if (retained.length === 1 && retained[0].state === "paused") return retained[0];
+    if (retained.length === 1 && retained[0].state === "running") return retained[0];
     if (retained.length > 1) {
       throw new Error("Cube inventory retained more than one exact-Session microVM");
     }
     await wait(250);
   }
-  throw new Error("Cube inventory did not reach one sealed paused exact-Session microVM");
+  throw new Error("Cube inventory did not retain one running exact-Session microVM");
 }
 
 async function destroyCubeSession(sessionId) {
@@ -594,7 +594,7 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
     }
     await waitForDurableRunCompletion(accepted.runId);
     if (expectTools) {
-      await waitForPausedCubeSession(sessionId);
+      await waitForRunningCubeSession(sessionId);
     } else {
       await waitForNoCubeSession(sessionId);
     }
@@ -816,7 +816,7 @@ try {
     "Large Workspace cold restore reused stale physical authority",
   );
 
-  const retained = await waitForPausedCubeSession(session.sessionId);
+  await waitForRunningCubeSession(session.sessionId);
   await waitForNoCubeSession(foreignSession.sessionId);
   const temporalWorkflows = await Promise.all(
     [
@@ -864,7 +864,7 @@ try {
     },
     multiRound: {
       sameCubeMicroVm: true,
-      sealedPauseResume: true,
+      runningSessionReuse: true,
       workspaceRestored: true,
       workspaceVersions: finalVersions.versions.length,
       finalFileBytes: Buffer.byteLength(finalSource, "utf8"),
@@ -903,7 +903,7 @@ try {
     },
     totalUsage: usage,
     cleanup: {
-      retainedPausedSessionMicroVmCount: 1,
+      retainedRunningSessionMicroVmCount: 1,
       foreignSessionMicroVmCount: 0,
       explicitWarmEvictionVerified: false,
     },
@@ -914,7 +914,7 @@ try {
   await terminateWarmCubeSession(largeFollowUp.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
-  report.cleanup.retainedPausedSessionMicroVmCount = 0;
+  report.cleanup.retainedRunningSessionMicroVmCount = 0;
 
   if (writeReport) {
     const reportDirectory = resolve(repositoryRoot, "docs/reports");
@@ -936,7 +936,7 @@ try {
         `- First coding first text / settled: ${String(report.firstCoding.firstTextMs)} ms / ${String(report.firstCoding.settledMs)} ms`,
         `- Follow-up first text / settled: ${String(report.followUpCoding.firstTextMs)} ms / ${String(report.followUpCoding.settledMs)} ms`,
         `- Coding Tool calls: ${String(report.firstCoding.toolCalls)} + ${String(report.followUpCoding.toolCalls)}`,
-        `- Same sealed Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
+        `- Same running Session Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
         `- Large Workspace files / checkpoint reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.checkpointReferenceBytes)} bytes`,
         `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
@@ -944,9 +944,9 @@ try {
         `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
         `- Temporal Workflows / bounded-reference histories: ${String(report.temporal.workflows.length)} / ${String(report.temporal.workflows.filter((workflow) => workflow.boundedReferencesOnly).length)}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
-        `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedPausedSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
+        `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two coding Runs reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. Two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary, rotated Tool authority and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

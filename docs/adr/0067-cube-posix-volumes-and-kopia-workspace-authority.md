@@ -74,10 +74,9 @@ and Session. AgentDock must prove the previous physical Cube assignment absent
 before a higher-fence cold activation attaches the same volume. A volume that
 has held one tenant's code is never reassigned to another tenant.
 
-The previous `agent-dock.workspace-cube-snapshot.v1` format remains readable
-for migration and rollback. New large checkpoints use
-`agent-dock.workspace-kopia-snapshot.v1`. Cube native snapshots stop being the
-new Workspace authority after cutover.
+Only `agent-dock.workspace-kopia-snapshot.v1` is accepted after the development
+cutover. ADR-0068 removes the previous Cube-native format and deliberately
+deletes incompatible development data instead of retaining a migration path.
 
 ## Failure semantics
 
@@ -140,4 +139,3 @@ The data path gains an external shared-filesystem dependency and a Kopia
 repository. Operators must monitor both and run Kopia maintenance. The benefit
 is that Cube execution-node lifecycle is no longer the durable Workspace
 authority, while the existing PostgreSQL correctness model remains unchanged.
-

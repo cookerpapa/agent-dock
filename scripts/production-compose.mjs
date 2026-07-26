@@ -85,7 +85,6 @@ const applicationSecretNames = [
   "model-credential-master-key",
   "sandbox-manager-token",
   "sandbox-materializer-token",
-  "cube-snapshot-gc-token",
   "workspace-data-mover-token",
   "workspace-kopia-repository-password",
   "workspace-kopia-aws-credentials",
@@ -114,7 +113,6 @@ if (
   throw new Error("Production application secrets must share one private non-root owner");
 }
 for (const [relativePath, label] of [
-  ["state/sandbox-manager", "Sandbox Manager"],
   ["state/workspace-data-mover", "Workspace Data Mover"],
   ["state/cube-shared", "Cube shared Workspace"],
   ["state/cube-shared/volume", "Cube shared Workspace volume"],

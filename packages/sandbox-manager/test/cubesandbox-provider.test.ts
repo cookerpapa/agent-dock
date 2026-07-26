@@ -28,7 +28,6 @@ import type { WorkspaceDataMover } from "../src/workspace-data-mover.ts";
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const WEB_PROXY = Object.freeze({ host: "10.255.255.254", port: 3_128 });
-const CHECKPOINT_KEY = Buffer.alloc(32, 0x5a);
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-cube-test",
   projectId: "project-cube-test",
@@ -96,11 +95,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   readonly creates: CubeSandboxCreateInput[] = [];
   readonly requests: { sandboxId: string; input: CubeSandboxDataRequest }[] = [];
   readonly destroyed: string[] = [];
-  readonly deletedSnapshots: string[] = [];
-  readonly createdSnapshots: string[] = [];
-  readonly snapshotMetadata = new Map<string, Readonly<Record<string, string>>>();
   readonly instances = new Map<string, CubeSandboxInstance>();
-  portableWorkspace: typeof snapshot | undefined;
   healthChecks = 0;
   closed = false;
 
@@ -115,14 +110,12 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   async create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance> {
     this.creates.push(input);
     const sandboxId = `cube-sandbox-${String(this.creates.length)}`;
-    const inherited = this.snapshotMetadata.get(input.templateId);
     const instance: CubeSandboxInstance = {
       sandboxId,
       templateId: input.templateId,
       state: "running",
       domain: "cube.internal",
-      // Cube applies snapshot-template labels after create-time metadata.
-      metadata: Object.freeze({ ...input.metadata, ...inherited }),
+      metadata: Object.freeze({ ...input.metadata }),
       trafficAccessToken: `traffic-${String(this.creates.length)}`,
       cpuCount: 1,
       memoryMB: 768,
@@ -137,38 +130,6 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
 
   async list(): Promise<readonly CubeSandboxInstance[]> {
     return [...this.instances.values()];
-  }
-
-  async pause(instance: CubeSandboxInstance): Promise<CubeSandboxInstance> {
-    const paused = { ...instance, state: "paused" };
-    this.instances.set(instance.sandboxId, paused);
-    return paused;
-  }
-
-  async connect(instance: CubeSandboxInstance): Promise<CubeSandboxInstance> {
-    const connected = { ...instance, state: "running" };
-    this.instances.set(instance.sandboxId, connected);
-    return connected;
-  }
-
-  async createSnapshot(instance: CubeSandboxInstance, name: string) {
-    this.createdSnapshots.push(name);
-    this.snapshotMetadata.set(`cube-snapshot-${instance.sandboxId}`, instance.metadata);
-    return {
-      snapshotId: `cube-snapshot-${instance.sandboxId}`,
-      names: [name],
-    };
-  }
-
-  async deleteSnapshot(snapshotId: string): Promise<void> {
-    this.deletedSnapshots.push(snapshotId);
-  }
-
-  async listSnapshots() {
-    return [...this.snapshotMetadata.keys()].map((snapshotId) => ({
-      snapshotId,
-      names: [] as string[],
-    }));
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -228,7 +189,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
       return {
         sealed: true,
         fencingToken: input.authority?.fencingToken,
-        remainingToolProcesses: 0,
+        frozenToolProcesses: [],
         files: [
           {
             path: "result.txt",
@@ -237,10 +198,10 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
             sha256: createHash("sha256").update("cube\n").digest("hex"),
           },
         ],
-        ...(this.portableWorkspace === undefined
-          ? {}
-          : { portableWorkspace: this.portableWorkspace }),
       };
+    }
+    if (input.path === "/v1/checkpoint/complete") {
+      return { completed: true, resumedToolProcesses: 0 };
     }
     if (input.path === "/v1/materialize-file") {
       const body = input.body as { path: string };
@@ -297,7 +258,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     await provider.checkHealth();
@@ -325,7 +285,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     await expect(
@@ -356,7 +315,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover,
     });
     const manager = new ToolSandboxManager({
@@ -460,7 +418,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(released.retained).toBe(true);
     expect(runtime.destroyed).toEqual([]);
     expect(manager.warmCount).toBe(1);
-    expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("paused");
+    expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("running");
 
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
@@ -510,7 +468,7 @@ describe("CubeSandbox Provider contract", () => {
     await manager.close();
   });
 
-  it("cold-restores a sealed Cube snapshot under a fresh activation and higher fence", async () => {
+  it("cold-restores a Kopia checkpoint under a fresh activation and higher fence", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const workspaceDataMover = fakeWorkspaceDataMover();
     const provider = new CubeSandboxProvider({
@@ -519,7 +477,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover,
     });
     const first = await provider.create({
@@ -594,16 +551,14 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("uses Kopia checkpoints even when the guest can also emit a small portable snapshot", async () => {
+  it("uses only Kopia checkpoints for a Cube Workspace", async () => {
     const runtime = new FakeCubeRuntimeClient();
-    runtime.portableWorkspace = snapshot;
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -626,12 +581,11 @@ describe("CubeSandbox Provider contract", () => {
       workspaceId: assignment.workspaceId,
       sessionId: assignment.sessionId,
     });
-    expect(runtime.createdSnapshots).toEqual([]);
     await provider.destroy(handle);
     await provider.close();
   });
 
-  it("rejects a Cube checkpoint before restore when tenant or fence is stale", async () => {
+  it("rejects a Kopia checkpoint before restore when tenant or fence is stale", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
@@ -639,7 +593,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -696,7 +649,6 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -791,7 +743,6 @@ describe("CubeSandbox Provider contract", () => {
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
       bootstrapProvider: bootstrap,
-      checkpointEncryptionKey: CHECKPOINT_KEY,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({

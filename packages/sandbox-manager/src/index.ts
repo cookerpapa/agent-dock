@@ -5,7 +5,6 @@ export {
   SANDBOX_MANAGER_OPERATION_PATH,
   SANDBOX_MANAGER_READY_PATH,
   SANDBOX_MANAGER_SERVICE_PATH,
-  SANDBOX_MANAGER_SNAPSHOT_GC_PATH,
   SandboxManagerClient,
   SandboxManagerClientError,
   type SandboxManagerClientOptions,
@@ -27,10 +26,6 @@ export {
   type CubeSandboxRuntimeClient,
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "./cubesandbox-runtime-client.ts";
-export {
-  CubeSnapshotGarbageCollector,
-  type CubeSnapshotGarbageCollectorOptions,
-} from "./cube-snapshot-garbage-collector.ts";
 export {
   KUBERNETES_GVISOR_RUNTIME_NAME,
   KUBERNETES_SANDBOX_ANNOTATIONS,

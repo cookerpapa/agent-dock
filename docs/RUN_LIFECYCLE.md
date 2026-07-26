@@ -125,13 +125,15 @@ sequence.
 
 At `agent_settled`:
 
-1. If a Tool was used, the Cube Provider seals the guest, proves that no Tool
-   process remains, flushes the Volume-Plugin-backed POSIX Workspace, and
-   captures a content-hashed file index plus cumulative Git patch. The trusted
-   Data Mover creates an immutable encrypted Kopia snapshot and returns only a
-   bounded Session/volume/environment/fence-bound reference. Legacy portable
-   and Cube-native references remain readable for migration. Otherwise no
-   Workspace capture/version or physical environment validation is created.
+1. If a Tool was used, the Cube Provider closes the current Tool Worker,
+   briefly freezes the remaining UID 1000 processes, flushes the
+   Volume-Plugin-backed POSIX Workspace, and captures a content-hashed file
+   index plus cumulative Git patch. The trusted Data Mover creates an immutable
+   encrypted Kopia snapshot and returns only a bounded
+   Session/volume/environment/fence-bound reference. The guest supervisor then
+   resumes the exact PID/start-time identities. Cube-native references are not
+   accepted. Otherwise no Workspace capture/version or physical environment
+   validation is created.
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
 4. Pi bytes and the bounded Workspace reference are conditionally written to
@@ -148,12 +150,12 @@ At `agent_settled`:
    abandons the staged version and restores the previous settled pointers.
 7. `turn.completed` is durably published as the commit marker.
 8. Manager revokes the Run capability. A successful exact-Session warm release
-   stops the Tool Worker, kills and verifies every UID 1000 process, seals the
-   guest and pauses it through Cube. A later Run must present a higher fence and
+   retains the running guest for the bounded idle TTL, but no Tool Worker or
+   prior Run authority remains. A later Run must present a higher fence and
    rotates the handoff secret before a fresh Tool Worker starts. Failure,
-   cancellation, timeout, identity mismatch or ambiguous pause/connect/rebind
-   destroys the activation. Every terminal path confirms either sealed paused
-   state or runtime absence.
+   cancellation, timeout, identity mismatch or ambiguous checkpoint/rebind
+   destroys the activation. Every terminal path confirms either an idle
+   Session-bound runtime or runtime absence.
 
 If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not

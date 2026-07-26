@@ -89,19 +89,20 @@ code:
   reserve -> first Tool -> create/restore Cube KVM guest
   -> many Tools -> capture Workspace/Pi
   -> commit content checkpoint under Attempt/fence
-  -> seal uid-1000 execution -> pause guest
+  -> revoke old Tool Worker -> retain running Session guest
 
 later code Run:
   matching Workspace revision + higher fence
-  -> Cube connect -> rotate handoff authority -> fresh Tool Worker attach
+  -> rotate handoff authority -> fresh Tool Worker attach
 ```
 
-Cube's lifecycle state is not used as the ownership CAS. AgentDock seals the
-guest, requires a strictly higher business fence, rotates a Manager-only
-handoff secret and keeps warm reuse scoped to the exact tenant/project/
-Workspace/Session. Environment or committed-Workspace revision mismatch,
-failure, cancellation, timeout, Manager restart or any ambiguous transition
-destroys the VM. Guest survival is never a durability mechanism.
+Cube's lifecycle state is not used as the ownership CAS. AgentDock revokes the
+old Run's Tool capability, requires a strictly higher business fence, rotates a
+Manager-only handoff secret and keeps warm reuse scoped to the exact tenant/
+project/Workspace/Session. Environment or committed-Workspace revision
+mismatch, failure, cancellation, timeout, Manager restart or any ambiguous
+transition destroys the VM. Guest survival is an interactive optimization, not
+a durability mechanism.
 
 ## Versioned Project environment
 

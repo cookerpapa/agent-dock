@@ -4,10 +4,10 @@ import {
 } from "@agent-dock/protocol";
 import { TextDecoder } from "node:util";
 import {
-  MAX_CUBE_WORKSPACE_TOTAL_BYTES,
-  validateCubeWorkspaceFileList,
+  MAX_WORKSPACE_INDEX_TOTAL_BYTES,
+  validateWorkspaceFileList,
   type WorkspaceSnapshotFileMetadata,
-} from "./cube-workspace-checkpoint.ts";
+} from "./workspace-index.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
 export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v1";
@@ -155,11 +155,11 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
     !SHA256_PATTERN.test(value.environmentSpecSha256) ||
     !Number.isSafeInteger(value.totalSizeBytes) ||
     (value.totalSizeBytes as number) < 0 ||
-    (value.totalSizeBytes as number) > MAX_CUBE_WORKSPACE_TOTAL_BYTES
+    (value.totalSizeBytes as number) > MAX_WORKSPACE_INDEX_TOTAL_BYTES
   ) {
     throw checkpointError("Kopia Workspace checkpoint shape is invalid");
   }
-  const files = validateCubeWorkspaceFileList(value.files);
+  const files = validateWorkspaceFileList(value.files);
   const totalSizeBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (totalSizeBytes !== value.totalSizeBytes) {
     throw checkpointError("Kopia Workspace checkpoint byte total is inconsistent");
@@ -202,7 +202,7 @@ export function parseKopiaWorkspaceCheckpoint(
 export function createKopiaWorkspaceCheckpoint(
   input: CreateKopiaWorkspaceCheckpointInput,
 ): Uint8Array {
-  const files = validateCubeWorkspaceFileList(input.files);
+  const files = validateWorkspaceFileList(input.files);
   const recipeCommands = validateRecipeCommands(input.recipeCommands);
   const encoded = Buffer.from(
     `${JSON.stringify({
