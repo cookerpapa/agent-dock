@@ -53,6 +53,7 @@ describe("trusted remote tools extension governance", () => {
     } as unknown as ExtensionAPI);
 
     expect(registered.map((tool) => tool.name).sort()).toEqual(["bash", "edit", "read", "write"]);
+    expect(registered.every((tool) => tool.executionMode === "sequential")).toBe(true);
     expect(handlers.has("before_agent_start")).toBe(true);
     expect(process.env.AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID).not.toBe(
       "10000000-0000-4000-8000-000000000099",

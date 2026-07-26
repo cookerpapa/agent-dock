@@ -433,6 +433,7 @@ function registerTrustedRemoteTools(
 
   pi.registerTool({
     ...readTool,
+    executionMode: "sequential",
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createReadTool(WORKSPACE_ROOT, { operations: readOperations(id) }).execute(
@@ -445,6 +446,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...writeTool,
+    executionMode: "sequential",
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createWriteTool(WORKSPACE_ROOT, { operations: writeOperations }).execute(
@@ -457,6 +459,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...editTool,
+    executionMode: "sequential",
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createEditTool(WORKSPACE_ROOT, { operations: editOperations }).execute(
@@ -469,6 +472,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...bashTool,
+    executionMode: "sequential",
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createBashTool(WORKSPACE_ROOT, { operations: bashOperations(id) }).execute(

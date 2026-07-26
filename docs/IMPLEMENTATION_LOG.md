@@ -2753,3 +2753,17 @@
 - Portable source restoration preserves the trusted runtime directory while
   replacing user files. This is required for empty/GitHub source seeds, whose
   restore step runs after the Data Mover establishes the volume generation.
+
+## 2026-07-27 — Pi Tool batch serialization
+
+- Production evidence showed one assistant response emitting two sibling
+  `read` calls 17 ms apart. Pi correctly used its default parallel Tool mode,
+  while the Cube guest Tool Worker deliberately admits one cancellable
+  operation at a time, so the second call returned
+  `tool_operation_overlap` before the model retried it.
+- All four remote `read`, `write`, `edit` and `bash` definitions now declare
+  Pi's public `executionMode: "sequential"` contract. The Agent Loop preserves
+  model order before crossing Tool RPC, matching the single-operation guest
+  protocol without moving file or command execution out of CubeSandbox.
+- The extension test asserts the execution mode on every registered Tool.
+  Sandbox Supervisor typecheck and its complete 65-test suite pass.
