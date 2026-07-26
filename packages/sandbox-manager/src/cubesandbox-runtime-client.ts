@@ -3,6 +3,30 @@ import { setTimeout as delay } from "node:timers/promises";
 
 export const CUBESANDBOX_TOOL_SERVICE_PORT = 49_984;
 
+/**
+ * Cube evaluates explicit allow entries before deny entries, so AgentDock
+ * never supplies an allow list in full-public mode. Keep every non-public or
+ * infrastructure-relevant IPv4 class explicit even when Cube also installs
+ * part of this list as a built-in protection.
+ */
+export const CUBESANDBOX_BLOCKED_EGRESS_CIDRS = Object.freeze([
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.0.0.0/24",
+  "192.0.2.0/24",
+  "192.88.99.0/24",
+  "192.168.0.0/16",
+  "198.18.0.0/15",
+  "198.51.100.0/24",
+  "203.0.113.0/24",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+] as const);
+
 export type CubeSandboxInstance = Readonly<{
   sandboxId: string;
   templateId: string;
@@ -18,7 +42,7 @@ export type CubeSandboxCreateInput = Readonly<{
   templateId: string;
   timeoutSeconds: number;
   metadata: Readonly<Record<string, string>>;
-  allowInternetAccess: false;
+  allowInternetAccess: true;
   allowPublicTraffic: false;
 }>;
 
@@ -254,8 +278,11 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         templateID: input.templateId,
         timeout: input.timeoutSeconds,
         metadata: input.metadata,
-        allow_internet_access: false,
-        network: { allowPublicTraffic: false },
+        allow_internet_access: true,
+        network: {
+          allowPublicTraffic: false,
+          denyOut: CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
+        },
         lifecycle: { on_timeout: "pause", auto_resume: false },
       }),
     });

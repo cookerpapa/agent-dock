@@ -31,6 +31,9 @@ storage/reconstruction evidence. ADR-0061 adds capacity-aware soft affinity on
 top of Temporal: a hot Session may reuse the prior live Worker only after a
 row-locked slot reservation, while busy, stale or unreachable targets
 immediately fall back to the common Task Queue.
+ADR-0062 changes the current Cube Tool network policy from offline to full
+public egress with explicit private/link-local/metadata denial; private
+traffic-token ingress and credential isolation remain unchanged.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -185,7 +188,9 @@ single-host slice. ADR-0029 splits the trusted Pi Worker pool from the Sandbox
 Manager; Pi's built-ins are disabled and replaced through public operation
 APIs. ADR-0053 makes CubeSandbox the primary physical Provider. A logical
 reservation means pure chat creates no guest; the first Tool Call schedules a
-credential-free, networkless, non-root KVM microVM for one exact RunAttempt.
+credential-free, non-root KVM microVM for one exact RunAttempt. ADR-0062 now
+permits its public egress while denying private, link-local, metadata and
+platform address classes.
 Production acceptance proves remote `bash/edit`, checkpoint/diff capture,
 cancellation, exact cleanup, secret absence and two-tenant guest isolation.
 ADR-0060 now allows an exact-Session follow-up to reuse the same physical Cube

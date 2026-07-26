@@ -401,8 +401,9 @@ create/execute/capture/stop, exact assignment inventory, and a fixed public
 GitHub importer. It receives no Docker/containerd socket, database, S3,
 provider, enrollment, GitHub or tenant credential.
 
-Each Tool Pod is non-root, read-only outside memory-backed volumes,
-capability-dropped, and networkless through default-deny NetworkPolicy. Its worker creates
+Each retained gVisor importer/bootstrap Pod is non-root, read-only outside
+memory-backed volumes, capability-dropped, and networkless except for its
+exact-host capability proxy. Its worker creates
 a fixed subprocess environment instead of inheriting the Manager or Runner
 environment. Therefore model-gateway capabilities, service tokens, database
 paths, and cloud credentials cannot enter `bash`, including through
@@ -561,19 +562,22 @@ image revision, digest and template specification hash. Its guest CoW root
 filesystem is writable, so the evidence contract does not pretend it has a
 read-only OCI rootfs. The authenticated lifecycle supervisor is root inside the
 guest so it can enforce the Run boundary; every model-selected Tool process
-runs as UID/GID `1000:1000`, with no capabilities, credentials, host mounts or
-outbound network. The live KVM gate
-proves different guest/host kernels, two-tenant Workspace isolation, forbidden
-platform and public egress, bounded output/path handling, cancellation and
-zero orphans.
+runs as UID/GID `1000:1000`, with no capabilities, credentials or host mounts.
+CubeVS permits public IPv4 egress while explicitly rejecting private,
+loopback, link-local, metadata and other special address classes. The live KVM
+gate proves different guest/host kernels, two-tenant Workspace isolation,
+forbidden platform/private egress, successful public HTTPS, bounded output/path
+handling, cancellation and zero orphans.
 
 There is no runtime selector and no lower-security Tool fallback. Cube ordinary
-Tool execution is always deny-all and offline. Recipes with `dependencyHosts`
-run only in the retained disposable gVisor bootstrap path, using an Ed25519
-capability for exact HTTPS hosts. The resulting regular-file Workspace is
-captured, the bootstrap is destroyed, and a new offline Cube guest receives
-the bytes and reruns offline verification. No process, connection or capability
-crosses that promotion boundary.
+Tool execution always uses the deployment-owned
+`public_egress_private_denied` policy. Recipes with `dependencyHosts` still run
+their immutable setup in the retained disposable gVisor bootstrap path, using
+an Ed25519 capability for exact HTTPS hosts. The resulting regular-file
+Workspace is captured and the bootstrap is destroyed before Cube receives the
+bytes. No bootstrap process, connection or capability crosses that promotion
+boundary; later arbitrary Tool Bash nevertheless has Cube's full-public
+egress.
 
 K3s/gVisor remains a different fixed-purpose boundary for repository import.
 The versioned `deploy/helm/agent-dock-execution-plane` chart keeps the `runsc`
@@ -594,7 +598,7 @@ Minimum controls:
 - dropped Linux capabilities and `RuntimeDefault` seccomp;
 - CPU, memory, PID, disk, execution-time, and output limits;
 - no hostPath, device, ServiceAccount token, runtime socket or host namespace;
-- restricted network egress;
+- full public egress with explicit private/link-local/metadata denial;
 - no long-lived model/provider secrets exposed to the agent.
 
 The Phase 0 Compose topology remains a zero-token configuration probe. The
@@ -602,9 +606,10 @@ production Java repair path activates a separate Tool Pod with UID/GID
 `1000:1000`, read-only rootfs, `RuntimeDefault` seccomp, dropped capabilities,
 `no-new-privileges`, no host namespaces/ports/hostPath/devices, and bounded CPU,
 memory, ephemeral storage, PIDs, file descriptors, `/tmp`, and workspace
-memory-backed volumes. Default-deny policy and `dnsPolicy: None` make normal
-fake and real Tool execution offline. Dependency setup has only the temporary
-capability path described above. Pinned Pi and the request-scoped model gateway stay together
+memory-backed volumes. Default-deny policy and `dnsPolicy: None` keep the
+retained gVisor importer and bootstrap paths restricted. Ordinary Cube Tool
+execution instead follows ADR-0062's public-only egress policy. Pinned Pi and
+the request-scoped model gateway stay together
 in the trusted Runner; the Runner receives a short-lived model capability and
 joins only internal model egress, while the provider relay transports opaque
 TLS bytes to the fixed provider host. Remote tools receive neither that route,

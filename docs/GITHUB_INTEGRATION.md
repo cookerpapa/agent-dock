@@ -27,8 +27,8 @@ and never returns a token. Internal RPC uses a mounted service credential.
    commit. The Gateway reads Git commit/tree/blob APIs, rejects truncated trees,
    symlinks, submodules and oversized manifests, and returns the canonical
    Workspace snapshot.
-5. The Tool Sandbox receives only the snapshot. It remains networkless and has
-   no GitHub credential.
+5. The Tool Sandbox receives only the snapshot. It has no GitHub credential;
+   ordinary Cube Tools follow the separate public-egress/private-denial policy.
 
 ## Pull-request delivery
 
@@ -61,4 +61,3 @@ GitHub API and prove token isolation, exact-commit import, deletion-aware tree
 creation, retry reconciliation, HMAC verification, and service authentication.
 No live-GitHub claim is made unless the operator runs the documented acceptance
 flow with their App installation.
-

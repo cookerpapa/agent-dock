@@ -850,8 +850,8 @@ verifies ambiguous-command failure and spool quarantine, scales the control plan
 one to two and back, restores a follow-up from S3, restarts the Supervisor into
 a fresh boot, reconciles the old boot, cancels a live Tool Pod, audits the
 execution boundary (no application owns a runtime socket; the Manager has only
-scoped Kubernetes authority; Tool Pods are host-mount-free, credential-free,
-and networkless), verifies non-root host-UID
+scoped Kubernetes authority; retained gVisor Pods are host-mount-free,
+credential-free and network-restricted), verifies non-root host-UID
 portability and secret absence, and replays 22 durable ordered events. It then
 exercises the built Web/Session inspector API surface, safe file and patch
 reads, Run usage/tests/context, owner activity, and fork/archive/rollback. The
@@ -913,8 +913,9 @@ therefore guarded and excluded from routine CI. During release validation,
 confirm the Pi runtime remains inside the trusted non-root Supervisor, that no
 application owns a Docker/containerd socket, that the Manager's Kubernetes
 credential remains limited to the importer resources, and that each transient
-Cube Tool guest has deny-all outbound networking and no credential-bearing
-environment or mount. Rotate or revoke a temporary test key afterward. Any
+Cube Tool guest has full public egress with private/link-local/metadata denial
+and no credential-bearing environment or mount. Rotate or revoke a temporary
+test key afterward. Any
 broader claim requires its own ADR, threat model, and acceptance evidence.
 
 To validate the semantic conversation read model and trusted provider relay

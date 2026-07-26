@@ -250,6 +250,24 @@ function denyProbeCommand(endpoints: readonly Readonly<{ host: string; port: num
   return `node -e ${JSON.stringify(program)}`;
 }
 
+function publicHttpsProbeCommand(): string {
+  const program =
+    `const https=require('node:https');` +
+    `const fail=()=>process.exit(94);` +
+    `const request=https.get('https://example.com/',{` +
+    `headers:{'user-agent':'agent-dock-cube-egress-check/1'},timeout:5000` +
+    `},response=>{` +
+    `response.resume();` +
+    `response.once('end',()=>{` +
+    `if((response.statusCode??500)<200||(response.statusCode??500)>=400)fail();` +
+    `process.stdout.write('public-egress-ok')` +
+    `});` +
+    `});` +
+    `request.once('timeout',()=>{request.destroy();fail()});` +
+    `request.once('error',fail);`;
+  return `node -e ${JSON.stringify(program)}`;
+}
+
 async function waitForNoManagedInstances(
   config: LiveConfiguration,
   activationIds: ReadonlySet<string>,
@@ -272,7 +290,7 @@ async function waitForNoManagedInstances(
 
 describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
   it(
-    "proves two-tenant isolation, deny-all egress, cancellation and cleanup",
+    "proves two-tenant isolation, full-public egress, private denial, cancellation and cleanup",
     async () => {
       const config = await configuration();
       await Promise.all(
@@ -362,7 +380,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             user: "1000:1000",
             privileged: false,
             hasDockerSocket: false,
-            networkMode: "deny_all",
+            networkMode: "public_egress_private_denied",
             droppedCapabilities: ["ALL"],
             securityOptions: ["no-new-privileges"],
           },
@@ -385,7 +403,14 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           output(
             await manager.execute(
               first.capability,
-              operation(first.activationId, denyProbeCommand(config.forbiddenEndpoints), 15_000),
+              operation(
+                first.activationId,
+                denyProbeCommand([
+                  ...config.forbiddenEndpoints,
+                  { host: "169.254.169.254", port: 80 },
+                ]),
+                15_000,
+              ),
             ),
           ),
         ).toBe("all-forbidden-endpoints-blocked");
@@ -393,14 +418,10 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           output(
             await manager.execute(
               first.capability,
-              operation(
-                first.activationId,
-                "node -e \"const s=require('node:net').createConnection({host:'1.1.1.1',port:443});const denied=()=>{s.destroy();process.exit(0)};s.setTimeout(3000,denied);s.once('error',denied);s.once('connect',()=>process.exit(93))\"",
-                10_000,
-              ),
+              operation(first.activationId, publicHttpsProbeCommand(), 15_000),
             ),
           ),
-        ).toBe("");
+        ).toBe("public-egress-ok");
 
         const captured = await manager.capture(first.activationId, firstAssignment, randomUUID());
         expect(captured.type).toBe("tool_sandbox.captured");
@@ -496,7 +517,8 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             totalMs: Math.round(performance.now() - startedAt),
             guestKernelDistinctFromHost: true,
             forbiddenEndpointCount: config.forbiddenEndpoints.length,
-            publicInternetDenied: true,
+            publicInternetReachable: true,
+            privateAndPlatformEgressDenied: true,
             cancellationDestroyedMicroVm: true,
             orphanCount: 0,
           },

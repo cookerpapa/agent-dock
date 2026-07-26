@@ -438,7 +438,7 @@ const templateSpecification = Object.freeze({
   cpuMillicores: 2_000,
   memoryMb: 2_000,
   cubeCaInjected: false,
-  allowInternetAccess: false,
+  allowInternetAccess: true,
 });
 const templateSpecSha256 = createHash("sha256")
   .update(JSON.stringify(templateSpecification), "utf8")
@@ -463,6 +463,7 @@ const created = parseJson(
       "--memory",
       "2000",
       "--with-cube-ca=false",
+      "--allow-internet-access",
       "--detach",
       "--json",
     ],

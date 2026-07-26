@@ -162,6 +162,9 @@ extension-policy support would overstate the current boundary.
 - [x] Promote capability-scoped dependency setup from a disposable gVisor Pod
   into a newly created offline Cube guest without promoting processes, network
   state or credentials
+- [ ] ADR-0062: enable full public Cube Tool egress while explicitly denying
+  private/link-local/metadata/platform ranges and preserving private-token
+  ingress
 - [ ] Review Cube upgrade/node-loss drills and upstream state/idempotency issues
   before claiming a dedicated multi-node public deployment
 

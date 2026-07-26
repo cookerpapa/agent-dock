@@ -42,9 +42,9 @@ operator path.
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
 | Workspace durability | AgentDock content checkpoint | same AgentDock content checkpoint |
 | Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
-| Tool network | Kubernetes default deny | Cube create request forces Internet/public deny |
+| Tool network | Kubernetes default deny | public egress with private/special CIDR denial |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
-| Dependency setup | disposable networked bootstrap then fresh offline Pod | promotes that content into a fresh offline Cube VM |
+| Dependency setup | disposable exact-host bootstrap | promotes regular files into a full-public Cube VM |
 | Native snapshot | not required | optional future optimization, never commit authority |
 
 ## Provider path
@@ -104,9 +104,17 @@ The create body always contains:
 
 ```json
 {
-  "allow_internet_access": false,
+  "allow_internet_access": true,
   "network": {
-    "allowPublicTraffic": false
+    "allowPublicTraffic": false,
+    "denyOut": [
+      "10.0.0.0/8",
+      "100.64.0.0/10",
+      "127.0.0.0/8",
+      "169.254.0.0/16",
+      "172.16.0.0/12",
+      "192.168.0.0/16"
+    ]
   }
 }
 ```
@@ -171,14 +179,16 @@ The live gate has proven:
 - a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
 - simultaneous tenant canaries remaining in different Workspaces;
 - no model/platform credential, Kubernetes token or Docker socket in the guest;
-- denial of CubeAPI, platform endpoints and public Internet from the guest;
+- successful public HTTPS plus denial of CubeAPI, platform/private endpoints
+  and link-local metadata from the guest;
 - output, path, symlink, command-time and process limits;
 - cancellation destroying the affected microVM;
 - content capture and exact zero-orphan cleanup.
 
-Recipes that require dependency hosts run only in the disposable gVisor
-bootstrap governed by ADR-0044. Its captured content is restored into a fresh
-Cube VM and verified offline; ordinary Cube Bash remains deny-all.
+Recipes that require dependency hosts retain the disposable gVisor bootstrap
+governed by ADR-0044. Its captured regular files are restored into a fresh
+Cube VM. This is still a reproducible preparation boundary, but ordinary Cube
+Bash subsequently has full public egress under ADR-0062.
 
 This does not prove a multi-node production deployment. Cube control-node loss,
 compute-node loss, rolling upgrade, storage failure, density and long-duration

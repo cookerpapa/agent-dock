@@ -1,7 +1,10 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OfficialCubeSandboxRuntimeClient } from "../src/index.ts";
+import {
+  CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
+  OfficialCubeSandboxRuntimeClient,
+} from "../src/index.ts";
 
 type ObservedRequest = {
   method: string;
@@ -124,7 +127,7 @@ afterAll(async () => {
 });
 
 describe("official CubeSandbox HTTP compatibility client", () => {
-  it("forces private deny-all creation and authenticates both planes", async () => {
+  it("allows public egress, denies private ranges and authenticates private ingress", async () => {
     const client = new OfficialCubeSandboxRuntimeClient({
       apiUrl: `http://127.0.0.1:${String(port)}`,
       apiKey: "k".repeat(48),
@@ -141,7 +144,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       templateId: "agent-dock-tool-v1",
       timeoutSeconds: 900,
       metadata: { "agentdock.managed": "true" },
-      allowInternetAccess: false,
+      allowInternetAccess: true,
       allowPublicTraffic: false,
     });
     expect(instance.trafficAccessToken).toBe("private-traffic-token");
@@ -150,8 +153,11 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       body: {
         templateID: "agent-dock-tool-v1",
         timeout: 900,
-        allow_internet_access: false,
-        network: { allowPublicTraffic: false },
+        allow_internet_access: true,
+        network: {
+          allowPublicTraffic: false,
+          denyOut: CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
+        },
         lifecycle: { on_timeout: "pause", auto_resume: false },
       },
     });

@@ -141,10 +141,6 @@ const EnvironmentValidationCommonSchema = {
   imageRevision: EnvironmentImageRevisionSchema,
   specSha256: Type.Literal(DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256),
   recipeSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
-  // This is the network state exposed to Agent tools after environment
-  // setup. A dependency recipe may temporarily use the scoped proxy, but
-  // the Manager must seal that path before it accepts this report.
-  networkMode: Type.Literal("deny_all"),
   runAsUser: Type.Literal("1000:1000"),
   tools: Type.Array(EnvironmentToolReportSchema, {
     minItems: 4,
@@ -159,6 +155,7 @@ export const EnvironmentValidationReportSchema = Type.Union([
       ...EnvironmentValidationCommonSchema,
       isolationBoundary: Type.Literal("gvisor"),
       runtime: Type.Literal("runsc"),
+      networkMode: Type.Literal("deny_all"),
       readOnlyRootFilesystem: Type.Literal(true),
     },
     { additionalProperties: false },
@@ -168,6 +165,13 @@ export const EnvironmentValidationReportSchema = Type.Union([
       ...EnvironmentValidationCommonSchema,
       isolationBoundary: Type.Literal("microvm"),
       runtime: Type.Literal("cubesandbox-kvm"),
+      // Historical checkpoints may truthfully retain deny_all. New Cube
+      // activations attest the deployment-owned full-public/private-denied
+      // policy selected in ADR-0062.
+      networkMode: Type.Union([
+        Type.Literal("deny_all"),
+        Type.Literal("public_egress_private_denied"),
+      ]),
       // Cube's disposable CoW guest rootfs is writable. The non-root Tool
       // Worker and the independent guest kernel, rather than a read-only OCI
       // rootfs, are the effective execution boundary.

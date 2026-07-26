@@ -54,7 +54,7 @@ Untrusted browser input / repository / model output
           v                         v
  CubeMaster/Cubelet/KVM       gVisor importer Pod
           |
- Tool microVM (untrusted, deny-all outbound)
+ Tool microVM (untrusted, public egress/private CIDRs denied)
 ```
 
 The Sandbox Manager is deliberately small. It holds the CubeAPI key and a
@@ -72,6 +72,8 @@ In scope:
 
 - a prompt that persuades the model to run arbitrary shell commands;
 - a repository with malicious build/test scripts;
+- malicious Tool code exfiltrating Workspace or prompt-derived data to a public
+  destination;
 - a tenant probing another tenant's IDs, events, checkpoints, or workspace;
 - replayed Tool RPC operations or stale fenced workers;
 - runaway output, process creation, memory use, CPU use, and long-running tools;
@@ -100,7 +102,8 @@ Assumed trusted or out of scope for the current claim:
 | Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool guest has no Kubernetes/Cube credential; Cube lifecycle is available only through the bounded Manager and fixed relays | production topology, Cube request-shape tests, live guest credential probes |
 | Accepted Run silently changes Tool image after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-guest toolchain preflight; READY template evidence binds Git revision, image digest and spec hash | migration/protocol tests, production startup gate, Cube environment evidence and real-token Run |
 | Model chooses an unreviewed image or runtime policy | template/profile/network/resources remain operator configuration and closed protocols reject extra client fields | protocol schemas, template contract tests and Manager policy mismatch tests |
-| Ordinary Tool reaches internal services or Internet | every Cube create request disables Internet/public traffic; dependency setup runs in a disposable capability-scoped gVisor Pod and only regular Workspace bytes are promoted into a fresh offline Cube guest | live Cube endpoint/public TCP probes, dependency-promotion test, offline Bash, and network matrix |
+| Ordinary Tool reaches internal services or metadata | every Cube create request enables public egress but explicitly denies private, loopback, carrier-grade NAT, link-local/metadata and other special IPv4 classes; it supplies no higher-priority allow entries | live Cube public-HTTPS success plus platform/private/metadata denial probes and network matrix |
+| Ordinary Tool exfiltrates Workspace data to a public host | accepted residual risk of owner-selected full-public mode; the guest has no model/platform/GitHub credential, and the private-deployment claim excludes DLP | credential-absence probes and explicit ADR-0062 risk statement |
 | Cross-tenant workspace read | one microVM is bound to one immutable tenant/project/workspace/session identity; an exact-Session warm handoff requires a higher fence, rotated secret and complete old-process removal | simultaneous two-tenant same-path canaries, stale-authority rejection and Cube KVM gate |
 | A used runtime is sanitized and reassigned to another tenant | used guests are never pooled or rebound across Session/Workspace/tenant identity; exact-Session warm release seals the root-owned supervisor, kills every Tool UID process and pauses the VM, while mismatch or ambiguity destroys it | sealed-handoff template check, immutable-binding Provider tests, exact cleanup and zero-orphan inventory gate |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
@@ -184,8 +187,8 @@ npm run release:evidence
 ```
 
 The first command retains the gVisor importer/regression proof. The second
-attests real Cube KVM guests, two-tenant isolation, deny-all egress,
-cancellation and cleanup. The third creates and removes a deterministic
+attests real Cube KVM guests, two-tenant isolation, public HTTPS,
+private/metadata denial, cancellation and cleanup. The third creates and removes a deterministic
 disposable topology, tests multi-tenant behavior, and restores a coordinated
 encrypted backup before continuing a Run. The fourth produces checksummed SBOM
 and image vulnerability evidence from clean revision-labelled images.

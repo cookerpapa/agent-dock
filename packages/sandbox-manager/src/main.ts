@@ -32,9 +32,9 @@ let provider: SandboxProvider;
 if (config.provider === "cubesandbox") {
   const cube = config.cubeSandbox;
   if (cube === undefined) throw new TypeError("CubeSandbox configuration is missing");
-  // Repository import remains a separately constrained gVisor workload in
-  // this experiment. It must pass the existing exact-commit/capability gate;
-  // the Cube Tool VM itself always remains deny-all.
+  // Repository import remains a separately constrained gVisor workload. It
+  // must pass the existing exact-commit/capability gate. Ordinary Cube Tool
+  // VMs use the deployment-owned full-public/private-denied policy.
   const importer = createGvisorProvider(0);
   provider = new CubeSandboxProvider({
     templateId: cube.templateId,

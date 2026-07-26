@@ -218,7 +218,7 @@ function operation(activationId: string): ToolSandboxOperationRequest {
 }
 
 describe("CubeSandbox Provider contract", () => {
-  it("attests a real-template probe and always requests private deny-all networking", async () => {
+  it("attests a real-template probe with full-public egress and private ingress", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
@@ -231,7 +231,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]).toMatchObject({
       templateId: "agent-dock-tool-v1",
-      allowInternetAccess: false,
+      allowInternetAccess: true,
       allowPublicTraffic: false,
       metadata: {
         "agentdock.managed": "true",
@@ -240,6 +240,33 @@ describe("CubeSandbox Provider contract", () => {
       },
     });
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
+    await provider.close();
+  });
+
+  it("rejects callers that try to replace the deployment-owned Cube network policy", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      runtimeClient: runtime,
+      importGitHub: vi.fn(async () => Buffer.alloc(0)),
+    });
+    await expect(
+      provider.create({
+        activationId: ACTIVATION_ID,
+        assignment,
+        environment,
+        workspaceSeed: { kind: "sample_java" },
+        policy: {
+          ...provider.defaultPolicy,
+          network: { mode: "deny_all" },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "cubesandbox_policy_unsupported",
+      retryable: false,
+    });
+    expect(runtime.creates).toHaveLength(0);
     await provider.close();
   });
 
@@ -381,7 +408,7 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("promotes capability-scoped dependency setup into a fresh offline Cube VM", async () => {
+  it("promotes capability-scoped dependency setup into a fresh full-public Cube VM", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const dependencyRecipe = {
       schemaVersion: 1 as const,
@@ -470,7 +497,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(bootstrap.destroy).toHaveBeenCalledOnce();
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]).toMatchObject({
-      allowInternetAccess: false,
+      allowInternetAccess: true,
       allowPublicTraffic: false,
     });
     const initialize = runtime.requests.find(({ input }) => input.path === "/v1/initialize");

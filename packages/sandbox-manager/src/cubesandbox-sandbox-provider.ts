@@ -40,7 +40,7 @@ export const CUBESANDBOX_RUNTIME_NAME = "cubesandbox-kvm";
 
 export const CUBESANDBOX_TOOL_POLICY: SandboxPolicy = Object.freeze({
   policyVersion: 1,
-  network: Object.freeze({ mode: "deny_all" }),
+  network: Object.freeze({ mode: "public_egress_private_denied" }),
   resources: Object.freeze({
     cpuNano: 1_000_000_000,
     memoryBytes: 768 * 1_024 * 1_024,
@@ -433,7 +433,7 @@ function effectiveIsolation(
     user: `${evidence.uid}:${evidence.gid}`,
     privileged: false,
     readOnlyRootFilesystem: evidence.readOnlyRootFilesystem,
-    networkMode: "deny_all",
+    networkMode: "public_egress_private_denied",
     mountCount: 0,
     hasDockerSocket: false,
     pidLimit: policy.resources.pids,
@@ -499,7 +499,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     if (
-      spec.policy.network.mode !== "deny_all" ||
+      spec.policy.network.mode !== "public_egress_private_denied" ||
       spec.policy.allowHostMounts ||
       spec.policy.allowDockerSocket ||
       spec.policy.privileged
@@ -556,7 +556,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         this.#imageRevision,
         bindingSha256,
       ),
-      allowInternetAccess: false,
+      allowInternetAccess: true,
       allowPublicTraffic: false,
     });
     try {
@@ -609,7 +609,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         ...toolchain,
         isolationBoundary: "microvm",
         runtime: CUBESANDBOX_RUNTIME_NAME,
-        networkMode: "deny_all",
+        networkMode: "public_egress_private_denied",
         runAsUser: "1000:1000",
         readOnlyRootFilesystem: false,
       };
@@ -1095,7 +1095,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         [METADATA.workload]: "runtime-probe",
         [METADATA.imageRevision]: this.#imageRevision,
       },
-      allowInternetAccess: false,
+      allowInternetAccess: true,
       allowPublicTraffic: false,
     });
     try {

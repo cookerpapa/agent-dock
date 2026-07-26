@@ -2,9 +2,10 @@
 
 ## Rule
 
-Untrusted Cube Tool microVMs never join a platform network and have deny-all
-outbound connectivity. Network membership never replaces application
-authentication.
+Untrusted Cube Tool microVMs never join a platform network. They have full
+public IPv4 egress through CubeVS, with explicit denial of private, loopback,
+carrier-grade NAT, link-local/metadata and other special address classes.
+Network membership never replaces application authentication.
 
 The trusted product plane currently runs in isolated Compose networks; the
 ordinary untrusted execution plane runs in Cube KVM guests. K3s/gVisor remains
@@ -54,14 +55,16 @@ member of the directly routed `provider-egress` network.
 
 | Workload | Ingress | DNS | Public egress | Platform/private endpoints | Credential |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Ordinary Tool microVM | private-token Tool protocol through CubeProxy only | no useful external route | deny | deny | none |
+| Ordinary Tool microVM | private-token Tool protocol through CubeProxy only | Cube-managed | allow | deny by CIDR policy | none |
 
-Every create request sets `allow_internet_access=false` and
-`allowPublicTraffic=false`. The real KVM gate also probes CubeAPI, Control
-Plane/PostgreSQL-class endpoints and a public IP from inside the guest; all
-must fail even though the trusted host can reach the forbidden platform
-targets. Port 49984 is the only registered Tool service. Cube's inherited
-`envd` command channel is not started.
+Every create request sets `allow_internet_access=true`,
+`allowPublicTraffic=false` and an explicit `denyOut` list for non-public and
+infrastructure-relevant IPv4 classes. No `allowOut` entries are supplied,
+because Cube evaluates allow entries before deny entries. The real KVM gate
+requires public HTTPS to succeed while CubeAPI, Control
+Plane/PostgreSQL-class endpoints and `169.254.169.254` fail. Port 49984 is the
+only registered Tool service and remains protected by Cube's per-Sandbox
+traffic token. Cube's inherited `envd` command channel is not started.
 
 ## Kubernetes importer plane
 
@@ -85,10 +88,10 @@ subresources. A disposable Pod selected for dependency setup can connect only
 to the proxy Service. For a Cube environment with `dependencyHosts`, the
 Manager captures only that bootstrap Pod's regular-file Workspace, destroys the
 Pod and capability, and restores the bytes into a newly created
-`allow_internet_access=false` Cube microVM. Processes, network namespaces,
-connections and capability material are not promoted. The ordinary Cube Tool
-microVM therefore remains offline even when its environment was prepared
-through controlled dependency egress.
+Cube microVM. Processes, network namespaces, connections and capability
+material are not promoted. That remains a reproducible environment-preparation
+boundary, but the ordinary Cube Tool microVM subsequently has ADR-0062's
+full-public/private-denied egress.
 
 ## Credential and authority matrix
 
@@ -110,14 +113,14 @@ an application container.
 
 ## Executable denial evidence
 
-The primary live gate verifies from inside real Cube KVM Tool guests that they
-cannot:
+The primary live gate verifies from inside real Cube KVM Tool guests that they:
 
-- reach CubeAPI, the Control Plane/PostgreSQL-class platform endpoints or public
-  Internet;
-- read Runner/Manager environment, model/platform credentials or a Kubernetes
+- can reach a stable public HTTPS endpoint;
+- cannot reach CubeAPI, the Control Plane/PostgreSQL-class platform endpoints
+  or link-local metadata;
+- cannot read Runner/Manager environment, model/platform credentials or a Kubernetes
   token;
-- find a Docker/containerd socket or another tenant's Workspace.
+- cannot find a Docker/containerd socket or another tenant's Workspace.
 
 It additionally verifies a guest kernel distinct from the host, UID/GID,
 capabilities, rlimit behavior, bounded output, cancellation and complete
@@ -133,5 +136,4 @@ redacted audit logs. Redirects require another CONNECT and therefore another
 exact allowed host. The issuer private key remains in the Sandbox Manager;
 Kubernetes receives only its public key. Cube Tool microVMs are never added to
 provider egress, the importer namespace, a host bridge, or a platform network.
-Dependency-network project recipes are rejected by the Cube Provider until a
-fresh-offline-guest transition is accepted.
+Their public Internet path is CubeVS's independent NAT/policy plane.

@@ -23,8 +23,8 @@ event delivery under ADR-0040.
 - trusted Pi Runner and model boundary;
 - authenticated Sandbox Manager with no runtime socket;
 - provider-neutral handles, policy, lifecycle, inspection, and cleanup;
-- primary `CubeSandboxProvider` with offline KVM Tool guests, fixed Cube relays,
-  and fail-closed current-commit template attestation;
+- primary `CubeSandboxProvider` with full-public/private-denied KVM Tool guests,
+  fixed Cube relays, and fail-closed current-commit template attestation;
 - retained Kubernetes/gVisor implementation only for importer/regression use;
 - credential, namespace, cgroup, filesystem, network, cancellation, and Pi
   integration evidence;
@@ -141,8 +141,9 @@ ADR-0039 remain evidence for the retained gVisor importer boundary.
   closed Tool policy;
 - the Manager has no Docker/containerd socket and reaches Cube only through
   credential-free fixed-target relays;
-- Tool guests have deny-all outbound networking, no platform credential or
-  host mount, and bounded CPU/memory/process/disk/time/output;
+- Tool guests have public egress with explicit private/link-local/metadata
+  denial, no platform credential or host mount, and bounded
+  CPU/memory/process/disk/time/output;
 - real KVM evidence covers guest/host kernel distinction, two-tenant Workspace
   isolation, cancellation and zero-orphan cleanup;
 - gVisor remains the fixed-purpose exact-commit importer and deterministic

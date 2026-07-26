@@ -17,6 +17,7 @@ export {
   type CubeSandboxProviderOptions,
 } from "./cubesandbox-sandbox-provider.ts";
 export {
+  CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
   OfficialCubeSandboxRuntimeClient,
   type CubeSandboxCreateInput,
   type CubeSandboxDataRequest,

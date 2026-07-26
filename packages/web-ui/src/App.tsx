@@ -283,13 +283,15 @@ function EmptyTranscript({ realModel }: { realModel: boolean }) {
       <h1>A cloud control plane around Pi, not a chat-page wrapper.</h1>
       <p>
         Submit the prepared task to create a durable session. AgentDock will claim the turn, acquire
-        a fenced lease, activate a hardened Kubernetes gVisor workspace, run pinned Pi, and replay
+        a fenced lease, activate a Cube KVM Tool workspace on demand, run pinned Pi, and replay
         every committed event here.
       </p>
       <div className="boundary-grid">
         <span>PostgreSQL outbox</span>
         <span>resumable SSE</span>
-        <span>{realModel ? "capability-only model egress" : "networkless sandbox"}</span>
+        <span>
+          {realModel ? "capability-only model egress" : "public egress · private networks denied"}
+        </span>
         <span>bounded Git diff</span>
       </div>
     </section>

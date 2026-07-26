@@ -59,7 +59,7 @@ CubeAPI -> CubeMaster -> Cubelet -> CubeShim / KVM
     v
 Untrusted demand-activated Tool microVM
     |-- isolated workspace, shell, compiler and tests
-    `-- no platform credential/network; bounded CPU/memory/process/disk/time
+    `-- public-only egress, no platform credential/private route; bounded resources
 ```
 
 ## Initial technology choices
@@ -191,6 +191,7 @@ only after a measured requirement appears.
 - [ADR-0058: Kubernetes Pi Worker pool and external conversation state](docs/adr/0058-kubernetes-pi-worker-pool-and-external-conversation-state.md)
 - [ADR-0059: single-node Kubernetes Pi Worker cutover](docs/adr/0059-single-node-kubernetes-pi-worker-cutover.md)
 - [ADR-0061: capacity-aware Temporal Worker affinity](docs/adr/0061-capacity-aware-temporal-worker-affinity.md)
+- [ADR-0062: Cube full-public egress with private-network denial](docs/adr/0062-cube-full-public-egress-with-private-network-denial.md)
 
 ## Current executable spikes
 
@@ -337,7 +338,8 @@ execution plane. No
 application service owns a Docker/containerd socket. Pi and the tenant model
 credential remain in the trusted Runner; `read/write/edit/bash` cross a narrow
 RPC boundary into a host-mount-free, credential-free Tool microVM with
-deny-all outbound networking. Only the Web ingress publishes a loopback port.
+full public outbound networking and explicit private/link-local/metadata
+denial. Only the Web ingress publishes a loopback port.
 The Manager retains provider-neutral capability and identity enforcement, while
 `CubeSandboxProvider` owns physical lifecycle. A Run receives logical Tool
 authority without creating a VM; the first Tool Call asks CubeMaster to
@@ -371,9 +373,11 @@ identity. See ADR-0042, ADR-0053 and the
 health, backup, upgrade, recovery, and the disposable full-topology acceptance
 command.
 
-Dependency installation remains explicit environment configuration, not
-general Agent Internet access. The retained Kubernetes/gVisor bootstrap path
-can validate a candidate recipe like this:
+Ordinary Cube Tool commands now have general public Internet access under
+ADR-0062, while private, link-local, metadata and platform address classes
+remain blocked by CubeVS. Immutable dependency installation remains available
+as explicit environment configuration through the retained Kubernetes/gVisor
+bootstrap path:
 
 ```json
 {
@@ -400,15 +404,13 @@ can validate a candidate recipe like this:
 }
 ```
 
-Only the marked command receives a short-lived exact-host proxy capability.
-Its process group is terminated at the command boundary. The Manager captures
-the prepared Workspace, destroys and confirms absence of that exact bootstrap
-Pod, then restores into a fresh gVisor Pod that never had proxy access.
-Cube Tool execution itself currently accepts only offline recipes and rejects
-`dependencyHosts`; temporary Cube egress plus a fresh offline-guest transition
-must pass the same boundary tests before this recipe can become a Cube project
-environment. This is an explicit fail-closed limitation, not a hidden gVisor
-Tool fallback.
+Only the marked immutable setup command receives that bootstrap's short-lived
+exact-host proxy capability. Its process group is terminated at the command
+boundary. The Manager captures the prepared Workspace, destroys and confirms
+absence of that exact bootstrap Pod, then restores the regular files into
+Cube. This preparation path remains useful for reproducible environment
+versions, but it is no longer an offline-runtime claim: later arbitrary Tool
+commands in the Cube guest have the deployment-owned full-public policy.
 
 This is production-complete for the bounded private multi-tenant Java fixture
 and controlled GitHub repositories pinned to exact commits (one repository or

@@ -73,7 +73,7 @@ describe("versioned project environment protocol", () => {
       recipeSha256: snapshot.recipeSha256,
       isolationBoundary: "microvm",
       runtime: "cubesandbox-kvm",
-      networkMode: "deny_all",
+      networkMode: "public_egress_private_denied",
       runAsUser: "1000:1000",
       readOnlyRootFilesystem: false,
       tools,

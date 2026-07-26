@@ -130,16 +130,17 @@ report does not falsely claim a read-only OCI rootfs.
 
 Recipes with `dependencyHosts` use the retained disposable gVisor bootstrap and
 the ADR-0044 Ed25519 proxy. After content capture and exact bootstrap
-destruction, a fresh deny-all Cube guest restores the content and repeats
-offline verification. gVisor never executes an ordinary Agent Tool Call.
+destruction, a fresh Cube guest restores the regular files. gVisor never
+executes an ordinary Agent Tool Call; the resulting Cube guest uses the
+deployment-owned full-public/private-denied policy.
 
 ## Fixed Cube Tool policy
 
 ```text
 upstream: TencentCloud/CubeSandbox v0.6.0
 template: immutable READY ID + image digest + current Git revision
-network: allow_internet_access=false; allowPublicTraffic=false
-Tool service: private-token port 49984 only
+network: allow_internet_access=true; explicit private/special denyOut
+inbound: allowPublicTraffic=false; private-token port 49984 only
 user: 1000:1000
 privileged: false
 capabilities: zero effective / drop ALL

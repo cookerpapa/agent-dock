@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-26
 - Extends: ADR-0031, ADR-0044, ADR-0053, ADR-0057
+- Partially superseded by: ADR-0062 for ordinary Cube egress only
 
 ## Context
 
@@ -67,6 +68,11 @@ microVM. Arbitrary Bash is never replayed.
 
 ### Controlled dependency networking
 
+This subsection records the accepted policy at the time of ADR-0060.
+ADR-0062 now enables full public egress with explicit private-network denial
+for ordinary Cube Tools. The sealed pause/rebind decisions in this ADR are
+unchanged.
+
 Cube Tool VMs remain `allow_internet_access=false` and
 `allowPublicTraffic=false`.
 
@@ -103,4 +109,3 @@ The change requires automated and live evidence for:
    verification VM;
 7. two-tenant same-path isolation; and
 8. a real-token multi-round Pi coding Run with lower second-Run Tool latency.
-
