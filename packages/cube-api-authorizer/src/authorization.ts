@@ -10,6 +10,8 @@ export type CubeAuthorizationRequest = Readonly<{
 const SANDBOX_ID = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?";
 const SANDBOX_ITEM_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}$`);
 const SANDBOX_LIFECYCLE_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/(?:pause|connect)$`);
+const SANDBOX_SNAPSHOT_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/snapshots$`);
+const SNAPSHOT_ITEM_PATH = /^\/templates\/snap-[a-f0-9]{24}$/;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -46,6 +48,20 @@ export function isAllowedCubeApiOperation(path: string, method: string): boolean
   if (
     normalizedMethod === "POST" &&
     SANDBOX_LIFECYCLE_PATH.test(parsed.pathname) &&
+    parsed.search === ""
+  ) {
+    return true;
+  }
+  if (
+    normalizedMethod === "POST" &&
+    SANDBOX_SNAPSHOT_PATH.test(parsed.pathname) &&
+    parsed.search === ""
+  ) {
+    return true;
+  }
+  if (
+    normalizedMethod === "DELETE" &&
+    SNAPSHOT_ITEM_PATH.test(parsed.pathname) &&
     parsed.search === ""
   ) {
     return true;

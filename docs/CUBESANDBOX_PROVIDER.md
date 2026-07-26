@@ -135,7 +135,10 @@ through CubeProxy using the returned traffic token. CubeAPI itself must use an
 API key or authentication callback plus private network/firewall placement;
 upstream documentation says its default configuration accepts requests without
 authentication. The supplied runbook uses the simple-key mode backed by a
-Kubernetes Secret.
+Kubernetes Secret. Its external authorizer uses an exact method/path allowlist:
+ordinary lifecycle routes plus snapshot creation are allowed, while deletion is
+limited to Cube's pinned `snap-<24 lowercase hex>` identity. The Manager
+credential therefore cannot delete the immutable `tpl-*` Tool template.
 
 In the Compose product plane:
 

@@ -11,6 +11,8 @@ describe("Cube API authorizer", () => {
     ["DELETE", `/sandboxes/${SANDBOX}`],
     ["POST", `/sandboxes/${SANDBOX}/pause`],
     ["POST", `/sandboxes/${SANDBOX}/connect`],
+    ["POST", `/sandboxes/${SANDBOX}/snapshots`],
+    ["DELETE", "/templates/snap-0123456789abcdef01234567"],
     ["GET", "/v2/sandboxes"],
     ["GET", "/v2/sandboxes?limit=1000"],
   ])("allows the Provider operation %s %s", (method, path) => {
@@ -27,6 +29,9 @@ describe("Cube API authorizer", () => {
   it.each([
     ["GET", "/templates"],
     ["DELETE", "/templates/tpl-owned"],
+    ["DELETE", "/templates/snap-owned"],
+    ["DELETE", "/templates/snap-0123456789abcdef0123456g"],
+    ["GET", `/sandboxes/${SANDBOX}/snapshots`],
     ["PATCH", `/sandboxes/${SANDBOX}`],
     ["POST", `/sandboxes/${SANDBOX}`],
     ["GET", "/v2/sandboxes?limit=1001"],

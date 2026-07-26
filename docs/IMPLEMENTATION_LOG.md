@@ -2592,6 +2592,11 @@
   official snapshot HTTP request shape and Workspace-version projection.
   The rebuilt Cube Tool template check also passed real process killing,
   checkpoint authority rotation, portable capture and warm rebind.
+- The first real KVM snapshot attempt exposed a missing operation in the
+  external Cube API authorizer. The allowlist now admits
+  `POST /sandboxes/:id/snapshots` and restricts deletion to Cube v0.6's exact
+  `DELETE /templates/snap-<24 lowercase hex>` namespace. It continues to deny
+  `tpl-*` deletion, list endpoints and arbitrary template operations.
 - The operational boundary is explicit: current Cube snapshot data is local to
   the single-node Cube storage plane. Compose backup alone is not a node-loss
   backup for provider-native Workspace versions; replicated/off-host storage,
