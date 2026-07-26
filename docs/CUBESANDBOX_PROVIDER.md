@@ -104,8 +104,11 @@ secret. A Workspace that still fits the portable manifest keeps that format;
 larger Workspaces ask Cube to create a native snapshot. The recovery secret is
 encrypted in the small reference stored in MinIO; PostgreSQL publishes that
 reference only under the current RunAttempt fence and Workspace-head CAS. A
-cold restore creates a new Cube VM from the snapshot ID and must rotate to a
-strictly higher fence before the Tool Worker starts. See ADR-0064.
+cold restore first creates a new Cube VM from the immutable Tool template, then
+uses Cube's official rollback operation to restore the snapshot filesystem. It
+must rotate to a strictly higher fence before the Tool Worker starts. Direct
+snapshot-as-template creation is not used because Cube v0.6 inherits the source
+Sandbox labels. See ADR-0064.
 
 ## Network and credential boundary
 
@@ -136,9 +139,10 @@ API key or authentication callback plus private network/firewall placement;
 upstream documentation says its default configuration accepts requests without
 authentication. The supplied runbook uses the simple-key mode backed by a
 Kubernetes Secret. Its external authorizer uses an exact method/path allowlist:
-ordinary lifecycle routes plus snapshot creation are allowed, while deletion is
-limited to Cube's pinned `snap-<24 lowercase hex>` identity. The Manager
-credential therefore cannot delete the immutable `tpl-*` Tool template.
+ordinary lifecycle routes plus snapshot creation and rollback are allowed,
+while deletion is limited to Cube's pinned `snap-<24 lowercase hex>` identity.
+The Manager credential therefore cannot delete the immutable `tpl-*` Tool
+template.
 
 In the Compose product plane:
 
@@ -231,8 +235,9 @@ page:
 - the in-tree [Node SDK source](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/sdk/node)
   and [Pi integration example](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/examples/pi-agent-integration).
 
-ADR-0064 promotes only snapshot-and-clone at a quiescent settled boundary. It
-does not use in-place rollback as a cross-Attempt ownership transfer. The
+ADR-0064 promotes only sealed snapshot-and-rollback at a quiescent settled
+boundary. Rollback applies to a newly created VM with the new physical identity;
+it does not transfer the old VM between Attempts. The
 failure modes represented by upstream issue
 [#804](https://github.com/TencentCloud/CubeSandbox/issues/804),
 [#985](https://github.com/TencentCloud/CubeSandbox/issues/985) and

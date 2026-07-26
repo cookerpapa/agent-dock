@@ -9,7 +9,7 @@ export type CubeAuthorizationRequest = Readonly<{
 
 const SANDBOX_ID = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?";
 const SANDBOX_ITEM_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}$`);
-const SANDBOX_LIFECYCLE_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/(?:pause|connect)$`);
+const SANDBOX_LIFECYCLE_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/(?:pause|connect|rollback)$`);
 const SANDBOX_SNAPSHOT_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/snapshots$`);
 const SNAPSHOT_ITEM_PATH = /^\/templates\/snap-[a-f0-9]{24}$/;
 

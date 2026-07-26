@@ -2568,7 +2568,7 @@
   512-file/2-MiB portable Workspace-manifest boundary.
 - Researched Kopia, Restic, REAPI CAS and Cube v0.6 snapshots before changing
   the persistence contract. ADR-0064 keeps the portable content manifest for
-  small Workspaces and selects Cube's official snapshot-and-clone path for
+  small Workspaces and selects Cube's official snapshot-and-rollback path for
   larger ordinary Cube Workspaces. This avoids a second repository/credential
   plane now while preserving a future Kopia/REAPI data-mover boundary.
 - Added a sealed checkpoint protocol. The root-owned guest supervisor stops
@@ -2578,10 +2578,12 @@
   a Cube snapshot and return only an AES-256-GCM encrypted reference bound to
   tenant, Workspace, image, environment, source binding and fence.
 - Added higher-fence cold restore. A new activation creates a fresh Cube VM
-  from the committed snapshot, authenticates only to the sealed service,
-  rotates activation/binding/secret/fence, starts a new Tool Worker and
-  revalidates runtime/toolchain evidence. Stale tenant/environment/fence
-  requests fail before VM creation.
+  from the immutable Tool template, applies Cube's official rollback operation
+  to the committed snapshot, authenticates only to the sealed service, rotates
+  activation/binding/secret/fence, starts a new Tool Worker and revalidates
+  runtime/toolchain evidence. Direct snapshot-as-template creation is not used
+  because Cube v0.6 inherits stale source labels. Stale
+  tenant/environment/fence requests fail before VM creation.
 - Raised only the bounded reference/index transport to 32 MiB and the durable
   file-count column to 100,000; portable manifests retain their original
   512-file, 512-KiB/file and 2-MiB limits. Historical lists/comparisons use the

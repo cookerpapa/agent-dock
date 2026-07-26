@@ -81,6 +81,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   readonly destroyed: string[] = [];
   readonly deletedSnapshots: string[] = [];
   readonly createdSnapshots: string[] = [];
+  readonly restoredSnapshots: string[] = [];
   readonly instances = new Map<string, CubeSandboxInstance>();
   portableWorkspace: typeof snapshot | undefined;
   healthChecks = 0;
@@ -137,6 +138,11 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
 
   async deleteSnapshot(snapshotId: string): Promise<void> {
     this.deletedSnapshots.push(snapshotId);
+  }
+
+  async rollback(instance: CubeSandboxInstance, snapshotId: string): Promise<CubeSandboxInstance> {
+    this.restoredSnapshots.push(snapshotId);
+    return instance;
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -486,7 +492,7 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(runtime.creates).toHaveLength(2);
     expect(runtime.creates[1]).toMatchObject({
-      templateId: "cube-snapshot-cube-sandbox-1",
+      templateId: "agent-dock-tool-v1",
       allowInternetAccess: true,
       allowPublicTraffic: false,
       metadata: {
@@ -494,6 +500,7 @@ describe("CubeSandbox Provider contract", () => {
         "agentdock.fencing_token": String(nextAssignment.fencingToken),
       },
     });
+    expect(runtime.restoredSnapshots).toEqual(["cube-snapshot-cube-sandbox-1"]);
     const rebind = runtime.requests.find(
       ({ sandboxId, input }) => sandboxId === "cube-sandbox-2" && input.path === "/v1/rebind",
     );

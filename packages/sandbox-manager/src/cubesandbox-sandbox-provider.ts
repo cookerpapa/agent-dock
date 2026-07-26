@@ -750,8 +750,8 @@ export class CubeSandboxProvider implements SandboxProvider {
     );
     const recoverySecret = openRecoveryAuthority(this.#checkpointEncryptionKey, checkpoint);
     const nextSecret = handoffSecret();
-    const instance = await this.#client.create({
-      templateId: checkpoint.snapshotId,
+    let instance = await this.#client.create({
+      templateId: this.#templateId,
       timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
       metadata: assignmentMetadata(
         spec.activationId,
@@ -763,6 +763,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       allowPublicTraffic: false,
     });
     try {
+      instance = await this.#client.rollback(instance, checkpoint.snapshotId);
       await this.#waitForService(instance, {
         handoffSecret: recoverySecret,
         fencingToken: checkpoint.fencingToken,
