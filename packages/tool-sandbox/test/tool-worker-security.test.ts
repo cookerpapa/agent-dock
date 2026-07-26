@@ -74,8 +74,8 @@ describe("credential-free Tool Sandbox worker", () => {
         NODE_USE_ENV_PROXY: "1",
         http_proxy: "http://10.255.255.254:3128",
         https_proxy: "http://10.255.255.254:3128",
-        NO_PROXY: "",
-        no_proxy: "",
+        NO_PROXY: "127.0.0.1,localhost,::1",
+        no_proxy: "127.0.0.1,localhost,::1",
       });
       expect(JSON.stringify(environment)).not.toContain("inherited-proxy.invalid");
     } finally {
@@ -192,7 +192,7 @@ describe("credential-free Tool Sandbox worker", () => {
         {
           id: "proxy-evidence",
           command:
-            'test -n "$HTTPS_PROXY"; test "$NO_PROXY" = ""; printf configured > proxy-marker.txt',
+            'test -n "$HTTPS_PROXY"; test "$NO_PROXY" = "127.0.0.1,localhost,::1"; printf configured > proxy-marker.txt',
           cwd: ".",
           timeoutMs: 1_000,
           network: "dependency",

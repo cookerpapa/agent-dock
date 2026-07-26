@@ -498,6 +498,7 @@ export function safeToolEnvironment(
   dependencyProxy?: DependencyProxyBootstrap,
   webProxy?: ToolWebProxyBootstrap,
 ): NodeJS.ProcessEnv {
+  const loopbackNoProxy = "127.0.0.1,localhost,::1";
   let proxyEnvironment: NodeJS.ProcessEnv = {};
   if (dependencyProxy !== undefined) {
     if (
@@ -521,8 +522,8 @@ export function safeToolEnvironment(
       http_proxy: proxy,
       https_proxy: proxy,
       NODE_USE_ENV_PROXY: "1",
-      NO_PROXY: "",
-      no_proxy: "",
+      NO_PROXY: loopbackNoProxy,
+      no_proxy: loopbackNoProxy,
     };
   } else if (webProxy !== undefined) {
     if (
@@ -544,8 +545,8 @@ export function safeToolEnvironment(
       http_proxy: proxy,
       https_proxy: proxy,
       NODE_USE_ENV_PROXY: "1",
-      NO_PROXY: "",
-      no_proxy: "",
+      NO_PROXY: loopbackNoProxy,
+      no_proxy: loopbackNoProxy,
     };
   }
   return {
