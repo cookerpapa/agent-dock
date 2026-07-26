@@ -276,6 +276,13 @@ describe("SupervisorHostRuntime", () => {
         .executeTakeFirstOrThrow();
       expect(activeCredential.boot_id).toBe(secondIdentity.bootId);
       expect(temporalWorkerOptions).toHaveLength(2);
+      expect(temporalWorkerOptions.map((options) => options.sandboxId)).toEqual([
+        firstIdentity.sandboxId,
+        secondIdentity.sandboxId,
+      ]);
+      expect(temporalWorkerOptions.map((options) => options.affinityTtlMs)).toEqual([
+        600_000, 600_000,
+      ]);
       expect(temporalWorkerOptions.map((options) => options.workerDeployment)).toEqual([
         {
           deploymentName: "agent-dock-pi-workers",

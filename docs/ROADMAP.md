@@ -27,7 +27,10 @@ legacy WebSocket matching lanes are disabled rather than run as a second
 scheduler. Content-addressed incremental Pi JSONL manifests
 are implemented in the production checkpoint adapter with v1 read
 compatibility, integrity checks, periodic consolidation, and measured local
-storage/reconstruction evidence.
+storage/reconstruction evidence. ADR-0061 adds capacity-aware soft affinity on
+top of Temporal: a hot Session may reuse the prior live Worker only after a
+row-locked slot reservation, while busy, stale or unreachable targets
+immediately fall back to the common Task Queue.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the

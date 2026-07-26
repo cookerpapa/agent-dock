@@ -304,6 +304,8 @@ export interface SessionTable {
   row_version: GeneratedInt8;
   current_workspace_version_id: GeneratedNullable<string>;
   forked_from_session_id: GeneratedNullable<string>;
+  worker_affinity_sandbox_id: GeneratedNullable<string>;
+  worker_affinity_expires_at: NullableTimestamp;
   archived_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -554,6 +556,17 @@ export interface SessionLeaseTable {
   valid_until: Timestamp;
   acquired_at: GeneratedTimestamp;
   renewed_at: GeneratedTimestamp;
+}
+
+export interface TemporalWorkerAffinityReservationTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  command_id: string;
+  sandbox_id: string;
+  task_queue: string;
+  expires_at: Timestamp;
+  created_at: GeneratedTimestamp;
 }
 
 export interface SupervisorConnectionTable {
@@ -972,6 +985,7 @@ export interface Database {
   supervisor_hosts: SupervisorHostTable;
   sandbox_retirements: SandboxRetirementTable;
   session_leases: SessionLeaseTable;
+  temporal_worker_affinity_reservations: TemporalWorkerAffinityReservationTable;
   commands: CommandTable;
   approvals: ApprovalTable;
   session_events: SessionEventTable;

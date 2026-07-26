@@ -28,7 +28,8 @@ Every Worker has:
 - an independent fsynced boot ledger;
 - an independent durable event spool;
 - a declared capacity of exactly one active SDK Session;
-- a Temporal Workflow/Activity poller on the common Pi Task Queue;
+- a Temporal Workflow poller/common Activity poller plus one boot-specific
+  Activity poller, all sharing the same SDK execution-slot gate;
 - an outbound authenticated management/liveness WebSocket to the Control Plane
   that does not assign production Runs;
 - a private management address validated against an operator URL template.
@@ -96,7 +97,10 @@ For a later user message:
 Control Plane commits Run/outbox and starts its Temporal Workflow
         |
         v
-Temporal assigns the exact-command Activity to any available Pi Worker
+reserve the prior Worker only if it is live and has a free slot
+        |
+        v
+Temporal tries that private queue, then falls back to the common queue
         |
         v
 Worker creates the eligible fenced RunAttempt
@@ -175,8 +179,8 @@ second concurrently running tenant Session. The container runtime restarts the
 Worker and the Control Plane reassigns future work from committed state.
 
 Capacity one does not mean the platform can run only one Agent. Production
-replicates the complete Worker process, and all replicas poll the same Temporal
-Task Queue:
+replicates the complete Worker process. All replicas poll the common Temporal
+Task Queue and each also polls its own private soft-affinity queue:
 
 ```text
 Temporal Task Queue
@@ -184,6 +188,16 @@ Temporal Task Queue
 ├── Pi Worker 2, one active SDK session
 └── Pi Worker N, one active SDK session
 ```
+
+After a successful Run, the Session remembers that exact Worker boot for at
+most the local checkpoint-cache TTL. The next Run uses the private queue only
+after a row-locked PostgreSQL reservation proves spare capacity. Concurrent
+reservations count against the slot before Temporal delivery. The Worker then
+claims the exact reservation and rechecks one shared in-process slot gate across
+both pollers. Busy, expired, restarted, or unreachable Workers are bypassed and
+the Workflow returns immediately to the common queue. This is a cache-locality
+optimization, not ownership: no private queue may block a Session or replace
+the shared PostgreSQL/S3 recovery path.
 
 The supported single-host profile runs those replicas as Docker Compose
 services. Kubernetes is not required for this horizontal-scaling property:

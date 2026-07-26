@@ -40,7 +40,7 @@ Temporal Server
     |-- one durable Workflow per accepted Run
     |-- Task Queue fairness, retry timers, cancellation and Worker matching
     |
-    | common capacity-bounded Task Queue
+    | capacity-aware soft affinity, then common Task Queue fallback
     v
 Trusted TypeScript Agent Runner
     |-- capacity-one Pi SDK AgentSession and model capability
@@ -68,7 +68,8 @@ Untrusted demand-activated Tool microVM
 - Runner: horizontally scalable, capacity-one TypeScript Workers embedding the
   pinned Pi SDK; no per-message Pi process
 - Run orchestration: pinned self-hosted Temporal Server 1.29.1 and TypeScript
-  SDK 1.21.1; one Workflow per Run and one Activity per active Pi execution
+  SDK 1.21.1; one Workflow per Run, capacity-reserved Worker-specific Activity
+  queues for hot Sessions, and a common Activity queue as the fairness fallback
 - Internal management/event protocol: versioned TypeBox schemas over an
   outbound WebSocket; this channel does not assign production Runs
 - Browser event delivery: SSE with resumable sequence numbers
@@ -189,6 +190,7 @@ only after a measured requirement appears.
 - [ADR-0057: capacity-one Pi Workers and global Tool admission](docs/adr/0057-capacity-one-pi-workers-and-global-tool-admission.md)
 - [ADR-0058: Kubernetes Pi Worker pool and external conversation state](docs/adr/0058-kubernetes-pi-worker-pool-and-external-conversation-state.md)
 - [ADR-0059: single-node Kubernetes Pi Worker cutover](docs/adr/0059-single-node-kubernetes-pi-worker-cutover.md)
+- [ADR-0061: capacity-aware Temporal Worker affinity](docs/adr/0061-capacity-aware-temporal-worker-affinity.md)
 
 ## Current executable spikes
 

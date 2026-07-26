@@ -21,6 +21,7 @@ import * as legacyEnvironmentValidationEvidence from "./019_legacy_environment_v
 import * as semanticConversationProjections from "./020_semantic_conversation_projections.ts";
 import * as parallelCandidateRaces from "./021_parallel_candidate_races.ts";
 import * as horizontalSupervisorPool from "./022_horizontal_supervisor_pool.ts";
+import * as temporalWorkerAffinity from "./023_temporal_worker_affinity.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -47,6 +48,7 @@ export const migrationProvider: MigrationProvider = {
       "020_semantic_conversation_projections": semanticConversationProjections,
       "021_parallel_candidate_races": parallelCandidateRaces,
       "022_horizontal_supervisor_pool": horizontalSupervisorPool,
+      "023_temporal_worker_affinity": temporalWorkerAffinity,
     };
   },
 };
@@ -160,3 +162,8 @@ export {
   down as downHorizontalSupervisorPool,
   up as upHorizontalSupervisorPool,
 } from "./022_horizontal_supervisor_pool.ts";
+
+export {
+  down as downTemporalWorkerAffinity,
+  up as upTemporalWorkerAffinity,
+} from "./023_temporal_worker_affinity.ts";

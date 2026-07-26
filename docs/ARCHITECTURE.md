@@ -344,12 +344,16 @@ event spool while drained, registers its outbound management WebSocket, then
 becomes ready only after its Temporal Workflow and Activity pollers are
 running.
 
-Every Supervisor polls the common Temporal Task Queue with Activity concurrency
-equal to its capacity-one SDK slots. The Control Plane never selects a
-Supervisor for a Run. A Session is not pinned to a Worker: each active Run
-restores the latest Pi-native JSONL checkpoint on the Worker selected by
-Temporal, creates and disposes an in-process `AgentSessionRuntime`, and releases
-that slot after settlement. Authenticated boot enrollment validates both a Supervisor ID
+Every Supervisor polls the common Temporal Task Queue and one deterministic
+boot-specific Activity Task Queue. Both pollers share the same in-process
+execution-slot counter, so adding the affinity poller does not increase declared
+Pi capacity. The Control Plane may attach a short-lived routing hint only when
+the prior Worker is live and a PostgreSQL row-locked capacity reservation
+succeeds. A Session is never hard-pinned: a stale, dead, or busy preferred
+Worker falls back to the common queue before a RunAttempt is created. Each
+active Run still restores the latest Pi-native JSONL checkpoint on the Worker
+matched by Temporal, creates and disposes an in-process `AgentSessionRuntime`,
+and releases that slot after settlement. Authenticated boot enrollment validates both a Supervisor ID
 prefix and an operator-owned management URL template. Artifact reads go
 directly to the shared object store rather than through one special Worker. See
 [Pi Worker pool and conversation persistence](PI_WORKER_POOL_AND_SESSION_PERSISTENCE.md).
@@ -361,8 +365,9 @@ activation's cached value. It can reuse a manifest and its content-addressed
 segments during restore and the following incremental save, but it never
 caches the Session's current PostgreSQL pointer. Every Run still resolves the
 head under the current lease/fence, validates object digests, and rechecks the
-revision after reconstruction. A cache hit is therefore an S3 transport
-optimization, not a second checkpoint authority or Session affinity mechanism.
+revision after reconstruction. A cache hit is therefore only an S3 transport
+optimization. ADR-0061 permits a bounded affinity hint to improve its hit rate,
+but neither the hint nor cache is a second checkpoint authority.
 
 The default local product still runs the Worker pool as Docker Compose
 replicas. ADR-0058 also supplies a closed, versioned Kubernetes chart for the
@@ -696,9 +701,11 @@ recovery. See ADR-0024.
 3. The API returns `202 Accepted`.
 4. The bounded outbox relay starts one deterministic Temporal Workflow for the
    Run. Duplicate relay scans adopt the existing Workflow ID.
-5. Temporal matches the Workflow Activity to a capacity-bounded Pi Worker on
-   the common Task Queue. The Activity claims only its named command; PostgreSQL
-   mailbox/concurrency checks may defer it on a durable Workflow timer.
+5. If the prior Worker is still live and has an unreserved slot, Temporal first
+   offers the Activity on that Worker's private Task Queue. A busy/stale target
+   or short Schedule-to-Start timeout falls back to the common Task Queue.
+   The Activity claims only its named command; PostgreSQL mailbox/concurrency
+   checks may defer it on a durable Workflow timer.
 6. The selected Worker creates the RunAttempt and session execution lease. The
    supervisor validates the fencing token, resolves and reverifies the
    immutable workspace seed, and loads settled session/workspace state.
@@ -1068,7 +1075,7 @@ bounded outbox relay
 Temporal Workflow: agent-dock-run-v1-{runId}
         |
         v
-Task Queue: agent-dock-pi-runs-v1
+common Task Queue: agent-dock-pi-runs-v1
         |
         +----> Supervisor/Pi Worker 1 (capacity one)
         `----> Supervisor/Pi Worker 2 (capacity one)
@@ -1083,9 +1090,15 @@ Task Queue: agent-dock-pi-runs-v1
                  Cube Tool microVM
 ```
 
-The relay starts or cancels a deterministic Workflow ID and never chooses a
-Worker. Each Supervisor process polls the common Task Queue with Activity
-concurrency equal to its configured Pi capacity. The former WebSocket
+The relay starts or cancels a deterministic Workflow ID. It may reserve an
+otherwise-idle prior Worker and include that boot-specific Task Queue as a soft
+hint; Temporal still performs both private-queue and common-queue matching.
+Each Supervisor polls both queues, but one shared process-local gate enforces
+its configured Pi capacity. A reservation is admitted only while
+`active_sessions + unexpired reservations < max_concurrent_sessions`, under a
+PostgreSQL lock on the Worker sandbox row. A two-second private
+Schedule-to-Start timeout, stale claim, or busy recheck returns to the common
+queue without creating work on the target. The former WebSocket
 execute/cancel matcher is not started in production and every Supervisor
 advertises `acceptingAssignments=false`; its authenticated socket remains only
 for boot identity, liveness, management and compatibility event transport.
@@ -1117,6 +1130,12 @@ profile uses StatefulSet identity only for the Worker-private boot/event spool;
 PostgreSQL/S3 hold all resumable conversation state. Cube remains the untrusted
 Tool microVM scheduler and is activated lazily only when Pi emits a Tool Call.
 Chat-only Runs use Temporal but never create a Cube Sandbox.
+
+Worker affinity is deliberately weaker than execution correctness. A successful
+Run records only the boot-specific Worker UUID and an expiry no longer than the
+Worker's immutable-checkpoint cache TTL. PostgreSQL FIFO/admission, RunAttempt,
+lease/fence, checkpoint CAS and S3 content verification are rerun after delivery.
+If the hint disappears, any healthy Worker can restore the same Session.
 
 ## 10. Web presentation
 
