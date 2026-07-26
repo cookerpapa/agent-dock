@@ -96,6 +96,26 @@ const METADATA = Object.freeze({
   imageRevision: "agentdock.image_revision",
 } as const);
 
+const ASSIGNMENT_METADATA_PREFIX = "agentdock.assignment.v1.";
+
+type CubeAssignmentMetadata = Readonly<{
+  activationId: string;
+  tenantId: string;
+  projectId: string;
+  workspaceId: string;
+  supervisorId: string;
+  bootId: string;
+  sandboxId: string;
+  commandId: string;
+  sessionId: string;
+  turnId: string;
+  attemptId: string;
+  leaseId: string;
+  fencingToken: number;
+  bindingSha256: string;
+  imageRevision: string;
+}>;
+
 type CubeRuntimeEvidence = Readonly<{
   imageRevision: string;
   kernelRelease: string;
@@ -308,6 +328,12 @@ function assignmentMetadata(
   imageRevision: string,
   bindingSha256: string,
 ): Readonly<Record<string, string>> {
+  const current: CubeAssignmentMetadata = {
+    activationId,
+    ...assignment,
+    bindingSha256,
+    imageRevision,
+  };
   return Object.freeze({
     [METADATA.managed]: "true",
     [METADATA.provider]: CUBESANDBOX_PROVIDER_ID,
@@ -327,6 +353,12 @@ function assignmentMetadata(
     [METADATA.fencingToken]: String(assignment.fencingToken),
     [METADATA.bindingSha256]: bindingSha256,
     [METADATA.imageRevision]: imageRevision,
+    // Cube snapshot templates inherit the source sandbox labels after applying
+    // create-time metadata. A fence-qualified immutable record therefore lets
+    // a restored clone add its new physical identity without trusting the
+    // inherited, lower-fence labels.
+    [`${ASSIGNMENT_METADATA_PREFIX}${String(assignment.fencingToken).padStart(16, "0")}`]:
+      JSON.stringify(current),
   });
 }
 
@@ -353,16 +385,17 @@ function metadataMatchesPhysicalBinding(
   assignment: ToolSandboxAssignment,
   bindingSha256: string,
 ): boolean {
+  const current = currentAssignmentMetadata(values);
   return (
     values[METADATA.managed] === "true" &&
     values[METADATA.provider] === CUBESANDBOX_PROVIDER_ID &&
     values[METADATA.workload] === "tool-sandbox" &&
-    values[METADATA.activationId] === activationId &&
-    values[METADATA.tenantId] === assignment.tenantId &&
-    values[METADATA.projectId] === assignment.projectId &&
-    values[METADATA.workspaceId] === assignment.workspaceId &&
-    values[METADATA.sessionId] === assignment.sessionId &&
-    values[METADATA.bindingSha256] === bindingSha256
+    current?.activationId === activationId &&
+    current.tenantId === assignment.tenantId &&
+    current.projectId === assignment.projectId &&
+    current.workspaceId === assignment.workspaceId &&
+    current.sessionId === assignment.sessionId &&
+    current.bindingSha256 === bindingSha256
   );
 }
 
@@ -371,16 +404,80 @@ function metadataMatchesOrphanIdentity(
   activationId: string,
   assignment: ToolSandboxAssignment,
 ): boolean {
+  const current = currentAssignmentMetadata(values);
   return (
     values[METADATA.managed] === "true" &&
     values[METADATA.provider] === CUBESANDBOX_PROVIDER_ID &&
     values[METADATA.workload] === "tool-sandbox" &&
-    values[METADATA.activationId] === activationId &&
-    values[METADATA.tenantId] === assignment.tenantId &&
-    values[METADATA.projectId] === assignment.projectId &&
-    values[METADATA.workspaceId] === assignment.workspaceId &&
-    values[METADATA.sessionId] === assignment.sessionId
+    current?.activationId === activationId &&
+    current.tenantId === assignment.tenantId &&
+    current.projectId === assignment.projectId &&
+    current.workspaceId === assignment.workspaceId &&
+    current.sessionId === assignment.sessionId
   );
+}
+
+function currentAssignmentMetadata(
+  values: Readonly<Record<string, string>>,
+): CubeAssignmentMetadata | undefined {
+  const candidates: CubeAssignmentMetadata[] = [];
+  for (const [key, raw] of Object.entries(values)) {
+    if (!key.startsWith(ASSIGNMENT_METADATA_PREFIX)) continue;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const fencingToken = parsed.fencingToken;
+      const required = [
+        "activationId",
+        "tenantId",
+        "projectId",
+        "workspaceId",
+        "supervisorId",
+        "bootId",
+        "sandboxId",
+        "commandId",
+        "sessionId",
+        "turnId",
+        "attemptId",
+        "leaseId",
+        "bindingSha256",
+        "imageRevision",
+      ] as const;
+      if (
+        required.some(
+          (name) =>
+            typeof parsed[name] !== "string" ||
+            (parsed[name] as string).length < 1 ||
+            (parsed[name] as string).length > 512,
+        ) ||
+        !Number.isSafeInteger(fencingToken) ||
+        (fencingToken as number) < 1 ||
+        key !== `${ASSIGNMENT_METADATA_PREFIX}${String(fencingToken as number).padStart(16, "0")}`
+      ) {
+        throw new Error("invalid assignment metadata");
+      }
+      candidates.push(parsed as unknown as CubeAssignmentMetadata);
+    } catch {
+      throw new SandboxManagerError(
+        "cubesandbox_inventory_invalid",
+        "CubeSandbox managed assignment metadata was invalid",
+        false,
+      );
+    }
+  }
+  candidates.sort((left, right) => right.fencingToken - left.fencingToken);
+  const current = candidates[0];
+  if (
+    current !== undefined &&
+    candidates[1]?.fencingToken === current.fencingToken &&
+    JSON.stringify(candidates[1]) !== JSON.stringify(current)
+  ) {
+    throw new SandboxManagerError(
+      "cubesandbox_inventory_ambiguous",
+      "CubeSandbox managed assignment metadata was ambiguous",
+      false,
+    );
+  }
+  return current;
 }
 
 function assignmentFromMetadata(
@@ -394,26 +491,8 @@ function assignmentFromMetadata(
   ) {
     return undefined;
   }
-  const fencingToken = Number(values[METADATA.fencingToken]);
-  const required = [
-    METADATA.activationId,
-    METADATA.tenantId,
-    METADATA.projectId,
-    METADATA.workspaceId,
-    METADATA.supervisorId,
-    METADATA.bootId,
-    METADATA.sandboxId,
-    METADATA.commandId,
-    METADATA.sessionId,
-    METADATA.turnId,
-    METADATA.attemptId,
-    METADATA.leaseId,
-  ] as const;
-  if (
-    required.some((key) => typeof values[key] !== "string" || values[key]!.length < 1) ||
-    !Number.isSafeInteger(fencingToken) ||
-    fencingToken < 1
-  ) {
+  const current = currentAssignmentMetadata(values);
+  if (current === undefined) {
     throw new SandboxManagerError(
       "cubesandbox_inventory_invalid",
       "CubeSandbox managed metadata was invalid",
@@ -421,19 +500,19 @@ function assignmentFromMetadata(
     );
   }
   return {
-    activationId: values[METADATA.activationId]!,
-    tenantId: values[METADATA.tenantId]!,
-    projectId: values[METADATA.projectId]!,
-    workspaceId: values[METADATA.workspaceId]!,
-    supervisorId: values[METADATA.supervisorId]!,
-    bootId: values[METADATA.bootId]!,
-    sandboxId: values[METADATA.sandboxId]!,
-    commandId: values[METADATA.commandId]!,
-    sessionId: values[METADATA.sessionId]!,
-    turnId: values[METADATA.turnId]!,
-    attemptId: values[METADATA.attemptId]!,
-    leaseId: values[METADATA.leaseId]!,
-    fencingToken,
+    activationId: current.activationId,
+    tenantId: current.tenantId,
+    projectId: current.projectId,
+    workspaceId: current.workspaceId,
+    supervisorId: current.supervisorId,
+    bootId: current.bootId,
+    sandboxId: current.sandboxId,
+    commandId: current.commandId,
+    sessionId: current.sessionId,
+    turnId: current.turnId,
+    attemptId: current.attemptId,
+    leaseId: current.leaseId,
+    fencingToken: current.fencingToken,
   };
 }
 
@@ -750,8 +829,8 @@ export class CubeSandboxProvider implements SandboxProvider {
     );
     const recoverySecret = openRecoveryAuthority(this.#checkpointEncryptionKey, checkpoint);
     const nextSecret = handoffSecret();
-    let instance = await this.#client.create({
-      templateId: this.#templateId,
+    const instance = await this.#client.create({
+      templateId: checkpoint.snapshotId,
       timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
       metadata: assignmentMetadata(
         spec.activationId,
@@ -763,7 +842,6 @@ export class CubeSandboxProvider implements SandboxProvider {
       allowPublicTraffic: false,
     });
     try {
-      instance = await this.#client.rollback(instance, checkpoint.snapshotId);
       await this.#waitForService(instance, {
         handoffSecret: recoverySecret,
         fencingToken: checkpoint.fencingToken,

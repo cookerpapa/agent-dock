@@ -306,7 +306,7 @@ credential-free relays can dial only the configured private CubeAPI and
 CubeProxy endpoints; they cannot select another destination. The Cube API key
 is a mode-0600 Manager-only file, and the returned per-guest traffic token
 never reaches Pi, the model or Tool code. The Cube external authorizer permits
-snapshot creation and rollback but permits template deletion only for the pinned
+snapshot creation but permits template deletion only for the pinned
 `snap-<24 lowercase hex>` snapshot namespace; registered `tpl-*` runtime
 templates remain outside the Manager credential's operation set.
 

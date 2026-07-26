@@ -2568,7 +2568,7 @@
   512-file/2-MiB portable Workspace-manifest boundary.
 - Researched Kopia, Restic, REAPI CAS and Cube v0.6 snapshots before changing
   the persistence contract. ADR-0064 keeps the portable content manifest for
-  small Workspaces and selects Cube's official snapshot-and-rollback path for
+  small Workspaces and selects Cube's official snapshot-clone path for
   larger ordinary Cube Workspaces. This avoids a second repository/credential
   plane now while preserving a future Kopia/REAPI data-mover boundary.
 - Added a sealed checkpoint protocol. The root-owned guest supervisor stops
@@ -2578,12 +2578,13 @@
   a Cube snapshot and return only an AES-256-GCM encrypted reference bound to
   tenant, Workspace, image, environment, source binding and fence.
 - Added higher-fence cold restore. A new activation creates a fresh Cube VM
-  from the immutable Tool template, applies Cube's official rollback operation
-  to the committed snapshot, authenticates only to the sealed service, rotates
-  activation/binding/secret/fence, starts a new Tool Worker and revalidates
-  runtime/toolchain evidence. Direct snapshot-as-template creation is not used
-  because Cube v0.6 inherits stale source labels. Stale
-  tenant/environment/fence requests fail before VM creation.
+  from the committed snapshot template, authenticates only to the sealed
+  service, rotates activation/binding/secret/fence, starts a new Tool Worker
+  and revalidates runtime/toolchain evidence. Cube v0.6 copies source labels
+  after create-time metadata, so every physical assignment also carries an
+  immutable fence-qualified assignment record. Inventory and identity checks
+  select only the highest valid fence and reject ambiguous records; inherited
+  lower-fence labels cannot regain authority.
 - Raised only the bounded reference/index transport to 32 MiB and the durable
   file-count column to 100,000; portable manifests retain their original
   512-file, 512-KiB/file and 2-MiB limits. Historical lists/comparisons use the
@@ -2599,6 +2600,11 @@
   `POST /sandboxes/:id/snapshots` and restricts deletion to Cube v0.6's exact
   `DELETE /templates/snap-<24 lowercase hex>` namespace. It continues to deny
   `tpl-*` deletion, list endpoints and arbitrary template operations.
+- A real rollback attempt then proved an important Cube v0.6 constraint:
+  rollback is origin-Sandbox-bound and rejects a fresh VM. Cold restore now
+  follows Cube's supported snapshot-as-template clone path; rollback was
+  removed from the AgentDock Manager credential instead of weakening the
+  physical-identity model.
 - The operational boundary is explicit: current Cube snapshot data is local to
   the single-node Cube storage plane. Compose backup alone is not a node-loss
   backup for provider-native Workspace versions; replicated/off-host storage,

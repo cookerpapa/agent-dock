@@ -81,7 +81,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   readonly destroyed: string[] = [];
   readonly deletedSnapshots: string[] = [];
   readonly createdSnapshots: string[] = [];
-  readonly restoredSnapshots: string[] = [];
+  readonly snapshotMetadata = new Map<string, Readonly<Record<string, string>>>();
   readonly instances = new Map<string, CubeSandboxInstance>();
   portableWorkspace: typeof snapshot | undefined;
   healthChecks = 0;
@@ -94,12 +94,14 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   async create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance> {
     this.creates.push(input);
     const sandboxId = `cube-sandbox-${String(this.creates.length)}`;
+    const inherited = this.snapshotMetadata.get(input.templateId);
     const instance: CubeSandboxInstance = {
       sandboxId,
       templateId: input.templateId,
       state: "running",
       domain: "cube.internal",
-      metadata: input.metadata,
+      // Cube applies snapshot-template labels after create-time metadata.
+      metadata: Object.freeze({ ...input.metadata, ...inherited }),
       trafficAccessToken: `traffic-${String(this.creates.length)}`,
       cpuCount: 1,
       memoryMB: 768,
@@ -130,6 +132,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
 
   async createSnapshot(instance: CubeSandboxInstance, name: string) {
     this.createdSnapshots.push(name);
+    this.snapshotMetadata.set(`cube-snapshot-${instance.sandboxId}`, instance.metadata);
     return {
       snapshotId: `cube-snapshot-${instance.sandboxId}`,
       names: [name],
@@ -138,11 +141,6 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
 
   async deleteSnapshot(snapshotId: string): Promise<void> {
     this.deletedSnapshots.push(snapshotId);
-  }
-
-  async rollback(instance: CubeSandboxInstance, snapshotId: string): Promise<CubeSandboxInstance> {
-    this.restoredSnapshots.push(snapshotId);
-    return instance;
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -492,15 +490,17 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(runtime.creates).toHaveLength(2);
     expect(runtime.creates[1]).toMatchObject({
-      templateId: "agent-dock-tool-v1",
+      templateId: "cube-snapshot-cube-sandbox-1",
       allowInternetAccess: true,
       allowPublicTraffic: false,
-      metadata: {
-        "agentdock.activation_id": nextActivationId,
-        "agentdock.fencing_token": String(nextAssignment.fencingToken),
-      },
     });
-    expect(runtime.restoredSnapshots).toEqual(["cube-snapshot-cube-sandbox-1"]);
+    expect(
+      Object.entries(runtime.creates[1]!.metadata).some(
+        ([key, value]) =>
+          key.startsWith("agentdock.assignment.v1.") && value.includes(nextActivationId),
+      ),
+    ).toBe(true);
+    await expect(provider.inspect(restored)).resolves.toMatchObject({ state: "running" });
     const rebind = runtime.requests.find(
       ({ sandboxId, input }) => sandboxId === "cube-sandbox-2" && input.path === "/v1/rebind",
     );

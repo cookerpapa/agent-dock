@@ -73,7 +73,6 @@ export interface CubeSandboxRuntimeClient {
   pause(instance: CubeSandboxInstance, timeoutMs?: number): Promise<CubeSandboxInstance>;
   connect(instance: CubeSandboxInstance, timeoutSeconds: number): Promise<CubeSandboxInstance>;
   createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot>;
-  rollback(instance: CubeSandboxInstance, snapshotId: string): Promise<CubeSandboxInstance>;
   deleteSnapshot(snapshotId: string): Promise<void>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
@@ -418,26 +417,6 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       throw new CubeRuntimeClientError("CubeSandbox snapshot names were invalid");
     }
     return Object.freeze({ snapshotId, names: Object.freeze(names) });
-  }
-
-  async rollback(instance: CubeSandboxInstance, snapshotId: string): Promise<CubeSandboxInstance> {
-    const sandboxId = encodeURIComponent(bounded(instance.sandboxId, "CubeSandbox ID", 256));
-    const safeSnapshotId = bounded(snapshotId, "CubeSandbox snapshot ID", 256);
-    const response = await this.#control(`/sandboxes/${sandboxId}/rollback`, {
-      method: "POST",
-      body: JSON.stringify({ snapshotID: safeSnapshotId }),
-    });
-    await response.body?.cancel().catch(() => undefined);
-    const current = await this.read(instance.sandboxId);
-    if (current === undefined) {
-      throw new CubeRuntimeClientError("CubeSandbox disappeared while restoring a snapshot");
-    }
-    return Object.freeze({
-      ...current,
-      ...(instance.trafficAccessToken === undefined
-        ? {}
-        : { trafficAccessToken: instance.trafficAccessToken }),
-    });
   }
 
   async deleteSnapshot(snapshotId: string): Promise<void> {

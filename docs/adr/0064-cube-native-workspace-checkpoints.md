@@ -54,19 +54,21 @@ If a Workspace restore decodes as a Cube reference, the Cube Provider:
 
 1. verifies tenant, Workspace, image and environment bindings;
 2. decrypts the recovery authority;
-3. creates a new Cube Sandbox from the immutable Tool template so its physical
-   metadata contains the new assignment;
-4. invokes Cube's official rollback operation with the snapshot ID;
+3. creates a new Cube Sandbox from the committed snapshot template and adds a
+   fence-qualified immutable assignment record;
+4. ignores inherited lower-fence source labels when validating physical
+   identity;
 5. reaches only the sealed Tool service;
 6. authenticates with the old recovery authority and rotates to the new
    activation, physical binding, secret and strictly higher fencing token;
 7. starts a fresh Tool Worker against the preserved Workspace;
 8. validates runtime/environment evidence before returning the handle.
 
-Cube v0.6 also accepts a snapshot ID as a create template, but that route
-inherits the source Sandbox labels. AgentDock therefore does not use it for
-cold restore: stale physical Attempt metadata would make post-restart orphan
-reconciliation unsafe.
+Cube v0.6 rollback is bound to the Sandbox that created the snapshot, so it
+cannot restore a fresh physical VM. Snapshot-template creation is the supported
+clone path, but it inherits source labels after applying create-time metadata.
+The immutable fence-qualified record makes that inheritance explicit and safe:
+only the unique highest valid fence is authoritative; ambiguity fails closed.
 
 No model or Tool request can choose a snapshot ID, Provider, recovery secret,
 binding or fence.

@@ -11,7 +11,6 @@ describe("Cube API authorizer", () => {
     ["DELETE", `/sandboxes/${SANDBOX}`],
     ["POST", `/sandboxes/${SANDBOX}/pause`],
     ["POST", `/sandboxes/${SANDBOX}/connect`],
-    ["POST", `/sandboxes/${SANDBOX}/rollback`],
     ["POST", `/sandboxes/${SANDBOX}/snapshots`],
     ["DELETE", "/templates/snap-0123456789abcdef01234567"],
     ["GET", "/v2/sandboxes"],
