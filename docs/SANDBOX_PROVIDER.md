@@ -89,20 +89,19 @@ code:
   reserve -> first Tool -> create/restore Cube KVM guest
   -> many Tools -> capture Workspace/Pi
   -> commit content checkpoint under Attempt/fence
-  -> destroy guest
+  -> seal uid-1000 execution -> pause guest
 
 later code Run:
-  new Attempt/fence -> new Cube guest -> restore committed Workspace
+  matching Workspace revision + higher fence
+  -> Cube connect -> rotate handoff authority -> fresh Tool Worker attach
 ```
 
-Cube v0.6.0 does not expose the online metadata compare-and-swap required to
-atomically rebind a live guest to a newer Attempt/fence. Consequently:
-
-- `supportsWarmRebind=false`;
-- production clean-prewarm target is zero;
-- every completed, failed, cancelled or timed-out guest is destroyed;
-- a used guest is never sanitized and reassigned to another tenant;
-- guest survival is never a durability mechanism.
+Cube's lifecycle state is not used as the ownership CAS. AgentDock seals the
+guest, requires a strictly higher business fence, rotates a Manager-only
+handoff secret and keeps warm reuse scoped to the exact tenant/project/
+Workspace/Session. Environment or committed-Workspace revision mismatch,
+failure, cancellation, timeout, Manager restart or any ambiguous transition
+destroys the VM. Guest survival is never a durability mechanism.
 
 ## Versioned Project environment
 
@@ -129,11 +128,10 @@ guest-kernel, deny-all network, UID/GID 1000:1000, no-new-privileges and
 zero-effective-capability evidence. Cube's CoW guest root is writable, so the
 report does not falsely claim a read-only OCI rootfs.
 
-Cube ordinary Tool execution currently accepts only offline environment
-recipes. `dependencyHosts` is rejected until a temporary-egress setup guest,
-content capture, exact destruction and fresh offline guest transition is
-implemented and live-validated. The retained gVisor bootstrap path does not
-silently become a Cube Tool fallback.
+Recipes with `dependencyHosts` use the retained disposable gVisor bootstrap and
+the ADR-0044 Ed25519 proxy. After content capture and exact bootstrap
+destruction, a fresh deny-all Cube guest restores the content and repeats
+offline verification. gVisor never executes an ordinary Agent Tool Call.
 
 ## Fixed Cube Tool policy
 

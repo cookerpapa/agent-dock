@@ -184,12 +184,13 @@ APIs. ADR-0053 makes CubeSandbox the primary physical Provider. A logical
 reservation means pure chat creates no guest; the first Tool Call schedules a
 credential-free, networkless, non-root KVM microVM for one exact RunAttempt.
 Production acceptance proves remote `bash/edit`, checkpoint/diff capture,
-cancellation, exact cleanup, secret absence and two-tenant guest isolation. A
-completed Run destroys its guest, and a follow-up restores the committed
-Workspace into a new activation because Cube v0.6.0 cannot prove a safe
-higher-fence metadata rebind. The gVisor Provider and clean-prewarm design
-remain historical/regression code paths rather than ordinary production Tool
-fallbacks.
+cancellation, exact cleanup, secret absence and two-tenant guest isolation.
+ADR-0060 now allows an exact-Session follow-up to reuse the same physical Cube
+activation only after the root-owned supervisor seals it, removes every Tool
+UID process, pauses it and accepts a higher-fence secret rotation. Mismatch or
+ambiguity destroys it and cold-restores the committed Workspace. The gVisor
+Provider remains a fixed-purpose dependency/import bootstrap, not an ordinary
+production Tool fallback.
 User/project extensions, interactive approvals, and mutually hostile public
 tenants are still outside the claim. The owner explicitly deferred extension
 and approval work, so those items are not represented as silently complete.
@@ -198,8 +199,10 @@ ADR-0030 adds the long-term Provider seam: one provider-neutral Manager owns
 capabilities and identity while the concrete Provider owns runtime operations.
 `CubeSandboxProvider` now owns ordinary physical lifecycle through bounded
 CubeAPI/CubeProxy clients and fixed relays. K3s/containerd maps the retained
-importer RuntimeClass to `runsc`/KVM. Both gates prove their actual physical
-boundary rather than inferring isolation from configuration.
+importer/dependency-bootstrap RuntimeClass to `runsc`/KVM. Controlled dependency
+egress is consumed only there, and its regular-file snapshot is promoted into a
+fresh offline Cube guest. Both gates prove their actual physical boundary
+rather than inferring isolation from configuration.
 
 ADR-0040 removes eager per-Run Pod creation and per-event remote ACK blocking.
 It separates conversation and Workspace checkpoints, uses exact Session-scoped
@@ -214,7 +217,9 @@ remain on the initial SSE replay path.
 ADR-0042 makes the Project development environment durable and auditable. Runs
 snapshot an append-only environment version; Manager policy and in-guest
 toolchain preflight fail closed on drift; successful Tool checkpoints persist
-concrete Cube runtime evidence. Cube activations are not warm-rebound.
+concrete Cube runtime evidence. Exact-Session Cube activations may be sealed
+and warm-rebound under ADR-0060; environment identity is part of the immutable
+binding.
 Arbitrary user Dockerfiles remain intentionally outside this slice until a
 separate trusted image-build and provenance plane exists.
 

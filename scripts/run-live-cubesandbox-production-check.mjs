@@ -279,6 +279,7 @@ function observeCubeSession(sessionId) {
               sandboxId: instance.sandboxId,
               attemptId: instance.metadata["agentdock.attempt_id"],
               turnId: instance.metadata["agentdock.turn_id"],
+              state: instance.state,
             });
           }
         }
@@ -308,6 +309,77 @@ async function waitForNoCubeSession(sessionId) {
     await wait(250);
   }
   throw new Error("Cube inventory retained a settled Session microVM");
+}
+
+async function waitForPausedCubeSession(sessionId) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const retained = managedForSession(await cube.list(), sessionId);
+    if (retained.length === 1 && retained[0].state === "paused") return retained[0];
+    if (retained.length > 1) {
+      throw new Error("Cube inventory retained more than one exact-Session microVM");
+    }
+    await wait(250);
+  }
+  throw new Error("Cube inventory did not reach one sealed paused exact-Session microVM");
+}
+
+async function terminateWarmCubeSession(sandboxId) {
+  assert(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$/.test(sandboxId));
+  const source = `
+    import { readFileSync } from "node:fs";
+    import { randomUUID } from "node:crypto";
+    const sandboxId = ${JSON.stringify(sandboxId)};
+    const token = readFileSync(
+      "/run/agent-dock-secrets/sandbox-manager-token",
+      "utf8",
+    ).trim();
+    const endpoint = "http://sandbox-manager:4300/internal/v1/sandbox-inventory";
+    const send = async (body) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(JSON.stringify(value));
+      return value;
+    };
+    const listed = await send({
+      protocolVersion: 1,
+      type: "assignments.list",
+      requestId: randomUUID(),
+      sandboxId,
+    });
+    if (listed.assignments.length !== 1) {
+      throw new Error("Expected one warm assignment, got " + listed.assignments.length);
+    }
+    const assignment = listed.assignments[0];
+    await send({
+      protocolVersion: 1,
+      type: "assignment.terminate_and_confirm",
+      requestId: randomUUID(),
+      sandboxId,
+      assignment,
+    });
+  `;
+  await capture(
+    process.execPath,
+    [
+      "scripts/production-compose.mjs",
+      "exec",
+      "-T",
+      "supervisor-host",
+      "node",
+      "--input-type=module",
+      "--eval",
+      source,
+    ],
+    60_000,
+  );
 }
 
 async function waitForDurableRunCompletion(runId) {
@@ -413,7 +485,11 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
       assert.equal(toolCalls, 0, "Pure chat unexpectedly executed a Tool");
     }
     await waitForDurableRunCompletion(accepted.runId);
-    await waitForNoCubeSession(sessionId);
+    if (expectTools) {
+      await waitForPausedCubeSession(sessionId);
+    } else {
+      await waitForNoCubeSession(sessionId);
+    }
     const activations = await observer.stop();
     return {
       accepted,
@@ -506,15 +582,15 @@ try {
     true,
   );
   assert.equal(followUp.activations.length, 1, "Follow-up Run did not use exactly one Cube VM");
-  assert.notEqual(
+  assert.equal(
     followUp.activations[0].activationId,
     firstCoding.activations[0].activationId,
-    "Two coding Runs reused the same Cube activation",
+    "Two coding Runs did not reuse the same sealed Cube activation",
   );
-  assert.notEqual(
+  assert.equal(
     followUp.activations[0].sandboxId,
     firstCoding.activations[0].sandboxId,
-    "Two coding Runs reused the same Cube native sandbox",
+    "Two coding Runs did not reuse the same Cube native sandbox",
   );
   const followUpUsage = await api.getRunUsage(followUp.accepted.runId);
   assert(followUpUsage.totals.requests > 0 && followUpUsage.totals.outputTokens > 0);
@@ -563,7 +639,7 @@ try {
     (error) => error instanceof AgentDockApiError && error.status === 404,
   );
 
-  await waitForNoCubeSession(session.sessionId);
+  const retained = await waitForPausedCubeSession(session.sessionId);
   await waitForNoCubeSession(foreignSession.sessionId);
   const temporalWorkflows = await Promise.all(
     [chat.accepted, firstCoding.accepted, followUp.accepted].map((accepted) =>
@@ -600,7 +676,8 @@ try {
       usage: followUpUsage.totals,
     },
     multiRound: {
-      distinctCubeMicroVms: true,
+      sameCubeMicroVm: true,
+      sealedPauseResume: true,
       workspaceRestored: true,
       workspaceVersions: finalVersions.versions.length,
       finalFileBytes: Buffer.byteLength(finalSource, "utf8"),
@@ -621,9 +698,17 @@ try {
       workflows: temporalWorkflows,
     },
     totalUsage: usage,
-    cleanup: { sessionMicroVmCount: 0, foreignSessionMicroVmCount: 0 },
+    cleanup: {
+      retainedPausedSessionMicroVmCount: 1,
+      foreignSessionMicroVmCount: 0,
+      explicitWarmEvictionVerified: false,
+    },
   };
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
+  await terminateWarmCubeSession(retained.sandboxId);
+  await waitForNoCubeSession(session.sessionId);
+  report.cleanup.explicitWarmEvictionVerified = true;
+  report.cleanup.retainedPausedSessionMicroVmCount = 0;
 
   if (writeReport) {
     const reportDirectory = resolve(repositoryRoot, "docs/reports");
@@ -645,15 +730,15 @@ try {
         `- First coding first text / settled: ${String(report.firstCoding.firstTextMs)} ms / ${String(report.firstCoding.settledMs)} ms`,
         `- Follow-up first text / settled: ${String(report.followUpCoding.firstTextMs)} ms / ${String(report.followUpCoding.settledMs)} ms`,
         `- Coding Tool calls: ${String(report.firstCoding.toolCalls)} + ${String(report.followUpCoding.toolCalls)}`,
-        `- Distinct Cube KVM guests: ${String(report.multiRound.distinctCubeMicroVms)}`,
+        `- Same sealed Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
         `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
         `- Temporal Workflows / bounded-reference histories: ${String(report.temporal.workflows.length)} / ${String(report.temporal.workflows.filter((workflow) => workflow.boundedReferencesOnly).length)}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
-        `- Remaining test-session Cube microVMs: ${String(report.cleanup.sessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
+        `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedPausedSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two later coding Runs in the same Session used different KVM guests; the follow-up restored, read and modified the first Run's committed counting-sort file. All three Runs completed through Temporal, whose decoded histories contained only bounded references/status. Provider usage, semantic projections, cross-tenant API denial and exact Cube cleanup were all verified.",
+        "A real-model chat Run completed without touching Cube. Two later coding Runs in the same Session reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind; the follow-up read and modified the first Run's retained counting-sort file. All three Runs completed through Temporal, whose decoded histories contained only bounded references/status. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were all verified.",
         "",
       ].join("\n"),
       "utf8",

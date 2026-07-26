@@ -918,21 +918,38 @@ export async function runToolWorker(): Promise<void> {
         }
         activationId = message.activationId;
         const environment = await validateToolEnvironment(message.environment);
-        const seed =
-          message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
-        await prepareToolWorkspace(seed, message.workspaceRestore);
-        environment.recipeCommands = await executeEnvironmentRecipe(
-          message.environment,
-          TOOL_WORKSPACE_DIRECTORY,
-          {
-            ...(message.dependencyProxy === undefined
-              ? {}
-              : { dependencyProxy: message.dependencyProxy }),
-            ...(message.environmentStage === undefined
-              ? {}
-              : { environmentStage: message.environmentStage }),
-          },
-        );
+        if (message.workspaceAttach === undefined) {
+          const seed =
+            message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
+          await prepareToolWorkspace(seed, message.workspaceRestore);
+          environment.recipeCommands = await executeEnvironmentRecipe(
+            message.environment,
+            TOOL_WORKSPACE_DIRECTORY,
+            {
+              ...(message.dependencyProxy === undefined
+                ? {}
+                : { dependencyProxy: message.dependencyProxy }),
+              ...(message.environmentStage === undefined
+                ? {}
+                : { environmentStage: message.environmentStage }),
+            },
+          );
+        } else {
+          if (
+            message.workspaceRestore !== undefined ||
+            message.dependencyProxy !== undefined ||
+            message.environmentStage !== undefined ||
+            (await readdir(TOOL_WORKSPACE_DIRECTORY)).length === 0
+          ) {
+            throw new ToolWorkerError(
+              "workspace_attach_invalid",
+              "Preserved Tool workspace could not be attached",
+              false,
+            );
+          }
+          await assertRealPathInsideWorkspace(join(TOOL_WORKSPACE_DIRECTORY, ".git"));
+          environment.recipeCommands = [...message.workspaceAttach.recipeCommands];
+        }
         initialized = true;
         await writeOutput({
           toolWorkerProtocolVersion: 1,

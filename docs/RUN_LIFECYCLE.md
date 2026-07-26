@@ -141,9 +141,13 @@ At `agent_settled`:
    settles the staged version, and records the Attempt revision. A failure
    abandons the staged version and restores the previous settled pointers.
 7. `turn.completed` is durably published as the commit marker.
-8. Manager revokes the capability. Cube v0.6.0 activations are destroyed after
-   the Run because the provider does not expose the metadata CAS needed for a
-   safe higher-fence rebind. Every terminal path confirms runtime absence.
+8. Manager revokes the Run capability. A successful exact-Session warm release
+   stops the Tool Worker, kills and verifies every UID 1000 process, seals the
+   guest and pauses it through Cube. A later Run must present a higher fence and
+   rotates the handoff secret before a fresh Tool Worker starts. Failure,
+   cancellation, timeout, identity mismatch or ambiguous pause/connect/rebind
+   destroys the activation. Every terminal path confirms either sealed paused
+   state or runtime absence.
 
 If failure occurs before the terminal marker, the next activation restores the
 previous settled Pi/workspace pair. Uploaded but uncommitted objects are not

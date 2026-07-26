@@ -12,7 +12,7 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   CUBESANDBOX_TOOL_SERVICE_PORT,
   OfficialCubeSandboxRuntimeClient,
@@ -80,6 +80,7 @@ const METADATA = Object.freeze({
   attemptId: "agentdock.attempt_id",
   leaseId: "agentdock.lease_id",
   fencingToken: "agentdock.fencing_token",
+  bindingSha256: "agentdock.binding_sha256",
   imageRevision: "agentdock.image_revision",
 } as const);
 
@@ -94,6 +95,8 @@ type CubeRuntimeEvidence = Readonly<{
   noNewPrivileges: boolean;
   effectiveCapabilities: string;
   readOnlyRootFilesystem: boolean;
+  supervisorUid: number;
+  supervisorGid: number;
 }>;
 
 type CubeActivation = {
@@ -103,6 +106,9 @@ type CubeActivation = {
   toolchain: EnvironmentToolchainReport;
   seenOperationIds: Set<string>;
   seenCaptureIds: Set<string>;
+  bindingSha256: string;
+  handoffSecret: string;
+  state: "running" | "sealed" | "paused";
 };
 
 export type CubeSandboxProviderOptions = Readonly<{
@@ -114,6 +120,7 @@ export type CubeSandboxProviderOptions = Readonly<{
   importGitHub: (source: GitHubRepositorySource, signal: AbortSignal) => Promise<Uint8Array>;
   checkImporter?: () => Promise<void>;
   closeImporter?: () => Promise<void>;
+  bootstrapProvider?: SandboxProvider;
 }>;
 
 function bounded(value: string, label: string, maximum = 1_024): string {
@@ -200,13 +207,43 @@ function parseEvidence(value: unknown): CubeRuntimeEvidence {
     noNewPrivileges: booleanField(candidate, "noNewPrivileges"),
     effectiveCapabilities: capabilities,
     readOnlyRootFilesystem: booleanField(candidate, "readOnlyRootFilesystem"),
+    supervisorUid: integerField(candidate, "supervisorUid"),
+    supervisorGid: integerField(candidate, "supervisorGid"),
   });
+}
+
+function physicalBindingSha256(
+  activationId: string,
+  assignment: ToolSandboxAssignment,
+  environment: SandboxCreateSpec["environment"],
+): string {
+  return createHash("sha256")
+    .update("agent-dock.cubesandbox-binding.v1\0")
+    .update(
+      JSON.stringify({
+        activationId,
+        tenantId: assignment.tenantId,
+        projectId: assignment.projectId,
+        workspaceId: assignment.workspaceId,
+        sessionId: assignment.sessionId,
+        environmentVersionId: environment.environmentVersionId,
+        specSha256: environment.specSha256,
+        recipeSha256: environment.recipeSha256,
+        imageRevision: environment.imageRevision,
+      }),
+    )
+    .digest("hex");
+}
+
+function handoffSecret(): string {
+  return `adch_${randomBytes(32).toString("base64url")}`;
 }
 
 function assignmentMetadata(
   activationId: string,
   assignment: ToolSandboxAssignment,
   imageRevision: string,
+  bindingSha256: string,
 ): Readonly<Record<string, string>> {
   return Object.freeze({
     [METADATA.managed]: "true",
@@ -225,6 +262,7 @@ function assignmentMetadata(
     [METADATA.attemptId]: assignment.attemptId,
     [METADATA.leaseId]: assignment.leaseId,
     [METADATA.fencingToken]: String(assignment.fencingToken),
+    [METADATA.bindingSha256]: bindingSha256,
     [METADATA.imageRevision]: imageRevision,
   });
 }
@@ -246,7 +284,26 @@ function sameAssignment(left: ToolSandboxAssignment, right: ToolSandboxAssignmen
   );
 }
 
-function metadataMatchesAssignment(
+function metadataMatchesPhysicalBinding(
+  values: Readonly<Record<string, string>>,
+  activationId: string,
+  assignment: ToolSandboxAssignment,
+  bindingSha256: string,
+): boolean {
+  return (
+    values[METADATA.managed] === "true" &&
+    values[METADATA.provider] === CUBESANDBOX_PROVIDER_ID &&
+    values[METADATA.workload] === "tool-sandbox" &&
+    values[METADATA.activationId] === activationId &&
+    values[METADATA.tenantId] === assignment.tenantId &&
+    values[METADATA.projectId] === assignment.projectId &&
+    values[METADATA.workspaceId] === assignment.workspaceId &&
+    values[METADATA.sessionId] === assignment.sessionId &&
+    values[METADATA.bindingSha256] === bindingSha256
+  );
+}
+
+function metadataMatchesOrphanIdentity(
   values: Readonly<Record<string, string>>,
   activationId: string,
   assignment: ToolSandboxAssignment,
@@ -259,15 +316,7 @@ function metadataMatchesAssignment(
     values[METADATA.tenantId] === assignment.tenantId &&
     values[METADATA.projectId] === assignment.projectId &&
     values[METADATA.workspaceId] === assignment.workspaceId &&
-    values[METADATA.supervisorId] === assignment.supervisorId &&
-    values[METADATA.bootId] === assignment.bootId &&
-    values[METADATA.sandboxId] === assignment.sandboxId &&
-    values[METADATA.commandId] === assignment.commandId &&
-    values[METADATA.sessionId] === assignment.sessionId &&
-    values[METADATA.turnId] === assignment.turnId &&
-    values[METADATA.attemptId] === assignment.attemptId &&
-    values[METADATA.leaseId] === assignment.leaseId &&
-    values[METADATA.fencingToken] === String(assignment.fencingToken)
+    values[METADATA.sessionId] === assignment.sessionId
   );
 }
 
@@ -400,7 +449,7 @@ function effectiveIsolation(
 export class CubeSandboxProvider implements SandboxProvider {
   readonly providerId = CUBESANDBOX_PROVIDER_ID;
   readonly defaultPolicy = CUBESANDBOX_TOOL_POLICY;
-  readonly supportsWarmRebind = false;
+  readonly supportsWarmRebind = true;
   readonly #templateId: string;
   readonly #imageRevision: string;
   readonly #client: CubeSandboxRuntimeClient;
@@ -408,6 +457,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly #importGitHub: CubeSandboxProviderOptions["importGitHub"];
   readonly #checkImporter: (() => Promise<void>) | undefined;
   readonly #closeImporter: (() => Promise<void>) | undefined;
+  readonly #bootstrapProvider: SandboxProvider | undefined;
   readonly #activations = new Map<string, CubeActivation>();
   #runtimeProbe: Promise<void> | undefined;
 
@@ -418,6 +468,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     this.#importGitHub = options.importGitHub;
     this.#checkImporter = options.checkImporter;
     this.#closeImporter = options.closeImporter;
+    this.#bootstrapProvider = options.bootstrapProvider;
     if (options.runtimeClient !== undefined) {
       this.#client = options.runtimeClient;
     } else {
@@ -451,8 +502,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       spec.policy.network.mode !== "deny_all" ||
       spec.policy.allowHostMounts ||
       spec.policy.allowDockerSocket ||
-      spec.policy.privileged ||
-      spec.environment.recipe.dependencyHosts !== undefined
+      spec.policy.privileged
     ) {
       throw new SandboxManagerError(
         "cubesandbox_policy_unsupported",
@@ -460,10 +510,52 @@ export class CubeSandboxProvider implements SandboxProvider {
         false,
       );
     }
+    let workspaceRestore = spec.workspaceRestore;
+    let offlineSetupCommands: EnvironmentToolchainReport["recipeCommands"] | undefined;
+    if (spec.environment.recipe.dependencyHosts !== undefined) {
+      if (this.#bootstrapProvider === undefined) {
+        throw new SandboxManagerError(
+          "cubesandbox_dependency_bootstrap_unavailable",
+          "CubeSandbox dependency bootstrap was unavailable",
+          false,
+        );
+      }
+      let bootstrapHandle: SandboxHandle | undefined;
+      try {
+        bootstrapHandle = await this.#bootstrapProvider.create(spec);
+        const captured = await this.#bootstrapProvider.snapshot(bootstrapHandle, randomUUID());
+        if (captured.type !== "tool_sandbox.captured") {
+          throw new SandboxManagerError(
+            "cubesandbox_dependency_bootstrap_failed",
+            "Dependency bootstrap did not produce a Workspace",
+            false,
+          );
+        }
+        workspaceRestore = captured.workspace;
+        offlineSetupCommands = captured.environment.recipeCommands.filter(
+          (command) => command.phase === "setup",
+        );
+      } finally {
+        if (bootstrapHandle !== undefined) {
+          await this.#bootstrapProvider.destroy(bootstrapHandle).catch(() => undefined);
+        }
+      }
+    }
+    const bindingSha256 = physicalBindingSha256(
+      spec.activationId,
+      spec.assignment,
+      spec.environment,
+    );
+    const authoritySecret = handoffSecret();
     const instance = await this.#client.create({
       templateId: this.#templateId,
       timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
-      metadata: assignmentMetadata(spec.activationId, spec.assignment, this.#imageRevision),
+      metadata: assignmentMetadata(
+        spec.activationId,
+        spec.assignment,
+        this.#imageRevision,
+        bindingSha256,
+      ),
       allowInternetAccess: false,
       allowPublicTraffic: false,
     });
@@ -480,12 +572,23 @@ export class CubeSandboxProvider implements SandboxProvider {
             activationId: spec.activationId,
             environment: spec.environment,
             workspaceSeed: spec.workspaceSeed,
-            ...(spec.workspaceRestore === undefined
+            ...(workspaceRestore === undefined ? {} : { workspaceRestore }),
+            ...(offlineSetupCommands === undefined
               ? {}
-              : { workspaceRestore: spec.workspaceRestore }),
+              : {
+                  environmentStage: {
+                    type: "offline_restore",
+                    setupCommands: offlineSetupCommands,
+                  },
+                }),
           },
           timeoutMs: this.#readyTimeoutMs,
           maximumResponseBytes: 1 * 1_024 * 1_024,
+          authority: {
+            handoffSecret: authoritySecret,
+            fencingToken: spec.assignment.fencingToken,
+            bindingSha256,
+          },
         }),
       );
       if (
@@ -528,6 +631,9 @@ export class CubeSandboxProvider implements SandboxProvider {
         toolchain,
         seenOperationIds: new Set(),
         seenCaptureIds: new Set(),
+        bindingSha256,
+        handoffSecret: authoritySecret,
+        state: "running",
       });
       return handle;
     } catch (error: unknown) {
@@ -536,12 +642,132 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
   }
 
-  async rebind(): Promise<SandboxHandle> {
-    throw new SandboxManagerError(
-      "cubesandbox_rebind_unsupported",
-      "CubeSandbox does not support fenced warm rebinding",
-      true,
-    );
+  async suspendForWarm(handle: SandboxHandle): Promise<SandboxHandle> {
+    const activation = await this.#owned(handle);
+    if (activation.state !== "running") {
+      throw new SandboxManagerError(
+        "cubesandbox_handoff_state_invalid",
+        "CubeSandbox was not running before warm suspension",
+        true,
+      );
+    }
+    try {
+      const sealed = record(
+        await this.#client.request(activation.instance, {
+          method: "POST",
+          path: "/v1/seal",
+          body: {},
+          timeoutMs: this.#readyTimeoutMs,
+          maximumResponseBytes: 64 * 1_024,
+          authority: this.#authority(activation),
+        }),
+        "CubeSandbox seal",
+      );
+      if (
+        sealed.sealed !== true ||
+        sealed.fencingToken !== handle.assignment.fencingToken ||
+        sealed.remainingToolProcesses !== 0
+      ) {
+        throw new SandboxManagerError(
+          "cubesandbox_seal_invalid",
+          "CubeSandbox did not prove a sealed Tool boundary",
+          false,
+        );
+      }
+      activation.state = "sealed";
+      activation.instance = await this.#client.pause(activation.instance, this.#readyTimeoutMs);
+      activation.state = "paused";
+      return handle;
+    } catch (error: unknown) {
+      await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
+      this.#activations.delete(handle.activationId);
+      throw new SandboxManagerError(
+        "cubesandbox_suspend_failed",
+        "CubeSandbox warm suspension failed and the VM was destroyed",
+        true,
+      );
+    }
+  }
+
+  async rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle> {
+    this.#assertHandle(handle);
+    const activation = this.#activations.get(handle.activationId);
+    if (
+      activation === undefined ||
+      activation.handle.runtimeId !== handle.runtimeId ||
+      activation.state !== "paused" ||
+      assignment.tenantId !== handle.assignment.tenantId ||
+      assignment.projectId !== handle.assignment.projectId ||
+      assignment.workspaceId !== handle.assignment.workspaceId ||
+      assignment.sessionId !== handle.assignment.sessionId ||
+      assignment.fencingToken <= handle.assignment.fencingToken
+    ) {
+      throw new SandboxManagerError(
+        "cubesandbox_rebind_identity_invalid",
+        "CubeSandbox warm rebind identity was invalid",
+        false,
+      );
+    }
+    const nextSecret = handoffSecret();
+    try {
+      const connected = await this.#client.connect(
+        activation.instance,
+        Math.ceil(this.defaultPolicy.resources.turnWallClockTimeoutMs / 1_000),
+      );
+      const response = record(
+        await this.#client.request(connected, {
+          method: "POST",
+          path: "/v1/rebind",
+          body: {
+            handoffSecret: nextSecret,
+            fencingToken: assignment.fencingToken,
+            bindingSha256: activation.bindingSha256,
+          },
+          timeoutMs: this.#readyTimeoutMs,
+          maximumResponseBytes: 1 * 1_024 * 1_024,
+          authority: this.#authority(activation),
+        }),
+        "CubeSandbox rebind",
+      );
+      if (response.rebound !== true || response.fencingToken !== assignment.fencingToken) {
+        throw new SandboxManagerError(
+          "cubesandbox_rebind_invalid",
+          "CubeSandbox warm rebind did not acknowledge the new fence",
+          false,
+        );
+      }
+      const toolchain = parseEnvironmentToolchainReport(response.environment);
+      if (
+        toolchain.profileKey !== handle.environment.profileKey ||
+        toolchain.profileVersion !== handle.environment.profileVersion ||
+        toolchain.imageRevision !== handle.environment.imageRevision ||
+        toolchain.specSha256 !== handle.environment.specSha256 ||
+        toolchain.recipeSha256 !== handle.environment.recipeSha256
+      ) {
+        throw new SandboxManagerError(
+          "cubesandbox_rebind_environment_mismatch",
+          "CubeSandbox preserved environment did not match",
+          false,
+        );
+      }
+      const rebound: SandboxHandle = Object.freeze({ ...handle, assignment });
+      activation.instance = connected;
+      activation.handle = rebound;
+      activation.handoffSecret = nextSecret;
+      activation.toolchain = toolchain;
+      activation.state = "running";
+      activation.seenOperationIds.clear();
+      activation.seenCaptureIds.clear();
+      return rebound;
+    } catch (error: unknown) {
+      await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
+      this.#activations.delete(handle.activationId);
+      throw new SandboxManagerError(
+        "cubesandbox_rebind_failed",
+        "CubeSandbox warm rebind failed and requires a cold restore",
+        true,
+      );
+    }
   }
 
   async exec(
@@ -576,6 +802,7 @@ export class CubeSandboxProvider implements SandboxProvider {
           },
           timeoutMs: 5_000,
           maximumResponseBytes: 64 * 1_024,
+          authority: this.#authority(activation),
         })
         .catch(() => undefined);
     };
@@ -590,6 +817,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         ...(signal === undefined ? {} : { signal }),
         timeoutMs,
         maximumResponseBytes: TOOL_RESPONSE_LIMIT_BYTES,
+        authority: this.#authority(activation),
       });
       return parseToolSandboxOperationResponse(result);
     } catch (error: unknown) {
@@ -687,6 +915,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         body: { activationId: handle.activationId, requestId },
         timeoutMs: this.#readyTimeoutMs,
         maximumResponseBytes: TOOL_RESPONSE_LIMIT_BYTES,
+        authority: this.#authority(activation),
       }),
       "CubeSandbox capture",
     );
@@ -717,7 +946,12 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
     if (
       runtimeUuid(instance.sandboxId) !== handle.runtimeId ||
-      !metadataMatchesAssignment(instance.metadata, handle.activationId, handle.assignment)
+      !metadataMatchesPhysicalBinding(
+        instance.metadata,
+        handle.activationId,
+        handle.assignment,
+        physicalBindingSha256(handle.activationId, handle.assignment, handle.environment),
+      )
     ) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
@@ -742,7 +976,12 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
     if (
       runtimeUuid(instance.sandboxId) !== handle.runtimeId ||
-      !metadataMatchesAssignment(instance.metadata, handle.activationId, handle.assignment)
+      !metadataMatchesPhysicalBinding(
+        instance.metadata,
+        handle.activationId,
+        handle.assignment,
+        physicalBindingSha256(handle.activationId, handle.assignment, handle.environment),
+      )
     ) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
@@ -775,7 +1014,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       return;
     }
     const matches = (await this.#client.list()).filter((instance) =>
-      metadataMatchesAssignment(instance.metadata, activationId, assignment),
+      metadataMatchesOrphanIdentity(instance.metadata, activationId, assignment),
     );
     if (matches.length > 1) {
       throw new SandboxManagerError(
@@ -791,7 +1030,10 @@ export class CubeSandboxProvider implements SandboxProvider {
     bounded(sandboxId, "Sandbox inventory ID", 512);
     const output: SupervisorRuntimeAssignment[] = [];
     for (const instance of await this.#client.list()) {
-      const assignment = assignmentFromMetadata(instance);
+      const managed = [...this.#activations.values()].find(
+        (activation) => activation.instance.sandboxId === instance.sandboxId,
+      );
+      const assignment = managed?.handle.assignment ?? assignmentFromMetadata(instance);
       if (assignment !== undefined && assignment.sandboxId === sandboxId) {
         output.push(supervisorAssignment(instance, assignment));
       }
@@ -802,7 +1044,10 @@ export class CubeSandboxProvider implements SandboxProvider {
   async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
     const instance = await this.#client.read(assignment.containerName);
     if (instance === undefined) return;
-    const current = assignmentFromMetadata(instance);
+    const managed = [...this.#activations.values()].find(
+      (activation) => activation.instance.sandboxId === instance.sandboxId,
+    );
+    const current = managed?.handle.assignment ?? assignmentFromMetadata(instance);
     if (current === undefined || !sameRuntimeAssignment(instance, current, assignment)) {
       throw new SandboxManagerError(
         "cubesandbox_assignment_identity_mismatch",
@@ -891,6 +1136,8 @@ export class CubeSandboxProvider implements SandboxProvider {
       evidence.imageRevision !== this.#imageRevision ||
       evidence.uid !== 1_000 ||
       evidence.gid !== 1_000 ||
+      evidence.supervisorUid !== 0 ||
+      evidence.supervisorGid !== 0 ||
       evidence.cpuCount * 1_000_000_000 < policy.resources.cpuNano ||
       evidence.memoryBytes < Math.floor(policy.resources.memoryBytes * 0.9) ||
       !evidence.hypervisorFlag ||
@@ -925,7 +1172,12 @@ export class CubeSandboxProvider implements SandboxProvider {
     if (
       current === undefined ||
       runtimeUuid(current.sandboxId) !== handle.runtimeId ||
-      !metadataMatchesAssignment(current.metadata, handle.activationId, handle.assignment)
+      !metadataMatchesPhysicalBinding(
+        current.metadata,
+        handle.activationId,
+        handle.assignment,
+        activation.bindingSha256,
+      )
     ) {
       throw new SandboxManagerError(
         "tool_sandbox_identity_mismatch",
@@ -934,6 +1186,16 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     return activation;
+  }
+
+  #authority(
+    activation: CubeActivation,
+  ): NonNullable<Parameters<CubeSandboxRuntimeClient["request"]>[1]["authority"]> {
+    return {
+      handoffSecret: activation.handoffSecret,
+      fencingToken: activation.handle.assignment.fencingToken,
+      bindingSha256: activation.bindingSha256,
+    };
   }
 
   #assertHandle(handle: SandboxHandle): void {

@@ -169,6 +169,11 @@ export interface SandboxProvider {
 
   checkHealth(): Promise<void>;
   create(spec: SandboxCreateSpec): Promise<SandboxHandle>;
+  /**
+   * Quiesce a runtime before it enters the exact-Session warm pool. Providers
+   * that do not need a physical suspend may omit this hook.
+   */
+  suspendForWarm?(handle: SandboxHandle): Promise<SandboxHandle>;
   rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle>;
   exec(
     handle: SandboxHandle,

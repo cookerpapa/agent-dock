@@ -310,12 +310,15 @@ never reaches Pi, the model or Tool code.
 Capability authorization and assignment fencing remain above the Provider.
 Tool microVMs are demand-activated on the first Tool Call, not for pure chat.
 Every guest is dedicated to one exact
-tenant/project/workspace/session/RunAttempt, runs Tool code as UID/GID
-`1000:1000`, has no platform credential, host mount/runtime socket or public
-network, and is removed after completion, failure, cancellation or timeout.
-Cube v0.6.0 lacks the metadata CAS required for safe warm rebind, so the
-production clean-prewarm target is zero and no used guest is ever reassigned.
-A later coding Run restores the committed Workspace into a new microVM.
+tenant/project/workspace/session identity and one current RunAttempt. A
+root-owned guest supervisor enforces the sealed handoff, while Tool code runs as
+UID/GID `1000:1000` with no platform credential, host mount/runtime socket or
+public network. Successful settlement may kill all Tool-UID processes, pause
+the VM and retain it only for that exact Session. A later higher-fence Run
+connects and rotates its handoff secret. Failure, cancellation, timeout,
+identity mismatch or ambiguous handoff destroys it; committed checkpoints
+remain the cold-recovery authority. The production shared clean-prewarm target
+is still zero and no used guest is ever assigned to another identity.
 
 The bundled local Pi Workers are trusted Docker Compose services; they are not
 running inside the Cube K3s cluster. Replicas poll the same Temporal Task Queue
@@ -630,8 +633,9 @@ Use `npm run production:ps` for the first health view. Expected steady state:
 - `database-bootstrap`, `minio-bootstrap`, and `supervisor-volume-bootstrap`
   exited successfully;
 - no `tool-sandbox-image` service is running;
-- no AgentDock Cube activation remains after Run settlement and no
-  dependency-bootstrap or importer Pod remains after its operation;
+- a completed coding Session may retain at most one sealed, paused exact-Session
+  Cube activation until warm TTL/LRU eviction; no dependency-bootstrap or
+  importer Pod remains after its operation;
 - the Cube clean-prewarm target is zero;
 - one current Supervisor boot per configured stable Supervisor ID is ready and
   both identities poll `agent-dock-pi-runs-v1` for Workflow and Activity Tasks.

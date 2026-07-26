@@ -156,6 +156,12 @@ extension-policy support would overstate the current boundary.
   Flannel/Pod=1450) so CubeProxy responses cannot be black-holed
 - [x] Make normal production commands fail closed on Cube cluster/template
   evidence and reserve stale-template tolerance only for inspection/teardown
+- [x] ADR-0060: implement Cube's standard pause/connect recovery behind a
+  sealed exact-Session handoff with Tool-process removal, higher fencing token,
+  handoff-secret rotation and destroy-on-ambiguity fallback
+- [x] Promote capability-scoped dependency setup from a disposable gVisor Pod
+  into a newly created offline Cube guest without promoting processes, network
+  state or credentials
 - [ ] Review Cube upgrade/node-loss drills and upstream state/idempotency issues
   before claiming a dedicated multi-node public deployment
 

@@ -13,10 +13,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 const SERVICE_PORT = 49_984;
 const MAXIMUM_REQUEST_BYTES = 8 * 1_024 * 1_024;
 const RESPONSE_TIMEOUT_MS = 10 * 60_000;
+const TOOL_UID = 1_000;
+const TOOL_GID = 1_000;
+const HANDOFF_SECRET_PATTERN = /^adch_[A-Za-z0-9_-]{43}$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 type Pending<T> = {
   resolve(value: T): void;
@@ -35,6 +42,14 @@ type CubeRuntimeEvidence = {
   noNewPrivileges: boolean;
   effectiveCapabilities: string;
   readOnlyRootFilesystem: boolean;
+  supervisorUid: number;
+  supervisorGid: number;
+};
+
+type HandoffAuthority = {
+  secret: string;
+  fencingToken: number;
+  bindingSha256: string;
 };
 
 type CubeCapturedWorkspace = Omit<
@@ -99,6 +114,63 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   }
 }
 
+function singleHeader(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseAuthority(request: IncomingMessage): HandoffAuthority {
+  const secret = singleHeader(request, "x-agent-dock-handoff-secret");
+  const rawFence = singleHeader(request, "x-agent-dock-fencing-token");
+  const bindingSha256 = singleHeader(request, "x-agent-dock-binding-sha256");
+  const fencingToken = rawFence === undefined ? Number.NaN : Number(rawFence);
+  if (
+    secret === undefined ||
+    !HANDOFF_SECRET_PATTERN.test(secret) ||
+    !Number.isSafeInteger(fencingToken) ||
+    fencingToken < 1 ||
+    bindingSha256 === undefined ||
+    !SHA256_PATTERN.test(bindingSha256)
+  ) {
+    throw new CubeToolServiceError(403, "Tool authority was invalid");
+  }
+  return { secret, fencingToken, bindingSha256 };
+}
+
+function sameAuthority(left: HandoffAuthority, right: HandoffAuthority): boolean {
+  return (
+    timingSafeEqual(
+      createHash("sha256").update(left.secret).digest(),
+      createHash("sha256").update(right.secret).digest(),
+    ) &&
+    left.fencingToken === right.fencingToken &&
+    left.bindingSha256 === right.bindingSha256
+  );
+}
+
+function parseRebind(value: unknown): HandoffAuthority {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CubeToolServiceError(400, "Tool rebind was invalid");
+  }
+  const input = value as Record<string, unknown>;
+  if (
+    Object.keys(input).length !== 3 ||
+    typeof input.handoffSecret !== "string" ||
+    !HANDOFF_SECRET_PATTERN.test(input.handoffSecret) ||
+    !Number.isSafeInteger(input.fencingToken) ||
+    (input.fencingToken as number) < 1 ||
+    typeof input.bindingSha256 !== "string" ||
+    !SHA256_PATTERN.test(input.bindingSha256)
+  ) {
+    throw new CubeToolServiceError(400, "Tool rebind was invalid");
+  }
+  return {
+    secret: input.handoffSecret,
+    fencingToken: input.fencingToken as number,
+    bindingSha256: input.bindingSha256,
+  };
+}
+
 function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
   const body = Buffer.from(JSON.stringify(value), "utf8");
   response.writeHead(statusCode, {
@@ -144,13 +216,16 @@ function exec(file: string, args: readonly string[]): Promise<string> {
   });
 }
 
-async function runtimeEvidence(): Promise<CubeRuntimeEvidence> {
+async function runtimeEvidence(workerPid: number | undefined): Promise<CubeRuntimeEvidence> {
+  if (workerPid === undefined) {
+    throw new CubeToolServiceError(503, "Cube Tool Worker was not running");
+  }
   const [imageRevision, kernel, cpuInfo, memory, processStatus, mountInfo] = await Promise.all([
     exec("/bin/cat", ["/opt/agent-dock/image-revision"]),
     exec("/bin/uname", ["-r"]),
     exec("/bin/sh", ["-c", "cat /proc/cpuinfo"]),
     exec("/bin/sh", ["-c", "cat /proc/meminfo"]),
-    exec("/bin/sh", ["-c", "cat /proc/self/status"]),
+    readFile(`/proc/${String(workerPid)}/status`, "utf8"),
     exec("/bin/sh", ["-c", "cat /proc/self/mountinfo"]),
   ]);
   const cpuCount = cpuInfo.split("\n").filter((line) => /^processor\s*:/.test(line)).length;
@@ -178,12 +253,14 @@ async function runtimeEvidence(): Promise<CubeRuntimeEvidence> {
     kernelRelease: oneLine(kernel, "Kernel"),
     cpuCount,
     memoryBytes,
-    uid: process.getuid?.() ?? -1,
-    gid: process.getgid?.() ?? -1,
+    uid: Number(processStatus.match(/^Uid:\s+\d+\s+(\d+)\s+/m)?.[1] ?? -1),
+    gid: Number(processStatus.match(/^Gid:\s+\d+\s+(\d+)\s+/m)?.[1] ?? -1),
     hypervisorFlag: /(?:^|\s)(?:flags|Features)\s*:.*(?:^|\s)hypervisor(?:\s|$)/m.test(cpuInfo),
     noNewPrivileges,
     effectiveCapabilities: capabilities,
     readOnlyRootFilesystem: rootMount[5]?.split(",").includes("ro") ?? false,
+    supervisorUid: process.getuid?.() ?? -1,
+    supervisorGid: process.getgid?.() ?? -1,
   };
 }
 
@@ -200,12 +277,22 @@ class ToolWorkerBridge {
     this.#child = spawn(process.execPath, [workerPath], {
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
+      uid: TOOL_UID,
+      gid: TOOL_GID,
     });
     const lines = createInterface({ input: this.#child.stdout, crlfDelay: Infinity });
     lines.on("line", (line) => this.#acceptLine(line));
     this.#child.stderr.on("data", (chunk: Buffer) => process.stderr.write(chunk));
     this.#child.once("error", () => this.#fail(new Error("Tool Worker could not start")));
     this.#child.once("exit", () => this.#fail(new Error("Tool Worker exited")));
+  }
+
+  get pid(): number | undefined {
+    return this.#child.pid;
+  }
+
+  get busy(): boolean {
+    return this.#ready !== undefined || this.#operations.size > 0 || this.#captures.size > 0;
   }
 
   async initialize(message: ToolWorkerInput): Promise<EnvironmentToolchainReport> {
@@ -288,6 +375,17 @@ class ToolWorkerBridge {
       }).catch(() => undefined);
     }
     this.#child.kill("SIGTERM");
+    await Promise.race([
+      new Promise<void>((resolve) => this.#child.once("exit", () => resolve())),
+      delay(500),
+    ]);
+    if (this.#child.exitCode === null && this.#child.signalCode === null) {
+      this.#child.kill("SIGKILL");
+      await Promise.race([
+        new Promise<void>((resolve) => this.#child.once("exit", () => resolve())),
+        delay(500),
+      ]);
+    }
   }
 
   async #write(message: ToolWorkerInput): Promise<void> {
@@ -363,7 +461,78 @@ class ToolWorkerBridge {
   }
 }
 
-const bridge = new ToolWorkerBridge();
+async function toolProcessIds(): Promise<number[]> {
+  const entries = await readdir("/proc");
+  const output: number[] = [];
+  await Promise.all(
+    entries
+      .filter((entry) => /^[1-9][0-9]*$/.test(entry))
+      .map(async (entry) => {
+        const pid = Number(entry);
+        const status = await readFile(`/proc/${entry}/status`, "utf8").catch(() => undefined);
+        const uid = status?.match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/m);
+        if (
+          Number.isSafeInteger(pid) &&
+          uid != null &&
+          uid.slice(1).some((value) => Number(value) === TOOL_UID)
+        ) {
+          output.push(pid);
+        }
+      }),
+  );
+  return output.sort((left, right) => left - right);
+}
+
+async function killAllToolProcesses(): Promise<void> {
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    for (const pid of await toolProcessIds()) {
+      try {
+        process.kill(pid, signal);
+      } catch (error: unknown) {
+        if (
+          typeof error !== "object" ||
+          error === null ||
+          !("code" in error) ||
+          error.code !== "ESRCH"
+        ) {
+          throw error;
+        }
+      }
+    }
+    await delay(signal === "SIGTERM" ? 150 : 50);
+  }
+  if ((await toolProcessIds()).length > 0) {
+    throw new CubeToolServiceError(500, "Tool processes could not be sealed");
+  }
+}
+
+type InitializedToolState = {
+  activationId: string;
+  environment: Extract<ToolWorkerInput, { type: "worker.initialize" }>["environment"];
+  workspaceSeed: Extract<ToolWorkerInput, { type: "worker.initialize" }>["workspaceSeed"];
+  toolchain: EnvironmentToolchainReport;
+};
+
+let bridge: ToolWorkerBridge | undefined = new ToolWorkerBridge();
+let authority: HandoffAuthority | undefined;
+let initialized: InitializedToolState | undefined;
+let sealed = false;
+
+function requireAuthority(request: IncomingMessage): HandoffAuthority {
+  const candidate = parseAuthority(request);
+  if (authority === undefined || !sameAuthority(candidate, authority)) {
+    throw new CubeToolServiceError(403, "Tool authority did not match");
+  }
+  return candidate;
+}
+
+function readyBridge(): ToolWorkerBridge {
+  if (sealed || bridge === undefined || initialized === undefined) {
+    throw new CubeToolServiceError(409, "Cube Tool service was sealed");
+  }
+  return bridge;
+}
+
 const server = createServer((request, response) => {
   void (async () => {
     const url = new URL(request.url ?? "/", "http://cube-tool.invalid");
@@ -373,31 +542,54 @@ const server = createServer((request, response) => {
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/evidence") {
-      sendJson(response, 200, await runtimeEvidence());
+      sendJson(response, 200, await runtimeEvidence(bridge?.pid));
       return;
     }
     if (request.method !== "POST") {
       throw new CubeToolServiceError(404, "Cube Tool service route was not found");
     }
     if (url.pathname === "/v1/initialize") {
+      if (authority !== undefined || initialized !== undefined || sealed) {
+        throw new CubeToolServiceError(409, "Cube Tool service was already initialized");
+      }
+      const initialAuthority = parseAuthority(request);
       const input = parseToolWorkerInput(await readJson(request));
-      sendJson(response, 200, await bridge.initialize(input));
+      if (input.type !== "worker.initialize" || input.workspaceAttach !== undefined) {
+        throw new CubeToolServiceError(400, "Initialization message was invalid");
+      }
+      const toolchain = await readyBridgeForInitialization().initialize(input);
+      authority = initialAuthority;
+      initialized = {
+        activationId: input.activationId,
+        environment: input.environment,
+        workspaceSeed: input.workspaceSeed,
+        toolchain,
+      };
+      sendJson(response, 200, toolchain);
       return;
     }
     if (url.pathname === "/v1/operation") {
+      requireAuthority(request);
       const operation = parseToolSandboxOperationRequest(await readJson(request));
       const disconnected = (): void => {
-        void bridge.cancel(operation.activationId, operation.operationId).catch(() => undefined);
+        try {
+          void readyBridge()
+            .cancel(operation.activationId, operation.operationId)
+            .catch(() => undefined);
+        } catch {
+          // A concurrent seal/rebind already revoked this execution channel.
+        }
       };
       request.once("aborted", disconnected);
       try {
-        sendJson(response, 200, await bridge.operation(operation));
+        sendJson(response, 200, await readyBridge().operation(operation));
       } finally {
         request.removeListener("aborted", disconnected);
       }
       return;
     }
     if (url.pathname === "/v1/cancel") {
+      requireAuthority(request);
       const input = parseToolWorkerInput({
         toolWorkerProtocolVersion: 1,
         type: "worker.cancel",
@@ -406,11 +598,12 @@ const server = createServer((request, response) => {
       if (input.type !== "worker.cancel") {
         throw new CubeToolServiceError(400, "Tool cancellation was invalid");
       }
-      await bridge.cancel(input.activationId, input.operationId);
+      await readyBridge().cancel(input.activationId, input.operationId);
       sendJson(response, 200, { cancelled: true });
       return;
     }
     if (url.pathname === "/v1/capture") {
+      requireAuthority(request);
       const input = parseToolWorkerInput({
         toolWorkerProtocolVersion: 1,
         type: "worker.capture",
@@ -419,12 +612,77 @@ const server = createServer((request, response) => {
       if (input.type !== "worker.capture") {
         throw new CubeToolServiceError(400, "Tool capture was invalid");
       }
-      sendJson(response, 200, await bridge.capture(input.activationId, input.requestId));
+      sendJson(response, 200, await readyBridge().capture(input.activationId, input.requestId));
+      return;
+    }
+    if (url.pathname === "/v1/seal") {
+      requireAuthority(request);
+      const current = readyBridge();
+      if (current.busy) {
+        throw new CubeToolServiceError(409, "Tool Worker was busy");
+      }
+      sealed = true;
+      bridge = undefined;
+      await current.close();
+      await killAllToolProcesses();
+      sendJson(response, 200, {
+        sealed: true,
+        fencingToken: authority?.fencingToken,
+        remainingToolProcesses: 0,
+      });
+      return;
+    }
+    if (url.pathname === "/v1/rebind") {
+      const previous = requireAuthority(request);
+      if (!sealed || bridge !== undefined || initialized === undefined) {
+        throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
+      }
+      const next = parseRebind(await readJson(request));
+      if (
+        next.bindingSha256 !== previous.bindingSha256 ||
+        next.fencingToken <= previous.fencingToken ||
+        next.secret === previous.secret
+      ) {
+        throw new CubeToolServiceError(409, "Tool rebind authority was stale");
+      }
+      const replacement = new ToolWorkerBridge();
+      try {
+        const toolchain = await replacement.initialize({
+          toolWorkerProtocolVersion: 1,
+          type: "worker.initialize",
+          activationId: initialized.activationId,
+          environment: initialized.environment,
+          workspaceSeed: initialized.workspaceSeed,
+          workspaceAttach: {
+            recipeCommands: initialized.toolchain.recipeCommands,
+          },
+        });
+        bridge = replacement;
+        authority = next;
+        initialized = { ...initialized, toolchain };
+        sealed = false;
+        sendJson(response, 200, {
+          rebound: true,
+          fencingToken: next.fencingToken,
+          environment: toolchain,
+        });
+      } catch (error: unknown) {
+        await replacement.close().catch(() => undefined);
+        await killAllToolProcesses().catch(() => undefined);
+        throw error;
+      }
       return;
     }
     throw new CubeToolServiceError(404, "Cube Tool service route was not found");
   })().catch((error: unknown) => safeFailure(response, error));
 });
+
+function readyBridgeForInitialization(): ToolWorkerBridge {
+  if (bridge === undefined || sealed) {
+    throw new CubeToolServiceError(409, "Cube Tool service was unavailable");
+  }
+  return bridge;
+}
 
 server.listen(SERVICE_PORT, "0.0.0.0", () => {
   process.stdout.write(`AgentDock Cube Tool service ready on ${SERVICE_PORT}\n`);
@@ -432,12 +690,15 @@ server.listen(SERVICE_PORT, "0.0.0.0", () => {
 
 let closing: Promise<void> | undefined;
 function close(): Promise<void> {
-  closing ??= bridge.close().finally(
-    () =>
-      new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      }),
-  );
+  closing ??= (async () => {
+    const current = bridge;
+    bridge = undefined;
+    await current?.close().catch(() => undefined);
+    await killAllToolProcesses().catch(() => undefined);
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  })();
   return closing;
 }
 

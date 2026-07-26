@@ -16,7 +16,8 @@ Trusted Pi Worker pool
         ▼
 AgentDock Sandbox Manager
         ├── CubeSandboxProvider (ordinary Tool execution)
-        └── Kubernetes/gVisor importer (exact-commit acquisition only)
+        └── Kubernetes/gVisor bootstrap/import
+            (capability-scoped acquisition and dependency setup only)
                 │
                 ▼
 CubeAPI -> CubeMaster -> Cubelet -> CubeShim/KVM
@@ -40,10 +41,10 @@ operator path.
 | AgentDock status | importer and deterministic regression only | ordinary Tool execution, live KVM validated |
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
 | Workspace durability | AgentDock content checkpoint | same AgentDock content checkpoint |
-| Exact-Session warm rebind | implemented in former Tool Provider | disabled until Cube metadata CAS is proved |
+| Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
 | Tool network | Kubernetes default deny | Cube create request forces Internet/public deny |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
-| Dependency setup | disposable networked bootstrap then fresh offline Pod | rejects dependency-network recipes |
+| Dependency setup | disposable networked bootstrap then fresh offline Pod | promotes that content into a fresh offline Cube VM |
 | Native snapshot | not required | optional future optimization, never commit authority |
 
 ## Provider path
@@ -71,7 +72,8 @@ AgentDock.
 
 ## Identity and fencing
 
-Cube metadata binds:
+Cube metadata records the immutable physical binding plus the original
+assignment for orphan diagnosis:
 
 ```text
 activation
@@ -83,15 +85,18 @@ AgentDock image revision
 ```
 
 The public AgentDock runtime ID is a deterministic UUID hash of Cube's native
-sandbox ID; the native ID remains a trusted Provider detail. Before each Tool
-operation, the Provider re-reads the instance and verifies the full assignment.
-A used operation/capture ID is rejected. A transport failure after command
-start destroys the VM and produces an unknown result rather than replaying an
-arbitrary side effect.
+sandbox ID; the native ID remains a trusted Provider detail. Mutable
+Run/Attempt ownership lives in the Manager. Every Tool request carries a
+Manager-only handoff secret, immutable binding digest and current fencing
+token. The root-owned guest supervisor checks them before forwarding work to a
+uid-1000 Tool Worker.
 
-Cube does not currently provide the online metadata compare-and-swap required
-for AgentDock's higher-fence warm rebind. A Cube activation is consequently
-disposed at the Run boundary. This is slower but correct.
+At a warm Run boundary the supervisor stops the Worker, kills and verifies the
+absence of every uid-1000 process, then Cube explicitly pauses the VM. A later
+exact-Session Run must present a strictly higher fence to connect, rotate the
+secret and start a fresh Worker against the preserved Workspace. The traffic
+token alone is insufficient after rebind. Any ambiguous transition destroys
+the VM and falls back to the committed AgentDock checkpoint.
 
 ## Network and credential boundary
 
@@ -129,10 +134,10 @@ request. The CubeAPI bearer key remains only in the Manager.
 
 The template is based on the pinned Cube base image but deliberately replaces
 its inherited entrypoint. Root `envd` is not started because it would expose a
-second command/file path outside AgentDock's Tool Broker. The sole service on
-49984 starts the existing Tool Worker as uid/gid 1000 with no new privileges,
-zero effective capabilities, a 128-process limit and a 1024-file limit. It
-includes:
+second command/file path outside AgentDock's Tool Broker. The sole root-owned
+supervisor on 49984 authenticates the closed protocol and starts the existing
+Tool Worker as uid/gid 1000 with no new privileges, zero effective
+capabilities, a 128-process limit and a 1024-file limit. It includes:
 
 ```text
 Node 24
@@ -158,7 +163,7 @@ The live gate has proven:
 
 - Provider control/data request shape and private traffic-token routing;
 - metadata identity, fencing and replay checks;
-- Manager lifecycle, capture and no-warm semantics;
+- Manager lifecycle, capture, sealed pause/connect and higher-fence rebind;
 - exact Tool image versions;
 - actual file write, Python execution, traversal rejection and content-hashed
   checkpoint through the template service;
@@ -170,6 +175,10 @@ The live gate has proven:
 - output, path, symlink, command-time and process limits;
 - cancellation destroying the affected microVM;
 - content capture and exact zero-orphan cleanup.
+
+Recipes that require dependency hosts run only in the disposable gVisor
+bootstrap governed by ADR-0044. Its captured content is restored into a fresh
+Cube VM and verified offline; ordinary Cube Bash remains deny-all.
 
 This does not prove a multi-node production deployment. Cube control-node loss,
 compute-node loss, rolling upgrade, storage failure, density and long-duration

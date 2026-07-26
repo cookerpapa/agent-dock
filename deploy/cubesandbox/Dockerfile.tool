@@ -68,8 +68,9 @@ WORKDIR /workspace
 EXPOSE 49984
 
 # Deliberately replace cubesandbox-base's entrypoint: the inherited script
-# starts root envd, which would be a second unmediated command/file channel
-# inside the guest. Cube's custom HTTP probe supports the AgentDock service
-# directly, so only the closed Tool protocol is exposed.
+# starts envd, which would be a second unmediated command/file channel inside
+# the guest. The one root-owned AgentDock supervisor authenticates every
+# mutable request, starts Tool Workers and user commands as uid 1000, and
+# enforces the seal/rebind boundary before Cube pause/resume.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/agent-dock-cube-tool"]

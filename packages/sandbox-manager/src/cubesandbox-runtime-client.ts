@@ -1,4 +1,5 @@
 import { Agent, buildConnector, fetch, type Dispatcher } from "undici";
+import { setTimeout as delay } from "node:timers/promises";
 
 export const CUBESANDBOX_TOOL_SERVICE_PORT = 49_984;
 
@@ -28,6 +29,11 @@ export type CubeSandboxDataRequest = Readonly<{
   signal?: AbortSignal;
   timeoutMs: number;
   maximumResponseBytes: number;
+  authority?: Readonly<{
+    handoffSecret: string;
+    fencingToken: number;
+    bindingSha256: string;
+  }>;
 }>;
 
 export interface CubeSandboxRuntimeClient {
@@ -35,6 +41,8 @@ export interface CubeSandboxRuntimeClient {
   create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance>;
   read(sandboxId: string): Promise<CubeSandboxInstance | undefined>;
   list(): Promise<readonly CubeSandboxInstance[]>;
+  pause(instance: CubeSandboxInstance, timeoutMs?: number): Promise<CubeSandboxInstance>;
+  connect(instance: CubeSandboxInstance, timeoutSeconds: number): Promise<CubeSandboxInstance>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
   close(): Promise<void>;
@@ -248,6 +256,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         metadata: input.metadata,
         allow_internet_access: false,
         network: { allowPublicTraffic: false },
+        lifecycle: { on_timeout: "pause", auto_resume: false },
       }),
     });
     const instance = parseInstance(
@@ -293,6 +302,59 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     return values.map((value) => parseInstance(value, this.#sandboxDomain));
   }
 
+  async pause(instance: CubeSandboxInstance, timeoutMs = 30_000): Promise<CubeSandboxInstance> {
+    const sandboxId = instance.sandboxId;
+    const id = encodeURIComponent(bounded(sandboxId, "CubeSandbox ID", 256));
+    const response = await this.#control(`/sandboxes/${id}/pause`, { method: "POST" });
+    await response.body?.cancel().catch(() => undefined);
+    const deadline = Date.now() + positiveInteger(timeoutMs, 30_000, 1_000, 300_000);
+    while (Date.now() < deadline) {
+      const current = await this.read(sandboxId);
+      if (current === undefined) {
+        throw new CubeRuntimeClientError("CubeSandbox disappeared while pausing");
+      }
+      if (current.state === "paused") {
+        return Object.freeze({
+          ...current,
+          ...(instance.trafficAccessToken === undefined
+            ? {}
+            : { trafficAccessToken: instance.trafficAccessToken }),
+        });
+      }
+      if (current.state !== "running" && current.state !== "pausing") {
+        throw new CubeRuntimeClientError("CubeSandbox entered an invalid pause state");
+      }
+      await delay(250);
+    }
+    throw new CubeRuntimeClientError("CubeSandbox pause did not converge");
+  }
+
+  async connect(
+    instance: CubeSandboxInstance,
+    timeoutSeconds: number,
+  ): Promise<CubeSandboxInstance> {
+    const id = encodeURIComponent(bounded(instance.sandboxId, "CubeSandbox ID", 256));
+    const response = await this.#control(`/sandboxes/${id}/connect`, {
+      method: "POST",
+      body: JSON.stringify({
+        timeout: positiveInteger(timeoutSeconds, 900, 1, 24 * 60 * 60),
+      }),
+    });
+    const connected = parseInstance(
+      parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox connect"),
+      this.#sandboxDomain,
+    );
+    if (connected.sandboxId !== instance.sandboxId) {
+      throw new CubeRuntimeClientError("CubeSandbox connect returned the wrong identity");
+    }
+    return Object.freeze({
+      ...connected,
+      ...(instance.trafficAccessToken === undefined
+        ? {}
+        : { trafficAccessToken: instance.trafficAccessToken }),
+    });
+  }
+
   async destroy(sandboxId: string): Promise<void> {
     const id = encodeURIComponent(bounded(sandboxId, "CubeSandbox ID", 256));
     const response = await this.#control(`/sandboxes/${id}`, { method: "DELETE" }, true);
@@ -315,6 +377,13 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       headers: {
         "e2b-traffic-access-token": token,
         "cube-traffic-access-token": token,
+        ...(input.authority === undefined
+          ? {}
+          : {
+              "x-agent-dock-handoff-secret": input.authority.handoffSecret,
+              "x-agent-dock-fencing-token": String(input.authority.fencingToken),
+              "x-agent-dock-binding-sha256": input.authority.bindingSha256,
+            }),
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),

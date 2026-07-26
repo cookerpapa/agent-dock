@@ -94,6 +94,10 @@ accepts a request-selected destination.
 
 ### No warm reassignment
 
+> Historical first-promotion limit. ADR-0060 supersedes this limit with a
+> sealed exact-Session pause/connect protocol; cross-identity reassignment
+> remains forbidden.
+
 AgentDock warm reuse requires an atomic metadata rebind to a higher writer
 fence. The evaluated Cube API does not expose a sufficiently strong online
 compare-and-swap for all assignment metadata. `supportsWarmRebind` is therefore
@@ -110,6 +114,10 @@ optimize cold start or candidate cloning, but a lost Cube cluster must remain
 recoverable from AgentDock artifacts.
 
 ### No dependency egress inside the Tool VM
+
+> ADR-0060 retains the offline Tool-VM rule and adds a disposable gVisor
+> dependency bootstrap whose regular-file snapshot is promoted into a new
+> offline Cube guest.
 
 The first Provider accepts only the final deny-all Tool policy. It rejects an
 environment recipe that asks for dependency hosts because the experiment has

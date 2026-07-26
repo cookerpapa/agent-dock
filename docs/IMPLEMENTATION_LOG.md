@@ -2398,3 +2398,43 @@
   multi-node-ready control/data contract. It does not yet claim real
   multi-node node-loss, storage failover or cross-zone high availability;
   those remain an explicit open acceptance item.
+
+## 2026-07-26: fenced Cube recovery and offline dependency promotion
+
+- Audited the immutable CubeSandbox v0.6.0 source at
+  `8721dd151971ce3c2966482bbd32904ad98f378e`. Cube's standard recovery path is
+  explicit `pause` followed by `connect` (or CLM-managed timeout pause/automatic
+  resume), coordinated through Cube lifecycle state and Redis locks. That
+  physical state machine does not identify the AgentDock RunAttempt allowed to
+  mutate a Workspace, so ADR-0060 keeps PostgreSQL lease/fence state authoritative.
+- Reworked the Cube Tool template into a root-owned authenticated supervisor
+  plus a UID/GID 1000 Tool Worker. Warm release now rejects active operations,
+  stops the Worker, kills and verifies every process carrying Tool UID 1000,
+  seals the service and only then observes Cube `paused`. A later exact-Session
+  Run must have a higher fence, presents the old in-memory handoff authority,
+  rotates to a fresh 256-bit secret and starts a fresh non-root Worker attached
+  to the retained Workspace. Old authority is rejected after rebind.
+- Added Cube API authorization and runtime-client support for `pause` and
+  `connect`, disabled transparent auto-resume, retained the private traffic
+  token in the trusted client, and changed Manager inventory to expose the
+  current in-memory assignment while physical Cube metadata remains an
+  immutable binding. Identity mismatch, ambiguous lifecycle transitions or
+  Manager loss destroys the optimization and cold-restores the committed
+  checkpoint.
+- Kept ordinary Cube Tools offline. Environments with declared dependency hosts
+  now run setup in the existing disposable gVisor/Ed25519-capability bootstrap,
+  capture regular Workspace bytes, destroy the bootstrap, and restore into a
+  newly created `allow_internet_access=false` Cube guest for offline
+  verification. Processes, sockets, namespaces and capability material cannot
+  cross that promotion boundary.
+- Added Provider/runtime/authorizer tests for pause/connect, exact-Session
+  higher-fence reuse, stale authority, dependency promotion and final offline
+  policy. The local Cube template compatibility gate additionally ran counting
+  sort, traversal rejection, background-process sealing and fence 7→8 rebind;
+  it observed root supervisor, UID/GID 1000 Tool Worker, zero effective Worker
+  capabilities, `NoNewPrivs`, zero remaining Tool processes and successful
+  stale-secret rejection.
+- The complete monorepo typecheck and the focused Cube authorizer, Tool Worker
+  and Sandbox Manager suites passed before immutable-template registration.
+  Real KVM pause/connect and real-model multi-round evidence is recorded in the
+  subsequent production-acceptance entry/report rather than implied here.

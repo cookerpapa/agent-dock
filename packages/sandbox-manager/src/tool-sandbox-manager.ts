@@ -417,6 +417,21 @@ export class ToolSandboxManager {
       handle !== undefined &&
       this.#provider.supportsWarmRebind !== false
     ) {
+      if (this.#provider.suspendForWarm !== undefined) {
+        try {
+          handle = await this.#provider.suspendForWarm(handle);
+        } catch {
+          await this.#provider.stop(handle).catch(() => undefined);
+          this.#releaseAdmission(handle.activationId);
+          handle = undefined;
+        }
+      }
+    }
+    if (
+      request.disposition === "keep_warm" &&
+      handle !== undefined &&
+      this.#provider.supportsWarmRebind !== false
+    ) {
       const key = workspaceKey(request.assignment);
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {

@@ -59,6 +59,13 @@ export const ToolWorkerEnvironmentStageSchema = Type.Union([
   ),
 ]);
 
+const ToolWorkerWorkspaceAttachSchema = Type.Object(
+  {
+    recipeCommands: Type.Array(EnvironmentRecipeCommandResultSchema, { maxItems: 20 }),
+  },
+  { additionalProperties: false },
+);
+
 export const ToolSandboxAssignmentSchema = Type.Object(
   {
     tenantId: OpaqueIdSchema,
@@ -350,6 +357,7 @@ export const ToolWorkerInputSchema = Type.Union([
       workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
       dependencyProxy: Type.Optional(DependencyProxyBootstrapSchema),
       environmentStage: Type.Optional(ToolWorkerEnvironmentStageSchema),
+      workspaceAttach: Type.Optional(ToolWorkerWorkspaceAttachSchema),
     },
     { additionalProperties: false },
   ),

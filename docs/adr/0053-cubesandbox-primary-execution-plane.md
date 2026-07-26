@@ -76,6 +76,11 @@ Attempt/fence, the first promoted version destroys the VM at the Run boundary
 instead of claiming unsafe warm reassignment. AgentDock checkpoints restore the
 next activation.
 
+ADR-0060 supersedes only that first-version lifecycle restriction. Cube's
+pause/connect API is now wrapped by an AgentDock-owned sealed handoff, higher
+fence and rotating secret; Cube itself still does not become the business-state
+or fencing authority.
+
 The existing Kubernetes gVisor runtime remains temporarily available only to
 the separately constrained exact-commit public-repository importer. It is not
 an Agent Tool execution fallback. Removing that importer dependency requires a

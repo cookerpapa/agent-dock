@@ -82,9 +82,13 @@ port, lifetime, connection, concurrency, byte and duration boundary.
 Importer/bootstrap Pods set `dnsPolicy: None`, publish no port, and are
 unreachable from the Manager except through Kubernetes attach/exec
 subresources. A disposable Pod selected for dependency setup can connect only
-to the proxy Service. Cube Tool execution currently rejects
-`dependencyHosts`; this bootstrap workflow cannot silently turn into ordinary
-Tool network access.
+to the proxy Service. For a Cube environment with `dependencyHosts`, the
+Manager captures only that bootstrap Pod's regular-file Workspace, destroys the
+Pod and capability, and restores the bytes into a newly created
+`allow_internet_access=false` Cube microVM. Processes, network namespaces,
+connections and capability material are not promoted. The ordinary Cube Tool
+microVM therefore remains offline even when its environment was prepared
+through controlled dependency egress.
 
 ## Credential and authority matrix
 

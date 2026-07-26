@@ -35,11 +35,12 @@ ADR-0039 then removed direct-Docker lifecycle ownership. The Provider interface
 alone is not treated as runtime evidence.
 
 ADR-0040 removes physical provisioning from pure-chat Runs and materializes an
-execution environment on the first Tool Call. ADR-0053 deliberately disables
-warm rebind for Cube v0.6.0: each RunAttempt owns one guest and later Runs cold
-restore the external checkpoint. Pi and Workspace checkpoints remain separate,
-and Pi event production is decoupled from PostgreSQL through a bounded
-asynchronous batch publisher with cumulative ACK.
+execution environment on the first Tool Call. ADR-0060 adds exact-Session warm
+retention through a sealed Cube pause/connect handoff: every old Tool process is
+removed, the next Run must present a higher fence and rotated secret, and any
+ambiguity falls back to cold checkpoint restore. Pi and Workspace checkpoints
+remain separate, and Pi event production is decoupled from PostgreSQL through
+a bounded asynchronous batch publisher with cumulative ACK.
 
 ### Milestone 2: durable Run protocol
 

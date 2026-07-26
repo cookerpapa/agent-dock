@@ -1,4 +1,5 @@
 import {
+  canonicalEnvironmentRecipeJson,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type ToolSandboxAssignment,
@@ -8,6 +9,7 @@ import {
   createWorkspaceSnapshot,
   encodeWorkspaceSnapshotBlob,
 } from "@agent-dock/workspace-runtime";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   CubeSandboxProvider,
@@ -16,6 +18,8 @@ import {
   type CubeSandboxDataRequest,
   type CubeSandboxInstance,
   type CubeSandboxRuntimeClient,
+  type SandboxHandle,
+  type SandboxProvider,
 } from "../src/index.ts";
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
@@ -104,6 +108,18 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     return [...this.instances.values()];
   }
 
+  async pause(instance: CubeSandboxInstance): Promise<CubeSandboxInstance> {
+    const paused = { ...instance, state: "paused" };
+    this.instances.set(instance.sandboxId, paused);
+    return paused;
+  }
+
+  async connect(instance: CubeSandboxInstance): Promise<CubeSandboxInstance> {
+    const connected = { ...instance, state: "running" };
+    this.instances.set(instance.sandboxId, connected);
+    return connected;
+  }
+
   async destroy(sandboxId: string): Promise<void> {
     this.destroyed.push(sandboxId);
     this.instances.delete(sandboxId);
@@ -123,9 +139,39 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
         noNewPrivileges: true,
         effectiveCapabilities: "0000000000000000",
         readOnlyRootFilesystem: false,
+        supervisorUid: 0,
+        supervisorGid: 0,
       };
     }
-    if (input.path === "/v1/initialize") return toolchain;
+    if (input.path === "/v1/initialize") {
+      const body = input.body as {
+        environment: typeof environment;
+        environmentStage?: {
+          type: "offline_restore";
+          setupCommands: typeof toolchain.recipeCommands;
+        };
+      };
+      return {
+        ...toolchain,
+        profileKey: body.environment.profileKey,
+        profileVersion: body.environment.profileVersion,
+        imageRevision: body.environment.imageRevision,
+        specSha256: body.environment.specSha256,
+        recipeSha256: body.environment.recipeSha256,
+        recipeCommands: body.environmentStage?.setupCommands ?? [],
+      };
+    }
+    if (input.path === "/v1/seal") {
+      return {
+        sealed: true,
+        fencingToken: input.authority?.fencingToken,
+        remainingToolProcesses: 0,
+      };
+    }
+    if (input.path === "/v1/rebind") {
+      const body = input.body as { fencingToken: number };
+      return { rebound: true, fencingToken: body.fencingToken, environment: toolchain };
+    }
     if (input.path === "/v1/capture") {
       const body = input.body as { activationId: string; requestId: string };
       return {
@@ -254,7 +300,51 @@ describe("CubeSandbox Provider contract", () => {
       disposition: "keep_warm",
       workspaceRevision: "a".repeat(64),
     });
-    expect(released.retained).toBe(false);
+    expect(released.retained).toBe(true);
+    expect(runtime.destroyed).toEqual([]);
+    expect(manager.warmCount).toBe(1);
+    expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("paused");
+
+    const nextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-cube-test-2",
+      turnId: "turn-cube-test-2",
+      attemptId: "10000000-0000-4000-8000-000000000030",
+      leaseId: "10000000-0000-4000-8000-000000000031",
+      fencingToken: 8,
+    };
+    const next = await manager.create({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.create",
+      requestId: "10000000-0000-4000-8000-000000000032",
+      assignment: nextAssignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      workspaceRevision: "a".repeat(64),
+    });
+    expect(next.activationId).toBe(reserved.activationId);
+    await manager.execute(next.capability, {
+      ...operation(next.activationId),
+      operationId: "10000000-0000-4000-8000-000000000033",
+    });
+    expect(runtime.creates).toHaveLength(1);
+    expect(runtime.requests.some(({ input }) => input.path === "/v1/rebind")).toBe(true);
+    expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("running");
+    expect(await manager.listAssignments(nextAssignment.sandboxId)).toEqual([
+      expect.objectContaining({
+        commandId: nextAssignment.commandId,
+        fencingToken: nextAssignment.fencingToken,
+      }),
+    ]);
+    const destroyed = await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "10000000-0000-4000-8000-000000000034",
+      activationId: next.activationId,
+      assignment: nextAssignment,
+      disposition: "destroy",
+    });
+    expect(destroyed.retained).toBe(false);
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
     expect(manager.warmCount).toBe(0);
     await manager.close();
@@ -285,6 +375,110 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
     await expect(provider.inspect(handle)).resolves.toMatchObject({ state: "absent" });
+    await provider.close();
+  });
+
+  it("promotes capability-scoped dependency setup into a fresh offline Cube VM", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const dependencyRecipe = {
+      schemaVersion: 1 as const,
+      dependencyHosts: ["registry.npmjs.org"],
+      setupCommands: [
+        {
+          id: "install",
+          command: "npm install",
+          cwd: ".",
+          timeoutMs: 60_000,
+          network: "dependency" as const,
+        },
+      ],
+      verificationCommands: [
+        {
+          id: "verify",
+          command: "npm test",
+          cwd: ".",
+          timeoutMs: 60_000,
+          network: "none" as const,
+        },
+      ],
+    };
+    const dependencyEnvironment = {
+      ...environment,
+      recipe: dependencyRecipe,
+      recipeSha256: createHash("sha256")
+        .update(canonicalEnvironmentRecipeJson(dependencyRecipe))
+        .digest("hex") as `${string}`,
+    };
+    const setupResult = {
+      id: "install",
+      phase: "setup" as const,
+      exitCode: 0,
+      durationMs: 12,
+      outputSha256: "b".repeat(64),
+    };
+    const bootstrapHandle: SandboxHandle = {
+      providerApiVersion: 1,
+      providerId: "kubernetes-gvisor",
+      activationId: ACTIVATION_ID,
+      runtimeId: "10000000-0000-4000-8000-000000000040",
+      runtimeName: "bootstrap-pod",
+      workspaceRoot: "/workspace",
+      assignment,
+      environment: dependencyEnvironment,
+      environmentValidation: {
+        ...toolchain,
+        recipeSha256: dependencyEnvironment.recipeSha256,
+        recipeCommands: [setupResult],
+        isolationBoundary: "gvisor",
+        runtime: "runsc",
+        networkMode: "deny_all",
+        runAsUser: "1000:1000",
+        readOnlyRootFilesystem: true,
+      },
+    };
+    const bootstrap = {
+      create: vi.fn(async () => bootstrapHandle),
+      snapshot: vi.fn(async (_handle: SandboxHandle, requestId: string) => ({
+        managerProtocolVersion: 1 as const,
+        type: "tool_sandbox.captured" as const,
+        requestId,
+        activationId: ACTIVATION_ID,
+        workspace: snapshot,
+        environment: bootstrapHandle.environmentValidation,
+      })),
+      destroy: vi.fn(async () => undefined),
+    } as unknown as SandboxProvider;
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      runtimeClient: runtime,
+      importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      bootstrapProvider: bootstrap,
+    });
+    const handle = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment: dependencyEnvironment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    expect(bootstrap.create).toHaveBeenCalledOnce();
+    expect(bootstrap.snapshot).toHaveBeenCalledOnce();
+    expect(bootstrap.destroy).toHaveBeenCalledOnce();
+    expect(runtime.creates).toHaveLength(1);
+    expect(runtime.creates[0]).toMatchObject({
+      allowInternetAccess: false,
+      allowPublicTraffic: false,
+    });
+    const initialize = runtime.requests.find(({ input }) => input.path === "/v1/initialize");
+    expect(initialize?.input.body).toMatchObject({
+      workspaceRestore: snapshot,
+      environmentStage: {
+        type: "offline_restore",
+        setupCommands: [setupResult],
+      },
+    });
+    await provider.destroy(handle);
     await provider.close();
   });
 });

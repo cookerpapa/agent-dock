@@ -46,6 +46,7 @@ const processEnvironment = {
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: supervisorIdPrefix,
   AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER: "kubernetes-gvisor",
   AGENT_DOCK_TEST_KUBERNETES_GVISOR_PROVIDER: "1",
+  COMPOSE_PROFILES: "compose-pi-workers",
   COMPOSE_PROJECT_NAME: projectName,
 };
 let initialized = false;
@@ -1689,13 +1690,19 @@ async function main() {
       if (!response.ok) return false;
       const body = await response.json();
       const targets = body?.data?.activeTargets;
-      return Array.isArray(targets) &&
-        targets.length === 4 &&
-        targets.every((target) => target.health === "up")
-        ? targets
-        : false;
+      if (!Array.isArray(targets)) return false;
+      const required = new Set([
+        "control-plane:9464",
+        "sandbox-manager:9466",
+        "supervisor-host:9465",
+        "supervisor-host-1:9465",
+      ]);
+      for (const target of targets) {
+        if (target.health === "up") required.delete(target.labels?.instance);
+      }
+      return required.size === 0 ? targets : false;
     },
-    "four healthy Prometheus scrape targets",
+    "required healthy Prometheus scrape targets",
     60_000,
   );
   const grafanaHealth = await fetch(`http://127.0.0.1:${String(grafanaPort)}/api/health`);

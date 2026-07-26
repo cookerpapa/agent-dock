@@ -51,6 +51,7 @@ if (config.provider === "cubesandbox") {
     importGitHub: (source, signal) => importer.importGitHub(source, signal),
     checkImporter: () => importer.checkHealth(),
     closeImporter: () => importer.close(),
+    bootstrapProvider: importer,
   });
 } else {
   provider = createGvisorProvider(config.cleanPrewarmTarget);

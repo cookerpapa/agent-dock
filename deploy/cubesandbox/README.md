@@ -166,17 +166,20 @@ traffic. The per-microVM Cube traffic token remains inside the trusted Provider.
 
 The K3s/gVisor plane remains available only to the exact-commit importer and
 the explicit deterministic production gate. It is not an ordinary Tool
-fallback. Cube currently rejects project recipes with `dependencyHosts` until
-temporary setup egress followed by a demonstrably fresh offline guest is
-implemented and accepted.
+fallback. Project recipes with `dependencyHosts` execute in a disposable
+capability-scoped gVisor bootstrap; only captured regular-file Workspace bytes
+are restored into a newly created, offline Cube guest for verification and
+ordinary Tool execution.
 
 ## Lifecycle and rollback
 
 Cube is not a data authority. Conversation state and content-verified
-Workspace checkpoints commit through PostgreSQL/object storage. Cube v0.6.0
-does not provide the metadata CAS required for safe higher-fence warm rebind,
-so each completed, failed, cancelled or timed-out Tool Run destroys its guest;
-a later Run restores the committed Workspace into a new guest.
+Workspace checkpoints commit through PostgreSQL/object storage. For an exact
+Session, the root-owned Tool supervisor can seal the guest, kill every Tool UID
+process and pause it. A later higher-fence Run connects, rotates the private
+handoff secret and starts a fresh Worker. Failed, cancelled, timed-out or
+ambiguous transitions destroy the guest; a later Run restores the committed
+Workspace into a new guest.
 
 Operational inspection and teardown remain available even if the source
 revision has advanced beyond the last registered template:

@@ -9,6 +9,8 @@ describe("Cube API authorizer", () => {
     ["POST", "/sandboxes"],
     ["GET", `/sandboxes/${SANDBOX}`],
     ["DELETE", `/sandboxes/${SANDBOX}`],
+    ["POST", `/sandboxes/${SANDBOX}/pause`],
+    ["POST", `/sandboxes/${SANDBOX}/connect`],
     ["GET", "/v2/sandboxes"],
     ["GET", "/v2/sandboxes?limit=1000"],
   ])("allows the Provider operation %s %s", (method, path) => {

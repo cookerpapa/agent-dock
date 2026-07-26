@@ -207,11 +207,15 @@ interfaces and sends a narrow authenticated RPC to a separate Sandbox Manager.
 The Manager first creates only a logical reservation. The first actual Tool
 Call asks the primary `CubeSandboxProvider` to materialize a credential-free
 KVM microVM; pure-chat Runs never touch Cube. A microVM is bound to one exact
-tenant/project/workspace/session/RunAttempt. Cube v0.6.0 does not expose the
-atomic metadata CAS required for a safe higher-fence rebind, so settlement
-captures dirty Workspace state and destroys the guest. A later coding Run
-restores that committed checkpoint into a newly scheduled guest. See ADR-0040
-and ADR-0053.
+tenant/project/workspace/session identity and one current RunAttempt. At a
+successful warm boundary, a root-owned guest supervisor stops the non-root Tool
+Worker, kills and verifies the absence of every UID 1000 process, then Cube
+pauses the microVM. A later higher-fence Attempt reconnects the same activation,
+rotates the handoff secret and starts a fresh Tool Worker against the retained
+Workspace. Cube still does not own business fencing: any identity mismatch,
+stale authority or ambiguous pause/connect/rebind destroys the guest and the
+next Attempt cold-restores the committed checkpoint. See ADR-0040, ADR-0053
+and ADR-0060.
 
 ADR-0042 adds a durable environment plane without moving image policy into the
 Agent. Every Project owns one active member of an append-only environment
@@ -240,11 +244,11 @@ microVM and therefore keeps the environment in `pending` until a real Tool Run
 proves it. Every activation must match the exact environment snapshot; an
 environment change cannot reuse an older guest.
 
-ADR-0045 records the former gVisor clean-prewarm design. ADR-0053 disables that
-pool for primary Tool execution: Cube v0.6.0 cannot prove the metadata CAS
-needed to bind a precreated guest safely to an exact tenant/Attempt. The
-production prewarm target is therefore zero, and a guest that has ever run
-tenant code is always destroyed rather than reassigned.
+ADR-0045 records the former gVisor clean-prewarm design. The Cube production
+prewarm target remains zero: a never-bound shared Cube pool is not implemented,
+and a guest that has run tenant code is never reassigned to another identity.
+ADR-0060 permits only exact-Session warm retention through the sealed,
+higher-fence handoff protocol described above.
 
 ADR-0043 extends this resource with owner-controlled configuration-as-code.
 Editing a recipe creates an inactive append-only candidate. A candidate must
@@ -550,16 +554,21 @@ and accepted only after its status is `READY`. Production startup verifies the
 private cluster/template evidence, pinned Cube v0.6.0 commit, Pod MTU 1450,
 image revision, digest and template specification hash. Its guest CoW root
 filesystem is writable, so the evidence contract does not pretend it has a
-read-only OCI rootfs. Tool execution remains non-root, capability-free,
-credential-free, host-mount-free and deny-all outbound. The live KVM gate
+read-only OCI rootfs. The authenticated lifecycle supervisor is root inside the
+guest so it can enforce the Run boundary; every model-selected Tool process
+runs as UID/GID `1000:1000`, with no capabilities, credentials, host mounts or
+outbound network. The live KVM gate
 proves different guest/host kernels, two-tenant Workspace isolation, forbidden
 platform and public egress, bounded output/path handling, cancellation and
 zero orphans.
 
 There is no runtime selector and no lower-security Tool fallback. Cube ordinary
-Tool execution currently accepts only deny-all, offline environment recipes.
-Recipes with `dependencyHosts` fail closed until Cube has an accepted
-temporary-egress/bootstrap-to-fresh-offline-guest design.
+Tool execution is always deny-all and offline. Recipes with `dependencyHosts`
+run only in the retained disposable gVisor bootstrap path, using an Ed25519
+capability for exact HTTPS hosts. The resulting regular-file Workspace is
+captured, the bootstrap is destroyed, and a new offline Cube guest receives
+the bytes and reruns offline verification. No process, connection or capability
+crosses that promotion boundary.
 
 K3s/gVisor remains a different fixed-purpose boundary for repository import.
 The versioned `deploy/helm/agent-dock-execution-plane` chart keeps the `runsc`
@@ -721,8 +730,11 @@ after a browser reconnect with `Last-Event-ID`. Step 9 separates Pi and Workspac
 checkpoints: Pi JSONL is saved at every settled Run, while a safe regular-file
 Workspace manifest is captured only after Tool execution. Both are content-
 hashed and stored outside the Tool Sandbox under the current fence. The settled
-guest is destroyed; a later coding Run restores the committed Workspace
-revision into a new Cube activation.
+guest is either destroyed or sealed and paused for the exact Session. A later
+higher-fence coding Run reconnects that activation only after rotating the
+private handoff secret; otherwise it restores the committed Workspace revision
+into a new Cube activation. Durable checkpoints, not the paused guest, remain
+the recovery authority.
 The latest durable `turn.completed` event is the snapshot commit marker, so a
 Runner or Tool Sandbox failure after upload but before terminal publication
 falls back to the previous settled pair. The demo adapter uses a private host directory. The

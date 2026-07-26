@@ -297,13 +297,15 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
       const activationIds = new Set<string>();
       let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
       let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+      let activeSecondAssignment = secondAssignment;
       const startedAt = performance.now();
       let firstToolMs = 0;
       let secondToolMs = 0;
       try {
         await provider.checkHealth();
         first = await manager.create(createRequest(firstAssignment, config.imageRevision));
-        second = await manager.create(createRequest(secondAssignment, config.imageRevision));
+        const secondRequest = createRequest(secondAssignment, config.imageRevision);
+        second = await manager.create(secondRequest);
         activationIds.add(first.activationId);
         activationIds.add(second.activationId);
 
@@ -410,6 +412,54 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           firstCanary,
         );
 
+        const secondRuntimeBefore = (await manager.listAssignments(secondAssignment.sandboxId))[0];
+        expect(secondRuntimeBefore).toBeDefined();
+        const secondCaptured = await manager.capture(
+          second.activationId,
+          secondAssignment,
+          randomUUID(),
+        );
+        expect(secondCaptured.type).toBe("tool_sandbox.captured");
+        const warmRevision = "c".repeat(64);
+        await expect(
+          manager.release({
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.release",
+            requestId: randomUUID(),
+            activationId: second.activationId,
+            assignment: secondAssignment,
+            disposition: "keep_warm",
+            workspaceRevision: warmRevision,
+          }),
+        ).resolves.toMatchObject({ retained: true });
+        const reboundAssignment: ToolSandboxAssignment = {
+          ...secondAssignment,
+          commandId: `cube-live-${testRun}-command-rebound`,
+          turnId: `cube-live-${testRun}-turn-rebound`,
+          attemptId: randomUUID(),
+          leaseId: randomUUID(),
+          fencingToken: secondAssignment.fencingToken + 10,
+        };
+        activeSecondAssignment = reboundAssignment;
+        second = await manager.create({
+          ...secondRequest,
+          requestId: randomUUID(),
+          assignment: reboundAssignment,
+          workspaceRevision: warmRevision,
+        });
+        expect(
+          output(
+            await manager.execute(
+              second.capability,
+              operation(second.activationId, "cat tenant-canary"),
+            ),
+          ),
+        ).toBe(secondCanary);
+        const secondRuntimeAfter = (await manager.listAssignments(reboundAssignment.sandboxId))[0];
+        expect(secondRuntimeAfter?.containerId).toBe(secondRuntimeBefore?.containerId);
+        expect(secondRuntimeAfter?.containerName).toBe(secondRuntimeBefore?.containerName);
+        expect(secondRuntimeAfter?.fencingToken).toBe(reboundAssignment.fencingToken);
+
         const controller = new AbortController();
         const cancelled = manager.execute(
           first.capability,
@@ -426,7 +476,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           await manager.stop(first.activationId, firstAssignment).catch(() => undefined);
         }
         if (second !== undefined) {
-          await manager.stop(second.activationId, secondAssignment).catch(() => undefined);
+          await manager.stop(second.activationId, activeSecondAssignment).catch(() => undefined);
         }
         await manager.close().catch(() => undefined);
       }

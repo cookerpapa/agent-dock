@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -57,15 +57,21 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function jsonRequest(baseUrl, path, body) {
+let currentAuthority;
+async function jsonRequest(baseUrl, path, body, authority = currentAuthority) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: body === undefined ? "GET" : "POST",
-    ...(body === undefined
-      ? {}
-      : {
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        }),
+    headers: {
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+      ...(authority === undefined
+        ? {}
+        : {
+            "x-agent-dock-handoff-secret": authority.handoffSecret,
+            "x-agent-dock-fencing-token": String(authority.fencingToken),
+            "x-agent-dock-binding-sha256": authority.bindingSha256,
+          }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
@@ -73,6 +79,22 @@ async function jsonRequest(baseUrl, path, body) {
     throw new Error(`${path} returned ${String(response.status)}: ${text}`);
   }
   return text.length === 0 ? undefined : JSON.parse(text);
+}
+
+async function requestStatus(baseUrl, path, body, authority) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-agent-dock-handoff-secret": authority.handoffSecret,
+      "x-agent-dock-fencing-token": String(authority.fencingToken),
+      "x-agent-dock-binding-sha256": authority.bindingSha256,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  await response.body?.cancel();
+  return response.status;
 }
 
 async function waitUntilReady(baseUrl) {
@@ -126,7 +148,7 @@ try {
     image,
     "/bin/bash",
     "-c",
-    "ulimit -n 1024; exec setpriv --no-new-privs --reuid=1000 --regid=1000 --clear-groups /usr/local/bin/node /app/packages/tool-sandbox/src/cube-tool-service.ts",
+    "ulimit -n 1024; exec setpriv --no-new-privs /usr/local/bin/node /app/packages/tool-sandbox/src/cube-tool-service.ts",
   ]);
   started = true;
 
@@ -138,6 +160,10 @@ try {
 
   const evidence = await jsonRequest(baseUrl, "/v1/evidence");
   assert(evidence.uid === 1_000 && evidence.gid === 1_000, "Tool service was not uid/gid 1000");
+  assert(
+    evidence.supervisorUid === 0 && evidence.supervisorGid === 0,
+    "Cube handoff supervisor was not root-owned",
+  );
   assert(evidence.noNewPrivileges === true, "Tool service allowed new privileges");
   assert(
     evidence.effectiveCapabilities === "0000000000000000",
@@ -154,6 +180,11 @@ try {
   );
 
   const activationId = randomUUID();
+  currentAuthority = {
+    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+    fencingToken: 7,
+    bindingSha256: createHash("sha256").update("template-check-binding").digest("hex"),
+  };
   const toolchain = await jsonRequest(baseUrl, "/v1/initialize", {
     toolWorkerProtocolVersion: 1,
     type: "worker.initialize",
@@ -295,6 +326,78 @@ try {
     "Workspace checkpoint omitted the tested source file",
   );
 
+  const background = await jsonRequest(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "bash.exec",
+      command: "sleep 300 >/dev/null 2>&1 & echo $!",
+      cwd: "/workspace",
+      timeoutMs: 5_000,
+    }),
+  );
+  assert(background.exitCode === 0, "Background-process fixture did not start");
+  const previousAuthority = currentAuthority;
+  const sealed = await jsonRequest(baseUrl, "/v1/seal", {});
+  assert(
+    sealed.sealed === true && sealed.remainingToolProcesses === 0,
+    "Cube guest did not prove a sealed uid-1000 process boundary",
+  );
+  const staleWhileSealed = await requestStatus(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "file.read",
+      path: "counting_sort.py",
+    }),
+    previousAuthority,
+  );
+  assert(staleWhileSealed === 409, "A sealed Cube guest accepted a Tool operation");
+
+  const nextAuthority = {
+    ...previousAuthority,
+    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+    fencingToken: previousAuthority.fencingToken + 1,
+  };
+  const rebound = await jsonRequest(
+    baseUrl,
+    "/v1/rebind",
+    {
+      handoffSecret: nextAuthority.handoffSecret,
+      fencingToken: nextAuthority.fencingToken,
+      bindingSha256: nextAuthority.bindingSha256,
+    },
+    previousAuthority,
+  );
+  assert(
+    rebound.rebound === true && rebound.fencingToken === nextAuthority.fencingToken,
+    "Cube guest did not accept the higher-fence handoff",
+  );
+  currentAuthority = nextAuthority;
+  const staleAfterRebind = await requestStatus(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "file.read",
+      path: "counting_sort.py",
+    }),
+    previousAuthority,
+  );
+  assert(staleAfterRebind === 403, "The old Cube handoff authority survived rebind");
+  const preserved = await jsonRequest(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "file.read",
+      path: "counting_sort.py",
+    }),
+  );
+  assert(
+    preserved.type === "tool_sandbox.operation_result" &&
+      Buffer.from(preserved.content, "base64").toString("utf8") === source,
+    "Rebound Tool Worker did not attach the preserved Workspace",
+  );
+
   process.stdout.write(
     `${JSON.stringify({
       image,
@@ -303,6 +406,8 @@ try {
       templateService: {
         uid: evidence.uid,
         gid: evidence.gid,
+        supervisorUid: evidence.supervisorUid,
+        supervisorGid: evidence.supervisorGid,
         noNewPrivileges: evidence.noNewPrivileges,
         effectiveCapabilities: evidence.effectiveCapabilities,
       },
@@ -310,6 +415,12 @@ try {
       execution: { exitCode: executed.exitCode, output: output.trim() },
       unmediatedEnvdAbsent: true,
       pathTraversalRejected: true,
+      sealedHandoff: {
+        previousFence: previousAuthority.fencingToken,
+        currentFence: nextAuthority.fencingToken,
+        remainingToolProcesses: sealed.remainingToolProcesses,
+        staleAuthorityRejected: true,
+      },
       checkpoint: {
         files: manifest.files.length,
         sizeBytes: captured.workspace.sizeBytes,
