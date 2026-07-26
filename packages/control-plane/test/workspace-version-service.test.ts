@@ -420,9 +420,9 @@ describe.sequential("versioned Workspace service", () => {
         }),
       },
     });
-    await expect(
-      corruptService.file(IDS.tenant, IDS.version3, "README.md"),
-    ).rejects.toMatchObject({ code: "artifact_corrupt" });
+    await expect(corruptService.file(IDS.tenant, IDS.version3, "README.md")).rejects.toMatchObject({
+      code: "artifact_corrupt",
+    });
   });
 
   it("registers an allowlisted GitHub App source and idempotently delivers an immutable version", async () => {

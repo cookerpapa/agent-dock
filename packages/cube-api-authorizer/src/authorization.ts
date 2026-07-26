@@ -75,8 +75,7 @@ export function isAllowedCubeApiOperation(path: string, method: string): boolean
     const limit = limits[0];
     if (
       limits.length > 1 ||
-      (limits.length === 1 &&
-        (limit === undefined || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(limit)))
+      (limits.length === 1 && (limit === undefined || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(limit)))
     ) {
       return false;
     }

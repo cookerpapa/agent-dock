@@ -228,10 +228,7 @@ async function materializeWorkspaceFile(path: string): Promise<{
   } catch {
     throw new CubeToolServiceError(404, "Workspace file was not found");
   }
-  if (
-    resolvedParent !== WORKSPACE_ROOT &&
-    !resolvedParent.startsWith(`${WORKSPACE_ROOT}/`)
-  ) {
+  if (resolvedParent !== WORKSPACE_ROOT && !resolvedParent.startsWith(`${WORKSPACE_ROOT}/`)) {
     throw new CubeToolServiceError(403, "Workspace file escaped its root");
   }
   let handle;
