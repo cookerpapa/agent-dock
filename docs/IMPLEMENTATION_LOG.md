@@ -2750,3 +2750,6 @@
   indexes and portable snapshots. Old sidecar schema and markerless snapshots
   are intentionally unsupported; development data is reset instead of adding
   compatibility branches.
+- Portable source restoration preserves the trusted runtime directory while
+  replacing user files. This is required for empty/GitHub source seeds, whose
+  restore step runs after the Data Mover establishes the volume generation.

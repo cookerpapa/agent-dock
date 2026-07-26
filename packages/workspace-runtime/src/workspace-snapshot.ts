@@ -315,7 +315,7 @@ export async function restoreWorkspaceSnapshot(
 ): Promise<void> {
   const restored = parseWorkspaceSnapshot(snapshot);
   for (const entry of await readdir(workspaceDirectory)) {
-    if (entry === ".git") continue;
+    if (entry === ".git" || entry === TRUSTED_WORKSPACE_METADATA_DIRECTORY) continue;
     await rm(resolve(workspaceDirectory, entry), { recursive: true, force: true });
   }
   for (const file of restored) {
