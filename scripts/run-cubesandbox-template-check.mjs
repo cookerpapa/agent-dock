@@ -352,23 +352,25 @@ try {
     }),
   );
   assert(background.exitCode === 0, "Background-process fixture did not start");
+  const backgroundPid = Number(Buffer.from(background.output, "base64").toString("utf8").trim());
+  assert(Number.isSafeInteger(backgroundPid) && backgroundPid > 1, "Background PID was invalid");
   const previousAuthority = currentAuthority;
   const recoveryAuthority = {
     ...previousAuthority,
     handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
   };
-  const sealed = await jsonRequest(
+  const checkpointed = await jsonRequest(
     baseUrl,
     "/v1/checkpoint",
     { recoverySecret: recoveryAuthority.handoffSecret },
     previousAuthority,
   );
   assert(
-    sealed.sealed === true &&
-      sealed.remainingToolProcesses === 0 &&
-      sealed.files.some((file) => file.path === "counting_sort.py") &&
-      sealed.portableWorkspace?.encoding === "base64",
-    "Cube guest did not prepare a sealed portable Workspace checkpoint",
+    checkpointed.sealed === true &&
+      Array.isArray(checkpointed.frozenToolProcesses) &&
+      checkpointed.frozenToolProcesses.some((process) => process.pid === backgroundPid) &&
+      checkpointed.files.some((file) => file.path === "counting_sort.py"),
+    "Cube guest did not prepare a quiescent Workspace checkpoint",
   );
   const staleWhileSealed = await requestStatus(
     baseUrl,
@@ -380,6 +382,12 @@ try {
     previousAuthority,
   );
   assert(staleWhileSealed === 403, "The pre-checkpoint authority survived rotation");
+  const completed = await jsonRequest(baseUrl, "/v1/checkpoint/complete", {}, recoveryAuthority);
+  assert(
+    completed.completed === true &&
+      completed.resumedToolProcesses === checkpointed.frozenToolProcesses.length,
+    "Cube guest did not resume the checkpointed process boundary",
+  );
 
   const nextAuthority = {
     ...recoveryAuthority,
@@ -425,6 +433,21 @@ try {
       Buffer.from(preserved.content, "base64").toString("utf8") === source,
     "Rebound Tool Worker did not attach the preserved Workspace",
   );
+  const backgroundPreserved = await jsonRequest(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "bash.exec",
+      command: `kill -0 ${String(backgroundPid)} && printf background-alive`,
+      cwd: "/workspace",
+      timeoutMs: 5_000,
+    }),
+  );
+  assert(
+    backgroundPreserved.exitCode === 0 &&
+      Buffer.from(backgroundPreserved.output, "base64").toString("utf8") === "background-alive",
+    "Session background process did not survive checkpoint and rebind",
+  );
 
   process.stdout.write(
     `${JSON.stringify({
@@ -444,10 +467,12 @@ try {
       coldWorkspaceAttach: true,
       unmediatedEnvdAbsent: true,
       pathTraversalRejected: true,
-      sealedHandoff: {
+      sessionHandoff: {
         previousFence: previousAuthority.fencingToken,
         currentFence: nextAuthority.fencingToken,
-        remainingToolProcesses: sealed.remainingToolProcesses,
+        frozenToolProcesses: checkpointed.frozenToolProcesses.length,
+        resumedToolProcesses: completed.resumedToolProcesses,
+        backgroundProcessPreserved: true,
         staleAuthorityRejected: true,
       },
       checkpoint: {
