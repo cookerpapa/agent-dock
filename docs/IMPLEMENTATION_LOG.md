@@ -2615,3 +2615,20 @@
   them, and mark the Workspace as native-only. This keeps the portable manifest
   regular-file-only while allowing ordinary real repositories to checkpoint
   without hiding links or weakening path traversal checks.
+- Repeated production acceptance exposed an admission leak in the administrative
+  physical-VM termination path. Cube had already removed the VM, but the Manager
+  retained one warm activation because its Run/Fence assignment had advanced.
+  Termination now lets the Provider validate the exact inventory assignment,
+  while Manager cleanup is keyed by the validated physical runtime plus stable
+  Supervisor identity. A regression test proves that the admission drops from
+  `1/1` to `0/1` even when the inventory assignment has advanced.
+- Fresh-VM restore then exposed a format-boundary bug before lazy activation:
+  the trusted Runner attempted to extract `AGENTS.md` bytes from a provider-native
+  checkpoint that intentionally contains only a bounded index and encrypted
+  recovery authority. Native checkpoints are now recognized before portable
+  manifest parsing, so file bytes remain deferred to the restored Tool Sandbox.
+- Final real-model acceptance used 18 DeepSeek requests, cloned and settled
+  3,664 Temporal repository files, explicitly destroyed the source Cube VM and
+  restored 3,665 files into a fresh higher-fence VM. The durable checkpoint
+  reference was 669,487 bytes, all five Temporal histories carried bounded
+  references only, and explicit cleanup left zero Cube microVMs.

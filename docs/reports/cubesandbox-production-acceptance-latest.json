@@ -1,14 +1,14 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-26T02:29:16.814Z",
+  "checkedAt": "2026-07-26T11:05:03.377Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 1244,
-    "settledMs": 1465,
+    "firstTextMs": 1359,
+    "settledMs": 1598,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
@@ -21,31 +21,31 @@
     }
   },
   "firstCoding": {
-    "firstTextMs": 11901,
-    "settledMs": 28710,
+    "firstTextMs": 8679,
+    "settledMs": 15930,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "patchBytes": 2878,
+    "patchBytes": 1788,
     "usage": {
       "requests": 3,
-      "inputTokens": 149,
-      "outputTokens": 1129,
-      "cacheReadTokens": 6144,
+      "inputTokens": 178,
+      "outputTokens": 751,
+      "cacheReadTokens": 5504,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 8156,
-    "settledMs": 31560,
+    "firstTextMs": 9448,
+    "settledMs": 17906,
     "toolCalls": 3,
     "cubeActivations": 1,
-    "patchBytes": 3048,
+    "patchBytes": 2038,
     "usage": {
       "requests": 4,
-      "inputTokens": 1534,
-      "outputTokens": 426,
-      "cacheReadTokens": 12672,
+      "inputTokens": 1306,
+      "outputTokens": 515,
+      "cacheReadTokens": 10624,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
@@ -55,36 +55,75 @@
     "sealedPauseResume": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalFileBytes": 2806
+    "finalFileBytes": 1833
   },
   "multiTenant": {
     "crossTenantConversationHidden": true,
     "lowerLevelCubeTenantGate": 2
   },
+  "largeWorkspace": {
+    "source": "github.com/temporalio/temporal",
+    "firstRunId": "cc91d514-b34c-4883-b766-0e51eaa413bd",
+    "followUpRunId": "23585e96-ffa9-439d-bc59-4d42fb3cf7c7",
+    "firstFileCount": 3664,
+    "restoredFileCount": 3665,
+    "checkpointReferenceBytes": 669487,
+    "sourceSandboxDestroyed": true,
+    "freshCubeMicroVm": true,
+    "higherFenceActivation": true,
+    "firstUsage": {
+      "requests": 5,
+      "inputTokens": 457,
+      "outputTokens": 548,
+      "cacheReadTokens": 7936,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    },
+    "followUpUsage": {
+      "requests": 5,
+      "inputTokens": 744,
+      "outputTokens": 637,
+      "cacheReadTokens": 11520,
+      "cacheWriteTokens": 0,
+      "costMicrousd": 0
+    }
+  },
   "semanticConversation": {
     "projectionCount": 3,
-    "projectedSourceEvents": 71,
+    "projectedSourceEvents": 59,
     "semanticItems": 8,
-    "replayAfterSequence": 71
+    "replayAfterSequence": 59
   },
   "temporal": {
     "scheduler": "Temporal",
     "taskQueue": "agent-dock-pi-runs-v1",
     "workflows": [
       {
-        "workflowId": "agent-dock-run-v1-059763d6-11ee-4d7f-9d32-4e1216d75d75",
+        "workflowId": "agent-dock-run-v1-fd75444a-1181-439c-8369-56688fd04b60",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-6c60f023-0563-48b6-8137-959837828dfe",
+        "workflowId": "agent-dock-run-v1-7b129f8b-e7d9-4259-91d0-a7bafa17a302",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-376a4331-d8c6-4780-82ab-1ffe00a0d824",
+        "workflowId": "agent-dock-run-v1-9f72abb5-0a5a-4e62-aed2-31805864a4b9",
+        "historyEvents": 11,
+        "decodedPayloads": 4,
+        "boundedReferencesOnly": true
+      },
+      {
+        "workflowId": "agent-dock-run-v1-cc91d514-b34c-4883-b766-0e51eaa413bd",
+        "historyEvents": 11,
+        "decodedPayloads": 4,
+        "boundedReferencesOnly": true
+      },
+      {
+        "workflowId": "agent-dock-run-v1-23585e96-ffa9-439d-bc59-4d42fb3cf7c7",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
@@ -92,10 +131,10 @@
     ]
   },
   "totalUsage": {
-    "requests": 8,
-    "inputTokens": 1748,
-    "outputTokens": 1580,
-    "cacheReadTokens": 20096,
+    "requests": 18,
+    "inputTokens": 2750,
+    "outputTokens": 2476,
+    "cacheReadTokens": 36864,
     "cacheWriteTokens": 0
   },
   "cleanup": {
