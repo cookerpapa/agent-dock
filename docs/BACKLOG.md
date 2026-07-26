@@ -196,7 +196,9 @@ extension-policy support would overstate the current boundary.
 - [x] Persist an encrypted tenant/Workspace/environment/fence-bound Cube snapshot reference through existing MinIO and PostgreSQL CAS
 - [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
 - [x] Keep legacy portable manifests readable and return explicit `artifact_unavailable` for unsupported historical content reads
-- [ ] Add reference-aware Cube snapshot garbage collection after Workspace-version retention policy exists
+- [x] Add fail-closed reference-aware Cube snapshot garbage collection; every
+  retained Artifact remains live until a separate Workspace-version retention
+  policy is introduced
 - [x] Add a separately authorized, admission-controlled read-only Cube snapshot
   materializer for bounded historical regular-file download
 - [ ] Add a streaming snapshot exporter for whole-version GitHub delivery and

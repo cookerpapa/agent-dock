@@ -62,6 +62,7 @@ if (config.provider === "cubesandbox") {
       .update("agent-dock.cube-workspace-checkpoint-key.v1\0")
       .update(config.serviceToken)
       .digest(),
+    ...(cube.snapshotGc === undefined ? {} : { snapshotGc: cube.snapshotGc }),
   });
 } else {
   provider = createGvisorProvider(config.cleanPrewarmTarget);
@@ -80,6 +81,7 @@ const server = new SandboxManagerServer({
   ...(config.materializerToken === undefined
     ? {}
     : { materializerToken: config.materializerToken }),
+  ...(config.snapshotGcToken === undefined ? {} : { snapshotGcToken: config.snapshotGcToken }),
   manager,
   metrics: observability.metrics,
 });

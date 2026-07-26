@@ -171,6 +171,31 @@ async function ensureSandboxMaterializerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureCubeSnapshotGcToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/cube-snapshot-gc-token");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+      throw new Error("Production Cube snapshot GC token is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomSecret()}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
+async function ensureSandboxManagerStateDirectory(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "state/sandbox-manager");
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  await chmod(path, 0o700);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+}
+
 async function ensureCubeEgressConfigToken(runtimeDirectory) {
   const path = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
   try {
@@ -370,8 +395,9 @@ await assertPrivateDirectory(runtimeDirectory);
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
-  const sandboxMaterializerTokenCreated =
-    await ensureSandboxMaterializerToken(runtimeDirectory);
+  const sandboxMaterializerTokenCreated = await ensureSandboxMaterializerToken(runtimeDirectory);
+  const cubeSnapshotGcTokenCreated = await ensureCubeSnapshotGcToken(runtimeDirectory);
+  await ensureSandboxManagerStateDirectory(runtimeDirectory);
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
   const dependencyEgressIssuerCreated = await ensureDependencyEgressIssuer(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
@@ -385,6 +411,7 @@ if (await validateExisting(runtimeDirectory)) {
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
       sandboxMaterializerTokenCreated,
+      cubeSnapshotGcTokenCreated,
       cubeEgressConfigTokenCreated,
       dependencyEgressIssuerCreated,
       githubGatewaySecretsCreated,
@@ -406,6 +433,7 @@ if (existingEntries.length > 0) {
 const secretsDirectory = resolve(runtimeDirectory, "secrets");
 await mkdir(secretsDirectory, { mode: 0o700 });
 await chmod(secretsDirectory, 0o700);
+await ensureSandboxManagerStateDirectory(runtimeDirectory);
 
 const postgresPassword = randomSecret();
 const minioRootUser = `agentdock${randomBytes(8).toString("hex")}`;
@@ -503,6 +531,7 @@ await writePrivateFile(
   resolve(secretsDirectory, "sandbox-materializer-token"),
   `${randomSecret()}\n`,
 );
+await writePrivateFile(resolve(secretsDirectory, "cube-snapshot-gc-token"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "cube-egress-config-token"),
   `${randomSecret()}\n`,

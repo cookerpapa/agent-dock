@@ -85,6 +85,7 @@ const applicationSecretNames = [
   "model-credential-master-key",
   "sandbox-manager-token",
   "sandbox-materializer-token",
+  "cube-snapshot-gc-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
   ...(requestedProvider === "cubesandbox" && !allowsStaleCubeTemplate
@@ -108,6 +109,16 @@ if (
   )
 ) {
   throw new Error("Production application secrets must share one private non-root owner");
+}
+const sandboxManagerState = await lstat(resolve(runtimeDirectory, "state/sandbox-manager"));
+if (
+  !sandboxManagerState.isDirectory() ||
+  sandboxManagerState.isSymbolicLink() ||
+  (sandboxManagerState.mode & 0o077) !== 0 ||
+  sandboxManagerState.uid !== applicationOwner.uid ||
+  sandboxManagerState.gid !== applicationOwner.gid
+) {
+  throw new Error("Production Sandbox Manager state directory must be private and non-root");
 }
 
 async function readPrivateRuntimeJson(path, label) {

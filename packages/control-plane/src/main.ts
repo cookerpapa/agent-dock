@@ -30,6 +30,7 @@ import {
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
+import { CubeSnapshotReferenceReconciler } from "./cube-snapshot-reference-reconciler.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -61,6 +62,7 @@ export async function startControlPlane(): Promise<void> {
   const objectStore = createS3CheckpointObjectStoreFromEnvironment();
   let runtime: RemoteControlPlaneRuntime | undefined;
   let temporalOrchestrator: TemporalRunOrchestrator | undefined;
+  let snapshotGcTimer: NodeJS.Timeout | undefined;
   try {
     await verifyBootstrap(database);
     const modelCredentialVault = new TenantModelCredentialVault(config.modelCredentialMasterKey);
@@ -140,6 +142,16 @@ export async function startControlPlane(): Promise<void> {
       baseUrl: config.sandboxManagerBaseUrl,
       serviceToken: config.sandboxMaterializerToken,
       allowInsecureHttp: config.allowInsecureInternalHttp,
+    });
+    const snapshotGcClient = new SandboxManagerClient({
+      baseUrl: config.sandboxManagerBaseUrl,
+      serviceToken: config.sandboxSnapshotGcToken,
+      allowInsecureHttp: config.allowInsecureInternalHttp,
+    });
+    const snapshotReferenceReconciler = new CubeSnapshotReferenceReconciler({
+      database,
+      objectStore,
+      client: snapshotGcClient,
     });
     const provisioner = new SupervisorBootProvisioner({
       database,
@@ -222,6 +234,37 @@ export async function startControlPlane(): Promise<void> {
       },
     });
     await runtime.listen(config.port, config.host);
+    const reconcileSnapshots = (): void => {
+      void snapshotReferenceReconciler
+        .reconcile()
+        .then((result) => {
+          operationalLog({
+            service: "agent-dock-control-plane",
+            level: "info",
+            event: "cube_snapshot_gc.completed",
+            attributes: {
+              managedSnapshots: result.managedSnapshots,
+              referencedSnapshots: result.referencedSnapshots,
+              candidates: result.candidates,
+              deletedSnapshots: result.deletedSnapshotIds.length,
+              deletionEnabled: result.deletionEnabled,
+            },
+          });
+        })
+        .catch((error: unknown) => {
+          operationalLog({
+            service: "agent-dock-control-plane",
+            level: "error",
+            event: "cube_snapshot_gc.failed",
+            attributes: {
+              errorName: error instanceof Error ? error.name : "unknown",
+            },
+          });
+        });
+    };
+    reconcileSnapshots();
+    snapshotGcTimer = setInterval(reconcileSnapshots, config.sandboxSnapshotGcIntervalMs);
+    snapshotGcTimer.unref();
     process.stdout.write(
       `AgentDock production control plane listening on ${config.host}:${String(config.port)}\n`,
     );
@@ -230,6 +273,7 @@ export async function startControlPlane(): Promise<void> {
     const close = async (): Promise<void> => {
       if (closing) return;
       closing = true;
+      if (snapshotGcTimer !== undefined) clearInterval(snapshotGcTimer);
       await temporalOrchestrator?.stop();
       await runtime?.close();
       objectStore.destroy();
@@ -244,6 +288,7 @@ export async function startControlPlane(): Promise<void> {
     process.once("SIGINT", closeAfterSignal);
     process.once("SIGTERM", closeAfterSignal);
   } catch (error: unknown) {
+    if (snapshotGcTimer !== undefined) clearInterval(snapshotGcTimer);
     await temporalOrchestrator?.stop().catch(() => undefined);
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);

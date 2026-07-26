@@ -100,6 +100,8 @@ and comparisons do not need to boot a VM. ADR-0065 adds a read-only, bounded
 snapshot materializer for historical regular-file preview. Whole-version
 GitHub delivery still requires portable v1 bytes or a future streaming
 data-mover path; it fails clearly rather than returning invented bytes.
+ADR-0066 adds fail-closed reference-aware reclamation for failed or
+uncommitted AgentDock snapshots while treating every retained Artifact as live.
 
 ## Consequences
 
@@ -116,7 +118,8 @@ Negative:
 
 - new large checkpoints are Provider-bound;
 - current single-node Cube snapshot storage does not survive node/disk loss;
-- old snapshot garbage collection needs a reference-aware reconciler;
+- Workspace-version retention remains undefined even though orphan snapshot
+  garbage collection is reference-aware;
 - whole-version export and GitHub delivery need a streaming snapshot data mover;
 - rotating the persistent Sandbox Manager service secret requires migrating or
   retaining the previous checkpoint decryption key.

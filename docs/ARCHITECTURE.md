@@ -405,8 +405,12 @@ GitHub importer. A second credential authorizes only bounded read-only
 materialization of one content-indexed file from a sealed Cube snapshot; it
 cannot call the ordinary lifecycle API. The transient clone is never rebound
 into a writable Tool Worker and must be confirmed absent before its global
-admission slot is released. The Manager receives no Docker/containerd socket, database, S3,
-provider, enrollment, GitHub or tenant credential.
+admission slot is released. A third GC-only credential accepts a complete,
+integrity-checked snapshot reference set. The Manager fails closed on missing
+references and applies a persistent two-scan/24-hour grace before it can delete
+only an AgentDock-named orphan; see ADR-0066. The Manager receives no
+Docker/containerd socket, database, S3, provider, enrollment, GitHub or tenant
+credential.
 
 Each retained gVisor importer/bootstrap Pod is non-root, read-only outside
 memory-backed volumes, capability-dropped, and networkless except for its

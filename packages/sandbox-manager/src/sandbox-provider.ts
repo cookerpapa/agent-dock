@@ -6,6 +6,8 @@ import type {
   SandboxCheckpointBlob,
   SandboxManagerMaterializeFileRequest,
   SandboxManagerMaterializeFileResponse,
+  SandboxManagerSnapshotGcRequest,
+  SandboxManagerSnapshotGcResponse,
   SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCaptureResponse,
@@ -206,6 +208,9 @@ export interface SandboxProvider {
     request: SandboxManagerMaterializeFileRequest,
     signal?: AbortSignal,
   ): Promise<SandboxManagerMaterializeFileResponse>;
+  reconcileSnapshots?(
+    request: SandboxManagerSnapshotGcRequest,
+  ): Promise<SandboxManagerSnapshotGcResponse>;
 
   /** Used only when the Manager restarted before it could reconstruct a handle. */
   destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;

@@ -28,6 +28,7 @@ import {
 
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
 const MATERIALIZER_TOKEN = `materializer-${"m".repeat(48)}`;
+const SNAPSHOT_GC_TOKEN = `snapshot-gc-${"g".repeat(48)}`;
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {
@@ -136,6 +137,19 @@ function backend(): SandboxManagerBackend {
         sizeBytes: content.byteLength,
       };
     },
+    async reconcileSnapshots(request) {
+      return {
+        managerProtocolVersion: 1,
+        type: "workspace.snapshot_gc_reconciled",
+        requestId: request.requestId,
+        scanId: request.scanId,
+        managedSnapshots: 2,
+        referencedSnapshots: request.referencedSnapshotIds.length,
+        candidates: 1,
+        deletedSnapshotIds: [],
+        deletionEnabled: true,
+      };
+    },
     async listAssignments(sandboxId) {
       return sandboxId === runtimeAssignment.sandboxId ? [runtimeAssignment] : [];
     },
@@ -153,6 +167,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       port: 0,
       serviceToken: SERVICE_TOKEN,
       materializerToken: MATERIALIZER_TOKEN,
+      snapshotGcToken: SNAPSHOT_GC_TOKEN,
       manager: backend(),
       metrics,
     });
@@ -224,9 +239,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     ]);
     await expect(client.terminateAndConfirmAbsent(runtimeAssignment)).resolves.toBeUndefined();
 
-    const manifest = Buffer.from(
-      '{"format":"agent-dock.workspace-manifest.v1","files":[]}\n',
-    );
+    const manifest = Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
     const materializer = new SandboxManagerClient({
       baseUrl: address,
       serviceToken: MATERIALIZER_TOKEN,
@@ -263,6 +276,35 @@ describe("Sandbox Manager authenticated RPC", () => {
       body: JSON.stringify(request),
     });
     expect(overPrivileged.status).toBe(401);
+
+    const snapshotGc = new SandboxManagerClient({
+      baseUrl: address,
+      serviceToken: SNAPSHOT_GC_TOKEN,
+      allowInsecureHttp: true,
+    });
+    await expect(
+      snapshotGc.reconcileSnapshots({
+        managerProtocolVersion: 1,
+        type: "workspace.snapshot_gc",
+        requestId: "10000000-0000-4000-8000-000000000097",
+        scanId: "10000000-0000-4000-8000-000000000098",
+        referencedSnapshotIds: ["snapshot-live"],
+      }),
+    ).resolves.toMatchObject({
+      managedSnapshots: 2,
+      referencedSnapshots: 1,
+      candidates: 1,
+      deletionEnabled: true,
+    });
+    const gcOverPrivileged = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${SNAPSHOT_GC_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    expect(gcOverPrivileged.status).toBe(401);
 
     const unauthorized = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
       method: "POST",

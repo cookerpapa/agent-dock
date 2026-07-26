@@ -12,6 +12,8 @@ import type {
   ToolSandboxReleaseResponse,
   SandboxManagerMaterializeFileRequest,
   SandboxManagerMaterializeFileResponse,
+  SandboxManagerSnapshotGcRequest,
+  SandboxManagerSnapshotGcResponse,
 } from "@agent-dock/protocol";
 import {
   canonicalEnvironmentRecipeJson,
@@ -572,6 +574,19 @@ export class ToolSandboxManager {
     } finally {
       if (releaseAdmission) this.#releaseAdmission(request.requestId);
     }
+  }
+
+  async reconcileSnapshots(
+    request: SandboxManagerSnapshotGcRequest,
+  ): Promise<SandboxManagerSnapshotGcResponse> {
+    if (this.#provider.reconcileSnapshots === undefined) {
+      throw new SandboxManagerError(
+        "snapshot_gc_unavailable",
+        "The configured Sandbox Provider cannot reconcile snapshot references",
+        false,
+      );
+    }
+    return this.#provider.reconcileSnapshots(request);
   }
 
   async close(): Promise<void> {

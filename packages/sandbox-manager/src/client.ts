@@ -1,6 +1,7 @@
 import {
   parseInternalServiceError,
   parseSandboxManagerMaterializeFileResponse,
+  parseSandboxManagerSnapshotGcResponse,
   parseSandboxManagerResponse,
   parseSupervisorManagementResponse,
   parseToolSandboxOperationResponse,
@@ -9,6 +10,8 @@ import {
   type SandboxManagerResponse,
   type SandboxManagerMaterializeFileRequest,
   type SandboxManagerMaterializeFileResponse,
+  type SandboxManagerSnapshotGcRequest,
+  type SandboxManagerSnapshotGcResponse,
   type SupervisorManagementRequest,
   type SupervisorManagementResponse,
   type SupervisorRuntimeAssignment,
@@ -28,6 +31,7 @@ export const SANDBOX_MANAGER_SERVICE_PATH = "/internal/v1/sandbox-manager";
 export const SANDBOX_MANAGER_OPERATION_PATH = "/internal/v1/tool-operation";
 export const SANDBOX_MANAGER_INVENTORY_PATH = "/internal/v1/sandbox-inventory";
 export const SANDBOX_MANAGER_MATERIALIZER_PATH = "/internal/v1/workspace-materializer";
+export const SANDBOX_MANAGER_SNAPSHOT_GC_PATH = "/internal/v1/workspace-snapshot-gc";
 export const SANDBOX_MANAGER_LIVE_PATH = "/health/live";
 export const SANDBOX_MANAGER_READY_PATH = "/health/ready";
 
@@ -299,12 +303,7 @@ export class SandboxManagerClient {
     signal?: AbortSignal,
   ): Promise<SandboxManagerMaterializeFileResponse> {
     const response = parseSandboxManagerMaterializeFileResponse(
-      await this.#post(
-        SANDBOX_MANAGER_MATERIALIZER_PATH,
-        this.#serviceToken,
-        request,
-        signal,
-      ),
+      await this.#post(SANDBOX_MANAGER_MATERIALIZER_PATH, this.#serviceToken, request, signal),
     );
     if (
       response.requestId !== request.requestId ||
@@ -315,6 +314,23 @@ export class SandboxManagerClient {
       throw new SandboxManagerClientError(
         "sandbox_manager_protocol_error",
         "Workspace materialization response identity did not match",
+        false,
+      );
+    }
+    return response;
+  }
+
+  async reconcileSnapshots(
+    request: SandboxManagerSnapshotGcRequest,
+    signal?: AbortSignal,
+  ): Promise<SandboxManagerSnapshotGcResponse> {
+    const response = parseSandboxManagerSnapshotGcResponse(
+      await this.#post(SANDBOX_MANAGER_SNAPSHOT_GC_PATH, this.#serviceToken, request, signal),
+    );
+    if (response.requestId !== request.requestId || response.scanId !== request.scanId) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_protocol_error",
+        "Workspace snapshot GC response identity did not match",
         false,
       );
     }

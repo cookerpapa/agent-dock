@@ -8,6 +8,8 @@ import {
   type GitHubRepositorySource,
   type SandboxManagerMaterializeFileRequest,
   type SandboxManagerMaterializeFileResponse,
+  type SandboxManagerSnapshotGcRequest,
+  type SandboxManagerSnapshotGcResponse,
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
@@ -34,6 +36,7 @@ import {
   type CubeSandboxRuntimeClient,
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "./cubesandbox-runtime-client.ts";
+import { CubeSnapshotGarbageCollector } from "./cube-snapshot-garbage-collector.ts";
 import {
   SandboxManagerError,
   type SandboxCreateSpec,
@@ -157,6 +160,12 @@ export type CubeSandboxProviderOptions = Readonly<{
   bootstrapProvider?: SandboxProvider;
   webProxy: ToolWebProxyBootstrap;
   checkpointEncryptionKey: Uint8Array;
+  snapshotGc?: Readonly<{
+    statePath: string;
+    deletionEnabled: boolean;
+    graceMs: number;
+    maximumDeletesPerScan: number;
+  }>;
 }>;
 
 function bounded(value: string, label: string, maximum = 1_024): string {
@@ -604,6 +613,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly #bootstrapProvider: SandboxProvider | undefined;
   readonly #webProxy: ToolWebProxyBootstrap;
   readonly #checkpointEncryptionKey: Buffer;
+  readonly #snapshotGarbageCollector: CubeSnapshotGarbageCollector | undefined;
   readonly #activations = new Map<string, CubeActivation>();
   #runtimeProbe: Promise<void> | undefined;
 
@@ -633,6 +643,13 @@ export class CubeSandboxProvider implements SandboxProvider {
       }
       this.#client = new OfficialCubeSandboxRuntimeClient(options.runtime);
     }
+    this.#snapshotGarbageCollector =
+      options.snapshotGc === undefined
+        ? undefined
+        : new CubeSnapshotGarbageCollector({
+            runtime: this.#client,
+            ...options.snapshotGc,
+          });
   }
 
   async checkHealth(): Promise<void> {
@@ -1497,6 +1514,19 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     return result;
+  }
+
+  async reconcileSnapshots(
+    request: SandboxManagerSnapshotGcRequest,
+  ): Promise<SandboxManagerSnapshotGcResponse> {
+    if (this.#snapshotGarbageCollector === undefined) {
+      throw new SandboxManagerError(
+        "cube_snapshot_gc_unavailable",
+        "Cube snapshot garbage collection is not configured",
+        false,
+      );
+    }
+    return this.#snapshotGarbageCollector.reconcile(request);
   }
 
   async destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
