@@ -330,12 +330,16 @@ async function destroyCubeSession(sessionId) {
   await waitForNoCubeSession(sessionId);
 }
 
-async function terminateWarmCubeSession(sandboxId) {
-  assert(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$/.test(sandboxId));
+async function terminateWarmCubeSession(instance) {
+  const logicalSandboxId = instance.metadata["agentdock.sandbox_id"];
+  assert.match(
+    logicalSandboxId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
   const source = `
     import { readFileSync } from "node:fs";
     import { randomUUID } from "node:crypto";
-    const sandboxId = ${JSON.stringify(sandboxId)};
+    const sandboxId = ${JSON.stringify(logicalSandboxId)};
     const token = readFileSync(
       "/run/agent-dock-secrets/sandbox-manager-token",
       "utf8",
@@ -711,7 +715,7 @@ try {
     },
   };
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
-  await terminateWarmCubeSession(retained.sandboxId);
+  await terminateWarmCubeSession(retained);
   await waitForNoCubeSession(session.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
   report.cleanup.retainedPausedSessionMicroVmCount = 0;
