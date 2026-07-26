@@ -10,7 +10,7 @@ import type {
   WorkspaceVersionListResource,
   WorkspaceVersionResource,
 } from "@agent-dock/protocol";
-import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import { workspaceSnapshotMetadata } from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 
@@ -244,8 +244,8 @@ export class WorkspaceVersionService {
       files: loaded.files.map((file) => ({
         path: file.path,
         executable: file.executable,
-        sizeBytes: file.content.byteLength,
-        sha256: sha256(file.content),
+        sizeBytes: file.sizeBytes,
+        sha256: file.sha256,
       })),
     };
   }
@@ -262,7 +262,13 @@ export class WorkspaceVersionService {
     const file = loaded.files.find((candidate) => candidate.path === path);
     if (file === undefined)
       throw new WorkspaceVersionError("not_found", "Workspace file was not found");
-    return { bytes: file.content, sha256: sha256(file.content), executable: file.executable };
+    if (file.content === undefined) {
+      throw new WorkspaceVersionError(
+        "artifact_unavailable",
+        "Workspace file content requires a live Provider snapshot reader",
+      );
+    }
+    return { bytes: file.content, sha256: file.sha256, executable: file.executable };
   }
 
   async compare(
@@ -290,13 +296,13 @@ export class WorkspaceVersionService {
       const right = targetFiles.get(path);
       if (left === undefined && right !== undefined) {
         added += 1;
-        files.push({ path, change: "added", targetSha256: sha256(right.content) });
+        files.push({ path, change: "added", targetSha256: right.sha256 });
       } else if (left !== undefined && right === undefined) {
         deleted += 1;
-        files.push({ path, change: "deleted", baseSha256: sha256(left.content) });
+        files.push({ path, change: "deleted", baseSha256: left.sha256 });
       } else if (left !== undefined && right !== undefined) {
-        const leftHash = sha256(left.content);
-        const rightHash = sha256(right.content);
+        const leftHash = left.sha256;
+        const rightHash = right.sha256;
         if (leftHash !== rightHash) {
           modified += 1;
           files.push({
@@ -687,7 +693,7 @@ export class WorkspaceVersionService {
       version.workspaceSha256,
       version.workspaceSizeBytes,
     );
-    const files = parseWorkspaceSnapshot(bytes);
+    const files = workspaceSnapshotMetadata(bytes);
     if (files.length !== version.fileCount && version.originKind !== "migration") {
       throw new WorkspaceVersionError("artifact_corrupt", "Workspace file count is inconsistent");
     }

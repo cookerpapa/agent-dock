@@ -587,10 +587,14 @@ user-controlled command. Standard NetworkPolicy plus a fixed GitHub URL is not
 a DNS-aware firewall; do not claim this as a mutually hostile public-tenant
 boundary.
 
-Current repository limits are at most 512 regular files, 512 KiB per file, and
-2 MiB for the canonical manifest. Absolute/traversing paths, symlinks, special
-files, redirects, submodules, LFS filters, oversized content, and commit mismatch
-fail closed. Arbitrary Git hosts, branch/tag refresh, sparse checkout, and direct
+Controlled repository import remains limited to at most 512 regular files,
+512 KiB per file, and 2 MiB for its portable canonical seed manifest.
+Absolute/traversing paths, symlinks, special files, redirects, submodules, LFS
+filters, oversized content, and commit mismatch fail closed. A repository
+cloned later by ordinary Cube Tool execution is not forced back through that
+portable format: its settled Workspace uses the Cube-native checkpoint in
+ADR-0064, with at most 100,000 indexed regular files and 1 GiB total Workspace
+content. Arbitrary import hosts, branch/tag refresh, sparse checkout, and direct
 Tool-Sandbox GitHub credentials are not supported.
 
 For private repositories and PR write-back, create a least-privilege GitHub App
@@ -714,6 +718,15 @@ version, and exact local image IDs, then encrypts and authenticates the complete
 payload with AES-256-GCM and a scrypt-derived key. Treat both backup and key as
 sensitive; storing them together removes the intended protection.
 
+That bundle covers the AgentDock Compose authorities; it does not copy the
+Cube/K3s node's native snapshot data. After ADR-0064, any Workspace version
+whose artifact is `agent-dock.workspace-cube-snapshot.v1` also depends on the
+matching Cube snapshot store. A restore on the same preserved Cube node can
+reuse it, but this command alone is not an off-host or node-loss backup for
+large Cube Workspaces. Before moving hosts, take a coordinated backup of Cube's
+configured snapshot storage or materialize the Workspace through a future
+Kopia/REAPI data mover.
+
 Restore only into a new project name and an absent or empty runtime path, after
 installing the recorded checkout and exact local images:
 
@@ -736,8 +749,9 @@ volumes, rebinds the runtime path, hardens permissions, and validates Compose.
 It never overwrites an existing container, volume, or non-empty runtime. After
 startup verify both tenant views, event cursor continuity, current Workspace
 version/Artifact reads, Supervisor retirement, and one new completed turn before
-admitting traffic. `npm run production:check` performs this complete drill on a
-disposable populated topology.
+admitting traffic. `npm run production:check` performs this complete drill for
+the Compose authorities and portable fixtures on a disposable populated
+topology; it is not evidence of Cube snapshot node-loss recovery.
 
 For larger installations, use `pg_dump` plus an S3-native versioned/replicated
 bucket and a coordinated ledger/spool snapshot instead of raw volumes. A logical

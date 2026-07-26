@@ -3,7 +3,10 @@ import { DeepSeekModelIdSchema } from "./control-plane-api.ts";
 import { WorkspacePatchSchema } from "./event-envelope.ts";
 
 export const MAX_PI_SESSION_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
-export const MAX_WORKSPACE_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
+// Provider-native Workspace checkpoints carry a bounded file index and an
+// encrypted recovery reference. Large filesystem bytes remain in the Provider
+// snapshot instead of being base64-inlined into this control message.
+export const MAX_WORKSPACE_SNAPSHOT_BYTES = 32 * 1_024 * 1_024;
 
 const MAX_BASE64_SNAPSHOT_LENGTH =
   Math.ceil(Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES) / 3) * 4;
@@ -30,7 +33,10 @@ export const SandboxCheckpointBlobSchema = Type.Object(
   {
     encoding: Type.Literal("base64"),
     sha256: Sha256Schema,
-    sizeBytes: Type.Integer({ minimum: 1, maximum: MAX_PI_SESSION_SNAPSHOT_BYTES }),
+    sizeBytes: Type.Integer({
+      minimum: 1,
+      maximum: Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES),
+    }),
     data: Type.String({ minLength: 4, maxLength: MAX_BASE64_SNAPSHOT_LENGTH }),
   },
   { additionalProperties: false },

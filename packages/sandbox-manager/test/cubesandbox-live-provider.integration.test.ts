@@ -6,7 +6,10 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
-import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import {
+  decodeWorkspaceSnapshotBlob,
+  parseCubeWorkspaceCheckpoint,
+} from "@agent-dock/workspace-runtime";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
@@ -371,6 +374,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         importGitHub: async () => {
           throw new Error("Repository import is outside the Cube live Provider gate");
         },
+        checkpointEncryptionKey: Buffer.alloc(32, 0x4c),
       });
       const manager = new ToolSandboxManager({
         provider,
@@ -379,13 +383,15 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
       const activationIds = new Set<string>();
       let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
       let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+      let activeFirstAssignment = firstAssignment;
       let activeSecondAssignment = secondAssignment;
       const startedAt = performance.now();
       let firstToolMs = 0;
       let secondToolMs = 0;
       try {
         await provider.checkHealth();
-        first = await manager.create(createRequest(firstAssignment, config.imageRevision));
+        const firstRequest = createRequest(firstAssignment, config.imageRevision);
+        first = await manager.create(firstRequest);
         const secondRequest = createRequest(secondAssignment, config.imageRevision);
         second = await manager.create(secondRequest);
         activationIds.add(first.activationId);
@@ -423,6 +429,17 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             ),
           ),
         ).toBe(firstCanary);
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(
+                first.activationId,
+                "node -e \"const fs=require('node:fs');fs.mkdirSync('large',{recursive:true});for(let i=0;i<600;i++)fs.writeFileSync('large/file-'+i,String(i))\"",
+              ),
+            ),
+          ),
+        ).toBe("");
         expect(
           output(
             await manager.execute(
@@ -492,10 +509,57 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         if (captured.type !== "tool_sandbox.captured") {
           throw new Error("CubeSandbox live Workspace capture was missing");
         }
-        const files = parseWorkspaceSnapshot(Buffer.from(captured.workspace.data, "base64"));
-        expect(files.find((file) => file.path === "tenant-canary")?.content.toString()).toBe(
-          firstCanary,
+        const checkpoint = parseCubeWorkspaceCheckpoint(
+          decodeWorkspaceSnapshotBlob(captured.workspace),
         );
+        expect(checkpoint).toMatchObject({
+          providerId: "cubesandbox",
+          tenantId: firstAssignment.tenantId,
+          workspaceId: firstAssignment.workspaceId,
+          fencingToken: firstAssignment.fencingToken,
+        });
+        expect(checkpoint?.files.length).toBeGreaterThan(512);
+        expect(checkpoint?.files.find((file) => file.path === "tenant-canary")).toMatchObject({
+          sizeBytes: Buffer.byteLength(firstCanary),
+        });
+        await expect(
+          manager.release({
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.release",
+            requestId: randomUUID(),
+            activationId: first.activationId,
+            assignment: firstAssignment,
+            disposition: "destroy",
+          }),
+        ).resolves.toMatchObject({ retained: false });
+        const restoredFirstAssignment: ToolSandboxAssignment = {
+          ...firstAssignment,
+          supervisorId: `cube-live-${testRun}-supervisor-restored`,
+          bootId: randomUUID(),
+          sandboxId: randomUUID(),
+          commandId: `cube-live-${testRun}-command-restored`,
+          turnId: `cube-live-${testRun}-turn-restored`,
+          attemptId: randomUUID(),
+          leaseId: randomUUID(),
+          fencingToken: firstAssignment.fencingToken + 10,
+        };
+        activeFirstAssignment = restoredFirstAssignment;
+        first = await manager.create({
+          ...firstRequest,
+          requestId: randomUUID(),
+          assignment: restoredFirstAssignment,
+          workspaceSeed: { kind: "sample_java" },
+          workspaceRestore: captured.workspace,
+        });
+        activationIds.add(first.activationId);
+        expect(
+          output(
+            await manager.execute(
+              first.capability,
+              operation(first.activationId, "cat tenant-canary"),
+            ),
+          ),
+        ).toBe(firstCanary);
 
         const secondRuntimeBefore = (await manager.listAssignments(secondAssignment.sandboxId))[0];
         expect(secondRuntimeBefore).toBeDefined();
@@ -556,12 +620,12 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         );
         setTimeout(() => controller.abort(), 500).unref();
         await expect(cancelled).rejects.toMatchObject({ code: "tool_cancelled" });
-        await expect(manager.inspect(first.activationId, firstAssignment)).resolves.toMatchObject({
-          state: "absent",
-        });
+        await expect(
+          manager.inspect(first.activationId, activeFirstAssignment),
+        ).resolves.toMatchObject({ state: "absent" });
       } finally {
         if (first !== undefined) {
-          await manager.stop(first.activationId, firstAssignment).catch(() => undefined);
+          await manager.stop(first.activationId, activeFirstAssignment).catch(() => undefined);
         }
         if (second !== undefined) {
           await manager.stop(second.activationId, activeSecondAssignment).catch(() => undefined);

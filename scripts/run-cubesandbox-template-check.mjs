@@ -338,10 +338,22 @@ try {
   );
   assert(background.exitCode === 0, "Background-process fixture did not start");
   const previousAuthority = currentAuthority;
-  const sealed = await jsonRequest(baseUrl, "/v1/seal", {});
+  const recoveryAuthority = {
+    ...previousAuthority,
+    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+  };
+  const sealed = await jsonRequest(
+    baseUrl,
+    "/v1/checkpoint",
+    { recoverySecret: recoveryAuthority.handoffSecret },
+    previousAuthority,
+  );
   assert(
-    sealed.sealed === true && sealed.remainingToolProcesses === 0,
-    "Cube guest did not prove a sealed uid-1000 process boundary",
+    sealed.sealed === true &&
+      sealed.remainingToolProcesses === 0 &&
+      sealed.files.some((file) => file.path === "counting_sort.py") &&
+      sealed.portableWorkspace?.encoding === "base64",
+    "Cube guest did not prepare a sealed portable Workspace checkpoint",
   );
   const staleWhileSealed = await requestStatus(
     baseUrl,
@@ -352,22 +364,23 @@ try {
     }),
     previousAuthority,
   );
-  assert(staleWhileSealed === 409, "A sealed Cube guest accepted a Tool operation");
+  assert(staleWhileSealed === 403, "The pre-checkpoint authority survived rotation");
 
   const nextAuthority = {
-    ...previousAuthority,
+    ...recoveryAuthority,
     handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
-    fencingToken: previousAuthority.fencingToken + 1,
+    fencingToken: recoveryAuthority.fencingToken + 1,
   };
   const rebound = await jsonRequest(
     baseUrl,
     "/v1/rebind",
     {
+      activationId,
       handoffSecret: nextAuthority.handoffSecret,
       fencingToken: nextAuthority.fencingToken,
       bindingSha256: nextAuthority.bindingSha256,
     },
-    previousAuthority,
+    recoveryAuthority,
   );
   assert(
     rebound.rebound === true && rebound.fencingToken === nextAuthority.fencingToken,
@@ -381,7 +394,7 @@ try {
       operation: "file.read",
       path: "counting_sort.py",
     }),
-    previousAuthority,
+    recoveryAuthority,
   );
   assert(staleAfterRebind === 403, "The old Cube handoff authority survived rebind");
   const preserved = await jsonRequest(

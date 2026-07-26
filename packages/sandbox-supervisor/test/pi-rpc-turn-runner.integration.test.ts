@@ -6,6 +6,7 @@ import {
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -67,6 +68,22 @@ async function waitFor(
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    if (process.platform === "linux") {
+      try {
+        const statLine = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const commandEnd = statLine.lastIndexOf(")");
+        const state =
+          commandEnd < 0
+            ? undefined
+            : statLine
+                .slice(commandEnd + 1)
+                .trim()
+                .split(/\s+/)[0];
+        if (state === "Z" || state === "X") return false;
+      } catch {
+        return false;
+      }
+    }
     return true;
   } catch (error: unknown) {
     return !(

@@ -19,7 +19,7 @@ import {
   type SavedToolOutputArtifact,
 } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID } from "node:crypto";
-import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import { workspaceSnapshotFileCount } from "@agent-dock/workspace-runtime";
 import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -795,7 +795,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             workspace_artifact_id: workspaceArtifactId,
             patch_artifact_id: patchArtifactId ?? null,
             revision,
-            file_count: parseWorkspaceSnapshot(checkpoint.workspace).length,
+            file_count: workspaceSnapshotFileCount(checkpoint.workspace),
             state: "staged",
             settled_at: null,
           })

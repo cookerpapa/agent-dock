@@ -5,6 +5,7 @@ import { KubernetesGvisorSandboxProvider } from "./kubernetes-gvisor-sandbox-pro
 import type { SandboxProvider } from "./sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
+import { createHash } from "node:crypto";
 
 const config = await loadSandboxManagerConfig();
 const observability = await startServiceObservability({
@@ -57,6 +58,10 @@ if (config.provider === "cubesandbox") {
       host: cube.egressProxyHost,
       port: cube.egressProxyPort,
     },
+    checkpointEncryptionKey: createHash("sha256")
+      .update("agent-dock.cube-workspace-checkpoint-key.v1\0")
+      .update(config.serviceToken)
+      .digest(),
   });
 } else {
   provider = createGvisorProvider(config.cleanPrewarmTarget);

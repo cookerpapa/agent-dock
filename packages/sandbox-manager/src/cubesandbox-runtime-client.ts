@@ -38,6 +38,11 @@ export type CubeSandboxInstance = Readonly<{
   memoryMB?: number;
 }>;
 
+export type CubeSandboxSnapshot = Readonly<{
+  snapshotId: string;
+  names: readonly string[];
+}>;
+
 export type CubeSandboxCreateInput = Readonly<{
   templateId: string;
   timeoutSeconds: number;
@@ -67,6 +72,8 @@ export interface CubeSandboxRuntimeClient {
   list(): Promise<readonly CubeSandboxInstance[]>;
   pause(instance: CubeSandboxInstance, timeoutMs?: number): Promise<CubeSandboxInstance>;
   connect(instance: CubeSandboxInstance, timeoutSeconds: number): Promise<CubeSandboxInstance>;
+  createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot>;
+  deleteSnapshot(snapshotId: string): Promise<void>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
   close(): Promise<void>;
@@ -384,6 +391,38 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         ? {}
         : { trafficAccessToken: instance.trafficAccessToken }),
     });
+  }
+
+  async createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot> {
+    const id = encodeURIComponent(bounded(instance.sandboxId, "CubeSandbox ID", 256));
+    const safeName = bounded(name, "CubeSandbox snapshot name", 128);
+    const response = await this.#control(`/sandboxes/${id}/snapshots`, {
+      method: "POST",
+      body: JSON.stringify({ name: safeName }),
+    });
+    const value = record(
+      parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox snapshot create"),
+      "CubeSandbox snapshot create",
+    );
+    const snapshotId = bounded(value.snapshotID, "CubeSandbox snapshot ID", 256);
+    const names =
+      value.names === undefined
+        ? []
+        : Array.isArray(value.names) &&
+            value.names.length <= 16 &&
+            value.names.every((item) => typeof item === "string")
+          ? value.names.map((item) => bounded(item, "CubeSandbox snapshot name", 128))
+          : undefined;
+    if (names === undefined) {
+      throw new CubeRuntimeClientError("CubeSandbox snapshot names were invalid");
+    }
+    return Object.freeze({ snapshotId, names: Object.freeze(names) });
+  }
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    const id = encodeURIComponent(bounded(snapshotId, "CubeSandbox snapshot ID", 256));
+    const response = await this.#control(`/templates/${id}`, { method: "DELETE" }, true);
+    await response.body?.cancel().catch(() => undefined);
   }
 
   async destroy(sandboxId: string): Promise<void> {

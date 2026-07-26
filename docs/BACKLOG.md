@@ -188,6 +188,18 @@ extension-policy support would overstate the current boundary.
 - [x] Add a trusted GitHub App credential boundary for private exact-commit import and Pull Request write-back
 - [ ] Isolate and policy-gate project/user extensions before enabling them
 
+## Cube-native large Workspace persistence
+
+- [x] Research Kopia, Restic, REAPI CAS and Cube v0.6 snapshots before changing the persistence boundary
+- [x] Seal the Tool guest and prove zero Tool-UID processes before snapshotting
+- [x] Capture a content-hashed index and Git patch without base64-buffering repository contents
+- [x] Persist an encrypted tenant/Workspace/environment/fence-bound Cube snapshot reference through existing MinIO and PostgreSQL CAS
+- [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
+- [x] Keep legacy portable manifests readable and return explicit `artifact_unavailable` for unsupported historical content reads
+- [ ] Add reference-aware Cube snapshot garbage collection after Workspace-version retention policy exists
+- [ ] Add a read-only snapshot materializer for historical file download and GitHub delivery
+- [ ] Back Cube snapshot data with replicated/off-host storage or a Kopia/REAPI data mover before claiming node-loss recovery
+
 ## Phase 4 private multi-tenant slice
 
 - [x] ADR-0025: private identity, roles, quotas, fair scheduling, and threat boundary

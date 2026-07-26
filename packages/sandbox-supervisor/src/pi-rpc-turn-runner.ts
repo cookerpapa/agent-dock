@@ -10,6 +10,7 @@ import {
 } from "@agent-dock/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
@@ -302,7 +303,30 @@ function processGroupExists(child: ChildProcessWithoutNullStreams): boolean {
   }
   try {
     process.kill(-child.pid, 0);
-    return true;
+    if (process.platform !== "linux") return true;
+    try {
+      const hasLiveMember = readdirSync("/proc", { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+        .some((entry) => {
+          try {
+            const statLine = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+            const commandEnd = statLine.lastIndexOf(")");
+            if (commandEnd < 0) return false;
+            const fields = statLine
+              .slice(commandEnd + 1)
+              .trim()
+              .split(/\s+/);
+            const state = fields[0];
+            const processGroupId = Number(fields[2]);
+            return processGroupId === child.pid && state !== "Z" && state !== "X";
+          } catch {
+            return false;
+          }
+        });
+      return hasLiveMember;
+    } catch {
+      return true;
+    }
   } catch (error: unknown) {
     if (isRecord(error) && error.code === "ESRCH") return false;
     if (isRecord(error) && error.code === "EPERM") return true;

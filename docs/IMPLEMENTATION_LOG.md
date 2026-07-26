@@ -2559,3 +2559,40 @@
 - Added service, gateway, Tool environment and Cube request-shape tests. ADR
   0063 supersedes ADR 0062's direct-native-route requirement and documents WSL
   mirrored networking plus the exact hot-update semantics.
+
+## 2026-07-26 — Large Workspace settlement and Cube-native cold restore
+
+- Diagnosed the reported `Local supervisor execution failed` against the
+  durable Run evidence: all model calls and Tool operations had succeeded, but
+  settlement rejected the cloned Temporal repository at the original
+  512-file/2-MiB portable Workspace-manifest boundary.
+- Researched Kopia, Restic, REAPI CAS and Cube v0.6 snapshots before changing
+  the persistence contract. ADR-0064 keeps the portable content manifest for
+  small Workspaces and selects Cube's official snapshot-and-clone path for
+  larger ordinary Cube Workspaces. This avoids a second repository/credential
+  plane now while preserving a future Kopia/REAPI data-mover boundary.
+- Added a sealed checkpoint protocol. The root-owned guest supervisor stops
+  the Tool Worker, kills all Tool-UID processes, captures a content-hashed
+  index and Git patch, and rotates to a recovery authority without reopening
+  execution. Small Workspaces return portable content; large Workspaces create
+  a Cube snapshot and return only an AES-256-GCM encrypted reference bound to
+  tenant, Workspace, image, environment, source binding and fence.
+- Added higher-fence cold restore. A new activation creates a fresh Cube VM
+  from the committed snapshot, authenticates only to the sealed service,
+  rotates activation/binding/secret/fence, starts a new Tool Worker and
+  revalidates runtime/toolchain evidence. Stale tenant/environment/fence
+  requests fail before VM creation.
+- Raised only the bounded reference/index transport to 32 MiB and the durable
+  file-count column to 100,000; portable manifests retain their original
+  512-file, 512-KiB/file and 2-MiB limits. Historical lists/comparisons use the
+  provider index, while unsupported exact-content reads fail explicitly.
+- Deterministic evidence includes a 601-file index without embedded file
+  content, symlink rejection, portable-small/native-large Provider paths,
+  encrypted-authority non-disclosure, source-destroy/fresh-activation restore,
+  official snapshot HTTP request shape and Workspace-version projection.
+  The rebuilt Cube Tool template check also passed real process killing,
+  checkpoint authority rotation, portable capture and warm rebind.
+- The operational boundary is explicit: current Cube snapshot data is local to
+  the single-node Cube storage plane. Compose backup alone is not a node-loss
+  backup for provider-native Workspace versions; replicated/off-host storage,
+  reference-aware GC and a read-only historical materializer remain backlog.

@@ -40,12 +40,12 @@ operator path.
 | Orchestrator | Kubernetes Pod + RuntimeClass | CubeAPI/CubeMaster/Cubelet |
 | AgentDock status | importer and deterministic regression only | ordinary Tool execution, live KVM validated |
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
-| Workspace durability | AgentDock content checkpoint | same AgentDock content checkpoint |
+| Workspace durability | AgentDock portable content manifest | sealed Cube-native snapshot plus fenced AgentDock reference |
 | Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
 | Tool network | Kubernetes default deny | one trusted web gateway; every direct route denied |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
 | Dependency setup | disposable exact-host bootstrap | promotes regular files into a proxy-mediated Cube VM |
-| Native snapshot | not required | optional future optimization, never commit authority |
+| Native snapshot | not required | ordinary large-Workspace persistence under ADR-0064 |
 
 ## Provider path
 
@@ -55,7 +55,7 @@ operator path.
 - create and immutable handle construction;
 - bash/read/write/edit through the existing Tool Worker;
 - cancellation;
-- content snapshot;
+- sealed content-index capture plus Cube-native snapshot;
 - inspect, inventory, stop/destroy and orphan cleanup.
 
 The implementation uses a minimal, bounded client for the official v0.6 REST
@@ -97,6 +97,15 @@ exact-Session Run must present a strictly higher fence to connect, rotate the
 secret and start a fresh Worker against the preserved Workspace. The traffic
 token alone is insufficient after rebind. Any ambiguous transition destroys
 the VM and falls back to the committed AgentDock checkpoint.
+
+At an ordinary durable checkpoint, the same sealed boundary captures a
+content-hashed file index and Git patch and rotates to a one-use recovery
+secret. A Workspace that still fits the portable manifest keeps that format;
+larger Workspaces ask Cube to create a native snapshot. The recovery secret is
+encrypted in the small reference stored in MinIO; PostgreSQL publishes that
+reference only under the current RunAttempt fence and Workspace-head CAS. A
+cold restore creates a new Cube VM from the snapshot ID and must rotate to a
+strictly higher fence before the Tool Worker starts. See ADR-0064.
 
 ## Network and credential boundary
 
@@ -181,6 +190,8 @@ The live gate has proven:
 - exact Tool image versions;
 - actual file write, Python execution, traversal rejection and content-hashed
   checkpoint through the template service;
+- Cube-native snapshot creation, source-VM destruction, cold restore into a
+  fresh activation, and recovery-authority rotation under a higher fence;
 - fixed-target control/data relays.
 - a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
 - simultaneous tenant canaries remaining in different Workspaces;
@@ -217,10 +228,12 @@ page:
 - the in-tree [Node SDK source](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/sdk/node)
   and [Pi integration example](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/examples/pi-agent-integration).
 
-Before promoting native snapshot/rollback to a durability primitive, reproduce
-and close the failure modes represented by upstream issue
+ADR-0064 promotes only snapshot-and-clone at a quiescent settled boundary. It
+does not use in-place rollback as a cross-Attempt ownership transfer. The
+failure modes represented by upstream issue
 [#804](https://github.com/TencentCloud/CubeSandbox/issues/804),
 [#985](https://github.com/TencentCloud/CubeSandbox/issues/985) and
-[#1105](https://github.com/TencentCloud/CubeSandbox/issues/1105). AgentDock
-therefore treats a Cube VM as disposable and keeps its external,
-content-verified checkpoint commit as the source of truth.
+[#1105](https://github.com/TencentCloud/CubeSandbox/issues/1105) remain part of
+the multi-node release gate. PostgreSQL remains the logical source of truth,
+while the current single-node Cube snapshot store is explicitly not claimed to
+survive node/disk loss.

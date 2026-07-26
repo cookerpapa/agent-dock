@@ -8,6 +8,14 @@ import {
   type ToolWorkerInput,
   type ToolWorkerOutput,
 } from "@agent-dock/protocol";
+import {
+  MAX_WORKSPACE_SNAPSHOT_FILES,
+  MAX_WORKSPACE_SNAPSHOT_FILE_BYTES,
+  captureCubeWorkspaceIndex,
+  captureWorkspaceSnapshot,
+  collectGitWorkspacePatch,
+  encodeWorkspaceSnapshotBlob,
+} from "@agent-dock/workspace-runtime";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createInterface } from "node:readline";
@@ -148,19 +156,23 @@ function sameAuthority(left: HandoffAuthority, right: HandoffAuthority): boolean
   );
 }
 
-function parseRebind(value: unknown): HandoffAuthority {
+function parseRebind(value: unknown): HandoffAuthority & { activationId: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new CubeToolServiceError(400, "Tool rebind was invalid");
   }
   const input = value as Record<string, unknown>;
   if (
-    Object.keys(input).length !== 3 ||
+    Object.keys(input).length !== 4 ||
     typeof input.handoffSecret !== "string" ||
     !HANDOFF_SECRET_PATTERN.test(input.handoffSecret) ||
     !Number.isSafeInteger(input.fencingToken) ||
     (input.fencingToken as number) < 1 ||
     typeof input.bindingSha256 !== "string" ||
-    !SHA256_PATTERN.test(input.bindingSha256)
+    !SHA256_PATTERN.test(input.bindingSha256) ||
+    typeof input.activationId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      input.activationId,
+    )
   ) {
     throw new CubeToolServiceError(400, "Tool rebind was invalid");
   }
@@ -168,6 +180,7 @@ function parseRebind(value: unknown): HandoffAuthority {
     secret: input.handoffSecret,
     fencingToken: input.fencingToken as number,
     bindingSha256: input.bindingSha256,
+    activationId: input.activationId,
   };
 }
 
@@ -506,6 +519,17 @@ async function killAllToolProcesses(): Promise<void> {
   }
 }
 
+async function sealToolBoundary(): Promise<void> {
+  const current = readyBridge();
+  if (current.busy) {
+    throw new CubeToolServiceError(409, "Tool Worker was busy");
+  }
+  sealed = true;
+  bridge = undefined;
+  await current.close();
+  await killAllToolProcesses();
+}
+
 type InitializedToolState = {
   activationId: string;
   environment: Extract<ToolWorkerInput, { type: "worker.initialize" }>["environment"];
@@ -617,16 +641,72 @@ const server = createServer((request, response) => {
       sendJson(response, 200, await readyBridge().capture(input.activationId, input.requestId));
       return;
     }
+    if (url.pathname === "/v1/checkpoint") {
+      const previous = requireAuthority(request);
+      const body = await readJson(request);
+      const recoverySecret =
+        typeof body === "object" && body !== null && !Array.isArray(body)
+          ? (body as Record<string, unknown>).recoverySecret
+          : undefined;
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        typeof recoverySecret !== "string" ||
+        !HANDOFF_SECRET_PATTERN.test(recoverySecret) ||
+        recoverySecret === previous.secret
+      ) {
+        throw new CubeToolServiceError(400, "Tool checkpoint request was invalid");
+      }
+      await sealToolBoundary();
+      const [files, workspacePatch] = await Promise.all([
+        captureCubeWorkspaceIndex("/workspace"),
+        collectGitWorkspacePatch(
+          "/workspace",
+          {
+            HOME: "/tmp/agent-dock-tool-home",
+            LANG: "C.UTF-8",
+            PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          },
+          { uid: TOOL_UID, gid: TOOL_GID },
+        ),
+      ]);
+      let portableWorkspace: ReturnType<typeof encodeWorkspaceSnapshotBlob> | undefined;
+      if (
+        files.length <= MAX_WORKSPACE_SNAPSHOT_FILES &&
+        files.every((file) => file.sizeBytes <= MAX_WORKSPACE_SNAPSHOT_FILE_BYTES)
+      ) {
+        try {
+          portableWorkspace = encodeWorkspaceSnapshotBlob(
+            await captureWorkspaceSnapshot("/workspace"),
+          );
+        } catch (error: unknown) {
+          if (
+            !(error instanceof Error) ||
+            error.message !== "Workspace manifest is outside its byte limit"
+          ) {
+            throw error;
+          }
+        }
+      }
+      authority = {
+        ...previous,
+        secret: recoverySecret,
+      };
+      sendJson(response, 200, {
+        sealed: true,
+        fencingToken: previous.fencingToken,
+        remainingToolProcesses: 0,
+        files,
+        workspacePatch,
+        ...(portableWorkspace === undefined ? {} : { portableWorkspace }),
+      });
+      return;
+    }
     if (url.pathname === "/v1/seal") {
       requireAuthority(request);
-      const current = readyBridge();
-      if (current.busy) {
-        throw new CubeToolServiceError(409, "Tool Worker was busy");
-      }
-      sealed = true;
-      bridge = undefined;
-      await current.close();
-      await killAllToolProcesses();
+      await sealToolBoundary();
       sendJson(response, 200, {
         sealed: true,
         fencingToken: authority?.fencingToken,
@@ -640,11 +720,7 @@ const server = createServer((request, response) => {
         throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
       }
       const next = parseRebind(await readJson(request));
-      if (
-        next.bindingSha256 !== previous.bindingSha256 ||
-        next.fencingToken <= previous.fencingToken ||
-        next.secret === previous.secret
-      ) {
+      if (next.fencingToken <= previous.fencingToken || next.secret === previous.secret) {
         throw new CubeToolServiceError(409, "Tool rebind authority was stale");
       }
       const replacement = new ToolWorkerBridge();
@@ -652,7 +728,7 @@ const server = createServer((request, response) => {
         const toolchain = await replacement.initialize({
           toolWorkerProtocolVersion: 1,
           type: "worker.initialize",
-          activationId: initialized.activationId,
+          activationId: next.activationId,
           environment: initialized.environment,
           workspaceSeed: initialized.workspaceSeed,
           ...(initialized.webProxy === undefined ? {} : { webProxy: initialized.webProxy }),
@@ -661,8 +737,12 @@ const server = createServer((request, response) => {
           },
         });
         bridge = replacement;
-        authority = next;
-        initialized = { ...initialized, toolchain };
+        authority = {
+          secret: next.secret,
+          fencingToken: next.fencingToken,
+          bindingSha256: next.bindingSha256,
+        };
+        initialized = { ...initialized, activationId: next.activationId, toolchain };
         sealed = false;
         sendJson(response, 200, {
           rebound: true,

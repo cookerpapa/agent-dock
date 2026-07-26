@@ -328,7 +328,9 @@ Responsibilities:
 - proxy extension UI requests and responses between Pi and the web client;
 - spool unacknowledged events locally and replay them after reconnect;
 - propagate cancellation to Pi and the separately managed Tool Sandbox;
-- commit Pi JSONL plus remotely captured workspace snapshots;
+- commit Pi JSONL plus a remotely captured Workspace checkpoint: portable
+  content bytes for legacy/import paths or an encrypted Cube-native snapshot
+  reference for ordinary large repositories;
 - report heartbeat, resource usage, and health.
 
 ### Trusted Supervisor host and production topology

@@ -23,6 +23,7 @@ import * as parallelCandidateRaces from "./021_parallel_candidate_races.ts";
 import * as horizontalSupervisorPool from "./022_horizontal_supervisor_pool.ts";
 import * as temporalWorkerAffinity from "./023_temporal_worker_affinity.ts";
 import * as hotPlatformRuntimeSettings from "./024_hot_platform_runtime_settings.ts";
+import * as largeCubeWorkspaceCheckpoints from "./025_large_cube_workspace_checkpoints.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -51,6 +52,7 @@ export const migrationProvider: MigrationProvider = {
       "022_horizontal_supervisor_pool": horizontalSupervisorPool,
       "023_temporal_worker_affinity": temporalWorkerAffinity,
       "024_hot_platform_runtime_settings": hotPlatformRuntimeSettings,
+      "025_large_cube_workspace_checkpoints": largeCubeWorkspaceCheckpoints,
     };
   },
 };
@@ -174,3 +176,8 @@ export {
   down as downHotPlatformRuntimeSettings,
   up as upHotPlatformRuntimeSettings,
 } from "./024_hot_platform_runtime_settings.ts";
+
+export {
+  down as downLargeCubeWorkspaceCheckpoints,
+  up as upLargeCubeWorkspaceCheckpoints,
+} from "./025_large_cube_workspace_checkpoints.ts";

@@ -7,7 +7,9 @@ import {
 } from "@agent-dock/protocol";
 import {
   createWorkspaceSnapshot,
+  decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
+  parseCubeWorkspaceCheckpoint,
 } from "@agent-dock/workspace-runtime";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
@@ -25,6 +27,7 @@ import {
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const WEB_PROXY = Object.freeze({ host: "10.255.255.254", port: 3_128 });
+const CHECKPOINT_KEY = Buffer.alloc(32, 0x5a);
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-cube-test",
   projectId: "project-cube-test",
@@ -76,7 +79,10 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   readonly creates: CubeSandboxCreateInput[] = [];
   readonly requests: { sandboxId: string; input: CubeSandboxDataRequest }[] = [];
   readonly destroyed: string[] = [];
+  readonly deletedSnapshots: string[] = [];
+  readonly createdSnapshots: string[] = [];
   readonly instances = new Map<string, CubeSandboxInstance>();
+  portableWorkspace: typeof snapshot | undefined;
   healthChecks = 0;
   closed = false;
 
@@ -119,6 +125,18 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     const connected = { ...instance, state: "running" };
     this.instances.set(instance.sandboxId, connected);
     return connected;
+  }
+
+  async createSnapshot(instance: CubeSandboxInstance, name: string) {
+    this.createdSnapshots.push(name);
+    return {
+      snapshotId: `cube-snapshot-${instance.sandboxId}`,
+      names: [name],
+    };
+  }
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    this.deletedSnapshots.push(snapshotId);
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -173,14 +191,23 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
       const body = input.body as { fencingToken: number };
       return { rebound: true, fencingToken: body.fencingToken, environment: toolchain };
     }
-    if (input.path === "/v1/capture") {
-      const body = input.body as { activationId: string; requestId: string };
+    if (input.path === "/health") return {};
+    if (input.path === "/v1/checkpoint") {
       return {
-        managerProtocolVersion: 1,
-        type: "tool_sandbox.captured",
-        activationId: body.activationId,
-        requestId: body.requestId,
-        workspace: snapshot,
+        sealed: true,
+        fencingToken: input.authority?.fencingToken,
+        remainingToolProcesses: 0,
+        files: [
+          {
+            path: "result.txt",
+            executable: false,
+            sizeBytes: 5,
+            sha256: createHash("sha256").update("cube\n").digest("hex"),
+          },
+        ],
+        ...(this.portableWorkspace === undefined
+          ? {}
+          : { portableWorkspace: this.portableWorkspace }),
       };
     }
     if (input.path === "/v1/cancel") return { cancelled: true };
@@ -227,6 +254,7 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
     });
     await provider.checkHealth();
     expect(runtime.healthChecks).toBe(1);
@@ -253,6 +281,7 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
     });
     await expect(
       provider.create({
@@ -281,6 +310,7 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
     });
     const manager = new ToolSandboxManager({
       provider,
@@ -315,13 +345,39 @@ describe("CubeSandbox Provider contract", () => {
     );
     expect(captured).toMatchObject({
       type: "tool_sandbox.captured",
-      workspace: snapshot,
       environment: {
         isolationBoundary: "microvm",
         runtime: "cubesandbox-kvm",
         readOnlyRootFilesystem: false,
       },
     });
+    if (captured.type !== "tool_sandbox.captured") {
+      throw new Error("CubeSandbox capture response was missing");
+    }
+    const checkpoint = parseCubeWorkspaceCheckpoint(
+      decodeWorkspaceSnapshotBlob(captured.workspace),
+    );
+    expect(checkpoint).toMatchObject({
+      providerId: "cubesandbox",
+      snapshotId: "cube-snapshot-cube-sandbox-1",
+      sourceSandboxId: "cube-sandbox-1",
+      activationId: reserved.activationId,
+      tenantId: assignment.tenantId,
+      workspaceId: assignment.workspaceId,
+      fencingToken: assignment.fencingToken,
+      imageRevision: environment.imageRevision,
+      environmentSpecSha256: environment.specSha256,
+      totalSizeBytes: 5,
+      files: [
+        {
+          path: "result.txt",
+          executable: false,
+          sizeBytes: 5,
+          sha256: createHash("sha256").update("cube\n").digest("hex"),
+        },
+      ],
+    });
+    expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("adch_");
     const released = await manager.release({
       managerProtocolVersion: 1,
       type: "tool_sandbox.release",
@@ -384,6 +440,154 @@ describe("CubeSandbox Provider contract", () => {
     await manager.close();
   });
 
+  it("cold-restores a sealed Cube snapshot under a fresh activation and higher fence", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
+    });
+    const first = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    const captured = await provider.snapshot(first, "10000000-0000-4000-8000-000000000040");
+    expect(captured.type).toBe("tool_sandbox.captured");
+    if (captured.type !== "tool_sandbox.captured") {
+      throw new Error("CubeSandbox capture response was missing");
+    }
+    await provider.destroy(first);
+
+    const nextActivationId = "20000000-0000-4000-8000-000000000041";
+    const nextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      supervisorId: "supervisor-cube-restore",
+      bootId: "20000000-0000-4000-8000-000000000042",
+      sandboxId: "20000000-0000-4000-8000-000000000043",
+      commandId: "command-cube-restore",
+      turnId: "turn-cube-restore",
+      attemptId: "20000000-0000-4000-8000-000000000044",
+      leaseId: "20000000-0000-4000-8000-000000000045",
+      fencingToken: assignment.fencingToken + 1,
+    };
+    const restored = await provider.create({
+      activationId: nextActivationId,
+      assignment: nextAssignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      workspaceRestore: captured.workspace,
+      policy: provider.defaultPolicy,
+    });
+    expect(runtime.creates).toHaveLength(2);
+    expect(runtime.creates[1]).toMatchObject({
+      templateId: "cube-snapshot-cube-sandbox-1",
+      allowInternetAccess: true,
+      allowPublicTraffic: false,
+      metadata: {
+        "agentdock.activation_id": nextActivationId,
+        "agentdock.fencing_token": String(nextAssignment.fencingToken),
+      },
+    });
+    const rebind = runtime.requests.find(
+      ({ sandboxId, input }) => sandboxId === "cube-sandbox-2" && input.path === "/v1/rebind",
+    );
+    expect(rebind?.input.body).toMatchObject({
+      activationId: nextActivationId,
+      fencingToken: nextAssignment.fencingToken,
+    });
+    expect(rebind?.input.authority).toMatchObject({
+      fencingToken: assignment.fencingToken,
+    });
+    expect(restored.assignment).toEqual(nextAssignment);
+    await provider.destroy(restored);
+    await provider.close();
+  });
+
+  it("keeps portable checkpoints for small Workspaces without creating a native snapshot", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    runtime.portableWorkspace = snapshot;
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
+    });
+    const handle = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    const captured = await provider.snapshot(handle, "10000000-0000-4000-8000-000000000049");
+    expect(captured).toMatchObject({
+      type: "tool_sandbox.captured",
+      workspace: snapshot,
+    });
+    expect(runtime.createdSnapshots).toEqual([]);
+    await provider.destroy(handle);
+    await provider.close();
+  });
+
+  it("rejects a Cube checkpoint before restore when tenant or fence is stale", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
+    });
+    const handle = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    const captured = await provider.snapshot(handle, "10000000-0000-4000-8000-000000000046");
+    expect(captured.type).toBe("tool_sandbox.captured");
+    if (captured.type !== "tool_sandbox.captured") {
+      throw new Error("CubeSandbox capture response was missing");
+    }
+    await expect(
+      provider.create({
+        activationId: "20000000-0000-4000-8000-000000000047",
+        assignment: {
+          ...assignment,
+          tenantId: "another-tenant",
+          fencingToken: assignment.fencingToken + 1,
+        },
+        environment,
+        workspaceSeed: { kind: "sample_java" },
+        workspaceRestore: captured.workspace,
+        policy: provider.defaultPolicy,
+      }),
+    ).rejects.toMatchObject({ code: "cubesandbox_checkpoint_binding_invalid" });
+    await expect(
+      provider.create({
+        activationId: "20000000-0000-4000-8000-000000000048",
+        assignment,
+        environment,
+        workspaceSeed: { kind: "sample_java" },
+        workspaceRestore: captured.workspace,
+        policy: provider.defaultPolicy,
+      }),
+    ).rejects.toMatchObject({ code: "cubesandbox_checkpoint_binding_invalid" });
+    expect(runtime.creates).toHaveLength(1);
+    await provider.destroy(handle);
+    await provider.close();
+  });
+
   it("destroys an uncertain VM instead of replaying an arbitrary command", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const originalRequest = runtime.request.bind(runtime);
@@ -397,6 +601,7 @@ describe("CubeSandbox Provider contract", () => {
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
+      checkpointEncryptionKey: CHECKPOINT_KEY,
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,
@@ -490,6 +695,7 @@ describe("CubeSandbox Provider contract", () => {
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
       bootstrapProvider: bootstrap,
+      checkpointEncryptionKey: CHECKPOINT_KEY,
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,

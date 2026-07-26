@@ -192,6 +192,7 @@ only after a measured requirement appears.
 - [ADR-0059: single-node Kubernetes Pi Worker cutover](docs/adr/0059-single-node-kubernetes-pi-worker-cutover.md)
 - [ADR-0061: capacity-aware Temporal Worker affinity](docs/adr/0061-capacity-aware-temporal-worker-affinity.md)
 - [ADR-0062: Cube full-public egress with private-network denial](docs/adr/0062-cube-full-public-egress-with-private-network-denial.md)
+- [ADR-0064: Cube-native large Workspace checkpoints](docs/adr/0064-cube-native-workspace-checkpoints.md)
 
 ## Current executable spikes
 
@@ -535,9 +536,12 @@ same-boot reconnect after transient transport loss. The default project source
 is one trusted sample fixture; a project may instead name a normalized public
 GitHub `owner/repository` plus an exact 40-hex commit. At each successful settled
 boundary, trusted Pi JSONL is stored as tenant/session-scoped,
-content-addressed line segments plus an immutable manifest, while a bounded,
-hashed regular-file workspace manifest is captured through the private tool
-channel before `turn.completed`;
+content-addressed line segments plus an immutable manifest. For an ordinary
+Cube Tool Run, the guest is sealed and a content-hashed file index plus Git
+patch are captured. A small Workspace keeps the portable manifest; a larger
+Workspace creates a Cube-native snapshot and only its encrypted,
+identity-bound reference crosses the private Tool channel before
+`turn.completed`;
 the next turn restores both into a fresh Pi activation and a different
 ephemeral Tool Sandbox. Production therefore supports a genuine same-session
 follow-up without keeping an idle Pi process or Sandbox alive.

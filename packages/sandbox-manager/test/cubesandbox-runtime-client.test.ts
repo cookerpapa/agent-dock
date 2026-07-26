@@ -76,6 +76,21 @@ beforeAll(async () => {
         );
         return;
       }
+      if (request.method === "POST" && request.url === "/sandboxes/cube-runtime-1/snapshots") {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            snapshotID: "cube-snapshot-1",
+            names: [(body as { name?: unknown }).name],
+          }),
+        );
+        return;
+      }
+      if (request.method === "DELETE" && request.url === "/templates/cube-snapshot-1") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"deleted":true}');
+        return;
+      }
       if (request.method === "GET" && request.url === "/sandboxes/cube-runtime-1") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
@@ -197,6 +212,24 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       state: "running",
       trafficAccessToken: "private-traffic-token",
     });
+    await expect(client.createSnapshot(instance, "workspace-checkpoint")).resolves.toEqual({
+      snapshotId: "cube-snapshot-1",
+      names: ["workspace-checkpoint"],
+    });
+    expect(
+      observed.find((request) => request.path === "/sandboxes/cube-runtime-1/snapshots"),
+    ).toMatchObject({
+      method: "POST",
+      body: { name: "workspace-checkpoint" },
+      headers: { authorization: `Bearer ${"k".repeat(48)}` },
+    });
+    await client.deleteSnapshot("cube-snapshot-1");
+    expect(observed.find((request) => request.path === "/templates/cube-snapshot-1")).toMatchObject(
+      {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${"k".repeat(48)}` },
+      },
+    );
     await client.destroy(instance.sandboxId);
     await client.close();
   });

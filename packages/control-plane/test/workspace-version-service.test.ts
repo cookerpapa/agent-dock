@@ -2,7 +2,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { GitHubGatewayClient, GitHubGatewayRequest } from "@agent-dock/github-gateway";
-import { createWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+import {
+  createCubeWorkspaceCheckpoint,
+  createWorkspaceSnapshot,
+} from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -29,6 +32,8 @@ const IDS = {
   workspace2: "18000000-0000-4000-8000-000000000002",
   version1: "19000000-0000-4000-8000-000000000001",
   version2: "19000000-0000-4000-8000-000000000002",
+  workspace3: "18000000-0000-4000-8000-000000000003",
+  version3: "19000000-0000-4000-8000-000000000003",
 } as const;
 
 let pglite: PGlite;
@@ -272,6 +277,93 @@ describe.sequential("versioned Workspace service", () => {
     });
     await expect(service.get(IDS.otherTenant, IDS.version2)).rejects.toMatchObject({
       code: "not_found",
+    });
+  });
+
+  it("lists and compares Cube-native versions without pretending their file bytes are portable", async () => {
+    const readme = Buffer.from("provider-native\n");
+    const checkpoint = createCubeWorkspaceCheckpoint({
+      snapshotId: "cube-snapshot-version-three",
+      sourceSandboxId: "cube-sandbox-version-three",
+      activationId: "20000000-0000-4000-8000-000000000001",
+      tenantId: IDS.tenant,
+      workspaceId: IDS.workspace,
+      bindingSha256: "a".repeat(64),
+      fencingToken: 3,
+      imageRevision: "development",
+      environmentSpecSha256: "b".repeat(64),
+      files: [
+        {
+          path: "README.md",
+          executable: false,
+          sizeBytes: readme.byteLength,
+          sha256: hash(readme),
+        },
+      ],
+      authority: {
+        keyVersion: 1,
+        nonce: "c".repeat(16),
+        ciphertext: "d".repeat(64),
+        authTag: "e".repeat(22),
+      },
+    });
+    objects.set("checkpoints/workspace-3", checkpoint);
+    await database
+      .insertInto("artifacts")
+      .values({
+        id: IDS.workspace3,
+        tenant_id: IDS.tenant,
+        session_id: IDS.session,
+        turn_id: null,
+        run_id: null,
+        kind: "workspace_snapshot",
+        object_key: "checkpoints/workspace-3",
+        sha256: hash(checkpoint),
+        size_bytes: checkpoint.byteLength,
+        file_name: "workspace.json",
+        media_type: "application/octet-stream",
+      })
+      .execute();
+    await database
+      .insertInto("workspace_versions")
+      .values({
+        id: IDS.version3,
+        tenant_id: IDS.tenant,
+        workspace_id: IDS.workspace,
+        session_id: IDS.session,
+        version_number: 3,
+        parent_version_id: IDS.version2,
+        source_version_id: null,
+        origin_kind: "migration",
+        run_id: null,
+        attempt_id: null,
+        turn_id: null,
+        pi_artifact_id: IDS.pi2,
+        workspace_artifact_id: IDS.workspace3,
+        patch_artifact_id: null,
+        revision: hash(checkpoint),
+        file_count: 1,
+        state: "settled",
+        settled_at: new Date("2026-07-20T00:02:00.000Z"),
+      })
+      .execute();
+
+    await expect(service.files(IDS.tenant, IDS.version3)).resolves.toMatchObject({
+      files: [
+        {
+          path: "README.md",
+          executable: false,
+          sizeBytes: readme.byteLength,
+          sha256: hash(readme),
+        },
+      ],
+    });
+    await expect(service.compare(IDS.tenant, IDS.version2, IDS.version3)).resolves.toMatchObject({
+      summary: { added: 0, modified: 1, deleted: 1, modeChanged: 0 },
+    });
+    await expect(service.file(IDS.tenant, IDS.version3, "README.md")).rejects.toMatchObject({
+      code: "artifact_unavailable",
+      message: "Workspace file content requires a live Provider snapshot reader",
     });
   });
 

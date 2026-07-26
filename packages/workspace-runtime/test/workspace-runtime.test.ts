@@ -1,17 +1,21 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   captureWorkspaceSnapshot,
+  captureCubeWorkspaceIndex,
   collectGitWorkspacePatch,
+  createCubeWorkspaceCheckpoint,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   createWorkspaceSnapshot,
   mergeWorkspaceSnapshots,
   parseWorkspaceSnapshot,
+  parseCubeWorkspaceCheckpoint,
   restoreWorkspaceSnapshot,
+  workspaceSnapshotMetadata,
 } from "../src/index.ts";
 
 const temporaryDirectories: string[] = [];
@@ -124,5 +128,57 @@ describe("shared workspace runtime", () => {
         { root: "backend", snapshot: createWorkspaceSnapshot([]) },
       ]),
     ).toThrow(/root/);
+  });
+
+  it("indexes a large Cube Workspace without embedding file bytes or dropping nested Git state", async () => {
+    const root = await temporaryDirectory("agent-dock-cube-workspace-index-");
+    await mkdir(resolve(root, ".git"));
+    await writeFile(resolve(root, ".git/HEAD"), "ref: refs/heads/main\n");
+    await mkdir(resolve(root, "nested/.git"), { recursive: true });
+    await writeFile(resolve(root, "nested/.git/config"), "[core]\n");
+    await mkdir(resolve(root, "src"));
+    await Promise.all(
+      Array.from({ length: 600 }, (_, index) =>
+        writeFile(resolve(root, `src/file-${String(index).padStart(3, "0")}.txt`), `${index}\n`),
+      ),
+    );
+
+    const files = await captureCubeWorkspaceIndex(root);
+    expect(files).toHaveLength(601);
+    expect(files[0]?.path).toBe("nested/.git/config");
+    expect(files.some((file) => file.path === ".git/HEAD")).toBe(false);
+    const encoded = createCubeWorkspaceCheckpoint({
+      snapshotId: "cube-snapshot-large",
+      sourceSandboxId: "cube-sandbox-large",
+      activationId: "10000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-large",
+      workspaceId: "workspace-large",
+      bindingSha256: "a".repeat(64),
+      fencingToken: 7,
+      imageRevision: "development",
+      environmentSpecSha256: "b".repeat(64),
+      files,
+      authority: {
+        keyVersion: 1,
+        nonce: "c".repeat(16),
+        ciphertext: "d".repeat(64),
+        authTag: "e".repeat(22),
+      },
+    });
+    const parsed = parseCubeWorkspaceCheckpoint(encoded);
+    expect(parsed?.files).toHaveLength(601);
+    expect(workspaceSnapshotMetadata(encoded)).toEqual(parsed?.files);
+    expect(encoded.byteLength).toBeLessThan(256 * 1_024);
+    expect(Buffer.from(encoded).toString("utf8")).not.toContain(
+      Buffer.from("599\n").toString("base64"),
+    );
+    expect(() => parseWorkspaceSnapshot(encoded)).toThrow(/portable file bytes/);
+  });
+
+  it("rejects symlinks from the Cube checkpoint index", async () => {
+    const root = await temporaryDirectory("agent-dock-cube-workspace-link-");
+    await writeFile(resolve(root, "target.txt"), "target\n");
+    await symlink("target.txt", resolve(root, "link.txt"));
+    await expect(captureCubeWorkspaceIndex(root)).rejects.toThrow(/link or special file/);
   });
 });

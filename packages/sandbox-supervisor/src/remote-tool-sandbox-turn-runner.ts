@@ -445,7 +445,19 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           }
         }
         const checkpointStartedAt = performance.now();
-        const captured = await this.#manager.capture(activation.activationId, toolAssignment);
+        const captured = await this.#manager
+          .capture(activation.activationId, toolAssignment)
+          .catch((error: unknown) => {
+            this.#metrics?.checkpointDuration.observe(
+              { outcome: "failed" },
+              (performance.now() - checkpointStartedAt) / 1_000,
+            );
+            throw safePiError(
+              error,
+              "workspace_checkpoint_capture_failed",
+              "The Tool Workspace checkpoint could not be captured",
+            );
+          });
         if (this.#checkpointStore !== undefined) {
           try {
             const saved =

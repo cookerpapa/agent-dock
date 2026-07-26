@@ -5,12 +5,19 @@ function executeGit(
   args: readonly string[],
   cwd: string,
   environment: NodeJS.ProcessEnv,
+  identity?: Readonly<{ uid: number; gid: number }>,
 ): Promise<string> {
   return new Promise<string>((resolvePromise, rejectPromise) => {
     execFile(
       "git",
       [...args],
-      { cwd, encoding: "utf8", env: environment, maxBuffer: 512 * 1_024 },
+      {
+        cwd,
+        encoding: "utf8",
+        env: environment,
+        maxBuffer: 512 * 1_024,
+        ...(identity === undefined ? {} : identity),
+      },
       (error, stdout) => {
         if (error) rejectPromise(error);
         else resolvePromise(stdout);
@@ -39,12 +46,14 @@ function boundedUtf8(value: string, maxBytes: number): { value: string; truncate
 export async function collectGitWorkspacePatch(
   workspaceDirectory: string,
   environment: NodeJS.ProcessEnv = process.env,
+  identity?: Readonly<{ uid: number; gid: number }>,
 ): Promise<WorkspacePatch> {
   const untracked = (
     await executeGit(
       ["ls-files", "--others", "--exclude-standard", "-z", "--"],
       workspaceDirectory,
       environment,
+      identity,
     )
   )
     .split("\0")
@@ -54,12 +63,14 @@ export async function collectGitWorkspacePatch(
       ["add", "--intent-to-add", "--", ...untracked],
       workspaceDirectory,
       environment,
+      identity,
     );
   }
   const diff = await executeGit(
     ["diff", "--no-ext-diff", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "--"],
     workspaceDirectory,
     environment,
+    identity,
   );
   const bounded = boundedUtf8(diff, MAX_WORKSPACE_PATCH_BYTES);
   return {

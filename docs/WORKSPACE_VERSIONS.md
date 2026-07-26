@@ -15,15 +15,18 @@ Version 1 (settled)
        └─ Version 3 (staged while Run owns the fence)
 ```
 
-A version references exact Pi transcript and canonical Workspace snapshot
-artifacts plus an optional unified patch. SHA-256 and byte length are checked
+A version references exact Pi transcript and canonical Workspace checkpoint
+artifacts plus an optional unified patch. The checkpoint is either the legacy
+portable regular-file manifest or an identity-bound Cube-native snapshot
+reference with a content-hashed file index. SHA-256 and byte length are checked
 after bytes cross the authenticated Supervisor artifact transport. Browser
 requests use tenant-owned UUIDs; browsers never submit object-store keys.
 
 ## User operations
 
 - list version history and the current pointer;
-- list files or download one manifest-selected file;
+- list files from either checkpoint format; download exact file content from a
+  portable manifest;
 - compare two versions in the same Workspace by content/mode hash;
 - download typed artifacts;
 - fork a new cold Session from a selected version;
@@ -36,10 +39,15 @@ rows. Active work blocks pointer-changing operations. Archived Sessions reject
 new Turns. Rollback does not delete or rewrite history; the next Pi activation
 loads the selected version's transcript and files.
 
+Cube-native versions can be listed, compared, forked and rolled back without
+booting a VM because the reference contains content hashes. Exact historical
+file download and GitHub delivery currently fail with
+`artifact_unavailable` unless a portable manifest/patch is available; a future
+read-only Cube snapshot materializer will close that product gap.
+
 ## Consistency claim
 
 The implementation provides immutable version history, fenced staged commit,
 and CAS-protected user pointer changes. It does not claim exactly-once shell
 execution or object upload. Objects are content-verified, while stale Attempts
 cannot settle a version or overwrite the Session's current pointer.
-

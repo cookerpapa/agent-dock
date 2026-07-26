@@ -166,6 +166,7 @@ export class PostgresTemporalWorkerAffinity {
           sandbox_id: sandbox.id,
           task_queue: taskQueue,
           expires_at: new Date(now.valueOf() + this.#reservationTtlMs),
+          created_at: now,
         })
         .executeTakeFirstOrThrow();
       return { reservationId, sandboxId: sandbox.id, taskQueue };

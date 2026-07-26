@@ -4,10 +4,16 @@ import { constants, type Stats } from "node:fs";
 import { chmod, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import { TextDecoder } from "node:util";
+import {
+  parseCubeWorkspaceCheckpoint,
+  type WorkspaceSnapshotFileMetadata,
+} from "./cube-workspace-checkpoint.ts";
+import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
 export const MAX_WORKSPACE_SNAPSHOT_FILES = 512;
 export const MAX_WORKSPACE_SNAPSHOT_FILE_BYTES = 512 * 1_024;
 export const MAX_WORKSPACE_SNAPSHOT_PATH_BYTES = 512;
+export const MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES = 2 * 1_024 * 1_024;
 
 type WorkspaceSnapshotFile = {
   path: string;
@@ -28,15 +34,9 @@ export type WorkspaceSnapshotFileContent = {
   content: Buffer;
 };
 
-export class WorkspaceRuntimeError extends Error {
-  readonly code = "invalid_workspace_snapshot";
-  readonly retryable = false;
-
-  constructor(message: string) {
-    super(message);
-    this.name = "WorkspaceRuntimeError";
-  }
-}
+export type WorkspaceSnapshotMetadata = WorkspaceSnapshotFileMetadata & {
+  content?: Buffer;
+};
 
 function snapshotError(message: string): WorkspaceRuntimeError {
   return new WorkspaceRuntimeError(message);
@@ -157,14 +157,17 @@ export async function captureWorkspaceSnapshot(workspaceDirectory: string): Prom
     files,
   };
   const encoded = Buffer.from(`${JSON.stringify(manifest)}\n`, "utf8");
-  if (encoded.byteLength > MAX_WORKSPACE_SNAPSHOT_BYTES) {
+  if (encoded.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {
     throw snapshotError("Workspace manifest is outside its byte limit");
   }
   return encoded;
 }
 
 export function parseWorkspaceSnapshot(snapshot: Uint8Array): WorkspaceSnapshotFileContent[] {
-  if (snapshot.byteLength < 1 || snapshot.byteLength > MAX_WORKSPACE_SNAPSHOT_BYTES) {
+  if (parseCubeWorkspaceCheckpoint(snapshot) !== undefined) {
+    throw snapshotError("Provider Workspace checkpoint does not contain portable file bytes");
+  }
+  if (snapshot.byteLength < 1 || snapshot.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {
     throw snapshotError("Workspace manifest is outside its byte limit");
   }
   let parsed: unknown;
@@ -263,7 +266,7 @@ export function createWorkspaceSnapshot(
     `${JSON.stringify({ format: "agent-dock.workspace-manifest.v1", files: entries })}\n`,
     "utf8",
   );
-  if (encoded.byteLength > MAX_WORKSPACE_SNAPSHOT_BYTES) {
+  if (encoded.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {
     throw snapshotError("Workspace manifest is outside its byte limit");
   }
   validateWorkspaceSnapshot(encoded);
@@ -316,7 +319,24 @@ export async function restoreWorkspaceSnapshot(
 }
 
 export function validateWorkspaceSnapshot(snapshot: Uint8Array): void {
+  if (parseCubeWorkspaceCheckpoint(snapshot) !== undefined) return;
   parseWorkspaceSnapshot(snapshot);
+}
+
+export function workspaceSnapshotMetadata(snapshot: Uint8Array): WorkspaceSnapshotMetadata[] {
+  const cube = parseCubeWorkspaceCheckpoint(snapshot);
+  if (cube !== undefined) return cube.files.map((file) => ({ ...file }));
+  return parseWorkspaceSnapshot(snapshot).map((file) => ({
+    path: file.path,
+    executable: file.executable,
+    sizeBytes: file.content.byteLength,
+    sha256: sha256(file.content),
+    content: file.content,
+  }));
+}
+
+export function workspaceSnapshotFileCount(snapshot: Uint8Array): number {
+  return workspaceSnapshotMetadata(snapshot).length;
 }
 
 export function encodeWorkspaceSnapshotBlob(snapshot: Uint8Array): SandboxCheckpointBlob {
