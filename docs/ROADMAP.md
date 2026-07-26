@@ -209,8 +209,11 @@ capabilities and identity while the concrete Provider owns runtime operations.
 CubeAPI/CubeProxy clients and fixed relays. K3s/containerd maps the retained
 importer/dependency-bootstrap RuntimeClass to `runsc`/KVM. Controlled dependency
 egress is consumed only there, and its regular-file snapshot is promoted into a
-fresh offline Cube guest. Both gates prove their actual physical boundary
-rather than inferring isolation from configuration.
+fresh Cube guest. ADR-0062 gives that guest deployment-owned public egress with
+private/link-local/metadata/platform denial; the promotion still carries only
+regular Workspace bytes, never processes or credentials. Both gates prove
+their actual physical boundary rather than inferring isolation from
+configuration.
 
 ADR-0040 removes eager per-Run Pod creation and per-event remote ACK blocking.
 It separates conversation and Workspace checkpoints, uses exact Session-scoped

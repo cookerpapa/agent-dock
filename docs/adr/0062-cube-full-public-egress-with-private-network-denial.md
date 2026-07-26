@@ -89,6 +89,9 @@ outside the current private-deployment claim.
 
 - Cube creation fails closed if the full-public policy cannot be encoded.
 - Missing private-ingress traffic token destroys the new microVM.
+- Every Cube node must have a native public route. CubeVS does not inherit an
+  application-level `HTTP_PROXY`; a proxy-only host is not accepted as
+  full-public evidence.
 - A live gate failure to reach the public acceptance endpoint blocks release.
 - A live gate success against any denied platform/private endpoint blocks
   release.

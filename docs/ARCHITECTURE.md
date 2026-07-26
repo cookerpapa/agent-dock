@@ -236,13 +236,14 @@ each command has an immutable ID, normalized working directory, timeout and
 explicit network class. Raw setup output is not copied into the trusted control
 plane: validation retains only phase, exit code, duration and output SHA-256.
 The Provider combines this toolchain report with its live
-`cubesandbox-kvm`, guest-kernel, final deny-all network and non-root
-inspection. Cube's CoW guest root is writable, so the evidence does not falsely
-claim a read-only OCI rootfs. Successful Tool settlement stores that evidence
-under Project environment, Run and Attempt identity. Pure chat creates no
-microVM and therefore keeps the environment in `pending` until a real Tool Run
-proves it. Every activation must match the exact environment snapshot; an
-environment change cannot reuse an older guest.
+`cubesandbox-kvm`, guest-kernel, deployment-owned
+`public_egress_private_denied` network policy and non-root inspection. Cube's
+CoW guest root is writable, so the evidence does not falsely claim a read-only
+OCI rootfs. Successful Tool settlement stores that evidence under Project
+environment, Run and Attempt identity. Pure chat creates no microVM and
+therefore keeps the environment in `pending` until a real Tool Run proves it.
+Every activation must match the exact environment snapshot; an environment
+change cannot reuse an older guest.
 
 ADR-0045 records the former gVisor clean-prewarm design. The Cube production
 prewarm target remains zero: a never-bound shared Cube pool is not implemented,

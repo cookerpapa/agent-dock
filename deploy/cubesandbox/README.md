@@ -154,7 +154,8 @@ The gate creates real microVMs for two tenants and proves:
 - uid/gid 1000, no new privileges and zero effective capabilities;
 - no Docker socket, Kubernetes token or platform/model credential;
 - same-path canaries remain different across tenant Workspaces;
-- CubeAPI, platform endpoints and public Internet are denied;
+- a stable public HTTPS endpoint is reachable;
+- CubeAPI, platform endpoints, private/link-local networks and metadata are denied;
 - path, symlink, output, timeout and process limits;
 - content-hashed Workspace capture;
 - cancellation destroys the executing guest;
@@ -180,15 +181,25 @@ specification or AgentDock Git revision does not match.
 
 The primary Compose overlay starts two credential-free fixed-target relays.
 The Sandbox Manager remains on internal networks, holds the Cube API key from
-the private file, and forces every create request to disable Internet and public
+the private file, and forces every create request to enable outbound public
+Internet while denying private/link-local/metadata ranges and public inbound
 traffic. The per-microVM Cube traffic token remains inside the trusted Provider.
 
 The K3s/gVisor plane remains available only to the exact-commit importer and
 the explicit deterministic production gate. It is not an ordinary Tool
 fallback. Project recipes with `dependencyHosts` execute in a disposable
 capability-scoped gVisor bootstrap; only captured regular-file Workspace bytes
-are restored into a newly created, offline Cube guest for verification and
-ordinary Tool execution.
+are restored into a newly created Cube guest for verification and ordinary Tool
+execution. That guest receives the same deployment-owned
+`public_egress_private_denied` policy as every ordinary Cube activation.
+
+Cube's full-public mode performs native guest networking and NAT; it does not
+inherit `HTTP_PROXY` from the trusted host. Every Cube node must therefore have
+a native IPv4 or IPv6 public route. A proxy-only WSL `mirrored` environment
+without an IPv4 default route is unsupported for this tier. The live gate first
+probes its configured public HTTPS endpoint directly from the trusted host and
+then from a real guest, so this prerequisite fails explicitly rather than
+producing false network evidence.
 
 ## Lifecycle and rollback
 

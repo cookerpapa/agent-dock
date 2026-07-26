@@ -66,6 +66,11 @@ Plane/PostgreSQL-class endpoints and `169.254.169.254` fail. Port 49984 is the
 only registered Tool service and remains protected by Cube's per-Sandbox
 traffic token. Cube's inherited `envd` command channel is not started.
 
+This CubeVS/NAT path requires every Cube node to have a native public route.
+Host-level `HTTP_PROXY` is not inherited by a microVM. A proxy-only WSL
+`mirrored` node with no IPv4 default route does not satisfy the full-public
+tier; the live gate rejects it before creating acceptance guests.
+
 ## Kubernetes importer plane
 
 | Workload/namespace | Ingress | DNS | Public egress | Cluster/private/link-local | Platform networks |

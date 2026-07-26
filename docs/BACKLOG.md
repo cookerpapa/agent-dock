@@ -160,8 +160,9 @@ extension-policy support would overstate the current boundary.
   sealed exact-Session handoff with Tool-process removal, higher fencing token,
   handoff-secret rotation and destroy-on-ambiguity fallback
 - [x] Promote capability-scoped dependency setup from a disposable gVisor Pod
-  into a newly created offline Cube guest without promoting processes, network
-  state or credentials
+  into a newly created Cube guest without promoting processes, network state or
+  credentials; ADR-0062 later changes that guest's final deployment-owned
+  egress policy
 - [ ] ADR-0062: enable full public Cube Tool egress while explicitly denying
   private/link-local/metadata/platform ranges and preserving private-token
   ingress

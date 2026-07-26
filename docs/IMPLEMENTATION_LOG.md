@@ -2508,3 +2508,30 @@
   proving that the task was not pinned behind the occupied preferred Worker.
   It executed only after the earlier same-Session Run settled, preserving the
   required serialization.
+
+## 2026-07-26: Cube full-public/private-denied egress
+
+- Accepted ADR-0062 and changed the sole ordinary Cube Provider to a fixed
+  `public_egress_private_denied` policy. Every create now enables native
+  Internet, keeps public inbound disabled and installs a repository-owned CIDR
+  deny list covering private, loopback, carrier-grade NAT, link-local/metadata,
+  benchmarking, documentation, multicast and reserved IPv4 classes. Browser,
+  model, recipe and Tool input cannot replace that policy.
+- Updated immutable template registration to record
+  `allowInternetAccess=true`, registered template
+  `tpl-094eb332fcf244b89e3b2fd5` for revision
+  `0a45d71d4fc404c57962d5d48c139870c50b6207`, and deployed that revision with
+  both Kubernetes Pi Workers Ready. Request-shape, closed-policy, protocol and
+  Sandbox Manager tests passed; the monorepo CI passed except for the external
+  npm audit endpoint returning a malformed gzip response after the repository's
+  own vulnerability policy had reported zero remaining vulnerabilities.
+- The first real KVM gate proved platform/private/metadata denial, but public
+  HTTPS timed out. Host inspection found WSL `mirrored` mode, no native IPv4
+  default route and Internet access available only through
+  `HTTP_PROXY=http://127.0.0.1:10808`. CubeVS performs native guest NAT and
+  cannot inherit that application proxy. The gate now performs a direct
+  trusted-host HTTPS preflight and reports this prerequisite explicitly.
+- This entry does not claim completed full-public acceptance on the current
+  node. Switch the Cube node to a native-route network mode, rerun the real KVM
+  gate, then update the immutable acceptance report and close the ADR-0062
+  backlog item.

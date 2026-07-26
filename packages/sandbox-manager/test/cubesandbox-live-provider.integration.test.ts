@@ -10,6 +10,7 @@ import { parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
+import { get as httpsGet } from "node:https";
 import { connect } from "node:net";
 import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -25,6 +26,7 @@ const enabled = process.env.AGENT_DOCK_CUBESANDBOX_TEST === "1";
 type LiveConfiguration = Readonly<{
   templateId: string;
   imageRevision: string;
+  publicHttpsUrl: string;
   runtime: OfficialCubeSandboxRuntimeClientOptions;
   forbiddenEndpoints: readonly Readonly<{ host: string; port: number }>[];
 }>;
@@ -85,6 +87,17 @@ async function configuration(): Promise<LiveConfiguration> {
   if (apiUrl.protocol !== "http:" && apiUrl.protocol !== "https:") {
     throw new Error("AGENT_DOCK_CUBESANDBOX_API_URL must use HTTP or HTTPS");
   }
+  const publicHttpsUrl = new URL(
+    process.env.AGENT_DOCK_CUBESANDBOX_PUBLIC_HTTPS_URL ?? "https://example.com/",
+  );
+  if (
+    publicHttpsUrl.protocol !== "https:" ||
+    publicHttpsUrl.username !== "" ||
+    publicHttpsUrl.password !== "" ||
+    publicHttpsUrl.hash !== ""
+  ) {
+    throw new Error("AGENT_DOCK_CUBESANDBOX_PUBLIC_HTTPS_URL must be a credential-free HTTPS URL");
+  }
   const proxyScheme = process.env.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
   if (proxyScheme !== "http" && proxyScheme !== "https") {
     throw new Error("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME was invalid");
@@ -102,6 +115,7 @@ async function configuration(): Promise<LiveConfiguration> {
   return {
     templateId: required("AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
     imageRevision: required("AGENT_DOCK_IMAGE_REVISION"),
+    publicHttpsUrl: publicHttpsUrl.toString(),
     runtime: {
       apiUrl: apiUrl.toString(),
       apiKey: await readPrivateKey(required("AGENT_DOCK_CUBESANDBOX_API_KEY_FILE")),
@@ -230,6 +244,43 @@ async function assertReachableFromTrustedHost(
   });
 }
 
+async function assertRawPublicHttpsFromTrustedHost(url: string): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const request = httpsGet(
+      url,
+      {
+        headers: { "user-agent": "agent-dock-cube-egress-host-preflight/1" },
+        timeout: 5_000,
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => {
+          const status = response.statusCode ?? 500;
+          if (status < 200 || status >= 400) {
+            rejectPromise(
+              new Error(`trusted-host public HTTPS preflight returned HTTP ${String(status)}`),
+            );
+            return;
+          }
+          resolvePromise();
+        });
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy(new Error("trusted-host public HTTPS preflight timed out"));
+    });
+    request.once("error", (error) => {
+      rejectPromise(
+        new Error(
+          "Cube full-egress acceptance requires a native public route on every Cube node; " +
+            "an HTTP_PROXY-only host cannot provide CubeVS NAT egress",
+          { cause: error },
+        ),
+      );
+    });
+  });
+}
+
 function denyProbeCommand(endpoints: readonly Readonly<{ host: string; port: number }>[]): string {
   const encoded = Buffer.from(JSON.stringify(endpoints), "utf8").toString("base64");
   const program =
@@ -250,20 +301,26 @@ function denyProbeCommand(endpoints: readonly Readonly<{ host: string; port: num
   return `node -e ${JSON.stringify(program)}`;
 }
 
-function publicHttpsProbeCommand(): string {
+function publicHttpsProbeCommand(url: string): string {
+  const encodedUrl = Buffer.from(url, "utf8").toString("base64");
   const program =
     `const https=require('node:https');` +
-    `const fail=()=>process.exit(94);` +
-    `const request=https.get('https://example.com/',{` +
+    `const url=Buffer.from('${encodedUrl}','base64').toString('utf8');` +
+    `const fail=error=>{` +
+    `process.stderr.write(String(error?.stack??error??'public HTTPS probe failed'));` +
+    `process.exit(94)` +
+    `};` +
+    `const request=https.get(url,{` +
     `headers:{'user-agent':'agent-dock-cube-egress-check/1'},timeout:5000` +
     `},response=>{` +
     `response.resume();` +
     `response.once('end',()=>{` +
-    `if((response.statusCode??500)<200||(response.statusCode??500)>=400)fail();` +
+    `if((response.statusCode??500)<200||(response.statusCode??500)>=400)` +
+    `fail('unexpected HTTP status '+response.statusCode);` +
     `process.stdout.write('public-egress-ok')` +
     `});` +
     `});` +
-    `request.once('timeout',()=>{request.destroy();fail()});` +
+    `request.once('timeout',()=>{request.destroy();fail('public HTTPS probe timed out')});` +
     `request.once('error',fail);`;
   return `node -e ${JSON.stringify(program)}`;
 }
@@ -293,6 +350,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
     "proves two-tenant isolation, full-public egress, private denial, cancellation and cleanup",
     async () => {
       const config = await configuration();
+      await assertRawPublicHttpsFromTrustedHost(config.publicHttpsUrl);
       await Promise.all(
         config.forbiddenEndpoints.map((endpoint) => assertReachableFromTrustedHost(endpoint)),
       );
@@ -418,7 +476,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           output(
             await manager.execute(
               first.capability,
-              operation(first.activationId, publicHttpsProbeCommand(), 15_000),
+              operation(first.activationId, publicHttpsProbeCommand(config.publicHttpsUrl), 15_000),
             ),
           ),
         ).toBe("public-egress-ok");

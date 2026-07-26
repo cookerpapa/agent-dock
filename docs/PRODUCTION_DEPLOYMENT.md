@@ -542,11 +542,13 @@ never guesses current provider pricing.
 The trusted Supervisor decrypts the exact snapshotted version and gives its
 in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
 capability. The capability is revoked when the activation settles and never
-crosses the remote-tool RPC boundary. Tool microVMs have no outbound network.
-Treat the Supervisor, Sandbox Manager, PostgreSQL, private runtime directory,
-Cube control/compute plane, K3s/containerd/runsc importer plane and host
-authority as the trusted computing base; this is not a mutually hostile
-public-SaaS deployment.
+crosses the remote-tool RPC boundary. Tool microVMs can reach public Internet
+destinations, but Cube receives a fixed deny list for private, link-local,
+metadata, platform and reserved address classes; public inbound traffic remains
+disabled. This is not a data-loss-prevention boundary. Treat the Supervisor,
+Sandbox Manager, PostgreSQL, private runtime directory, Cube control/compute
+plane, K3s/containerd/runsc importer plane and host authority as the trusted
+computing base; this is not a mutually hostile public-SaaS deployment.
 
 ## Controlled GitHub workspaces
 
@@ -827,6 +829,12 @@ real KVM gate:
 npm run cubesandbox:template-check
 npm run cubesandbox:live-check
 ```
+
+The Cube node must have a native public route. The gate deliberately performs
+a proxy-free HTTPS preflight from the trusted host before allocating guests;
+`HTTP_PROXY` alone is insufficient because CubeVS/NAT does not inherit an
+application proxy. For local WSL, use a network mode that presents an IPv4 or
+IPv6 default route to Linux rather than proxy-only `mirrored` networking.
 
 Run the destructive acceptance topology separately from a real deployment:
 

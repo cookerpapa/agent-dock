@@ -13,9 +13,9 @@ Ordinary Tool workloads run in independent CubeSandbox KVM guests. Public
 repository import remains a separate fixed-purpose gVisor `runsc`/KVM workload.
 Neither path is an ordinary shared-kernel Docker-container boundary. This does
 not make the current loopback product a hostile public code-execution SaaS:
-public identity, abuse controls, Cube control-plane hardening, capacity
-admission, arbitrary dependency egress and independent review remain outside
-the claim.
+public identity, abuse controls, Cube control-plane hardening, destination-level
+egress governance, capacity admission and independent review remain outside the
+claim.
 
 ## Assets
 

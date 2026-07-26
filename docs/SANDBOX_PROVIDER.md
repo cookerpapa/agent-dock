@@ -156,6 +156,12 @@ command timeout: at most 300 seconds
 turn wall clock: 900 seconds
 ```
 
+CubeVS supplies native guest networking rather than inheriting application
+proxy variables from the trusted host. Production Cube nodes must therefore
+have a native public route. `cubesandbox:live-check` first verifies direct HTTPS
+from the trusted host and then requires the same endpoint to succeed from a
+real guest while platform/private probes fail.
+
 The template replaces Cube's inherited entrypoint. Root `envd` is not started,
 because it would expose an unmediated second command/file channel. Port 49983
 must not have a listener.
