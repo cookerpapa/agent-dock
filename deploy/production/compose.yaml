@@ -642,6 +642,7 @@ services:
       temporal: {}
 
   supervisor-volume-bootstrap:
+    profiles: [compose-pi-workers]
     image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
     restart: "no"
     entrypoint: [/bin/sh, -eu, -c]

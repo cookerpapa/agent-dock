@@ -2455,3 +2455,7 @@
   the official CLI is managed in-cluster. Direct mode is explicit and
   fail-closed: CubeMaster address, pinned CLI and registry address must all be
   supplied.
+- Scoped `supervisor-volume-bootstrap` to the Compose Pi Worker profile. A
+  Kubernetes Worker deployment has no Compose supervisor volumes to prepare;
+  excluding that successful one-shot container also prevents Compose `--wait`
+  from treating its expected exit as a failed long-running service.
