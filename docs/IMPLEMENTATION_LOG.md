@@ -2459,3 +2459,52 @@
   Kubernetes Worker deployment has no Compose supervisor volumes to prepare;
   excluding that successful one-shot container also prevents Compose `--wait`
   from treating its expected exit as a failed long-running service.
+
+## 2026-07-26: capacity-aware Temporal Worker affinity
+
+- Added soft Session affinity without introducing a second scheduler.
+  PostgreSQL remembers the Worker that successfully completed a Session, while
+  Temporal remains the only component that matches an Activity to a Worker.
+  An affinity reservation is issued only when that exact Worker is live and
+  `active_sessions + unexpired_reservations < max_concurrent_sessions`.
+- Added a deterministic, Worker-private Temporal Activity Task Queue alongside
+  the existing shared queue. The two pollers share the same in-process
+  execution-slot counter, so the private poller cannot increase effective
+  Worker capacity. A private Activity has a two-second Schedule-to-Start
+  timeout and falls back to the shared queue only when it has not started;
+  an Activity that may already have produced side effects is never blindly
+  retried.
+- Made affinity a bounded optimization rather than correctness state.
+  Reservations are short-lived, claimed by the exact Worker, released on every
+  terminal path and serialized against capacity with a PostgreSQL row lock.
+  Session FIFO, RunAttempt ownership, leases, fencing tokens, checkpoint CAS
+  and the durable Temporal Workflow remain authoritative when a Worker is
+  stale, full, unreachable or replaced.
+- Added deterministic tests proving that two concurrent Sessions cannot both
+  reserve a capacity-one Worker, that a wrong Worker cannot claim a
+  reservation, that active capacity suppresses affinity, and that attacker
+  input cannot select an arbitrary Temporal Task Queue. The complete monorepo
+  typecheck and test suites passed: Control Plane reported 132 passing tests
+  with 3 expected environment-dependent skips, Database reported 37 passing
+  tests, and all other workspaces passed.
+- Registered and validated the immutable Cube Tool template for revision
+  `f704269b5b853c9bc77e0799fd3b06d3fc020fa0`, deployed the production stack,
+  promoted the same revision as the current Temporal Worker build and observed
+  both Kubernetes Worker Pods Ready.
+- Real-model acceptance used Session
+  `462873bd-ef0d-4943-8eab-09f84c14d9c3`. Its first Run settled on Worker
+  `agent-dock-pi-worker-local-v1-0` in 1,919 ms and the next Run settled on the
+  same Worker in 1,679 ms after restoring a non-empty Pi base artifact.
+  Temporal History, rather than the final Worker identity alone, proves the
+  affinity hit: the second Activity was scheduled on
+  `agent-dock-pi-worker-v1-757ba511-294f-40e6-bdfc-e8a09a76a613` with the
+  expected two-second Schedule-to-Start timeout.
+- A separate busy-capacity acceptance held that preferred Worker's only slot
+  with Run `d121ab17-4e07-4aec-bf49-ae79ea3ae361`, then submitted Run
+  `630923db-41f0-4093-bb76-5942fbd16e85` for the same Session. Every scheduled
+  Activity for the queued Run used the shared
+  `agent-dock-pi-runs-v1` queue; none used the Worker-private queue. During the
+  same-Session FIFO wait, Activity starts alternated between both Worker Pods,
+  proving that the task was not pinned behind the occupied preferred Worker.
+  It executed only after the earlier same-Session Run settled, preserving the
+  required serialization.
