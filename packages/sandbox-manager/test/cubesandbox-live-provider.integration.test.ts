@@ -444,7 +444,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             user: "1000:1000",
             privileged: false,
             hasDockerSocket: false,
-            networkMode: "public_egress_private_denied",
+            networkMode: "public_web_proxy_private_denied",
             droppedCapabilities: ["ALL"],
             securityOptions: ["no-new-privileges"],
           },
