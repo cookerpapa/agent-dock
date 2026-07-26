@@ -330,8 +330,15 @@ async function destroyCubeSession(sessionId) {
   await waitForNoCubeSession(sessionId);
 }
 
-async function terminateWarmCubeSession(instance) {
-  const logicalSandboxId = instance.metadata["agentdock.sandbox_id"];
+async function terminateWarmCubeSession(runId) {
+  const logicalSandboxId = await psql(
+    `select ra.sandbox_id
+       from runs r
+       join run_attempts ra
+         on ra.run_id = r.id
+        and ra.id = r.current_attempt_id
+      where r.id = ${sqlLiteral(runId)}`,
+  );
   assert.match(
     logicalSandboxId,
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -715,7 +722,7 @@ try {
     },
   };
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
-  await terminateWarmCubeSession(retained);
+  await terminateWarmCubeSession(followUp.accepted.runId);
   await waitForNoCubeSession(session.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
   report.cleanup.retainedPausedSessionMicroVmCount = 0;
