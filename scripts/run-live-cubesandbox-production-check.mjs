@@ -330,8 +330,8 @@ async function destroyCubeSession(sessionId) {
   await waitForNoCubeSession(sessionId);
 }
 
-async function terminateWarmCubeSession(runId) {
-  const logicalSandboxId = await psql(
+async function logicalSandboxIdForRun(runId) {
+  const value = await psql(
     `select ra.sandbox_id
        from runs r
        join run_attempts ra
@@ -339,10 +339,25 @@ async function terminateWarmCubeSession(runId) {
         and ra.id = r.current_attempt_id
       where r.id = ${sqlLiteral(runId)}`,
   );
-  assert.match(
-    logicalSandboxId,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  assert.match(value, /^[0-9a-f-]{36}$/i);
+  return value;
+}
+
+async function logicalSandboxIdsForSession(sessionId) {
+  const values = await psql(
+    `select distinct ra.sandbox_id
+       from runs r
+       join run_attempts ra on ra.run_id = r.id
+      where r.session_id = ${sqlLiteral(sessionId)}
+        and ra.sandbox_id is not null`,
   );
+  if (values.length === 0) return [];
+  const sandboxIds = values.split(/\r?\n/);
+  for (const sandboxId of sandboxIds) assert.match(sandboxId, /^[0-9a-f-]{36}$/i);
+  return sandboxIds;
+}
+
+async function terminateLogicalSandbox(logicalSandboxId, required) {
   const source = `
     import { readFileSync } from "node:fs";
     import { randomUUID } from "node:crypto";
@@ -371,9 +386,10 @@ async function terminateWarmCubeSession(runId) {
       requestId: randomUUID(),
       sandboxId,
     });
-    if (listed.assignments.length !== 1) {
+    if (listed.assignments.length > 1 || (${JSON.stringify(required)} && listed.assignments.length !== 1)) {
       throw new Error("Expected one warm assignment, got " + listed.assignments.length);
     }
+    if (listed.assignments.length === 0) process.exit(0);
     const assignment = listed.assignments[0];
     await send({
       protocolVersion: 1,
@@ -397,6 +413,10 @@ async function terminateWarmCubeSession(runId) {
     ],
     60_000,
   );
+}
+
+async function terminateWarmCubeSession(runId) {
+  await terminateLogicalSandbox(await logicalSandboxIdForRun(runId), true);
 }
 
 async function waitForDurableRunCompletion(runId) {
@@ -763,8 +783,14 @@ try {
   }
   process.stdout.write(`${JSON.stringify(report)}\n`);
 } finally {
-  // Acceptance failures must not leave paused or running test guests behind.
-  // This deliberately targets only the freshly-created exact Session.
+  // Release Manager ownership/admission first, then use the native Cube API
+  // only as an orphan fallback. Reversing this order would strand a warm
+  // in-memory handle until the Manager's TTL/restart.
+  for (const logicalSandboxId of await logicalSandboxIdsForSession(session.sessionId).catch(
+    () => [],
+  )) {
+    await terminateLogicalSandbox(logicalSandboxId, false).catch(() => undefined);
+  }
   await destroyCubeSession(session.sessionId).catch(() => undefined);
   await cube.close();
 }
