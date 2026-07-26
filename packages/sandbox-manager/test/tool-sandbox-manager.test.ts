@@ -1,4 +1,5 @@
 import type {
+  SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
@@ -373,6 +374,47 @@ describe("provider-backed Tool Sandbox Manager", () => {
     expect(fixture.rebind).toHaveBeenCalledTimes(1);
     expect(fixture.exec).toHaveBeenCalledTimes(2);
     await manager.stop(second.activationId, nextAssignment);
+  });
+
+  it("releases admission when a validated physical runtime is terminated after its assignment advanced", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+      maximumActiveSandboxes: 1,
+    });
+    const created = await manager.create(createRequest);
+    await manager.execute(created.capability, operation("40000000-0000-4000-8000-000000000012"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "40000000-0000-4000-8000-000000000013",
+      activationId: created.activationId,
+      assignment,
+      disposition: "keep_warm",
+      workspaceRevision: "b".repeat(64),
+    });
+    expect(manager.admittedCount).toBe(1);
+    expect(manager.warmCount).toBe(1);
+
+    const advancedInventoryAssignment: SupervisorRuntimeAssignment = {
+      containerId: "66666666-6666-4666-8666-666666666666",
+      containerName: `agent-dock-tool-${ACTIVATION_ID}`.slice(0, 63),
+      supervisorId: assignment.supervisorId,
+      bootId: assignment.bootId,
+      sandboxId: assignment.sandboxId,
+      commandId: "command-provider-test-advanced",
+      sessionId: assignment.sessionId,
+      turnId: "turn-provider-test-advanced",
+      leaseId: "40000000-0000-4000-8000-000000000014",
+      fencingToken: assignment.fencingToken + 1,
+    };
+    await manager.terminateAndConfirmAbsent(advancedInventoryAssignment);
+
+    expect(manager.admittedCount).toBe(0);
+    expect(manager.warmCount).toBe(0);
+    expect(manager.activeCount).toBe(0);
   });
 
   it("revokes the capability before a provider stop failure escapes", async () => {

@@ -165,7 +165,7 @@ function handleMatches(
   );
 }
 
-function sameRuntimeAssignment(
+function samePhysicalRuntime(
   handle: SandboxHandle,
   assignment: SupervisorRuntimeAssignment,
 ): boolean {
@@ -174,12 +174,7 @@ function sameRuntimeAssignment(
     handle.runtimeName === assignment.containerName &&
     handle.assignment.supervisorId === assignment.supervisorId &&
     handle.assignment.bootId === assignment.bootId &&
-    handle.assignment.sandboxId === assignment.sandboxId &&
-    handle.assignment.commandId === assignment.commandId &&
-    handle.assignment.sessionId === assignment.sessionId &&
-    handle.assignment.turnId === assignment.turnId &&
-    handle.assignment.leaseId === assignment.leaseId &&
-    handle.assignment.fencingToken === assignment.fencingToken
+    handle.assignment.sandboxId === assignment.sandboxId
   );
 }
 
@@ -505,26 +500,26 @@ export class ToolSandboxManager {
   }
 
   async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
-    const managed = [...this.#activations.entries()].find(([, activation]) =>
-      activation.handle === undefined
-        ? false
-        : sameRuntimeAssignment(activation.handle, assignment),
+    const managed = [...this.#activations.entries()].filter(([, activation]) =>
+      activation.handle === undefined ? false : samePhysicalRuntime(activation.handle, assignment),
     );
-    if (managed !== undefined) this.#revoke(managed[0], managed[1]);
-    const admittedActivationIds = [...this.#admitted.entries()]
-      .filter(([, admittedAssignment]) => sameSupervisorAssignment(admittedAssignment, assignment))
-      .map(([activationId]) => activationId);
-    const terminatedWarmActivationIds: string[] = [];
+    for (const [activationId, activation] of managed) this.#revoke(activationId, activation);
+    const terminatedActivationIds = new Set(
+      [...this.#admitted.entries()]
+        .filter(([, admittedAssignment]) =>
+          sameSupervisorAssignment(admittedAssignment, assignment),
+        )
+        .map(([activationId]) => activationId),
+    );
+    for (const [activationId] of managed) terminatedActivationIds.add(activationId);
     for (const [key, warm] of this.#warm) {
-      if (sameRuntimeAssignment(warm.handle, assignment)) {
+      if (samePhysicalRuntime(warm.handle, assignment)) {
         this.#warm.delete(key);
-        terminatedWarmActivationIds.push(warm.handle.activationId);
+        terminatedActivationIds.add(warm.handle.activationId);
       }
     }
     await this.#provider.terminateAndConfirmAbsent(assignment);
-    if (managed !== undefined) this.#releaseAdmission(managed[0]);
-    for (const activationId of admittedActivationIds) this.#releaseAdmission(activationId);
-    for (const activationId of terminatedWarmActivationIds) this.#releaseAdmission(activationId);
+    for (const activationId of terminatedActivationIds) this.#releaseAdmission(activationId);
   }
 
   async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {

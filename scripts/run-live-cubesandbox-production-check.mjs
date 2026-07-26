@@ -403,11 +403,12 @@ async function workspaceVersionEvidence(runId) {
   return { fileCount, artifactBytes };
 }
 
-async function terminateLogicalSandbox(logicalSandboxId, required) {
+async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
   const source = `
     import { readFileSync } from "node:fs";
     import { randomUUID } from "node:crypto";
     const sandboxId = ${JSON.stringify(logicalSandboxId)};
+    const sessionId = ${JSON.stringify(sessionId)};
     const token = readFileSync(
       "/run/agent-dock-secrets/sandbox-manager-token",
       "utf8",
@@ -432,11 +433,14 @@ async function terminateLogicalSandbox(logicalSandboxId, required) {
       requestId: randomUUID(),
       sandboxId,
     });
-    if (listed.assignments.length > 1 || (${JSON.stringify(required)} && listed.assignments.length !== 1)) {
-      throw new Error("Expected one warm assignment, got " + listed.assignments.length);
+    const assignments = listed.assignments.filter(
+      (assignment) => assignment.sessionId === sessionId,
+    );
+    if (assignments.length > 1 || (${JSON.stringify(required)} && assignments.length !== 1)) {
+      throw new Error("Expected one exact-Session warm assignment, got " + assignments.length);
     }
-    if (listed.assignments.length === 0) process.exit(0);
-    const assignment = listed.assignments[0];
+    if (assignments.length === 0) process.exit(0);
+    const assignment = assignments[0];
     await send({
       protocolVersion: 1,
       type: "assignment.terminate_and_confirm",
@@ -461,8 +465,8 @@ async function terminateLogicalSandbox(logicalSandboxId, required) {
   );
 }
 
-async function terminateWarmCubeSession(runId) {
-  await terminateLogicalSandbox(await logicalSandboxIdForRun(runId), true);
+async function terminateWarmCubeSession(runId, sessionId) {
+  await terminateLogicalSandbox(await logicalSandboxIdForRun(runId), sessionId, true);
 }
 
 async function waitForDurableRunCompletion(runId) {
@@ -754,7 +758,7 @@ try {
     largeFirstWorkspace.artifactBytes <= 32 * 1_024 * 1_024,
     "Cube checkpoint reference exceeded its bounded transport",
   );
-  await terminateWarmCubeSession(largeFirst.accepted.runId);
+  await terminateWarmCubeSession(largeFirst.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
 
   const largeFollowUp = await runTurn(
@@ -874,9 +878,9 @@ try {
     },
   };
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
-  await terminateWarmCubeSession(followUp.accepted.runId);
+  await terminateWarmCubeSession(followUp.accepted.runId, session.sessionId);
   await waitForNoCubeSession(session.sessionId);
-  await terminateWarmCubeSession(largeFollowUp.accepted.runId);
+  await terminateWarmCubeSession(largeFollowUp.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
   report.cleanup.retainedPausedSessionMicroVmCount = 0;
@@ -925,14 +929,18 @@ try {
   for (const logicalSandboxId of await logicalSandboxIdsForSession(session.sessionId).catch(
     () => [],
   )) {
-    await terminateLogicalSandbox(logicalSandboxId, false).catch(() => undefined);
+    await terminateLogicalSandbox(logicalSandboxId, session.sessionId, false).catch(
+      () => undefined,
+    );
   }
   await destroyCubeSession(session.sessionId).catch(() => undefined);
   if (largeSession !== undefined) {
     for (const logicalSandboxId of await logicalSandboxIdsForSession(largeSession.sessionId).catch(
       () => [],
     )) {
-      await terminateLogicalSandbox(logicalSandboxId, false).catch(() => undefined);
+      await terminateLogicalSandbox(logicalSandboxId, largeSession.sessionId, false).catch(
+        () => undefined,
+      );
     }
     await destroyCubeSession(largeSession.sessionId).catch(() => undefined);
   }
