@@ -66,6 +66,34 @@ export function isAllowedCubeApiOperation(path: string, method: string): boolean
   ) {
     return true;
   }
+  if (normalizedMethod === "GET" && parsed.pathname === "/snapshots") {
+    if (parsed.search === "") return true;
+    if ([...parsed.searchParams.keys()].some((key) => key !== "limit" && key !== "nextToken")) {
+      return false;
+    }
+    const limits = parsed.searchParams.getAll("limit");
+    const limit = limits[0];
+    if (
+      limits.length > 1 ||
+      (limits.length === 1 &&
+        (limit === undefined || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(limit)))
+    ) {
+      return false;
+    }
+    const nextTokens = parsed.searchParams.getAll("nextToken");
+    const nextToken = nextTokens[0];
+    if (
+      nextTokens.length > 1 ||
+      (nextTokens.length === 1 &&
+        (nextToken === undefined ||
+          nextToken.length < 1 ||
+          nextToken.length > 4_096 ||
+          /[\u0000-\u001f\u007f]/.test(nextToken)))
+    ) {
+      return false;
+    }
+    return limits.length === 1 || nextTokens.length === 1;
+  }
   if (normalizedMethod === "GET" && parsed.pathname === "/v2/sandboxes") {
     if (parsed.search === "") return true;
     if ([...parsed.searchParams.keys()].some((key) => key !== "limit")) return false;
