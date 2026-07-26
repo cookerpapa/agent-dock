@@ -780,9 +780,14 @@ npm run production:ps
 `production:deploy` rebuilds pinned images and runs the idempotent migration and
 bootstrap jobs before the long-running services become ready. Temporal schema
 and namespace initialization must succeed before the Control Plane starts.
-Recreating the
-Supervisor host intentionally creates a fresh boot/sandbox generation; the old
-boot is fenced and retired, and settled sessions restore from PostgreSQL/MinIO.
+When `AGENT_DOCK_PI_WORKER_DEPLOYMENT=kubernetes`, the same command also builds
+the trusted Pi Worker image from the exact repository revision, imports it into
+the local Worker cluster, rolls the StatefulSet, waits for both Workers and
+their management routes, and promotes that Build ID in Temporal. A deployment
+must not leave the Control Plane on a newer protocol revision while Temporal
+continues routing Runs to an older Worker image. Recreating a Supervisor host
+intentionally creates a fresh boot/sandbox generation; the old boot is fenced
+and retired, and settled sessions restore from PostgreSQL/MinIO.
 
 Database migrations are forward-moving. A container-image rollback is not a
 safe schema rollback by itself. Restore the coordinated pre-upgrade recovery

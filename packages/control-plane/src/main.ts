@@ -28,7 +28,10 @@ import {
   type RemoteControlPlaneRuntime,
 } from "./remote-control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
-import { SandboxManagerClient } from "@agent-dock/sandbox-manager/client";
+import {
+  SandboxManagerClient,
+  SandboxManagerClientError,
+} from "@agent-dock/sandbox-manager/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import { CubeSnapshotReferenceReconciler } from "./cube-snapshot-reference-reconciler.ts";
 
@@ -252,12 +255,20 @@ export async function startControlPlane(): Promise<void> {
           });
         })
         .catch((error: unknown) => {
+          const managerError =
+            error instanceof SandboxManagerClientError ? error : undefined;
           operationalLog({
             service: "agent-dock-control-plane",
             level: "error",
             event: "cube_snapshot_gc.failed",
             attributes: {
               errorName: error instanceof Error ? error.name : "unknown",
+              ...(managerError === undefined
+                ? {}
+                : {
+                    errorCode: managerError.code,
+                    retryable: managerError.retryable,
+                  }),
             },
           });
         });

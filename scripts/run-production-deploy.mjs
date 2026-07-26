@@ -49,5 +49,8 @@ const port = environment.AGENT_DOCK_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
+if (environment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes") {
+  await run("scripts/local-kubernetes-pi-workers.mjs", ["up"]);
+}
 const displayHost = bindAddress.includes(":") ? `[${bindAddress}]` : bindAddress;
 process.stdout.write(`AgentDock production deployment is ready at http://${displayHost}:${port}\n`);
