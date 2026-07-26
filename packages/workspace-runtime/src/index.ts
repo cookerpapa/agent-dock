@@ -27,6 +27,7 @@ export {
   createCubeWorkspaceCheckpoint,
   cubeWorkspaceCheckpointAad,
   parseCubeWorkspaceCheckpoint,
+  type CubeWorkspaceIndex,
   type CreateCubeWorkspaceCheckpointInput,
   type CubeWorkspaceCheckpoint,
   type CubeWorkspaceCheckpointAuthority,

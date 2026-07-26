@@ -143,7 +143,9 @@ describe("shared workspace runtime", () => {
       ),
     );
 
-    const files = await captureCubeWorkspaceIndex(root);
+    const index = await captureCubeWorkspaceIndex(root);
+    const files = index.files;
+    expect(index.portable).toBe(true);
     expect(files).toHaveLength(601);
     expect(files[0]?.path).toBe("nested/.git/config");
     expect(files.some((file) => file.path === ".git/HEAD")).toBe(false);
@@ -175,10 +177,20 @@ describe("shared workspace runtime", () => {
     expect(() => parseWorkspaceSnapshot(encoded)).toThrow(/portable file bytes/);
   });
 
-  it("rejects symlinks from the Cube checkpoint index", async () => {
+  it("indexes symlinks without following them and selects a native Cube snapshot", async () => {
     const root = await temporaryDirectory("agent-dock-cube-workspace-link-");
     await writeFile(resolve(root, "target.txt"), "target\n");
     await symlink("target.txt", resolve(root, "link.txt"));
-    await expect(captureCubeWorkspaceIndex(root)).rejects.toThrow(/link or special file/);
+    const index = await captureCubeWorkspaceIndex(root);
+    expect(index.portable).toBe(false);
+    expect(index.files.map((file) => file.path)).toEqual(["link.txt", "target.txt"]);
+    const link = index.files[0];
+    const target = index.files[1];
+    expect(link).toMatchObject({
+      path: "link.txt",
+      executable: false,
+      sizeBytes: Buffer.byteLength("target.txt"),
+    });
+    expect(link?.sha256).not.toBe(target?.sha256);
   });
 });

@@ -137,7 +137,13 @@ The checkpoint artifact stored in MinIO is a small
 - Cube snapshot/source identities;
 - the prior activation, physical binding and fence;
 - an encrypted recovery authority;
-- a content-hashed regular-file index for file listing and comparison.
+- a content-hashed file/symbolic-link index for listing and comparison.
+
+The index never follows a symbolic link. Link targets are hashed with a
+domain-separated digest so replacing a regular file with a link cannot reuse
+the regular-file digest. A Workspace containing links is ineligible for the
+portable regular-file manifest and therefore uses the native Cube snapshot,
+which preserves Git's `120000` entries exactly. Special files remain rejected.
 
 The recovery authority is generated only after Tool processes are sealed,
 encrypted with a domain-separated key derived from the stable Sandbox Manager
@@ -165,4 +171,5 @@ regression Provider.
   events and Temporal history;
 - the old v1 fixture remains readable;
 - a failed capture reports a checkpoint-specific safe error;
+- real Git symbolic links are indexed without dereferencing or losing them;
 - no source Sandbox or temporary clone remains after the test.

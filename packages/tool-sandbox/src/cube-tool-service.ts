@@ -660,7 +660,7 @@ const server = createServer((request, response) => {
         throw new CubeToolServiceError(400, "Tool checkpoint request was invalid");
       }
       await sealToolBoundary();
-      const [files, workspacePatch] = await Promise.all([
+      const [workspaceIndex, workspacePatch] = await Promise.all([
         captureCubeWorkspaceIndex("/workspace"),
         collectGitWorkspacePatch(
           "/workspace",
@@ -672,8 +672,10 @@ const server = createServer((request, response) => {
           { uid: TOOL_UID, gid: TOOL_GID },
         ),
       ]);
+      const files = workspaceIndex.files;
       let portableWorkspace: ReturnType<typeof encodeWorkspaceSnapshotBlob> | undefined;
       if (
+        workspaceIndex.portable &&
         files.length <= MAX_WORKSPACE_SNAPSHOT_FILES &&
         files.every((file) => file.sizeBytes <= MAX_WORKSPACE_SNAPSHOT_FILE_BYTES)
       ) {

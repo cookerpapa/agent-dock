@@ -2590,7 +2590,7 @@
   512-file, 512-KiB/file and 2-MiB limits. Historical lists/comparisons use the
   provider index, while unsupported exact-content reads fail explicitly.
 - Deterministic evidence includes a 601-file index without embedded file
-  content, symlink rejection, portable-small/native-large Provider paths,
+  content, non-dereferencing symbolic-link indexing, portable-small/native-large Provider paths,
   encrypted-authority non-disclosure, source-destroy/fresh-activation restore,
   official snapshot HTTP request shape and Workspace-version projection.
   The rebuilt Cube Tool template check also passed real process killing,
@@ -2609,3 +2609,9 @@
   the single-node Cube storage plane. Compose backup alone is not a node-loss
   backup for provider-native Workspace versions; replicated/off-host storage,
   reference-aware GC and a read-only historical materializer remain backlog.
+- The real Temporal repository gate exposed two Git `120000` entries after the
+  original file-count limit had been removed. Cube-native indexes now hash
+  symbolic-link targets with an explicit domain separator, never dereference
+  them, and mark the Workspace as native-only. This keeps the portable manifest
+  regular-file-only while allowing ordinary real repositories to checkpoint
+  without hiding links or weakening path traversal checks.

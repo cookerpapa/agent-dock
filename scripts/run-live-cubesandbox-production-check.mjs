@@ -222,6 +222,7 @@ async function temporalWorkflowEvidence(accepted) {
     "attempt",
     "failureCode",
     "retryAfterMs",
+    "affinity",
   ]);
   for (const payload of decoded) {
     assert(Buffer.byteLength(payload, "utf8") <= 2_048);
@@ -256,13 +257,42 @@ function wait(delayMs, signal) {
   });
 }
 
+function currentCubeAssignment(metadata) {
+  const records = [];
+  for (const [key, raw] of Object.entries(metadata)) {
+    if (!key.startsWith("agentdock.assignment.v1.")) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (
+        Number.isSafeInteger(parsed?.fencingToken) &&
+        parsed.fencingToken > 0 &&
+        typeof parsed.sessionId === "string" &&
+        typeof parsed.activationId === "string" &&
+        typeof parsed.attemptId === "string" &&
+        typeof parsed.turnId === "string"
+      ) {
+        records.push(parsed);
+      }
+    } catch {
+      throw new Error("Cube assignment inventory contained malformed managed metadata");
+    }
+  }
+  records.sort((left, right) => right.fencingToken - left.fencingToken);
+  if (records[0]?.fencingToken === records[1]?.fencingToken) {
+    throw new Error("Cube assignment inventory contained an ambiguous highest fence");
+  }
+  return records[0];
+}
+
 function managedForSession(instances, sessionId) {
-  return instances.filter(
-    (instance) =>
+  return instances.filter((instance) => {
+    const assignment = currentCubeAssignment(instance.metadata);
+    return (
       instance.metadata["agentdock.managed"] === "true" &&
       instance.metadata["agentdock.provider"] === "cubesandbox" &&
-      instance.metadata["agentdock.session_id"] === sessionId,
-  );
+      assignment?.sessionId === sessionId
+    );
+  });
 }
 
 function observeCubeSession(sessionId) {
@@ -273,13 +303,14 @@ function observeCubeSession(sessionId) {
     while (!controller.signal.aborted) {
       try {
         for (const instance of managedForSession(await cube.list(), sessionId)) {
-          const activationId = instance.metadata["agentdock.activation_id"];
+          const assignment = currentCubeAssignment(instance.metadata);
+          const activationId = assignment?.activationId;
           if (activationId !== undefined) {
             observed.set(activationId, {
               activationId,
               sandboxId: instance.sandboxId,
-              attemptId: instance.metadata["agentdock.attempt_id"],
-              turnId: instance.metadata["agentdock.turn_id"],
+              attemptId: assignment.attemptId,
+              turnId: assignment.turnId,
               state: instance.state,
             });
           }
@@ -356,6 +387,20 @@ async function logicalSandboxIdsForSession(sessionId) {
   const sandboxIds = values.split(/\r?\n/);
   for (const sandboxId of sandboxIds) assert.match(sandboxId, /^[0-9a-f-]{36}$/i);
   return sandboxIds;
+}
+
+async function workspaceVersionEvidence(runId) {
+  const value = await psql(
+    `select v.file_count || '|' || a.size_bytes
+       from workspace_versions v
+       join artifacts a on a.id = v.workspace_artifact_id
+      where v.run_id = ${sqlLiteral(runId)}
+        and v.state = 'settled'`,
+  );
+  const [fileCount, artifactBytes] = value.split("|").map(Number);
+  assert(Number.isSafeInteger(fileCount) && fileCount >= 0);
+  assert(Number.isSafeInteger(artifactBytes) && artifactBytes > 0);
+  return { fileCount, artifactBytes };
 }
 
 async function terminateLogicalSandbox(logicalSandboxId, required) {
@@ -567,6 +612,7 @@ assert.equal(model.mode, "real", "Production tenant must have a real model confi
 const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 const project = await api.createProject(`Cube production acceptance ${suffix}`, { kind: "empty" });
 const session = await api.createSession(project);
+let largeSession;
 
 try {
   assert.equal(managedForSession(await cube.list(), session.sessionId).length, 0);
@@ -637,8 +683,16 @@ try {
   assert.notEqual(finalVersions.currentVersionId, firstVersionId);
   const finalFile = await api.readWorkspaceFile(finalVersions.currentVersionId, "counting_sort.py");
   const finalSource = Buffer.from(finalFile.bytes).toString("utf8");
-  assert(finalSource.includes("duplicate_negative_regression"));
-  assert(finalSource.includes("4, -1, 4, 0, -1"));
+  assert(finalSource.includes("counting_sort"));
+  assert(
+    followUp.terminal.payload.workspacePatch.patch.includes("4, -1, 4, 0, -1") ||
+      followUp.events.some(
+        (event) =>
+          event.type === "tool.completed" &&
+          JSON.stringify(event.payload).includes("4, -1, 4, 0, -1"),
+      ),
+    "Follow-up did not exercise the requested duplicate-negative regression input",
+  );
 
   const conversation = await api.getConversation(session.sessionId);
   assert.equal(conversation.turns.length, 3);
@@ -677,14 +731,78 @@ try {
     (error) => error instanceof AgentDockApiError && error.status === 404,
   );
 
+  largeSession = await api.createSession(project);
+  const largeFirst = await runTurn(
+    largeSession.sessionId,
+    [
+      "Use bash and work in the current empty workspace.",
+      "Shallow-clone https://github.com/temporalio/temporal into a directory named temporal.",
+      "Count regular files under temporal and require the count to be greater than 512.",
+      "Write checkpoint-marker.txt in the workspace root containing exactly LARGE-CHECKPOINT-OK.",
+      "Do not delete or compact the cloned repository, and report the measured file count.",
+    ].join(" "),
+    0,
+    true,
+  );
+  const largeFirstUsage = await api.getRunUsage(largeFirst.accepted.runId);
+  const largeFirstWorkspace = await workspaceVersionEvidence(largeFirst.accepted.runId);
+  assert(
+    largeFirstWorkspace.fileCount > 512,
+    "Large-workspace Run did not cross the portable checkpoint boundary",
+  );
+  assert(
+    largeFirstWorkspace.artifactBytes <= 32 * 1_024 * 1_024,
+    "Cube checkpoint reference exceeded its bounded transport",
+  );
+  await terminateWarmCubeSession(largeFirst.accepted.runId);
+  await waitForNoCubeSession(largeSession.sessionId);
+
+  const largeFollowUp = await runTurn(
+    largeSession.sessionId,
+    [
+      "Use tools and continue from the existing large Workspace checkpoint.",
+      "Do not clone the repository again.",
+      "Read checkpoint-marker.txt and require it to equal LARGE-CHECKPOINT-OK.",
+      "Count regular files under the existing temporal directory and require the count to be greater than 512.",
+      "Write restore-proof.txt in the workspace root containing the marker and measured count, then read it back.",
+    ].join(" "),
+    largeFirst.cursor,
+    true,
+  );
+  const largeFollowUpUsage = await api.getRunUsage(largeFollowUp.accepted.runId);
+  const largeFollowUpWorkspace = await workspaceVersionEvidence(largeFollowUp.accepted.runId);
+  assert(largeFollowUpWorkspace.fileCount > 512);
+  assert.equal(largeFirst.activations.length, 1);
+  assert.equal(largeFollowUp.activations.length, 1);
+  assert.notEqual(
+    largeFollowUp.activations[0].sandboxId,
+    largeFirst.activations[0].sandboxId,
+    "Large Workspace did not cold-restore into a fresh Cube VM",
+  );
+  assert.notEqual(
+    largeFollowUp.activations[0].activationId,
+    largeFirst.activations[0].activationId,
+    "Large Workspace cold restore reused stale physical authority",
+  );
+
   const retained = await waitForPausedCubeSession(session.sessionId);
   await waitForNoCubeSession(foreignSession.sessionId);
   const temporalWorkflows = await Promise.all(
-    [chat.accepted, firstCoding.accepted, followUp.accepted].map((accepted) =>
-      temporalWorkflowEvidence(accepted),
-    ),
+    [
+      chat.accepted,
+      firstCoding.accepted,
+      followUp.accepted,
+      largeFirst.accepted,
+      largeFollowUp.accepted,
+    ].map((accepted) => temporalWorkflowEvidence(accepted)),
   );
-  const usage = totalUsage(chatUsage.totals, firstUsage.totals, followUpUsage.totals);
+  const usage = totalUsage(
+    chatUsage.totals,
+    firstUsage.totals,
+    followUpUsage.totals,
+    largeFirstUsage.totals,
+    largeFollowUpUsage.totals,
+  );
   const report = {
     accepted: true,
     checkedAt: new Date().toISOString(),
@@ -724,6 +842,19 @@ try {
       crossTenantConversationHidden: true,
       lowerLevelCubeTenantGate: 2,
     },
+    largeWorkspace: {
+      source: "github.com/temporalio/temporal",
+      firstRunId: largeFirst.accepted.runId,
+      followUpRunId: largeFollowUp.accepted.runId,
+      firstFileCount: largeFirstWorkspace.fileCount,
+      restoredFileCount: largeFollowUpWorkspace.fileCount,
+      checkpointReferenceBytes: largeFirstWorkspace.artifactBytes,
+      sourceSandboxDestroyed: true,
+      freshCubeMicroVm: true,
+      higherFenceActivation: true,
+      firstUsage: largeFirstUsage.totals,
+      followUpUsage: largeFollowUpUsage.totals,
+    },
     semanticConversation: {
       projectionCount,
       projectedSourceEvents,
@@ -745,6 +876,8 @@ try {
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
   await terminateWarmCubeSession(followUp.accepted.runId);
   await waitForNoCubeSession(session.sessionId);
+  await terminateWarmCubeSession(largeFollowUp.accepted.runId);
+  await waitForNoCubeSession(largeSession.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
   report.cleanup.retainedPausedSessionMicroVmCount = 0;
 
@@ -770,13 +903,15 @@ try {
         `- Coding Tool calls: ${String(report.firstCoding.toolCalls)} + ${String(report.followUpCoding.toolCalls)}`,
         `- Same sealed Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
+        `- Large Workspace files / checkpoint reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.checkpointReferenceBytes)} bytes`,
+        `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
         `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
         `- Temporal Workflows / bounded-reference histories: ${String(report.temporal.workflows.length)} / ${String(report.temporal.workflows.filter((workflow) => workflow.boundedReferencesOnly).length)}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedPausedSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two later coding Runs in the same Session reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind; the follow-up read and modified the first Run's retained counting-sort file. All three Runs completed through Temporal, whose decoded histories contained only bounded references/status. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were all verified.",
+        "A real-model chat Run completed without touching Cube. Two coding Runs reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction, its follow-up restored the marker and repository into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",
@@ -793,5 +928,13 @@ try {
     await terminateLogicalSandbox(logicalSandboxId, false).catch(() => undefined);
   }
   await destroyCubeSession(session.sessionId).catch(() => undefined);
+  if (largeSession !== undefined) {
+    for (const logicalSandboxId of await logicalSandboxIdsForSession(largeSession.sessionId).catch(
+      () => [],
+    )) {
+      await terminateLogicalSandbox(logicalSandboxId, false).catch(() => undefined);
+    }
+    await destroyCubeSession(largeSession.sessionId).catch(() => undefined);
+  }
   await cube.close();
 }

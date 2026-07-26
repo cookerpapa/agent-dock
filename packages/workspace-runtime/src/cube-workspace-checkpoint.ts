@@ -1,7 +1,7 @@
 import { MAX_WORKSPACE_SNAPSHOT_BYTES } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, readlink } from "node:fs/promises";
 import { posix, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
@@ -12,6 +12,8 @@ export const MAX_CUBE_WORKSPACE_FILE_BYTES = 1 * 1_024 * 1_024 * 1_024;
 export const MAX_CUBE_WORKSPACE_TOTAL_BYTES = 1 * 1_024 * 1_024 * 1_024;
 
 const MAX_PATH_BYTES = 512;
+const MAX_SYMLINK_TARGET_BYTES = 4 * 1_024;
+const SYMLINK_DIGEST_DOMAIN = Buffer.from("agent-dock.workspace-symlink.v1\0", "utf8");
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -23,6 +25,11 @@ export type WorkspaceSnapshotFileMetadata = Readonly<{
   executable: boolean;
   sizeBytes: number;
   sha256: string;
+}>;
+
+export type CubeWorkspaceIndex = Readonly<{
+  files: readonly WorkspaceSnapshotFileMetadata[];
+  portable: boolean;
 }>;
 
 export type CubeWorkspaceCheckpointAuthority = Readonly<{
@@ -348,11 +355,45 @@ async function hashOpenFile(absolutePath: string): Promise<{ metadata: Stats; sh
   }
 }
 
+async function hashSymbolicLink(
+  absolutePath: string,
+): Promise<{ metadata: Stats; sizeBytes: number; sha256: string }> {
+  try {
+    const before = await lstat(absolutePath);
+    if (!before.isSymbolicLink() || before.size > MAX_SYMLINK_TARGET_BYTES) {
+      throw snapshotError("Workspace symbolic link is outside its byte limit");
+    }
+    const target = await readlink(absolutePath, { encoding: "buffer" });
+    const after = await lstat(absolutePath);
+    if (
+      !after.isSymbolicLink() ||
+      target.byteLength !== before.size ||
+      after.size !== before.size ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs ||
+      after.ino !== before.ino
+    ) {
+      throw snapshotError("Workspace symbolic link changed during checkpoint capture");
+    }
+    return {
+      metadata: after,
+      sizeBytes: target.byteLength,
+      // Domain separation makes a regular file containing the same target text
+      // observably different from a symbolic link without exposing or following
+      // the link outside the Workspace.
+      sha256: createHash("sha256").update(SYMLINK_DIGEST_DOMAIN).update(target).digest("hex"),
+    };
+  } catch (error: unknown) {
+    if (error instanceof WorkspaceRuntimeError) throw error;
+    throw snapshotError("Workspace symbolic link could not be captured safely");
+  }
+}
+
 async function collectMetadata(
   root: string,
   relativeDirectory: string,
   output: WorkspaceSnapshotFileMetadata[],
-  byteCounter: { value: number },
+  state: { totalSizeBytes: number; portable: boolean },
 ): Promise<void> {
   const directory = relativeDirectory.length === 0 ? root : resolve(root, relativeDirectory);
   const entries = await readdir(directory, { withFileTypes: true });
@@ -363,21 +404,41 @@ async function collectMetadata(
     if (!validRelativePath(relativePath)) {
       throw snapshotError("Workspace contains an unsupported path");
     }
-    if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
-      throw snapshotError("Workspace contains a link or special file");
-    }
     if (entry.isDirectory()) {
-      await collectMetadata(root, relativePath, output, byteCounter);
+      await collectMetadata(root, relativePath, output, state);
       continue;
     }
     if (output.length >= MAX_CUBE_WORKSPACE_CHECKPOINT_FILES) {
       throw snapshotError("Workspace contains too many files for a Cube checkpoint");
     }
+    if (entry.isSymbolicLink()) {
+      const link = await hashSymbolicLink(resolve(root, relativePath));
+      state.totalSizeBytes += link.sizeBytes;
+      state.portable = false;
+      if (
+        !Number.isSafeInteger(state.totalSizeBytes) ||
+        state.totalSizeBytes > MAX_CUBE_WORKSPACE_TOTAL_BYTES
+      ) {
+        throw snapshotError("Workspace exceeds the Cube checkpoint byte limit");
+      }
+      output.push(
+        Object.freeze({
+          path: relativePath,
+          executable: false,
+          sizeBytes: link.sizeBytes,
+          sha256: link.sha256,
+        }),
+      );
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw snapshotError("Workspace contains a special file");
+    }
     const { metadata, sha256 } = await hashOpenFile(resolve(root, relativePath));
-    byteCounter.value += metadata.size;
+    state.totalSizeBytes += metadata.size;
     if (
-      !Number.isSafeInteger(byteCounter.value) ||
-      byteCounter.value > MAX_CUBE_WORKSPACE_TOTAL_BYTES
+      !Number.isSafeInteger(state.totalSizeBytes) ||
+      state.totalSizeBytes > MAX_CUBE_WORKSPACE_TOTAL_BYTES
     ) {
       throw snapshotError("Workspace exceeds the Cube checkpoint byte limit");
     }
@@ -394,8 +455,12 @@ async function collectMetadata(
 
 export async function captureCubeWorkspaceIndex(
   workspaceDirectory: string,
-): Promise<readonly WorkspaceSnapshotFileMetadata[]> {
+): Promise<CubeWorkspaceIndex> {
   const files: WorkspaceSnapshotFileMetadata[] = [];
-  await collectMetadata(workspaceDirectory, "", files, { value: 0 });
-  return Object.freeze(files);
+  const state = { totalSizeBytes: 0, portable: true };
+  await collectMetadata(workspaceDirectory, "", files, state);
+  return Object.freeze({
+    files: Object.freeze(files),
+    portable: state.portable,
+  });
 }
