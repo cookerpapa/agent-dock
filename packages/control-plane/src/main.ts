@@ -66,6 +66,8 @@ export async function startControlPlane(): Promise<void> {
   let runtime: RemoteControlPlaneRuntime | undefined;
   let temporalOrchestrator: TemporalRunOrchestrator | undefined;
   let snapshotGcTimer: NodeJS.Timeout | undefined;
+  let snapshotGcRetryTimer: NodeJS.Timeout | undefined;
+  let closing = false;
   try {
     await verifyBootstrap(database);
     const modelCredentialVault = new TenantModelCredentialVault(config.modelCredentialMasterKey);
@@ -241,6 +243,10 @@ export async function startControlPlane(): Promise<void> {
       void snapshotReferenceReconciler
         .reconcile()
         .then((result) => {
+          if (snapshotGcRetryTimer !== undefined) {
+            clearTimeout(snapshotGcRetryTimer);
+            snapshotGcRetryTimer = undefined;
+          }
           operationalLog({
             service: "agent-dock-control-plane",
             level: "info",
@@ -255,8 +261,7 @@ export async function startControlPlane(): Promise<void> {
           });
         })
         .catch((error: unknown) => {
-          const managerError =
-            error instanceof SandboxManagerClientError ? error : undefined;
+          const managerError = error instanceof SandboxManagerClientError ? error : undefined;
           operationalLog({
             service: "agent-dock-control-plane",
             level: "error",
@@ -271,6 +276,13 @@ export async function startControlPlane(): Promise<void> {
                   }),
             },
           });
+          if (!closing && managerError?.retryable === true && snapshotGcRetryTimer === undefined) {
+            snapshotGcRetryTimer = setTimeout(() => {
+              snapshotGcRetryTimer = undefined;
+              if (!closing) reconcileSnapshots();
+            }, 5_000);
+            snapshotGcRetryTimer.unref();
+          }
         });
     };
     reconcileSnapshots();
@@ -280,11 +292,11 @@ export async function startControlPlane(): Promise<void> {
       `AgentDock production control plane listening on ${config.host}:${String(config.port)}\n`,
     );
 
-    let closing = false;
     const close = async (): Promise<void> => {
       if (closing) return;
       closing = true;
       if (snapshotGcTimer !== undefined) clearInterval(snapshotGcTimer);
+      if (snapshotGcRetryTimer !== undefined) clearTimeout(snapshotGcRetryTimer);
       await temporalOrchestrator?.stop();
       await runtime?.close();
       objectStore.destroy();
@@ -299,7 +311,9 @@ export async function startControlPlane(): Promise<void> {
     process.once("SIGINT", closeAfterSignal);
     process.once("SIGTERM", closeAfterSignal);
   } catch (error: unknown) {
+    closing = true;
     if (snapshotGcTimer !== undefined) clearInterval(snapshotGcTimer);
+    if (snapshotGcRetryTimer !== undefined) clearTimeout(snapshotGcRetryTimer);
     await temporalOrchestrator?.stop().catch(() => undefined);
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);

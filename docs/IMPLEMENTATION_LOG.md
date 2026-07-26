@@ -2646,3 +2646,27 @@
   control-plane scaling, fresh Supervisor boot, active cancellation, warm
   retirement, 22 durable events, and a 12,472,325-byte encrypted backup/restore
   drill with restored cursor 34.
+
+## 2026-07-26 — Cube snapshot lifecycle closure and deploy convergence
+
+- Added a separately authenticated, read-only historical materializer. A
+  Workspace-version file read now clones the immutable Cube snapshot into a
+  temporary sealed VM, verifies the content-index entry and hash, returns only
+  the requested bounded file, and destroys the reader. The reader cannot run
+  ordinary tools or inherit a writable Session assignment.
+- Added reference-aware Cube snapshot garbage collection. PostgreSQL/MinIO
+  committed Workspace versions are the authoritative reference set; Cube
+  inventory candidates require two observations and a 24-hour grace period,
+  deletion is capped per scan, and invalid or missing committed references stop
+  the scan before deletion. GC state is persisted mode `0600`.
+- Extended the Cube API authorizer only for the official bounded
+  `GET /snapshots` inventory shape. Unknown query fields, duplicate fields and
+  invalid pagination bounds remain denied.
+- Production deployment now rebuilds and rolls the Kubernetes Pi Worker pool,
+  pins it to the current Git revision and promotes the matching Temporal build.
+  This closes the stale-worker failure where the Compose control plane had
+  advanced but K3d Workers still executed an older protocol.
+- Snapshot reconciliation now treats Sandbox Manager startup unavailability as
+  a bounded retryable dependency race and retries after five seconds. Integrity,
+  tenant-binding and protocol failures remain non-retryable and fail closed;
+  shutdown cancels both periodic and retry timers.
