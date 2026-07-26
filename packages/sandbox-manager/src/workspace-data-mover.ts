@@ -209,6 +209,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
   readonly #kopiaBinary: string;
   readonly #kopiaConfigPath: string;
   readonly #kopiaCacheDirectory: string;
+  readonly #kopiaLogDirectory = "/tmp/agent-dock-kopia-logs";
   readonly #repositoryPassword: string;
   readonly #s3: KopiaWorkspaceDataMoverOptions["s3"];
   readonly #commandTimeoutMs: number;
@@ -426,6 +427,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     await mkdir(this.#stateRoot, { recursive: true, mode: 0o700 });
     await mkdir(dirname(this.#kopiaConfigPath), { recursive: true, mode: 0o700 });
     await mkdir(this.#kopiaCacheDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(this.#kopiaLogDirectory, { recursive: true, mode: 0o700 });
     try {
       await this.#kopia(["repository", "status", "--json"], 60_000);
       return;
@@ -476,7 +478,10 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
           KOPIA_CONFIG_PATH: this.#kopiaConfigPath,
           KOPIA_CACHE_DIRECTORY: this.#kopiaCacheDirectory,
           KOPIA_CHECK_FOR_UPDATES: "false",
-          KOPIA_LOG_DIR: join(this.#stateRoot, "logs"),
+          // Kopia maintains `latest.log` symlinks. Disposable process logs
+          // stay off the backed-up state tree so the backup walker can keep
+          // rejecting every symlink without weakening that boundary.
+          KOPIA_LOG_DIR: this.#kopiaLogDirectory,
           AWS_ACCESS_KEY_ID: this.#s3.accessKey,
           AWS_SECRET_ACCESS_KEY: this.#s3.secretAccessKey,
           AWS_REGION: this.#s3.region,

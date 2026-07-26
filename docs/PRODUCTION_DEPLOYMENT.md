@@ -725,10 +725,12 @@ That bundle covers the AgentDock Compose authorities, including the dedicated
 Kopia repository in the MinIO volume. New Workspace versions no longer depend
 on Cube's node-local native snapshot store. The POSIX directory mounted into
 Cube is a replaceable execution copy and is reconstructed from the committed
-Kopia snapshot. For a true host-loss claim, store the encrypted backup
-off-host, or deploy MinIO/S3 and the shared POSIX filesystem on independently
-replicated infrastructure; keeping all three on one physical machine does not
-create disaster recovery.
+Kopia snapshot. Kopia process logs live on the Data Mover `/tmp` mount because
+Kopia creates rotating `latest.log` symlinks and AgentDock's backup walker
+deliberately rejects every symlink. For a true host-loss claim, store the
+encrypted backup off-host, or deploy MinIO/S3 and the shared POSIX filesystem
+on independently replicated infrastructure; keeping all three on one physical
+machine does not create disaster recovery.
 
 Restore only into a new project name and an absent or empty runtime path, after
 installing the recorded checkout and exact local images:
