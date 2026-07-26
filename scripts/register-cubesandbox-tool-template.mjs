@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { chmod, chown, mkdir, mkdtemp, open, rename, rm } from "node:fs/promises";
+import { connect, createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,14 @@ const runtimeDirectory = resolve(
 );
 const explicitKubeconfig = process.env.KUBECONFIG;
 const kubeconfig = explicitKubeconfig ?? "/etc/rancher/k3s/k3s.yaml";
+const directCubeMasterAddress = process.env.AGENT_DOCK_CUBE_MASTER_ADDRESS;
+const directCubeMasterPort = process.env.AGENT_DOCK_CUBE_MASTER_PORT ?? "8089";
+const directCubeMasterCli = process.env.AGENT_DOCK_CUBE_MASTER_CLI;
+const directRegistryAddress = process.env.AGENT_DOCK_CUBE_REGISTRY_ADDRESS;
+const directRegistryPort = process.env.AGENT_DOCK_CUBE_REGISTRY_PORT ?? "5000";
+const directManagement = [directCubeMasterAddress, directCubeMasterCli, directRegistryAddress].some(
+  (value) => value !== undefined,
+);
 const registryHost = "localhost:5000";
 const registryRepository = `${registryHost}/agent-dock/cubesandbox-tool`;
 const clusterRegistryRepository =
@@ -26,6 +35,14 @@ const environment = {
   ...process.env,
   KUBECONFIG: kubeconfig,
   PATH: `${nodeDirectory}:${process.env.PATH ?? ""}`,
+};
+const directNoProxy = [directCubeMasterAddress, directRegistryAddress, "127.0.0.1", "localhost"]
+  .filter((value) => value !== undefined)
+  .join(",");
+const directEnvironment = {
+  ...environment,
+  NO_PROXY: [directNoProxy, environment.NO_PROXY].filter(Boolean).join(","),
+  no_proxy: [directNoProxy, environment.no_proxy].filter(Boolean).join(","),
 };
 const dockerProxyBuildArguments = [
   "HTTP_PROXY",
@@ -40,9 +57,27 @@ const dockerProxyBuildArguments = [
     : [],
 );
 
-if (process.getuid?.() !== 0 && explicitKubeconfig === undefined) {
+if (
+  directManagement &&
+  (directCubeMasterAddress === undefined ||
+    directCubeMasterCli === undefined ||
+    directRegistryAddress === undefined)
+) {
   throw new Error(
-    "Non-root CubeSandbox template registration requires an explicit readable KUBECONFIG",
+    "Direct Cube management requires AGENT_DOCK_CUBE_MASTER_ADDRESS, AGENT_DOCK_CUBE_MASTER_CLI and AGENT_DOCK_CUBE_REGISTRY_ADDRESS together",
+  );
+}
+for (const [label, value] of [
+  ["CubeMaster port", directCubeMasterPort],
+  ["Cube registry port", directRegistryPort],
+]) {
+  if (!/^[1-9][0-9]{0,4}$/.test(value) || Number(value) > 65_535) {
+    throw new Error(`${label} is invalid`);
+  }
+}
+if (process.getuid?.() !== 0 && explicitKubeconfig === undefined && !directManagement) {
+  throw new Error(
+    "Non-root CubeSandbox template registration requires direct Cube management or an explicit readable KUBECONFIG",
   );
 }
 
@@ -165,6 +200,39 @@ async function readPrivate(path, maximumBytes, label) {
 }
 
 async function startRegistryForward() {
+  if (directManagement) {
+    const sockets = new Set();
+    const server = createServer((downstream) => {
+      sockets.add(downstream);
+      const upstream = connect({
+        host: directRegistryAddress,
+        port: Number(directRegistryPort),
+      });
+      sockets.add(upstream);
+      downstream.pipe(upstream);
+      upstream.pipe(downstream);
+      const closePair = () => {
+        downstream.destroy();
+        upstream.destroy();
+      };
+      downstream.once("error", closePair);
+      upstream.once("error", closePair);
+      downstream.once("close", () => {
+        sockets.delete(downstream);
+        sockets.delete(upstream);
+      });
+    });
+    await new Promise((resolvePromise, rejectPromise) => {
+      server.once("error", rejectPromise);
+      server.listen(5_000, "127.0.0.1", resolvePromise);
+    });
+    return {
+      async stop() {
+        for (const socket of sockets) socket.destroy();
+        await new Promise((resolvePromise) => server.close(resolvePromise));
+      },
+    };
+  }
   const child = spawn(
     "kubectl",
     [
@@ -208,7 +276,11 @@ async function startRegistryForward() {
       ).unref(),
     ),
   ]);
-  return child;
+  return {
+    async stop() {
+      await stopChild(child);
+    },
+  };
 }
 
 async function stopChild(child) {
@@ -219,6 +291,33 @@ async function stopChild(child) {
     new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000)),
   ]);
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+}
+
+async function cubeMasterCli(args, timeout) {
+  if (directManagement) {
+    return capture(
+      directCubeMasterCli,
+      ["--address", directCubeMasterAddress, "--port", directCubeMasterPort, ...args],
+      { timeout, environment: directEnvironment },
+    );
+  }
+  return capture(
+    "kubectl",
+    [
+      "-n",
+      "cube-system",
+      "exec",
+      "deployment/cube-cubemastercli",
+      "--",
+      "cubemastercli",
+      "--address",
+      "cube-master",
+      "--port",
+      "8089",
+      ...args,
+    ],
+    { timeout },
+  );
 }
 
 const revision = await repositoryHead();
@@ -254,16 +353,22 @@ if (
 ) {
   throw new Error("Cube cluster evidence and API credential ownership do not match");
 }
-await capture("test", ["-r", kubeconfig]);
+if (directManagement) {
+  await capture("test", ["-x", directCubeMasterCli]);
+} else {
+  await capture("test", ["-r", kubeconfig]);
+}
 await capture("test", ["-r", "/etc/docker/certs.d/localhost:5000/ca.crt"]);
-await capture("kubectl", [
-  "-n",
-  "cube-system",
-  "rollout",
-  "status",
-  "deployment/agent-dock-cube-template-registry",
-  "--timeout=120s",
-]);
+if (!directManagement) {
+  await capture("kubectl", [
+    "-n",
+    "cube-system",
+    "rollout",
+    "status",
+    "deployment/agent-dock-cube-template-registry",
+    "--timeout=120s",
+  ]);
+}
 
 const imageTag = `${registryRepository}:${revision}`;
 await run("docker", [
@@ -306,7 +411,7 @@ try {
     throw new Error("Pushed Cube Tool image digest was unavailable");
   }
 } finally {
-  await stopChild(forward);
+  await forward.stop();
 }
 
 const clusterImage = `${clusterRegistryRepository}@${digest}`;
@@ -325,19 +430,8 @@ const templateSpecSha256 = createHash("sha256")
   .update(JSON.stringify(templateSpecification), "utf8")
   .digest("hex");
 const created = parseJson(
-  await capture(
-    "kubectl",
+  await cubeMasterCli(
     [
-      "-n",
-      "cube-system",
-      "exec",
-      "deployment/cube-cubemastercli",
-      "--",
-      "cubemastercli",
-      "--address",
-      "cube-master",
-      "--port",
-      "8089",
       "tpl",
       "create-from-image",
       "--image",
@@ -358,7 +452,7 @@ const created = parseJson(
       "--detach",
       "--json",
     ],
-    { timeout: 120_000 },
+    120_000,
   ),
   "Cube template create response",
 );
@@ -368,28 +462,9 @@ if (!/^[0-9a-f-]{36}$/.test(jobId ?? "")) {
   throw new Error("Cube template create response did not contain a valid job ID");
 }
 const watched = parseJson(
-  await capture(
-    "kubectl",
-    [
-      "-n",
-      "cube-system",
-      "exec",
-      "deployment/cube-cubemastercli",
-      "--",
-      "cubemastercli",
-      "--address",
-      "cube-master",
-      "--port",
-      "8089",
-      "tpl",
-      "watch",
-      "--job-id",
-      jobId,
-      "--interval",
-      "2s",
-      "--json",
-    ],
-    { timeout: 30 * 60_000 },
+  await cubeMasterCli(
+    ["tpl", "watch", "--job-id", jobId, "--interval", "2s", "--json"],
+    30 * 60_000,
   ),
   "Cube template watch response",
 );
@@ -400,25 +475,7 @@ if (!/^tpl-[a-z0-9]{24}$/.test(templateId ?? "")) {
 }
 
 const listed = parseJson(
-  await capture(
-    "kubectl",
-    [
-      "-n",
-      "cube-system",
-      "exec",
-      "deployment/cube-cubemastercli",
-      "--",
-      "cubemastercli",
-      "--address",
-      "cube-master",
-      "--port",
-      "8089",
-      "tpl",
-      "list",
-      "--json",
-    ],
-    { timeout: 60_000 },
-  ),
+  await cubeMasterCli(["tpl", "list", "--json"], 60_000),
   "Cube template inventory",
 );
 assertSuccessfulCubeResponse(listed, "Cube template inventory");

@@ -334,7 +334,7 @@ async function terminateWarmCubeSession(sandboxId) {
       "/run/agent-dock-secrets/sandbox-manager-token",
       "utf8",
     ).trim();
-    const endpoint = "http://sandbox-manager:4300/internal/v1/sandbox-inventory";
+    const endpoint = "http://127.0.0.1:4300/internal/v1/sandbox-inventory";
     const send = async (body) => {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -372,7 +372,7 @@ async function terminateWarmCubeSession(sandboxId) {
       "scripts/production-compose.mjs",
       "exec",
       "-T",
-      "supervisor-host",
+      "sandbox-manager",
       "node",
       "--input-type=module",
       "--eval",

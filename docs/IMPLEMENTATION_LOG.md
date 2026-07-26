@@ -2438,3 +2438,18 @@
   and Sandbox Manager suites passed before immutable-template registration.
   Real KVM pause/connect and real-model multi-round evidence is recorded in the
   subsequent production-acceptance entry/report rather than implied here.
+
+# 2026-07-26: Cube official private-management template registration
+
+- Added a non-root template-registration path through Cube v0.6.0's official
+  `cubemastercli` and private CubeMaster port. It uses the same
+  `create-from-image -> watch -> list/READY` protocol as the in-cluster CLI,
+  without granting AgentDock or Sandbox Manager Kubernetes administrator
+  credentials.
+- The private template registry is reached through a short-lived raw TCP relay
+  bound only to `127.0.0.1`; the relay transports registry TLS unchanged and is
+  closed after the digest-pinned image push.
+- Retained the existing kubeconfig-based operator path for installations where
+  the official CLI is managed in-cluster. Direct mode is explicit and
+  fail-closed: CubeMaster address, pinned CLI and registry address must all be
+  supplied.
