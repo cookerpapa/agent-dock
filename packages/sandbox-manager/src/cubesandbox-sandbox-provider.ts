@@ -6,6 +6,8 @@ import {
   type EnvironmentValidationReport,
   type EnvironmentToolchainReport,
   type GitHubRepositorySource,
+  type SandboxManagerMaterializeFileRequest,
+  type SandboxManagerMaterializeFileResponse,
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
@@ -1366,6 +1368,135 @@ export class CubeSandboxProvider implements SandboxProvider {
       handle,
       effectiveIsolation: effectiveIsolation(evidence, this.defaultPolicy),
     };
+  }
+
+  async materializeFile(
+    request: SandboxManagerMaterializeFileRequest,
+    signal?: AbortSignal,
+  ): Promise<SandboxManagerMaterializeFileResponse> {
+    const checkpoint = parseCubeWorkspaceCheckpoint(decodeWorkspaceSnapshotBlob(request.snapshot));
+    if (
+      checkpoint === undefined ||
+      checkpoint.tenantId !== request.tenantId ||
+      checkpoint.workspaceId !== request.workspaceId ||
+      checkpoint.imageRevision !== this.#imageRevision
+    ) {
+      throw new SandboxManagerError(
+        "cubesandbox_checkpoint_binding_invalid",
+        "Cube Workspace checkpoint did not match the requested Workspace or runtime image",
+        false,
+      );
+    }
+    const expected = checkpoint.files.find((file) => file.path === request.path);
+    if (expected === undefined) {
+      throw new SandboxManagerError(
+        "workspace_file_not_found",
+        "Workspace file was not found",
+        false,
+      );
+    }
+    const recoverySecret = openRecoveryAuthority(this.#checkpointEncryptionKey, checkpoint);
+    const instance = await this.#client.create({
+      templateId: checkpoint.snapshotId,
+      timeoutSeconds: Math.ceil(this.defaultPolicy.resources.maximumCommandTimeoutMs / 1_000),
+      metadata: {
+        [METADATA.managed]: "true",
+        [METADATA.provider]: this.providerId,
+        [METADATA.workload]: "snapshot-materializer",
+        [METADATA.tenantId]: request.tenantId,
+        [METADATA.workspaceId]: request.workspaceId,
+        [METADATA.imageRevision]: this.#imageRevision,
+      },
+      allowInternetAccess: true,
+      allowPublicTraffic: false,
+    });
+    let result: SandboxManagerMaterializeFileResponse | undefined;
+    let operationError: unknown;
+    try {
+      if (signal?.aborted) {
+        throw new SandboxManagerError(
+          "snapshot_materialization_cancelled",
+          "Workspace file materialization was cancelled",
+          false,
+        );
+      }
+      await this.#waitForService(instance, {
+        handoffSecret: recoverySecret,
+        fencingToken: checkpoint.fencingToken,
+        bindingSha256: checkpoint.bindingSha256,
+      });
+      const raw = record(
+        await this.#client.request(instance, {
+          method: "POST",
+          path: "/v1/materialize-file",
+          body: { path: request.path },
+          ...(signal === undefined ? {} : { signal }),
+          timeoutMs: this.#readyTimeoutMs,
+          maximumResponseBytes: 1 * 1_024 * 1_024,
+          authority: {
+            handoffSecret: recoverySecret,
+            fencingToken: checkpoint.fencingToken,
+            bindingSha256: checkpoint.bindingSha256,
+          },
+        }),
+        "CubeSandbox snapshot materialization",
+      );
+      const content =
+        typeof raw.content === "string" && raw.content.length <= 1 * 1_024 * 1_024
+          ? Buffer.from(raw.content, "base64")
+          : undefined;
+      if (
+        raw.path !== request.path ||
+        content === undefined ||
+        raw.sizeBytes !== content.byteLength ||
+        raw.sizeBytes !== expected.sizeBytes ||
+        raw.sha256 !== expected.sha256 ||
+        raw.sha256 !== createHash("sha256").update(content).digest("hex") ||
+        raw.executable !== expected.executable
+      ) {
+        throw new SandboxManagerError(
+          "cubesandbox_snapshot_materialization_invalid",
+          "Cube Workspace file did not match its immutable checkpoint index",
+          false,
+        );
+      }
+      result = {
+        managerProtocolVersion: 1,
+        type: "workspace.file_materialized",
+        requestId: request.requestId,
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        path: request.path,
+        content: content.toString("base64"),
+        sha256: expected.sha256,
+        executable: expected.executable,
+        sizeBytes: expected.sizeBytes,
+      };
+    } catch (error: unknown) {
+      operationError = error;
+    }
+    try {
+      await this.#client.destroy(instance.sandboxId);
+      const remaining = await this.#client.read(instance.sandboxId);
+      if (remaining !== undefined) {
+        throw new Error("snapshot materializer remained present");
+      }
+    } catch {
+      throw new SandboxManagerError(
+        "snapshot_materializer_cleanup_failed",
+        "Snapshot materializer cleanup could not be confirmed",
+        true,
+      );
+    }
+    if (operationError !== undefined) throw operationError;
+    if (result === undefined) {
+      throw new SandboxManagerError(
+        "snapshot_materialization_failed",
+        "Workspace file materialization failed",
+        true,
+      );
+    }
+    return result;
   }
 
   async destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {

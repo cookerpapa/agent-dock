@@ -7,6 +7,7 @@ export type SandboxManagerConfig = {
   host: string;
   port: number;
   serviceToken: string;
+  materializerToken?: string;
   toolImage: string;
   imageRevision: string;
   kubeconfigPath: string;
@@ -183,6 +184,13 @@ export async function loadSandboxManagerConfig(
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
+    ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
+      ? {}
+      : {
+          materializerToken: await readSecret(
+            environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE,
+          ),
+        }),
     toolImage: bounded(required(environment, "AGENT_DOCK_TOOL_SANDBOX_IMAGE"), "toolImage"),
     imageRevision: bounded(
       required(environment, "AGENT_DOCK_IMAGE_REVISION"),

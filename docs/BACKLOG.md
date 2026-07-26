@@ -197,7 +197,10 @@ extension-policy support would overstate the current boundary.
 - [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
 - [x] Keep legacy portable manifests readable and return explicit `artifact_unavailable` for unsupported historical content reads
 - [ ] Add reference-aware Cube snapshot garbage collection after Workspace-version retention policy exists
-- [ ] Add a read-only snapshot materializer for historical file download and GitHub delivery
+- [x] Add a separately authorized, admission-controlled read-only Cube snapshot
+  materializer for bounded historical regular-file download
+- [ ] Add a streaming snapshot exporter for whole-version GitHub delivery and
+  portable backup
 - [ ] Back Cube snapshot data with replicated/off-host storage or a Kopia/REAPI data mover before claiming node-loss recovery
 
 ## Phase 4 private multi-tenant slice

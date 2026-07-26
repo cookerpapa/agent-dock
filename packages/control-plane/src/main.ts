@@ -28,6 +28,8 @@ import {
   type RemoteControlPlaneRuntime,
 } from "./remote-control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
+import { SandboxManagerClient } from "@agent-dock/sandbox-manager/client";
+import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -134,6 +136,11 @@ export async function startControlPlane(): Promise<void> {
             serviceToken: config.githubGatewayServiceToken,
             allowInsecureHttp: config.allowInsecureInternalHttp,
           });
+    const snapshotMaterializer = new SandboxManagerClient({
+      baseUrl: config.sandboxManagerBaseUrl,
+      serviceToken: config.sandboxMaterializerToken,
+      allowInsecureHttp: config.allowInsecureInternalHttp,
+    });
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: config.supervisorIdPrefix,
@@ -152,6 +159,7 @@ export async function startControlPlane(): Promise<void> {
           sql`select 1`.execute(database),
           temporalOrchestrator?.checkHealth() ??
             Promise.reject(new Error("Temporal orchestration is unavailable")),
+          snapshotMaterializer.checkHealth(),
         ]);
         return true;
       },
@@ -174,6 +182,24 @@ export async function startControlPlane(): Promise<void> {
       cubeEgressConfigToken: config.cubeEgressConfigToken,
       environmentImageRevision: config.environmentImageRevision,
       artifactReader: { get: (objectKey) => objectStore.get(objectKey) },
+      providerSnapshotReader: {
+        read: async (input) => {
+          const response = await snapshotMaterializer.materializeFile({
+            managerProtocolVersion: 1,
+            type: "workspace.materialize_file",
+            requestId: randomUUID(),
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            snapshot: encodeWorkspaceSnapshotBlob(input.snapshot),
+            path: input.path,
+          });
+          return {
+            bytes: Buffer.from(response.content, "base64"),
+            sha256: response.sha256,
+            executable: response.executable,
+          };
+        },
+      },
       ...(githubGateway === undefined ? {} : { githubGateway }),
       ...(config.githubGatewayServiceToken === undefined
         ? {}

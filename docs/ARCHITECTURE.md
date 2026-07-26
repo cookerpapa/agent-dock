@@ -401,7 +401,11 @@ Provider TLS and authentication stay end-to-end; neither relay receives the
 model key. A separate `@agent-dock/sandbox-manager` service receives
 a least-privilege kubeconfig. Its authenticated API is limited to
 create/execute/capture/stop, exact assignment inventory, and a fixed public
-GitHub importer. It receives no Docker/containerd socket, database, S3,
+GitHub importer. A second credential authorizes only bounded read-only
+materialization of one content-indexed file from a sealed Cube snapshot; it
+cannot call the ordinary lifecycle API. The transient clone is never rebound
+into a writable Tool Worker and must be confirmed absent before its global
+admission slot is released. The Manager receives no Docker/containerd socket, database, S3,
 provider, enrollment, GitHub or tenant credential.
 
 Each retained gVisor importer/bootstrap Pod is non-root, read-only outside

@@ -21,7 +21,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { open, readFile, readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { posix, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 
@@ -32,6 +34,8 @@ const TOOL_UID = 1_000;
 const TOOL_GID = 1_000;
 const HANDOFF_SECRET_PATTERN = /^adch_[A-Za-z0-9_-]{43}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const MAX_MATERIALIZED_FILE_BYTES = 512 * 1_024;
+const WORKSPACE_ROOT = "/workspace";
 
 type Pending<T> = {
   resolve(value: T): void;
@@ -182,6 +186,93 @@ function parseRebind(value: unknown): HandoffAuthority & { activationId: string 
     bindingSha256: input.bindingSha256,
     activationId: input.activationId,
   };
+}
+
+function parseMaterializeFile(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CubeToolServiceError(400, "Workspace file request was invalid");
+  }
+  const input = value as Record<string, unknown>;
+  const path = input.path;
+  if (
+    Object.keys(input).length !== 1 ||
+    typeof path !== "string" ||
+    path.length < 1 ||
+    path.length > 512 ||
+    path.startsWith("/") ||
+    path.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(path) ||
+    posix.normalize(path) !== path ||
+    path.split("/").some((segment) => segment.length < 1 || segment === "." || segment === "..")
+  ) {
+    throw new CubeToolServiceError(400, "Workspace file request was invalid");
+  }
+  return path;
+}
+
+async function materializeWorkspaceFile(path: string): Promise<{
+  path: string;
+  content: string;
+  sha256: string;
+  executable: boolean;
+  sizeBytes: number;
+}> {
+  if (!sealed || bridge !== undefined || initialized === undefined) {
+    throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
+  }
+  const absolutePath = resolve(WORKSPACE_ROOT, path);
+  const parent = absolutePath.slice(0, absolutePath.lastIndexOf("/")) || WORKSPACE_ROOT;
+  let resolvedParent: string;
+  try {
+    resolvedParent = await realpath(parent);
+  } catch {
+    throw new CubeToolServiceError(404, "Workspace file was not found");
+  }
+  if (
+    resolvedParent !== WORKSPACE_ROOT &&
+    !resolvedParent.startsWith(`${WORKSPACE_ROOT}/`)
+  ) {
+    throw new CubeToolServiceError(403, "Workspace file escaped its root");
+  }
+  let handle;
+  try {
+    handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    throw new CubeToolServiceError(404, "Workspace file was not found");
+  }
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size > MAX_MATERIALIZED_FILE_BYTES) {
+      throw new CubeToolServiceError(413, "Workspace file was outside its preview byte limit");
+    }
+    const content = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < before.size) {
+      const read = await handle.read(content, offset, before.size - offset, offset);
+      if (read.bytesRead < 1) {
+        throw new CubeToolServiceError(409, "Workspace file changed while it was read");
+      }
+      offset += read.bytesRead;
+    }
+    const after = await handle.stat();
+    if (
+      after.size !== before.size ||
+      after.ino !== before.ino ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs
+    ) {
+      throw new CubeToolServiceError(409, "Workspace file changed while it was read");
+    }
+    return {
+      path,
+      content: content.toString("base64"),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      executable: (after.mode & 0o111) !== 0,
+      sizeBytes: content.byteLength,
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
@@ -704,6 +795,12 @@ const server = createServer((request, response) => {
         workspacePatch,
         ...(portableWorkspace === undefined ? {} : { portableWorkspace }),
       });
+      return;
+    }
+    if (url.pathname === "/v1/materialize-file") {
+      requireAuthority(request);
+      const path = parseMaterializeFile(await readJson(request));
+      sendJson(response, 200, await materializeWorkspaceFile(path));
       return;
     }
     if (url.pathname === "/v1/seal") {

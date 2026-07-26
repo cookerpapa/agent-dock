@@ -154,6 +154,23 @@ async function ensureSandboxManagerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureSandboxMaterializerToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/sandbox-materializer-token");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+      throw new Error("Production Sandbox materializer token is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomSecret()}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
 async function ensureCubeEgressConfigToken(runtimeDirectory) {
   const path = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
   try {
@@ -353,6 +370,8 @@ await assertPrivateDirectory(runtimeDirectory);
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
+  const sandboxMaterializerTokenCreated =
+    await ensureSandboxMaterializerToken(runtimeDirectory);
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
   const dependencyEgressIssuerCreated = await ensureDependencyEgressIssuer(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
@@ -365,6 +384,7 @@ if (await validateExisting(runtimeDirectory)) {
       reused: true,
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
+      sandboxMaterializerTokenCreated,
       cubeEgressConfigTokenCreated,
       dependencyEgressIssuerCreated,
       githubGatewaySecretsCreated,
@@ -479,6 +499,10 @@ await writePrivateFile(
   `${randomSecret()}\n`,
 );
 await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${randomSecret()}\n`);
+await writePrivateFile(
+  resolve(secretsDirectory, "sandbox-materializer-token"),
+  `${randomSecret()}\n`,
+);
 await writePrivateFile(
   resolve(secretsDirectory, "cube-egress-config-token"),
   `${randomSecret()}\n`,

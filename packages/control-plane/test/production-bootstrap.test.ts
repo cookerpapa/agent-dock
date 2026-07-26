@@ -199,6 +199,12 @@ describe.sequential("production bootstrap and configuration", () => {
         "cube-egress-config-token",
         `cube-egress-${"c".repeat(48)}`,
       ),
+      AGENT_DOCK_SANDBOX_MANAGER_URL: "http://sandbox-manager:4300",
+      AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: await secret(
+        root,
+        "sandbox-materializer-token",
+        `materializer-${"s".repeat(48)}`,
+      ),
       AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
       AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
@@ -211,6 +217,7 @@ describe.sequential("production bootstrap and configuration", () => {
     expect(runtime).toMatchObject({
       supervisorIdPrefix: "pi-worker-",
       supervisorManagementBaseUrlTemplate: "http://{supervisorId}:4100",
+      sandboxManagerBaseUrl: "http://sandbox-manager:4300/",
       host: "0.0.0.0",
       port: 3000,
       temporalAddress: "temporal:7233",

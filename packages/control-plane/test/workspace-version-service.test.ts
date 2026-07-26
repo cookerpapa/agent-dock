@@ -365,6 +365,64 @@ describe.sequential("versioned Workspace service", () => {
       code: "artifact_unavailable",
       message: "Workspace file content requires a live Provider snapshot reader",
     });
+
+    const materializedRequests: unknown[] = [];
+    const materializedService = new WorkspaceVersionService({
+      database,
+      artifactReader: {
+        get: async (key) => {
+          const bytes = objects.get(key);
+          if (bytes === undefined) throw new Error("missing");
+          return bytes;
+        },
+      },
+      providerSnapshotReader: {
+        read: async (input) => {
+          materializedRequests.push(input);
+          return {
+            bytes: readme,
+            sha256: hash(readme),
+            executable: false,
+          };
+        },
+      },
+    });
+    await expect(
+      materializedService.file(IDS.tenant, IDS.version3, "README.md"),
+    ).resolves.toMatchObject({
+      bytes: readme,
+      sha256: hash(readme),
+      executable: false,
+    });
+    expect(materializedRequests).toEqual([
+      {
+        tenantId: IDS.tenant,
+        workspaceId: IDS.workspace,
+        snapshot: checkpoint,
+        path: "README.md",
+      },
+    ]);
+
+    const corruptService = new WorkspaceVersionService({
+      database,
+      artifactReader: {
+        get: async (key) => {
+          const bytes = objects.get(key);
+          if (bytes === undefined) throw new Error("missing");
+          return bytes;
+        },
+      },
+      providerSnapshotReader: {
+        read: async () => ({
+          bytes: Buffer.from("tampered\n"),
+          sha256: hash(Buffer.from("tampered\n")),
+          executable: false,
+        }),
+      },
+    });
+    await expect(
+      corruptService.file(IDS.tenant, IDS.version3, "README.md"),
+    ).rejects.toMatchObject({ code: "artifact_corrupt" });
   });
 
   it("registers an allowlisted GitHub App source and idempotently delivers an immutable version", async () => {

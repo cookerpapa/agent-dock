@@ -77,6 +77,9 @@ const server = new SandboxManagerServer({
   host: config.host,
   port: config.port,
   serviceToken: config.serviceToken,
+  ...(config.materializerToken === undefined
+    ? {}
+    : { materializerToken: config.materializerToken }),
   manager,
   metrics: observability.metrics,
 });

@@ -231,6 +231,35 @@ export const SandboxManagerGitHubImportResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const SandboxManagerMaterializeFileRequestSchema = Type.Object(
+  {
+    ...ToolSandboxEnvelope,
+    type: Type.Literal("workspace.materialize_file"),
+    requestId: UuidSchema,
+    tenantId: OpaqueIdSchema,
+    workspaceId: OpaqueIdSchema,
+    snapshot: SandboxCheckpointBlobSchema,
+    path: Type.String({ minLength: 1, maxLength: 512 }),
+  },
+  { additionalProperties: false },
+);
+
+export const SandboxManagerMaterializeFileResponseSchema = Type.Object(
+  {
+    ...ToolSandboxEnvelope,
+    type: Type.Literal("workspace.file_materialized"),
+    requestId: UuidSchema,
+    tenantId: OpaqueIdSchema,
+    workspaceId: OpaqueIdSchema,
+    path: Type.String({ minLength: 1, maxLength: 512 }),
+    content: Base64Schema,
+    sha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+    executable: Type.Boolean(),
+    sizeBytes: Type.Integer({ minimum: 0, maximum: MAX_TOOL_FILE_BYTES }),
+  },
+  { additionalProperties: false },
+);
+
 export const SandboxManagerRequestSchema = Type.Union([
   ToolSandboxCreateRequestSchema,
   ToolSandboxCaptureRequestSchema,
@@ -465,6 +494,12 @@ export type SandboxManagerGitHubImportRequest = Static<
 export type SandboxManagerGitHubImportResponse = Static<
   typeof SandboxManagerGitHubImportResponseSchema
 >;
+export type SandboxManagerMaterializeFileRequest = Static<
+  typeof SandboxManagerMaterializeFileRequestSchema
+>;
+export type SandboxManagerMaterializeFileResponse = Static<
+  typeof SandboxManagerMaterializeFileResponseSchema
+>;
 export type SandboxManagerRequest = Static<typeof SandboxManagerRequestSchema>;
 export type SandboxManagerResponse = Static<typeof SandboxManagerResponseSchema>;
 export type ToolSandboxOperationRequest = Static<typeof ToolSandboxOperationRequestSchema>;
@@ -499,6 +534,26 @@ export function parseSandboxManagerRequest(value: unknown): SandboxManagerReques
 
 export function parseSandboxManagerResponse(value: unknown): SandboxManagerResponse {
   return parse(SandboxManagerResponseSchema, value, "Sandbox Manager response");
+}
+
+export function parseSandboxManagerMaterializeFileRequest(
+  value: unknown,
+): SandboxManagerMaterializeFileRequest {
+  return parse(
+    SandboxManagerMaterializeFileRequestSchema,
+    value,
+    "Sandbox Manager materialize file request",
+  );
+}
+
+export function parseSandboxManagerMaterializeFileResponse(
+  value: unknown,
+): SandboxManagerMaterializeFileResponse {
+  return parse(
+    SandboxManagerMaterializeFileResponseSchema,
+    value,
+    "Sandbox Manager materialize file response",
+  );
 }
 
 export function parseToolSandboxOperationRequest(value: unknown): ToolSandboxOperationRequest {

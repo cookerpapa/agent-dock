@@ -14,6 +14,8 @@ export type ProductionControlPlaneConfig = {
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
   cubeEgressConfigToken: string;
+  sandboxManagerBaseUrl: string;
+  sandboxMaterializerToken: string;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
   supervisorIdPrefix: string;
@@ -246,6 +248,15 @@ export async function loadProductionControlPlaneConfig(
     cubeEgressConfigToken: await secret(
       environment,
       "AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN",
+      allowInlineSecrets,
+    ),
+    sandboxManagerBaseUrl: managementUrl(
+      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
+      allowInsecureInternalHttp,
+    ),
+    sandboxMaterializerToken: await secret(
+      environment,
+      "AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN",
       allowInlineSecrets,
     ),
     ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined

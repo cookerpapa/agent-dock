@@ -18,6 +18,7 @@ import {
   type TraceCarrier,
 } from "@agent-dock/observability";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   SANDBOX_MANAGER_SERVICE_PATH,
   SandboxManagerClient,
@@ -26,6 +27,7 @@ import {
 } from "../src/index.ts";
 
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
+const MATERIALIZER_TOKEN = `materializer-${"m".repeat(48)}`;
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {
@@ -119,6 +121,21 @@ function backend(): SandboxManagerBackend {
     async importGitHub() {
       return Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
     },
+    async materializeFile(request) {
+      const content = Buffer.from("immutable\n");
+      return {
+        managerProtocolVersion: 1,
+        type: "workspace.file_materialized",
+        requestId: request.requestId,
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        path: request.path,
+        content: content.toString("base64"),
+        sha256: createHash("sha256").update(content).digest("hex"),
+        executable: false,
+        sizeBytes: content.byteLength,
+      };
+    },
     async listAssignments(sandboxId) {
       return sandboxId === runtimeAssignment.sandboxId ? [runtimeAssignment] : [];
     },
@@ -135,6 +152,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
+      materializerToken: MATERIALIZER_TOKEN,
       manager: backend(),
       metrics,
     });
@@ -205,6 +223,46 @@ describe("Sandbox Manager authenticated RPC", () => {
       runtimeAssignment,
     ]);
     await expect(client.terminateAndConfirmAbsent(runtimeAssignment)).resolves.toBeUndefined();
+
+    const manifest = Buffer.from(
+      '{"format":"agent-dock.workspace-manifest.v1","files":[]}\n',
+    );
+    const materializer = new SandboxManagerClient({
+      baseUrl: address,
+      serviceToken: MATERIALIZER_TOKEN,
+      allowInsecureHttp: true,
+    });
+    await expect(
+      materializer.materializeFile({
+        managerProtocolVersion: 1,
+        type: "workspace.materialize_file",
+        requestId: "10000000-0000-4000-8000-000000000099",
+        tenantId: assignment.tenantId,
+        workspaceId: assignment.workspaceId,
+        snapshot: {
+          encoding: "base64",
+          sha256: createHash("sha256").update(manifest).digest("hex"),
+          sizeBytes: manifest.byteLength,
+          data: manifest.toString("base64"),
+        },
+        path: "README.md",
+      }),
+    ).resolves.toMatchObject({
+      tenantId: assignment.tenantId,
+      workspaceId: assignment.workspaceId,
+      path: "README.md",
+      content: Buffer.from("immutable\n").toString("base64"),
+    });
+
+    const overPrivileged = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${MATERIALIZER_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    expect(overPrivileged.status).toBe(401);
 
     const unauthorized = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
       method: "POST",

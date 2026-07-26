@@ -30,6 +30,7 @@
     "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
+    "@agent-dock/sandbox-manager": "0.1.0",
     "@agent-dock/temporal-orchestration": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
     "@aws-sdk/client-s3": "3.1090.0",

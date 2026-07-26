@@ -86,6 +86,13 @@ beforeAll(async () => {
         );
         return;
       }
+      if (request.method === "GET" && request.url === "/snapshots?limit=100") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify([{ snapshotID: "cube-snapshot-1", names: ["workspace-checkpoint"] }]),
+        );
+        return;
+      }
       if (request.method === "DELETE" && request.url === "/templates/cube-snapshot-1") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end('{"deleted":true}');
@@ -216,6 +223,9 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       snapshotId: "cube-snapshot-1",
       names: ["workspace-checkpoint"],
     });
+    await expect(client.listSnapshots()).resolves.toEqual([
+      { snapshotId: "cube-snapshot-1", names: ["workspace-checkpoint"] },
+    ]);
     expect(
       observed.find((request) => request.path === "/sandboxes/cube-runtime-1/snapshots"),
     ).toMatchObject({

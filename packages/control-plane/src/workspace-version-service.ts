@@ -20,9 +20,19 @@ export interface TrustedArtifactReader {
   get(objectKey: string): Promise<Uint8Array>;
 }
 
+export interface TrustedProviderSnapshotReader {
+  read(input: {
+    tenantId: string;
+    workspaceId: string;
+    snapshot: Uint8Array;
+    path: string;
+  }): Promise<{ bytes: Uint8Array; sha256: string; executable: boolean }>;
+}
+
 export type WorkspaceVersionServiceOptions = {
   database: Kysely<Database>;
   artifactReader?: TrustedArtifactReader;
+  providerSnapshotReader?: TrustedProviderSnapshotReader;
   clock?: () => Date;
   idGenerator?: () => string;
 };
@@ -197,12 +207,14 @@ function versionResource(row: VersionRow): WorkspaceVersionResource {
 export class WorkspaceVersionService {
   readonly #database: Kysely<Database>;
   readonly #artifactReader: TrustedArtifactReader | undefined;
+  readonly #providerSnapshotReader: TrustedProviderSnapshotReader | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
 
   constructor(options: WorkspaceVersionServiceOptions) {
     this.#database = options.database;
     this.#artifactReader = options.artifactReader;
+    this.#providerSnapshotReader = options.providerSnapshotReader;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? randomUUID;
   }
@@ -263,10 +275,42 @@ export class WorkspaceVersionService {
     if (file === undefined)
       throw new WorkspaceVersionError("not_found", "Workspace file was not found");
     if (file.content === undefined) {
-      throw new WorkspaceVersionError(
-        "artifact_unavailable",
-        "Workspace file content requires a live Provider snapshot reader",
-      );
+      if (this.#providerSnapshotReader === undefined) {
+        throw new WorkspaceVersionError(
+          "artifact_unavailable",
+          "Workspace file content requires a live Provider snapshot reader",
+        );
+      }
+      let materialized: Awaited<ReturnType<TrustedProviderSnapshotReader["read"]>>;
+      try {
+        materialized = await this.#providerSnapshotReader.read({
+          tenantId,
+          workspaceId: loaded.version.workspaceId,
+          snapshot: loaded.snapshot,
+          path,
+        });
+      } catch {
+        throw new WorkspaceVersionError(
+          "artifact_unavailable",
+          "Workspace file content could not be materialized",
+        );
+      }
+      if (
+        materialized.bytes.byteLength !== file.sizeBytes ||
+        materialized.sha256 !== file.sha256 ||
+        sha256(materialized.bytes) !== file.sha256 ||
+        materialized.executable !== file.executable
+      ) {
+        throw new WorkspaceVersionError(
+          "artifact_corrupt",
+          "Materialized Workspace file did not match its immutable version",
+        );
+      }
+      return {
+        bytes: materialized.bytes,
+        sha256: file.sha256,
+        executable: file.executable,
+      };
     }
     return { bytes: file.content, sha256: file.sha256, executable: file.executable };
   }
@@ -697,7 +741,7 @@ export class WorkspaceVersionService {
     if (files.length !== version.fileCount && version.originKind !== "migration") {
       throw new WorkspaceVersionError("artifact_corrupt", "Workspace file count is inconsistent");
     }
-    return { version, files };
+    return { version, files, snapshot: bytes };
   }
 
   async #readArtifact(

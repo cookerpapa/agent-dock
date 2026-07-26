@@ -10,6 +10,8 @@ import type {
   ToolSandboxOperationResponse,
   ToolSandboxReleaseRequest,
   ToolSandboxReleaseResponse,
+  SandboxManagerMaterializeFileRequest,
+  SandboxManagerMaterializeFileResponse,
 } from "@agent-dock/protocol";
 import {
   canonicalEnvironmentRecipeJson,
@@ -528,6 +530,48 @@ export class ToolSandboxManager {
 
   async importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
     return this.#provider.importGitHub(source, signal);
+  }
+
+  async materializeFile(
+    request: SandboxManagerMaterializeFileRequest,
+    signal?: AbortSignal,
+  ): Promise<SandboxManagerMaterializeFileResponse> {
+    if (this.#provider.materializeFile === undefined) {
+      throw new SandboxManagerError(
+        "snapshot_materializer_unavailable",
+        "The configured Sandbox Provider cannot materialize immutable Workspace files",
+        false,
+      );
+    }
+    const assignment: ToolSandboxAssignment = {
+      tenantId: request.tenantId,
+      projectId: request.workspaceId,
+      workspaceId: request.workspaceId,
+      supervisorId: "snapshot-materializer",
+      bootId: request.requestId,
+      sandboxId: request.requestId,
+      commandId: request.requestId,
+      sessionId: request.workspaceId,
+      turnId: request.requestId,
+      attemptId: request.requestId,
+      leaseId: request.requestId,
+      fencingToken: 1,
+    };
+    await this.#acquireAdmission(request.requestId, assignment, signal);
+    let releaseAdmission = true;
+    try {
+      return await this.#provider.materializeFile(request, signal);
+    } catch (error: unknown) {
+      if (
+        error instanceof SandboxManagerError &&
+        error.code === "snapshot_materializer_cleanup_failed"
+      ) {
+        releaseAdmission = false;
+      }
+      throw error;
+    } finally {
+      if (releaseAdmission) this.#releaseAdmission(request.requestId);
+    }
   }
 
   async close(): Promise<void> {

@@ -4,6 +4,8 @@ import type {
   EnvironmentValidationReport,
   GitHubRepositorySource,
   SandboxCheckpointBlob,
+  SandboxManagerMaterializeFileRequest,
+  SandboxManagerMaterializeFileResponse,
   SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCaptureResponse,
@@ -196,6 +198,14 @@ export interface SandboxProvider {
   stop(handle: SandboxHandle): Promise<void>;
   destroy(handle: SandboxHandle): Promise<void>;
   inspect(handle: SandboxHandle): Promise<SandboxInspection>;
+  /**
+   * Read one bounded file from an immutable Provider snapshot without
+   * rebinding the snapshot into a writable Agent execution.
+   */
+  materializeFile?(
+    request: SandboxManagerMaterializeFileRequest,
+    signal?: AbortSignal,
+  ): Promise<SandboxManagerMaterializeFileResponse>;
 
   /** Used only when the Manager restarted before it could reconstruct a handle. */
   destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;

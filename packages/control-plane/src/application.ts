@@ -13,7 +13,10 @@ import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisione
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
 import type { PublicTenantRegistrationConfiguration } from "./public-tenant-registration.ts";
 import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
-import type { TrustedArtifactReader } from "./workspace-version-service.ts";
+import type {
+  TrustedArtifactReader,
+  TrustedProviderSnapshotReader,
+} from "./workspace-version-service.ts";
 import type { WebAuthenticationService } from "./web-authentication.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
@@ -31,6 +34,7 @@ export type ControlPlaneApplicationOptions = Omit<
   publicRegistration?: PublicTenantRegistrationConfiguration;
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
+  providerSnapshotReader?: TrustedProviderSnapshotReader;
   githubGateway?: GitHubGatewayClient;
   githubWebhookGateway?: GitHubWebhookIngestGateway;
   webAuthentication?: WebAuthenticationService;

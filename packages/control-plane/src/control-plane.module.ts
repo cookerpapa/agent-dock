@@ -22,6 +22,7 @@ import { OperationalInsightsService } from "./operational-insights-service.ts";
 import {
   WorkspaceVersionService,
   type TrustedArtifactReader,
+  type TrustedProviderSnapshotReader,
 } from "./workspace-version-service.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
@@ -39,6 +40,7 @@ export type ControlPlaneModuleOptions = Omit<
   publicRegistration?: PublicTenantRegistrationConfiguration;
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
+  providerSnapshotReader?: TrustedProviderSnapshotReader;
   githubGateway?: GitHubGatewayClient;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
@@ -71,6 +73,9 @@ export class ControlPlaneModule {
     const workspaceVersions = new WorkspaceVersionService({
       database: options.database,
       ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
+      ...(options.providerSnapshotReader === undefined
+        ? {}
+        : { providerSnapshotReader: options.providerSnapshotReader }),
       ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     });
     const controlPlaneStores = new ControlPlaneStoreFactory({

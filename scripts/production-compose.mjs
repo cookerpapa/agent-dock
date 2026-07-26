@@ -84,6 +84,7 @@ const applicationSecretNames = [
   "metrics-token",
   "model-credential-master-key",
   "sandbox-manager-token",
+  "sandbox-materializer-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
   ...(requestedProvider === "cubesandbox" && !allowsStaleCubeTemplate

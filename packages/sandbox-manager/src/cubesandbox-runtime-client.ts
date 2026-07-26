@@ -73,6 +73,7 @@ export interface CubeSandboxRuntimeClient {
   pause(instance: CubeSandboxInstance, timeoutMs?: number): Promise<CubeSandboxInstance>;
   connect(instance: CubeSandboxInstance, timeoutSeconds: number): Promise<CubeSandboxInstance>;
   createSnapshot(instance: CubeSandboxInstance, name: string): Promise<CubeSandboxSnapshot>;
+  listSnapshots(): Promise<readonly CubeSandboxSnapshot[]>;
   deleteSnapshot(snapshotId: string): Promise<void>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
@@ -175,6 +176,23 @@ function parseInstance(value: unknown, fallbackDomain: string): CubeSandboxInsta
     ...(cpuCount === undefined ? {} : { cpuCount }),
     ...(memoryMB === undefined ? {} : { memoryMB }),
   });
+}
+
+function parseSnapshot(value: unknown): CubeSandboxSnapshot {
+  const candidate = record(value, "CubeSandbox snapshot");
+  const snapshotId = bounded(candidate.snapshotID, "CubeSandbox snapshot ID", 256);
+  const names =
+    candidate.names === undefined
+      ? []
+      : Array.isArray(candidate.names) &&
+          candidate.names.length <= 16 &&
+          candidate.names.every((item) => typeof item === "string")
+        ? candidate.names.map((item) => bounded(item, "CubeSandbox snapshot name", 128))
+        : undefined;
+  if (names === undefined) {
+    throw new CubeRuntimeClientError("CubeSandbox snapshot names were invalid");
+  }
+  return Object.freeze({ snapshotId, names: Object.freeze(names) });
 }
 
 function validateApiUrl(value: string): string {
@@ -404,19 +422,38 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox snapshot create"),
       "CubeSandbox snapshot create",
     );
-    const snapshotId = bounded(value.snapshotID, "CubeSandbox snapshot ID", 256);
-    const names =
-      value.names === undefined
-        ? []
-        : Array.isArray(value.names) &&
-            value.names.length <= 16 &&
-            value.names.every((item) => typeof item === "string")
-          ? value.names.map((item) => bounded(item, "CubeSandbox snapshot name", 128))
+    return parseSnapshot(value);
+  }
+
+  async listSnapshots(): Promise<readonly CubeSandboxSnapshot[]> {
+    const snapshots: CubeSandboxSnapshot[] = [];
+    let nextToken: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const query =
+        nextToken === undefined
+          ? "/snapshots?limit=100"
+          : `/snapshots?limit=100&nextToken=${encodeURIComponent(nextToken)}`;
+      const response = await this.#control(query);
+      const body = parseJson(
+        await readBoundedResponse(response, 4 * 1_024 * 1_024),
+        "CubeSandbox snapshot inventory",
+      );
+      const values = Array.isArray(body)
+        ? body
+        : Array.isArray((body as { snapshots?: unknown })?.snapshots)
+          ? (body as { snapshots: unknown[] }).snapshots
           : undefined;
-    if (names === undefined) {
-      throw new CubeRuntimeClientError("CubeSandbox snapshot names were invalid");
+      if (values === undefined || values.length > 100) {
+        throw new CubeRuntimeClientError("CubeSandbox snapshot inventory was invalid");
+      }
+      snapshots.push(...values.map(parseSnapshot));
+      const header = response.headers.get("x-next-token");
+      if (header === null || header.length === 0) {
+        return Object.freeze(snapshots);
+      }
+      nextToken = bounded(header, "CubeSandbox snapshot continuation token", 4_096);
     }
-    return Object.freeze({ snapshotId, names: Object.freeze(names) });
+    throw new CubeRuntimeClientError("CubeSandbox snapshot inventory exceeded its page limit");
   }
 
   async deleteSnapshot(snapshotId: string): Promise<void> {

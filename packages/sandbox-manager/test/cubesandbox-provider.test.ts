@@ -143,6 +143,13 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     this.deletedSnapshots.push(snapshotId);
   }
 
+  async listSnapshots() {
+    return [...this.snapshotMetadata.keys()].map((snapshotId) => ({
+      snapshotId,
+      names: [] as string[],
+    }));
+  }
+
   async destroy(sandboxId: string): Promise<void> {
     this.destroyed.push(sandboxId);
     this.instances.delete(sandboxId);
@@ -212,6 +219,17 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
         ...(this.portableWorkspace === undefined
           ? {}
           : { portableWorkspace: this.portableWorkspace }),
+      };
+    }
+    if (input.path === "/v1/materialize-file") {
+      const body = input.body as { path: string };
+      const content = Buffer.from("cube\n");
+      return {
+        path: body.path,
+        content: content.toString("base64"),
+        sha256: createHash("sha256").update(content).digest("hex"),
+        executable: false,
+        sizeBytes: content.byteLength,
       };
     }
     if (input.path === "/v1/cancel") return { cancelled: true };
@@ -382,6 +400,32 @@ describe("CubeSandbox Provider contract", () => {
       ],
     });
     expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("adch_");
+    const materialized = await manager.materializeFile({
+      managerProtocolVersion: 1,
+      type: "workspace.materialize_file",
+      requestId: "10000000-0000-4000-8000-000000000023",
+      tenantId: assignment.tenantId,
+      workspaceId: assignment.workspaceId,
+      snapshot: captured.workspace,
+      path: "result.txt",
+    });
+    expect(materialized).toMatchObject({
+      type: "workspace.file_materialized",
+      path: "result.txt",
+      content: Buffer.from("cube\n").toString("base64"),
+    });
+    expect(runtime.creates).toHaveLength(2);
+    expect(runtime.creates[1]).toMatchObject({
+      templateId: "cube-snapshot-cube-sandbox-1",
+      metadata: {
+        "agentdock.workload": "snapshot-materializer",
+        "agentdock.tenant_id": assignment.tenantId,
+        "agentdock.workspace_id": assignment.workspaceId,
+      },
+    });
+    expect(runtime.destroyed).toEqual(["cube-sandbox-2"]);
+    expect(runtime.instances.has("cube-sandbox-2")).toBe(false);
+    expect(manager.admittedCount).toBe(1);
     const released = await manager.release({
       managerProtocolVersion: 1,
       type: "tool_sandbox.release",
@@ -392,7 +436,7 @@ describe("CubeSandbox Provider contract", () => {
       workspaceRevision: "a".repeat(64),
     });
     expect(released.retained).toBe(true);
-    expect(runtime.destroyed).toEqual([]);
+    expect(runtime.destroyed).toEqual(["cube-sandbox-2"]);
     expect(manager.warmCount).toBe(1);
     expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("paused");
 
@@ -421,7 +465,7 @@ describe("CubeSandbox Provider contract", () => {
       ...operation(next.activationId),
       operationId: "10000000-0000-4000-8000-000000000033",
     });
-    expect(runtime.creates).toHaveLength(1);
+    expect(runtime.creates).toHaveLength(2);
     expect(runtime.requests.some(({ input }) => input.path === "/v1/rebind")).toBe(true);
     expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("running");
     expect(await manager.listAssignments(nextAssignment.sandboxId)).toEqual([
@@ -439,7 +483,7 @@ describe("CubeSandbox Provider contract", () => {
       disposition: "destroy",
     });
     expect(destroyed.retained).toBe(false);
-    expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
+    expect(runtime.destroyed).toEqual(["cube-sandbox-2", "cube-sandbox-1"]);
     expect(manager.warmCount).toBe(0);
     await manager.close();
   });

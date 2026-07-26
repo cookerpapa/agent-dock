@@ -230,6 +230,9 @@ export async function createRemoteControlPlaneRuntime(
         ? {}
         : { sessionEventStreamOptions: options.sessionEventStreamOptions }),
       ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
+      ...(options.providerSnapshotReader === undefined
+        ? {}
+        : { providerSnapshotReader: options.providerSnapshotReader }),
       ...(options.githubGateway === undefined ? {} : { githubGateway: options.githubGateway }),
     });
   } catch (error: unknown) {

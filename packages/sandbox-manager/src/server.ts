@@ -1,5 +1,6 @@
 import {
   parseSandboxManagerRequest,
+  parseSandboxManagerMaterializeFileRequest,
   parseSupervisorManagementRequest,
   parseToolSandboxOperationRequest,
   type InternalServiceError,
@@ -11,6 +12,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import {
   SANDBOX_MANAGER_INVENTORY_PATH,
   SANDBOX_MANAGER_LIVE_PATH,
+  SANDBOX_MANAGER_MATERIALIZER_PATH,
   SANDBOX_MANAGER_OPERATION_PATH,
   SANDBOX_MANAGER_READY_PATH,
   SANDBOX_MANAGER_SERVICE_PATH,
@@ -24,6 +26,7 @@ export type SandboxManagerServerOptions = {
   host: string;
   port: number;
   serviceToken: string;
+  materializerToken?: string;
   manager: SandboxManagerBackend;
   bodyLimit?: number;
   metrics?: AgentDockMetrics;
@@ -38,6 +41,7 @@ export type SandboxManagerBackend = Pick<
   | "stop"
   | "execute"
   | "importGitHub"
+  | "materializeFile"
   | "listAssignments"
   | "terminateAndConfirmAbsent"
   | "confirmAbsent"
@@ -92,6 +96,7 @@ export class SandboxManagerServer {
   readonly #host: string;
   readonly #port: number;
   readonly #serviceDigest: Buffer;
+  readonly #materializerDigest: Buffer | undefined;
   readonly #manager: SandboxManagerBackend;
   readonly #server: FastifyInstance;
   readonly #metrics: AgentDockMetrics | undefined;
@@ -107,6 +112,10 @@ export class SandboxManagerServer {
     this.#host = options.host;
     this.#port = options.port;
     this.#serviceDigest = digest(validServiceToken(options.serviceToken));
+    this.#materializerDigest =
+      options.materializerToken === undefined
+        ? undefined
+        : digest(validServiceToken(options.materializerToken));
     this.#manager = options.manager;
     this.#metrics = options.metrics;
     this.#server = Fastify({
@@ -156,6 +165,16 @@ export class SandboxManagerServer {
     const token = bearer(value);
     const candidate = token === undefined ? Buffer.alloc(32) : digest(token);
     return token !== undefined && timingSafeEqual(this.#serviceDigest, candidate);
+  }
+
+  #materializerAuthorized(value: string | undefined): boolean {
+    const token = bearer(value);
+    const candidate = token === undefined ? Buffer.alloc(32) : digest(token);
+    return (
+      token !== undefined &&
+      this.#materializerDigest !== undefined &&
+      timingSafeEqual(this.#materializerDigest, candidate)
+    );
   }
 
   async #failure(reply: FastifyReply, error: unknown): Promise<void> {
@@ -339,6 +358,33 @@ export class SandboxManagerServer {
           requestId: message.requestId,
           snapshot: encodeWorkspaceSnapshotBlob(snapshot),
         });
+      } catch (error: unknown) {
+        await this.#failure(reply, error);
+      }
+    });
+
+    this.#server.post(SANDBOX_MANAGER_MATERIALIZER_PATH, async (request, reply) => {
+      if (!this.#materializerAuthorized(request.headers.authorization)) {
+        await reply.code(401).send({
+          error: {
+            code: "invalid_snapshot_materializer_credential",
+            message: "Workspace materialization request is not authorized",
+            retryable: false,
+          },
+        } satisfies InternalServiceError);
+        return;
+      }
+      try {
+        const message = parseSandboxManagerMaterializeFileRequest(request.body);
+        await reply.code(200).send(
+          await this.#observed({
+            request,
+            spanName: "workspace.materialize_file",
+            operation: "materialize_file",
+            kind: "sandbox",
+            run: () => this.#manager.materializeFile(message),
+          }),
+        );
       } catch (error: unknown) {
         await this.#failure(reply, error);
       }
