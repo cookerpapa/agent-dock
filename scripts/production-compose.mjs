@@ -86,6 +86,9 @@ const applicationSecretNames = [
   "sandbox-manager-token",
   "sandbox-materializer-token",
   "cube-snapshot-gc-token",
+  "workspace-data-mover-token",
+  "workspace-kopia-repository-password",
+  "workspace-kopia-aws-credentials",
   "supervisor-enrollment-token",
   "supervisor-management-token",
   ...(requestedProvider === "cubesandbox" && !allowsStaleCubeTemplate
@@ -110,15 +113,22 @@ if (
 ) {
   throw new Error("Production application secrets must share one private non-root owner");
 }
-const sandboxManagerState = await lstat(resolve(runtimeDirectory, "state/sandbox-manager"));
-if (
-  !sandboxManagerState.isDirectory() ||
-  sandboxManagerState.isSymbolicLink() ||
-  (sandboxManagerState.mode & 0o077) !== 0 ||
-  sandboxManagerState.uid !== applicationOwner.uid ||
-  sandboxManagerState.gid !== applicationOwner.gid
-) {
-  throw new Error("Production Sandbox Manager state directory must be private and non-root");
+for (const [relativePath, label] of [
+  ["state/sandbox-manager", "Sandbox Manager"],
+  ["state/workspace-data-mover", "Workspace Data Mover"],
+  ["state/cube-shared", "Cube shared Workspace"],
+  ["state/cube-shared/volume", "Cube shared Workspace volume"],
+]) {
+  const state = await lstat(resolve(runtimeDirectory, relativePath));
+  if (
+    !state.isDirectory() ||
+    state.isSymbolicLink() ||
+    (state.mode & 0o077) !== 0 ||
+    state.uid !== applicationOwner.uid ||
+    state.gid !== applicationOwner.gid
+  ) {
+    throw new Error(`Production ${label} state directory must be private and non-root`);
+  }
 }
 
 async function readPrivateRuntimeJson(path, label) {

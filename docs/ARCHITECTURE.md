@@ -328,9 +328,9 @@ Responsibilities:
 - proxy extension UI requests and responses between Pi and the web client;
 - spool unacknowledged events locally and replay them after reconnect;
 - propagate cancellation to Pi and the separately managed Tool Sandbox;
-- commit Pi JSONL plus a remotely captured Workspace checkpoint: portable
-  content bytes for legacy/import paths or an encrypted Cube-native snapshot
-  reference for ordinary large repositories;
+- commit Pi JSONL plus a remotely captured Workspace checkpoint: portable or
+  Cube-native references remain readable for migration, while new Cube Runs
+  publish a Session-bound Kopia snapshot reference and content index;
 - report heartbeat, resource usage, and health.
 
 ### Trusted Supervisor host and production topology
@@ -411,6 +411,19 @@ references and applies a persistent two-scan/24-hour grace before it can delete
 only an AgentDock-named orphan; see ADR-0066. The Manager receives no
 Docker/containerd socket, database, S3, provider, enrollment, GitHub or tenant
 credential.
+
+New Cube Workspaces cross a separate storage boundary. CubeMaster and Cubelet
+load the `agentdock-posix` Volume Plugin and mount one deterministic
+tenant/Workspace/Session volume at `/workspace`. Only the trusted Workspace
+Data Mover receives the dedicated Kopia repository password and S3 credential.
+After the guest is sealed and `/workspace` is flushed, the Data Mover snapshots
+the POSIX directory into Kopia; before a cold activation it empties that exact
+volume and restores only the committed snapshot. It exposes a narrow
+service-token API for prepare, snapshot and bounded single-file
+materialization. It has no model, PostgreSQL, Kubernetes, Cube API or
+browser-facing network. PostgreSQL remains the publication authority: an
+uploaded Kopia snapshot is only an immutable candidate until the current
+RunAttempt fence and Workspace-head CAS settle it. See ADR-0067.
 
 Each retained gVisor importer/bootstrap Pod is non-root, read-only outside
 memory-backed volumes, capability-dropped, and networkless except for its

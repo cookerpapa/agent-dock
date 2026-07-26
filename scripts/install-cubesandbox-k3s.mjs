@@ -59,6 +59,14 @@ const k3sServiceRouteDropInPath =
 const k3sServiceCidr = "10.43.0.0/16";
 const templateRegistryTlsSecret = "agent-dock-cube-template-registry-tls";
 const templateRegistryDockerTrustDirectory = "/etc/docker/certs.d/localhost:5000";
+const posixVolumePluginName = "agentdock-posix";
+const posixVolumePluginConfigMap = "agent-dock-posix-volume-plugin";
+const posixVolumePluginSource = resolve(
+  repositoryRoot,
+  "deploy/cubesandbox/cube-volume-agentdock-posix.sh",
+);
+const posixSharedRoot = resolve(runtimeDirectory, "state/cube-shared");
+const posixVolumeRoot = resolve(posixSharedRoot, "volume");
 
 if (process.getuid?.() !== 0) {
   throw new Error(
@@ -330,6 +338,235 @@ async function restartCubeWorkloadsAfterNetworkChange() {
   for (const resource of resources) {
     await run("kubectl", ["-n", "cube-system", "rollout", "status", resource, "--timeout=600s"]);
   }
+}
+
+function withCubeletPosixVolumePlugin(config) {
+  if (
+    config.includes(`name        = "${posixVolumePluginName}"`) ||
+    config.includes(`name = "${posixVolumePluginName}"`)
+  ) {
+    return config;
+  }
+  const marker = `    [[plugins."io.cubelet.internal.v1.storage".volume_plugins]]
+      name        = "cos"
+      type        = "binary"
+      binary_path = "/usr/local/services/cubetoolbox/Cubelet/plugin/cube-volume-cos"`;
+  if (!config.includes(marker)) {
+    throw new Error("Cubelet v0.6 volume plugin configuration shape was not recognized");
+  }
+  return config.replace(
+    marker,
+    `${marker}
+
+    [[plugins."io.cubelet.internal.v1.storage".volume_plugins]]
+      name        = "${posixVolumePluginName}"
+      type        = "binary"
+      binary_path = "/usr/local/services/cubetoolbox/Cubelet/plugin/cube-volume-agentdock-posix"`,
+  );
+}
+
+function withCubeMasterPosixVolumePlugin(config) {
+  if (config.includes(`  - name: ${posixVolumePluginName}\n`)) return config;
+  const marker = `  - name: cos
+    type: binary
+    binary_path: /usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-cos`;
+  if (!config.includes(marker)) {
+    throw new Error("CubeMaster v0.6 volume plugin configuration shape was not recognized");
+  }
+  return config.replace(
+    marker,
+    `${marker}
+  - name: ${posixVolumePluginName}
+    type: binary
+    binary_path: /usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-agentdock-posix`,
+  );
+}
+
+async function installPosixVolumePlugin() {
+  await mkdir(posixVolumeRoot, { recursive: true, mode: 0o700 });
+  await chmod(posixSharedRoot, 0o700);
+  await chmod(posixVolumeRoot, 0o700);
+  const pod = await capture("kubectl", [
+    "-n",
+    "cube-system",
+    "get",
+    "pod",
+    "-l",
+    "app.kubernetes.io/component=cube-node",
+    "-o",
+    "jsonpath={.items[0].metadata.name}",
+  ]);
+  if (pod.length < 1) throw new Error("Cubelet Pod was unavailable for plugin configuration");
+  const cubeletConfig = withCubeletPosixVolumePlugin(
+    await capture("kubectl", [
+      "-n",
+      "cube-system",
+      "exec",
+      pod,
+      "-c",
+      "cubelet",
+      "--",
+      "cat",
+      "/usr/local/services/cubetoolbox/Cubelet/config/config.toml",
+    ]),
+  );
+  const masterSecret = JSON.parse(
+    await capture("kubectl", [
+      "-n",
+      "cube-system",
+      "get",
+      "secret",
+      "cube-master-config",
+      "-o",
+      "json",
+    ]),
+  );
+  const encodedMasterConfig = masterSecret?.data?.["conf.yaml"];
+  if (typeof encodedMasterConfig !== "string") {
+    throw new Error("CubeMaster configuration Secret was invalid");
+  }
+  const masterConfig = withCubeMasterPosixVolumePlugin(
+    Buffer.from(encodedMasterConfig, "base64").toString("utf8"),
+  );
+  const temporary = await mkdtemp(join(tmpdir(), "agent-dock-cube-posix-volume-"));
+  try {
+    const cubeletConfigPath = join(temporary, "cubelet-config.toml");
+    await writeFile(cubeletConfigPath, cubeletConfig, { mode: 0o600 });
+    const configMap = await capture("kubectl", [
+      "-n",
+      "cube-system",
+      "create",
+      "configmap",
+      posixVolumePluginConfigMap,
+      `--from-file=cubelet-config.toml=${cubeletConfigPath}`,
+      `--from-file=cube-volume-agentdock-posix=${posixVolumePluginSource}`,
+      "--dry-run=client",
+      "-o",
+      "json",
+    ]);
+    await run("kubectl", ["apply", "-f", "-"], { input: configMap });
+    await run("kubectl", [
+      "-n",
+      "cube-system",
+      "patch",
+      "secret",
+      "cube-master-config",
+      "--type=merge",
+      "-p",
+      JSON.stringify({
+        data: { "conf.yaml": Buffer.from(masterConfig, "utf8").toString("base64") },
+      }),
+    ]);
+    await run("kubectl", [
+      "-n",
+      "cube-system",
+      "patch",
+      "deployment",
+      "cube-master",
+      "--type=strategic",
+      "-p",
+      JSON.stringify({
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                {
+                  name: "cube-master",
+                  volumeMounts: [
+                    {
+                      name: "agentdock-posix-volume-plugin",
+                      mountPath:
+                        "/usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-agentdock-posix",
+                      subPath: "cube-volume-agentdock-posix",
+                      readOnly: true,
+                    },
+                    {
+                      name: "agentdock-posix-shared",
+                      mountPath: "/data/cube-shared",
+                    },
+                  ],
+                },
+              ],
+              volumes: [
+                {
+                  name: "agentdock-posix-volume-plugin",
+                  configMap: { name: posixVolumePluginConfigMap, defaultMode: 365 },
+                },
+                {
+                  name: "agentdock-posix-shared",
+                  hostPath: { path: posixSharedRoot, type: "Directory" },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ]);
+    await run("kubectl", [
+      "-n",
+      "cube-system",
+      "patch",
+      "daemonset",
+      "cube-node",
+      "--type=strategic",
+      "-p",
+      JSON.stringify({
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                {
+                  name: "cubelet",
+                  volumeMounts: [
+                    {
+                      name: "agentdock-posix-volume-plugin",
+                      mountPath: "/opt/cube-image/Cubelet/plugin/cube-volume-agentdock-posix",
+                      subPath: "cube-volume-agentdock-posix",
+                      readOnly: true,
+                    },
+                    {
+                      name: "agentdock-posix-volume-plugin",
+                      mountPath: "/opt/cube-image/Cubelet/config/config.toml",
+                      subPath: "cubelet-config.toml",
+                      readOnly: true,
+                    },
+                  ],
+                },
+              ],
+              volumes: [
+                {
+                  name: "agentdock-posix-volume-plugin",
+                  configMap: { name: posixVolumePluginConfigMap, defaultMode: 365 },
+                },
+                {
+                  name: "data-cube-shared",
+                  hostPath: { path: posixSharedRoot, type: "Directory" },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ]);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+  await run("kubectl", [
+    "-n",
+    "cube-system",
+    "rollout",
+    "status",
+    "deployment/cube-master",
+    "--timeout=600s",
+  ]);
+  await run("kubectl", [
+    "-n",
+    "cube-system",
+    "rollout",
+    "status",
+    "daemonset/cube-node",
+    "--timeout=900s",
+  ]);
 }
 
 async function assertCubePodMtu(expectedMtu) {
@@ -783,6 +1020,7 @@ try {
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }
+await installPosixVolumePlugin();
 if (nodeNetwork.changed) {
   await restartCubeWorkloadsAfterNetworkChange();
 }

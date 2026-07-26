@@ -8,12 +8,14 @@ import {
   captureCubeWorkspaceIndex,
   collectGitWorkspacePatch,
   createCubeWorkspaceCheckpoint,
+  createKopiaWorkspaceCheckpoint,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   createWorkspaceSnapshot,
   mergeWorkspaceSnapshots,
   parseWorkspaceSnapshot,
   parseCubeWorkspaceCheckpoint,
+  parseKopiaWorkspaceCheckpoint,
   restoreWorkspaceSnapshot,
   workspaceSnapshotMetadata,
 } from "../src/index.ts";
@@ -192,5 +194,50 @@ describe("shared workspace runtime", () => {
       sizeBytes: Buffer.byteLength("target.txt"),
     });
     expect(link?.sha256).not.toBe(target?.sha256);
+  });
+
+  it("round-trips a strictly bound Kopia checkpoint without embedding Workspace bytes", () => {
+    const checkpoint = createKopiaWorkspaceCheckpoint({
+      snapshotId: "k1234567890abcdef",
+      volumeId: `adw-${"a".repeat(48)}`,
+      activationId: "10000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-kopia",
+      workspaceId: "workspace-kopia",
+      sessionId: "session-kopia",
+      bindingSha256: "b".repeat(64),
+      fencingToken: 9,
+      imageRevision: "development",
+      environmentSpecSha256: "c".repeat(64),
+      files: [
+        {
+          path: "src/result.txt",
+          executable: false,
+          sizeBytes: 7,
+          sha256: "d".repeat(64),
+        },
+      ],
+      recipeCommands: [],
+    });
+    expect(parseKopiaWorkspaceCheckpoint(checkpoint)).toMatchObject({
+      snapshotId: "k1234567890abcdef",
+      tenantId: "tenant-kopia",
+      workspaceId: "workspace-kopia",
+      sessionId: "session-kopia",
+      fencingToken: 9,
+      totalSizeBytes: 7,
+    });
+    expect(workspaceSnapshotMetadata(checkpoint)).toEqual([
+      expect.objectContaining({ path: "src/result.txt", sizeBytes: 7 }),
+    ]);
+    expect(() => parseWorkspaceSnapshot(checkpoint)).toThrow(/portable file bytes/);
+
+    const withUnexpectedField = JSON.parse(Buffer.from(checkpoint).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    withUnexpectedField.untrusted = true;
+    expect(() =>
+      parseKopiaWorkspaceCheckpoint(Buffer.from(JSON.stringify(withUnexpectedField))),
+    ).toThrow(/shape/);
   });
 });

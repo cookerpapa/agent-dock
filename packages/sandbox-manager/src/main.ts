@@ -6,6 +6,7 @@ import type { SandboxProvider } from "./sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 import { createHash } from "node:crypto";
+import { HttpWorkspaceDataMover } from "./workspace-data-mover.ts";
 
 const config = await loadSandboxManagerConfig();
 const observability = await startServiceObservability({
@@ -62,6 +63,10 @@ if (config.provider === "cubesandbox") {
       .update("agent-dock.cube-workspace-checkpoint-key.v1\0")
       .update(config.serviceToken)
       .digest(),
+    workspaceDataMover: new HttpWorkspaceDataMover({
+      baseUrl: cube.workspaceDataMoverUrl,
+      serviceToken: cube.workspaceDataMoverToken,
+    }),
     ...(cube.snapshotGc === undefined ? {} : { snapshotGc: cube.snapshotGc }),
   });
 } else {

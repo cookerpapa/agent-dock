@@ -1,3 +1,5 @@
+FROM kopia/kopia@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e AS kopia
+
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -18,6 +20,7 @@ LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
 WORKDIR /app
+COPY --from=kopia /bin/kopia /usr/local/bin/kopia
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
 COPY package.json package-lock.json ./

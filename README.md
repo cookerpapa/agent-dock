@@ -84,6 +84,9 @@ Untrusted demand-activated Tool microVM
   freezes the source set before queue acceptance
 - Sandbox: pinned Tencent CubeSandbox v0.6.0; CubeMaster schedules one
   credential-free KVM Tool microVM on the first real Tool Call
+- Workspace durability: Cube's Volume Plugin mounts a Session-bound POSIX
+  execution copy; a trusted Kopia Data Mover snapshots/restores immutable bytes
+  while PostgreSQL Fence/CAS alone advances the current Workspace head
 - Repository importer: Kubernetes `RuntimeClass` with gVisor `runsc`/KVM until
   an equivalent Cube temporary-egress/fresh-offline transition is validated
 - Provider policy: Cube is deployment-owned and fail-closed; no browser,
@@ -193,6 +196,7 @@ only after a measured requirement appears.
 - [ADR-0061: capacity-aware Temporal Worker affinity](docs/adr/0061-capacity-aware-temporal-worker-affinity.md)
 - [ADR-0062: Cube full-public egress with private-network denial](docs/adr/0062-cube-full-public-egress-with-private-network-denial.md)
 - [ADR-0064: Cube-native large Workspace checkpoints](docs/adr/0064-cube-native-workspace-checkpoints.md)
+- [ADR-0067: Cube POSIX volumes and Kopia Workspace authority](docs/adr/0067-cube-posix-volumes-and-kopia-workspace-authority.md)
 
 ## Current executable spikes
 
@@ -538,13 +542,13 @@ GitHub `owner/repository` plus an exact 40-hex commit. At each successful settle
 boundary, trusted Pi JSONL is stored as tenant/session-scoped,
 content-addressed line segments plus an immutable manifest. For an ordinary
 Cube Tool Run, the guest is sealed and a content-hashed file index plus Git
-patch are captured. A small Workspace keeps the portable manifest; a larger
-Workspace creates a Cube-native snapshot and only its encrypted,
-identity-bound reference crosses the private Tool channel before
-`turn.completed`;
-the next turn restores both into a fresh Pi activation and a different
-ephemeral Tool Sandbox. Production therefore supports a genuine same-session
-follow-up without keeping an idle Pi process or Sandbox alive.
+patch are captured. The trusted Data Mover snapshots the flushed POSIX
+Workspace into Kopia, and only its identity/fence-bound reference crosses the
+private Tool channel before `turn.completed`. A warm exact-Session activation
+may be sealed, paused and reused; after eviction or failure a fresh Cube VM
+mounts the volume restored from the committed Kopia snapshot. Production
+therefore supports genuine same-session follow-up without keeping an idle Pi
+process alive or making the Cube node copy authoritative.
 
 The ephemeral demo still uses a private host directory coupled to its temporary
 database. The production storage boundary has an S3-compatible adapter:
@@ -722,8 +726,8 @@ AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
 ```
 
 The primary Cube product path has a focused real-token acceptance command. It
-proves pure-chat zero activation, two same-Session coding Runs in distinct KVM
-guests with Workspace restore, semantic projections, cross-tenant API denial
+proves pure-chat zero activation, warm same-Session coding, Kopia recovery after
+deleting the local POSIX copy, semantic projections, cross-tenant API denial
 and exact Cube cleanup:
 
 ```bash

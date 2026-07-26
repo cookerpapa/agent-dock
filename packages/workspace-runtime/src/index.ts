@@ -32,6 +32,14 @@ export {
   type CubeWorkspaceCheckpoint,
   type CubeWorkspaceCheckpointAuthority,
   type WorkspaceSnapshotFileMetadata,
+  validateCubeWorkspaceFileList,
 } from "./cube-workspace-checkpoint.ts";
+export {
+  KOPIA_WORKSPACE_CHECKPOINT_FORMAT,
+  createKopiaWorkspaceCheckpoint,
+  parseKopiaWorkspaceCheckpoint,
+  type CreateKopiaWorkspaceCheckpointInput,
+  type KopiaWorkspaceCheckpoint,
+} from "./kopia-workspace-checkpoint.ts";
 
 export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";

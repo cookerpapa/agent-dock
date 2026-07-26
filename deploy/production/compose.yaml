@@ -296,6 +296,30 @@ services:
         printf '%s\n%s\n' "$${application_access_key}" "$${application_secret_key}" | mc admin user add agentdock >/dev/null
         mc admin policy attach agentdock agent-dock-checkpoint-read-write --user "$${application_access_key}" >/dev/null
         mc stat "agentdock/$${bucket}" >/dev/null
+        kopia_bucket=${AGENT_DOCK_WORKSPACE_KOPIA_BUCKET:-agent-dock-workspace-kopia}
+        {
+          IFS= read -r kopia_credential_profile
+          IFS=' ' read -r kopia_access_label kopia_access_equals kopia_access_key
+          IFS=' ' read -r kopia_secret_label kopia_secret_equals kopia_secret_key
+        } < /run/agent-dock-secrets/workspace-kopia-aws-credentials
+        test "$${kopia_credential_profile}" = '[default]'
+        test "$${kopia_access_label}" = 'aws_access_key_id'
+        test "$${kopia_access_equals}" = '='
+        test -n "$${kopia_access_key}"
+        test "$${kopia_secret_label}" = 'aws_secret_access_key'
+        test "$${kopia_secret_equals}" = '='
+        test -n "$${kopia_secret_key}"
+        mc mb --ignore-existing "agentdock/$${kopia_bucket}"
+        mc anonymous set none "agentdock/$${kopia_bucket}"
+        printf '%s\n' \
+          '{"Version":"2012-10-17","Statement":[' \
+          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\",\"s3:ListBucketMultipartUploads\"],\"Resource\":[\"arn:aws:s3:::$${kopia_bucket}\"]}," \
+          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\",\"s3:AbortMultipartUpload\",\"s3:ListMultipartUploadParts\"],\"Resource\":[\"arn:aws:s3:::$${kopia_bucket}/*\"]}" \
+          ']}' > /tmp/agent-dock-workspace-kopia-policy.json
+        mc admin policy create agentdock agent-dock-workspace-kopia-read-write /tmp/agent-dock-workspace-kopia-policy.json >/dev/null
+        printf '%s\n%s\n' "$${kopia_access_key}" "$${kopia_secret_key}" | mc admin user add agentdock >/dev/null
+        mc admin policy attach agentdock agent-dock-workspace-kopia-read-write --user "$${kopia_access_key}" >/dev/null
+        mc stat "agentdock/$${kopia_bucket}" >/dev/null
     volumes:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-user
@@ -308,6 +332,10 @@ services:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
         target: /run/agent-dock-secrets/aws-credentials
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-aws-credentials
+        target: /run/agent-dock-secrets/workspace-kopia-aws-credentials
         read_only: true
     networks:
       - object-storage
@@ -697,6 +725,78 @@ services:
     cpus: 0.25
     logging: *bounded-logging
 
+  workspace-data-mover:
+    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/sandbox-manager/Dockerfile
+      args: *application-build-args
+      network: host
+    restart: unless-stopped
+    depends_on:
+      minio-bootstrap:
+        condition: service_completed_successfully
+    command: [/app/packages/sandbox-manager/src/workspace-data-mover-main.ts]
+    environment:
+      NODE_ENV: production
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST: 0.0.0.0
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT: "4500"
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
+      AGENT_DOCK_WORKSPACE_POSIX_ROOT: /data/cube-shared/volume
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT: /var/lib/agent-dock/workspace-data-mover
+      AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH: /var/lib/agent-dock/workspace-data-mover/kopia/repository.config
+      AGENT_DOCK_WORKSPACE_KOPIA_CACHE_DIRECTORY: /var/lib/agent-dock/workspace-data-mover/kopia/cache
+      AGENT_DOCK_WORKSPACE_KOPIA_REPOSITORY_PASSWORD_FILE: /run/agent-dock-secrets/workspace-kopia-repository-password
+      AGENT_DOCK_WORKSPACE_KOPIA_AWS_CREDENTIALS_FILE: /run/agent-dock-secrets/workspace-kopia-aws-credentials
+      AGENT_DOCK_WORKSPACE_KOPIA_S3_BUCKET: ${AGENT_DOCK_WORKSPACE_KOPIA_BUCKET:-agent-dock-workspace-kopia}
+      AGENT_DOCK_WORKSPACE_KOPIA_S3_ENDPOINT: minio:9000
+      AGENT_DOCK_WORKSPACE_KOPIA_S3_REGION: us-east-1
+      AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX: production/kopia/v1/
+      AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS: "true"
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/cube-shared/volume
+        target: /data/cube-shared/volume
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/workspace-data-mover
+        target: /var/lib/agent-dock/workspace-data-mover
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-data-mover-token
+        target: /run/agent-dock-secrets/workspace-data-mover-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-repository-password
+        target: /run/agent-dock-secrets/workspace-kopia-repository-password
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-aws-credentials
+        target: /run/agent-dock-secrets/workspace-kopia-aws-credentials
+        read_only: true
+    networks:
+      - sandbox-control
+      - object-storage
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4500/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.5
+    stop_grace_period: 45s
+    logging: *bounded-logging
+
   sandbox-manager:
     image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
@@ -707,6 +807,8 @@ services:
     restart: unless-stopped
     depends_on:
       kubernetes-api-relay:
+        condition: service_healthy
+      workspace-data-mover:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -724,6 +826,8 @@ services:
       AGENT_DOCK_CUBE_SNAPSHOT_GC_DELETE_ENABLED: "true"
       AGENT_DOCK_CUBE_SNAPSHOT_GC_GRACE_MS: "86400000"
       AGENT_DOCK_CUBE_SNAPSHOT_GC_MAXIMUM_DELETES: "25"
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: http://workspace-data-mover:4500
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
       AGENT_DOCK_TOOL_SANDBOX_IMAGE: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
       AGENT_DOCK_IMAGE_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
       AGENT_DOCK_KUBECONFIG_PATH: /run/agent-dock-kubernetes/sandbox-manager.kubeconfig
@@ -760,6 +864,10 @@ services:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cube-snapshot-gc-token
         target: /run/agent-dock-secrets/cube-snapshot-gc-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-data-mover-token
+        target: /run/agent-dock-secrets/workspace-data-mover-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/sandbox-manager

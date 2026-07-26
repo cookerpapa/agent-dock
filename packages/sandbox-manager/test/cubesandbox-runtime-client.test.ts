@@ -40,6 +40,24 @@ beforeAll(async () => {
         response.end('{"kernelRelease":"cube-guest"}');
         return;
       }
+      if (
+        request.method === "GET" &&
+        request.url === "/volumes/adw-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      if (request.method === "POST" && request.url === "/volumes") {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            volumeID: (body as { name?: unknown }).name,
+            name: (body as { name?: unknown }).name,
+          }),
+        );
+        return;
+      }
       if (request.method === "POST" && request.url === "/sandboxes") {
         response.writeHead(201, { "content-type": "application/json" });
         response.end(
@@ -160,12 +178,23 @@ describe("official CubeSandbox HTTP compatibility client", () => {
     expect(observed.find((request) => request.path === "/health")).toMatchObject({
       headers: { authorization: `Bearer ${"k".repeat(48)}` },
     });
+    const volumeId = `adw-${"a".repeat(48)}`;
+    await expect(client.ensureVolume(volumeId, "agentdock-posix")).resolves.toEqual({
+      volumeId,
+      name: volumeId,
+    });
+    expect(observed.find((request) => request.path === "/volumes")).toMatchObject({
+      method: "POST",
+      headers: { authorization: `Bearer ${"k".repeat(48)}` },
+      body: { name: volumeId, driver: "agentdock-posix" },
+    });
     const instance = await client.create({
       templateId: "agent-dock-tool-v1",
       timeoutSeconds: 900,
       metadata: { "agentdock.managed": "true" },
       allowInternetAccess: true,
       allowPublicTraffic: false,
+      volumeMounts: [{ name: volumeId, path: "/workspace" }],
     });
     expect(instance.trafficAccessToken).toBe("private-traffic-token");
     expect(observed.find((request) => request.path === "/sandboxes")).toMatchObject({
@@ -180,6 +209,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
           denyOut: ["0.0.0.0/0"],
         },
         lifecycle: { on_timeout: "pause", auto_resume: false },
+        volumeMounts: [{ name: volumeId, path: "/workspace" }],
       },
     });
     await expect(

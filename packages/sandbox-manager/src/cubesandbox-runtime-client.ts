@@ -43,12 +43,18 @@ export type CubeSandboxSnapshot = Readonly<{
   names: readonly string[];
 }>;
 
+export type CubeSandboxVolume = Readonly<{
+  volumeId: string;
+  name: string;
+}>;
+
 export type CubeSandboxCreateInput = Readonly<{
   templateId: string;
   timeoutSeconds: number;
   metadata: Readonly<Record<string, string>>;
   allowInternetAccess: true;
   allowPublicTraffic: false;
+  volumeMounts?: readonly Readonly<{ name: string; path: "/workspace" }>[];
 }>;
 
 export type CubeSandboxDataRequest = Readonly<{
@@ -67,6 +73,7 @@ export type CubeSandboxDataRequest = Readonly<{
 
 export interface CubeSandboxRuntimeClient {
   checkHealth(): Promise<void>;
+  ensureVolume(volumeId: string, driver: string): Promise<CubeSandboxVolume>;
   create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance>;
   read(sandboxId: string): Promise<CubeSandboxInstance | undefined>;
   list(): Promise<readonly CubeSandboxInstance[]>;
@@ -195,6 +202,16 @@ function parseSnapshot(value: unknown): CubeSandboxSnapshot {
   return Object.freeze({ snapshotId, names: Object.freeze(names) });
 }
 
+function parseVolume(value: unknown): CubeSandboxVolume {
+  const candidate = record(value, "CubeSandbox volume");
+  const volumeId = bounded(candidate.volumeID ?? candidate.volume_id, "CubeSandbox volume ID", 128);
+  const name = bounded(candidate.name, "CubeSandbox volume name", 128);
+  if (!/^[A-Za-z0-9_-]+$/.test(volumeId) || !/^[A-Za-z0-9_-]+$/.test(name) || name !== volumeId) {
+    throw new CubeRuntimeClientError("CubeSandbox volume identity was invalid");
+  }
+  return Object.freeze({ volumeId, name });
+}
+
 function validateApiUrl(value: string): string {
   let parsed: URL;
   try {
@@ -299,6 +316,42 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     await response.body?.cancel().catch(() => undefined);
   }
 
+  async ensureVolume(volumeId: string, driver: string): Promise<CubeSandboxVolume> {
+    const id = bounded(volumeId, "CubeSandbox volume ID", 128);
+    const selectedDriver = bounded(driver, "CubeSandbox volume driver", 64);
+    if (!/^[A-Za-z0-9_-]+$/.test(id) || !/^[A-Za-z0-9_-]+$/.test(selectedDriver)) {
+      throw new CubeRuntimeClientError("CubeSandbox volume request was invalid");
+    }
+    const encoded = encodeURIComponent(id);
+    const existing = await this.#control(`/volumes/${encoded}`, {}, true);
+    if (existing.status !== 404) {
+      return parseVolume(
+        parseJson(await readBoundedResponse(existing, 64 * 1_024), "CubeSandbox volume inspect"),
+      );
+    }
+    await existing.body?.cancel().catch(() => undefined);
+    try {
+      const created = await this.#control("/volumes", {
+        method: "POST",
+        body: JSON.stringify({ name: id, driver: selectedDriver }),
+      });
+      return parseVolume(
+        parseJson(await readBoundedResponse(created, 64 * 1_024), "CubeSandbox volume create"),
+      );
+    } catch (error: unknown) {
+      // A competing activation may have created the same deterministic volume
+      // after our read. Re-read and adopt only an exact identity.
+      const raced = await this.#control(`/volumes/${encoded}`, {}, true);
+      if (raced.status === 404) {
+        await raced.body?.cancel().catch(() => undefined);
+        throw error;
+      }
+      return parseVolume(
+        parseJson(await readBoundedResponse(raced, 64 * 1_024), "CubeSandbox volume inspect"),
+      );
+    }
+  }
+
   async create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance> {
     const response = await this.#control("/sandboxes", {
       method: "POST",
@@ -306,6 +359,16 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         templateID: input.templateId,
         timeout: input.timeoutSeconds,
         metadata: input.metadata,
+        ...(input.volumeMounts === undefined
+          ? {}
+          : {
+              volumeMounts: input.volumeMounts.map((mount) => {
+                if (!/^adw-[0-9a-f]{48}$/.test(mount.name) || mount.path !== "/workspace") {
+                  throw new CubeRuntimeClientError("CubeSandbox volume mount was invalid");
+                }
+                return { name: mount.name, path: mount.path };
+              }),
+            }),
         allow_internet_access: true,
         network: {
           allowPublicTraffic: false,

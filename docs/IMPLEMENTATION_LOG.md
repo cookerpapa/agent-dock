@@ -2670,3 +2670,34 @@
   a bounded retryable dependency race and retries after five seconds. Integrity,
   tenant-binding and protocol failures remain non-retryable and fail closed;
   shutdown cancels both periodic and retry timers.
+
+## 2026-07-26 — Cube POSIX volumes and trusted Kopia Workspace durability
+
+- Added ADR-0067 after checking Cube v0.6's official binary Volume Plugin
+  contract and Kopia's current repository/restore behavior. New Cube
+  activations receive one deterministic tenant/Workspace/Session volume through
+  the `agentdock-posix` plugin; browsers, models and Tool code cannot select a
+  host path, volume driver or repository.
+- Added a separately authenticated trusted Workspace Data Mover. It alone
+  mounts the POSIX root and receives a dedicated Kopia repository password and
+  least-privilege S3 credential. Its API is limited to exact-volume prepare,
+  quiescent snapshot and hash-verified bounded single-file materialization.
+- New checkpoints contain a Kopia snapshot ID, volume/session binding, file
+  index, environment evidence, activation and fence. Legacy portable and
+  Cube-native formats remain readable, but ordinary new Cube Runs no longer
+  create node-local Cube snapshots.
+- Cube checkpointing now seals the guest, kills Tool processes and calls
+  `sync -f /workspace` before the trusted mover snapshots it. Cold restore
+  populates the POSIX volume before a fresh base-template VM starts under a
+  strictly higher fence. PostgreSQL's existing staged WorkspaceVersion,
+  RunAttempt fencing and head CAS remain the sole publication authority.
+- Production now provisions a dedicated Kopia MinIO bucket/user, private mover
+  state/secrets, internal-only network membership and a pinned static Kopia
+  binary. The Cube API allowlist admits only deterministic volume create/read;
+  volume deletion and arbitrary IDs remain denied.
+- Unit evidence covers strict reference shape, tenant-bound volume identity,
+  traversal rejection, authenticated mover RPC, materialization hash checking,
+  Kopia Provider restore, legacy compatibility and Cube API denial. The live
+  acceptance additionally erases the source Session's local POSIX contents
+  while leaving its mover sidecar intact before demanding a fresh-VM restore
+  from Kopia; a sidecar is deliberately never treated as proof of live bytes.

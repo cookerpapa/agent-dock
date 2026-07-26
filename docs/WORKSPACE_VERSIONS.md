@@ -16,9 +16,10 @@ Version 1 (settled)
 ```
 
 A version references exact Pi transcript and canonical Workspace checkpoint
-artifacts plus an optional unified patch. The checkpoint is either the legacy
-portable regular-file manifest or an identity-bound Cube-native snapshot
-reference with a content-hashed file index. SHA-256 and byte length are checked
+artifacts plus an optional unified patch. New Cube checkpoints are
+identity-bound Kopia snapshot references with a content-hashed file index;
+legacy portable and Cube-native references remain readable. SHA-256 and byte
+length are checked
 after bytes cross the authenticated Supervisor artifact transport. Browser
 requests use tenant-owned UUIDs; browsers never submit object-store keys.
 
@@ -39,11 +40,12 @@ rows. Active work blocks pointer-changing operations. Archived Sessions reject
 new Turns. Rollback does not delete or rewrite history; the next Pi activation
 loads the selected version's transcript and files.
 
-Cube-native versions can be listed, compared, forked and rolled back without
+Kopia-backed versions can be listed, compared, forked and rolled back without
 booting a VM because the reference contains content hashes. Exact historical
-file download and GitHub delivery currently fail with
-`artifact_unavailable` unless a portable manifest/patch is available; a future
-read-only Cube snapshot materializer will close that product gap.
+regular-file download asks the trusted Data Mover to restore only the requested
+snapshot path and verifies its committed hash; it does not create a Tool VM or
+give the browser access to Kopia credentials. Legacy Cube-native
+materialization remains available only for pre-ADR-0067 versions.
 
 ## Consistency claim
 

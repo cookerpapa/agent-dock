@@ -563,6 +563,9 @@ describe("provider-backed Tool Sandbox Manager", () => {
       const cubeKeyPath = join(directory, "cube-api-key");
       await writeFile(cubeKeyPath, `${"k".repeat(48)}\n`, { mode: 0o600 });
       await chmod(cubeKeyPath, 0o600);
+      const workspaceDataMoverTokenPath = join(directory, "workspace-data-mover-token");
+      await writeFile(workspaceDataMoverTokenPath, `${"m".repeat(48)}\n`, { mode: 0o600 });
+      await chmod(workspaceDataMoverTokenPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_PROVIDER: "cubesandbox",
@@ -575,6 +578,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
           AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
           AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
           AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: "https",
+          AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: "http://workspace-data-mover:4500",
+          AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
         }),
       ).resolves.toMatchObject({
         provider: "cubesandbox",
@@ -586,6 +591,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
           proxyPort: 443,
           proxyScheme: "https",
           sandboxDomain: "cube.app",
+          workspaceDataMoverUrl: "http://workspace-data-mover:4500",
+          workspaceDataMoverToken: "m".repeat(48),
         },
       });
       await expect(

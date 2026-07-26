@@ -40,12 +40,12 @@ operator path.
 | Orchestrator | Kubernetes Pod + RuntimeClass | CubeAPI/CubeMaster/Cubelet |
 | AgentDock status | importer and deterministic regression only | ordinary Tool execution, live KVM validated |
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
-| Workspace durability | AgentDock portable content manifest | sealed Cube-native snapshot plus fenced AgentDock reference |
+| Workspace durability | AgentDock portable content manifest | Cube Volume Plugin + POSIX Workspace + trusted Kopia snapshot |
 | Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
 | Tool network | Kubernetes default deny | one trusted web gateway; every direct route denied |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
 | Dependency setup | disposable exact-host bootstrap | promotes regular files into a proxy-mediated Cube VM |
-| Native snapshot | not required | ordinary large-Workspace persistence under ADR-0064 |
+| Native snapshot | not required | legacy restore only; new checkpoints use ADR-0067 Kopia references |
 
 ## Provider path
 
@@ -55,7 +55,7 @@ operator path.
 - create and immutable handle construction;
 - bash/read/write/edit through the existing Tool Worker;
 - cancellation;
-- sealed content-index capture plus Cube-native snapshot;
+- sealed content-index capture plus trusted Kopia snapshot;
 - inspect, inventory, stop/destroy and orphan cleanup.
 
 The implementation uses a minimal, bounded client for the official v0.6 REST
@@ -99,16 +99,23 @@ token alone is insufficient after rebind. Any ambiguous transition destroys
 the VM and falls back to the committed AgentDock checkpoint.
 
 At an ordinary durable checkpoint, the same sealed boundary captures a
-content-hashed file index and Git patch and rotates to a one-use recovery
-secret. A Workspace that still fits the portable manifest keeps that format;
-larger Workspaces ask Cube to create a native snapshot. The recovery secret is
-encrypted in the small reference stored in MinIO; PostgreSQL publishes that
-reference only under the current RunAttempt fence and Workspace-head CAS. A
-cold restore creates a fresh Cube VM from the committed snapshot template. It
-must rotate to a strictly higher fence before the Tool Worker starts. Because
-Cube v0.6 inherits source labels, AgentDock adds an immutable
-fence-qualified assignment record on every physical activation and treats only
-the highest valid record as current. See ADR-0064.
+content-hashed file index and Git patch, terminates every Tool process, and
+flushes `/workspace`. Cube mounts that path from an `agentdock-posix` Volume
+Plugin volume. A separately authenticated trusted Data Mover snapshots the
+quiescent POSIX directory into Kopia's encrypted, content-addressed repository
+in the dedicated MinIO bucket. The bounded checkpoint contains the Kopia
+snapshot ID, deterministic Session volume ID, file index, environment binding,
+activation and fence; it contains neither repository credentials nor Workspace
+file bytes.
+
+PostgreSQL publishes that immutable candidate only under the current
+RunAttempt fence and Workspace-head CAS. A cold restore first asks the Data
+Mover to restore the committed Kopia snapshot into the exact bound POSIX
+volume, then creates a fresh base-template Cube VM with that volume mounted.
+The new Tool Worker starts only under a strictly higher fence. A stale or
+wrong-tenant Attempt therefore cannot select a snapshot, publish a new head, or
+rebind another Session's volume. Legacy ADR-0064 Cube snapshot references
+remain readable for migration, but no new Run creates them. See ADR-0067.
 
 ## Network and credential boundary
 
@@ -197,8 +204,8 @@ The live gate has proven:
 - exact Tool image versions;
 - actual file write, Python execution, traversal rejection and content-hashed
   checkpoint through the template service;
-- Cube-native snapshot creation, source-VM destruction, cold restore into a
-  fresh activation, and recovery-authority rotation under a higher fence;
+- Kopia snapshot creation from a sealed POSIX Workspace, source-VM destruction,
+  local-copy deletion, and cold restore into a fresh higher-fence activation;
 - fixed-target control/data relays.
 - a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
 - simultaneous tenant canaries remaining in different Workspaces;
@@ -214,9 +221,12 @@ governed by ADR-0044. Its captured regular files are restored into a fresh
 Cube VM. This is still a reproducible preparation boundary, but proxy-aware
 ordinary Cube Bash subsequently has mediated public-web egress under ADR-0063.
 
-This does not prove a multi-node production deployment. Cube control-node loss,
-compute-node loss, rolling upgrade, storage failure, density and long-duration
-soak drills remain release gates for a public service.
+The local profile proves loss of the Cube execution copy, not loss of the
+physical host that also runs MinIO. A multi-node deployment must mount the same
+POSIX filesystem at `/data/cube-shared/volume` on CubeMaster, every Cubelet and
+the Data Mover, and must place Kopia's S3 repository off-node or on replicated
+storage. Cube control-node loss, rolling upgrade, storage failure, density and
+long-duration soak drills remain release gates for a public service.
 
 The latest sanitized measurements are recorded in
 [`reports/cubesandbox-kvm-acceptance-latest.md`](reports/cubesandbox-kvm-acceptance-latest.md).
@@ -235,13 +245,13 @@ page:
 - the in-tree [Node SDK source](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/sdk/node)
   and [Pi integration example](https://github.com/TencentCloud/CubeSandbox/tree/v0.6.0/examples/pi-agent-integration).
 
-ADR-0064 promotes only sealed snapshot-and-clone at a quiescent settled
-boundary. Cube rollback remains origin-Sandbox-bound and is deliberately not
-part of the Manager credential. The
+ADR-0067 supersedes Cube-native snapshot creation for new Workspaces. Cube
+rollback remains origin-Sandbox-bound and is deliberately not part of the
+Manager credential. The
 failure modes represented by upstream issue
 [#804](https://github.com/TencentCloud/CubeSandbox/issues/804),
 [#985](https://github.com/TencentCloud/CubeSandbox/issues/985) and
 [#1105](https://github.com/TencentCloud/CubeSandbox/issues/1105) remain part of
-the multi-node release gate. PostgreSQL remains the logical source of truth,
-while the current single-node Cube snapshot store is explicitly not claimed to
-survive node/disk loss.
+the multi-node release gate. PostgreSQL remains the logical head authority,
+Kopia stores immutable Workspace bytes, and the POSIX directory is a
+replaceable execution copy rather than the durable commit authority.

@@ -196,6 +196,58 @@ async function ensureSandboxManagerStateDirectory(runtimeDirectory) {
   if (application.changeOwnership) await chown(path, application.uid, application.gid);
 }
 
+async function ensureWorkspaceDataMoverState(runtimeDirectory) {
+  const application = applicationIdentity();
+  for (const relativePath of [
+    "state/cube-shared",
+    "state/cube-shared/volume",
+    "state/workspace-data-mover",
+  ]) {
+    const path = resolve(runtimeDirectory, relativePath);
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
+    if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  }
+}
+
+async function ensureWorkspaceDataMoverSecrets(runtimeDirectory) {
+  const application = applicationIdentity();
+  const specs = [
+    ["workspace-data-mover-token", `${randomSecret()}\n`, /^[A-Za-z0-9_-]{64}$/],
+    ["workspace-kopia-repository-password", `${randomSecret()}\n`, /^[A-Za-z0-9_-]{64}$/],
+  ];
+  const created = [];
+  for (const [name, contents, pattern] of specs) {
+    const path = resolve(runtimeDirectory, "secrets", name);
+    try {
+      const existing = (await readPrivateFile(path)).trim();
+      if (!pattern.test(existing)) throw new Error(`Production ${name} is invalid`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await writePrivateFile(path, contents);
+      if (application.changeOwnership) await chown(path, application.uid, application.gid);
+      created.push(name);
+    }
+  }
+  const credentialsPath = resolve(runtimeDirectory, "secrets/workspace-kopia-aws-credentials");
+  try {
+    parseAwsCredentials(await readPrivateFile(credentialsPath));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    const accessKey = `agentdockkopia${randomBytes(8).toString("hex")}`;
+    const secretKey = randomSecret();
+    await writePrivateFile(
+      credentialsPath,
+      `[default]\naws_access_key_id = ${accessKey}\naws_secret_access_key = ${secretKey}\n`,
+    );
+    if (application.changeOwnership) {
+      await chown(credentialsPath, application.uid, application.gid);
+    }
+    created.push("workspace-kopia-aws-credentials");
+  }
+  return created;
+}
+
 async function ensureCubeEgressConfigToken(runtimeDirectory) {
   const path = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
   try {
@@ -398,6 +450,8 @@ if (await validateExisting(runtimeDirectory)) {
   const sandboxMaterializerTokenCreated = await ensureSandboxMaterializerToken(runtimeDirectory);
   const cubeSnapshotGcTokenCreated = await ensureCubeSnapshotGcToken(runtimeDirectory);
   await ensureSandboxManagerStateDirectory(runtimeDirectory);
+  await ensureWorkspaceDataMoverState(runtimeDirectory);
+  const workspaceDataMoverSecretsCreated = await ensureWorkspaceDataMoverSecrets(runtimeDirectory);
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
   const dependencyEgressIssuerCreated = await ensureDependencyEgressIssuer(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
@@ -412,6 +466,7 @@ if (await validateExisting(runtimeDirectory)) {
       sandboxManagerTokenCreated,
       sandboxMaterializerTokenCreated,
       cubeSnapshotGcTokenCreated,
+      workspaceDataMoverSecretsCreated,
       cubeEgressConfigTokenCreated,
       dependencyEgressIssuerCreated,
       githubGatewaySecretsCreated,
@@ -434,6 +489,7 @@ const secretsDirectory = resolve(runtimeDirectory, "secrets");
 await mkdir(secretsDirectory, { mode: 0o700 });
 await chmod(secretsDirectory, 0o700);
 await ensureSandboxManagerStateDirectory(runtimeDirectory);
+await ensureWorkspaceDataMoverState(runtimeDirectory);
 
 const postgresPassword = randomSecret();
 const minioRootUser = `agentdock${randomBytes(8).toString("hex")}`;
@@ -533,6 +589,14 @@ await writePrivateFile(
 );
 await writePrivateFile(resolve(secretsDirectory, "cube-snapshot-gc-token"), `${randomSecret()}\n`);
 await writePrivateFile(
+  resolve(secretsDirectory, "workspace-data-mover-token"),
+  `${randomSecret()}\n`,
+);
+await writePrivateFile(
+  resolve(secretsDirectory, "workspace-kopia-repository-password"),
+  `${randomSecret()}\n`,
+);
+await writePrivateFile(
   resolve(secretsDirectory, "cube-egress-config-token"),
   `${randomSecret()}\n`,
 );
@@ -551,6 +615,10 @@ await writePrivateFile(resolve(secretsDirectory, "grafana-admin-password"), `${r
 await writePrivateFile(
   resolve(secretsDirectory, "aws-credentials"),
   `[default]\naws_access_key_id = ${minioApplicationUser}\naws_secret_access_key = ${minioApplicationPassword}\n`,
+);
+await writePrivateFile(
+  resolve(secretsDirectory, "workspace-kopia-aws-credentials"),
+  `[default]\naws_access_key_id = agentdockkopia${randomBytes(8).toString("hex")}\naws_secret_access_key = ${randomSecret()}\n`,
 );
 if (application.changeOwnership) {
   await Promise.all(
@@ -586,6 +654,7 @@ const environment = [
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
   "AGENT_DOCK_CHECKPOINT_BUCKET=agent-dock-checkpoints",
   "AGENT_DOCK_CHECKPOINT_REGION=us-east-1",
+  "AGENT_DOCK_WORKSPACE_KOPIA_BUCKET=agent-dock-workspace-kopia",
   "AGENT_DOCK_GITHUB_APP_ID=",
   "AGENT_DOCK_PROMETHEUS_PORT=9090",
   "AGENT_DOCK_GRAFANA_PORT=3001",

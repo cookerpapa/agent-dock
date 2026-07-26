@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { OfficialCubeSandboxRuntimeClient } from "../packages/sandbox-manager/src/index.ts";
+import {
+  OfficialCubeSandboxRuntimeClient,
+  workspaceVolumeId,
+} from "../packages/sandbox-manager/src/index.ts";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
@@ -403,6 +406,24 @@ async function workspaceVersionEvidence(runId) {
   return { fileCount, artifactBytes };
 }
 
+async function eraseLocalWorkspaceCopy(tenant, workspaceId, sessionId) {
+  const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
+  const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
+  const volumePath = resolve(volumeRoot, `agentdock-posix-${volumeId}`);
+  assert(
+    volumePath.startsWith(`${volumeRoot}/`),
+    "Local Workspace fault target escaped the shared-volume root",
+  );
+  const metadata = await lstat(volumePath);
+  assert(metadata.isDirectory() && !metadata.isSymbolicLink());
+  const entries = await readdir(volumePath);
+  for (const entry of entries) {
+    assert(entry !== "." && entry !== ".." && !entry.includes("/"));
+    await rm(resolve(volumePath, entry), { recursive: true, force: true });
+  }
+  return { volumeId, removedEntries: entries.length };
+}
+
 async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
   const source = `
     import { readFileSync } from "node:fs";
@@ -760,6 +781,12 @@ try {
   );
   await terminateWarmCubeSession(largeFirst.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
+  const localCopyFault = await eraseLocalWorkspaceCopy(
+    tenantId,
+    largeSession.workspaceId,
+    largeSession.sessionId,
+  );
+  assert(localCopyFault.removedEntries > 0, "Workspace fault injection removed no local data");
 
   const largeFollowUp = await runTurn(
     largeSession.sessionId,
@@ -854,6 +881,10 @@ try {
       restoredFileCount: largeFollowUpWorkspace.fileCount,
       checkpointReferenceBytes: largeFirstWorkspace.artifactBytes,
       sourceSandboxDestroyed: true,
+      localPosixCopyErased: true,
+      localPosixEntriesErased: localCopyFault.removedEntries,
+      volumeId: localCopyFault.volumeId,
+      restoredFromKopia: true,
       freshCubeMicroVm: true,
       higherFenceActivation: true,
       firstUsage: largeFirstUsage.totals,
@@ -915,7 +946,7 @@ try {
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedPausedSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two coding Runs reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction, its follow-up restored the marker and repository into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. Two coding Runs reused one physical Cube KVM guest through a sealed pause/connect and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

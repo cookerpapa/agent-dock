@@ -43,6 +43,8 @@ export type SandboxManagerConfig = {
     egressProxyHost: string;
     egressProxyPort: number;
     requestTimeoutMs: number;
+    workspaceDataMoverUrl: string;
+    workspaceDataMoverToken: string;
     snapshotGc?: {
       statePath: string;
       deletionEnabled: boolean;
@@ -353,6 +355,14 @@ export async function loadSandboxManagerConfig(
               30_000,
               1_000,
               300_000,
+            ),
+            workspaceDataMoverUrl: bounded(
+              required(environment, "AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
+              "AGENT_DOCK_WORKSPACE_DATA_MOVER_URL",
+              2_048,
+            ),
+            workspaceDataMoverToken: await readSecret(
+              required(environment, "AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE"),
             ),
             ...(environment.AGENT_DOCK_CUBE_SNAPSHOT_GC_TOKEN_FILE === undefined
               ? {}

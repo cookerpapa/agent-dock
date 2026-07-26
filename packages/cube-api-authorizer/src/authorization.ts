@@ -12,6 +12,7 @@ const SANDBOX_ITEM_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}$`);
 const SANDBOX_LIFECYCLE_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/(?:pause|connect)$`);
 const SANDBOX_SNAPSHOT_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/snapshots$`);
 const SNAPSHOT_ITEM_PATH = /^\/templates\/snap-[a-f0-9]{24}$/;
+const WORKSPACE_VOLUME_ITEM_PATH = /^\/volumes\/adw-[a-f0-9]{48}$/;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -36,6 +37,16 @@ export function isAllowedCubeApiOperation(path: string, method: string): boolean
   }
   if (parsed.origin !== "http://cube-api.internal" || parsed.hash !== "") return false;
   if (normalizedMethod === "POST" && parsed.pathname === "/sandboxes" && parsed.search === "") {
+    return true;
+  }
+  if (normalizedMethod === "POST" && parsed.pathname === "/volumes" && parsed.search === "") {
+    return true;
+  }
+  if (
+    normalizedMethod === "GET" &&
+    WORKSPACE_VOLUME_ITEM_PATH.test(parsed.pathname) &&
+    parsed.search === ""
+  ) {
     return true;
   }
   if (

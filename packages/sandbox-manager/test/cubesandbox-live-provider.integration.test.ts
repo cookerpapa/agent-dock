@@ -8,7 +8,7 @@ import {
 } from "@agent-dock/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
-  parseCubeWorkspaceCheckpoint,
+  parseKopiaWorkspaceCheckpoint,
 } from "@agent-dock/workspace-runtime";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -19,6 +19,7 @@ import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   CubeSandboxProvider,
+  HttpWorkspaceDataMover,
   OfficialCubeSandboxRuntimeClient,
   ToolSandboxManager,
   type OfficialCubeSandboxRuntimeClientOptions,
@@ -375,6 +376,12 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           throw new Error("Repository import is outside the Cube live Provider gate");
         },
         checkpointEncryptionKey: Buffer.alloc(32, 0x4c),
+        workspaceDataMover: new HttpWorkspaceDataMover({
+          baseUrl: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
+          serviceToken: await readPrivateKey(
+            required("AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE"),
+          ),
+        }),
       });
       const manager = new ToolSandboxManager({
         provider,
@@ -509,7 +516,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         if (captured.type !== "tool_sandbox.captured") {
           throw new Error("CubeSandbox live Workspace capture was missing");
         }
-        const checkpoint = parseCubeWorkspaceCheckpoint(
+        const checkpoint = parseKopiaWorkspaceCheckpoint(
           decodeWorkspaceSnapshotBlob(captured.workspace),
         );
         expect(checkpoint).toMatchObject({

@@ -126,15 +126,18 @@ sequence.
 At `agent_settled`:
 
 1. If a Tool was used, the Cube Provider seals the guest, proves that no Tool
-   process remains, and captures a content-hashed file index plus cumulative
-   Git patch. A small Workspace retains the portable regular-file manifest; a
-   larger Workspace creates a native Cube snapshot and returns only a bounded,
-   encrypted, identity-bound reference. Otherwise no Workspace capture/version
-   or physical environment validation is created.
+   process remains, flushes the Volume-Plugin-backed POSIX Workspace, and
+   captures a content-hashed file index plus cumulative Git patch. The trusted
+   Data Mover creates an immutable encrypted Kopia snapshot and returns only a
+   bounded Session/volume/environment/fence-bound reference. Legacy portable
+   and Cube-native references remain readable for migration. Otherwise no
+   Workspace capture/version or physical environment validation is created.
 2. Trusted Runner captures stable Pi JSONL.
 3. Content hashes and bounded manifests are validated.
-4. Pi bytes and the Workspace manifest/reference are conditionally written to
-   object storage. Large Cube filesystem bytes remain in Cube's snapshot store.
+4. Pi bytes and the bounded Workspace reference are conditionally written to
+   the checkpoint bucket. Workspace file bytes are already in Kopia's
+   content-addressed object repository under a separate least-privilege
+   credential.
 5. PostgreSQL always stages the new Pi conversation pointer. A Tool-using Run
    additionally stages an immutable Workspace version and append-only
    environment validation bound to the current Run/Attempt, parent version,
@@ -209,8 +212,9 @@ reconciliation.
 | Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
 | Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
-| Source Cube VM destroyed after checkpoint | next higher-fence Attempt creates a fresh VM from the committed Cube snapshot reference |
-| Cube snapshot node/disk loss | current single-node profile cannot recover; fail closed rather than silently fall back to a weaker runtime |
+| Source Cube VM or local POSIX copy destroyed after checkpoint | Data Mover restores the committed Kopia snapshot, then the next higher-fence Attempt creates a fresh base-template VM |
+| Cube execution node/disk loss | recover on a node that mounts the shared POSIX path; the Kopia repository, not the node copy, is authoritative |
+| Kopia repository/object-store loss | fail closed on the previous Workspace head; recover the coordinated MinIO/Kopia backup before admitting work |
 | Tool Sandbox exit | active operation fails; capability is revoked; runtime is removed |
 | Event ACK loss | Supervisor file spool redelivers the identical event/batch; cumulative sequence ACK deduplicates it |
 | Checkpoint upload interruption | previous settled revision remains authoritative |

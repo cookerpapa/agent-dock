@@ -24,6 +24,7 @@ trusted Model Gateway to the exact model provider host.
 | Provider bridge relay | no | no | no | no | no | no | no | yes | Unix socket only | no | none |
 | Provider host relay | no | no | no | no | no | no | no | Unix socket only | exact provider or operator proxy | no | no TCP listener |
 | Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | via relay | none |
+| Workspace Data Mover | no | no | no | dedicated Kopia bucket only | authenticated Manager RPC only | no | no | no | no | no | none |
 | Kubernetes API relay | no | no | no | no | yes | no | no | no | no | fixed host `6443` | none |
 | CubeAPI relay | no | no | no | no | fixed Cube lifecycle target | no | no | no | fixed private CubeAPI | no | none |
 | CubeProxy relay | no | no | no | no | fixed per-guest data target | no | no | no | fixed private CubeProxy | no | none |
@@ -44,6 +45,12 @@ The two Cube relays likewise hold no API key or guest traffic token. Each can
 dial only one operator-validated private endpoint. CubeAPI authentication and
 CubeProxy per-sandbox traffic authentication remain end-to-end with the
 Manager.
+
+The Workspace Data Mover joins only `sandbox-control` and `object-storage`.
+It has a private POSIX Workspace mount and dedicated Kopia S3 credential, but
+no database, model, GitHub, Kubernetes, Cube API, provider-egress or public
+edge path. Sandbox Manager holds only the Data Mover service token; it never
+sees the Kopia repository password or object-store credential.
 
 The provider bridge accepts CONNECT only on the internal `model-egress`
 network and forwards bytes through a `0700` named-volume Unix socket. The
@@ -109,6 +116,7 @@ proxy-mediated public-web egress.
 | Control Plane | digest verification | encrypted credential authority | yes | no | no | service RPC only | no | no |
 | Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped identity | yes | service RPC only | no | no |
 | Sandbox Manager | no | no | no | no | own verifier | no | importer namespaces plus one named RuntimeClass read; Cube API key separately | no |
+| Workspace Data Mover | no | no | no | dedicated Kopia read/write credential | own verifier | no | no | no |
 | Kubernetes API relay | no | no | no | no | no | no | no | no |
 | GitHub Gateway | no | no | no | no | no | App key + memory-only token | no | no |
 | Provider relays | no | no | no | no | no | no | no | no |

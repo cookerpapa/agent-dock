@@ -21,12 +21,15 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { isIPv4 } from "node:net";
 import {
   createCubeWorkspaceCheckpoint,
+  createKopiaWorkspaceCheckpoint,
   cubeWorkspaceCheckpointAad,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   parseCubeWorkspaceCheckpoint,
+  parseKopiaWorkspaceCheckpoint,
   type CubeWorkspaceCheckpoint,
   type CubeWorkspaceCheckpointAuthority,
+  type KopiaWorkspaceCheckpoint,
   type WorkspaceSnapshotFileMetadata,
 } from "@agent-dock/workspace-runtime";
 import {
@@ -37,6 +40,7 @@ import {
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "./cubesandbox-runtime-client.ts";
 import { CubeSnapshotGarbageCollector } from "./cube-snapshot-garbage-collector.ts";
+import { workspaceVolumeId, type WorkspaceDataMover } from "./workspace-data-mover.ts";
 import {
   SandboxManagerError,
   type SandboxCreateSpec,
@@ -146,6 +150,8 @@ type CubeActivation = {
   bindingSha256: string;
   handoffSecret: string;
   state: "running" | "sealed" | "paused";
+  workspaceStorage:
+    Readonly<{ kind: "kopia"; volumeId: string }> | Readonly<{ kind: "legacy_cube_snapshot" }>;
 };
 
 export type CubeSandboxProviderOptions = Readonly<{
@@ -160,6 +166,7 @@ export type CubeSandboxProviderOptions = Readonly<{
   bootstrapProvider?: SandboxProvider;
   webProxy: ToolWebProxyBootstrap;
   checkpointEncryptionKey: Uint8Array;
+  workspaceDataMover: WorkspaceDataMover;
   snapshotGc?: Readonly<{
     statePath: string;
     deletionEnabled: boolean;
@@ -613,6 +620,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly #bootstrapProvider: SandboxProvider | undefined;
   readonly #webProxy: ToolWebProxyBootstrap;
   readonly #checkpointEncryptionKey: Buffer;
+  readonly #workspaceDataMover: WorkspaceDataMover;
   readonly #snapshotGarbageCollector: CubeSnapshotGarbageCollector | undefined;
   readonly #activations = new Map<string, CubeActivation>();
   #runtimeProbe: Promise<void> | undefined;
@@ -626,6 +634,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     this.#closeImporter = options.closeImporter;
     this.#bootstrapProvider = options.bootstrapProvider;
     this.#checkpointEncryptionKey = checkpointKey(options.checkpointEncryptionKey);
+    this.#workspaceDataMover = options.workspaceDataMover;
     if (
       !isIPv4(options.webProxy.host) ||
       !Number.isSafeInteger(options.webProxy.port) ||
@@ -653,7 +662,11 @@ export class CubeSandboxProvider implements SandboxProvider {
   }
 
   async checkHealth(): Promise<void> {
-    await Promise.all([this.#client.checkHealth(), this.#checkImporter?.()]);
+    await Promise.all([
+      this.#client.checkHealth(),
+      this.#checkImporter?.(),
+      this.#workspaceDataMover.checkHealth(),
+    ]);
     this.#runtimeProbe ??= this.#probeRuntime();
     try {
       await this.#runtimeProbe;
@@ -687,6 +700,10 @@ export class CubeSandboxProvider implements SandboxProvider {
       spec.workspaceRestore === undefined
         ? undefined
         : parseCubeWorkspaceCheckpoint(decodeWorkspaceSnapshotBlob(spec.workspaceRestore));
+    const kopiaCheckpoint =
+      spec.workspaceRestore === undefined
+        ? undefined
+        : parseKopiaWorkspaceCheckpoint(decodeWorkspaceSnapshotBlob(spec.workspaceRestore));
     if (
       cubeCheckpoint !== undefined &&
       (cubeCheckpoint.tenantId !== spec.assignment.tenantId ||
@@ -703,6 +720,24 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
     if (cubeCheckpoint !== undefined) {
       return this.#createFromCheckpoint(spec, cubeCheckpoint);
+    }
+    if (
+      kopiaCheckpoint !== undefined &&
+      (kopiaCheckpoint.tenantId !== spec.assignment.tenantId ||
+        kopiaCheckpoint.workspaceId !== spec.assignment.workspaceId ||
+        kopiaCheckpoint.sessionId !== spec.assignment.sessionId ||
+        kopiaCheckpoint.imageRevision !== this.#imageRevision ||
+        kopiaCheckpoint.environmentSpecSha256 !== spec.environment.specSha256 ||
+        spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken)
+    ) {
+      throw new SandboxManagerError(
+        "cubesandbox_checkpoint_binding_invalid",
+        "Kopia Workspace checkpoint did not match the requested Session, environment or fence",
+        false,
+      );
+    }
+    if (kopiaCheckpoint !== undefined) {
+      return this.#createFromKopiaCheckpoint(spec, kopiaCheckpoint);
     }
     let workspaceRestore = spec.workspaceRestore;
     let offlineSetupCommands: EnvironmentToolchainReport["recipeCommands"] | undefined;
@@ -741,6 +776,14 @@ export class CubeSandboxProvider implements SandboxProvider {
       spec.environment,
     );
     const authoritySecret = handoffSecret();
+    const volumeId = workspaceVolumeId(spec.assignment);
+    await this.#client.ensureVolume(volumeId, "agentdock-posix");
+    await this.#workspaceDataMover.prepare({
+      tenantId: spec.assignment.tenantId,
+      workspaceId: spec.assignment.workspaceId,
+      sessionId: spec.assignment.sessionId,
+      volumeId,
+    });
     const instance = await this.#client.create({
       templateId: this.#templateId,
       timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
@@ -752,6 +795,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       ),
       allowInternetAccess: true,
       allowPublicTraffic: false,
+      volumeMounts: [{ name: volumeId, path: "/workspace" }],
     });
     try {
       const evidence = await this.#waitForEvidence(instance);
@@ -829,6 +873,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         bindingSha256,
         handoffSecret: authoritySecret,
         state: "running",
+        workspaceStorage: { kind: "kopia", volumeId },
       });
       return handle;
     } catch (error: unknown) {
@@ -939,6 +984,123 @@ export class CubeSandboxProvider implements SandboxProvider {
         bindingSha256,
         handoffSecret: nextSecret,
         state: "running",
+        workspaceStorage: { kind: "legacy_cube_snapshot" },
+      });
+      return handle;
+    } catch (error: unknown) {
+      await this.#client.destroy(instance.sandboxId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async #createFromKopiaCheckpoint(
+    spec: SandboxCreateSpec,
+    checkpoint: KopiaWorkspaceCheckpoint,
+  ): Promise<SandboxHandle> {
+    const bindingSha256 = physicalBindingSha256(
+      spec.activationId,
+      spec.assignment,
+      spec.environment,
+    );
+    const authoritySecret = handoffSecret();
+    const volumeId = workspaceVolumeId(spec.assignment);
+    if (checkpoint.volumeId !== volumeId) {
+      throw new SandboxManagerError(
+        "cubesandbox_checkpoint_binding_invalid",
+        "Kopia Workspace checkpoint volume binding was invalid",
+        false,
+      );
+    }
+    await this.#client.ensureVolume(volumeId, "agentdock-posix");
+    await this.#workspaceDataMover.prepare({
+      tenantId: spec.assignment.tenantId,
+      workspaceId: spec.assignment.workspaceId,
+      sessionId: spec.assignment.sessionId,
+      volumeId,
+      snapshotId: checkpoint.snapshotId,
+    });
+    const instance = await this.#client.create({
+      templateId: this.#templateId,
+      timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
+      metadata: assignmentMetadata(
+        spec.activationId,
+        spec.assignment,
+        this.#imageRevision,
+        bindingSha256,
+      ),
+      allowInternetAccess: true,
+      allowPublicTraffic: false,
+      volumeMounts: [{ name: volumeId, path: "/workspace" }],
+    });
+    try {
+      const evidence = await this.#waitForEvidence(instance);
+      this.#assertEvidence(evidence, spec.policy);
+      const toolchain = parseEnvironmentToolchainReport(
+        await this.#client.request(instance, {
+          method: "POST",
+          path: "/v1/initialize",
+          body: {
+            toolWorkerProtocolVersion: 1,
+            type: "worker.initialize",
+            activationId: spec.activationId,
+            environment: spec.environment,
+            workspaceSeed: spec.workspaceSeed,
+            webProxy: this.#webProxy,
+            workspaceAttach: { recipeCommands: checkpoint.recipeCommands },
+          },
+          timeoutMs: this.#readyTimeoutMs,
+          maximumResponseBytes: 1 * 1_024 * 1_024,
+          authority: {
+            handoffSecret: authoritySecret,
+            fencingToken: spec.assignment.fencingToken,
+            bindingSha256,
+          },
+        }),
+      );
+      if (
+        !isExpectedDefaultToolchain(toolchain) ||
+        toolchain.profileKey !== spec.environment.profileKey ||
+        toolchain.profileVersion !== spec.environment.profileVersion ||
+        toolchain.imageRevision !== spec.environment.imageRevision ||
+        toolchain.specSha256 !== spec.environment.specSha256 ||
+        toolchain.recipeSha256 !== spec.environment.recipeSha256
+      ) {
+        throw new SandboxManagerError(
+          "cubesandbox_checkpoint_environment_mismatch",
+          "Kopia Workspace checkpoint environment did not match the accepted Run",
+          false,
+        );
+      }
+      const environmentValidation: EnvironmentValidationReport = {
+        ...toolchain,
+        isolationBoundary: "microvm",
+        runtime: CUBESANDBOX_RUNTIME_NAME,
+        networkMode: "public_web_proxy_private_denied",
+        runAsUser: "1000:1000",
+        readOnlyRootFilesystem: false,
+      };
+      const handle: SandboxHandle = Object.freeze({
+        providerApiVersion: 1,
+        providerId: this.providerId,
+        activationId: spec.activationId,
+        runtimeId: runtimeUuid(instance.sandboxId),
+        runtimeName: bounded(instance.sandboxId, "CubeSandbox runtime name", 128),
+        workspaceRoot: "/workspace",
+        assignment: spec.assignment,
+        environment: spec.environment,
+        environmentValidation,
+      });
+      this.#activations.set(spec.activationId, {
+        instance,
+        handle,
+        evidence,
+        toolchain,
+        seenOperationIds: new Set(),
+        seenCaptureIds: new Set(),
+        bindingSha256,
+        handoffSecret: authoritySecret,
+        state: "running",
+        workspaceStorage: { kind: "kopia", volumeId },
       });
       return handle;
     } catch (error: unknown) {
@@ -1244,6 +1406,50 @@ export class CubeSandboxProvider implements SandboxProvider {
       }
       activation.handoffSecret = recoverySecret;
       activation.state = "sealed";
+      if (activation.workspaceStorage.kind === "kopia") {
+        const kopia = await this.#workspaceDataMover.snapshot({
+          tenantId: handle.assignment.tenantId,
+          workspaceId: handle.assignment.workspaceId,
+          sessionId: handle.assignment.sessionId,
+          volumeId: activation.workspaceStorage.volumeId,
+          activationId: handle.activationId,
+          fencingToken: handle.assignment.fencingToken,
+          bindingSha256: activation.bindingSha256,
+        });
+        const workspace = encodeWorkspaceSnapshotBlob(
+          createKopiaWorkspaceCheckpoint({
+            snapshotId: kopia.snapshotId,
+            volumeId: activation.workspaceStorage.volumeId,
+            activationId: handle.activationId,
+            tenantId: handle.assignment.tenantId,
+            workspaceId: handle.assignment.workspaceId,
+            sessionId: handle.assignment.sessionId,
+            bindingSha256: activation.bindingSha256,
+            fencingToken: handle.assignment.fencingToken,
+            imageRevision: this.#imageRevision,
+            environmentSpecSha256: handle.environment.specSha256,
+            files: raw.files as WorkspaceSnapshotFileMetadata[],
+            recipeCommands: activation.toolchain.recipeCommands,
+          }),
+        );
+        const parsed = parseSandboxManagerResponse({
+          managerProtocolVersion: 1,
+          type: "tool_sandbox.captured",
+          requestId,
+          activationId: handle.activationId,
+          workspace,
+          ...(raw.workspacePatch === undefined ? {} : { workspacePatch: raw.workspacePatch }),
+          environment: handle.environmentValidation,
+        });
+        if (parsed.type !== "tool_sandbox.captured") {
+          throw new SandboxManagerError(
+            "cubesandbox_protocol_error",
+            "CubeSandbox returned the wrong Kopia checkpoint response",
+            false,
+          );
+        }
+        return parsed;
+      }
       if (raw.portableWorkspace !== undefined) {
         const parsed = parseSandboxManagerResponse({
           managerProtocolVersion: 1,
@@ -1391,7 +1597,74 @@ export class CubeSandboxProvider implements SandboxProvider {
     request: SandboxManagerMaterializeFileRequest,
     signal?: AbortSignal,
   ): Promise<SandboxManagerMaterializeFileResponse> {
-    const checkpoint = parseCubeWorkspaceCheckpoint(decodeWorkspaceSnapshotBlob(request.snapshot));
+    const snapshotBytes = decodeWorkspaceSnapshotBlob(request.snapshot);
+    const kopia = parseKopiaWorkspaceCheckpoint(snapshotBytes);
+    if (kopia !== undefined) {
+      if (
+        kopia.tenantId !== request.tenantId ||
+        kopia.workspaceId !== request.workspaceId ||
+        kopia.imageRevision !== this.#imageRevision
+      ) {
+        throw new SandboxManagerError(
+          "cubesandbox_checkpoint_binding_invalid",
+          "Kopia Workspace checkpoint did not match the requested Workspace or runtime image",
+          false,
+        );
+      }
+      const expected = kopia.files.find((file) => file.path === request.path);
+      if (expected === undefined) {
+        throw new SandboxManagerError(
+          "workspace_file_not_found",
+          "Workspace file was not found",
+          false,
+        );
+      }
+      if (signal?.aborted) {
+        throw new SandboxManagerError(
+          "snapshot_materialization_cancelled",
+          "Workspace file materialization was cancelled",
+          false,
+        );
+      }
+      const materialized = await this.#workspaceDataMover.materialize({
+        tenantId: kopia.tenantId,
+        workspaceId: kopia.workspaceId,
+        sessionId: kopia.sessionId,
+        volumeId: kopia.volumeId,
+        snapshotId: kopia.snapshotId,
+        path: request.path,
+        expectedSha256: expected.sha256,
+        maximumBytes: Math.max(1, expected.sizeBytes),
+      });
+      if (
+        signal?.aborted ||
+        materialized.bytes.byteLength !== expected.sizeBytes ||
+        materialized.sha256 !== expected.sha256
+      ) {
+        throw new SandboxManagerError(
+          signal?.aborted
+            ? "snapshot_materialization_cancelled"
+            : "cubesandbox_snapshot_materialization_invalid",
+          signal?.aborted
+            ? "Workspace file materialization was cancelled"
+            : "Kopia Workspace file did not match its immutable checkpoint index",
+          false,
+        );
+      }
+      return {
+        managerProtocolVersion: 1,
+        type: "workspace.file_materialized",
+        requestId: request.requestId,
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        path: request.path,
+        content: Buffer.from(materialized.bytes).toString("base64"),
+        sha256: expected.sha256,
+        executable: expected.executable,
+        sizeBytes: expected.sizeBytes,
+      };
+    }
+    const checkpoint = parseCubeWorkspaceCheckpoint(snapshotBytes);
     if (
       checkpoint === undefined ||
       checkpoint.tenantId !== request.tenantId ||
@@ -1611,7 +1884,11 @@ export class CubeSandboxProvider implements SandboxProvider {
     const instances = [...this.#activations.values()].map((activation) => activation.instance);
     this.#activations.clear();
     await Promise.allSettled(instances.map((instance) => this.#client.destroy(instance.sandboxId)));
-    await Promise.all([this.#client.close(), this.#closeImporter?.()]);
+    await Promise.all([
+      this.#client.close(),
+      this.#workspaceDataMover.close(),
+      this.#closeImporter?.(),
+    ]);
   }
 
   async #probeRuntime(): Promise<void> {

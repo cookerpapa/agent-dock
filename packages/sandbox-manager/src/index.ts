@@ -71,3 +71,15 @@ export {
   type SandboxManagerBackend,
   type SandboxManagerServerOptions,
 } from "./server.ts";
+export {
+  HttpWorkspaceDataMover,
+  KopiaWorkspaceDataMover,
+  WorkspaceDataMoverError,
+  WorkspaceDataMoverServer,
+  workspaceVolumeId,
+  type WorkspaceDataMover,
+  type WorkspaceDataMoverIdentity,
+  type WorkspaceDataMoverMaterializeInput,
+  type WorkspaceDataMoverPrepareInput,
+  type WorkspaceDataMoverSnapshotInput,
+} from "./workspace-data-mover.ts";

@@ -122,7 +122,9 @@ function validFileMetadata(
   return true;
 }
 
-function validateFileList(value: unknown): readonly WorkspaceSnapshotFileMetadata[] {
+export function validateCubeWorkspaceFileList(
+  value: unknown,
+): readonly WorkspaceSnapshotFileMetadata[] {
   if (!Array.isArray(value) || value.length > MAX_CUBE_WORKSPACE_CHECKPOINT_FILES) {
     throw snapshotError("Cube Workspace checkpoint file index is invalid");
   }
@@ -223,7 +225,7 @@ function parseCheckpointRecord(value: Record<string, unknown>): CubeWorkspaceChe
   ) {
     throw snapshotError("Cube Workspace checkpoint shape is invalid");
   }
-  const files = validateFileList(value.files);
+  const files = validateCubeWorkspaceFileList(value.files);
   const totalSizeBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (totalSizeBytes !== value.totalSizeBytes) {
     throw snapshotError("Cube Workspace checkpoint byte total is inconsistent");
@@ -265,7 +267,7 @@ export function parseCubeWorkspaceCheckpoint(
 export function createCubeWorkspaceCheckpoint(
   input: CreateCubeWorkspaceCheckpointInput,
 ): Uint8Array {
-  const files = validateFileList(input.files);
+  const files = validateCubeWorkspaceFileList(input.files);
   const value = {
     format: CUBE_WORKSPACE_CHECKPOINT_FORMAT,
     providerId: "cubesandbox",

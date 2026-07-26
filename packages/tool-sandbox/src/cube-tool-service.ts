@@ -748,6 +748,11 @@ const server = createServer((request, response) => {
         throw new CubeToolServiceError(400, "Tool checkpoint request was invalid");
       }
       await sealToolBoundary();
+      // The trusted data mover snapshots the host-side POSIX mount after this
+      // response. Flush the guest view only after all Tool-UID processes are
+      // gone so the indexed bytes and the Kopia snapshot share one quiescent
+      // boundary.
+      await exec("/bin/sync", ["-f", "/workspace"]);
       const [workspaceIndex, workspacePatch] = await Promise.all([
         captureCubeWorkspaceIndex("/workspace"),
         collectGitWorkspacePatch(

@@ -38,9 +38,11 @@ ADR-0064 replaces the 512-file/2-MiB ordinary Workspace settlement bottleneck
 with sealed Cube-native snapshots, encrypted recovery references and
 higher-fence cold restore. ADR-0065 adds a bounded sealed historical-file
 materializer and ADR-0066 adds fail-closed reference-aware orphan reclamation.
-The single-node snapshot store remains a bounded private-deployment claim;
-replicated/off-host snapshot data and whole-version streaming export remain
-release work.
+ADR-0067 supersedes new Cube-native snapshots with the Cube Volume Plugin,
+Session-bound POSIX execution copies, a trusted Kopia/S3 Data Mover and
+PostgreSQL Fence/CAS head publication. The local-copy-loss drill is
+implemented; replicated/off-host POSIX and object storage plus a whole-host
+failure drill remain release work.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the

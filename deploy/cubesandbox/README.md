@@ -203,13 +203,26 @@ producing false network evidence.
 
 ## Lifecycle and rollback
 
-Cube is not a data authority. Conversation state and content-verified
-Workspace checkpoints commit through PostgreSQL/object storage. For an exact
+Cube is not a data authority. The installer loads the `agentdock-posix` binary
+Volume Plugin into CubeMaster and Cubelet. Cube mounts one deterministic
+Session-bound directory at `/workspace`; after the guest is sealed and flushed,
+the trusted Workspace Data Mover snapshots that directory into its dedicated
+Kopia repository. PostgreSQL Fence/CAS publishes only the current Attempt's
+immutable reference as the Workspace head.
+
+The bundled single-node profile maps
+`runtime/state/cube-shared/volume` at `/data/cube-shared/volume`. A multi-node
+operator must replace that local path with the same POSIX shared filesystem on
+CubeMaster, every Cubelet and the Data Mover. Kopia's S3 target must be
+off-node or replicated before claiming whole-host recovery.
+
+Conversation state and content-verified Workspace checkpoints commit through
+PostgreSQL/object storage. For an exact
 Session, the root-owned Tool supervisor can seal the guest, kill every Tool UID
 process and pause it. A later higher-fence Run connects, rotates the private
 handoff secret and starts a fresh Worker. Failed, cancelled, timed-out or
 ambiguous transitions destroy the guest; a later Run restores the committed
-Workspace into a new guest.
+Kopia snapshot into the POSIX volume before a fresh base-template guest starts.
 
 Operational inspection and teardown remain available even if the source
 revision has advanced beyond the last registered template:

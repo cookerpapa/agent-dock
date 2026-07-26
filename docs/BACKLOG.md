@@ -203,7 +203,12 @@ extension-policy support would overstate the current boundary.
   materializer for bounded historical regular-file download
 - [ ] Add a streaming snapshot exporter for whole-version GitHub delivery and
   portable backup
-- [ ] Back Cube snapshot data with replicated/off-host storage or a Kopia/REAPI data mover before claiming node-loss recovery
+- [x] Replace new Cube-native snapshots with the Cube Volume Plugin, a
+  Session-bound POSIX Workspace, a trusted Kopia/S3 Data Mover, and
+  PostgreSQL Fence/CAS publication
+- [x] Prove fresh-VM recovery after deleting the local POSIX Workspace copy
+- [ ] Prove whole-host/node loss against a genuinely off-node or replicated
+  POSIX and S3 deployment before claiming disaster recovery
 
 ## Phase 4 private multi-tenant slice
 
