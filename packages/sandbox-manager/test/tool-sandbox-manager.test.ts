@@ -350,6 +350,9 @@ describe("provider-backed Tool Sandbox Manager", () => {
 
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
+      supervisorId: "supervisor-provider-test-next",
+      bootId: "20000000-0000-4000-8000-000000000020",
+      sandboxId: "20000000-0000-4000-8000-000000000021",
       commandId: "command-provider-test-next",
       turnId: "turn-provider-test-next",
       attemptId: "10000000-0000-4000-8000-000000000020",

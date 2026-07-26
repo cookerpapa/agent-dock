@@ -434,6 +434,9 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         ).resolves.toMatchObject({ retained: true });
         const reboundAssignment: ToolSandboxAssignment = {
           ...secondAssignment,
+          supervisorId: `cube-live-${testRun}-supervisor-rebound`,
+          bootId: randomUUID(),
+          sandboxId: randomUUID(),
           commandId: `cube-live-${testRun}-command-rebound`,
           turnId: `cube-live-${testRun}-turn-rebound`,
           attemptId: randomUUID(),

@@ -77,14 +77,16 @@ function positiveInteger(value: number, name: string, maximum: number): number {
 }
 
 function workspaceKey(assignment: ToolSandboxAssignment): string {
+  // A warm activation belongs to the durable tenant/project/workspace/session,
+  // not to the ephemeral Pi worker that happened to execute the previous Run.
+  // RunAttempt ownership is transferred by the monotonically increasing fence
+  // in provider.rebind(); keeping supervisor identity in this key would strand
+  // the paused VM whenever Temporal schedules the next Run on another worker.
   return [
     assignment.tenantId,
     assignment.projectId,
     assignment.workspaceId,
     assignment.sessionId,
-    assignment.supervisorId,
-    assignment.bootId,
-    assignment.sandboxId,
   ].join("\0");
 }
 

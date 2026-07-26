@@ -324,6 +324,12 @@ async function waitForPausedCubeSession(sessionId) {
   throw new Error("Cube inventory did not reach one sealed paused exact-Session microVM");
 }
 
+async function destroyCubeSession(sessionId) {
+  const retained = managedForSession(await cube.list(), sessionId);
+  await Promise.allSettled(retained.map((instance) => cube.destroy(instance.sandboxId)));
+  await waitForNoCubeSession(sessionId);
+}
+
 async function terminateWarmCubeSession(sandboxId) {
   assert(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$/.test(sandboxId));
   const source = `
@@ -746,6 +752,8 @@ try {
   }
   process.stdout.write(`${JSON.stringify(report)}\n`);
 } finally {
-  await waitForNoCubeSession(session.sessionId).catch(() => undefined);
+  // Acceptance failures must not leave paused or running test guests behind.
+  // This deliberately targets only the freshly-created exact Session.
+  await destroyCubeSession(session.sessionId).catch(() => undefined);
   await cube.close();
 }

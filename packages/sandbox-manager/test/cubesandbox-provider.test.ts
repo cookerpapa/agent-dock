@@ -307,6 +307,9 @@ describe("CubeSandbox Provider contract", () => {
 
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
+      supervisorId: "supervisor-cube-test-next",
+      bootId: "20000000-0000-4000-8000-000000000030",
+      sandboxId: "20000000-0000-4000-8000-000000000031",
       commandId: "command-cube-test-2",
       turnId: "turn-cube-test-2",
       attemptId: "10000000-0000-4000-8000-000000000030",
