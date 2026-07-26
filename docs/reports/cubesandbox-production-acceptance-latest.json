@@ -1,14 +1,14 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-26T16:43:43.197Z",
+  "checkedAt": "2026-07-26T19:08:49.295Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 1504,
-    "settledMs": 1757,
+    "firstTextMs": 1675,
+    "settledMs": 1948,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
@@ -21,41 +21,41 @@
     }
   },
   "firstCoding": {
-    "firstTextMs": 10732,
-    "settledMs": 21113,
+    "firstTextMs": 9113,
+    "settledMs": 12207,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "patchBytes": 2516,
+    "patchBytes": 1873,
     "usage": {
       "requests": 3,
-      "inputTokens": 194,
-      "outputTokens": 1011,
-      "cacheReadTokens": 5888,
+      "inputTokens": 208,
+      "outputTokens": 1120,
+      "cacheReadTokens": 5504,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 7707,
-    "settledMs": 21002,
+    "firstTextMs": 8064,
+    "settledMs": 8925,
     "toolCalls": 3,
     "cubeActivations": 1,
-    "patchBytes": 2694,
+    "patchBytes": 2028,
     "usage": {
       "requests": 4,
-      "inputTokens": 1481,
-      "outputTokens": 468,
-      "cacheReadTokens": 12160,
+      "inputTokens": 1191,
+      "outputTokens": 537,
+      "cacheReadTokens": 12288,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "multiRound": {
     "sameCubeMicroVm": true,
-    "sealedPauseResume": true,
+    "runningSessionReuse": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalFileBytes": 2460
+    "finalFileBytes": 1807
   },
   "multiTenant": {
     "crossTenantConversationHidden": true,
@@ -63,71 +63,71 @@
   },
   "largeWorkspace": {
     "source": "github.com/temporalio/temporal",
-    "firstRunId": "d3db1d01-4208-45e3-8c39-ea1075d2e373",
-    "followUpRunId": "7e11912c-4499-4aec-a4e3-36468fe30ae6",
+    "firstRunId": "72447d21-cca6-441f-8f4c-10afa1aeac56",
+    "followUpRunId": "183b083f-b3df-4a83-b894-ada40f6f685f",
     "firstFileCount": 3664,
     "restoredFileCount": 3665,
     "checkpointReferenceBytes": 669559,
     "sourceSandboxDestroyed": true,
     "localPosixCopyErased": true,
-    "localPosixEntriesErased": 3,
-    "volumeId": "adw-02b4c9aae99604fc98005971f27df8569a9f24cd086a073f",
+    "localPosixEntriesErased": 4,
+    "volumeId": "adw-d3cba2f9a2d3fa01dad0fccdaeb2183201c2bd1d34da3a4f",
     "restoredFromKopia": true,
     "freshCubeMicroVm": true,
     "higherFenceActivation": true,
     "firstUsage": {
       "requests": 4,
-      "inputTokens": 1926,
-      "outputTokens": 393,
-      "cacheReadTokens": 8960,
+      "inputTokens": 1988,
+      "outputTokens": 448,
+      "cacheReadTokens": 9088,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     },
     "followUpUsage": {
       "requests": 5,
-      "inputTokens": 403,
-      "outputTokens": 547,
-      "cacheReadTokens": 18432,
+      "inputTokens": 668,
+      "outputTokens": 571,
+      "cacheReadTokens": 18560,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "semanticConversation": {
     "projectionCount": 3,
-    "projectedSourceEvents": 89,
+    "projectedSourceEvents": 85,
     "semanticItems": 8,
-    "replayAfterSequence": 89
+    "replayAfterSequence": 85
   },
   "temporal": {
     "scheduler": "Temporal",
     "taskQueue": "agent-dock-pi-runs-v1",
     "workflows": [
       {
-        "workflowId": "agent-dock-run-v1-30a1232b-7b6e-4ca1-9ea6-1574f780eed3",
+        "workflowId": "agent-dock-run-v1-fc5d5c44-8c94-4e2e-832a-683dd921c0e9",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-217c0de7-24c1-484f-bc45-b02b43445857",
+        "workflowId": "agent-dock-run-v1-7f847f99-c441-42bd-83ee-af3d1b47007a",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-18456a05-018d-4c3e-a846-c964b23786cb",
+        "workflowId": "agent-dock-run-v1-85c78af7-0df3-4a8d-a0d3-805b1ac9bb33",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-d3db1d01-4208-45e3-8c39-ea1075d2e373",
+        "workflowId": "agent-dock-run-v1-72447d21-cca6-441f-8f4c-10afa1aeac56",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
       },
       {
-        "workflowId": "agent-dock-run-v1-7e11912c-4499-4aec-a4e3-36468fe30ae6",
+        "workflowId": "agent-dock-run-v1-183b083f-b3df-4a83-b894-ada40f6f685f",
         "historyEvents": 11,
         "decodedPayloads": 4,
         "boundedReferencesOnly": true
@@ -136,13 +136,13 @@
   },
   "totalUsage": {
     "requests": 17,
-    "inputTokens": 4069,
-    "outputTokens": 2444,
+    "inputTokens": 4120,
+    "outputTokens": 2701,
     "cacheReadTokens": 46720,
     "cacheWriteTokens": 0
   },
   "cleanup": {
-    "retainedPausedSessionMicroVmCount": 0,
+    "retainedRunningSessionMicroVmCount": 0,
     "foreignSessionMicroVmCount": 0,
     "explicitWarmEvictionVerified": true
   }
