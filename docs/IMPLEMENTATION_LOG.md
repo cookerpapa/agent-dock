@@ -2632,3 +2632,17 @@
   restored 3,665 files into a fresh higher-fence VM. The durable checkpoint
   reference was 669,487 bytes, all five Temporal histories carried bounded
   references only, and explicit cleanup left zero Cube microVMs.
+- The disposable production gate then reproduced a capacity-starvation edge
+  case: two idle Session-scoped warm sandboxes could occupy both global
+  admissions, leaving a new Session blocked until the 15-minute TTL. Admission
+  now evicts the least-recently-used idle warm runtime when new demand reaches
+  capacity; active runtimes remain untouched and exact-Session warm reuse still
+  wins before eviction.
+- Production Kubernetes inspection now uses an explicit host-loopback API
+  endpoint while retaining the kubeconfig TLS server name, and prefers the
+  native Linux kubectl when installed. This avoids depending on a transient WSL
+  `/etc/hosts` entry or accidentally invoking Docker Desktop's Windows kubectl
+  shim. The rebuilt disposable gate passed restart recovery, `1 -> 2 -> 1`
+  control-plane scaling, fresh Supervisor boot, active cancellation, warm
+  retirement, 22 durable events, and a 12,472,325-byte encrypted backup/restore
+  drill with restored cursor 34.

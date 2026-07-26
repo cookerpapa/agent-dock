@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash, createPrivateKey, randomBytes, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { release as hostKernelRelease, tmpdir } from "node:os";
@@ -20,6 +21,13 @@ const hostKubeconfigPath = resolve(
   process.env.AGENT_DOCK_KUBECONFIG_PATH ??
     "deploy/production/runtime/kubernetes/sandbox-manager.kubeconfig",
 );
+const kubectlBin =
+  process.env.AGENT_DOCK_KUBECTL_BIN ??
+  (existsSync("/usr/local/bin/kubectl") ? "/usr/local/bin/kubectl" : "kubectl");
+const kubernetesHostServer =
+  process.env.AGENT_DOCK_KUBERNETES_HOST_SERVER ?? "https://127.0.0.1:6443";
+const kubernetesTlsServerName =
+  process.env.AGENT_DOCK_KUBERNETES_TLS_SERVER_NAME ?? "agent-dock-kubernetes";
 const environmentFile = resolve(runtimeDirectory, ".env");
 const httpPort = await availablePort();
 const allocatedPorts = new Set([httpPort]);
@@ -155,7 +163,19 @@ async function installScopedKubeconfig(targetRuntimeDirectory) {
 }
 
 function kubernetesCapture(args, timeoutMs = 120_000) {
-  return capture("kubectl", ["--kubeconfig", hostKubeconfigPath, ...args], { timeoutMs });
+  return capture(
+    kubectlBin,
+    [
+      "--kubeconfig",
+      hostKubeconfigPath,
+      "--server",
+      kubernetesHostServer,
+      "--tls-server-name",
+      kubernetesTlsServerName,
+      ...args,
+    ],
+    { timeoutMs },
+  );
 }
 
 async function tenantAdmin(args) {

@@ -376,6 +376,61 @@ describe("provider-backed Tool Sandbox Manager", () => {
     await manager.stop(second.activationId, nextAssignment);
   });
 
+  it("evicts the least-recently-used warm runtime when new demand reaches admission capacity", async () => {
+    const fixture = providerFixture();
+    const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
+    const capabilities = [CAPABILITY, SECOND_CAPABILITY];
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => activationIds.shift()!,
+      capabilityGenerator: () => capabilities.shift()!,
+      maximumActiveSandboxes: 1,
+      maximumWarmActivations: 4,
+    });
+    const first = await manager.create(createRequest);
+    await manager.execute(first.capability, operation("50000000-0000-4000-8000-000000000012"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "50000000-0000-4000-8000-000000000013",
+      activationId: first.activationId,
+      assignment,
+      disposition: "keep_warm",
+      workspaceRevision: "c".repeat(64),
+    });
+    expect(manager.warmCount).toBe(1);
+    expect(manager.admittedCount).toBe(1);
+
+    const nextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-capacity-eviction",
+      workspaceId: "workspace-provider-test-capacity-eviction",
+      sessionId: "session-provider-test-capacity-eviction",
+      turnId: "turn-provider-test-capacity-eviction",
+      attemptId: "50000000-0000-4000-8000-000000000014",
+      leaseId: "50000000-0000-4000-8000-000000000014",
+      fencingToken: 6,
+    };
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "50000000-0000-4000-8000-000000000015",
+      assignment: nextAssignment,
+    });
+    await expect(
+      manager.execute(second.capability, {
+        ...operation("50000000-0000-4000-8000-000000000016"),
+        activationId: second.activationId,
+      }),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    expect(fixture.stopped).toBe(true);
+    expect(fixture.createCount).toBe(2);
+    expect(manager.warmCount).toBe(0);
+    expect(manager.admissionWaitingCount).toBe(0);
+    expect(manager.admittedCount).toBe(1);
+    await manager.stop(second.activationId, nextAssignment);
+  });
+
   it("releases admission when a validated physical runtime is terminated after its assignment advanced", async () => {
     const fixture = providerFixture();
     const manager = new ToolSandboxManager({

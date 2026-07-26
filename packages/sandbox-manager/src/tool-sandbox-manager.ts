@@ -684,26 +684,41 @@ export class ToolSandboxManager {
     }
   }
 
-  #acquireAdmission(
+  async #acquireAdmission(
     activationId: string,
     assignment: ToolSandboxAssignment,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.#admitted.has(activationId)) return Promise.resolve();
+    if (this.#admitted.has(activationId)) return;
     if (signal?.aborted) {
-      return Promise.reject(
-        new SandboxManagerError(
+      throw new SandboxManagerError(
+        "tool_sandbox_admission_cancelled",
+        "Tool Sandbox admission was cancelled",
+        false,
+      );
+    }
+    while (this.#admitted.size >= this.#maximumActiveSandboxes && this.#warm.size > 0) {
+      const oldest = [...this.#warm.entries()].sort(
+        (left, right) => left[1].lastUsedAt - right[1].lastUsedAt,
+      )[0];
+      if (oldest === undefined) break;
+      if (this.#warm.get(oldest[0]) !== oldest[1]) continue;
+      this.#warm.delete(oldest[0]);
+      await this.#provider.stop(oldest[1].handle);
+      this.#releaseAdmission(oldest[1].handle.activationId);
+      if (signal?.aborted) {
+        throw new SandboxManagerError(
           "tool_sandbox_admission_cancelled",
           "Tool Sandbox admission was cancelled",
           false,
-        ),
-      );
+        );
+      }
     }
     if (this.#admitted.size < this.#maximumActiveSandboxes) {
       this.#admitted.set(activationId, assignment);
-      return Promise.resolve();
+      return;
     }
-    return new Promise<void>((resolvePromise, rejectPromise) => {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
       const waiter: AdmissionWaiter = {
         activationId,
         assignment,
