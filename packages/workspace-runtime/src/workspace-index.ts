@@ -3,6 +3,10 @@ import { constants, type Stats } from "node:fs";
 import { lstat, open, readdir, readlink } from "node:fs/promises";
 import { posix, resolve } from "node:path";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
+import {
+  TRUSTED_WORKSPACE_METADATA_DIRECTORY,
+  isTrustedWorkspaceMetadataPath,
+} from "./workspace-internals.ts";
 
 export const MAX_WORKSPACE_INDEX_FILES = 100_000;
 export const MAX_WORKSPACE_INDEX_FILE_BYTES = 1 * 1_024 * 1_024 * 1_024;
@@ -57,7 +61,8 @@ function validRelativePath(value: string): boolean {
   const segments = value.split("/");
   return (
     segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..") &&
-    segments[0] !== ".git"
+    segments[0] !== ".git" &&
+    !isTrustedWorkspaceMetadataPath(value)
   );
 }
 
@@ -194,7 +199,12 @@ async function collectMetadata(
   for (const entry of entries.sort((left, right) => comparePaths(left.name, right.name))) {
     const relativePath =
       relativeDirectory.length === 0 ? entry.name : `${relativeDirectory}/${entry.name}`;
-    if (relativeDirectory.length === 0 && entry.name === ".git") continue;
+    if (
+      relativeDirectory.length === 0 &&
+      (entry.name === ".git" || entry.name === TRUSTED_WORKSPACE_METADATA_DIRECTORY)
+    ) {
+      continue;
+    }
     if (!validRelativePath(relativePath)) {
       throw snapshotError("Workspace contains an unsupported path");
     }

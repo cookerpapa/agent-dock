@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import {
@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { TRUSTED_WORKSPACE_METADATA_DIRECTORY } from "@agent-dock/workspace-runtime";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { fetch } from "undici";
 
@@ -24,6 +25,8 @@ const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const VOLUME_GENERATION_PATTERN = /^[0-9a-f]{64}$/;
+const VOLUME_GENERATION_FILE = "generation";
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
 
@@ -86,12 +89,13 @@ export type KopiaWorkspaceDataMoverOptions = Readonly<{
 }>;
 
 type VolumeState = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 2;
   tenantId: string;
   workspaceId: string;
   sessionId: string;
   volumeId: string;
   snapshotId: string;
+  volumeGeneration: string;
 }>;
 
 export class WorkspaceDataMoverError extends Error {
@@ -280,21 +284,23 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       if (snapshotId === undefined) {
         await this.#emptyDirectory(directory);
         await this.#removeState(identity.volumeId);
+        await this.#createVolumeGeneration(directory);
         return { restored: false };
       }
-      // The sidecar is outside the user mount and is written only after a
-      // successful immutable snapshot. Reusing this exact-Session live volume
-      // preserves writes made by retained background processes after that
-      // snapshot. A rollback requests a different snapshot ID and therefore
-      // always takes the empty-then-restore path below.
+      // Reuse requires both the trusted sidecar and the generation marker
+      // carried by the live POSIX volume. The sidecar alone cannot distinguish
+      // a healthy warm Workspace from a volume whose contents were lost while
+      // its host directory survived.
       const state = await this.#readState(identity.volumeId);
+      const volumeGeneration = await this.#readVolumeGeneration(directory);
       if (
         state !== undefined &&
         state.tenantId === identity.tenantId &&
         state.workspaceId === identity.workspaceId &&
         state.sessionId === identity.sessionId &&
         state.volumeId === identity.volumeId &&
-        state.snapshotId === snapshotId
+        state.snapshotId === snapshotId &&
+        volumeGeneration === state.volumeGeneration
       ) {
         return { restored: false };
       }
@@ -309,7 +315,20 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
           snapshotId,
           directory,
         ]);
-        await this.#writeState({ schemaVersion: 1, ...identity, snapshotId });
+        const restoredGeneration = await this.#readVolumeGeneration(directory);
+        if (restoredGeneration === undefined) {
+          throw new WorkspaceDataMoverError(
+            "workspace_restore_generation_invalid",
+            "Committed Workspace snapshot did not contain its volume generation",
+            false,
+          );
+        }
+        await this.#writeState({
+          schemaVersion: 2,
+          ...identity,
+          snapshotId,
+          volumeGeneration: restoredGeneration,
+        });
         return { restored: true };
       } catch (error: unknown) {
         await this.#emptyDirectory(directory).catch(() => undefined);
@@ -340,6 +359,14 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     return this.#withVolumeLock(identity.volumeId, async () => {
       await this.#ensureReady();
       const directory = await this.#ensureVolumeDirectory(identity.volumeId);
+      const volumeGeneration = await this.#readVolumeGeneration(directory);
+      if (volumeGeneration === undefined) {
+        throw new WorkspaceDataMoverError(
+          "workspace_volume_generation_invalid",
+          "Workspace volume generation was missing",
+          false,
+        );
+      }
       const output = await this.#kopia([
         "snapshot",
         "create",
@@ -365,7 +392,12 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         );
       }
       const snapshotId = validatedSnapshotId(parsed.id);
-      await this.#writeState({ schemaVersion: 1, ...identity, snapshotId });
+      await this.#writeState({
+        schemaVersion: 2,
+        ...identity,
+        snapshotId,
+        volumeGeneration,
+      });
       return { snapshotId };
     });
   }
@@ -549,6 +581,43 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     }
   }
 
+  async #createVolumeGeneration(directory: string): Promise<string> {
+    const metadataDirectory = join(directory, TRUSTED_WORKSPACE_METADATA_DIRECTORY);
+    await mkdir(metadataDirectory, { mode: 0o700 });
+    const generation = randomBytes(32).toString("hex");
+    await writeFile(join(metadataDirectory, VOLUME_GENERATION_FILE), `${generation}\n`, {
+      mode: 0o400,
+      flag: "wx",
+    });
+    return generation;
+  }
+
+  async #readVolumeGeneration(directory: string): Promise<string | undefined> {
+    const metadataDirectory = join(directory, TRUSTED_WORKSPACE_METADATA_DIRECTORY);
+    const generationPath = join(metadataDirectory, VOLUME_GENERATION_FILE);
+    try {
+      const [directoryMetadata, generationMetadata, generation] = await Promise.all([
+        lstat(metadataDirectory),
+        lstat(generationPath),
+        readFile(generationPath, "utf8"),
+      ]);
+      const normalized = generation.trim();
+      if (
+        !directoryMetadata.isDirectory() ||
+        directoryMetadata.isSymbolicLink() ||
+        !generationMetadata.isFile() ||
+        generationMetadata.isSymbolicLink() ||
+        generationMetadata.size !== 65 ||
+        !VOLUME_GENERATION_PATTERN.test(normalized)
+      ) {
+        return undefined;
+      }
+      return normalized;
+    } catch {
+      return undefined;
+    }
+  }
+
   #statePath(volumeId: string): string {
     return join(this.#stateRoot, "volumes", `${volumeId}.json`);
   }
@@ -575,15 +644,25 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     if (
       !isRecord(value) ||
       Object.keys(value).sort().join("\0") !==
-        ["schemaVersion", "sessionId", "snapshotId", "tenantId", "volumeId", "workspaceId"]
+        [
+          "schemaVersion",
+          "sessionId",
+          "snapshotId",
+          "tenantId",
+          "volumeGeneration",
+          "volumeId",
+          "workspaceId",
+        ]
           .sort()
           .join("\0") ||
-      value.schemaVersion !== 1 ||
+      value.schemaVersion !== 2 ||
       typeof value.tenantId !== "string" ||
       typeof value.workspaceId !== "string" ||
       typeof value.sessionId !== "string" ||
       typeof value.volumeId !== "string" ||
-      typeof value.snapshotId !== "string"
+      typeof value.snapshotId !== "string" ||
+      typeof value.volumeGeneration !== "string" ||
+      !VOLUME_GENERATION_PATTERN.test(value.volumeGeneration)
     ) {
       return undefined;
     }
@@ -595,9 +674,10 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         volumeId: value.volumeId,
       });
       return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         ...identity,
         snapshotId: validatedSnapshotId(value.snapshotId),
+        volumeGeneration: value.volumeGeneration,
       };
     } catch {
       return undefined;

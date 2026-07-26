@@ -88,7 +88,14 @@ describe("credential-free Tool Sandbox worker", () => {
   it("keeps every remote file path beneath the isolated workspace", () => {
     expect(resolveToolWorkspacePath("src/Main.java")).toBe("/workspace/src/Main.java");
     expect(resolveToolWorkspacePath("/workspace/src/Main.java")).toBe("/workspace/src/Main.java");
-    for (const path of ["../etc/passwd", "/etc/passwd", "src\\escape", "bad\0path"]) {
+    for (const path of [
+      "../etc/passwd",
+      "/etc/passwd",
+      "src\\escape",
+      "bad\0path",
+      ".agent-dock-runtime/generation",
+      "/workspace/.agent-dock-runtime/generation",
+    ]) {
       expect(() => resolveToolWorkspacePath(path)).toThrow(ToolWorkerError);
     }
   });

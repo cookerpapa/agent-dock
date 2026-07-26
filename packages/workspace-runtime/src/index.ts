@@ -19,6 +19,10 @@ export {
 
 export { WorkspaceRuntimeError } from "./workspace-error.ts";
 export {
+  TRUSTED_WORKSPACE_METADATA_DIRECTORY,
+  isTrustedWorkspaceMetadataPath,
+} from "./workspace-internals.ts";
+export {
   MAX_WORKSPACE_INDEX_FILES,
   MAX_WORKSPACE_INDEX_FILE_BYTES,
   MAX_WORKSPACE_INDEX_TOTAL_BYTES,

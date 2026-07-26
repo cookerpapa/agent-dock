@@ -2731,3 +2731,22 @@
   completion, exact-Session warm rebind, live-volume reuse and explicit
   rollback. The one unrelated concurrent WebSocket test that flaked in the
   workspace-wide run passed on isolated rerun.
+
+## 2026-07-27 — POSIX volume-generation proof
+
+- A real-model large-Workspace fault injection exposed that the external mover
+  sidecar could survive after the POSIX volume contents were erased. Treating
+  that sidecar alone as proof caused restore to be skipped and mounted an empty
+  Workspace into the replacement Cube.
+- Every new live volume now receives a random
+  `.agent-dock-runtime/generation` marker before user code starts. Kopia carries
+  that marker in every immutable snapshot, while the trusted sidecar records
+  the same generation with the committed snapshot ID.
+- Warm reuse now requires exact tenant/workspace/session identity, exact
+  snapshot ID and matching sidecar/volume generation. A missing marker,
+  replaced or empty volume, explicit rollback or sidecar mismatch always takes
+  the empty-then-Kopia-restore path.
+- Runtime metadata is excluded from Tool file paths, Git patches, Workspace
+  indexes and portable snapshots. Old sidecar schema and markerless snapshots
+  are intentionally unsupported; development data is reset instead of adding
+  compatibility branches.

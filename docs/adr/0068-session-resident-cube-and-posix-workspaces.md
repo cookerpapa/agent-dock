@@ -78,11 +78,19 @@ PostgreSQL remains the only canonical WorkspaceVersion-head authority and
 publishes a snapshot only after the existing RunAttempt fence and base-version
 CAS succeed.
 
-The Data Mover may reuse an exact-Session live Volume when its trusted sidecar
-base equals the requested committed Kopia snapshot. This preserves writes made
-by a retained background process after the previous checkpoint. A missing
-sidecar, identity mismatch, requested rollback to another snapshot or explicit
-reset causes an empty-then-restore operation.
+The Data Mover may reuse an exact-Session live Volume only when its trusted
+sidecar base equals the requested committed Kopia snapshot **and** the
+sidecar's random volume generation equals the protected generation marker
+carried inside that live Volume and its Kopia snapshot. This preserves writes
+made by a retained background process after the previous checkpoint without
+mistaking an empty or replaced POSIX path for a healthy warm Workspace. A
+missing or mismatched marker/sidecar, identity mismatch, requested rollback to
+another snapshot or explicit reset causes an empty-then-restore operation.
+
+`.agent-dock-runtime/generation` is platform metadata, not user Workspace
+content. It is excluded from Tool file paths, Workspace indexes, portable
+snapshots and Git patches. A Kopia snapshot without the current generation
+marker is invalid; no legacy fallback is supported.
 
 Kopia remains behind the `WorkspaceDataMover` boundary. A deployment backed by
 CephFS may later add a CephFS checkpoint provider without changing Pi, Tool
@@ -131,8 +139,9 @@ The cutover is complete only when automated and live tests prove:
    processes;
 7. rollback or identity mismatch restores the requested Kopia snapshot instead
    of reusing live bytes;
-8. no native Cube Workspace checkpoint or snapshot-GC compatibility code
+8. deleting the POSIX contents while retaining the trusted sidecar forces a
+   Kopia restore of the same committed snapshot;
+9. no native Cube Workspace checkpoint or snapshot-GC compatibility code
    remains;
-9. two tenants cannot observe each other's process, Volume or Workspace; and
-10. a real-model multi-round coding Run and Web preview pass end to end.
-
+10. two tenants cannot observe each other's process, Volume or Workspace; and
+11. a real-model multi-round coding Run and Web preview pass end to end.

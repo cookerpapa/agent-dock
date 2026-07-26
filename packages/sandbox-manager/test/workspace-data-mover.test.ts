@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -130,16 +130,22 @@ describe("trusted Workspace Data Mover", () => {
     const workspaceRoot = join(root, "workspaces");
     const stateRoot = join(root, "state");
     const kopiaBinary = join(root, "fake-kopia.mjs");
+    const generationBackup = join(root, "generation.backup");
     await writeFile(
       kopiaBinary,
       `#!${process.execPath}
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 const args = process.argv.slice(2);
 if (args[0] === "repository" && args[1] === "status") {
   process.stdout.write("{}\\n");
   process.exit(0);
 }
 if (args[0] === "snapshot" && args[1] === "create") {
+  const source = args.at(-1);
+  await copyFile(
+    source + "/.agent-dock-runtime/generation",
+    ${JSON.stringify(generationBackup)},
+  );
   process.stdout.write(JSON.stringify({ id: "snapshot-one" }) + "\\n");
   process.exit(0);
 }
@@ -147,6 +153,11 @@ if (args[0] === "snapshot" && args[1] === "restore") {
   const source = args.at(-2);
   const target = args.at(-1);
   await mkdir(target, { recursive: true });
+  await mkdir(target + "/.agent-dock-runtime", { recursive: true });
+  await copyFile(
+    ${JSON.stringify(generationBackup)},
+    target + "/.agent-dock-runtime/generation",
+  );
   await writeFile(target + "/restored.txt", "restored from " + source + "\\n");
   process.exit(0);
 }
@@ -192,6 +203,16 @@ process.exit(2);
       });
       await expect(readFile(join(volume, "background-write.txt"), "utf8")).resolves.toBe(
         "after checkpoint\n",
+      );
+
+      for (const entry of await readdir(volume)) {
+        await rm(join(volume, entry), { recursive: true, force: true });
+      }
+      await expect(mover.prepare({ ...identity, snapshotId: "snapshot-one" })).resolves.toEqual({
+        restored: true,
+      });
+      await expect(readFile(join(volume, "restored.txt"), "utf8")).resolves.toBe(
+        "restored from snapshot-one\n",
       );
 
       await expect(mover.prepare({ ...identity, snapshotId: "snapshot-two" })).resolves.toEqual({
