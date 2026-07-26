@@ -7,7 +7,7 @@ import {
   type EnvironmentRuntimeSnapshot,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -16,6 +16,7 @@ import {
   resolveToolWorkspacePath,
   safeToolEnvironment,
   ToolWorkerError,
+  validateAttachedWorkspaceRoot,
   validateToolEnvironment,
 } from "../src/tool-worker.ts";
 
@@ -89,6 +90,23 @@ describe("credential-free Tool Sandbox worker", () => {
     expect(resolveToolWorkspacePath("/workspace/src/Main.java")).toBe("/workspace/src/Main.java");
     for (const path of ["../etc/passwd", "/etc/passwd", "src\\escape", "bad\0path"]) {
       expect(() => resolveToolWorkspacePath(path)).toThrow(ToolWorkerError);
+    }
+  });
+
+  it("accepts a restored non-Git workspace root and rejects a linked mount root", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-attached-workspace-"));
+    const linkedWorkspace = `${workspace}-link`;
+    try {
+      await mkdir(resolve(workspace, "nested-repository"));
+      await expect(validateAttachedWorkspaceRoot(workspace)).resolves.toBeUndefined();
+      await symlink(workspace, linkedWorkspace, "dir");
+      await expect(validateAttachedWorkspaceRoot(linkedWorkspace)).rejects.toMatchObject({
+        code: "workspace_attach_invalid",
+        retryable: false,
+      });
+    } finally {
+      await rm(linkedWorkspace, { force: true });
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 

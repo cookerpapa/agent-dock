@@ -617,6 +617,26 @@ async function assertRealPathInsideWorkspace(path: string): Promise<void> {
   }
 }
 
+export async function validateAttachedWorkspaceRoot(
+  path = TOOL_WORKSPACE_DIRECTORY,
+): Promise<void> {
+  const metadata = await lstat(path).catch(() => undefined);
+  const canonical = await realpath(path).catch(() => undefined);
+  if (
+    metadata === undefined ||
+    canonical === undefined ||
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    canonical !== resolve(path)
+  ) {
+    throw new ToolWorkerError(
+      "workspace_attach_invalid",
+      "Preserved Tool workspace could not be attached",
+      false,
+    );
+  }
+}
+
 async function assertNoFinalSymlink(path: string): Promise<void> {
   const metadata = await lstat(path).catch((error: unknown) => {
     if (isMissing(error)) return undefined;
@@ -981,7 +1001,7 @@ export async function runToolWorker(): Promise<void> {
               false,
             );
           }
-          await assertRealPathInsideWorkspace(join(TOOL_WORKSPACE_DIRECTORY, ".git"));
+          await validateAttachedWorkspaceRoot();
           environment.recipeCommands = [...message.workspaceAttach.recipeCommands];
         }
         initialized = true;
