@@ -13,6 +13,9 @@ COPY packages/dependency-egress-proxy/src/address-policy.ts packages/dependency-
 COPY packages/cube-egress-gateway/src packages/cube-egress-gateway/src
 RUN rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+RUN mkdir -p /run/agent-dock-secrets \
+    && chown 1000:1000 /run/agent-dock-secrets \
+    && chmod 0750 /run/agent-dock-secrets
 
 STOPSIGNAL SIGTERM
 USER 1000:1000

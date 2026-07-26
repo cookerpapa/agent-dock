@@ -92,7 +92,8 @@ spec:
               drop: [ALL]
           volumeMounts:
             - name: config-token
-              mountPath: /run/agent-dock-secrets
+              mountPath: /run/agent-dock-secrets/config-token
+              subPath: config-token
               readOnly: true
             - name: tmp
               mountPath: /tmp
