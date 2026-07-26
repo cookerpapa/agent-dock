@@ -4,7 +4,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   ConversationSummaryResource,
+  CubeProxyConfigurationResource,
+  DeepSeekModelId,
   GitHubInstallationResource,
+  ModelConfigurationResource,
   TenantIdentityResource,
   WorkspaceSourceRequest,
 } from "@agent-dock/protocol";
@@ -524,6 +527,17 @@ export default function ChatApp() {
     null,
   );
   const [githubLoading, setGitHubLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelConfiguration, setModelConfiguration] = useState<ModelConfigurationResource | null>(
+    null,
+  );
+  const [selectedModelId, setSelectedModelId] = useState<DeepSeekModelId>("deepseek-v4-flash");
+  const [modelApiKey, setModelApiKey] = useState("");
+  const [cubeProxyConfiguration, setCubeProxyConfiguration] =
+    useState<CubeProxyConfigurationResource | null>(null);
+  const [cubeProxyEnabled, setCubeProxyEnabled] = useState(false);
+  const [cubeProxyUrl, setCubeProxyUrl] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState<"model" | "proxy" | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
   const lastSequenceRef = useRef(0);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -585,6 +599,39 @@ export default function ChatApp() {
       cancelled = true;
     };
   }, [api, authPhase, identity?.tenantId, update]);
+
+  useEffect(() => {
+    if (authPhase !== "authenticated" || identity?.role !== "owner") {
+      setCubeProxyConfiguration(null);
+      setModelConfiguration(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getCubeProxyConfiguration()
+      .then(async (proxyConfiguration) => {
+        if (cancelled) return;
+        setCubeProxyConfiguration(proxyConfiguration);
+        setCubeProxyEnabled(proxyConfiguration.enabled);
+        setCubeProxyUrl(proxyConfiguration.proxyUrl ?? "");
+        const model = await api.getModelConfiguration();
+        if (cancelled) return;
+        setModelConfiguration(model);
+        if (model.mode === "real") setSelectedModelId(model.modelId);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof AgentDockApiError && error.status === 403) {
+          setCubeProxyConfiguration(null);
+          setModelConfiguration(null);
+          return;
+        }
+        update({ type: "api.error", message: errorMessage(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, authPhase, identity?.role, identity?.tenantId, update]);
 
   useEffect(() => {
     const sessionId = state.session?.sessionId;
@@ -682,8 +729,58 @@ export default function ChatApp() {
     }
     resetConversation();
     setConversations([]);
+    setSettingsOpen(false);
+    setModelConfiguration(null);
+    setModelApiKey("");
+    setCubeProxyConfiguration(null);
+    setCubeProxyEnabled(false);
+    setCubeProxyUrl("");
     setIdentity(null);
     setAuthPhase("anonymous");
+  }
+
+  async function saveModelConfiguration(): Promise<void> {
+    if (cubeProxyConfiguration === null || settingsSaving !== null) return;
+    const apiKey = modelApiKey.trim();
+    if (!/^[A-Za-z0-9._-]{16,512}$/.test(apiKey)) {
+      update({ type: "api.error", message: "DeepSeek API Key 格式无效。" });
+      return;
+    }
+    setSettingsSaving("model");
+    update({ type: "api.error.cleared" });
+    try {
+      const configured = await api.replaceModelConfiguration(selectedModelId, apiKey);
+      setModelConfiguration(configured);
+      setModelApiKey("");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setSettingsSaving(null);
+    }
+  }
+
+  async function saveCubeProxyConfiguration(): Promise<void> {
+    if (cubeProxyConfiguration === null || settingsSaving !== null) return;
+    const proxyUrl = cubeProxyUrl.trim();
+    if (cubeProxyEnabled && proxyUrl.length === 0) {
+      update({ type: "api.error", message: "启用 Cube 联网前需要填写上游代理地址。" });
+      return;
+    }
+    setSettingsSaving("proxy");
+    update({ type: "api.error.cleared" });
+    try {
+      const configured = await api.replaceCubeProxyConfiguration(
+        cubeProxyEnabled,
+        proxyUrl.length === 0 ? undefined : proxyUrl,
+      );
+      setCubeProxyConfiguration(configured);
+      setCubeProxyEnabled(configured.enabled);
+      setCubeProxyUrl(configured.proxyUrl ?? "");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setSettingsSaving(null);
+    }
   }
 
   async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
@@ -985,6 +1082,11 @@ export default function ChatApp() {
                 重新连接
               </button>
             ) : null}
+            {cubeProxyConfiguration !== null ? (
+              <button onClick={() => setSettingsOpen(true)} type="button">
+                设置
+              </button>
+            ) : null}
             <button
               disabled={state.session === null}
               onClick={() => setInspectorOpen((value) => !value)}
@@ -1143,6 +1245,124 @@ export default function ChatApp() {
                 </button>
               </footer>
             </form>
+          </div>
+        ) : null}
+
+        {settingsOpen && cubeProxyConfiguration !== null ? (
+          <div className="product-modal-backdrop" role="presentation">
+            <section
+              aria-label="平台运行配置"
+              aria-modal="true"
+              className="product-workspace-modal product-settings-modal"
+              role="dialog"
+            >
+              <header>
+                <div>
+                  <h2>平台运行配置</h2>
+                  <p>配置写入持久化控制面，新任务或新连接热生效，无需重启集群。</p>
+                </div>
+                <button onClick={() => setSettingsOpen(false)} type="button">
+                  ×
+                </button>
+              </header>
+
+              <div className="product-settings-section">
+                <div>
+                  <h3>Pi Worker 模型</h3>
+                  <p>Key 加密保存且不会进入 Cube。正在运行的任务保留启动时的模型快照。</p>
+                </div>
+                <label>
+                  <span>模型</span>
+                  <select
+                    disabled={settingsSaving !== null}
+                    onChange={(event) => setSelectedModelId(event.target.value as DeepSeekModelId)}
+                    value={selectedModelId}
+                  >
+                    <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+                    <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                  </select>
+                </label>
+                <label>
+                  <span>API Key</span>
+                  <input
+                    autoComplete="off"
+                    disabled={settingsSaving !== null}
+                    onChange={(event) => setModelApiKey(event.target.value)}
+                    placeholder={modelConfiguration?.mode === "real" ? "输入新 Key 以轮换" : "sk-…"}
+                    spellCheck={false}
+                    type="password"
+                    value={modelApiKey}
+                  />
+                </label>
+                <div className="product-settings-action">
+                  <small>
+                    当前凭据版本{" "}
+                    {modelConfiguration === null
+                      ? "读取中"
+                      : String(modelConfiguration.credentialVersion)}
+                  </small>
+                  <button
+                    className="product-primary-button"
+                    disabled={settingsSaving !== null || modelApiKey.trim() === ""}
+                    onClick={() => void saveModelConfiguration()}
+                    type="button"
+                  >
+                    {settingsSaving === "model" ? "加密并发布中…" : "更新模型配置"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="product-settings-section">
+                <div>
+                  <h3>CubeSandbox 公网代理</h3>
+                  <p>MicroVM 只能连接可信网关。配置刷新后，新 HTTP/HTTPS 连接使用最新版本。</p>
+                </div>
+                <label className="product-settings-toggle">
+                  <input
+                    checked={cubeProxyEnabled}
+                    disabled={settingsSaving !== null}
+                    onChange={(event) => setCubeProxyEnabled(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>允许代理感知的软件访问公网 HTTP/HTTPS</span>
+                </label>
+                <label>
+                  <span>WSL / 宿主机上游代理</span>
+                  <input
+                    autoComplete="off"
+                    disabled={settingsSaving !== null}
+                    onChange={(event) => setCubeProxyUrl(event.target.value)}
+                    placeholder="http://127.0.0.1:7890"
+                    spellCheck={false}
+                    type="url"
+                    value={cubeProxyUrl}
+                  />
+                </label>
+                <div className="product-settings-action">
+                  <small>当前代理版本 {String(cubeProxyConfiguration.revision)}</small>
+                  <button
+                    className="product-primary-button"
+                    disabled={
+                      settingsSaving !== null || (cubeProxyEnabled && cubeProxyUrl.trim() === "")
+                    }
+                    onClick={() => void saveCubeProxyConfiguration()}
+                    type="button"
+                  >
+                    {settingsSaving === "proxy" ? "发布中…" : "应用代理配置"}
+                  </button>
+                </div>
+              </div>
+
+              <footer>
+                <button
+                  disabled={settingsSaving !== null}
+                  onClick={() => setSettingsOpen(false)}
+                  type="button"
+                >
+                  关闭
+                </button>
+              </footer>
+            </section>
           </div>
         ) : null}
 

@@ -194,6 +194,11 @@ describe.sequential("production bootstrap and configuration", () => {
         "model-master-key",
         Buffer.alloc(32, 5).toString("base64url"),
       ),
+      AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: await secret(
+        root,
+        "cube-egress-config-token",
+        `cube-egress-${"c".repeat(48)}`,
+      ),
       AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
       AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
@@ -212,6 +217,7 @@ describe.sequential("production bootstrap and configuration", () => {
       temporalNamespace: "agent-dock",
       temporalTaskQueue: "agent-dock-pi-runs-v1",
       platformModelSourceTenantId: CONFIG.tenantId,
+      platformOperatorTenantId: CONFIG.tenantId,
       webSessionCookieSecure: false,
       webSessionTtlMs: 2_592_000_000,
       publicRegistration: {

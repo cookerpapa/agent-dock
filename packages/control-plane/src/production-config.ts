@@ -13,6 +13,7 @@ export type ProductionControlPlaneConfig = {
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
+  cubeEgressConfigToken: string;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
   supervisorIdPrefix: string;
@@ -26,6 +27,7 @@ export type ProductionControlPlaneConfig = {
   temporalNamespace: string;
   temporalTaskQueue: string;
   platformModelSourceTenantId: string;
+  platformOperatorTenantId: string;
   environmentImageRevision: string;
   webSessionCookieSecure: boolean;
   webSessionTtlMs: number;
@@ -212,6 +214,18 @@ export async function loadProductionControlPlaneConfig(
   if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
     throw new TypeError("GitHub Gateway URL and service token must be configured together");
   }
+  const platformModelSourceTenantId = parseUuidPathParameter(
+    required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),
+    "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID",
+  );
+  const configuredPlatformOperatorTenantId = environment.AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID;
+  const platformOperatorTenantId = parseUuidPathParameter(
+    configuredPlatformOperatorTenantId === undefined ||
+      configuredPlatformOperatorTenantId.length === 0
+      ? platformModelSourceTenantId
+      : configuredPlatformOperatorTenantId,
+    "AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID",
+  );
   return {
     databaseUrl: await loadProductionDatabaseUrl(environment),
     supervisorEnrollmentToken: await secret(
@@ -227,6 +241,11 @@ export async function loadProductionControlPlaneConfig(
     modelCredentialMasterKey: await secret(
       environment,
       "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+      allowInlineSecrets,
+    ),
+    cubeEgressConfigToken: await secret(
+      environment,
+      "AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN",
       allowInlineSecrets,
     ),
     ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined
@@ -274,10 +293,8 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
       255,
     ),
-    platformModelSourceTenantId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),
-      "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID",
-    ),
+    platformModelSourceTenantId,
+    platformOperatorTenantId,
     environmentImageRevision: bounded(
       required(environment, "AGENT_DOCK_IMAGE_REVISION"),
       "AGENT_DOCK_IMAGE_REVISION",

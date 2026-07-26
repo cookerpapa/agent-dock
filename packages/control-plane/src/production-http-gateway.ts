@@ -7,6 +7,7 @@ export const CONTROL_PLANE_READY_PATH = "/health/ready";
 export const TENANT_REGISTRATION_PATH = "/v1/registrations";
 export const ACCOUNT_REGISTRATION_PATH = "/v1/auth/register";
 export const ACCOUNT_LOGIN_PATH = "/v1/auth/login";
+export const CUBE_EGRESS_CONFIGURATION_INTERNAL_PATH = "/v1/internal/cube-egress-configuration";
 
 export type ProductionHttpGatewayOptions = {
   authenticator: TenantApiAuthenticator;
@@ -40,6 +41,9 @@ export class ProductionHttpGateway {
     fastify.addHook("onRequest", async (request, reply) => {
       const path = request.raw.url?.split("?", 1)[0] ?? "";
       if (!path.startsWith("/v1/") && path !== "/v1") return;
+      if (request.method === "GET" && path === CUBE_EGRESS_CONFIGURATION_INTERNAL_PATH) {
+        return;
+      }
       if (request.method === "POST" && path === TENANT_REGISTRATION_PATH) {
         if (this.#publicRegistrationEnabled) return;
         await reply.code(404).send({

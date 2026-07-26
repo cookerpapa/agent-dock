@@ -54,7 +54,7 @@ Untrusted browser input / repository / model output
           v                         v
  CubeMaster/Cubelet/KVM       gVisor importer Pod
           |
- Tool microVM (untrusted, public egress/private CIDRs denied)
+ Tool microVM (untrusted, only trusted web-egress gateway reachable)
 ```
 
 The Sandbox Manager is deliberately small. It holds the CubeAPI key and a
@@ -96,14 +96,15 @@ Assumed trusted or out of scope for the current claim:
 | Threat | Control | Executable evidence |
 | --- | --- | --- |
 | Password or browser session disclosure | Per-account salted scrypt verifier; opaque HttpOnly/SameSite session; digest-only persistence; bounded lifetime and immediate revocation | PostgreSQL account/login/logout and cookie-auth integration tests |
-| Product user replaces or reads the platform model key | Product UI has no model controls; production writes require the platform-operator tenant; per-tenant AES-GCM binding and safe metadata-only reads | platform-model inheritance/write-denial integration test and production account flow |
+| Product user replaces or reads the platform model key | Admin UI writes require the platform-operator owner; replacement creates encrypted per-tenant AES-GCM credential versions, while reads expose only safe metadata | platform-model inheritance/write-denial integration test and production account flow |
 | Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
 | Runner's provider route exposes host networking or arbitrary egress | Runner joins internal model egress only; a TCP-to-Unix-socket relay permits exact provider TCP/443, holds no model key and does not terminate TLS | production topology inspection, relay allowlist tests and real-provider acceptance |
 | Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool guest has no Kubernetes/Cube credential; Cube lifecycle is available only through the bounded Manager and fixed relays | production topology, Cube request-shape tests, live guest credential probes |
 | Accepted Run silently changes Tool image after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-guest toolchain preflight; READY template evidence binds Git revision, image digest and spec hash | migration/protocol tests, production startup gate, Cube environment evidence and real-token Run |
 | Model chooses an unreviewed image or runtime policy | template/profile/network/resources remain operator configuration and closed protocols reject extra client fields | protocol schemas, template contract tests and Manager policy mismatch tests |
-| Ordinary Tool reaches internal services or metadata | every Cube create request enables public egress but explicitly denies private, loopback, carrier-grade NAT, link-local/metadata and other special IPv4 classes; it supplies no higher-priority allow entries | live Cube public-HTTPS success plus platform/private/metadata denial probes and network matrix |
-| Ordinary Tool exfiltrates Workspace data to a public host | accepted residual risk of owner-selected full-public mode; the guest has no model/platform/GitHub credential, and the private-deployment claim excludes DLP | credential-absence probes and explicit ADR-0062 risk statement |
+| Ordinary Tool reaches internal services or metadata | every Cube create request allows only the stable trusted gateway and denies all other IPv4; the gateway resolves targets itself and rejects the entire answer set if any address is private/special | gateway SSRF tests plus live Cube proxy-mediated HTTPS/direct/private/metadata denial probes |
+| Ordinary Tool bypasses or reconfigures the egress proxy | upstream URL and polling identity exist only in the trusted gateway/Control Plane; Tool environment receives a fixed credential-free gateway address and Cube denies every direct route | Tool environment test, Cube request-shape test and gateway service-token test |
+| Ordinary Tool exfiltrates Workspace data to a public host | accepted residual risk of operator-enabled public-web mode; the guest has no model/platform/GitHub credential, and the private-deployment claim excludes DLP | credential-absence probes and explicit ADR-0063 risk statement |
 | Cross-tenant workspace read | one microVM is bound to one immutable tenant/project/workspace/session identity; an exact-Session warm handoff requires a higher fence, rotated secret and complete old-process removal | simultaneous two-tenant same-path canaries, stale-authority rejection and Cube KVM gate |
 | A used runtime is sanitized and reassigned to another tenant | used guests are never pooled or rebound across Session/Workspace/tenant identity; exact-Session warm release seals the root-owned supervisor, kills every Tool UID process and pauses the VM, while mismatch or ambiguity destroys it | sealed-handoff template check, immutable-binding Provider tests, exact cleanup and zero-orphan inventory gate |
 | Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |

@@ -523,11 +523,18 @@ source key only inside the trusted Control Plane and re-seals it with the new
 tenant/binding/version as AES-GCM associated data. No user response or browser
 asset contains the key.
 
+The browser administrator may be a separate password-authenticated tenant.
+Set `AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID` in the private runtime `.env` to
+that tenant UUID. Authorization then follows the delegated administrator, while
+model replacement still updates the durable bootstrap model source first and
+replicates the new encrypted binding into browser-account tenants. If the
+variable is empty, it defaults to the bootstrap source tenant.
+
 Normal product accounts may read safe `GET /v1/model-configuration` metadata
-for diagnostics but cannot replace it. The default Web application has no model
-panel. In production, only the configured platform operator tenant may call
-`PUT /v1/model-configuration`; the endpoint accepts only `deepseek` plus the
-server model allowlist and never accepts a provider URL.
+for diagnostics but cannot replace it. The Web **settings** panel exposes model
+replacement only to the configured platform operator owner. The same boundary
+protects `PUT /v1/model-configuration`; the endpoint accepts only `deepseek`
+plus the server model allowlist and never accepts a provider URL.
 
 Operator replacement creates immutable credential-binding versions for the
 platform source and every browser-account tenant in one transaction. Repeating
@@ -542,9 +549,9 @@ never guesses current provider pricing.
 The trusted Supervisor decrypts the exact snapshotted version and gives its
 in-process Pi runtime only a short-lived, request-limited loopback Model Gateway
 capability. The capability is revoked when the activation settles and never
-crosses the remote-tool RPC boundary. Tool microVMs can reach public Internet
-destinations, but Cube receives a fixed deny list for private, link-local,
-metadata, platform and reserved address classes; public inbound traffic remains
+crosses the remote-tool RPC boundary. Tool microVMs can reach only the trusted
+web gateway, which forwards proxy-aware public HTTP/HTTPS and rejects
+private/link-local/metadata/platform targets; public inbound traffic remains
 disabled. This is not a data-loss-prevention boundary. Treat the Supervisor,
 Sandbox Manager, PostgreSQL, private runtime directory, Cube control/compute
 plane, K3s/containerd/runsc importer plane and host authority as the trusted
@@ -830,11 +837,13 @@ npm run cubesandbox:template-check
 npm run cubesandbox:live-check
 ```
 
-The Cube node must have a native public route. The gate deliberately performs
-a proxy-free HTTPS preflight from the trusted host before allocating guests;
-`HTTP_PROXY` alone is insufficient because CubeVS/NAT does not inherit an
-application proxy. For local WSL, use a network mode that presents an IPv4 or
-IPv6 default route to Linux rather than proxy-only `mirrored` networking.
+The local profile supports WSL mirrored networking. Cube guests do not inherit
+the host `HTTP_PROXY`; instead every guest can reach only
+`10.255.255.254:3128`, the trusted Cube web-egress gateway. Configure the
+gateway's upstream origin in the platform-operator **settings** panel. The
+gateway polls the versioned Control Plane value once per second, so new
+connections use a changed proxy without restarting K3s, Cube, the Manager or
+the Pi Worker pool.
 
 Run the destructive acceptance topology separately from a real deployment:
 
@@ -921,9 +930,10 @@ therefore guarded and excluded from routine CI. During release validation,
 confirm the Pi runtime remains inside the trusted non-root Supervisor, that no
 application owns a Docker/containerd socket, that the Manager's Kubernetes
 credential remains limited to the importer resources, and that each transient
-Cube Tool guest has full public egress with private/link-local/metadata denial
-and no credential-bearing environment or mount. Rotate or revoke a temporary
-test key afterward. Any
+Cube Tool guest has only the trusted proxy-mediated web route, cannot dial
+direct public/private/link-local/metadata destinations, and has no
+credential-bearing environment or mount. Rotate or revoke a temporary test key
+afterward. Any
 broader claim requires its own ADR, threat model, and acceptance evidence.
 
 To validate the semantic conversation read model and trusted provider relay

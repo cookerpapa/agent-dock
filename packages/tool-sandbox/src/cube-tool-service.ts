@@ -510,6 +510,7 @@ type InitializedToolState = {
   activationId: string;
   environment: Extract<ToolWorkerInput, { type: "worker.initialize" }>["environment"];
   workspaceSeed: Extract<ToolWorkerInput, { type: "worker.initialize" }>["workspaceSeed"];
+  webProxy: Extract<ToolWorkerInput, { type: "worker.initialize" }>["webProxy"];
   toolchain: EnvironmentToolchainReport;
 };
 
@@ -563,6 +564,7 @@ const server = createServer((request, response) => {
         activationId: input.activationId,
         environment: input.environment,
         workspaceSeed: input.workspaceSeed,
+        webProxy: input.webProxy,
         toolchain,
       };
       sendJson(response, 200, toolchain);
@@ -653,6 +655,7 @@ const server = createServer((request, response) => {
           activationId: initialized.activationId,
           environment: initialized.environment,
           workspaceSeed: initialized.workspaceSeed,
+          ...(initialized.webProxy === undefined ? {} : { webProxy: initialized.webProxy }),
           workspaceAttach: {
             recipeCommands: initialized.toolchain.recipeCommands,
           },

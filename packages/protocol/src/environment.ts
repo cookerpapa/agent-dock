@@ -171,6 +171,7 @@ export const EnvironmentValidationReportSchema = Type.Union([
       networkMode: Type.Union([
         Type.Literal("deny_all"),
         Type.Literal("public_egress_private_denied"),
+        Type.Literal("public_web_proxy_private_denied"),
       ]),
       // Cube's disposable CoW guest rootfs is writable. The non-root Tool
       // Worker and the independent guest kernel, rather than a read-only OCI

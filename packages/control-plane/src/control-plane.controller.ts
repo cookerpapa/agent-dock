@@ -33,6 +33,7 @@ import {
   parsePromoteCandidateRequest,
   parseRegisterGitHubInstallationRequest,
   parseReplaceModelConfigurationRequest,
+  parseReplaceCubeProxyConfigurationRequest,
   parseReplaceModelGovernanceRequest,
   parseRollbackWorkspaceRequest,
   parseSetGitHubRepositoryRequest,
@@ -49,6 +50,8 @@ import {
   type ProjectResource,
   type ProjectEnvironmentHistoryResource,
   type ModelConfigurationResource,
+  type CubeProxyConfigurationResource,
+  type InternalCubeProxyConfigurationResource,
   type ModelGovernanceResource,
   type OperationalAuditLogResource,
   type OperationalInsightsResource,
@@ -83,6 +86,7 @@ import { OperationalInsightsService } from "./operational-insights-service.ts";
 import { readWebSessionCookie, WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
 import { CandidateRaceService } from "./candidate-race-service.ts";
+import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -108,6 +112,8 @@ export class ControlPlaneController {
     private readonly projectEnvironments: ProjectEnvironmentService,
     @Inject(CandidateRaceService)
     private readonly candidateRaces: CandidateRaceService,
+    @Inject(PlatformRuntimeSettingsService)
+    private readonly platformRuntimeSettings: PlatformRuntimeSettingsService,
   ) {}
 
   @Post("auth/register")
@@ -173,6 +179,31 @@ export class ControlPlaneController {
       this.tenantRequestContext.resolve(request),
       parseReplaceModelConfigurationRequest(body),
     );
+  }
+
+  @Get("platform-settings/cube-proxy")
+  async getCubeProxyConfiguration(
+    @Req() request: FastifyRequest,
+  ): Promise<CubeProxyConfigurationResource> {
+    return this.platformRuntimeSettings.get(this.tenantRequestContext.resolve(request));
+  }
+
+  @Put("platform-settings/cube-proxy")
+  async replaceCubeProxyConfiguration(
+    @Req() request: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<CubeProxyConfigurationResource> {
+    return this.platformRuntimeSettings.replace(
+      this.tenantRequestContext.resolve(request),
+      parseReplaceCubeProxyConfigurationRequest(body),
+    );
+  }
+
+  @Get("internal/cube-egress-configuration")
+  async internalCubeEgressConfiguration(
+    @Headers("x-agent-dock-internal-token") token: string | undefined,
+  ): Promise<InternalCubeProxyConfigurationResource> {
+    return this.platformRuntimeSettings.internal(token);
   }
 
   @Get("model-governance")

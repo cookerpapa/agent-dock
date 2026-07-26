@@ -25,6 +25,7 @@ export type TenantModelConfigurationServiceOptions = {
   vault?: TenantModelCredentialVault;
   clock?: () => Date;
   platformOperatorTenantId?: string;
+  platformModelSourceTenantId?: string;
 };
 
 function positiveVersion(value: string | number | bigint): number {
@@ -62,12 +63,15 @@ export class TenantModelConfigurationService {
   readonly #vault: TenantModelCredentialVault | undefined;
   readonly #clock: () => Date;
   readonly #platformOperatorTenantId: string | undefined;
+  readonly #platformModelSourceTenantId: string | undefined;
 
   constructor(options: TenantModelConfigurationServiceOptions) {
     this.#database = options.database;
     this.#vault = options.vault;
     this.#clock = options.clock ?? (() => new Date());
     this.#platformOperatorTenantId = options.platformOperatorTenantId;
+    this.#platformModelSourceTenantId =
+      options.platformModelSourceTenantId ?? options.platformOperatorTenantId;
   }
 
   async get(identity: TenantRequestIdentity): Promise<ModelConfigurationResource> {
@@ -152,20 +156,29 @@ export class TenantModelConfigurationService {
     }
     const now = validClock(this.#clock);
     return this.#database.transaction().execute(async (transaction) => {
-      const result = await this.#replaceForTenant(transaction, identity.tenantId, request, now);
-      if (this.#platformOperatorTenantId !== undefined) {
+      if (
+        this.#platformOperatorTenantId !== undefined &&
+        this.#platformModelSourceTenantId !== undefined
+      ) {
+        const result = await this.#replaceForTenant(
+          transaction,
+          this.#platformModelSourceTenantId,
+          request,
+          now,
+        );
         const managedTenants = await transaction
           .selectFrom("user_password_credentials")
           .select("tenant_id as tenantId")
           .distinct()
-          .where("tenant_id", "!=", identity.tenantId)
+          .where("tenant_id", "!=", this.#platformModelSourceTenantId)
           .orderBy("tenant_id", "asc")
           .execute();
         for (const managedTenant of managedTenants) {
           await this.#replaceForTenant(transaction, managedTenant.tenantId, request, now);
         }
+        return result;
       }
-      return result;
+      return this.#replaceForTenant(transaction, identity.tenantId, request, now);
     });
   }
 

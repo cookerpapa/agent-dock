@@ -13,6 +13,7 @@ import {
   parseGitHubInstallationResource,
   parseGitHubPullRequestDeliveryResource,
   parseModelConfigurationResource,
+  parseCubeProxyConfigurationResource,
   parseModelGovernanceResource,
   parseLogoutResource,
   parseOperationalAuditLogResource,
@@ -52,6 +53,7 @@ import {
   type GitHubInstallationResource,
   type GitHubPullRequestDeliveryResource,
   type ModelConfigurationResource,
+  type CubeProxyConfigurationResource,
   type ModelGovernanceResource,
   type LogoutResource,
   type OperationalAuditLogResource,
@@ -261,6 +263,31 @@ export class AgentDockApi {
         this.#fetch,
         "/v1/model-configuration",
         jsonRequest({ provider: "deepseek", modelId, apiKey }, undefined, "PUT"),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getCubeProxyConfiguration(): Promise<CubeProxyConfigurationResource> {
+    return parseCubeProxyConfigurationResource(
+      await request(
+        this.#fetch,
+        "/v1/platform-settings/cube-proxy",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async replaceCubeProxyConfiguration(
+    enabled: boolean,
+    proxyUrl?: string,
+  ): Promise<CubeProxyConfigurationResource> {
+    return parseCubeProxyConfigurationResource(
+      await request(
+        this.#fetch,
+        "/v1/platform-settings/cube-proxy",
+        jsonRequest({ enabled, ...(proxyUrl === undefined ? {} : { proxyUrl }) }, undefined, "PUT"),
         this.#authorizationToken,
       ),
     );

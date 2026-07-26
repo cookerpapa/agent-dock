@@ -23,7 +23,7 @@ event delivery under ADR-0040.
 - trusted Pi Runner and model boundary;
 - authenticated Sandbox Manager with no runtime socket;
 - provider-neutral handles, policy, lifecycle, inspection, and cleanup;
-- primary `CubeSandboxProvider` with full-public/private-denied KVM Tool guests,
+- primary `CubeSandboxProvider` with proxy-mediated, direct-denied KVM Tool guests,
   fixed Cube relays, and fail-closed current-commit template attestation;
 - retained Kubernetes/gVisor implementation only for importer/regression use;
 - credential, namespace, cgroup, filesystem, network, cancellation, and Pi

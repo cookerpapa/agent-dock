@@ -12,6 +12,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
   ConversationSummaryResource,
+  CubeProxyConfigurationResource,
   DeepSeekModelId,
   GitHubInstallationResource,
   ModelConfigurationResource,
@@ -322,6 +323,11 @@ export default function App() {
   const [modelCredentialInput, setModelCredentialInput] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<DeepSeekModelId>("deepseek-v4-flash");
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
+  const [cubeProxyConfiguration, setCubeProxyConfiguration] =
+    useState<CubeProxyConfigurationResource | null>(null);
+  const [cubeProxyUrlInput, setCubeProxyUrlInput] = useState("");
+  const [cubeProxyEnabled, setCubeProxyEnabled] = useState(false);
+  const [cubeProxySaving, setCubeProxySaving] = useState(false);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceSourceKind, setWorkspaceSourceKind] =
@@ -391,6 +397,10 @@ export default function App() {
     setModelPanelOpen(false);
     setModelCredentialInput("");
     setModelConfigurationSaving(false);
+    setCubeProxyConfiguration(null);
+    setCubeProxyUrlInput("");
+    setCubeProxyEnabled(false);
+    setCubeProxySaving(false);
     setWorkspacePanelOpen(false);
     setWorkspaceName("");
     setWorkspaceSourceKind("sample_java");
@@ -433,6 +443,33 @@ export default function App() {
       cancelled = true;
     };
   }, [api, apiToken, identity?.tenantId]);
+
+  useEffect(() => {
+    if (!canConfigureModel || (AUTH_REQUIRED && apiToken.length === 0)) {
+      setCubeProxyConfiguration(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getCubeProxyConfiguration()
+      .then((configuration) => {
+        if (cancelled) return;
+        setCubeProxyConfiguration(configuration);
+        setCubeProxyEnabled(configuration.enabled);
+        setCubeProxyUrlInput(configuration.proxyUrl ?? "");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof AgentDockApiError && error.status === 403) {
+          setCubeProxyConfiguration(null);
+          return;
+        }
+        update({ type: "api.error", message: apiFailureMessage(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, apiToken, canConfigureModel, identity?.tenantId]);
 
   useEffect(() => {
     if (identity === null || (AUTH_REQUIRED && apiToken.length === 0)) {
@@ -563,11 +600,37 @@ export default function App() {
       const configured = await api.replaceModelConfiguration(selectedModelId, providerKey);
       setModelConfiguration(configured);
       setModelCredentialInput("");
-      setModelPanelOpen(false);
     } catch (error: unknown) {
       update({ type: "api.error", message: apiFailureMessage(error) });
     } finally {
       setModelConfigurationSaving(false);
+    }
+  }
+
+  async function replaceCubeProxyConfiguration(): Promise<void> {
+    if (cubeProxyConfiguration === null || cubeProxySaving) return;
+    const proxyUrl = cubeProxyUrlInput.trim();
+    if (cubeProxyEnabled && proxyUrl.length === 0) {
+      update({
+        type: "api.error",
+        message: "Enable CubeSandbox egress only after entering a proxy URL.",
+      });
+      return;
+    }
+    setCubeProxySaving(true);
+    update({ type: "api.error.cleared" });
+    try {
+      const configured = await api.replaceCubeProxyConfiguration(
+        cubeProxyEnabled,
+        proxyUrl.length === 0 ? undefined : proxyUrl,
+      );
+      setCubeProxyConfiguration(configured);
+      setCubeProxyEnabled(configured.enabled);
+      setCubeProxyUrlInput(configured.proxyUrl ?? "");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: apiFailureMessage(error) });
+    } finally {
+      setCubeProxySaving(false);
     }
   }
 
@@ -1081,10 +1144,10 @@ export default function App() {
             {canConfigureModel ? (
               <button
                 onClick={() => setModelPanelOpen((open) => !open)}
-                title="Configure tenant model credential"
+                title="Configure platform runtime"
                 type="button"
               >
-                model
+                settings
               </button>
             ) : null}
             <button
@@ -1122,19 +1185,17 @@ export default function App() {
           </section>
         ) : null}
         {modelPanelOpen && canConfigureModel ? (
-          <form
-            className="model-configuration-panel"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void replaceModelConfiguration();
-            }}
-          >
+          <section className="model-configuration-panel">
             <div>
-              <strong>Tenant model runtime</strong>
+              <strong>Platform runtime settings</strong>
               <span>
-                The key is encrypted at rest. Pi receives only a short-lived, turn-bound gateway
-                capability.
+                Changes are versioned and take effect without restarting the cluster. Active Runs
+                keep the model snapshot they started with.
               </span>
+            </div>
+            <div className="settings-section-label">
+              <strong>Pi model</strong>
+              <span>The key is encrypted at rest and never enters a Tool Sandbox.</span>
             </div>
             <label htmlFor="model-id">model</label>
             <select
@@ -1157,24 +1218,69 @@ export default function App() {
               type="password"
               value={modelCredentialInput}
             />
-            <button disabled={modelConfigurationSaving || modelCredentialInput.trim() === ""}>
+            <button
+              disabled={modelConfigurationSaving || modelCredentialInput.trim() === ""}
+              onClick={() => void replaceModelConfiguration()}
+              type="button"
+            >
               {modelConfigurationSaving
                 ? "encrypting…"
                 : usesRealModel
                   ? "rotate / update"
                   : "enable real Pi"}
             </button>
+            {cubeProxyConfiguration === null ? null : (
+              <>
+                <div className="settings-section-label">
+                  <strong>CubeSandbox web egress</strong>
+                  <span>
+                    MicroVMs can reach only the trusted gateway. New proxy connections use the
+                    latest revision.
+                  </span>
+                </div>
+                <label htmlFor="cube-proxy-enabled">enabled</label>
+                <input
+                  checked={cubeProxyEnabled}
+                  disabled={cubeProxySaving}
+                  id="cube-proxy-enabled"
+                  onChange={(event) => setCubeProxyEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <label htmlFor="cube-proxy-url">upstream proxy</label>
+                <input
+                  autoComplete="off"
+                  disabled={cubeProxySaving}
+                  id="cube-proxy-url"
+                  onChange={(event) => setCubeProxyUrlInput(event.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                  spellCheck={false}
+                  type="url"
+                  value={cubeProxyUrlInput}
+                />
+                <button
+                  disabled={
+                    cubeProxySaving || (cubeProxyEnabled && cubeProxyUrlInput.trim() === "")
+                  }
+                  onClick={() => void replaceCubeProxyConfiguration()}
+                  type="button"
+                >
+                  {cubeProxySaving
+                    ? "applying…"
+                    : `apply proxy · revision ${String(cubeProxyConfiguration.revision)}`}
+                </button>
+              </>
+            )}
             <button
-              disabled={modelConfigurationSaving}
+              disabled={modelConfigurationSaving || cubeProxySaving}
               onClick={() => {
                 setModelCredentialInput("");
                 setModelPanelOpen(false);
               }}
               type="button"
             >
-              cancel
+              close
             </button>
-          </form>
+          </section>
         ) : null}
         {workspacePanelOpen && canMutate ? (
           <form

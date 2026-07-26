@@ -28,6 +28,8 @@ const runtimeDirectory = resolve(
 const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
 const secretValuesPath = resolve(runtimeDirectory, "cubesandbox/secret-values.yaml");
 const authorizerImage = "agent-dock/cube-api-authorizer:local";
+const cubeEgressGatewayImage = "agent-dock/cube-egress-gateway:local";
+const cubeEgressConfigTokenPath = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
 const wslStableNodeIp = "10.255.255.254";
 const wslStableNodeInterface = "agentdock0";
 const wslStableNodeMtu = 1_500;
@@ -634,6 +636,7 @@ if ((await repositoryHead(cubeRepository)) !== CUBE_COMMIT) {
 await capture("test", ["-r", kubeconfig]);
 await capture("test", ["-r", credentialPath]);
 await capture("test", ["-r", secretValuesPath]);
+await capture("test", ["-r", cubeEgressConfigTokenPath]);
 await capture("test", ["-c", "/dev/kvm"]);
 await capture("which", ["mkfs.xfs"]);
 await capture("which", ["helm"]);
@@ -664,6 +667,18 @@ await run("docker", [
   authorizerImage,
   ".",
 ]);
+await run("docker", [
+  "build",
+  "--file",
+  "packages/cube-egress-gateway/Dockerfile",
+  "--build-arg",
+  "AGENT_DOCK_VERSION=cube-primary",
+  "--build-arg",
+  `AGENT_DOCK_REVISION=${await repositoryHead(repositoryRoot)}`,
+  "--tag",
+  cubeEgressGatewayImage,
+  ".",
+]);
 
 const temporary = await mkdtemp(join(tmpdir(), "agent-dock-cube-install-"));
 try {
@@ -678,6 +693,18 @@ try {
     "import",
     "--all-platforms",
     archive,
+  ]);
+  const egressArchive = join(temporary, "cube-egress-gateway.tar");
+  await run("docker", ["image", "save", "--output", egressArchive, cubeEgressGatewayImage]);
+  await run("ctr", [
+    "--address",
+    "/run/k3s/containerd/containerd.sock",
+    "--namespace",
+    "k8s.io",
+    "images",
+    "import",
+    "--all-platforms",
+    egressArchive,
   ]);
 
   // `kubectl apply` owns the namespace declaratively without printing any
@@ -704,13 +731,35 @@ try {
     "json",
   ]);
   await run("kubectl", ["apply", "-f", "-"], { input: secret });
+  const egressSecret = await capture("kubectl", [
+    "-n",
+    "cube-system",
+    "create",
+    "secret",
+    "generic",
+    "agent-dock-cube-egress-config",
+    `--from-file=config-token=${cubeEgressConfigTokenPath}`,
+    "--dry-run=client",
+    "-o",
+    "json",
+  ]);
+  await run("kubectl", ["apply", "-f", "-"], { input: egressSecret });
   await run("kubectl", ["apply", "-f", "deploy/cubesandbox/authorizer.yaml"]);
+  await run("kubectl", ["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
   await run("kubectl", [
     "-n",
     "cube-system",
     "rollout",
     "status",
     "deployment/agent-dock-cube-api-authorizer",
+    "--timeout=180s",
+  ]);
+  await run("kubectl", [
+    "-n",
+    "cube-system",
+    "rollout",
+    "status",
+    "deployment/agent-dock-cube-egress-gateway",
     "--timeout=180s",
   ]);
 

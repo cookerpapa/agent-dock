@@ -38,6 +38,8 @@ export type SandboxManagerConfig = {
     proxyPort: number;
     proxyScheme: "http" | "https";
     sandboxDomain: string;
+    egressProxyHost: string;
+    egressProxyPort: number;
     requestTimeoutMs: number;
   };
 };
@@ -307,6 +309,17 @@ export async function loadSandboxManagerConfig(
               environment.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
               "cubeSandboxDomain",
               253,
+            ),
+            egressProxyHost: bounded(
+              environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
+              "cubeSandboxEgressProxyHost",
+              15,
+            ),
+            egressProxyPort: integer(
+              environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT,
+              3_128,
+              1,
+              65_535,
             ),
             requestTimeoutMs: integer(
               environment.AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS,

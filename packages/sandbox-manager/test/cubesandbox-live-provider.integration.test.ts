@@ -28,6 +28,7 @@ type LiveConfiguration = Readonly<{
   imageRevision: string;
   publicHttpsUrl: string;
   runtime: OfficialCubeSandboxRuntimeClientOptions;
+  webProxy: Readonly<{ host: string; port: number }>;
   forbiddenEndpoints: readonly Readonly<{ host: string; port: number }>[];
 }>;
 
@@ -112,6 +113,8 @@ async function configuration(): Promise<LiveConfiguration> {
       apiUrl.protocol === "https:" ? 443 : 80,
     ),
   });
+  const egressProxyIp = process.env.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254";
+  const egressProxyPort = port(process.env.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT, 3_128);
   return {
     templateId: required("AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
     imageRevision: required("AGENT_DOCK_IMAGE_REVISION"),
@@ -126,8 +129,10 @@ async function configuration(): Promise<LiveConfiguration> {
       ),
       proxyScheme,
       sandboxDomain: process.env.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
+      egressProxyIp,
       requestTimeoutMs: 30_000,
     },
+    webProxy: { host: egressProxyIp, port: egressProxyPort },
     forbiddenEndpoints: [apiEndpoint, ...configured],
   };
 }
@@ -361,6 +366,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
       const provider = new CubeSandboxProvider({
         templateId: config.templateId,
         imageRevision: config.imageRevision,
+        webProxy: config.webProxy,
         runtime: config.runtime,
         importGitHub: async () => {
           throw new Error("Repository import is outside the Cube live Provider gate");

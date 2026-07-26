@@ -154,6 +154,23 @@ async function ensureSandboxManagerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureCubeEgressConfigToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+      throw new Error("Production Cube egress configuration token is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomSecret()}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
 async function ensureDependencyEgressIssuer(runtimeDirectory) {
   const path = resolve(runtimeDirectory, "secrets/dependency-egress-private-key.pem");
   try {
@@ -336,6 +353,7 @@ await assertPrivateDirectory(runtimeDirectory);
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
+  const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
   const dependencyEgressIssuerCreated = await ensureDependencyEgressIssuer(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
   const observabilitySecretsCreated = await ensureObservabilitySecrets(runtimeDirectory);
@@ -347,6 +365,7 @@ if (await validateExisting(runtimeDirectory)) {
       reused: true,
       modelCredentialMasterKeyCreated,
       sandboxManagerTokenCreated,
+      cubeEgressConfigTokenCreated,
       dependencyEgressIssuerCreated,
       githubGatewaySecretsCreated,
       observabilitySecretsCreated,
@@ -460,6 +479,10 @@ await writePrivateFile(
   `${randomSecret()}\n`,
 );
 await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${randomSecret()}\n`);
+await writePrivateFile(
+  resolve(secretsDirectory, "cube-egress-config-token"),
+  `${randomSecret()}\n`,
+);
 {
   const { privateKey } = generateKeyPairSync("ed25519");
   await writePrivateFile(

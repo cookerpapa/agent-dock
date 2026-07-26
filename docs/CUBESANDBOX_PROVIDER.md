@@ -42,9 +42,9 @@ operator path.
 | Root filesystem | read-only OCI rootfs | writable disposable guest CoW rootfs |
 | Workspace durability | AgentDock content checkpoint | same AgentDock content checkpoint |
 | Exact-Session warm rebind | implemented in former Tool Provider | sealed pause/connect/rebind with higher AgentDock fence |
-| Tool network | Kubernetes default deny | public egress with private/special CIDR denial |
+| Tool network | Kubernetes default deny | one trusted web gateway; every direct route denied |
 | Repository import | signed-capability gVisor importer | delegates to that importer |
-| Dependency setup | disposable exact-host bootstrap | promotes regular files into a full-public Cube VM |
+| Dependency setup | disposable exact-host bootstrap | promotes regular files into a proxy-mediated Cube VM |
 | Native snapshot | not required | optional future optimization, never commit authority |
 
 ## Provider path
@@ -107,17 +107,18 @@ The create body always contains:
   "allow_internet_access": true,
   "network": {
     "allowPublicTraffic": false,
-    "denyOut": [
-      "10.0.0.0/8",
-      "100.64.0.0/10",
-      "127.0.0.0/8",
-      "169.254.0.0/16",
-      "172.16.0.0/12",
-      "192.168.0.0/16"
-    ]
+    "allowOut": ["10.255.255.254/32"],
+    "denyOut": ["0.0.0.0/0"]
   }
 }
 ```
+
+The sole allowed address is the trusted host-network Cube web-egress gateway.
+The Tool Worker receives that stable host and port through standard HTTP proxy
+variables, not the operator's upstream proxy URL. The gateway resolves targets,
+rejects every private/special answer and forwards only public HTTP/HTTPS through
+the hot-configured operator proxy. Direct public, platform, metadata and
+cross-tenant IPv4 connections remain denied by Cube. See ADR-0063.
 
 The Tool VM receives no model credential, database URL, object-store key,
 Kubernetes credential, CubeAPI key or GitHub token. Port 49984 is reachable only
@@ -133,6 +134,11 @@ In the Compose product plane:
 sandbox-manager (internal networks only)
     ├── cube-api-relay   ── fixed private CubeAPI host:port
     └── cube-proxy-relay ── fixed private CubeProxy host:port
+
+Cube Tool VM
+    └── 10.255.255.254:3128 only
+          └── trusted Cube egress gateway
+                └── hot-configured operator HTTP(S) proxy
 ```
 
 The relays have no credentials and cannot dial a destination selected by a
@@ -179,16 +185,16 @@ The live gate has proven:
 - a real Cubelet/CubeShim KVM guest whose kernel differs from the host;
 - simultaneous tenant canaries remaining in different Workspaces;
 - no model/platform credential, Kubernetes token or Docker socket in the guest;
-- successful public HTTPS plus denial of CubeAPI, platform/private endpoints
-  and link-local metadata from the guest;
+- successful proxy-mediated public HTTPS plus denial of direct public,
+  CubeAPI, platform/private endpoints and link-local metadata from the guest;
 - output, path, symlink, command-time and process limits;
 - cancellation destroying the affected microVM;
 - content capture and exact zero-orphan cleanup.
 
 Recipes that require dependency hosts retain the disposable gVisor bootstrap
 governed by ADR-0044. Its captured regular files are restored into a fresh
-Cube VM. This is still a reproducible preparation boundary, but ordinary Cube
-Bash subsequently has full public egress under ADR-0062.
+Cube VM. This is still a reproducible preparation boundary, but proxy-aware
+ordinary Cube Bash subsequently has mediated public-web egress under ADR-0063.
 
 This does not prove a multi-node production deployment. Cube control-node loss,
 compute-node loss, rolling upgrade, storage failure, density and long-duration

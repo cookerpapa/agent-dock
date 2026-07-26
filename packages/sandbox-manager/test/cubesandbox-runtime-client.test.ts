@@ -1,10 +1,7 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
-  OfficialCubeSandboxRuntimeClient,
-} from "../src/index.ts";
+import { OfficialCubeSandboxRuntimeClient } from "../src/index.ts";
 
 type ObservedRequest = {
   method: string;
@@ -135,6 +132,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       proxyPort: port,
       proxyScheme: "http",
       sandboxDomain: "cube.test",
+      egressProxyIp: "10.255.255.254",
     });
     await client.checkHealth();
     expect(observed.find((request) => request.path === "/health")).toMatchObject({
@@ -156,7 +154,8 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         allow_internet_access: true,
         network: {
           allowPublicTraffic: false,
-          denyOut: CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
+          allowOut: ["10.255.255.254/32"],
+          denyOut: ["0.0.0.0/0"],
         },
         lifecycle: { on_timeout: "pause", auto_resume: false },
       },

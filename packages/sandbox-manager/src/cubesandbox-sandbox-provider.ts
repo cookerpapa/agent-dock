@@ -11,8 +11,10 @@ import {
   type ToolSandboxCaptureResponse,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
+  type ToolWebProxyBootstrap,
 } from "@agent-dock/protocol";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { isIPv4 } from "node:net";
 import {
   CUBESANDBOX_TOOL_SERVICE_PORT,
   OfficialCubeSandboxRuntimeClient,
@@ -40,7 +42,7 @@ export const CUBESANDBOX_RUNTIME_NAME = "cubesandbox-kvm";
 
 export const CUBESANDBOX_TOOL_POLICY: SandboxPolicy = Object.freeze({
   policyVersion: 1,
-  network: Object.freeze({ mode: "public_egress_private_denied" }),
+  network: Object.freeze({ mode: "public_web_proxy_private_denied" }),
   resources: Object.freeze({
     cpuNano: 1_000_000_000,
     memoryBytes: 768 * 1_024 * 1_024,
@@ -121,6 +123,7 @@ export type CubeSandboxProviderOptions = Readonly<{
   checkImporter?: () => Promise<void>;
   closeImporter?: () => Promise<void>;
   bootstrapProvider?: SandboxProvider;
+  webProxy: ToolWebProxyBootstrap;
 }>;
 
 function bounded(value: string, label: string, maximum = 1_024): string {
@@ -433,7 +436,7 @@ function effectiveIsolation(
     user: `${evidence.uid}:${evidence.gid}`,
     privileged: false,
     readOnlyRootFilesystem: evidence.readOnlyRootFilesystem,
-    networkMode: "public_egress_private_denied",
+    networkMode: "public_web_proxy_private_denied",
     mountCount: 0,
     hasDockerSocket: false,
     pidLimit: policy.resources.pids,
@@ -458,6 +461,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly #checkImporter: (() => Promise<void>) | undefined;
   readonly #closeImporter: (() => Promise<void>) | undefined;
   readonly #bootstrapProvider: SandboxProvider | undefined;
+  readonly #webProxy: ToolWebProxyBootstrap;
   readonly #activations = new Map<string, CubeActivation>();
   #runtimeProbe: Promise<void> | undefined;
 
@@ -469,6 +473,15 @@ export class CubeSandboxProvider implements SandboxProvider {
     this.#checkImporter = options.checkImporter;
     this.#closeImporter = options.closeImporter;
     this.#bootstrapProvider = options.bootstrapProvider;
+    if (
+      !isIPv4(options.webProxy.host) ||
+      !Number.isSafeInteger(options.webProxy.port) ||
+      options.webProxy.port < 1 ||
+      options.webProxy.port > 65_535
+    ) {
+      throw new TypeError("CubeSandbox web proxy configuration is invalid");
+    }
+    this.#webProxy = Object.freeze({ ...options.webProxy });
     if (options.runtimeClient !== undefined) {
       this.#client = options.runtimeClient;
     } else {
@@ -499,7 +512,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     if (
-      spec.policy.network.mode !== "public_egress_private_denied" ||
+      spec.policy.network.mode !== "public_web_proxy_private_denied" ||
       spec.policy.allowHostMounts ||
       spec.policy.allowDockerSocket ||
       spec.policy.privileged
@@ -573,6 +586,7 @@ export class CubeSandboxProvider implements SandboxProvider {
             environment: spec.environment,
             workspaceSeed: spec.workspaceSeed,
             ...(workspaceRestore === undefined ? {} : { workspaceRestore }),
+            webProxy: this.#webProxy,
             ...(offlineSetupCommands === undefined
               ? {}
               : {
@@ -609,7 +623,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         ...toolchain,
         isolationBoundary: "microvm",
         runtime: CUBESANDBOX_RUNTIME_NAME,
-        networkMode: "public_egress_private_denied",
+        networkMode: "public_web_proxy_private_denied",
         runAsUser: "1000:1000",
         readOnlyRootFilesystem: false,
       };

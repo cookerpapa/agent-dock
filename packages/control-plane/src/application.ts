@@ -35,6 +35,8 @@ export type ControlPlaneApplicationOptions = Omit<
   githubWebhookGateway?: GitHubWebhookIngestGateway;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
+  platformModelSourceTenantId?: string;
+  cubeEgressConfigToken?: string;
 };
 
 export async function createControlPlaneApplication(

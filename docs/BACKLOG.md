@@ -161,11 +161,11 @@ extension-policy support would overstate the current boundary.
   handoff-secret rotation and destroy-on-ambiguity fallback
 - [x] Promote capability-scoped dependency setup from a disposable gVisor Pod
   into a newly created Cube guest without promoting processes, network state or
-  credentials; ADR-0062 later changes that guest's final deployment-owned
+  credentials; ADR-0063 later changes that guest's final deployment-owned
   egress policy
-- [ ] ADR-0062: enable full public Cube Tool egress while explicitly denying
-  private/link-local/metadata/platform ranges and preserving private-token
-  ingress
+- [x] ADR-0063: route Cube public HTTP/HTTPS through one trusted hot-configured
+  gateway while denying direct public/private/link-local/metadata/platform
+  routes and preserving private-token ingress
 - [ ] Review Cube upgrade/node-loss drills and upstream state/idempotency issues
   before claiming a dedicated multi-node public deployment
 

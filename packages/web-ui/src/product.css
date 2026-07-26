@@ -1107,6 +1107,57 @@
   padding: 7px 10px;
 }
 
+.product-settings-modal {
+  width: min(100%, 620px);
+}
+
+.product-settings-section {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #3e3e3e;
+  border-radius: 12px;
+  background: #1d1d1d;
+}
+
+.product-settings-section h3 {
+  margin: 0;
+  color: #ececec;
+  font-size: 14px;
+}
+
+.product-settings-section p {
+  margin: 4px 0 0;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.product-settings-modal .product-settings-toggle {
+  display: flex;
+  align-items: center;
+  grid-template-columns: none;
+}
+
+.product-settings-modal .product-settings-toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: #8474d2;
+}
+
+.product-settings-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.product-settings-action small {
+  color: #777;
+  font-size: 11px;
+}
+
 .product-sidebar-backdrop {
   display: none;
 }

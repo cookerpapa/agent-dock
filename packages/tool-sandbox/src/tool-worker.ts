@@ -14,6 +14,7 @@ import {
   type ToolWorkerEnvironmentStage,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
+  type ToolWebProxyBootstrap,
   type ToolWorkerOutput,
 } from "@agent-dock/protocol";
 import {
@@ -493,7 +494,10 @@ export async function verifyDependencyProxyTrust(
   );
 }
 
-export function safeToolEnvironment(dependencyProxy?: DependencyProxyBootstrap): NodeJS.ProcessEnv {
+export function safeToolEnvironment(
+  dependencyProxy?: DependencyProxyBootstrap,
+  webProxy?: ToolWebProxyBootstrap,
+): NodeJS.ProcessEnv {
   let proxyEnvironment: NodeJS.ProcessEnv = {};
   if (dependencyProxy !== undefined) {
     if (
@@ -516,6 +520,30 @@ export function safeToolEnvironment(dependencyProxy?: DependencyProxyBootstrap):
       HTTPS_PROXY: proxy,
       http_proxy: proxy,
       https_proxy: proxy,
+      NODE_USE_ENV_PROXY: "1",
+      NO_PROXY: "",
+      no_proxy: "",
+    };
+  } else if (webProxy !== undefined) {
+    if (
+      !isIPv4(webProxy.host) ||
+      !Number.isSafeInteger(webProxy.port) ||
+      webProxy.port < 1 ||
+      webProxy.port > 65_535
+    ) {
+      throw new ToolWorkerError(
+        "tool_web_network_invalid",
+        "Tool web proxy configuration was invalid",
+        false,
+      );
+    }
+    const proxy = `http://${webProxy.host}:${String(webProxy.port)}`;
+    proxyEnvironment = {
+      HTTP_PROXY: proxy,
+      HTTPS_PROXY: proxy,
+      http_proxy: proxy,
+      https_proxy: proxy,
+      NODE_USE_ENV_PROXY: "1",
       NO_PROXY: "",
       no_proxy: "",
     };
@@ -695,6 +723,7 @@ function terminateProcessGroup(child: ChildProcess, signal: NodeJS.Signals): voi
 async function executeBash(
   request: Extract<ToolSandboxOperationRequest, { operation: "bash.exec" }>,
   signal: AbortSignal,
+  webProxy?: ToolWebProxyBootstrap,
 ): Promise<Extract<ToolSandboxOperationResponse, { operation: "bash.exec" }>> {
   if (!byteLengthWithin(request.command, MAX_TOOL_COMMAND_BYTES)) {
     throw new ToolWorkerError("tool_command_limit", "Tool command is outside its byte limit");
@@ -704,7 +733,7 @@ async function executeBash(
   const child = spawn("/bin/bash", ["--noprofile", "--norc", "-lc", request.command], {
     cwd,
     detached: process.platform !== "win32",
-    env: safeToolEnvironment(),
+    env: safeToolEnvironment(undefined, webProxy),
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = Buffer.alloc(0);
@@ -762,8 +791,9 @@ async function executeBash(
 async function executeOperation(
   request: ToolSandboxOperationRequest,
   signal: AbortSignal,
+  webProxy?: ToolWebProxyBootstrap,
 ): Promise<ToolSandboxOperationResponse> {
-  if (request.operation === "bash.exec") return executeBash(request, signal);
+  if (request.operation === "bash.exec") return executeBash(request, signal, webProxy);
   if (request.operation === "file.read") {
     return {
       managerProtocolVersion: 1,
@@ -865,6 +895,7 @@ export async function runToolWorker(): Promise<void> {
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
   let activationId: string | undefined;
   let initialized = false;
+  let webProxy: ToolWebProxyBootstrap | undefined;
   let shuttingDown = false;
   let active:
     { operationId: string; controller: AbortController; promise: Promise<void> } | undefined;
@@ -917,6 +948,8 @@ export async function runToolWorker(): Promise<void> {
           );
         }
         activationId = message.activationId;
+        webProxy = message.webProxy;
+        safeToolEnvironment(undefined, webProxy);
         const environment = await validateToolEnvironment(message.environment);
         if (message.workspaceAttach === undefined) {
           const seed =
@@ -1041,7 +1074,7 @@ export async function runToolWorker(): Promise<void> {
       seenOperationIds.add(request.operationId);
       const controller = new AbortController();
       const promise = (async () => {
-        const response = await executeOperation(request, controller.signal).catch(
+        const response = await executeOperation(request, controller.signal, webProxy).catch(
           (error: unknown) => failureResponse(request, error),
         );
         // Clear the execution slot before publishing the terminal response.

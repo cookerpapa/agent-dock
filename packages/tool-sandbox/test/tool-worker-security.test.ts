@@ -60,6 +60,30 @@ describe("credential-free Tool Sandbox worker", () => {
     }
   });
 
+  it("injects only the trusted Cube web gateway address for public web egress", () => {
+    process.env.HTTP_PROXY = "http://inherited-proxy.invalid:9999";
+    process.env.HTTPS_PROXY = "http://inherited-proxy.invalid:9999";
+    try {
+      const environment = safeToolEnvironment(undefined, {
+        host: "10.255.255.254",
+        port: 3_128,
+      });
+      expect(environment).toMatchObject({
+        HTTP_PROXY: "http://10.255.255.254:3128",
+        HTTPS_PROXY: "http://10.255.255.254:3128",
+        NODE_USE_ENV_PROXY: "1",
+        http_proxy: "http://10.255.255.254:3128",
+        https_proxy: "http://10.255.255.254:3128",
+        NO_PROXY: "",
+        no_proxy: "",
+      });
+      expect(JSON.stringify(environment)).not.toContain("inherited-proxy.invalid");
+    } finally {
+      delete process.env.HTTP_PROXY;
+      delete process.env.HTTPS_PROXY;
+    }
+  });
+
   it("keeps every remote file path beneath the isolated workspace", () => {
     expect(resolveToolWorkspacePath("src/Main.java")).toBe("/workspace/src/Main.java");
     expect(resolveToolWorkspacePath("/workspace/src/Main.java")).toBe("/workspace/src/Main.java");

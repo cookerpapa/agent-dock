@@ -320,6 +320,48 @@ describe("tenant-aware browser API", () => {
     ).resolves.toMatchObject({ mode: "real", credentialVersion: 2 });
   });
 
+  it("reads and hot-replaces the versioned Cube proxy origin", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      expect(String(input)).toBe("/v1/platform-settings/cube-proxy");
+      if (init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            enabled: false,
+            configured: false,
+            revision: 0,
+            updatedAt: "2026-07-26T00:00:00.000Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        enabled: true,
+        proxyUrl: "http://127.0.0.1:7890",
+      });
+      return new Response(
+        JSON.stringify({
+          enabled: true,
+          configured: true,
+          proxyUrl: "http://127.0.0.1:7890",
+          revision: 1,
+          updatedAt: "2026-07-26T00:01:00.000Z",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(api.getCubeProxyConfiguration()).resolves.toMatchObject({
+      enabled: false,
+      revision: 0,
+    });
+    await expect(
+      api.replaceCubeProxyConfiguration(true, "http://127.0.0.1:7890"),
+    ).resolves.toMatchObject({ enabled: true, revision: 1 });
+  });
+
   it("authenticates identity before exposing tenant metadata", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {

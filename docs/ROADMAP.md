@@ -31,9 +31,9 @@ storage/reconstruction evidence. ADR-0061 adds capacity-aware soft affinity on
 top of Temporal: a hot Session may reuse the prior live Worker only after a
 row-locked slot reservation, while busy, stale or unreachable targets
 immediately fall back to the common Task Queue.
-ADR-0062 changes the current Cube Tool network policy from offline to full
-public egress with explicit private/link-local/metadata denial; private
-traffic-token ingress and credential isolation remain unchanged.
+ADR-0063 supersedes direct Cube public NAT with one trusted proxy-mediated web
+route and catch-all direct denial; private traffic-token ingress and credential
+isolation remain unchanged.
 
 The dependency-ordered long-term product direction is maintained in
 [`PLATFORM_PRODUCT_PLAN.md`](PLATFORM_PRODUCT_PLAN.md). This file preserves the
@@ -188,9 +188,9 @@ single-host slice. ADR-0029 splits the trusted Pi Worker pool from the Sandbox
 Manager; Pi's built-ins are disabled and replaced through public operation
 APIs. ADR-0053 makes CubeSandbox the primary physical Provider. A logical
 reservation means pure chat creates no guest; the first Tool Call schedules a
-credential-free, non-root KVM microVM for one exact RunAttempt. ADR-0062 now
-permits its public egress while denying private, link-local, metadata and
-platform address classes.
+credential-free, non-root KVM microVM for one exact RunAttempt. ADR-0063 permits
+only the trusted web gateway; the gateway rejects private, link-local, metadata
+and platform destinations before forwarding public HTTP/HTTPS.
 Production acceptance proves remote `bash/edit`, checkpoint/diff capture,
 cancellation, exact cleanup, secret absence and two-tenant guest isolation.
 ADR-0060 now allows an exact-Session follow-up to reuse the same physical Cube
@@ -209,9 +209,9 @@ capabilities and identity while the concrete Provider owns runtime operations.
 CubeAPI/CubeProxy clients and fixed relays. K3s/containerd maps the retained
 importer/dependency-bootstrap RuntimeClass to `runsc`/KVM. Controlled dependency
 egress is consumed only there, and its regular-file snapshot is promoted into a
-fresh Cube guest. ADR-0062 gives that guest deployment-owned public egress with
-private/link-local/metadata/platform denial; the promotion still carries only
-regular Workspace bytes, never processes or credentials. Both gates prove
+fresh Cube guest. ADR-0063 gives that guest deployment-owned proxy-mediated web
+egress with every direct route denied; the promotion still carries only regular
+Workspace bytes, never processes or credentials. Both gates prove
 their actual physical boundary rather than inferring isolation from
 configuration.
 

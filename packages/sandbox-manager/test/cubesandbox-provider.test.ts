@@ -24,6 +24,7 @@ import {
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
+const WEB_PROXY = Object.freeze({ host: "10.255.255.254", port: 3_128 });
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-cube-test",
   projectId: "project-cube-test",
@@ -223,6 +224,7 @@ describe("CubeSandbox Provider contract", () => {
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
+      webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
     });
@@ -248,6 +250,7 @@ describe("CubeSandbox Provider contract", () => {
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
+      webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
     });
@@ -275,6 +278,7 @@ describe("CubeSandbox Provider contract", () => {
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
+      webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
     });
@@ -390,6 +394,7 @@ describe("CubeSandbox Provider contract", () => {
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
+      webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
     });
@@ -481,6 +486,7 @@ describe("CubeSandbox Provider contract", () => {
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
+      webProxy: WEB_PROXY,
       runtimeClient: runtime,
       importGitHub: vi.fn(async () => Buffer.alloc(0)),
       bootstrapProvider: bootstrap,

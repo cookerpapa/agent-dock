@@ -946,6 +946,26 @@ export interface ContextCompactionTable {
   completed_at: NullableTimestamp;
 }
 
+export interface PlatformRuntimeSettingsTable {
+  settings_key: "default";
+  cube_proxy_enabled: GeneratedBoolean;
+  cube_proxy_url: string | null;
+  revision: GeneratedInt8;
+  updated_by_tenant_id: GeneratedNullable<string>;
+  updated_by_user_id: GeneratedNullable<string>;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface PlatformRuntimeSettingChangeTable {
+  id: string;
+  revision: Int8;
+  actor_tenant_id: string;
+  actor_user_id: string;
+  cube_proxy_enabled: boolean;
+  cube_proxy_url_sha256: string | null;
+  created_at: GeneratedTimestamp;
+}
+
 export interface Database {
   tenants: TenantTable;
   users: UserTable;
@@ -999,6 +1019,8 @@ export interface Database {
   model_routing_policies: ModelRoutingPolicyTable;
   model_requests: ModelRequestTable;
   context_compactions: ContextCompactionTable;
+  platform_runtime_settings: PlatformRuntimeSettingsTable;
+  platform_runtime_setting_changes: PlatformRuntimeSettingChangeTable;
   github_app_installations: GitHubAppInstallationTable;
   github_repositories: GitHubRepositoryTable;
   github_pull_request_deliveries: GitHubPullRequestDeliveryTable;

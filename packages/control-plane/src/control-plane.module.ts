@@ -26,6 +26,7 @@ import {
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
 import { CandidateRaceService } from "./candidate-race-service.ts";
+import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -41,6 +42,8 @@ export type ControlPlaneModuleOptions = Omit<
   githubGateway?: GitHubGatewayClient;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
+  platformModelSourceTenantId?: string;
+  cubeEgressConfigToken?: string;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -139,6 +142,22 @@ export class ControlPlaneModule {
             ...(options.platformOperatorTenantId === undefined
               ? {}
               : { platformOperatorTenantId: options.platformOperatorTenantId }),
+            ...(options.platformModelSourceTenantId === undefined
+              ? {}
+              : { platformModelSourceTenantId: options.platformModelSourceTenantId }),
+          }),
+        },
+        {
+          provide: PlatformRuntimeSettingsService,
+          useValue: new PlatformRuntimeSettingsService({
+            database: options.database,
+            ...(options.platformOperatorTenantId === undefined
+              ? {}
+              : { platformOperatorTenantId: options.platformOperatorTenantId }),
+            ...(options.cubeEgressConfigToken === undefined
+              ? {}
+              : { internalServiceToken: options.cubeEgressConfigToken }),
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
         },
         {

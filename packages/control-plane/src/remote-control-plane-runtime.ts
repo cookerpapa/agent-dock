@@ -216,6 +216,12 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.platformOperatorTenantId === undefined
         ? {}
         : { platformOperatorTenantId: options.platformOperatorTenantId }),
+      ...(options.platformModelSourceTenantId === undefined
+        ? {}
+        : { platformModelSourceTenantId: options.platformModelSourceTenantId }),
+      ...(options.cubeEgressConfigToken === undefined
+        ? {}
+        : { cubeEgressConfigToken: options.cubeEgressConfigToken }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

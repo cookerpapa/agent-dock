@@ -83,6 +83,40 @@ export const ModelConfigurationResourceSchema = Type.Union([
   ),
 ]);
 
+export const ReplaceCubeProxyConfigurationRequestSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    proxyUrl: Type.Optional(
+      Type.String({
+        minLength: 9,
+        maxLength: 2_048,
+        pattern: "^https?://[^\\s\\u0000-\\u001f\\u007f]+$",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const CubeProxyConfigurationResourceSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    configured: Type.Boolean(),
+    proxyUrl: Type.Optional(Type.String({ minLength: 9, maxLength: 2_048 })),
+    revision: NonNegativeSafeIntegerSchema,
+    updatedAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const InternalCubeProxyConfigurationResourceSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    upstreamProxyUrl: Type.Optional(Type.String({ minLength: 9, maxLength: 2_048 })),
+    revision: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ModelGovernanceLimitsSchema = Type.Object(
   {
     maximumModelRequestsPerRun: Type.Integer({ minimum: 1, maximum: 1_024 }),
@@ -1619,6 +1653,13 @@ export type ReplaceModelConfigurationRequest = Static<
   typeof ReplaceModelConfigurationRequestSchema
 >;
 export type ModelConfigurationResource = Static<typeof ModelConfigurationResourceSchema>;
+export type ReplaceCubeProxyConfigurationRequest = Static<
+  typeof ReplaceCubeProxyConfigurationRequestSchema
+>;
+export type CubeProxyConfigurationResource = Static<typeof CubeProxyConfigurationResourceSchema>;
+export type InternalCubeProxyConfigurationResource = Static<
+  typeof InternalCubeProxyConfigurationResourceSchema
+>;
 export type ReplaceModelGovernanceRequest = Static<typeof ReplaceModelGovernanceRequestSchema>;
 export type ModelGovernanceResource = Static<typeof ModelGovernanceResourceSchema>;
 export type UsageSummaryResource = Static<typeof UsageSummaryResourceSchema>;
@@ -1936,6 +1977,36 @@ export function parseReplaceModelConfigurationRequest(
 
 export function parseModelConfigurationResource(value: unknown): ModelConfigurationResource {
   return parseSchema(ModelConfigurationResourceSchema, value, "model configuration resource");
+}
+
+export function parseReplaceCubeProxyConfigurationRequest(
+  value: unknown,
+): ReplaceCubeProxyConfigurationRequest {
+  return parseSchema(
+    ReplaceCubeProxyConfigurationRequestSchema,
+    value,
+    "replace Cube proxy configuration request",
+  );
+}
+
+export function parseCubeProxyConfigurationResource(
+  value: unknown,
+): CubeProxyConfigurationResource {
+  return parseSchema(
+    CubeProxyConfigurationResourceSchema,
+    value,
+    "Cube proxy configuration resource",
+  );
+}
+
+export function parseInternalCubeProxyConfigurationResource(
+  value: unknown,
+): InternalCubeProxyConfigurationResource {
+  return parseSchema(
+    InternalCubeProxyConfigurationResourceSchema,
+    value,
+    "internal Cube proxy configuration resource",
+  );
 }
 
 export function parseReplaceModelGovernanceRequest(value: unknown): ReplaceModelGovernanceRequest {

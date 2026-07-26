@@ -287,6 +287,12 @@ export {
   bootstrapProductionDatabase,
   type ProductionBootstrapResult,
 } from "./production-bootstrap.ts";
+export {
+  normalizeCubeUpstreamProxyUrl,
+  PlatformRuntimeSettingsError,
+  PlatformRuntimeSettingsService,
+  type PlatformRuntimeSettingsServiceOptions,
+} from "./platform-runtime-settings.ts";
 
 export {
   validateSupervisorDispatchAffinity,

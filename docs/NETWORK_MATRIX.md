@@ -2,9 +2,10 @@
 
 ## Rule
 
-Untrusted Cube Tool microVMs never join a platform network. They have full
-public IPv4 egress through CubeVS, with explicit denial of private, loopback,
-carrier-grade NAT, link-local/metadata and other special address classes.
+Untrusted Cube Tool microVMs never join a platform network. CubeVS permits one
+exact trusted gateway IPv4 address and denies every other IPv4 destination.
+That gateway provides proxy-mediated public HTTP/HTTPS after resolving and
+rejecting private, loopback, link-local/metadata and other special addresses.
 Network membership never replaces application authentication.
 
 The trusted product plane currently runs in isolated Compose networks; the
@@ -26,6 +27,7 @@ trusted Model Gateway to the exact model provider host.
 | Kubernetes API relay | no | no | no | no | yes | no | no | no | no | fixed host `6443` | none |
 | CubeAPI relay | no | no | no | no | fixed Cube lifecycle target | no | no | no | fixed private CubeAPI | no | none |
 | CubeProxy relay | no | no | no | no | fixed per-guest data target | no | no | no | fixed private CubeProxy | no | none |
+| Cube web-egress gateway | no | no | no | no | no | no | redacted audit only | no | operator HTTP(S) proxy | no | stable `10.255.255.254:3128` to Cube only |
 | GitHub Gateway | no | no | no | no | no | yes | no | no | yes | no | none |
 | PostgreSQL | no | no | yes | no | no | no | no | no | no | no | none |
 | MinIO | no | no | no | yes | no | no | no | no | no | no | none |
@@ -55,21 +57,22 @@ member of the directly routed `provider-egress` network.
 
 | Workload | Ingress | DNS | Public egress | Platform/private endpoints | Credential |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Ordinary Tool microVM | private-token Tool protocol through CubeProxy only | Cube-managed | allow | deny by CIDR policy | none |
+| Ordinary Tool microVM | private-token Tool protocol through CubeProxy only | no direct DNS required for proxy-aware tools | HTTP/HTTPS through one trusted gateway only | deny all direct routes; gateway rejects private/special targets | none |
 
 Every create request sets `allow_internet_access=true`,
-`allowPublicTraffic=false` and an explicit `denyOut` list for non-public and
-infrastructure-relevant IPv4 classes. No `allowOut` entries are supplied,
-because Cube evaluates allow entries before deny entries. The real KVM gate
-requires public HTTPS to succeed while CubeAPI, Control
+`allowPublicTraffic=false`, `allowOut=["10.255.255.254/32"]` and
+`denyOut=["0.0.0.0/0"]`. Cube evaluates the exact gateway allow before the
+catch-all deny. The real KVM gate requires proxy-mediated public HTTPS to
+succeed while direct public routes, CubeAPI, Control
 Plane/PostgreSQL-class endpoints and `169.254.169.254` fail. Port 49984 is the
 only registered Tool service and remains protected by Cube's per-Sandbox
 traffic token. Cube's inherited `envd` command channel is not started.
 
-This CubeVS/NAT path requires every Cube node to have a native public route.
-Host-level `HTTP_PROXY` is not inherited by a microVM. A proxy-only WSL
-`mirrored` node with no IPv4 default route does not satisfy the full-public
-tier; the live gate rejects it before creating acceptance guests.
+The host-network gateway polls a service-token-authenticated Control Plane
+endpoint for the current operator proxy revision. New HTTP requests and CONNECT
+tunnels use the latest successfully loaded revision; no cluster restart is
+required. WSL mirrored networking is supported because only this trusted
+gateway, not each microVM, needs to reach the Windows/WSL proxy.
 
 ## Kubernetes importer plane
 
@@ -95,8 +98,8 @@ Manager captures only that bootstrap Pod's regular-file Workspace, destroys the
 Pod and capability, and restores the bytes into a newly created
 Cube microVM. Processes, network namespaces, connections and capability
 material are not promoted. That remains a reproducible environment-preparation
-boundary, but the ordinary Cube Tool microVM subsequently has ADR-0062's
-full-public/private-denied egress.
+boundary, but the ordinary Cube Tool microVM subsequently has ADR-0063's
+proxy-mediated public-web egress.
 
 ## Credential and authority matrix
 
@@ -109,7 +112,8 @@ full-public/private-denied egress.
 | Kubernetes API relay | no | no | no | no | no | no | no | no |
 | GitHub Gateway | no | no | no | no | no | App key + memory-only token | no | no |
 | Provider relays | no | no | no | no | no | no | no | no |
-| Cube Tool microVM | no | no | no | no | no | no | no Kubernetes/Cube credential | no |
+| Cube Tool microVM | no | no | no | no | no | no | no Kubernetes/Cube credential; only gateway address | no |
+| Cube web-egress gateway | no | no | no | no | no | no | no ServiceAccount token; polling token only | no |
 | Importer Pod | no | no | no | no | no | no | no ServiceAccount token | no |
 
 Only the trusted host operator uses Docker to build the product images and the
@@ -120,7 +124,8 @@ an application container.
 
 The primary live gate verifies from inside real Cube KVM Tool guests that they:
 
-- can reach a stable public HTTPS endpoint;
+- can reach a stable public HTTPS endpoint through the trusted gateway;
+- cannot reach a public IP directly;
 - cannot reach CubeAPI, the Control Plane/PostgreSQL-class platform endpoints
   or link-local metadata;
 - cannot read Runner/Manager environment, model/platform credentials or a Kubernetes
@@ -140,5 +145,6 @@ rejection, TCP/443-only forwarding, connection/byte/duration bounds and
 redacted audit logs. Redirects require another CONNECT and therefore another
 exact allowed host. The issuer private key remains in the Sandbox Manager;
 Kubernetes receives only its public key. Cube Tool microVMs are never added to
-provider egress, the importer namespace, a host bridge, or a platform network.
-Their public Internet path is CubeVS's independent NAT/policy plane.
+provider egress, the importer namespace, or a platform network. Their sole
+outbound route is the stable trusted web gateway; the gateway alone reaches the
+operator's HTTP(S) proxy.

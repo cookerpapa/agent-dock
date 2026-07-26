@@ -46,12 +46,17 @@ if (config.provider === "cubesandbox") {
       proxyPort: cube.proxyPort,
       proxyScheme: cube.proxyScheme,
       sandboxDomain: cube.sandboxDomain,
+      egressProxyIp: cube.egressProxyHost,
       requestTimeoutMs: cube.requestTimeoutMs,
     },
     importGitHub: (source, signal) => importer.importGitHub(source, signal),
     checkImporter: () => importer.checkHealth(),
     closeImporter: () => importer.close(),
     bootstrapProvider: importer,
+    webProxy: {
+      host: cube.egressProxyHost,
+      port: cube.egressProxyPort,
+    },
   });
 } else {
   provider = createGvisorProvider(config.cleanPrewarmTarget);

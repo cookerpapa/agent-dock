@@ -186,6 +186,17 @@ summary:focus-visible,
   gap: 2px;
 }
 
+.model-configuration-panel > div:first-child,
+.model-configuration-panel .settings-section-label {
+  grid-column: 1 / -1;
+}
+
+.model-configuration-panel input[type="checkbox"] {
+  justify-self: start;
+  width: 30px;
+  min-width: 30px;
+}
+
 .model-configuration-panel > div strong {
   color: var(--green-strong);
 }

@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-dock-cube-egress-gateway
+  namespace: cube-system
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-dock-cube-egress-gateway
+  namespace: cube-system
+  labels:
+    app.kubernetes.io/name: agent-dock-cube-egress-gateway
+    app.kubernetes.io/part-of: agent-dock
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-dock-cube-egress-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-dock-cube-egress-gateway
+        app.kubernetes.io/part-of: agent-dock
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostIPC: false
+      hostNetwork: true
+      hostPID: false
+      dnsPolicy: Default
+      restartPolicy: Always
+      serviceAccountName: agent-dock-cube-egress-gateway
+      terminationGracePeriodSeconds: 10
+      nodeSelector:
+        cube.tencent.com/cube-node: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: agent-dock/cube-egress-gateway:local
+          imagePullPolicy: Never
+          env:
+            - name: AGENT_DOCK_CUBE_EGRESS_HOST
+              value: 10.255.255.254
+            - name: AGENT_DOCK_CUBE_EGRESS_PORT
+              value: "3128"
+            - name: AGENT_DOCK_CUBE_EGRESS_CONTROL_PLANE_URL
+              value: http://127.0.0.1:8080/v1/internal/cube-egress-configuration
+            - name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE
+              value: /run/agent-dock-secrets/config-token
+            - name: AGENT_DOCK_CUBE_EGRESS_POLL_INTERVAL_MS
+              value: "1000"
+          ports:
+            - name: proxy
+              containerPort: 3128
+              hostPort: 3128
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: proxy
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: proxy
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config-token
+              mountPath: /run/agent-dock-secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config-token
+          secret:
+            secretName: agent-dock-cube-egress-config
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi

@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-26
 - Extends: ADR-0031, ADR-0044, ADR-0053, ADR-0057
-- Partially superseded by: ADR-0062 for ordinary Cube egress only
+- Partially superseded by: ADR-0063 for ordinary Cube egress only
 
 ## Context
 
@@ -69,7 +69,7 @@ microVM. Arbitrary Bash is never replayed.
 ### Controlled dependency networking
 
 This subsection records the accepted policy at the time of ADR-0060.
-ADR-0062 now enables full public egress with explicit private-network denial
+ADR-0063 now enables proxy-mediated public-web egress with direct-network denial
 for ordinary Cube Tools. The sealed pause/rebind decisions in this ADR are
 unchanged.
 

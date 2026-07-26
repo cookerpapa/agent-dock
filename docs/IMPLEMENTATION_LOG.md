@@ -2535,3 +2535,27 @@
   node. Switch the Cube node to a native-route network mode, rerun the real KVM
   gate, then update the immutable acceptance report and close the ADR-0062
   backlog item.
+## 2026-07-26 — Hot model administration and proxy-mediated Cube web egress
+
+- Added an owner-facing runtime settings panel. The platform operator can
+  replace the Pi DeepSeek model/key and the Cube upstream HTTP(S) proxy without
+  restarting the cluster. Model keys remain AES-GCM encrypted, replacements
+  create immutable credential versions, and an accepted Run keeps its original
+  model/credential snapshot.
+- Added versioned PostgreSQL authority and append-only digest audit for the
+  Cube proxy setting. A separate service-token-authenticated read endpoint
+  exposes only the current credential-free origin to trusted execution-plane
+  infrastructure.
+- Added a non-root, read-only, capability-free K3s host-network Cube egress
+  gateway. It hot-polls the setting, resolves destinations itself, rejects
+  private/special DNS answers, and supports public HTTP/HTTPS through the
+  operator proxy. New connections switch revision without Pod or cluster
+  restart.
+- Replaced direct Cube public NAT with a closed network policy:
+  `allowOut=["10.255.255.254/32"]` and `denyOut=["0.0.0.0/0"]`. Tool
+  microVMs receive only the trusted gateway address in a fixed subprocess
+  environment; no upstream URL, polling token or inherited host proxy crosses
+  the boundary.
+- Added service, gateway, Tool environment and Cube request-shape tests. ADR
+  0063 supersedes ADR 0062's direct-native-route requirement and documents WSL
+  mirrored networking plus the exact hot-update semantics.

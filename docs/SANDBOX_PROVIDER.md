@@ -132,14 +132,14 @@ Recipes with `dependencyHosts` use the retained disposable gVisor bootstrap and
 the ADR-0044 Ed25519 proxy. After content capture and exact bootstrap
 destruction, a fresh Cube guest restores the regular files. gVisor never
 executes an ordinary Agent Tool Call; the resulting Cube guest uses the
-deployment-owned full-public/private-denied policy.
+deployment-owned proxy-mediated public-web policy.
 
 ## Fixed Cube Tool policy
 
 ```text
 upstream: TencentCloud/CubeSandbox v0.6.0
 template: immutable READY ID + image digest + current Git revision
-network: allow_internet_access=true; explicit private/special denyOut
+network: allow_internet_access=true; allow only 10.255.255.254/32; deny all other IPv4
 inbound: allowPublicTraffic=false; private-token port 49984 only
 user: 1000:1000
 privileged: false
@@ -156,11 +156,11 @@ command timeout: at most 300 seconds
 turn wall clock: 900 seconds
 ```
 
-CubeVS supplies native guest networking rather than inheriting application
-proxy variables from the trusted host. Production Cube nodes must therefore
-have a native public route. `cubesandbox:live-check` first verifies direct HTTPS
-from the trusted host and then requires the same endpoint to succeed from a
-real guest while platform/private probes fail.
+CubeVS permits only the trusted host-network web gateway. The Tool Worker
+receives that gateway address in proxy variables; the gateway hot-loads the
+operator proxy, resolves targets itself and rejects non-public answers.
+`cubesandbox:live-check` requires proxy-mediated HTTPS from a real guest while
+direct public and platform/private probes fail.
 
 The template replaces Cube's inherited entrypoint. Root `envd` is not started,
 because it would expose an unmediated second command/file channel. Port 49983

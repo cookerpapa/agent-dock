@@ -11,6 +11,7 @@ import { GitHubIntegrationError } from "./github-integration-service.ts";
 import { ModelGovernanceError } from "./model-governance-service.ts";
 import { WebAuthenticationError } from "./web-authentication.ts";
 import { CandidateRaceError } from "./candidate-race-service.ts";
+import { PlatformRuntimeSettingsError } from "./platform-runtime-settings.ts";
 
 type ErrorResponse = {
   status: number;
@@ -35,6 +36,15 @@ function mappedError(error: unknown): ErrorResponse {
       status: error.code === "authorization_denied" ? 403 : 503,
       body: { error: { code: error.code, message: error.message } },
     };
+  }
+  if (error instanceof PlatformRuntimeSettingsError) {
+    const status =
+      error.code === "authorization_denied"
+        ? 403
+        : error.code === "cube_proxy_configuration_invalid"
+          ? 400
+          : 503;
+    return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof ModelGovernanceError) {
     const status =

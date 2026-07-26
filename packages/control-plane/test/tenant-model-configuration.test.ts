@@ -185,6 +185,47 @@ describe.sequential("tenant model configuration", () => {
     ).rejects.toBeInstanceOf(TenantModelConfigurationError);
   });
 
+  it("lets a delegated web administrator update the durable platform source", async () => {
+    const source = await createPrivateTenant(database, {
+      slug: "delegated-model-source",
+      ownerDisplayName: "Delegated Model Source",
+    });
+    const administrator = await createPrivateTenant(database, {
+      slug: "delegated-model-admin",
+      ownerDisplayName: "Delegated Model Admin",
+      webAccount: {
+        username: "delegated-model-admin",
+        role: "owner",
+        passwordSalt: "s".repeat(22),
+        passwordHash: "h".repeat(43),
+        scryptN: 16_384,
+        scryptR: 8,
+        scryptP: 1,
+      },
+    });
+    const service = new TenantModelConfigurationService({
+      database,
+      vault: new TenantModelCredentialVault(MASTER_KEY),
+      platformOperatorTenantId: administrator.tenantId,
+      platformModelSourceTenantId: source.tenantId,
+    });
+    await expect(
+      service.replace(ownerIdentity(administrator), {
+        provider: "deepseek",
+        modelId: "deepseek-v4-pro",
+        apiKey: FIRST_SECRET,
+      }),
+    ).resolves.toMatchObject({ mode: "real", modelId: "deepseek-v4-pro" });
+    await expect(service.get(ownerIdentity(source))).resolves.toMatchObject({
+      mode: "real",
+      modelId: "deepseek-v4-pro",
+    });
+    await expect(service.get(ownerIdentity(administrator))).resolves.toMatchObject({
+      mode: "real",
+      modelId: "deepseek-v4-pro",
+    });
+  });
+
   it("exposes only the authenticated tenant's safe configuration over HTTP", async () => {
     const tenant = await createPrivateTenant(database, {
       slug: "model-http-tenant",

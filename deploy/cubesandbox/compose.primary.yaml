@@ -16,6 +16,8 @@ services:
       AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: http
       AGENT_DOCK_CUBESANDBOX_DOMAIN: ${AGENT_DOCK_CUBESANDBOX_DOMAIN:?set the CubeProxy sandbox domain}
       AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS: "30000"
+      AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST: "10.255.255.254"
+      AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT: "3128"
     volumes:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cubesandbox-api-key

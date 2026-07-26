@@ -48,6 +48,14 @@ export const DependencyProxyBootstrapSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ToolWebProxyBootstrapSchema = Type.Object(
+  {
+    host: Type.String({ minLength: 7, maxLength: 15, pattern: "^[0-9.]+$" }),
+    port: Type.Integer({ minimum: 1, maximum: 65_535 }),
+  },
+  { additionalProperties: false },
+);
+
 export const ToolWorkerEnvironmentStageSchema = Type.Union([
   Type.Object({ type: Type.Literal("dependency_setup") }, { additionalProperties: false }),
   Type.Object(
@@ -356,6 +364,7 @@ export const ToolWorkerInputSchema = Type.Union([
       workspaceSeed: AgentWorkspaceSeedSchema,
       workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
       dependencyProxy: Type.Optional(DependencyProxyBootstrapSchema),
+      webProxy: Type.Optional(ToolWebProxyBootstrapSchema),
       environmentStage: Type.Optional(ToolWorkerEnvironmentStageSchema),
       workspaceAttach: Type.Optional(ToolWorkerWorkspaceAttachSchema),
     },
@@ -463,6 +472,7 @@ export type ToolSandboxOperationResponse = Static<typeof ToolSandboxOperationRes
 export type ToolWorkerInput = Static<typeof ToolWorkerInputSchema>;
 export type ToolWorkerOutput = Static<typeof ToolWorkerOutputSchema>;
 export type DependencyProxyBootstrap = Static<typeof DependencyProxyBootstrapSchema>;
+export type ToolWebProxyBootstrap = Static<typeof ToolWebProxyBootstrapSchema>;
 export type ToolWorkerEnvironmentStage = Static<typeof ToolWorkerEnvironmentStageSchema>;
 
 export class ToolSandboxProtocolError extends Error {

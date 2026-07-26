@@ -79,6 +79,7 @@ export type OfficialCubeSandboxRuntimeClientOptions = Readonly<{
   proxyPort: number;
   proxyScheme: "http" | "https";
   sandboxDomain: string;
+  egressProxyIp: string;
   requestTimeoutMs?: number;
 }>;
 
@@ -237,6 +238,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
   readonly #proxyPort: number;
   readonly #sandboxDomain: string;
   readonly #requestTimeoutMs: number;
+  readonly #egressProxyIp: string;
   readonly #dispatcher: Dispatcher;
 
   constructor(options: OfficialCubeSandboxRuntimeClientOptions) {
@@ -246,6 +248,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     this.#proxyPort = positiveInteger(options.proxyPort, 80, 1, 65_535);
     this.#sandboxDomain = validateHost(options.sandboxDomain, "CubeSandbox domain");
     this.#requestTimeoutMs = positiveInteger(options.requestTimeoutMs, 30_000, 1_000, 300_000);
+    this.#egressProxyIp = validateHost(options.egressProxyIp, "CubeSandbox egress proxy IP");
     const proxyNodeIp = validateHost(options.proxyNodeIp, "CubeSandbox proxy node IP");
     const baseConnect = buildConnector({ timeout: this.#requestTimeoutMs });
     this.#dispatcher = new Agent({
@@ -281,7 +284,8 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         allow_internet_access: true,
         network: {
           allowPublicTraffic: false,
-          denyOut: CUBESANDBOX_BLOCKED_EGRESS_CIDRS,
+          allowOut: [`${this.#egressProxyIp}/32`],
+          denyOut: ["0.0.0.0/0"],
         },
         lifecycle: { on_timeout: "pause", auto_resume: false },
       }),

@@ -28,6 +28,7 @@ export class SandboxManagerError extends Error {
 export type SandboxNetworkPolicy =
   | Readonly<{ mode: "deny_all" }>
   | Readonly<{ mode: "public_egress_private_denied" }>
+  | Readonly<{ mode: "public_web_proxy_private_denied" }>
   | Readonly<{ mode: "github" }>
   | Readonly<{
       mode: "package_registries";
