@@ -667,7 +667,7 @@ const server = createServer((request, response) => {
       }
       const initialAuthority = parseAuthority(request);
       const input = parseToolWorkerInput(await readJson(request));
-      if (input.type !== "worker.initialize" || input.workspaceAttach !== undefined) {
+      if (input.type !== "worker.initialize") {
         throw new CubeToolServiceError(400, "Initialization message was invalid");
       }
       const toolchain = await readyBridgeForInitialization().initialize(input);

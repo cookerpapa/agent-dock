@@ -178,6 +178,20 @@ try {
       /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(evidence.imageRevision),
     "Cube image revision evidence was invalid",
   );
+  // A fresh VM created from an immutable base template receives its durable
+  // Workspace through the Cube Volume Plugin before the trusted Manager
+  // initializes the Tool Worker. Exercise that cold-attach path explicitly;
+  // warm rebind below covers the same attach contract after a sealed handoff.
+  await capture("docker", [
+    "exec",
+    "--user",
+    "1000:1000",
+    containerName,
+    "git",
+    "init",
+    "--quiet",
+    "/workspace",
+  ]);
 
   const activationId = randomUUID();
   currentAuthority = {
@@ -212,6 +226,7 @@ try {
       recipeSha256: "5a851a442529ef2a092e5fb4f8f217703766a0142b267e4beb14fb1201aa1b6d",
     },
     workspaceSeed: { kind: "sample_java" },
+    workspaceAttach: { recipeCommands: [] },
   });
   const versions = new Map(toolchain.tools.map((tool) => [tool.name, tool.version]));
   assert(/^v24\./.test(versions.get("node") ?? ""), "Node 24 evidence was missing");
@@ -426,6 +441,7 @@ try {
       },
       toolchain: Object.fromEntries(versions),
       execution: { exitCode: executed.exitCode, output: output.trim() },
+      coldWorkspaceAttach: true,
       unmediatedEnvdAbsent: true,
       pathTraversalRejected: true,
       sealedHandoff: {
