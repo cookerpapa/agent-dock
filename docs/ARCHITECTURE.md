@@ -177,6 +177,12 @@ conversations therefore share committed directory state without sharing live
 processes or uncommitted writes; explicit candidate branches retain the same
 physical isolation.
 
+Fencing tokens are monotonic within one Session ownership sequence, not
+globally comparable across conversations. A same-Session restore must advance
+the checkpoint's fence; a different Session may reuse the same numeric value
+while the Workspace-head revision CAS prevents stale cross-conversation
+commits.
+
 ## 5. New conversation flow
 
 ```text

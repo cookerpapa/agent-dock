@@ -464,7 +464,7 @@ describe("CubeSandbox Provider contract", () => {
     await manager.close();
   });
 
-  it("cold-restores a Kopia checkpoint under a fresh activation and higher fence", async () => {
+  it("cold-restores a shared Workspace checkpoint into another Session with an independent fence", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const workspaceDataMover = fakeWorkspaceDataMover();
     const provider = new CubeSandboxProvider({
@@ -499,7 +499,10 @@ describe("CubeSandbox Provider contract", () => {
       turnId: "turn-cube-restore",
       attemptId: "20000000-0000-4000-8000-000000000044",
       leaseId: "20000000-0000-4000-8000-000000000045",
-      fencingToken: assignment.fencingToken + 1,
+      // Fencing tokens are monotonic within a Session. Another Session in the
+      // same Workspace has an independent fence sequence and may legitimately
+      // begin at the same value as the checkpoint's source Session.
+      fencingToken: assignment.fencingToken,
     };
     const restored = await provider.create({
       activationId: nextActivationId,

@@ -613,11 +613,12 @@ export class CubeSandboxProvider implements SandboxProvider {
         kopiaCheckpoint.workspaceId !== spec.assignment.workspaceId ||
         kopiaCheckpoint.imageRevision !== this.#imageRevision ||
         kopiaCheckpoint.environmentSpecSha256 !== spec.environment.specSha256 ||
-        spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken)
+        (kopiaCheckpoint.sourceSessionId === spec.assignment.sessionId &&
+          spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken))
     ) {
       throw new SandboxManagerError(
         "cubesandbox_checkpoint_binding_invalid",
-        "Kopia Workspace checkpoint did not match the requested Session, environment or fence",
+        "Kopia Workspace checkpoint did not match the requested Workspace, environment or Session fence",
         false,
       );
     }

@@ -72,6 +72,14 @@ Session-bound checkpoint format is deliberately unsupported during this
 pre-release cutover; incompatible development data is reset instead of
 retaining a second compatibility path.
 
+RunAttempt fencing remains Session-scoped. Restoring a checkpoint into its
+source Session therefore requires a strictly newer fence, while another
+conversation may begin with the same numeric fence because its fence sequence
+is independent. Cross-conversation correctness is enforced by the shared
+Workspace-head lock and revision CAS, not by comparing unrelated Session fence
+numbers. Tenant, Workspace, image and environment bindings are still checked
+before any restore.
+
 Repository import is removed from the browser. A connected Sandbox can clone
 or download repositories using normal Tools, so import is no longer a separate
 product workflow.

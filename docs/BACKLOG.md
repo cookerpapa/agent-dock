@@ -218,9 +218,12 @@ extension-policy support would overstate the current boundary.
 - [x] Publish a tenant/Workspace-scoped Kopia reference with source
   Session/environment provenance and PostgreSQL Fence/CAS
 - [x] Cold-restore one shared committed Workspace head into a different
-  conversation's isolated live POSIX volume without importing Pi history
+  conversation's isolated live POSIX volume without importing Pi history,
+  while treating Session fencing sequences as independent
 - [x] Preserve post-checkpoint live-volume writes for the same committed base while making explicit rollback restore immutable bytes
-- [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
+- [x] Cold-restore a fresh Cube microVM and rotate activation, binding and
+  secret; require a strictly higher fence for the same Session while accepting
+  an independently fenced conversation on the same committed Workspace
 - [x] Remove Cube-native Workspace checkpoint codecs, recovery authority, materializer, GC service, deployment secrets and compatibility tests
 - [x] Prove fresh-VM recovery after deleting the local POSIX Workspace copy
 - [ ] Add a streaming Kopia snapshot exporter for whole-version GitHub delivery and portable backup
