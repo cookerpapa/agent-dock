@@ -63,6 +63,15 @@ Workspace versions remain Session-local until an explicit promotion advances
 the shared Workspace head. This preserves parallel candidate evaluation
 without weakening ordinary conversation consistency.
 
+Kopia checkpoint format v2 records the Session that produced a snapshot as
+provenance, but does not bind restore to that Session. A new conversation
+restores the shared committed snapshot into its own Session-scoped POSIX
+volume. This keeps live process trees and candidate branches isolated while
+making committed `/workspace` bytes portable between conversations. The old
+Session-bound checkpoint format is deliberately unsupported during this
+pre-release cutover; incompatible development data is reset instead of
+retaining a second compatibility path.
+
 Repository import is removed from the browser. A connected Sandbox can clone
 or download repositories using normal Tools, so import is no longer a separate
 product workflow.
@@ -95,6 +104,9 @@ administrator tenant is configured.
   intentionally removed.
 - Multiple conversations can share one Workspace while keeping distinct
   titles and transcripts.
+- Shared committed snapshots restore into a conversation-private live volume;
+  live processes and uncommitted bytes are never transferred between
+  conversations.
 - Ordinary Runs for the same Workspace are serialized; different Workspaces
   and isolated candidate branches can still execute concurrently.
 - The Workspace drawer no longer fails because an unrelated operational API
@@ -107,7 +119,8 @@ administrator tenant is configured.
 2. the browser has no repository-import action or gVisor badge;
 3. creating a conversation requires a title and an existing/new Workspace;
 4. two conversations can target the same Workspace, see the same committed
-   files and retain separate Pi transcripts;
+   files, cold-restore them into separate live volumes and retain separate Pi
+   transcripts;
 5. deleting a conversation removes it from listing and direct opening;
 6. the Workspace drawer renders files without unrelated inspector requests or
    reload loops;

@@ -327,7 +327,7 @@ describe.sequential("versioned Workspace service", () => {
       activationId: "20000000-0000-4000-8000-000000000001",
       tenantId: IDS.tenant,
       workspaceId: IDS.workspace,
-      sessionId: IDS.session,
+      sourceSessionId: IDS.session,
       bindingSha256: "a".repeat(64),
       fencingToken: 3,
       imageRevision: "development",

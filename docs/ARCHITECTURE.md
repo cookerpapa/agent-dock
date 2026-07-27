@@ -170,6 +170,13 @@ for ordinary conversations sharing one Workspace are serialized under a
 Workspace row lock, then rebased to the latest committed head. Completion uses
 base-version CAS, so a stale Attempt cannot overwrite a newer directory.
 
+Committed Kopia checkpoints are tenant/Workspace scoped and carry their source
+Session only as provenance. On a cold Run, the current Workspace head is
+restored into that conversation's own Session-scoped POSIX volume. Ordinary
+conversations therefore share committed directory state without sharing live
+processes or uncommitted writes; explicit candidate branches retain the same
+physical isolation.
+
 ## 5. New conversation flow
 
 ```text

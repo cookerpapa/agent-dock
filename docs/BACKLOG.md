@@ -215,7 +215,10 @@ extension-policy support would overstate the current boundary.
 - [x] Revoke per-Run Tool authority without killing the Session's background processes
 - [x] Freeze exact PID/start-time identities during Workspace flush and Kopia snapshot, then resume them
 - [x] Capture a content-hashed index and Git patch without base64-buffering repository contents
-- [x] Publish only a tenant/Workspace/Session/environment/fence-bound Kopia reference through PostgreSQL Fence/CAS
+- [x] Publish a tenant/Workspace-scoped Kopia reference with source
+  Session/environment provenance and PostgreSQL Fence/CAS
+- [x] Cold-restore one shared committed Workspace head into a different
+  conversation's isolated live POSIX volume without importing Pi history
 - [x] Preserve post-checkpoint live-volume writes for the same committed base while making explicit rollback restore immutable bytes
 - [x] Cold-restore a fresh Cube microVM and rotate activation, binding, secret and strictly higher fence before Tool execution
 - [x] Remove Cube-native Workspace checkpoint codecs, recovery authority, materializer, GC service, deployment secrets and compatibility tests

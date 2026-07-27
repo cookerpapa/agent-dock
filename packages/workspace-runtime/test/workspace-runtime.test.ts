@@ -179,14 +179,14 @@ describe("shared workspace runtime", () => {
     expect(link?.sha256).not.toBe(target?.sha256);
   });
 
-  it("round-trips a strictly bound Kopia checkpoint without embedding Workspace bytes", () => {
+  it("round-trips a Workspace-portable Kopia checkpoint without embedding file bytes", () => {
     const checkpoint = createKopiaWorkspaceCheckpoint({
       snapshotId: "k1234567890abcdef",
       volumeId: `adw-${"a".repeat(48)}`,
       activationId: "10000000-0000-4000-8000-000000000001",
       tenantId: "tenant-kopia",
       workspaceId: "workspace-kopia",
-      sessionId: "session-kopia",
+      sourceSessionId: "session-kopia",
       bindingSha256: "b".repeat(64),
       fencingToken: 9,
       imageRevision: "development",
@@ -205,7 +205,7 @@ describe("shared workspace runtime", () => {
       snapshotId: "k1234567890abcdef",
       tenantId: "tenant-kopia",
       workspaceId: "workspace-kopia",
-      sessionId: "session-kopia",
+      sourceSessionId: "session-kopia",
       fencingToken: 9,
       totalSizeBytes: 7,
     });

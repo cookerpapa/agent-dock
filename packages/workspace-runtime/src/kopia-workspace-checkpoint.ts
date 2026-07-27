@@ -10,7 +10,7 @@ import {
 } from "./workspace-index.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
-export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v1";
+export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v2";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -26,7 +26,7 @@ export type KopiaWorkspaceCheckpoint = Readonly<{
   activationId: string;
   tenantId: string;
   workspaceId: string;
-  sessionId: string;
+  sourceSessionId: string;
   bindingSha256: string;
   fencingToken: number;
   imageRevision: string;
@@ -120,7 +120,7 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
       "activationId",
       "tenantId",
       "workspaceId",
-      "sessionId",
+      "sourceSessionId",
       "bindingSha256",
       "fencingToken",
       "imageRevision",
@@ -141,8 +141,8 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
     !OPAQUE_ID_PATTERN.test(value.tenantId) ||
     typeof value.workspaceId !== "string" ||
     !OPAQUE_ID_PATTERN.test(value.workspaceId) ||
-    typeof value.sessionId !== "string" ||
-    !OPAQUE_ID_PATTERN.test(value.sessionId) ||
+    typeof value.sourceSessionId !== "string" ||
+    !OPAQUE_ID_PATTERN.test(value.sourceSessionId) ||
     typeof value.bindingSha256 !== "string" ||
     !SHA256_PATTERN.test(value.bindingSha256) ||
     !Number.isSafeInteger(value.fencingToken) ||
@@ -172,7 +172,7 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
     activationId: value.activationId,
     tenantId: value.tenantId,
     workspaceId: value.workspaceId,
-    sessionId: value.sessionId,
+    sourceSessionId: value.sourceSessionId,
     bindingSha256: value.bindingSha256,
     fencingToken: value.fencingToken as number,
     imageRevision: value.imageRevision,
@@ -213,7 +213,7 @@ export function createKopiaWorkspaceCheckpoint(
       activationId: input.activationId,
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
-      sessionId: input.sessionId,
+      sourceSessionId: input.sourceSessionId,
       bindingSha256: input.bindingSha256,
       fencingToken: input.fencingToken,
       imageRevision: input.imageRevision,

@@ -611,7 +611,6 @@ export class CubeSandboxProvider implements SandboxProvider {
       kopiaCheckpoint !== undefined &&
       (kopiaCheckpoint.tenantId !== spec.assignment.tenantId ||
         kopiaCheckpoint.workspaceId !== spec.assignment.workspaceId ||
-        kopiaCheckpoint.sessionId !== spec.assignment.sessionId ||
         kopiaCheckpoint.imageRevision !== this.#imageRevision ||
         kopiaCheckpoint.environmentSpecSha256 !== spec.environment.specSha256 ||
         spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken)
@@ -742,13 +741,6 @@ export class CubeSandboxProvider implements SandboxProvider {
     );
     const authoritySecret = handoffSecret();
     const volumeId = workspaceVolumeId(spec.assignment);
-    if (checkpoint.volumeId !== volumeId) {
-      throw new SandboxManagerError(
-        "cubesandbox_checkpoint_binding_invalid",
-        "Kopia Workspace checkpoint volume binding was invalid",
-        false,
-      );
-    }
     await this.#client.ensureVolume(volumeId, "agentdock-posix");
     await this.#workspaceDataMover.prepare({
       tenantId: spec.assignment.tenantId,
@@ -1128,7 +1120,7 @@ export class CubeSandboxProvider implements SandboxProvider {
           activationId: handle.activationId,
           tenantId: handle.assignment.tenantId,
           workspaceId: handle.assignment.workspaceId,
-          sessionId: handle.assignment.sessionId,
+          sourceSessionId: handle.assignment.sessionId,
           bindingSha256: activation.bindingSha256,
           fencingToken: handle.assignment.fencingToken,
           imageRevision: this.#imageRevision,
@@ -1305,7 +1297,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       const materialized = await this.#workspaceDataMover.materialize({
         tenantId: kopia.tenantId,
         workspaceId: kopia.workspaceId,
-        sessionId: kopia.sessionId,
+        sessionId: kopia.sourceSessionId,
         volumeId: kopia.volumeId,
         snapshotId: kopia.snapshotId,
         path: request.path,

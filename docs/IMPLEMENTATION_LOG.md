@@ -2778,6 +2778,11 @@
   browser. A conversation now has its own title and must select an existing
   named Workspace or create a new empty Workspace. Multiple conversations may
   share one durable `/workspace`.
+- Storage: replaced the Session-bound Kopia index with the deliberately
+  incompatible v2 format. A committed checkpoint is tenant/Workspace scoped,
+  records its source Session only as provenance, and can cold-restore into a
+  different conversation's isolated live POSIX volume. Pi transcripts and
+  live process trees remain Session-local.
 - Deletion: added tenant-scoped, idempotent soft deletion for conversations.
   Archived Sessions disappear from list/direct-read APIs while the shared
   Workspace and audit history remain.

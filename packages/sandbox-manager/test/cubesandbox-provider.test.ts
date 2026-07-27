@@ -363,7 +363,7 @@ describe("CubeSandbox Provider contract", () => {
       activationId: reserved.activationId,
       tenantId: assignment.tenantId,
       workspaceId: assignment.workspaceId,
-      sessionId: assignment.sessionId,
+      sourceSessionId: assignment.sessionId,
       fencingToken: assignment.fencingToken,
       imageRevision: environment.imageRevision,
       environmentSpecSha256: environment.specSha256,
@@ -394,6 +394,7 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(workspaceDataMover.materialize).toHaveBeenCalledWith(
       expect.objectContaining({
+        sessionId: assignment.sessionId,
         snapshotId: "a".repeat(32),
         path: "result.txt",
       }),
@@ -490,6 +491,7 @@ describe("CubeSandbox Provider contract", () => {
     const nextActivationId = "20000000-0000-4000-8000-000000000041";
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
+      sessionId: "session-cube-shared-workspace",
       supervisorId: "supervisor-cube-restore",
       bootId: "20000000-0000-4000-8000-000000000042",
       sandboxId: "20000000-0000-4000-8000-000000000043",
@@ -530,7 +532,7 @@ describe("CubeSandbox Provider contract", () => {
       expect.objectContaining({
         tenantId: assignment.tenantId,
         workspaceId: assignment.workspaceId,
-        sessionId: assignment.sessionId,
+        sessionId: nextAssignment.sessionId,
         snapshotId: "a".repeat(32),
       }),
     );
@@ -572,7 +574,7 @@ describe("CubeSandbox Provider contract", () => {
       snapshotId: "a".repeat(32),
       tenantId: assignment.tenantId,
       workspaceId: assignment.workspaceId,
-      sessionId: assignment.sessionId,
+      sourceSessionId: assignment.sessionId,
     });
     await provider.destroy(handle);
     await provider.close();

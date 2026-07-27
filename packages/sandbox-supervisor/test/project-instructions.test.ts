@@ -10,7 +10,7 @@ describe("trusted project instruction extraction", () => {
       activationId: "10000000-0000-4000-8000-000000000001",
       tenantId: "tenant-project-instructions-test",
       workspaceId: "workspace-project-instructions-test",
-      sessionId: "session-project-instructions-test",
+      sourceSessionId: "session-project-instructions-test",
       bindingSha256: "a".repeat(64),
       fencingToken: 1,
       imageRevision: "test",
