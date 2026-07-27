@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import {
   chmod,
   chown,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -27,6 +28,7 @@ const runtimeDirectory = resolve(
 );
 const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
 const secretValuesPath = resolve(runtimeDirectory, "cubesandbox/secret-values.yaml");
+const cubeMasterCliPath = resolve(runtimeDirectory, "cubesandbox/cubemastercli");
 const authorizerImage = "agent-dock/cube-api-authorizer:local";
 const cubeEgressGatewayImage = "agent-dock/cube-egress-gateway:local";
 const cubeEgressConfigTokenPath = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
@@ -1050,7 +1052,9 @@ const cluster = {
   cubeCommit: CUBE_COMMIT,
   nodeName,
   api: serviceAddress("api", "http-api"),
+  master: serviceAddress("master", "cubemaster"),
   proxy: serviceAddress("cube-proxy", "http"),
+  registry: serviceAddress("template-registry", "https-registry"),
   sandboxDomain: "cube.app",
   pvmHostBootstrap: false,
   ...(nodeNetwork.podNetworkMtu === undefined ? {} : { podNetworkMtu: nodeNetwork.podNetworkMtu }),
@@ -1060,4 +1064,44 @@ await writeFile(evidencePath, `${JSON.stringify(cluster, null, 2)}\n`, { mode: 0
 const credentialOwner = await stat(credentialPath);
 await chown(evidencePath, credentialOwner.uid, credentialOwner.gid);
 await chmod(evidencePath, 0o600);
+const cliPod = await capture("kubectl", [
+  "-n",
+  "cube-system",
+  "get",
+  "pods",
+  "-l",
+  "app.kubernetes.io/component=cubemastercli",
+  "-o",
+  "jsonpath={.items[0].metadata.name}",
+]);
+if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(cliPod)) {
+  throw new Error("CubeMaster CLI Pod identity is invalid");
+}
+const cliTemporaryDirectory = await mkdtemp(
+  resolve(runtimeDirectory, "cubesandbox/.cubemastercli-"),
+);
+const cliTemporaryPath = join(cliTemporaryDirectory, "cubemastercli");
+try {
+  await run("kubectl", [
+    "-n",
+    "cube-system",
+    "cp",
+    `${cliPod}:/usr/local/bin/cubemastercli`,
+    cliTemporaryPath,
+  ]);
+  const cliMetadata = await lstat(cliTemporaryPath);
+  if (
+    !cliMetadata.isFile() ||
+    cliMetadata.isSymbolicLink() ||
+    cliMetadata.size < 1_000_000 ||
+    cliMetadata.size > 128 * 1024 * 1024
+  ) {
+    throw new Error("Pinned CubeMaster CLI is not a bounded regular executable");
+  }
+  await chown(cliTemporaryPath, credentialOwner.uid, credentialOwner.gid);
+  await chmod(cliTemporaryPath, 0o700);
+  await rename(cliTemporaryPath, cubeMasterCliPath);
+} finally {
+  await rm(cliTemporaryDirectory, { recursive: true, force: true });
+}
 process.stdout.write(`${JSON.stringify({ installed: true, evidencePath, ...cluster })}\n`);

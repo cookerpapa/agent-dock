@@ -81,6 +81,9 @@ The installer:
 - installs the pinned chart and private template registry;
 - rolls Cube components after a node-network change;
 - verifies Cube workload interface MTU instead of trusting YAML alone;
+- records the private CubeMaster and template-registry Service endpoints so a
+  non-root deployment can register immutable Tool templates without receiving
+  Kubernetes administrator credentials;
 - writes private, bounded cluster evidence to
   `deploy/production/runtime/cubesandbox/cluster.json`.
 
@@ -98,8 +101,11 @@ sudo --preserve-env=PATH \
   node scripts/register-cubesandbox-tool-template.mjs
 ```
 
-An operator that can reach the private CubeMaster and registry services can use
-Cube's official CLI without receiving Kubernetes administrator credentials:
+The standard installer records the private CubeMaster and registry endpoints,
+and stores the pinned `cubemastercli` beside the cluster evidence. A subsequent
+non-root production deploy therefore uses Cube's official CLI without receiving
+Kubernetes administrator credentials. An operator can still override all three
+values explicitly:
 
 ```bash
 AGENT_DOCK_CUBE_MASTER_ADDRESS="<private-cubemaster-address>" \

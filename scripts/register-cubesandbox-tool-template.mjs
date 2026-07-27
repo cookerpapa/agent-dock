@@ -15,14 +15,12 @@ const runtimeDirectory = resolve(
 );
 const explicitKubeconfig = process.env.KUBECONFIG;
 const kubeconfig = explicitKubeconfig ?? "/etc/rancher/k3s/k3s.yaml";
-const directCubeMasterAddress = process.env.AGENT_DOCK_CUBE_MASTER_ADDRESS;
-const directCubeMasterPort = process.env.AGENT_DOCK_CUBE_MASTER_PORT ?? "8089";
-const directCubeMasterCli = process.env.AGENT_DOCK_CUBE_MASTER_CLI;
-const directRegistryAddress = process.env.AGENT_DOCK_CUBE_REGISTRY_ADDRESS;
-const directRegistryPort = process.env.AGENT_DOCK_CUBE_REGISTRY_PORT ?? "5000";
-const directManagement = [directCubeMasterAddress, directCubeMasterCli, directRegistryAddress].some(
-  (value) => value !== undefined,
-);
+let directCubeMasterAddress = process.env.AGENT_DOCK_CUBE_MASTER_ADDRESS;
+let directCubeMasterPort = process.env.AGENT_DOCK_CUBE_MASTER_PORT ?? "8089";
+let directCubeMasterCli = process.env.AGENT_DOCK_CUBE_MASTER_CLI;
+let directRegistryAddress = process.env.AGENT_DOCK_CUBE_REGISTRY_ADDRESS;
+let directRegistryPort = process.env.AGENT_DOCK_CUBE_REGISTRY_PORT ?? "5000";
+let directManagement = false;
 const registryHost = "localhost:5000";
 const registryRepository = `${registryHost}/agent-dock/cubesandbox-tool`;
 const clusterRegistryRepository =
@@ -36,14 +34,16 @@ const environment = {
   KUBECONFIG: kubeconfig,
   PATH: `${nodeDirectory}:${process.env.PATH ?? ""}`,
 };
-const directNoProxy = [directCubeMasterAddress, directRegistryAddress, "127.0.0.1", "localhost"]
-  .filter((value) => value !== undefined)
-  .join(",");
-const directEnvironment = {
-  ...environment,
-  NO_PROXY: [directNoProxy, environment.NO_PROXY].filter(Boolean).join(","),
-  no_proxy: [directNoProxy, environment.no_proxy].filter(Boolean).join(","),
-};
+function directEnvironment() {
+  const directNoProxy = [directCubeMasterAddress, directRegistryAddress, "127.0.0.1", "localhost"]
+    .filter((value) => value !== undefined)
+    .join(",");
+  return {
+    ...environment,
+    NO_PROXY: [directNoProxy, environment.NO_PROXY].filter(Boolean).join(","),
+    no_proxy: [directNoProxy, environment.no_proxy].filter(Boolean).join(","),
+  };
+}
 const dockerProxyBuildArguments = [
   "HTTP_PROXY",
   "HTTPS_PROXY",
@@ -56,30 +56,6 @@ const dockerProxyBuildArguments = [
     ? ["--build-arg", name]
     : [],
 );
-
-if (
-  directManagement &&
-  (directCubeMasterAddress === undefined ||
-    directCubeMasterCli === undefined ||
-    directRegistryAddress === undefined)
-) {
-  throw new Error(
-    "Direct Cube management requires AGENT_DOCK_CUBE_MASTER_ADDRESS, AGENT_DOCK_CUBE_MASTER_CLI and AGENT_DOCK_CUBE_REGISTRY_ADDRESS together",
-  );
-}
-for (const [label, value] of [
-  ["CubeMaster port", directCubeMasterPort],
-  ["Cube registry port", directRegistryPort],
-]) {
-  if (!/^[1-9][0-9]{0,4}$/.test(value) || Number(value) > 65_535) {
-    throw new Error(`${label} is invalid`);
-  }
-}
-if (process.getuid?.() !== 0 && explicitKubeconfig === undefined && !directManagement) {
-  throw new Error(
-    "Non-root CubeSandbox template registration requires direct Cube management or an explicit readable KUBECONFIG",
-  );
-}
 
 function capture(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -298,7 +274,7 @@ async function cubeMasterCli(args, timeout) {
     return capture(
       directCubeMasterCli,
       ["--address", directCubeMasterAddress, "--port", directCubeMasterPort, ...args],
-      { timeout, environment: directEnvironment },
+      { timeout, environment: directEnvironment() },
     );
   }
   return capture(
@@ -331,12 +307,61 @@ if (dirty.length > 0) {
 }
 const clusterFile = await readPrivate(clusterPath, 64 * 1_024, "Cube cluster evidence");
 const cluster = parseJson(clusterFile.value, "Cube cluster evidence");
+const validEndpoint = (endpoint) =>
+  typeof endpoint?.host === "string" &&
+  /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(endpoint.host) &&
+  Number.isSafeInteger(endpoint?.port) &&
+  endpoint.port >= 1 &&
+  endpoint.port <= 65_535;
 if (
   cluster?.formatVersion !== 1 ||
   cluster?.cubeCommit !== CUBE_COMMIT ||
-  cluster?.podNetworkMtu !== 1_450
+  cluster?.podNetworkMtu !== 1_450 ||
+  !validEndpoint(cluster?.master) ||
+  !validEndpoint(cluster?.registry)
 ) {
-  throw new Error("Cube cluster evidence is missing the pinned release or validated Pod MTU");
+  throw new Error(
+    "Cube cluster evidence is missing the pinned release, management endpoints, or validated Pod MTU",
+  );
+}
+const explicitlyConfiguredDirectManagement = [
+  directCubeMasterAddress,
+  directCubeMasterCli,
+  directRegistryAddress,
+].some((value) => value !== undefined);
+if (
+  explicitlyConfiguredDirectManagement &&
+  (directCubeMasterAddress === undefined ||
+    directCubeMasterCli === undefined ||
+    directRegistryAddress === undefined)
+) {
+  throw new Error(
+    "Direct Cube management requires AGENT_DOCK_CUBE_MASTER_ADDRESS, AGENT_DOCK_CUBE_MASTER_CLI and AGENT_DOCK_CUBE_REGISTRY_ADDRESS together",
+  );
+}
+if (!explicitlyConfiguredDirectManagement) {
+  directCubeMasterAddress = cluster.master.host;
+  directCubeMasterPort = String(cluster.master.port);
+  directCubeMasterCli = resolve(runtimeDirectory, "cubesandbox/cubemastercli");
+  directRegistryAddress = cluster.registry.host;
+  directRegistryPort = String(cluster.registry.port);
+}
+directManagement =
+  directCubeMasterAddress !== undefined &&
+  directCubeMasterCli !== undefined &&
+  directRegistryAddress !== undefined;
+for (const [label, value] of [
+  ["CubeMaster port", directCubeMasterPort],
+  ["Cube registry port", directRegistryPort],
+]) {
+  if (!/^[1-9][0-9]{0,4}$/.test(value) || Number(value) > 65_535) {
+    throw new Error(`${label} is invalid`);
+  }
+}
+if (process.getuid?.() !== 0 && explicitKubeconfig === undefined && !directManagement) {
+  throw new Error(
+    "Non-root CubeSandbox template registration requires direct Cube management or an explicit readable KUBECONFIG",
+  );
 }
 const credentialFile = await readPrivate(credentialPath, 4_096, "CubeAPI credential");
 const credentialOwner = credentialFile.metadata;

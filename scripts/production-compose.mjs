@@ -165,6 +165,14 @@ if (requestedProvider === "cubesandbox") {
     cluster?.formatVersion !== 1 ||
     cluster?.cubeCommit !== "8721dd151971ce3c2966482bbd32904ad98f378e" ||
     cluster?.podNetworkMtu !== 1_450 ||
+    isIP(cluster?.master?.host ?? "") !== 4 ||
+    !Number.isSafeInteger(cluster?.master?.port) ||
+    cluster.master.port < 1 ||
+    cluster.master.port > 65_535 ||
+    isIP(cluster?.registry?.host ?? "") !== 4 ||
+    !Number.isSafeInteger(cluster?.registry?.port) ||
+    cluster.registry.port < 1 ||
+    cluster.registry.port > 65_535 ||
     isIP(cluster?.api?.host ?? "") !== 4 ||
     !Number.isSafeInteger(cluster?.api?.port) ||
     cluster.api.port < 1 ||

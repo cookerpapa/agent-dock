@@ -2793,3 +2793,8 @@
   scripts, and rewrote current architecture/runbook documents around the sole
   Cube path. Historical ADRs, research, migrations and evidence remain
   immutable records.
+- Deployment: cluster evidence now includes the private CubeMaster and template
+  registry endpoints plus a pinned local `cubemastercli`. A normal non-root
+  deploy can register the exact committed Tool image before Compose validates
+  and starts that revision, without receiving a Kubernetes administrator
+  kubeconfig.
