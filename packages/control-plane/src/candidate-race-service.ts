@@ -1173,6 +1173,23 @@ export class CandidateRaceService {
             settled_at: now,
           })
           .executeTakeFirstOrThrow();
+        const workspaceUpdated = await transaction
+          .updateTable("workspaces")
+          .set({
+            current_workspace_version_id: promotedVersionId,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", identity.tenantId)
+          .where("id", "=", race.workspace_id)
+          .where("current_workspace_version_id", "=", request.expectedParentWorkspaceVersionId)
+          .executeTakeFirst();
+        if (workspaceUpdated.numUpdatedRows !== 1n) {
+          throw new CandidateRaceError(
+            "conflict",
+            "Parent Workspace changed while the promotion was committing",
+          );
+        }
         const updated = await transaction
           .updateTable("sessions")
           .set({
@@ -1194,6 +1211,19 @@ export class CandidateRaceService {
             "Parent Workspace changed while the promotion was committing",
           );
         }
+        await transaction
+          .updateTable("sessions")
+          .set({
+            current_workspace_version_id: promotedVersionId,
+            workspace_snapshot_key: selected.workspaceObjectKey,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", identity.tenantId)
+          .where("workspace_id", "=", race.workspace_id)
+          .where("id", "!=", race.parent_session_id)
+          .where("forked_from_session_id", "is", null)
+          .execute();
         await transaction
           .insertInto("workspace_operations")
           .values({

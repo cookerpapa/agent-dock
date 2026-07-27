@@ -223,6 +223,11 @@ async function seed(): Promise<void> {
     .set({ current_workspace_version_id: IDS.version2 })
     .where("id", "=", IDS.session)
     .execute();
+  await database
+    .updateTable("workspaces")
+    .set({ current_workspace_version_id: IDS.version2 })
+    .where("id", "=", IDS.workspace)
+    .execute();
 }
 
 beforeAll(async () => {
@@ -277,6 +282,40 @@ describe.sequential("versioned Workspace service", () => {
     });
     await expect(service.get(IDS.otherTenant, IDS.version2)).rejects.toMatchObject({
       code: "not_found",
+    });
+  });
+
+  it("starts a new conversation from the shared Workspace head without copying Pi history", async () => {
+    const store = new ControlPlaneStore({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+      idGenerator: randomUUID,
+    });
+    const conversation = await store.createSession(
+      IDS.project,
+      IDS.workspace,
+      "Second conversation",
+    );
+    const persisted = await database
+      .selectFrom("sessions")
+      .select([
+        "pi_session_snapshot_key",
+        "workspace_snapshot_key",
+        "current_workspace_version_id",
+        "forked_from_session_id",
+      ])
+      .where("id", "=", conversation.sessionId)
+      .executeTakeFirstOrThrow();
+    expect(persisted).toEqual({
+      pi_session_snapshot_key: null,
+      workspace_snapshot_key: "checkpoints/workspace-2",
+      current_workspace_version_id: IDS.version2,
+      forked_from_session_id: null,
+    });
+    await expect(service.list(IDS.tenant, conversation.sessionId)).resolves.toMatchObject({
+      currentVersionId: IDS.version2,
+      versions: [{ versionId: IDS.version2 }, { versionId: IDS.version1 }],
     });
   });
 

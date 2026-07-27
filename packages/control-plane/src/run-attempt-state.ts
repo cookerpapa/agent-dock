@@ -103,10 +103,18 @@ export async function transitionCurrentRunAttempt(
         .onRef("attempt.run_id", "=", "run.id")
         .onRef("attempt.id", "=", "run.current_attempt_id"),
     )
+    .innerJoin("sessions as session_row", (join) =>
+      join
+        .onRef("session_row.tenant_id", "=", "run.tenant_id")
+        .onRef("session_row.id", "=", "run.session_id"),
+    )
     .select([
       "run.state as runState",
       "run.row_version as runVersion",
       "run.current_attempt_id as currentAttemptId",
+      "run.workspace_id as workspaceId",
+      "run.workspace_base_version_id as workspaceBaseVersionId",
+      "session_row.forked_from_session_id as forkedFromSessionId",
       "attempt.state as attemptState",
       "attempt.lease_id as leaseId",
       "attempt.fencing_token as fencingToken",
@@ -198,7 +206,13 @@ export async function transitionCurrentRunAttempt(
         .where("run_id", "=", identity.runId)
         .where("attempt_id", "=", identity.attemptId)
         .where("state", "=", "staged")
-        .returning(["id", "session_id", "pi_artifact_id", "workspace_artifact_id"])
+        .returning([
+          "id",
+          "workspace_id",
+          "session_id",
+          "pi_artifact_id",
+          "workspace_artifact_id",
+        ])
         .executeTakeFirst();
       if (version !== undefined) {
         await transaction
@@ -225,7 +239,41 @@ export async function transitionCurrentRunAttempt(
             "Settled Workspace version artifacts are missing",
           );
         }
-        const sessionUpdate = await transaction
+        if (row.forkedFromSessionId === null) {
+          let workspaceUpdate = transaction
+            .updateTable("workspaces")
+            .set({
+              current_workspace_version_id: version.id,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+            })
+            .where("tenant_id", "=", identity.tenantId)
+            .where("id", "=", version.workspace_id);
+          workspaceUpdate =
+            row.workspaceBaseVersionId === null
+              ? workspaceUpdate.where("current_workspace_version_id", "is", null)
+              : workspaceUpdate.where(
+                  "current_workspace_version_id",
+                  "=",
+                  row.workspaceBaseVersionId,
+                );
+          const workspaceHead = await workspaceUpdate.executeTakeFirst();
+          expectOne(workspaceHead.numUpdatedRows, "Advancing the shared Workspace head");
+
+          await transaction
+            .updateTable("sessions")
+            .set({
+              current_workspace_version_id: version.id,
+              workspace_snapshot_key: workspaceKey,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+            })
+            .where("tenant_id", "=", identity.tenantId)
+            .where("workspace_id", "=", version.workspace_id)
+            .where("forked_from_session_id", "is", null)
+            .execute();
+        }
+        const conversationUpdate = await transaction
           .updateTable("sessions")
           .set({
             current_workspace_version_id: version.id,
@@ -237,7 +285,7 @@ export async function transitionCurrentRunAttempt(
           .where("tenant_id", "=", identity.tenantId)
           .where("id", "=", version.session_id)
           .executeTakeFirst();
-        expectOne(sessionUpdate.numUpdatedRows, "Advancing the current workspace version");
+        expectOne(conversationUpdate.numUpdatedRows, "Advancing the Pi conversation checkpoint");
       }
     } else {
       await transaction

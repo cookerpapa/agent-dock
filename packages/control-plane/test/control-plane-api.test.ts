@@ -331,10 +331,17 @@ async function createAssignedTurn(options: {
   assignedSession: SessionResource;
   runtime: SandboxRuntimeAssignment;
 }> {
+  const projectResponse = await http.inject({
+    method: "POST",
+    url: "/v1/projects",
+    payload: { name: `runtime-${options.sandboxId}` },
+  });
+  expect(projectResponse.statusCode).toBe(201);
+  const isolatedProject = projectResponse.json() as ProjectResource;
   const sessionResponse = await http.inject({
     method: "POST",
-    url: `/v1/projects/${project.projectId}/sessions`,
-    payload: { workspaceId: project.workspaceId, title: "Test conversation" },
+    url: `/v1/projects/${isolatedProject.projectId}/sessions`,
+    payload: { workspaceId: isolatedProject.workspaceId, title: "Test conversation" },
   });
   expect(sessionResponse.statusCode).toBe(201);
   const assignedSession = sessionResponse.json() as SessionResource;

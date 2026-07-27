@@ -14,7 +14,7 @@ import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 export type LoadedSandboxCheckpoint = {
   revision: string;
-  piSession: Uint8Array;
+  piSession?: Uint8Array;
   workspace?: Uint8Array;
   workspaceRevision?: string;
 };
@@ -223,7 +223,8 @@ export function validateLoadedCheckpoint(
   if (checkpoint.revision.length < 1 || checkpoint.revision.length > 256) {
     throw checkpointError("Checkpoint revision is invalid");
   }
-  validatePiSessionSnapshot(checkpoint.piSession);
+  const restoredPiSession = checkpoint.piSession;
+  if (restoredPiSession !== undefined) validatePiSessionSnapshot(restoredPiSession);
   if (checkpoint.workspace !== undefined) validateWorkspaceSnapshot(checkpoint.workspace);
   if (
     checkpoint.workspaceRevision !== undefined &&

@@ -574,6 +574,11 @@ export class OutboxDispatcher {
             .onRef("session_row.tenant_id", "=", "command.tenant_id")
             .onRef("session_row.id", "=", "command.session_id"),
         )
+        .innerJoin("workspaces as workspace_row", (join) =>
+          join
+            .onRef("workspace_row.tenant_id", "=", "session_row.tenant_id")
+            .onRef("workspace_row.id", "=", "session_row.workspace_id"),
+        )
         .innerJoin("runs as run", (join) =>
           join
             .onRef("run.tenant_id", "=", "command.tenant_id")
@@ -612,6 +617,9 @@ export class OutboxDispatcher {
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
+          "session_row.current_workspace_version_id as sessionWorkspaceVersionId",
+          "session_row.forked_from_session_id as forkedFromSessionId",
+          "workspace_row.current_workspace_version_id as currentWorkspaceVersionId",
           "run.id as runId",
           "run.trace_id as traceId",
           "run.queued_at as runQueuedAt",
@@ -701,6 +709,28 @@ export class OutboxDispatcher {
               and earlier_command.mailbox_position < ${sql.ref("command.mailbox_position")}
           )`,
         )
+        .where(
+          sql<boolean>`(
+            ${sql.ref("session_row.forked_from_session_id")} is not null
+            or not exists (
+              select 1
+              from turns as workspace_active_turn
+              inner join sessions as workspace_active_session
+                on workspace_active_session.tenant_id = workspace_active_turn.tenant_id
+                and workspace_active_session.id = workspace_active_turn.session_id
+              where workspace_active_turn.tenant_id = ${sql.ref("command.tenant_id")}
+                and workspace_active_session.workspace_id = ${sql.ref("session_row.workspace_id")}
+                and workspace_active_session.forked_from_session_id is null
+                and workspace_active_turn.id <> ${sql.ref("command.turn_id")}
+                and workspace_active_turn.state in (
+                  'dispatching',
+                  'running',
+                  'waiting_approval',
+                  'cancelling'
+                )
+            )
+          )`,
+        )
         .where("session_row.state", "in", ["cold", "idle"])
         .where(
           sql<boolean>`(
@@ -754,6 +784,43 @@ export class OutboxDispatcher {
         .executeTakeFirst();
 
       if (!row) return undefined;
+
+      if (row.forkedFromSessionId === null) {
+        await transaction
+          .selectFrom("workspaces")
+          .select("id")
+          .where("tenant_id", "=", row.tenantId)
+          .where("id", "=", row.workspaceId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const workspaceBlocked = await transaction
+          .selectNoFrom((expression) =>
+            expression
+              .exists(
+                transaction
+                  .selectFrom("turns as active_turn")
+                  .innerJoin("sessions as active_session", (join) =>
+                    join
+                      .onRef("active_session.tenant_id", "=", "active_turn.tenant_id")
+                      .onRef("active_session.id", "=", "active_turn.session_id"),
+                  )
+                  .select("active_turn.id")
+                  .where("active_turn.tenant_id", "=", row.tenantId)
+                  .where("active_session.workspace_id", "=", row.workspaceId)
+                  .where("active_session.forked_from_session_id", "is", null)
+                  .where("active_turn.id", "!=", row.turnId)
+                  .where("active_turn.state", "in", [
+                    "dispatching",
+                    "running",
+                    "waiting_approval",
+                    "cancelling",
+                  ]),
+              )
+              .as("blocked"),
+          )
+          .executeTakeFirstOrThrow();
+        if (workspaceBlocked.blocked) return undefined;
+      }
 
       const payload = parseTurnCommandOutboxPayload(row.outboxPayload);
       if (
@@ -882,6 +949,10 @@ export class OutboxDispatcher {
           state: "claimed",
           current_attempt_id: attemptId,
           attempt_count: attemptNumber,
+          workspace_base_version_id:
+            row.forkedFromSessionId === null
+              ? row.currentWorkspaceVersionId
+              : row.sessionWorkspaceVersionId,
           stop_reason: null,
           failure_code: null,
           failure_message: null,
@@ -934,7 +1005,9 @@ export class OutboxDispatcher {
           .executeTakeFirst();
         expectOne(turnUpdate.numUpdatedRows, "claiming a turn");
       } else if (row.commandState !== "dispatched" || row.turnState !== "dispatching") {
-        throw new OutboxDispatcherInvariantError("Claimed command and turn states do not match");
+        throw new OutboxDispatcherInvariantError(
+          `Claimed command and turn states do not match (${row.commandState}/${row.turnState})`,
+        );
       }
 
       const outboxUpdate = await transaction

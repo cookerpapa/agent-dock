@@ -81,7 +81,7 @@ type ArtifactReference = {
 };
 
 type CheckpointMetadata = {
-  piSession: ArtifactReference;
+  piSession?: ArtifactReference;
   workspace?: ArtifactReference;
   revision: string;
   workspaceRevision?: string;
@@ -131,10 +131,10 @@ function safeSize(value: string | number | bigint, maximum: number, description:
   return parsed;
 }
 
-function revisionFor(piSessionKey: string, workspaceKey?: string): string {
+function revisionFor(piSessionKey?: string, workspaceKey?: string): string {
   return createHash("sha256")
     .update("agent-dock.checkpoint-revision.v1\0")
-    .update(piSessionKey)
+    .update(piSessionKey ?? "pi-session-absent")
     .update("\0")
     .update(workspaceKey ?? "workspace-absent")
     .digest("hex");
@@ -430,7 +430,9 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     if (metadata === undefined) return undefined;
 
     const [piState, workspace] = await Promise.all([
-      this.#loadPiSession(command, metadata.piSession),
+      metadata.piSession === undefined
+        ? Promise.resolve(undefined)
+        : this.#loadPiSession(command, metadata.piSession),
       metadata.workspace === undefined
         ? Promise.resolve(undefined)
         : this.#objectStore.get(metadata.workspace.objectKey),
@@ -438,7 +440,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     if (workspace !== undefined && metadata.workspace !== undefined) {
       this.#verifyObject(workspace, metadata.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "workspace");
     }
-    validatePiSessionSnapshot(piState.bytes);
+    if (piState !== undefined) validatePiSessionSnapshot(piState.bytes);
     if (workspace !== undefined) validateWorkspaceSnapshot(workspace);
 
     await this.#database.transaction().execute(async (transaction) => {
@@ -453,7 +455,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     });
     return {
       revision: metadata.revision,
-      piSession: piState.bytes,
+      ...(piState === undefined ? {} : { piSession: piState.bytes }),
       ...(workspace === undefined ? {} : { workspace }),
       ...(metadata.workspaceRevision === undefined
         ? {}
@@ -773,7 +775,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
           .selectFrom("workspace_versions")
           .select(["version_number"])
           .where("tenant_id", "=", command.payload.tenantId)
-          .where("session_id", "=", command.payload.sessionId)
+          .where("workspace_id", "=", command.payload.workspaceId)
           .orderBy("version_number", "desc")
           .limit(1)
           .executeTakeFirst();
@@ -901,8 +903,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         .orderBy("terminal.seq", "desc")
         .executeTakeFirst();
     }
-    if (pi === undefined) return undefined;
-
     let workspace:
       { object_key: string; sha256: string; size_bytes: string | number | bigint } | undefined;
     if (session.currentVersionId !== null) {
@@ -911,7 +911,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         .innerJoin("artifacts as artifact", "artifact.id", "version.workspace_artifact_id")
         .select(["artifact.object_key", "artifact.sha256", "artifact.size_bytes"])
         .where("version.tenant_id", "=", command.payload.tenantId)
-        .where("version.session_id", "=", command.payload.sessionId)
+        .where("version.workspace_id", "=", command.payload.workspaceId)
         .where("version.id", "=", session.currentVersionId)
         .where("version.state", "=", "settled")
         .executeTakeFirst();
@@ -969,15 +969,24 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
               "Workspace checkpoint",
             ),
           };
+    if (pi === undefined && workspaceReference === undefined) return undefined;
     return {
-      piSession: {
-        objectKey: pi.object_key,
-        sha256: pi.sha256,
-        sizeBytes: safeSize(pi.size_bytes, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session checkpoint"),
-        ...(pi.media_type === null ? {} : { mediaType: pi.media_type }),
-      },
+      ...(pi === undefined
+        ? {}
+        : {
+            piSession: {
+              objectKey: pi.object_key,
+              sha256: pi.sha256,
+              sizeBytes: safeSize(
+                pi.size_bytes,
+                MAX_PI_SESSION_SNAPSHOT_BYTES,
+                "Pi session checkpoint",
+              ),
+              ...(pi.media_type === null ? {} : { mediaType: pi.media_type }),
+            },
+          }),
       ...(workspaceReference === undefined ? {} : { workspace: workspaceReference }),
-      revision: revisionFor(pi.object_key, workspaceReference?.objectKey),
+      revision: revisionFor(pi?.object_key, workspaceReference?.objectKey),
       ...(workspaceReference === undefined ? {} : { workspaceRevision: workspaceReference.sha256 }),
     };
   }
@@ -1001,8 +1010,10 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
           false,
         );
       }
-      previous = await this.#loadPiSession(command, metadata.piSession);
-      validatePiSessionSnapshot(previous.bytes);
+      if (metadata.piSession !== undefined) {
+        previous = await this.#loadPiSession(command, metadata.piSession);
+        validatePiSessionSnapshot(previous.bytes);
+      }
     }
 
     const prepared = preparePiSessionManifest(piSession, PINNED_PI_VERSION, previous);
@@ -1127,6 +1138,31 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     let query = transaction
       .selectFrom("sessions as session_row")
       .innerJoin("session_leases as lease", "lease.session_id", "session_row.id")
+      .innerJoin("workspaces as workspace_row", (join) =>
+        join
+          .onRef("workspace_row.tenant_id", "=", "session_row.tenant_id")
+          .onRef("workspace_row.id", "=", "session_row.workspace_id"),
+      )
+      .leftJoin(
+        "workspace_versions as workspace_head",
+        "workspace_head.id",
+        "workspace_row.current_workspace_version_id",
+      )
+      .leftJoin(
+        "artifacts as workspace_head_artifact",
+        "workspace_head_artifact.id",
+        "workspace_head.workspace_artifact_id",
+      )
+      .leftJoin(
+        "workspace_versions as session_head",
+        "session_head.id",
+        "session_row.current_workspace_version_id",
+      )
+      .leftJoin(
+        "artifacts as session_head_artifact",
+        "session_head_artifact.id",
+        "session_head.workspace_artifact_id",
+      )
       .innerJoin("turns as turn_row", (join) =>
         join
           .onRef("turn_row.tenant_id", "=", "session_row.tenant_id")
@@ -1155,9 +1191,17 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
         "session_row.pi_session_snapshot_key as piSessionKey",
-        "session_row.workspace_snapshot_key as workspaceKey",
         "session_row.row_version as rowVersion",
-        "session_row.current_workspace_version_id as currentVersionId",
+        sql<string | null>`case
+          when ${sql.ref("session_row.forked_from_session_id")} is null
+            then ${sql.ref("workspace_head_artifact.object_key")}
+          else ${sql.ref("session_head_artifact.object_key")}
+        end`.as("workspaceKey"),
+        sql<string | null>`case
+          when ${sql.ref("session_row.forked_from_session_id")} is null
+            then ${sql.ref("workspace_row.current_workspace_version_id")}
+          else ${sql.ref("session_row.current_workspace_version_id")}
+        end`.as("currentVersionId"),
         "session_row.last_fencing_token as sessionFencingToken",
         "session_row.state as sessionState",
         "turn_row.state as turnState",
@@ -1181,7 +1225,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       .where("command_row.id", "=", command.payload.commandId)
       .where("run_row.id", "=", command.payload.runId)
       .where("attempt_row.id", "=", command.payload.attemptId);
-    if (lock) query = query.forUpdate("session_row");
+    if (lock) query = query.forUpdate(["session_row", "workspace_row"]);
     const row = await query.executeTakeFirst();
     if (
       row === undefined ||

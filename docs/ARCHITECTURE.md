@@ -120,8 +120,10 @@ and platform addresses.
 
 The Data Mover is trusted and separate from the guest Tool authority. It
 connects the Cube Volume Plugin/POSIX Workspace to immutable Kopia checkpoints.
-PostgreSQL CAS advances the Workspace head only if tenant, Session,
-RunAttempt, base revision and fence still match.
+PostgreSQL CAS advances the Workspace-owned head only if tenant, Workspace,
+RunAttempt, base revision and fence still match. Ordinary conversations share
+that head but retain independent Pi checkpoints. Explicit Fork/Candidate-Race
+Sessions use isolated branch heads until promotion.
 
 Cube runtime lifetime and Workspace lifetime are independent.
 
@@ -161,6 +163,12 @@ A new conversation requires a title and either:
 Deleting a conversation archives only that Session. It disappears from tenant
 listing and direct conversation reads, while the shared Workspace and durable
 audit/checkpoint records remain.
+
+The Workspace row owns the authoritative committed version. A newly created
+ordinary conversation starts from that version with no Pi checkpoint. Claims
+for ordinary conversations sharing one Workspace are serialized under a
+Workspace row lock, then rebased to the latest committed head. Completion uses
+base-version CAS, so a stale Attempt cannot overwrite a newer directory.
 
 ## 5. New conversation flow
 

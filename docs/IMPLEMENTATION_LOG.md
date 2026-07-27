@@ -2817,3 +2817,22 @@
 - Unit and type evidence covers the no-dependency and dependency-recipe paths.
   Production acceptance additionally requires a real-model write/read and
   committed Workspace file inspection.
+
+## 2026-07-27 — Workspace-owned directory head
+
+- End-to-end acceptance exposed that the new Workspace picker still inherited
+  the old Session-owned version model: a second conversation could select the
+  same Workspace but its directory inspector had no versions.
+- Added an authoritative Workspace version head and backfilled it from the
+  latest settled non-fork version. New ordinary conversations inherit the
+  directory head and snapshot only; their Pi checkpoint remains empty.
+- Ordinary same-Workspace Runs now claim under a Workspace row lock, rebase to
+  the latest committed head, execute one writer at a time, and advance the
+  head using base-version CAS. All ordinary conversation directory mirrors are
+  refreshed after commit without merging their Pi transcripts.
+- Explicit forks and Candidate-Race Sessions retain isolated branch heads and
+  parallel scheduling. Promotion is the only operation that advances the
+  parent Workspace head.
+- Automated evidence covers new-conversation inheritance, shared history,
+  same-Workspace execution serialization, candidate parallelism and migration
+  schema.

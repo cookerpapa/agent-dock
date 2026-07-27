@@ -115,6 +115,12 @@ Workspace "order-service"
 └── committed Workspace versions
 ```
 
+The Workspace row owns the committed directory head. A new conversation on an
+existing Workspace immediately sees that head but starts with an empty Pi
+transcript. Ordinary Runs sharing one Workspace are serialized and advance the
+head with compare-and-set; explicit Fork/Candidate-Race Sessions remain
+isolated branches until promotion.
+
 The browser no longer has a special repository-import workflow. The Agent can
 use normal `git`, package-manager and download commands inside the connected
 Cube microVM. Public network access is routed through the deployment-owned

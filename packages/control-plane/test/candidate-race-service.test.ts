@@ -356,6 +356,11 @@ async function seed(): Promise<void> {
     })
     .where("id", "=", IDS.parentSession)
     .execute();
+  await database
+    .updateTable("workspaces")
+    .set({ current_workspace_version_id: IDS.baseVersion })
+    .where("id", "=", IDS.workspace)
+    .execute();
 }
 
 async function settlePassingCandidate(

@@ -214,6 +214,8 @@ export interface WorkspaceTable {
   tenant_id: string;
   project_id: string;
   object_snapshot_key: string | null;
+  current_workspace_version_id: GeneratedNullable<string>;
+  row_version: GeneratedInt8;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }

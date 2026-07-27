@@ -25,6 +25,7 @@ import * as temporalWorkerAffinity from "./023_temporal_worker_affinity.ts";
 import * as hotPlatformRuntimeSettings from "./024_hot_platform_runtime_settings.ts";
 import * as largeWorkspaceCheckpoints from "./025_large_workspace_checkpoints.ts";
 import * as workspaceFirstConversations from "./026_workspace_first_conversations.ts";
+import * as sharedWorkspaceHeads from "./027_shared_workspace_heads.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -55,6 +56,7 @@ export const migrationProvider: MigrationProvider = {
       "024_hot_platform_runtime_settings": hotPlatformRuntimeSettings,
       "025_large_workspace_checkpoints": largeWorkspaceCheckpoints,
       "026_workspace_first_conversations": workspaceFirstConversations,
+      "027_shared_workspace_heads": sharedWorkspaceHeads,
     };
   },
 };
@@ -188,3 +190,8 @@ export {
   down as downWorkspaceFirstConversations,
   up as upWorkspaceFirstConversations,
 } from "./026_workspace_first_conversations.ts";
+
+export {
+  down as downSharedWorkspaceHeads,
+  up as upSharedWorkspaceHeads,
+} from "./027_shared_workspace_heads.ts";

@@ -294,4 +294,50 @@ describe.sequential("global tenant scheduling", () => {
     // bounded poll behavior instead of assuming one immediate poll.
     await expect(dispatchUntilWork(probeLane)).resolves.toMatchObject({ status: "completed" });
   });
+
+  it("serializes ordinary conversations that write the same shared Workspace", async () => {
+    const tenantId = "95000000-0000-4000-8000-000000000001";
+    const store = await seedTenant({
+      tenantId,
+      bindingId: "95000000-0000-4000-8000-000000000002",
+      profileId: "95000000-0000-4000-8000-000000000003",
+      slug: "shared-workspace",
+      maximumConcurrentTurns: 2,
+    });
+    const project = await store.createProject("shared-directory");
+    const firstSession = await store.createSession(project.projectId, project.workspaceId, "One");
+    const secondSession = await store.createSession(project.projectId, project.workspaceId, "Two");
+    await store.acceptTurn(firstSession.sessionId, "shared-one", { prompt: "first" });
+    await store.acceptTurn(secondSession.sessionId, "shared-two", { prompt: "second" });
+
+    let entered = 0;
+    let announceFirst!: () => void;
+    let releaseFirst!: () => void;
+    const firstEntered = new Promise<void>((resolvePromise) => {
+      announceFirst = resolvePromise;
+    });
+    const firstRelease = new Promise<void>((resolvePromise) => {
+      releaseFirst = resolvePromise;
+    });
+    const backend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        entered += 1;
+        await lifecycle.started();
+        if (entered === 1) {
+          announceFirst();
+          await firstRelease;
+        }
+        return { stopReason: "shared-workspace-test" };
+      },
+    };
+    const activeLane = new OutboxDispatcher({ database, backend });
+    const probeLane = new OutboxDispatcher({ database, backend });
+    const first = activeLane.dispatchNext();
+    await firstEntered;
+    await expect(probeLane.dispatchNext()).resolves.toEqual({ status: "idle" });
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ status: "completed" });
+    await expect(dispatchUntilWork(probeLane)).resolves.toMatchObject({ status: "completed" });
+    expect(entered).toBe(2);
+  });
 });

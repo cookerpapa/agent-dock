@@ -50,6 +50,19 @@ The Workspace UI shows the current directory version, files and file contents.
 Operational diagnostics remain available through service telemetry and
 administrative APIs, not the end-user directory inspector.
 
+`workspaces.current_workspace_version_id` is the authoritative committed
+directory head. Ordinary conversations keep a mirror of that pointer for
+read-model compatibility, but never own it. Every ordinary Run refreshes its
+base from the Workspace head when it is claimed, and a completed Tool Run
+advances the head with compare-and-set before all ordinary conversations are
+refreshed. Pi checkpoints remain Session-scoped, so selecting an existing
+Workspace never imports another conversation's transcript.
+
+Only explicit Fork/Candidate-Race Sessions are isolated branches. Their
+Workspace versions remain Session-local until an explicit promotion advances
+the shared Workspace head. This preserves parallel candidate evaluation
+without weakening ordinary conversation consistency.
+
 Repository import is removed from the browser. A connected Sandbox can clone
 or download repositories using normal Tools, so import is no longer a separate
 product workflow.
@@ -82,6 +95,8 @@ administrator tenant is configured.
   intentionally removed.
 - Multiple conversations can share one Workspace while keeping distinct
   titles and transcripts.
+- Ordinary Runs for the same Workspace are serialized; different Workspaces
+  and isolated candidate branches can still execute concurrently.
 - The Workspace drawer no longer fails because an unrelated operational API
   denied or timed out.
 - Platform settings authority is visible and testable in the identity contract.
@@ -91,7 +106,8 @@ administrator tenant is configured.
 1. no current source or deployment manifest constructs or offers gVisor;
 2. the browser has no repository-import action or gVisor badge;
 3. creating a conversation requires a title and an existing/new Workspace;
-4. two conversations can target the same Workspace and retain separate titles;
+4. two conversations can target the same Workspace, see the same committed
+   files and retain separate Pi transcripts;
 5. deleting a conversation removes it from listing and direct opening;
 6. the Workspace drawer renders files without unrelated inspector requests or
    reload loops;

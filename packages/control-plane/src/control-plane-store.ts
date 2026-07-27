@@ -852,11 +852,26 @@ export class ControlPlaneStore {
     return this.#database.transaction().execute(async (transaction) => {
       const policy = await this.#lockTenantPolicy(transaction);
       const workspace = await transaction
-        .selectFrom("workspaces")
-        .select(["id", "project_id"])
-        .where("tenant_id", "=", this.#tenantId)
-        .where("project_id", "=", projectId)
-        .where("id", "=", workspaceId)
+        .selectFrom("workspaces as workspace")
+        .leftJoin(
+          "workspace_versions as current_version",
+          "current_version.id",
+          "workspace.current_workspace_version_id",
+        )
+        .leftJoin(
+          "artifacts as workspace_artifact",
+          "workspace_artifact.id",
+          "current_version.workspace_artifact_id",
+        )
+        .select([
+          "workspace.id",
+          "workspace.project_id",
+          "workspace.current_workspace_version_id as currentVersionId",
+          "workspace_artifact.object_key as workspaceSnapshotKey",
+        ])
+        .where("workspace.tenant_id", "=", this.#tenantId)
+        .where("workspace.project_id", "=", projectId)
+        .where("workspace.id", "=", workspaceId)
         .executeTakeFirst();
       if (!workspace) {
         throw new ControlPlaneStoreError("not_found", "Project workspace was not found");
@@ -887,7 +902,8 @@ export class ControlPlaneStore {
           desired_model_profile_id: policy.defaultModelProfileId,
           state: "cold",
           pi_session_snapshot_key: null,
-          workspace_snapshot_key: null,
+          workspace_snapshot_key: workspace.workspaceSnapshotKey,
+          current_workspace_version_id: workspace.currentVersionId,
         })
         .returning(["id", "title", "project_id", "workspace_id", "state", "created_at"])
         .executeTakeFirstOrThrow();
@@ -2108,6 +2124,8 @@ export class ControlPlaneStore {
           "next_mailbox_position",
           "current_workspace_version_id",
           "pi_session_snapshot_key",
+          "workspace_snapshot_key",
+          "forked_from_session_id",
           "archived_at",
         ])
         .where("tenant_id", "=", this.#tenantId)
@@ -2117,9 +2135,37 @@ export class ControlPlaneStore {
       if (!session) {
         throw new ControlPlaneStoreError("not_found", "Session was not found");
       }
+      const workspace = await transaction
+        .selectFrom("workspaces as workspace")
+        .leftJoin(
+          "workspace_versions as current_version",
+          "current_version.id",
+          "workspace.current_workspace_version_id",
+        )
+        .leftJoin(
+          "artifacts as workspace_artifact",
+          "workspace_artifact.id",
+          "current_version.workspace_artifact_id",
+        )
+        .select([
+          "workspace.current_workspace_version_id as currentVersionId",
+          "workspace_artifact.object_key as workspaceSnapshotKey",
+        ])
+        .where("workspace.tenant_id", "=", this.#tenantId)
+        .where("workspace.id", "=", session.workspace_id)
+        .forUpdate("workspace")
+        .executeTakeFirstOrThrow();
       if (session.archived_at !== null) {
         throw new ControlPlaneStoreError("conflict", "Archived Session cannot accept turns");
       }
+      const workspaceBaseVersionId =
+        session.forked_from_session_id === null
+          ? workspace.currentVersionId
+          : session.current_workspace_version_id;
+      const workspaceSnapshotKey =
+        session.forked_from_session_id === null
+          ? workspace.workspaceSnapshotKey
+          : session.workspace_snapshot_key;
       if (session.desired_model_profile_id !== this.#defaultModelProfileId) {
         throw new ControlPlaneStoreError(
           "control_plane_misconfigured",
@@ -2278,7 +2324,7 @@ export class ControlPlaneStore {
             0,
             positiveSafeInteger(session.next_event_seq, "Next event sequence") - 1,
           ),
-          workspace_base_version_id: session.current_workspace_version_id,
+          workspace_base_version_id: workspaceBaseVersionId,
           pi_session_base_artifact_id: piSessionBaseArtifact?.id ?? null,
           idempotency_key: idempotencyKey,
           state: "queued",
@@ -2317,6 +2363,8 @@ export class ControlPlaneStore {
         .updateTable("sessions")
         .set({
           next_mailbox_position: sql<string>`${sql.ref("next_mailbox_position")} + 1`,
+          current_workspace_version_id: workspaceBaseVersionId,
+          workspace_snapshot_key: workspaceSnapshotKey,
           row_version: sql<string>`${sql.ref("row_version")} + 1`,
           updated_at: sql<Date>`now()`,
         })

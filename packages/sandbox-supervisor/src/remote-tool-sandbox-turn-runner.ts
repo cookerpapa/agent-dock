@@ -521,7 +521,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               persistToolOutputArtifact: (output: { toolCallId: string; bytes: Uint8Array }) =>
                 this.#checkpointStore!.saveToolOutput!(command, output),
             }),
-        ...(loadedCheckpoint === undefined ? {} : { restorePiSession: loadedCheckpoint.piSession }),
+        ...(loadedCheckpoint?.piSession === undefined
+          ? {}
+          : { restorePiSession: loadedCheckpoint.piSession }),
         onSettled,
         ...(this.#requestTimeoutMs === undefined
           ? {

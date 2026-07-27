@@ -109,13 +109,7 @@ const cube = new OfficialCubeSandboxRuntimeClient({
   egressProxyIp: environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
   requestTimeoutMs: 30_000,
 });
-const kubeconfigPath = resolve(runtimeDirectory, "kubernetes/sandbox-manager.kubeconfig");
-const executionEnvironment = {
-  ...process.env,
-  NO_PROXY: [process.env.NO_PROXY, "agent-dock-kubernetes", "127.0.0.1", "localhost"]
-    .filter(Boolean)
-    .join(","),
-};
+const executionEnvironment = process.env;
 
 function capture(command, args, timeoutMs = 30_000) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -291,28 +285,6 @@ async function waitForReviewBundle(runId) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
     }
   }
-}
-
-async function managedKubernetesPods(namespace) {
-  const value = JSON.parse(
-    await capture(
-      "kubectl",
-      [
-        "--kubeconfig",
-        kubeconfigPath,
-        "get",
-        "pods",
-        "--namespace",
-        namespace,
-        "--selector",
-        "agent-dock.io/managed=true",
-        "--output=json",
-      ],
-      60_000,
-    ),
-  );
-  assert(value !== null && typeof value === "object" && Array.isArray(value.items));
-  return value.items;
 }
 
 function managedCubeForSession(instances, sessionId) {
@@ -529,7 +501,6 @@ assert.equal(
   firstReviewBundle.manifest.usage.outputTokens + secondReviewBundle.manifest.usage.outputTokens,
   outputTokens,
 );
-assert.equal((await managedKubernetesPods("agent-dock-importers")).length, 0);
 await waitForNoCubeSession(session.sessionId);
 await cube.close();
 

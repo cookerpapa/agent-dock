@@ -14,6 +14,9 @@
   `/workspace` directory/file view
 - [x] Separate platform administration from tenant owner and route the
   dedicated administrator directly to settings
+- [x] Move the committed directory head to Workspace scope, restore it into
+  new conversations without copying Pi history, and serialize ordinary
+  same-Workspace Runs while retaining isolated Candidate-Race branches
 - [x] Remove current operational documentation and release scripts for the
   superseded execution plane
 

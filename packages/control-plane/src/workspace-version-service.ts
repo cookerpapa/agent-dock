@@ -221,25 +221,53 @@ export class WorkspaceVersionService {
 
   async list(tenantId: string, sessionId: string): Promise<WorkspaceVersionListResource> {
     const session = await this.#database
-      .selectFrom("sessions")
-      .select(["current_workspace_version_id", "archived_at"])
-      .where("tenant_id", "=", tenantId)
-      .where("id", "=", sessionId)
+      .selectFrom("sessions as session_row")
+      .innerJoin("workspaces as workspace", (join) =>
+        join
+          .onRef("workspace.tenant_id", "=", "session_row.tenant_id")
+          .onRef("workspace.id", "=", "session_row.workspace_id"),
+      )
+      .select([
+        "session_row.workspace_id as workspaceId",
+        "session_row.archived_at as archivedAt",
+        "session_row.forked_from_session_id as forkedFromSessionId",
+        sql<string | null>`case
+          when ${sql.ref("session_row.forked_from_session_id")} is null
+            then ${sql.ref("workspace.current_workspace_version_id")}
+          else ${sql.ref("session_row.current_workspace_version_id")}
+        end`.as("currentVersionId"),
+      ])
+      .where("session_row.tenant_id", "=", tenantId)
+      .where("session_row.id", "=", sessionId)
       .executeTakeFirst();
     if (session === undefined)
       throw new WorkspaceVersionError("not_found", "Session was not found");
-    const rows = await this.#versionQuery(tenantId)
-      .where("version.session_id", "=", sessionId)
-      .where("version.state", "=", "settled")
-      .orderBy("version.version_number", "desc")
+    let versionQuery = this.#versionQuery(tenantId).where("version.state", "=", "settled");
+    versionQuery =
+      session.forkedFromSessionId === null
+        ? versionQuery
+            .where("version.workspace_id", "=", session.workspaceId)
+            .where(
+              sql<boolean>`exists (
+                select 1
+                from sessions as origin_session
+                where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
+                  and origin_session.id = ${sql.ref("version.session_id")}
+                  and origin_session.forked_from_session_id is null
+              )`,
+            )
+        : versionQuery.where("version.session_id", "=", sessionId);
+    const rows = await versionQuery
+      .orderBy("version.created_at", "desc")
+      .orderBy("version.id", "desc")
       .limit(MAX_VERSIONS + 1)
       .execute();
     return {
       sessionId,
-      ...(session.current_workspace_version_id === null
+      ...(session.currentVersionId === null
         ? {}
-        : { currentVersionId: session.current_workspace_version_id }),
-      archived: session.archived_at !== null,
+        : { currentVersionId: session.currentVersionId }),
+      archived: session.archivedAt !== null,
       versions: rows.slice(0, MAX_VERSIONS).map(versionResource),
       truncated: rows.length > MAX_VERSIONS,
     };
@@ -575,52 +603,137 @@ export class WorkspaceVersionService {
         );
         if (replay !== undefined) return replay;
         const session = await transaction
-          .selectFrom("sessions")
-          .select(["state", "current_workspace_version_id", "archived_at"])
-          .where("tenant_id", "=", tenantId)
-          .where("id", "=", sessionId)
-          .forUpdate()
+          .selectFrom("sessions as session_row")
+          .innerJoin("workspaces as workspace", (join) =>
+            join
+              .onRef("workspace.tenant_id", "=", "session_row.tenant_id")
+              .onRef("workspace.id", "=", "session_row.workspace_id"),
+          )
+          .select([
+            "session_row.state",
+            "session_row.workspace_id as workspaceId",
+            "session_row.current_workspace_version_id as sessionCurrentVersionId",
+            "session_row.forked_from_session_id as forkedFromSessionId",
+            "session_row.archived_at as archivedAt",
+            "workspace.current_workspace_version_id as workspaceCurrentVersionId",
+          ])
+          .where("session_row.tenant_id", "=", tenantId)
+          .where("session_row.id", "=", sessionId)
+          .forUpdate(["session_row", "workspace"])
           .executeTakeFirst();
         if (session === undefined)
           throw new WorkspaceVersionError("not_found", "Session was not found");
         if (session.state !== "cold" && session.state !== "idle") {
           throw new WorkspaceVersionError("conflict", "Active Session cannot be rolled back");
         }
-        if (session.archived_at !== null) {
+        if (session.archivedAt !== null) {
           throw new WorkspaceVersionError("conflict", "Archived Session cannot be rolled back");
         }
-        if (session.current_workspace_version_id !== request.expectedCurrentVersionId) {
+        const currentVersionId =
+          session.forkedFromSessionId === null
+            ? session.workspaceCurrentVersionId
+            : session.sessionCurrentVersionId;
+        if (currentVersionId !== request.expectedCurrentVersionId) {
           throw new WorkspaceVersionError("conflict", "Current Workspace version changed");
         }
-        await this.#assertNoUnsettledTurns(transaction, tenantId, sessionId);
-        const target = await transaction
+        if (session.forkedFromSessionId === null) {
+          const activeWorkspaceTurn = await transaction
+            .selectFrom("turns as turn")
+            .innerJoin("sessions as active_session", (join) =>
+              join
+                .onRef("active_session.tenant_id", "=", "turn.tenant_id")
+                .onRef("active_session.id", "=", "turn.session_id"),
+            )
+            .select("turn.id")
+            .where("turn.tenant_id", "=", tenantId)
+            .where("active_session.workspace_id", "=", session.workspaceId)
+            .where("active_session.forked_from_session_id", "is", null)
+            .where("turn.state", "in", [
+              "queued",
+              "dispatching",
+              "running",
+              "waiting_approval",
+              "cancelling",
+            ])
+            .executeTakeFirst();
+          if (activeWorkspaceTurn !== undefined) {
+            throw new WorkspaceVersionError(
+              "conflict",
+              "Workspace has unsettled work and cannot be rolled back",
+            );
+          }
+        } else {
+          await this.#assertNoUnsettledTurns(transaction, tenantId, sessionId);
+        }
+        let targetQuery = transaction
           .selectFrom("workspace_versions as version")
           .innerJoin("artifacts as pi", "pi.id", "version.pi_artifact_id")
           .innerJoin("artifacts as workspace", "workspace.id", "version.workspace_artifact_id")
           .select(["version.id", "pi.object_key as piKey", "workspace.object_key as workspaceKey"])
           .where("version.tenant_id", "=", tenantId)
-          .where("version.session_id", "=", sessionId)
           .where("version.id", "=", request.versionId)
-          .where("version.state", "=", "settled")
-          .executeTakeFirst();
+          .where("version.state", "=", "settled");
+        targetQuery =
+          session.forkedFromSessionId === null
+            ? targetQuery
+                .where("version.workspace_id", "=", session.workspaceId)
+                .where(
+                  sql<boolean>`exists (
+                    select 1 from sessions as origin_session
+                    where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
+                      and origin_session.id = ${sql.ref("version.session_id")}
+                      and origin_session.forked_from_session_id is null
+                  )`,
+                )
+            : targetQuery.where("version.session_id", "=", sessionId);
+        const target = await targetQuery.executeTakeFirst();
         if (target === undefined)
           throw new WorkspaceVersionError("not_found", "Workspace version was not found");
-        const updated = await transaction
-          .updateTable("sessions")
-          .set({
-            current_workspace_version_id: target.id,
-            pi_session_snapshot_key: target.piKey,
-            workspace_snapshot_key: target.workspaceKey,
-            row_version: sql<string>`${sql.ref("row_version")} + 1`,
-            updated_at: now,
-            last_active_at: now,
-          })
-          .where("tenant_id", "=", tenantId)
-          .where("id", "=", sessionId)
-          .where("current_workspace_version_id", "=", request.expectedCurrentVersionId)
-          .executeTakeFirst();
-        if (updated.numUpdatedRows !== 1n) {
-          throw new WorkspaceVersionError("conflict", "Current Workspace version changed");
+        if (session.forkedFromSessionId === null) {
+          const workspaceUpdated = await transaction
+            .updateTable("workspaces")
+            .set({
+              current_workspace_version_id: target.id,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+            })
+            .where("tenant_id", "=", tenantId)
+            .where("id", "=", session.workspaceId)
+            .where("current_workspace_version_id", "=", request.expectedCurrentVersionId)
+            .executeTakeFirst();
+          if (workspaceUpdated.numUpdatedRows !== 1n) {
+            throw new WorkspaceVersionError("conflict", "Current Workspace version changed");
+          }
+          await transaction
+            .updateTable("sessions")
+            .set({
+              current_workspace_version_id: target.id,
+              workspace_snapshot_key: target.workspaceKey,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+            })
+            .where("tenant_id", "=", tenantId)
+            .where("workspace_id", "=", session.workspaceId)
+            .where("forked_from_session_id", "is", null)
+            .execute();
+        } else {
+          const updated = await transaction
+            .updateTable("sessions")
+            .set({
+              current_workspace_version_id: target.id,
+              pi_session_snapshot_key: target.piKey,
+              workspace_snapshot_key: target.workspaceKey,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+              last_active_at: now,
+            })
+            .where("tenant_id", "=", tenantId)
+            .where("id", "=", sessionId)
+            .where("current_workspace_version_id", "=", request.expectedCurrentVersionId)
+            .executeTakeFirst();
+          if (updated.numUpdatedRows !== 1n) {
+            throw new WorkspaceVersionError("conflict", "Current Workspace version changed");
+          }
         }
         const operationId = this.#idGenerator();
         await transaction
