@@ -26,8 +26,8 @@ function run(script, args = []) {
 
 await run("scripts/init-production.mjs");
 await run("scripts/init-cubesandbox-runtime.mjs");
-await run("scripts/production-compose.mjs", ["build"]);
 await run("scripts/register-cubesandbox-tool-template.mjs");
+await run("scripts/production-compose.mjs", ["build"]);
 await run("scripts/production-compose.mjs", ["up", "--detach", "--wait", "--remove-orphans"]);
 
 const runtimeDirectory = resolve(
