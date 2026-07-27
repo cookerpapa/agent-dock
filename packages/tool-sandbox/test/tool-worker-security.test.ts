@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  dependencyRecipeWebProxy,
   executeEnvironmentRecipe,
   resolveToolWorkspacePath,
   safeToolEnvironment,
@@ -34,6 +35,40 @@ function recipeEnvironment(recipe: EnvironmentRecipe): EnvironmentRuntimeSnapsho
 }
 
 describe("credential-free Tool Sandbox worker", () => {
+  it("keeps user web egress separate from environment dependency setup", () => {
+    const webProxy = { host: "10.255.255.254", port: 3_128 };
+    expect(
+      dependencyRecipeWebProxy(recipeEnvironment(DEFAULT_PROJECT_ENVIRONMENT_RECIPE), webProxy),
+    ).toBeUndefined();
+    expect(
+      dependencyRecipeWebProxy(
+        recipeEnvironment({
+          schemaVersion: 1,
+          dependencyHosts: ["registry.npmjs.org"],
+          setupCommands: [
+            {
+              id: "install",
+              command: "npm ci",
+              cwd: ".",
+              timeoutMs: 60_000,
+              network: "dependency",
+            },
+          ],
+          verificationCommands: [
+            {
+              id: "verify",
+              command: "true",
+              cwd: ".",
+              timeoutMs: 1_000,
+              network: "none",
+            },
+          ],
+        }),
+        webProxy,
+      ),
+    ).toEqual(webProxy);
+  });
+
   it("constructs a fixed subprocess environment without inheriting trusted credentials", () => {
     process.env.AGENT_DOCK_RUNTIME_API_KEY = "admg_should-never-cross";
     process.env.AGENT_DOCK_SANDBOX_MANAGER_TOKEN = "manager-should-never-cross";

@@ -92,6 +92,30 @@ function safeFailure(error: unknown): SandboxManagerError {
   );
 }
 
+function safeDiagnostic(error: unknown): Readonly<{
+  name: string;
+  message: string;
+  cause?: Readonly<{ name: string; message: string }>;
+}> {
+  const detail = (value: unknown): Readonly<{ name: string; message: string }> => {
+    if (!(value instanceof Error)) {
+      return { name: "UnknownError", message: "Non-Error failure" };
+    }
+    const clean = (text: string, fallback: string): string => {
+      const normalized = text.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+      return normalized.length === 0 ? fallback : normalized.slice(0, 1_024);
+    };
+    return {
+      name: clean(value.name, "Error"),
+      message: clean(value.message, "Operation failed without a message"),
+    };
+  };
+  const primary = detail(error);
+  const cause =
+    error instanceof Error && error.cause !== undefined ? detail(error.cause) : undefined;
+  return cause === undefined ? primary : { ...primary, cause };
+}
+
 export class SandboxManagerServer {
   readonly #host: string;
   readonly #port: number;
@@ -179,6 +203,16 @@ export class SandboxManagerServer {
 
   async #failure(reply: FastifyReply, error: unknown): Promise<void> {
     const failure = safeFailure(error);
+    process.stderr.write(
+      `${JSON.stringify({
+        level: "error",
+        service: "agent-dock-sandbox-manager",
+        event: "operation_failed",
+        publicCode: failure.code,
+        retryable: failure.retryable,
+        diagnostic: safeDiagnostic(error),
+      })}\n`,
+    );
     await reply.code(failure.retryable ? 503 : 409).send({
       error: {
         code: failure.code,

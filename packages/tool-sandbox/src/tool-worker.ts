@@ -427,6 +427,13 @@ export async function executeEnvironmentRecipe(
   return results;
 }
 
+export function dependencyRecipeWebProxy(
+  environment: EnvironmentRuntimeSnapshot,
+  webProxy: ToolWebProxyBootstrap | undefined,
+): ToolWebProxyBootstrap | undefined {
+  return (environment.recipe.dependencyHosts?.length ?? 0) > 0 ? webProxy : undefined;
+}
+
 async function dependencyProxyHealth(
   dependencyProxy: DependencyProxyBootstrap,
 ): Promise<string | undefined> {
@@ -1004,6 +1011,7 @@ export async function runToolWorker(): Promise<void> {
           const seed =
             message.workspaceSeed.kind === "snapshot" ? message.workspaceSeed.snapshot : undefined;
           await prepareToolWorkspace(seed, message.workspaceRestore);
+          const recipeWebProxy = dependencyRecipeWebProxy(message.environment, message.webProxy);
           environment.recipeCommands = await executeEnvironmentRecipe(
             message.environment,
             TOOL_WORKSPACE_DIRECTORY,
@@ -1011,7 +1019,7 @@ export async function runToolWorker(): Promise<void> {
               ...(message.dependencyProxy === undefined
                 ? {}
                 : { dependencyProxy: message.dependencyProxy }),
-              ...(message.webProxy === undefined ? {} : { webProxy: message.webProxy }),
+              ...(recipeWebProxy === undefined ? {} : { webProxy: recipeWebProxy }),
               ...(message.environmentStage === undefined
                 ? {}
                 : { environmentStage: message.environmentStage }),

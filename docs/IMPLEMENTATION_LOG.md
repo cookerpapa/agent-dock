@@ -2798,3 +2798,22 @@
   deploy can register the exact committed Tool image before Compose validates
   and starts that revision, without receiving a Kubernetes administrator
   kubeconfig.
+
+## 2026-07-27 — Cube Tool network-capability separation
+
+- A real-model empty-Workspace acceptance exposed an initialization failure:
+  the Cube Web proxy intended for later user Bash operations was also supplied
+  to an environment recipe that declared no dependency hosts. The Tool Worker
+  correctly rejected that excess setup capability before executing any Tool.
+- Environment initialization now receives the Web proxy only when the accepted
+  immutable recipe declares dependency hosts. The initialized Worker still
+  retains the separately scoped Web proxy for later user `bash` operations.
+  This restores empty-Workspace Tool execution without weakening the recipe
+  network invariant.
+- Sandbox Manager now writes bounded structured operator diagnostics for
+  otherwise generic internal failures. Cube Tool error envelopes are included
+  only in trusted logs; model-visible and public API errors remain generic and
+  do not expose credentials or infrastructure details.
+- Unit and type evidence covers the no-dependency and dependency-recipe paths.
+  Production acceptance additionally requires a real-model write/read and
+  committed Workspace file inspection.

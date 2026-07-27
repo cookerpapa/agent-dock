@@ -245,6 +245,26 @@ function parseJson(bytes: Buffer, label: string): unknown {
   }
 }
 
+function errorResponseDiagnostic(bytes: Buffer): string {
+  try {
+    const parsed = JSON.parse(bytes.toString("utf8")) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).error === "string"
+    ) {
+      const value = (parsed as Record<string, unknown>).error as string;
+      const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+      if (normalized.length > 0) return normalized.slice(0, 512);
+    }
+  } catch {
+    // The public response remains generic; trusted logs only need a bounded
+    // marker when the remote service did not return its documented envelope.
+  }
+  return "unstructured error response";
+}
+
 export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClient {
   readonly #apiUrl: string;
   readonly #apiKey: string;
@@ -435,7 +455,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     const bytes = await readBoundedResponse(response, input.maximumResponseBytes);
     if (!response.ok) {
       throw new CubeRuntimeClientError(
-        `CubeSandbox Tool service rejected the request with HTTP ${response.status}`,
+        `CubeSandbox Tool service rejected the request with HTTP ${response.status}: ${errorResponseDiagnostic(bytes)}`,
         response.status,
       );
     }
