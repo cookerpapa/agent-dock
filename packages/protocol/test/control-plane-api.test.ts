@@ -192,6 +192,7 @@ describe("control-plane public API schemas", () => {
     expect(
       parseSessionResource({
         sessionId: "30000000-0000-4000-8000-000000000001",
+        title: "Repair Java demo",
         projectId: "10000000-0000-4000-8000-000000000001",
         workspaceId: "20000000-0000-4000-8000-000000000001",
         state: "cold",
@@ -234,6 +235,7 @@ describe("control-plane public API schemas", () => {
         userId: "80000000-0000-4000-8000-000000000002",
         displayName: "Alpha Operator",
         role: "member",
+        platformAdministrator: false,
       }),
     ).toMatchObject({ tenantSlug: "private-alpha", role: "member" });
     expect(
@@ -251,9 +253,10 @@ describe("control-plane public API schemas", () => {
         conversations: [
           {
             sessionId: "30000000-0000-4000-8000-000000000001",
+            title: "Repair checkout",
             projectId: "10000000-0000-4000-8000-000000000001",
             workspaceId: "20000000-0000-4000-8000-000000000001",
-            projectName: "Java repair demo",
+            workspaceName: "Java repair demo",
             state: "idle",
             turnCount: 1,
             createdAt,
@@ -263,7 +266,7 @@ describe("control-plane public API schemas", () => {
         ],
         truncated: false,
       }),
-    ).toMatchObject({ conversations: [{ projectName: "Java repair demo" }] });
+    ).toMatchObject({ conversations: [{ title: "Repair checkout" }] });
     expect(
       parseConversationDetailResource({
         project: {
@@ -281,6 +284,7 @@ describe("control-plane public API schemas", () => {
         },
         session: {
           sessionId: "30000000-0000-4000-8000-000000000001",
+          title: "Repair checkout",
           projectId: "10000000-0000-4000-8000-000000000001",
           workspaceId: "20000000-0000-4000-8000-000000000001",
           state: "running",
@@ -646,7 +650,10 @@ describe("control-plane public API schemas", () => {
   });
 
   it("validates workspace and path identities as UUIDs", () => {
-    expect(parseCreateSessionRequest({ workspaceId: UUID })).toEqual({ workspaceId: UUID });
+    expect(parseCreateSessionRequest({ workspaceId: UUID, title: "  Fix checkout  " })).toEqual({
+      workspaceId: UUID,
+      title: "Fix checkout",
+    });
     expect(parseUuidPathParameter(UUID, "sessionId")).toBe(UUID);
     expect(() => parseUuidPathParameter("session-1", "sessionId")).toThrow(
       ControlPlaneApiValidationError,

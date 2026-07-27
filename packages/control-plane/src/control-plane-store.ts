@@ -27,6 +27,7 @@ import type {
   TestResultListResource,
   WorkspaceSourceResource,
   WorkspaceSourceSetSnapshot,
+  WorkspaceListResource,
 } from "@agent-dock/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
@@ -452,6 +453,7 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
 
 const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
 const MAX_CONVERSATION_SUMMARIES = 100;
+const MAX_WORKSPACE_SUMMARIES = 100;
 const MAX_CONVERSATION_TURNS = 200;
 const MAX_SESSION_RUNS = 100;
 const TURN_ACCEPTING_SESSION_STATES = new Set<SessionState>([
@@ -841,7 +843,11 @@ export class ControlPlaneStore {
     }
   }
 
-  async createSession(projectId: string, workspaceId: string): Promise<SessionResource> {
+  async createSession(
+    projectId: string,
+    workspaceId: string,
+    title = "新对话",
+  ): Promise<SessionResource> {
     const sessionId = this.#idGenerator();
     return this.#database.transaction().execute(async (transaction) => {
       const policy = await this.#lockTenantPolicy(transaction);
@@ -874,6 +880,7 @@ export class ControlPlaneStore {
         .insertInto("sessions")
         .values({
           id: sessionId,
+          title,
           tenant_id: this.#tenantId,
           project_id: workspace.project_id,
           workspace_id: workspace.id,
@@ -882,7 +889,7 @@ export class ControlPlaneStore {
           pi_session_snapshot_key: null,
           workspace_snapshot_key: null,
         })
-        .returning(["id", "project_id", "workspace_id", "state", "created_at"])
+        .returning(["id", "title", "project_id", "workspace_id", "state", "created_at"])
         .executeTakeFirstOrThrow();
       await transaction
         .insertInto("session_event_cursors")
@@ -890,6 +897,7 @@ export class ControlPlaneStore {
         .executeTakeFirstOrThrow();
       return {
         sessionId: session.id,
+        title: session.title,
         projectId: session.project_id,
         workspaceId: session.workspace_id,
         state: "cold",
@@ -897,6 +905,51 @@ export class ControlPlaneStore {
         createdAt: isoTimestamp(session.created_at),
       };
     });
+  }
+
+  async listWorkspaces(): Promise<WorkspaceListResource> {
+    const rows = await this.#database
+      .selectFrom("workspaces as workspace")
+      .innerJoin("projects as project", (join) =>
+        join
+          .onRef("project.tenant_id", "=", "workspace.tenant_id")
+          .onRef("project.id", "=", "workspace.project_id"),
+      )
+      .leftJoin("sessions as session_row", (join) =>
+        join
+          .onRef("session_row.tenant_id", "=", "workspace.tenant_id")
+          .onRef("session_row.workspace_id", "=", "workspace.id")
+          .on("session_row.archived_at", "is", null),
+      )
+      .select([
+        "workspace.id as workspaceId",
+        "workspace.project_id as projectId",
+        "project.name as name",
+        "project.created_at as createdAt",
+      ])
+      .select((expression) => [
+        expression.fn.count<string>("session_row.id").as("sessionCount"),
+        sql<Date>`coalesce(max(${expression.ref("session_row.last_active_at")}), ${expression.ref(
+          "project.created_at",
+        )})`.as("lastActiveAt"),
+      ])
+      .where("workspace.tenant_id", "=", this.#tenantId)
+      .groupBy(["workspace.id", "workspace.project_id", "project.name", "project.created_at"])
+      .orderBy("lastActiveAt", "desc")
+      .orderBy("workspace.id", "desc")
+      .limit(MAX_WORKSPACE_SUMMARIES + 1)
+      .execute();
+    return {
+      workspaces: rows.slice(0, MAX_WORKSPACE_SUMMARIES).map((row) => ({
+        workspaceId: row.workspaceId,
+        projectId: row.projectId,
+        name: row.name,
+        sessionCount: nonNegativeSafeInteger(row.sessionCount, "Workspace session count"),
+        createdAt: isoTimestamp(row.createdAt),
+        lastActiveAt: isoTimestamp(row.lastActiveAt),
+      })),
+      truncated: rows.length > MAX_WORKSPACE_SUMMARIES,
+    };
   }
 
   async listConversations(): Promise<ConversationListResource> {
@@ -914,16 +967,18 @@ export class ControlPlaneStore {
       )
       .select([
         "session_row.id as sessionId",
+        "session_row.title as title",
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
         "session_row.state as state",
         "session_row.created_at as createdAt",
         "session_row.updated_at as updatedAt",
         "session_row.last_active_at as lastActiveAt",
-        "project.name as projectName",
+        "project.name as workspaceName",
       ])
       .select((expression) => expression.fn.count<string>("turn.id").as("turnCount"))
       .where("session_row.tenant_id", "=", this.#tenantId)
+      .where("session_row.archived_at", "is", null)
       .where(
         sql<boolean>`not exists (
           select 1
@@ -934,6 +989,7 @@ export class ControlPlaneStore {
       )
       .groupBy([
         "session_row.id",
+        "session_row.title",
         "session_row.project_id",
         "session_row.workspace_id",
         "session_row.state",
@@ -949,9 +1005,10 @@ export class ControlPlaneStore {
     return {
       conversations: rows.slice(0, MAX_CONVERSATION_SUMMARIES).map((row) => ({
         sessionId: row.sessionId,
+        title: row.title,
         projectId: row.projectId,
         workspaceId: row.workspaceId,
-        projectName: row.projectName,
+        workspaceName: row.workspaceName,
         state: row.state,
         turnCount: nonNegativeSafeInteger(row.turnCount, "Conversation turn count"),
         createdAt: isoTimestamp(row.createdAt),
@@ -983,6 +1040,7 @@ export class ControlPlaneStore {
       )
       .select([
         "session_row.id as sessionId",
+        "session_row.title as sessionTitle",
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
         "session_row.desired_model_profile_id as modelProfileId",
@@ -1004,6 +1062,7 @@ export class ControlPlaneStore {
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
       .where("session_row.id", "=", sessionId)
+      .where("session_row.archived_at", "is", null)
       .executeTakeFirst();
     if (conversation === undefined) {
       throw new ControlPlaneStoreError("not_found", "Conversation was not found");
@@ -1185,6 +1244,7 @@ export class ControlPlaneStore {
       },
       session: {
         sessionId: conversation.sessionId,
+        title: conversation.sessionTitle,
         projectId: conversation.projectId,
         workspaceId: conversation.workspaceId,
         state: conversation.sessionState,

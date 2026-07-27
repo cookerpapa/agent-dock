@@ -6,10 +6,9 @@ import type {
   ConversationSummaryResource,
   CubeProxyConfigurationResource,
   DeepSeekModelId,
-  GitHubInstallationResource,
   ModelConfigurationResource,
   TenantIdentityResource,
-  WorkspaceSourceRequest,
+  WorkspaceSummaryResource,
 } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import {
@@ -21,7 +20,6 @@ import {
 } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
-import { parseRepositorySetManifest, REPOSITORY_SET_EXAMPLE } from "./repository-set.ts";
 
 type SourceHighlightModule = typeof import("./source-highlight.ts");
 type SourceHighlightResult = ReturnType<SourceHighlightModule["highlightSource"]>;
@@ -174,8 +172,7 @@ function errorMessage(error: unknown): string {
 
 function conversationTitle(prompt: string): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
-  const title = compact.length > 54 ? `${compact.slice(0, 54)}…` : compact;
-  return `${title || "新对话"} · ${Date.now().toString(36).slice(-5)}`;
+  return compact.length > 54 ? `${compact.slice(0, 54)}…` : compact || "新对话";
 }
 
 function relativeTime(value: string): string {
@@ -508,6 +505,7 @@ export default function ChatApp() {
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [state, setState] = useState(createInitialSessionView);
   const [conversations, setConversations] = useState<readonly ConversationSummaryResource[]>([]);
+  const [workspaces, setWorkspaces] = useState<readonly WorkspaceSummaryResource[]>([]);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [operation, setOperation] = useState<"creating" | "submitting" | "cancelling" | null>(null);
@@ -515,19 +513,11 @@ export default function ChatApp() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceSourceKind, setWorkspaceSourceKind] =
-    useState<WorkspaceSourceRequest["kind"]>("empty");
-  const [workspaceRepository, setWorkspaceRepository] = useState("");
-  const [workspaceCommitSha, setWorkspaceCommitSha] = useState("");
-  const [workspaceInstallationId, setWorkspaceInstallationId] = useState("");
-  const [workspaceRepositoryId, setWorkspaceRepositoryId] = useState("");
-  const [workspaceRepositorySet, setWorkspaceRepositorySet] = useState("");
-  const [githubInstallation, setGitHubInstallation] = useState<GitHubInstallationResource | null>(
-    null,
-  );
-  const [githubLoading, setGitHubLoading] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newConversationTitle, setNewConversationTitle] = useState("");
+  const [workspaceChoice, setWorkspaceChoice] = useState<"existing" | "new">("new");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [pendingInitialPrompt, setPendingInitialPrompt] = useState<string | null>(null);
   const [modelConfiguration, setModelConfiguration] = useState<ModelConfigurationResource | null>(
     null,
   );
@@ -560,6 +550,12 @@ export default function ChatApp() {
     setConversations(listed.conversations);
   }, [api]);
 
+  const refreshWorkspaces = useCallback(async (): Promise<void> => {
+    const listed = await api.listWorkspaces();
+    setWorkspaces(listed.workspaces);
+    setSelectedWorkspaceId((current) => current || listed.workspaces[0]?.workspaceId || "");
+  }, [api]);
+
   useEffect(() => {
     let cancelled = false;
     void api.getIdentity().then(
@@ -585,7 +581,7 @@ export default function ChatApp() {
   }, [api]);
 
   useEffect(() => {
-    if (authPhase !== "authenticated") return;
+    if (authPhase !== "authenticated" || identity?.platformAdministrator === true) return;
     let cancelled = false;
     void api.listConversations().then(
       (listed) => {
@@ -598,24 +594,28 @@ export default function ChatApp() {
     return () => {
       cancelled = true;
     };
-  }, [api, authPhase, identity?.tenantId, update]);
+  }, [api, authPhase, identity?.platformAdministrator, identity?.tenantId, update]);
 
   useEffect(() => {
-    if (authPhase !== "authenticated" || identity?.role !== "owner") {
+    if (authPhase !== "authenticated" || identity?.platformAdministrator === true) return;
+    void refreshWorkspaces().catch((error: unknown) => {
+      update({ type: "api.error", message: errorMessage(error) });
+    });
+  }, [authPhase, identity?.platformAdministrator, identity?.tenantId, refreshWorkspaces, update]);
+
+  useEffect(() => {
+    if (authPhase !== "authenticated" || identity?.platformAdministrator !== true) {
       setCubeProxyConfiguration(null);
       setModelConfiguration(null);
       return;
     }
     let cancelled = false;
-    void api
-      .getCubeProxyConfiguration()
-      .then(async (proxyConfiguration) => {
+    void Promise.all([api.getCubeProxyConfiguration(), api.getModelConfiguration()])
+      .then(([proxyConfiguration, model]) => {
         if (cancelled) return;
         setCubeProxyConfiguration(proxyConfiguration);
         setCubeProxyEnabled(proxyConfiguration.enabled);
         setCubeProxyUrl(proxyConfiguration.proxyUrl ?? "");
-        const model = await api.getModelConfiguration();
-        if (cancelled) return;
         setModelConfiguration(model);
         if (model.mode === "real") setSelectedModelId(model.modelId);
       })
@@ -631,7 +631,7 @@ export default function ChatApp() {
     return () => {
       cancelled = true;
     };
-  }, [api, authPhase, identity?.role, identity?.tenantId, update]);
+  }, [api, authPhase, identity?.platformAdministrator, identity?.tenantId, update]);
 
   useEffect(() => {
     const sessionId = state.session?.sessionId;
@@ -729,7 +729,7 @@ export default function ChatApp() {
     }
     resetConversation();
     setConversations([]);
-    setSettingsOpen(false);
+    setWorkspaces([]);
     setModelConfiguration(null);
     setModelApiKey("");
     setCubeProxyConfiguration(null);
@@ -740,7 +740,7 @@ export default function ChatApp() {
   }
 
   async function saveModelConfiguration(): Promise<void> {
-    if (cubeProxyConfiguration === null || settingsSaving !== null) return;
+    if (modelConfiguration === null || settingsSaving !== null) return;
     const apiKey = modelApiKey.trim();
     if (!/^[A-Za-z0-9._-]{16,512}$/.test(apiKey)) {
       update({ type: "api.error", message: "DeepSeek API Key 格式无效。" });
@@ -799,91 +799,81 @@ export default function ChatApp() {
     }
   }
 
-  async function openConversationById(sessionId: string): Promise<void> {
-    const detail = await api.getConversation(sessionId);
-    lastSequenceRef.current = detail.replayAfterSequence;
-    update({ type: "conversation.loaded", conversation: detail });
-    await refreshConversations();
+  function beginNewConversation(initialPrompt: string | null = null): void {
+    resetConversation();
+    setPendingInitialPrompt(initialPrompt);
+    setNewConversationTitle(initialPrompt === null ? "" : conversationTitle(initialPrompt));
+    setWorkspaceChoice(workspaces.length === 0 ? "new" : "existing");
+    setSelectedWorkspaceId(workspaces[0]?.workspaceId ?? "");
+    setNewWorkspaceName("");
+    setWorkspacePanelOpen(true);
   }
 
-  async function provisionSession(name: string, source: WorkspaceSourceRequest) {
+  async function createConversation(): Promise<void> {
+    const title = newConversationTitle.trim();
+    if (title.length === 0 || operation !== null) return;
     setOperation("creating");
+    update({ type: "api.error.cleared" });
     try {
-      const project = await api.createProject(name, source);
-      const session = await api.createSession(project);
-      lastSequenceRef.current = 0;
-      update({ type: "session.created", project, session });
-      await refreshConversations();
-      return session;
+      let projectId: string;
+      let workspaceId: string;
+      if (workspaceChoice === "new") {
+        const name = newWorkspaceName.trim();
+        if (name.length === 0) return;
+        const created = await api.createProject(name, { kind: "empty" });
+        projectId = created.projectId;
+        workspaceId = created.workspaceId;
+      } else {
+        const selected = workspaces.find(
+          (workspace) => workspace.workspaceId === selectedWorkspaceId,
+        );
+        if (selected === undefined) {
+          update({ type: "api.error", message: "请选择一个 Workspace。" });
+          return;
+        }
+        projectId = selected.projectId;
+        workspaceId = selected.workspaceId;
+      }
+      const session = await api.createSession(projectId, workspaceId, title);
+      const detail = await api.getConversation(session.sessionId);
+      lastSequenceRef.current = detail.replayAfterSequence;
+      update({ type: "conversation.loaded", conversation: detail });
+      setWorkspacePanelOpen(false);
+      await Promise.all([refreshConversations(), refreshWorkspaces()]);
+      if (pendingInitialPrompt !== null) {
+        const accepted = await api.acceptTurn(
+          session.sessionId,
+          pendingInitialPrompt,
+          newIdempotencyKey("turn"),
+          "off",
+        );
+        update({ type: "turn.accepted", accepted, prompt: pendingInitialPrompt });
+        setPrompt("");
+      }
+      setPendingInitialPrompt(null);
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
-      return undefined;
     } finally {
       setOperation(null);
     }
   }
 
-  async function createWorkspace(): Promise<void> {
-    const name = workspaceName.trim();
-    if (name.length === 0) return;
-    let source: WorkspaceSourceRequest;
-    try {
-      source =
-        workspaceSourceKind === "empty"
-          ? { kind: "empty" }
-          : workspaceSourceKind === "sample_java"
-            ? { kind: "sample_java" }
-            : workspaceSourceKind === "github_public"
-              ? {
-                  kind: "github_public",
-                  repository: workspaceRepository.trim(),
-                  commitSha: workspaceCommitSha.trim(),
-                }
-              : workspaceSourceKind === "github_app"
-                ? {
-                    kind: "github_app",
-                    installationId: Number(workspaceInstallationId),
-                    repositoryId: Number(workspaceRepositoryId),
-                    commitSha: workspaceCommitSha.trim(),
-                  }
-                : parseRepositorySetManifest(workspaceRepositorySet);
-    } catch (error: unknown) {
-      update({
-        type: "api.error",
-        message: error instanceof Error ? error.message : "多仓库清单格式无效。",
-      });
+  async function deleteConversation(conversation: ConversationSummaryResource): Promise<void> {
+    if (
+      operation !== null ||
+      !window.confirm(`删除对话“${conversation.title}”？Workspace 文件不会被删除。`)
+    ) {
       return;
     }
-    const session = await provisionSession(name, source);
-    if (session !== undefined) {
-      setWorkspacePanelOpen(false);
-      setWorkspaceName("");
-      setWorkspaceRepository("");
-      setWorkspaceCommitSha("");
-      setWorkspaceInstallationId("");
-      setWorkspaceRepositoryId("");
-      setWorkspaceRepositorySet("");
-      setGitHubInstallation(null);
-    }
-  }
-
-  async function loadGitHubInstallation(): Promise<void> {
-    const installationId = Number(workspaceInstallationId);
-    if (!Number.isSafeInteger(installationId) || installationId < 1) return;
-    setGitHubLoading(true);
+    setOperation("creating");
     try {
-      const installation =
-        identity?.role === "owner"
-          ? await api.registerGitHubInstallation(installationId)
-          : await api.getGitHubInstallation(installationId);
-      setGitHubInstallation(installation);
-      setWorkspaceRepositoryId(
-        String(installation.repositories.find((item) => item.enabled)?.repositoryId ?? ""),
-      );
+      await api.deleteConversation(conversation.sessionId, newIdempotencyKey("delete"));
+      if (state.session?.sessionId === conversation.sessionId) resetConversation();
+      await refreshConversations();
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {
-      setGitHubLoading(false);
+      setOperation(null);
     }
   }
 
@@ -895,11 +885,9 @@ export default function ChatApp() {
     try {
       let session = state.session;
       if (session === null) {
-        const project = await api.createProject(conversationTitle(text), { kind: "empty" });
-        session = await api.createSession(project);
-        lastSequenceRef.current = 0;
-        update({ type: "session.created", project, session });
-        await refreshConversations();
+        setOperation(null);
+        beginNewConversation(text);
+        return;
       }
       const accepted = await api.acceptTurn(
         session.sessionId,
@@ -934,24 +922,6 @@ export default function ChatApp() {
     }
   }
 
-  async function retryRun(runId: string, sourceAttemptId: string): Promise<void> {
-    if (state.session === null || operation !== null || currentTurn !== undefined) return;
-    const run = await api.getRun(runId);
-    const original = state.turns.find((turn) => turn.turnId === run.turnId);
-    if (original === undefined) return;
-    setOperation("submitting");
-    update({ type: "api.error.cleared" });
-    try {
-      const rewind = await api.rewindRun(runId, sourceAttemptId, newIdempotencyKey("retry"));
-      update({ type: "turn.accepted", accepted: rewind.acceptedTurn, prompt: original.prompt });
-      setPrompt("");
-      setInspectorRefreshSignal((value) => value + 1);
-      await refreshConversations();
-    } finally {
-      setOperation(null);
-    }
-  }
-
   if (authPhase === "checking") {
     return (
       <main className="product-loading-page">
@@ -971,6 +941,140 @@ export default function ChatApp() {
       />
     );
   }
+  if (identity.platformAdministrator) {
+    return (
+      <main className="product-admin-page">
+        <header className="product-admin-header">
+          <div>
+            <div className="product-logo">A</div>
+            <div>
+              <strong>AgentDock 管理后台</strong>
+              <span>平台运行配置</span>
+            </div>
+          </div>
+          <div>
+            <span>{identity.displayName}</span>
+            <button onClick={() => void logout()} type="button">
+              退出登录
+            </button>
+          </div>
+        </header>
+        {state.apiError ? (
+          <div className="product-error-banner product-admin-error">
+            <span>{state.apiError}</span>
+            <button onClick={() => update({ type: "api.error.cleared" })} type="button">
+              ×
+            </button>
+          </div>
+        ) : null}
+        <section className="product-admin-content">
+          <div className="product-admin-intro">
+            <span>ADMINISTRATION</span>
+            <h1>运行配置</h1>
+            <p>配置写入持久化控制面，新任务或新连接热生效，无需重启集群。</p>
+          </div>
+          <div className="product-admin-grid">
+            <section className="product-settings-section">
+              <div>
+                <h2>Pi Worker 模型</h2>
+                <p>Key 加密保存且不会进入 Cube；运行中的任务保留启动时的模型快照。</p>
+              </div>
+              <label>
+                <span>模型</span>
+                <select
+                  disabled={settingsSaving !== null}
+                  onChange={(event) => setSelectedModelId(event.target.value as DeepSeekModelId)}
+                  value={selectedModelId}
+                >
+                  <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+                  <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                </select>
+              </label>
+              <label>
+                <span>API Key</span>
+                <input
+                  autoComplete="off"
+                  disabled={settingsSaving !== null}
+                  onChange={(event) => setModelApiKey(event.target.value)}
+                  placeholder={modelConfiguration?.mode === "real" ? "输入新 Key 以轮换" : "sk-…"}
+                  spellCheck={false}
+                  type="password"
+                  value={modelApiKey}
+                />
+              </label>
+              <div className="product-settings-action">
+                <small>
+                  当前凭据版本{" "}
+                  {modelConfiguration === null
+                    ? "读取中"
+                    : String(modelConfiguration.credentialVersion)}
+                </small>
+                <button
+                  className="product-primary-button"
+                  disabled={
+                    settingsSaving !== null ||
+                    modelApiKey.trim() === "" ||
+                    modelConfiguration === null
+                  }
+                  onClick={() => void saveModelConfiguration()}
+                  type="button"
+                >
+                  {settingsSaving === "model" ? "加密并发布中…" : "更新模型配置"}
+                </button>
+              </div>
+            </section>
+            <section className="product-settings-section">
+              <div>
+                <h2>CubeSandbox 公网代理</h2>
+                <p>MicroVM 只能连接可信网关；新 HTTP/HTTPS 连接读取最新配置。</p>
+              </div>
+              <label className="product-settings-toggle">
+                <input
+                  checked={cubeProxyEnabled}
+                  disabled={settingsSaving !== null}
+                  onChange={(event) => setCubeProxyEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>允许代理感知的软件访问公网 HTTP/HTTPS</span>
+              </label>
+              <label>
+                <span>WSL / 宿主机上游代理</span>
+                <input
+                  autoComplete="off"
+                  disabled={settingsSaving !== null}
+                  onChange={(event) => setCubeProxyUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                  spellCheck={false}
+                  type="url"
+                  value={cubeProxyUrl}
+                />
+              </label>
+              <div className="product-settings-action">
+                <small>
+                  当前代理版本{" "}
+                  {cubeProxyConfiguration === null
+                    ? "读取中"
+                    : String(cubeProxyConfiguration.revision)}
+                </small>
+                <button
+                  className="product-primary-button"
+                  disabled={
+                    settingsSaving !== null ||
+                    cubeProxyConfiguration === null ||
+                    (cubeProxyEnabled && cubeProxyUrl.trim() === "")
+                  }
+                  onClick={() => void saveCubeProxyConfiguration()}
+                  type="button"
+                >
+                  {settingsSaving === "proxy" ? "发布中…" : "应用代理配置"}
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <div className="product-shell">
@@ -986,20 +1090,8 @@ export default function ChatApp() {
           <strong>AgentDock</strong>
         </header>
         <div className="product-sidebar-actions">
-          <button className="product-new-chat" onClick={resetConversation} type="button">
+          <button className="product-new-chat" onClick={() => beginNewConversation()} type="button">
             <span>＋</span> 新对话
-          </button>
-          <button
-            className="product-import-button"
-            onClick={() => {
-              setWorkspaceSourceKind("github_public");
-              setWorkspaceName("");
-              setWorkspacePanelOpen(true);
-              setSidebarOpen(false);
-            }}
-            type="button"
-          >
-            导入项目
           </button>
         </div>
         <nav className="product-conversation-list" aria-label="对话列表">
@@ -1008,16 +1100,33 @@ export default function ChatApp() {
             <div className="product-conversation-empty">还没有对话</div>
           ) : (
             conversations.map((conversation) => (
-              <button
-                className={state.session?.sessionId === conversation.sessionId ? "active" : ""}
-                disabled={conversationLoading !== null || operation !== null}
+              <div
+                className={`product-conversation-row ${
+                  state.session?.sessionId === conversation.sessionId ? "active" : ""
+                }`}
                 key={conversation.sessionId}
-                onClick={() => void openConversation(conversation)}
-                type="button"
               >
-                <strong>{conversation.projectName}</strong>
-                <small>{relativeTime(conversation.lastActiveAt)}</small>
-              </button>
+                <button
+                  disabled={conversationLoading !== null || operation !== null}
+                  onClick={() => void openConversation(conversation)}
+                  type="button"
+                >
+                  <strong>{conversation.title}</strong>
+                  <small>
+                    {conversation.workspaceName} · {relativeTime(conversation.lastActiveAt)}
+                  </small>
+                </button>
+                <button
+                  aria-label={`删除对话 ${conversation.title}`}
+                  className="product-delete-conversation"
+                  disabled={conversationLoading !== null || operation !== null}
+                  onClick={() => void deleteConversation(conversation)}
+                  title="删除对话"
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
             ))
           )}
         </nav>
@@ -1050,29 +1159,11 @@ export default function ChatApp() {
             ☰
           </button>
           <div className="product-topbar-title">
-            <strong>{state.project?.name ?? "新对话"}</strong>
+            <strong>{state.session?.title ?? "新对话"}</strong>
+            {state.project ? <span>/workspace · {state.project.name}</span> : null}
             {state.session ? (
               <span className={state.connection.phase === "live" ? "online" : ""}>
                 {state.connection.phase === "live" ? "已连接" : "连接中"}
-              </span>
-            ) : null}
-            {state.project ? (
-              <span
-                className={`product-environment-badge product-environment-${state.project.environment.state}`}
-                title={
-                  state.project.environment.latestValidation === undefined
-                    ? `镜像 ${state.project.environment.imageRevision}`
-                    : state.project.environment.latestValidation.tools
-                        .map((tool) => `${tool.name} ${tool.version}`)
-                        .join(" · ")
-                }
-              >
-                Env v{String(state.project.environment.versionNumber)} ·{" "}
-                {state.project.environment.state === "validated"
-                  ? "gVisor 已验证"
-                  : state.project.environment.state === "failed"
-                    ? "验证失败"
-                    : "等待首次工具调用"}
               </span>
             ) : null}
           </div>
@@ -1080,11 +1171,6 @@ export default function ChatApp() {
             {state.connection.phase === "failed" ? (
               <button onClick={() => setReconnectGeneration((value) => value + 1)} type="button">
                 重新连接
-              </button>
-            ) : null}
-            {cubeProxyConfiguration !== null ? (
-              <button onClick={() => setSettingsOpen(true)} type="button">
-                设置
               </button>
             ) : null}
             <button
@@ -1103,137 +1189,97 @@ export default function ChatApp() {
               className="product-workspace-modal"
               onSubmit={(event) => {
                 event.preventDefault();
-                void createWorkspace();
+                void createConversation();
               }}
             >
               <header>
                 <div>
-                  <h2>开始一个项目对话</h2>
-                  <p>选择空 Workspace 或导入固定版本的代码仓库。</p>
+                  <h2>新建对话</h2>
+                  <p>每个对话都在你选择的 /workspace 目录中工作。</p>
                 </div>
-                <button onClick={() => setWorkspacePanelOpen(false)} type="button">
+                <button
+                  onClick={() => {
+                    setWorkspacePanelOpen(false);
+                    setPendingInitialPrompt(null);
+                  }}
+                  type="button"
+                >
                   ×
                 </button>
               </header>
               <label>
-                <span>对话名称</span>
+                <span>对话标题</span>
                 <input
+                  autoFocus
                   maxLength={256}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="例如：重构订单服务"
+                  onChange={(event) => setNewConversationTitle(event.target.value)}
+                  placeholder="例如：修复订单服务的并发问题"
                   required
-                  value={workspaceName}
+                  value={newConversationTitle}
                 />
               </label>
-              <label>
-                <span>项目来源</span>
-                <select
-                  onChange={(event) =>
-                    setWorkspaceSourceKind(event.target.value as WorkspaceSourceRequest["kind"])
-                  }
-                  value={workspaceSourceKind}
-                >
-                  <option value="empty">空 Workspace</option>
-                  <option value="github_public">公开 GitHub 仓库</option>
-                  <option value="github_app">GitHub App 私有仓库</option>
-                  <option value="repository_set">多仓库精确版本</option>
-                  <option value="sample_java">Java 修复示例</option>
-                </select>
-              </label>
-              {workspaceSourceKind === "github_public" ? (
-                <>
-                  <label>
-                    <span>仓库</span>
+              <fieldset className="product-workspace-choice">
+                <legend>Workspace</legend>
+                {workspaces.length > 0 ? (
+                  <label className="product-choice-card">
                     <input
-                      onChange={(event) => setWorkspaceRepository(event.target.value)}
-                      placeholder="owner/repository"
-                      required
-                      value={workspaceRepository}
+                      checked={workspaceChoice === "existing"}
+                      onChange={() => setWorkspaceChoice("existing")}
+                      type="radio"
                     />
+                    <span>
+                      <strong>选择已有 Workspace</strong>
+                      <small>继续使用已有文件、依赖和 Git 状态</small>
+                    </span>
                   </label>
+                ) : null}
+                {workspaceChoice === "existing" && workspaces.length > 0 ? (
                   <label>
-                    <span>Commit SHA</span>
-                    <input
-                      maxLength={40}
-                      minLength={40}
-                      onChange={(event) => setWorkspaceCommitSha(event.target.value)}
-                      pattern="[0-9a-f]{40}"
-                      placeholder="40 位小写 SHA"
-                      required
-                      value={workspaceCommitSha}
-                    />
-                  </label>
-                </>
-              ) : null}
-              {workspaceSourceKind === "github_app" ? (
-                <div className="product-github-fields">
-                  <label>
-                    <span>Installation ID</span>
-                    <input
-                      min="1"
-                      onChange={(event) => {
-                        setWorkspaceInstallationId(event.target.value);
-                        setGitHubInstallation(null);
-                      }}
-                      type="number"
-                      value={workspaceInstallationId}
-                    />
-                  </label>
-                  <button
-                    disabled={githubLoading || !workspaceInstallationId}
-                    onClick={() => void loadGitHubInstallation()}
-                    type="button"
-                  >
-                    {githubLoading ? "同步中…" : "同步仓库"}
-                  </button>
-                  <label>
-                    <span>仓库</span>
+                    <span>目录</span>
                     <select
-                      disabled={githubInstallation === null}
-                      onChange={(event) => setWorkspaceRepositoryId(event.target.value)}
-                      value={workspaceRepositoryId}
+                      onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+                      value={selectedWorkspaceId}
                     >
-                      <option value="">选择仓库</option>
-                      {githubInstallation?.repositories
-                        .filter((item) => item.enabled)
-                        .map((item) => (
-                          <option key={item.repositoryId} value={item.repositoryId}>
-                            {item.fullName}
-                          </option>
-                        ))}
+                      {workspaces.map((workspace) => (
+                        <option key={workspace.workspaceId} value={workspace.workspaceId}>
+                          {workspace.name}（{String(workspace.sessionCount)} 个对话）
+                        </option>
+                      ))}
                     </select>
                   </label>
+                ) : null}
+                <label className="product-choice-card">
+                  <input
+                    checked={workspaceChoice === "new"}
+                    onChange={() => setWorkspaceChoice("new")}
+                    type="radio"
+                  />
+                  <span>
+                    <strong>创建新 Workspace</strong>
+                    <small>创建一个新的空 /workspace 目录</small>
+                  </span>
+                </label>
+                {workspaceChoice === "new" ? (
                   <label>
-                    <span>Commit SHA</span>
+                    <span>Workspace 名称</span>
                     <input
-                      maxLength={40}
-                      minLength={40}
-                      onChange={(event) => setWorkspaceCommitSha(event.target.value)}
-                      pattern="[0-9a-f]{40}"
-                      value={workspaceCommitSha}
+                      maxLength={256}
+                      onChange={(event) => setNewWorkspaceName(event.target.value)}
+                      placeholder="例如：order-service"
+                      required
+                      value={newWorkspaceName}
                     />
                   </label>
-                </div>
-              ) : null}
-              {workspaceSourceKind === "repository_set" ? (
-                <label>
-                  <span>仓库清单（2–8 个，JSON）</span>
-                  <textarea
-                    onChange={(event) => setWorkspaceRepositorySet(event.target.value)}
-                    placeholder={REPOSITORY_SET_EXAMPLE}
-                    required
-                    rows={12}
-                    spellCheck={false}
-                    value={workspaceRepositorySet}
-                  />
-                  <small>
-                    每个仓库必须固定到 40 位 Commit SHA，并映射到唯一顶层目录。清单也支持 github_app
-                    条目。
-                  </small>
-                </label>
-              ) : null}
+                ) : null}
+              </fieldset>
               <footer>
-                <button onClick={() => setWorkspacePanelOpen(false)} type="button">
+                <button
+                  onClick={() => {
+                    setWorkspacePanelOpen(false);
+                    setPendingInitialPrompt(null);
+                  }}
+                  type="button"
+                >
                   取消
                 </button>
                 <button
@@ -1245,124 +1291,6 @@ export default function ChatApp() {
                 </button>
               </footer>
             </form>
-          </div>
-        ) : null}
-
-        {settingsOpen && cubeProxyConfiguration !== null ? (
-          <div className="product-modal-backdrop" role="presentation">
-            <section
-              aria-label="平台运行配置"
-              aria-modal="true"
-              className="product-workspace-modal product-settings-modal"
-              role="dialog"
-            >
-              <header>
-                <div>
-                  <h2>平台运行配置</h2>
-                  <p>配置写入持久化控制面，新任务或新连接热生效，无需重启集群。</p>
-                </div>
-                <button onClick={() => setSettingsOpen(false)} type="button">
-                  ×
-                </button>
-              </header>
-
-              <div className="product-settings-section">
-                <div>
-                  <h3>Pi Worker 模型</h3>
-                  <p>Key 加密保存且不会进入 Cube。正在运行的任务保留启动时的模型快照。</p>
-                </div>
-                <label>
-                  <span>模型</span>
-                  <select
-                    disabled={settingsSaving !== null}
-                    onChange={(event) => setSelectedModelId(event.target.value as DeepSeekModelId)}
-                    value={selectedModelId}
-                  >
-                    <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
-                    <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-                  </select>
-                </label>
-                <label>
-                  <span>API Key</span>
-                  <input
-                    autoComplete="off"
-                    disabled={settingsSaving !== null}
-                    onChange={(event) => setModelApiKey(event.target.value)}
-                    placeholder={modelConfiguration?.mode === "real" ? "输入新 Key 以轮换" : "sk-…"}
-                    spellCheck={false}
-                    type="password"
-                    value={modelApiKey}
-                  />
-                </label>
-                <div className="product-settings-action">
-                  <small>
-                    当前凭据版本{" "}
-                    {modelConfiguration === null
-                      ? "读取中"
-                      : String(modelConfiguration.credentialVersion)}
-                  </small>
-                  <button
-                    className="product-primary-button"
-                    disabled={settingsSaving !== null || modelApiKey.trim() === ""}
-                    onClick={() => void saveModelConfiguration()}
-                    type="button"
-                  >
-                    {settingsSaving === "model" ? "加密并发布中…" : "更新模型配置"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="product-settings-section">
-                <div>
-                  <h3>CubeSandbox 公网代理</h3>
-                  <p>MicroVM 只能连接可信网关。配置刷新后，新 HTTP/HTTPS 连接使用最新版本。</p>
-                </div>
-                <label className="product-settings-toggle">
-                  <input
-                    checked={cubeProxyEnabled}
-                    disabled={settingsSaving !== null}
-                    onChange={(event) => setCubeProxyEnabled(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>允许代理感知的软件访问公网 HTTP/HTTPS</span>
-                </label>
-                <label>
-                  <span>WSL / 宿主机上游代理</span>
-                  <input
-                    autoComplete="off"
-                    disabled={settingsSaving !== null}
-                    onChange={(event) => setCubeProxyUrl(event.target.value)}
-                    placeholder="http://127.0.0.1:7890"
-                    spellCheck={false}
-                    type="url"
-                    value={cubeProxyUrl}
-                  />
-                </label>
-                <div className="product-settings-action">
-                  <small>当前代理版本 {String(cubeProxyConfiguration.revision)}</small>
-                  <button
-                    className="product-primary-button"
-                    disabled={
-                      settingsSaving !== null || (cubeProxyEnabled && cubeProxyUrl.trim() === "")
-                    }
-                    onClick={() => void saveCubeProxyConfiguration()}
-                    type="button"
-                  >
-                    {settingsSaving === "proxy" ? "发布中…" : "应用代理配置"}
-                  </button>
-                </div>
-              </div>
-
-              <footer>
-                <button
-                  disabled={settingsSaving !== null}
-                  onClick={() => setSettingsOpen(false)}
-                  type="button"
-                >
-                  关闭
-                </button>
-              </footer>
-            </section>
           </div>
         ) : null}
 
@@ -1403,17 +1331,11 @@ export default function ChatApp() {
           {inspectorOpen ? (
             <WorkspaceInspector
               api={api}
-              busy={currentTurn !== undefined || operation !== null}
               onClose={() => setInspectorOpen(false)}
               onError={(message) => update({ type: "api.error", message })}
-              onForked={openConversationById}
-              onRetry={retryRun}
-              onSessionChanged={refreshConversations}
               refreshSignal={inspectorRefreshSignal}
-              role={identity.role}
-              projectId={state.project?.projectId ?? null}
               sessionId={state.session?.sessionId ?? null}
-              source={state.project?.source ?? null}
+              workspaceName={state.project?.name ?? null}
             />
           ) : null}
         </div>

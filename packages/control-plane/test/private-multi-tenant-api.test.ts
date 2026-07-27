@@ -156,6 +156,7 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
       userId: tenantA.ownerUserId,
       displayName: "Alpha Owner",
       role: "member",
+      platformAdministrator: false,
     });
     const bravo = await http.inject({
       method: "GET",
@@ -230,7 +231,7 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
       method: "POST",
       url: `/v1/projects/${projectA.projectId}/sessions`,
       headers: authorization(memberAToken),
-      payload: { workspaceId: projectA.workspaceId },
+      payload: { workspaceId: projectA.workspaceId, title: "Test conversation" },
     });
     expect(alphaSession.statusCode).toBe(201);
     sessionA = alphaSession.json<SessionResource>();
@@ -262,7 +263,7 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
         method: "POST",
         url: `/v1/projects/${projectA.projectId}/sessions`,
         headers: authorization(tenantB.credential.token),
-        payload: { workspaceId: projectA.workspaceId },
+        payload: { workspaceId: projectA.workspaceId, title: "Test conversation" },
       }),
       await http.inject({
         method: "POST",

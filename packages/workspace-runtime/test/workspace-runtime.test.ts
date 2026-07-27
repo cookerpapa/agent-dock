@@ -68,9 +68,9 @@ describe("shared workspace runtime", () => {
       "fixture-baseline\n",
     );
     await expect(readFile(resolve(target, "src/App.java"), "utf8")).resolves.toBe("class App {}\n");
-    await expect(
-      readFile(resolve(target, ".agent-dock-runtime/generation"), "utf8"),
-    ).resolves.toBe(`${"a".repeat(64)}\n`);
+    await expect(readFile(resolve(target, ".agent-dock-runtime/generation"), "utf8")).resolves.toBe(
+      `${"a".repeat(64)}\n`,
+    );
     await expect(readFile(resolve(target, "stale.txt"), "utf8")).rejects.toThrow();
     expect((await stat(resolve(target, "test.sh"))).mode & 0o111).not.toBe(0);
   });

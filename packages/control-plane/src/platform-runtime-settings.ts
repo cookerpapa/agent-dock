@@ -96,6 +96,14 @@ export class PlatformRuntimeSettingsService {
     this.#idGenerator = options.idGenerator ?? randomUUID;
   }
 
+  isPlatformAdministrator(identity: TenantRequestIdentity): boolean {
+    return (
+      identity.role === "owner" &&
+      this.#platformOperatorTenantId !== undefined &&
+      identity.tenantId === this.#platformOperatorTenantId
+    );
+  }
+
   async get(identity: TenantRequestIdentity): Promise<CubeProxyConfigurationResource> {
     this.#requirePlatformOperator(identity);
     return this.#resource(await this.#read());
@@ -199,11 +207,7 @@ export class PlatformRuntimeSettingsService {
   }
 
   #requirePlatformOperator(identity: TenantRequestIdentity): void {
-    if (
-      identity.role !== "owner" ||
-      this.#platformOperatorTenantId === undefined ||
-      identity.tenantId !== this.#platformOperatorTenantId
-    ) {
+    if (!this.isPlatformAdministrator(identity)) {
       throw new PlatformRuntimeSettingsError(
         "authorization_denied",
         "Only the platform operator can administer CubeSandbox egress",

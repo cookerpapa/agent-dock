@@ -1,198 +1,138 @@
 # Threat model
 
-## Scope and security claim
+## Security claim
 
-AgentDock's supported security claim is a private, single-node, multi-tenant
-deployment for repositories selected by the deployment owner. Prompts,
-model-generated commands, repository files, build scripts, and tool output are
-untrusted. The host administrator, deployed images, Control Plane, Trusted Pi
-Runner, Model Gateway, Sandbox Manager, Cube control/compute plane, PostgreSQL,
-and object store are trusted.
+AgentDock executes model-generated and repository-controlled commands inside a
+tenant-bound CubeSandbox KVM microVM. The trusted Agent Loop, provider
+credential, database, object store and orchestration credentials remain
+outside that guest.
 
-Ordinary Tool workloads run in independent CubeSandbox KVM guests. Public
-repository import remains a separate fixed-purpose gVisor `runsc`/KVM workload.
-Neither path is an ordinary shared-kernel Docker-container boundary. This does
-not make the current loopback product a hostile public code-execution SaaS:
-public identity, abuse controls, Cube control-plane hardening, destination-level
-egress governance, capacity admission and independent review remain outside the
-claim.
+This is a bounded self-hosted multi-tenant design. It is not a claim that one
+single-node host can survive compromise of its host kernel, KVM, Cube control
+plane or administrator account.
 
 ## Assets
 
-- tenant identity and authorization;
-- browser password verifiers and revocable Web-session digests;
-- long-lived model-provider credentials and turn-scoped gateway capabilities;
-- Supervisor enrollment/management and Sandbox Manager credentials;
-- PostgreSQL control state and tenant usage records;
-- S3/MinIO checkpoints, immutable Workspace versions, and repository seeds;
-- GitHub App private key, short-lived installation tokens, and repository write authority;
-- Pi JSONL conversation history;
-- tenant workspace contents and resulting patches;
-- encrypted coordinated backups and their independently stored passphrases;
-- Cube API/scheduler/compute state, KVM, the Kubernetes importer node,
-  K3s/containerd, `runsc`, and the host kernel.
+- model/provider credentials;
+- tenant conversation and Pi Session state;
+- Workspace source and artifacts;
+- database/object-store credentials;
+- Cube and orchestration control authority;
+- host and other tenants' compute/data;
+- usage, audit and configuration records.
 
 ## Trust zones
 
 ```text
-Untrusted browser input / repository / model output
-                 |
-                 v
-        Control Plane (trusted)
-                 |
-       authenticated commands/events
-                 v
-   Trusted Pi Runner + Model Gateway ---- service RPC ---- GitHub Gateway
-          |      |                                      (trusted credential boundary)
-          |      `---- fixed CONNECT ---- Provider egress relay
-          |                                  (no model credential)
-       capability-scoped Tool RPC
-          v
-       Sandbox Manager (trusted TCB)
-          |                         |
- fixed CubeAPI/Proxy relays     scoped Kubernetes API
-          v                         v
- CubeMaster/Cubelet/KVM       gVisor importer Pod
-          |
- Tool microVM (untrusted, only trusted web-egress gateway reachable)
+Untrusted:
+  browser input
+  prompts/model output
+  repositories/dependencies
+  commands and processes in Cube
+
+Trusted product:
+  Web ingress
+  Control Plane
+  Temporal
+  Pi Workers
+  Model Gateway
+  Sandbox Manager
+  Workspace Data Mover
+  Cube egress gateway
+
+Infrastructure TCB:
+  PostgreSQL / object storage
+  Cube control plane / KVM / host kernel
+  deployment administrator
 ```
 
-The Sandbox Manager is deliberately small. It holds the CubeAPI key and a
-least-privilege Kubernetes credential only for the importer. Fixed-target
-credential-free relays prevent request-controlled Cube destinations. The
-Manager can create/inspect/delete restricted importer Pods but cannot read
-Secrets, mutate RBAC/NetworkPolicy, use host namespaces or manage nodes. No
-application service receives a Docker/containerd socket. Tool guests receive
-neither a Kubernetes ServiceAccount token, CubeAPI key nor any platform
-credential.
+## Main threats and controls
 
-## Adversaries and assumptions
+### Tenant data access
 
-In scope:
+Every API query is scoped by authenticated tenant identity. Foreign UUIDs
+return `404`. Workspace activation identity includes tenant and Workspace.
+Cross-tenant tests place canaries in separate Workspaces and attempt direct
+reads from the other guest.
 
-- a prompt that persuades the model to run arbitrary shell commands;
-- a repository with malicious build/test scripts;
-- malicious Tool code exfiltrating Workspace or prompt-derived data to a public
-  destination;
-- a tenant probing another tenant's IDs, events, checkpoints, or workspace;
-- replayed Tool RPC operations or stale fenced workers;
-- runaway output, process creation, memory use, CPU use, and long-running tools;
-- Runner, Manager, browser, or network interruption at lifecycle boundaries;
-- symlink and lexical path traversal inside a workspace;
-- accidental secret disclosure through environment, logs, events, Pod
-  configuration, snapshots, or patches.
+### Stale Worker side effects
 
-Assumed trusted or out of scope for the current claim:
+RunAttempts carry a lease and monotonically increasing fencing token. Tool
+execution, checkpoint CAS, terminal commit and runtime handoff validate the
+current token. A recovered old Worker cannot regain authority by retaining a
+process or network connection.
 
-- a malicious host administrator or compromised Cube/K3s control plane;
-- a CubeShim/RustVMM/KVM, gVisor, Kubernetes-node runtime or host-kernel escape;
-- arbitrary user-supplied Pi extensions running beside model credentials;
-- public anonymous hostile tenants, billing abuse, and Internet-scale denial of
-  service;
-- supply-chain compromise of pinned base images or npm packages.
+### Credential theft from user code
 
-## Threats and controls
+Cube receives no model, database, object-store, Temporal, Cube API or platform
+credential. Tool capabilities are not included in model messages or persisted
+inside `/workspace`. The guest cannot route to platform networks.
 
-| Threat | Control | Executable evidence |
-| --- | --- | --- |
-| Password or browser session disclosure | Per-account salted scrypt verifier; opaque HttpOnly/SameSite session; digest-only persistence; bounded lifetime and immediate revocation | PostgreSQL account/login/logout and cookie-auth integration tests |
-| Product user replaces or reads the platform model key | Admin UI writes require the platform-operator owner; replacement creates encrypted per-tenant AES-GCM credential versions, while reads expose only safe metadata | platform-model inheritance/write-denial integration test and production account flow |
-| Tool reads provider or platform credentials | Fixed subprocess environment; no credential env/file/mount in Tool Sandbox | `env`, `/proc/self/environ`, and `/proc/1/environ` probes |
-| Runner's provider route exposes host networking or arbitrary egress | Runner joins internal model egress only; a TCP-to-Unix-socket relay permits exact provider TCP/443, holds no model key and does not terminate TLS | production topology inspection, relay allowlist tests and real-provider acceptance |
-| Tool controls execution infrastructure | no application has a Docker/containerd socket; Tool guest has no Kubernetes/Cube credential; Cube lifecycle is available only through the bounded Manager and fixed relays | production topology, Cube request-shape tests, live guest credential probes |
-| Accepted Run silently changes Tool image after rollout | append-only Project environment versions; immutable Run snapshot; Manager profile/revision match; in-guest toolchain preflight; READY template evidence binds Git revision, image digest and spec hash | migration/protocol tests, production startup gate, Cube environment evidence and real-token Run |
-| Model chooses an unreviewed image or runtime policy | template/profile/network/resources remain operator configuration and closed protocols reject extra client fields | protocol schemas, template contract tests and Manager policy mismatch tests |
-| Ordinary Tool reaches internal services or metadata | every Cube create request allows only the stable trusted gateway and denies all other IPv4; the gateway resolves targets itself and rejects the entire answer set if any address is private/special | gateway SSRF tests plus live Cube proxy-mediated HTTPS/direct/private/metadata denial probes |
-| Ordinary Tool bypasses or reconfigures the egress proxy | upstream URL and polling identity exist only in the trusted gateway/Control Plane; Tool environment receives a fixed credential-free gateway address and Cube denies every direct route | Tool environment test, Cube request-shape test and gateway service-token test |
-| Ordinary Tool exfiltrates Workspace data to a public host | accepted residual risk of operator-enabled public-web mode; the guest has no model/platform/GitHub credential, and the private-deployment claim excludes DLP | credential-absence probes and explicit ADR-0063 risk statement |
-| Cross-tenant workspace read | one microVM is bound to one immutable tenant/project/workspace/session identity; an exact-Session warm handoff requires a higher fence and rotated secret, and it is never rebound across identities | simultaneous two-tenant same-path canaries, stale-authority rejection and Cube KVM gate |
-| A used runtime is sanitized and reassigned to another tenant | used guests are never pooled or rebound across Session/Workspace/tenant identity; exact-Session warm release revokes the old Tool capability while preserving only that Session's processes, and mismatch or ambiguity destroys it | checkpoint/rebind template check, immutable-binding Provider tests, exact cleanup and zero-orphan inventory gate |
-| Path or symlink escape | lexical root check, parent realpath check, `O_NOFOLLOW`, final-link rejection | traversal and `/etc/passwd` symlink tests |
-| Capability theft/replay | Manager capability is stored only as SHA-256 digest; the guest handoff secret remains in trusted memory, binds immutable identity plus fence, and rotates on every rebind; operation IDs are replay-protected | Manager unit/integration tests and stale handoff-authority rejection |
-| Kopia Workspace reference is stolen, tampered with, or rebound by an old Attempt | Data Mover derives the volume from tenant/Workspace/Session, accepts no caller-selected path or repository credential, and the reference binds volume/environment/activation/fence; PostgreSQL Fence/CAS is the only head publisher | strict checkpoint codec, wrong-tenant/stale-fence tests and local-copy-loss restore gate |
-| Historical Workspace preview becomes a hidden write/exec channel | the trusted Data Mover restores only the requested indexed regular file from immutable Kopia data, enforces path/hash/size bounds and exposes no shell or repository credential | credential-separation RPC test and traversal/hash Provider tests |
-| Stale worker commits state | lease ID, attempt ID, fencing token, checkpoint revision CAS, fenced event commit | PostgreSQL and production recovery tests |
-| Runaway resource use | Cube template CPU/memory/disk limits plus guest `RLIMIT_NPROC`, file limits and command/output/Turn bounds | template fingerprint, actual process exhaustion and in-guest probes |
-| Cancel leaves descendants | process-group abort followed by exact Cube activation destruction and absence confirmation | long background-process cancellation and zero-orphan test |
-| Partial checkpoint becomes current | upload/hash/manifest validation followed by fenced pointer CAS; terminal event is commit marker | checkpoint corruption and two-turn restore tests |
-| Cube execution node/disk is lost | POSIX execution copy is reconstructed from the committed Kopia snapshot; the local profile proves copy deletion, while a whole-host claim still requires off-node/replicated POSIX and S3 | ADR-0067 and local-copy-loss restore gate |
-| Old/failed Attempt publishes a Workspace version | staged version is bound to Run/Attempt and settled in the fenced terminal transaction; failures abandon it and restore prior pointers | version consistency and stale-attempt tests |
-| GitHub token reaches repository code | only the Gateway owns App key/tokens; private import returns canonical bytes and write-back consumes a trusted artifact | Gateway contract and Tool-Sandbox environment/network tests |
-| GitHub webhook forgery/replay | raw-body HMAC verification, bounded normalized schema, service RPC, unique delivery ID and content hash | Gateway HMAC and Control Plane deduplication tests |
-| Secret leaks through output | closed public schemas, bounded previews, tenant-scoped full-output Artifacts, no raw Pi payloads, repository secret scan | artifact/event tests, production secret audit, Gitleaks workflow |
-| Concurrent model requests overspend one budget | tenant-policy row lock plus completed/unexpired reservation aggregation before provider egress | Model Gateway reservation and denial tests |
-| Mutable prices rewrite historical cost | completed request snapshots all four owner-configured rates and integer micro-USD cost | Gateway ledger tests |
-| Observability leaks tenant content or credentials | closed low-cardinality metric labels, opaque trace attributes, recursive structured-log redaction, separate metrics bearer | observability unit tests and production target inspection |
-| Untrusted Tool syscalls attack the host kernel | ordinary Tool code runs behind a distinct KVM guest kernel; no runc/local-process fallback exists | Cubelet/KVM gate, guest/host kernel identity comparison and real Pi tests |
-| Compose backup is tampered with, partially restored, or overwrites live state | AES-GCM authenticated payload, scrypt key derivation, per-authority hashes, safe archive paths, exact image IDs, new empty project/runtime only; the MinIO authority includes the dedicated Kopia repository | crypto tamper/wrong-key check, Compose restore drill and Kopia restore verification |
-| Repository or Artifact preview executes active content in the browser | React-escaped bounded UTF-8 text only; binary is labelled; no HTML/script/live-preview embedding | Web component/API tests and production bundle/product flow |
-| Fixable severe image vulnerability ships unnoticed | immutable-pinned scanner, complete HIGH/CRITICAL report, CycloneDX SBOM, zero-fixable-HIGH/CRITICAL gate | CI image matrix and local release-evidence command |
+### Host discovery and escape
 
-## Credential flow
+The guest sees its own kernel/process/filesystem environment. KVM reduces the
+direct host-kernel syscall surface. The template uses fixed devices, identity
+and resources, and exposes no host mount or runtime socket.
 
-Long-lived provider credentials are decrypted only inside trusted services. A
-turn receives a random, expiring Model Gateway capability in the Pi process.
-That capability is never forwarded in Tool RPC or environment. The separate
-Tool capability authorizes one activation and is stored by the Manager only as
-a digest. The Tool Sandbox sees neither capability.
+Residual risk remains for Cube/VMM/KVM/host vulnerabilities. Production
+hardening should place the Cube execution plane on dedicated hosts and keep the
+host patched.
 
-The public repository importer receives no GitHub token. It can fetch only a
-normalized public `owner/repository` at an exact commit from a fixed-purpose
-gVisor Pod in `agent-dock-importers`. It has no host mount, ServiceAccount token,
-published port, prompt, user-controlled command, or enabled repository hook.
-The Pod has no DNS and its NetworkPolicy permits only the capability proxy
-ClusterIP. A per-import Ed25519 capability fixes the only CONNECT target to
-`github.com:443` and bounds lifetime, connections, concurrency, bytes and
-duration; proxy resolution rejects private, link-local, Pod, Service and node
-addresses. For the optional private path, the GitHub Gateway alone signs
-App JWTs and caches short-lived installation tokens in memory. The trusted
-Runner receives canonical repository bytes; the Control Plane submits a
-tenant/version-validated artifact for delivery. Neither component receives the
-token, and the Tool Sandbox cannot route to the Gateway. The default deployment
-ships without a usable App private key and fails App operations closed.
+### Network exfiltration and SSRF
 
-The trusted Model Gateway receives the provider key but no host network. Its
-public HTTPS request uses Node's environment-aware proxy dispatcher to reach a
-private bridge, which forwards to a Unix-socket-only host relay. The relay
-accepts only the operator-owned DeepSeek hostname on TCP/443 and transports
-opaque TLS bytes; it never receives the request headers inside TLS or the model
-key. Cube Tool guests cannot route to Compose networks. The host relay is trusted
-transport code and its host-network blast radius is constrained by non-root
-execution, no TCP listener, no platform secrets, dropped capabilities,
-read-only rootfs and bounded resources.
+Public Web traffic crosses the trusted egress gateway. The gateway rejects
+private, loopback, link-local, metadata, reserved and platform destinations
+after DNS resolution. Public egress intentionally permits source/data
+exfiltration to public hosts; operators who require stronger confidentiality
+must use a domain allowlist policy.
 
-## Residual risks and required upgrades
+### Resource exhaustion
 
-Before exposing arbitrary untrusted repositories to the public Internet:
+The Provider bounds CPU, memory, processes, open files, Workspace size,
+temporary storage, command time, Run wall-clock time and output. Tenant quotas
+and global Tool admission protect shared capacity. Orphan reconciliation and
+idle expiry reclaim runtimes.
 
-1. move Cube from the validated single-node WSL2/KVM profile to dedicated
-   control/compute nodes and complete node-loss, storage, upgrade, density and
-   security review;
-2. add verified identity, password recovery/MFA, distributed login and
-   registration abuse/rate controls, audit retention, and incident response
-   around the existing tenant model budgets;
-3. isolate project/user extension code from Pi and model credentials;
-4. add signed provenance attestations and automated patch cadence on top of the
-   current OCI labels, CycloneDX SBOMs, and vulnerability gate;
-5. run an independent penetration review of the Manager and host configuration.
+### Path and archive attacks
 
-The observability backends remain on an internal Compose network. A separate
-read-only Caddy process joins that network and its own non-platform edge network,
-publishing Prometheus, Jaeger, and Grafana only on host loopback. It has no
-platform secret, database network, Kubernetes credential, or Tool-Pod authority.
+Tool file APIs normalize paths beneath `/workspace`, reject absolute/traversal
+and symlink escape, bound file sizes and validate immutable checkpoint hashes.
+The Data Mover never accepts an arbitrary host path from the model or browser.
 
-## Reproduction
+### Duplicate/ambiguous side effects
 
-```bash
-npm run sandbox:check
-npm run cubesandbox:live-check
-npm run production:check
-npm run release:evidence
-```
+HTTP admission and checkpoint commits are idempotent. Arbitrary Bash is not
+automatically treated as retry-safe. If execution outcome is ambiguous, the
+operation is marked unknown or the activation is destroyed and restored from
+the last committed Workspace.
 
-The first command retains the gVisor importer/regression proof. The second
-attests real Cube KVM guests, two-tenant isolation, public HTTPS,
-private/metadata denial, cancellation and cleanup. The third creates and removes a deterministic
-disposable topology, tests multi-tenant behavior, and restores a coordinated
-encrypted backup before continuing a Run. The fourth produces checksummed SBOM
-and image vulnerability evidence from clean revision-labelled images.
+### Browser/admin confusion
+
+Tenant `owner` grants only tenant authority. A separate
+`platformAdministrator` identity controls deployment-wide model and proxy
+settings and lands on a dedicated page. The operator tenant ID comes from
+deployment configuration.
+
+## Data retention
+
+Conversation deletion is a soft archive. It removes the Session from ordinary
+listing/direct conversation reads but retains the durable event, Pi checkpoint
+and Workspace audit history for retention/recovery. A future retention worker
+must delete those records under explicit policy; the browser delete action does
+not silently erase a shared Workspace.
+
+## Required evidence
+
+Before a release:
+
+1. run unit/integration/type checks;
+2. run the real Cube template/provider gate;
+3. verify no platform credential appears in guest `env` or `/proc`;
+4. verify private/platform routes are denied and public proxy egress works;
+5. verify cross-tenant Workspace access fails;
+6. verify time/output/process limits and cancellation;
+7. verify stale fences cannot execute Tools or commit checkpoints;
+8. verify completed/failed/cancelled Runs leave the expected warm or destroyed
+   runtime state and no orphan resources.
+
+Historical threat models and ADRs describe superseded designs only.

@@ -20,8 +20,6 @@ import {
   type CubeSandboxDataRequest,
   type CubeSandboxInstance,
   type CubeSandboxRuntimeClient,
-  type SandboxHandle,
-  type SandboxProvider,
 } from "../src/index.ts";
 import type { WorkspaceDataMover } from "../src/workspace-data-mover.ts";
 
@@ -257,7 +255,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     await provider.checkHealth();
@@ -284,7 +281,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     await expect(
@@ -314,7 +310,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover,
     });
     const manager = new ToolSandboxManager({
@@ -476,7 +471,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover,
     });
     const first = await provider.create({
@@ -558,7 +552,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -592,7 +585,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -648,7 +640,6 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -666,7 +657,7 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("promotes capability-scoped dependency setup into a fresh full-public Cube VM", async () => {
+  it("runs dependency setup inside the same full-public Cube VM", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const dependencyRecipe = {
       schemaVersion: 1 as const,
@@ -697,52 +688,11 @@ describe("CubeSandbox Provider contract", () => {
         .update(canonicalEnvironmentRecipeJson(dependencyRecipe))
         .digest("hex") as `${string}`,
     };
-    const setupResult = {
-      id: "install",
-      phase: "setup" as const,
-      exitCode: 0,
-      durationMs: 12,
-      outputSha256: "b".repeat(64),
-    };
-    const bootstrapHandle: SandboxHandle = {
-      providerApiVersion: 1,
-      providerId: "kubernetes-gvisor",
-      activationId: ACTIVATION_ID,
-      runtimeId: "10000000-0000-4000-8000-000000000040",
-      runtimeName: "bootstrap-pod",
-      workspaceRoot: "/workspace",
-      assignment,
-      environment: dependencyEnvironment,
-      environmentValidation: {
-        ...toolchain,
-        recipeSha256: dependencyEnvironment.recipeSha256,
-        recipeCommands: [setupResult],
-        isolationBoundary: "gvisor",
-        runtime: "runsc",
-        networkMode: "deny_all",
-        runAsUser: "1000:1000",
-        readOnlyRootFilesystem: true,
-      },
-    };
-    const bootstrap = {
-      create: vi.fn(async () => bootstrapHandle),
-      snapshot: vi.fn(async (_handle: SandboxHandle, requestId: string) => ({
-        managerProtocolVersion: 1 as const,
-        type: "tool_sandbox.captured" as const,
-        requestId,
-        activationId: ACTIVATION_ID,
-        workspace: snapshot,
-        environment: bootstrapHandle.environmentValidation,
-      })),
-      destroy: vi.fn(async () => undefined),
-    } as unknown as SandboxProvider;
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      importGitHub: vi.fn(async () => Buffer.alloc(0)),
-      bootstrapProvider: bootstrap,
       workspaceDataMover: fakeWorkspaceDataMover(),
     });
     const handle = await provider.create({
@@ -752,9 +702,6 @@ describe("CubeSandbox Provider contract", () => {
       workspaceSeed: { kind: "sample_java" },
       policy: provider.defaultPolicy,
     });
-    expect(bootstrap.create).toHaveBeenCalledOnce();
-    expect(bootstrap.snapshot).toHaveBeenCalledOnce();
-    expect(bootstrap.destroy).toHaveBeenCalledOnce();
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]).toMatchObject({
       allowInternetAccess: true,
@@ -762,12 +709,10 @@ describe("CubeSandbox Provider contract", () => {
     });
     const initialize = runtime.requests.find(({ input }) => input.path === "/v1/initialize");
     expect(initialize?.input.body).toMatchObject({
-      workspaceRestore: snapshot,
-      environmentStage: {
-        type: "offline_restore",
-        setupCommands: [setupResult],
-      },
+      webProxy: WEB_PROXY,
     });
+    expect(initialize?.input.body).not.toHaveProperty("environmentStage");
+    expect(initialize?.input.body).not.toHaveProperty("workspaceRestore");
     await provider.destroy(handle);
     await provider.close();
   });

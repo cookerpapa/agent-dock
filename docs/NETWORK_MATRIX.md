@@ -1,158 +1,82 @@
 # Network and credential matrix
 
-## Rule
+## Default rule
 
-Untrusted Cube Tool microVMs never join a platform network. CubeVS permits one
-exact trusted gateway IPv4 address and denies every other IPv4 destination.
-That gateway provides proxy-mediated public HTTP/HTTPS after resolving and
-rejecting private, loopback, link-local/metadata and other special addresses.
-Network membership never replaces application authentication.
+Only an explicitly required connection is allowed. User code never joins a
+platform service network.
 
-The trusted product plane currently runs in isolated Compose networks; the
-ordinary untrusted execution plane runs in Cube KVM guests. K3s/gVisor remains
-for exact-commit import. Credential-free relays provide closed bridges from the
-Manager to fixed CubeAPI, CubeProxy and Kubernetes endpoints, and from the
-trusted Model Gateway to the exact model provider host.
+| Source | Destination | Allowed | Credential |
+| --- | --- | ---: | --- |
+| Browser | Web ingress | yes | browser session cookie |
+| Web ingress | Control Plane | yes | trusted internal route |
+| Control Plane | PostgreSQL | yes | DB credential |
+| Control Plane | Temporal | yes | internal namespace |
+| Control Plane | MinIO/S3 | yes | object-store credential |
+| Pi Worker | Control Plane management channel | yes | Worker boot credential |
+| Pi Worker | Model Gateway | yes | short-lived Run capability |
+| Pi Worker | Sandbox Manager | yes | service identity + Tool lease |
+| Sandbox Manager | Cube API/Proxy | yes | Cube API credential |
+| Data Mover | Cube Volume/POSIX storage | yes | deployment identity |
+| Data Mover | object storage | yes | scoped checkpoint credential |
+| Cube guest | Cube egress gateway | yes | no platform credential |
+| Cube guest | public HTTP/HTTPS | via gateway | none |
+| Cube guest | private/link-local/metadata networks | no | none |
+| Cube guest | Control Plane/PostgreSQL/Temporal/MinIO/Model Gateway | no | none |
+| Cube guest | Cube control API | no | none |
+| Cube guest | another tenant Workspace | no | none |
 
 ## Trusted product plane
 
-| Component | Edge/API | Management | Database | Object storage | Sandbox control | GitHub control | Observability | Model egress | Provider egress | K3s API relay | Public ports |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Web ingress | yes | no | no | no | no | webhook proxy only | no | no | no | no | loopback `8080` |
-| Control Plane | API | yes | yes | no | no | yes | metrics/trace | no | no | no | none |
-| Trusted Pi Runner | no | yes | yes | yes | yes | yes | metrics/trace | internal relay only | no direct route | no | none |
-| Provider bridge relay | no | no | no | no | no | no | no | yes | Unix socket only | no | none |
-| Provider host relay | no | no | no | no | no | no | no | Unix socket only | exact provider or operator proxy | no | no TCP listener |
-| Sandbox Manager | no | no | no | no | yes | no | metrics/trace | no | no | via relay | none |
-| Workspace Data Mover | no | no | no | dedicated Kopia bucket only | authenticated Manager RPC only | no | no | no | no | no | none |
-| Kubernetes API relay | no | no | no | no | yes | no | no | no | no | fixed host `6443` | none |
-| CubeAPI relay | no | no | no | no | fixed Cube lifecycle target | no | no | no | fixed private CubeAPI | no | none |
-| CubeProxy relay | no | no | no | no | fixed per-guest data target | no | no | no | fixed private CubeProxy | no | none |
-| Cube web-egress gateway | no | no | no | no | no | no | redacted audit only | no | operator HTTP(S) proxy | no | stable `10.255.255.254:3128` to Cube only |
-| GitHub Gateway | no | no | no | no | no | yes | no | no | yes | no | none |
-| PostgreSQL | no | no | yes | no | no | no | no | no | no | no | none |
-| MinIO | no | no | no | yes | no | no | no | no | no | no | none |
-| Prometheus / Jaeger / Grafana | no | no | no | no | no | no | yes | no | no | no | none |
-| Observability ingress | separate loopback edge | no | no | no | no | no | proxy only | no | no | no | loopback `9090`, `16686`, `3001` |
+Control Plane, Temporal, PostgreSQL, object storage, model gateway and Worker
+management use private deployment networks. Their credentials are injected only
+into the service that needs them.
 
-The Kubernetes relay has no mount, secret, environment credential or application route. It
-accepts TCP only on the private `sandbox-control` network and forwards only to
-the fixed `agent-dock-kubernetes-host:6443` target. TLS authentication and
-authorization remain end-to-end between the Manager's scoped kubeconfig and
-the Kubernetes API server.
+The Worker does not receive the Cube API key. The Sandbox Manager does not
+receive the model provider key.
 
-The two Cube relays likewise hold no API key or guest traffic token. Each can
-dial only one operator-validated private endpoint. CubeAPI authentication and
-CubeProxy per-sandbox traffic authentication remain end-to-end with the
-Manager.
+## Cube egress
 
-The Workspace Data Mover joins only `sandbox-control` and `object-storage`.
-It has a private POSIX Workspace mount and dedicated Kopia S3 credential, but
-no database, model, GitHub, Kubernetes, Cube API, provider-egress or public
-edge path. Sandbox Manager holds only the Data Mover service token; it never
-sees the Kopia repository password or object-store credential.
+The guest receives proxy environment variables pointing to the trusted gateway.
+The gateway may connect directly or through the administrator-configured
+upstream WSL/host proxy.
 
-The provider bridge accepts CONNECT only on the internal `model-egress`
-network and forwards bytes through a `0700` named-volume Unix socket. The
-host-network half listens on no TCP port, permits only
-`api.deepseek.com:443`, rejects non-public direct DNS answers, and contains no
-model or platform credential. Provider TLS and API authentication remain
-end-to-end between the trusted Model Gateway and DeepSeek. The Runner is not a
-member of the directly routed `provider-egress` network.
+The gateway denies:
 
-## Cube Tool execution plane
+```text
+loopback
+RFC1918
+carrier-grade NAT
+link-local
+cloud metadata
+multicast/reserved/test ranges
+platform service destinations
+```
 
-| Workload | Ingress | DNS | Public egress | Platform/private endpoints | Credential |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Ordinary Tool microVM | private-token Tool protocol through CubeProxy only | no direct DNS required for proxy-aware tools | HTTP/HTTPS through one trusted gateway only | deny all direct routes; gateway rejects private/special targets | none |
+DNS rebinding is mitigated by resolving and validating the actual target
+address at connection time. Redirects remain subject to the same validation.
 
-Every create request sets `allow_internet_access=true`,
-`allowPublicTraffic=false`, `allowOut=["10.255.255.254/32"]` and
-`denyOut=["0.0.0.0/0"]`. Cube evaluates the exact gateway allow before the
-catch-all deny. The real KVM gate requires proxy-mediated public HTTPS to
-succeed while direct public routes, CubeAPI, Control
-Plane/PostgreSQL-class endpoints and `169.254.169.254` fail. Port 49984 is the
-only registered Tool service and remains protected by Cube's per-Sandbox
-traffic token. Cube's inherited `envd` command channel is not started.
+## Credential placement
 
-The host-network gateway polls a service-token-authenticated Control Plane
-endpoint for the current operator proxy revision. New HTTP requests and CONNECT
-tunnels use the latest successfully loaded revision; no cluster restart is
-required. WSL mirrored networking is supported because only this trusted
-gateway, not each microVM, needs to reach the Windows/WSL proxy.
+| Credential | Stored/used by | Must not enter |
+| --- | --- | --- |
+| model API key | encrypted DB + Model Gateway | browser, Cube |
+| DB credential | Control Plane/trusted services | browser, Cube |
+| object-store credential | Control Plane/Data Mover/Worker as scoped | browser, Cube |
+| Temporal credential/config | Control Plane/Workers | browser, Cube |
+| Cube API key | Sandbox Manager | browser, Pi prompt, Cube guest |
+| browser password hash | authentication store | logs, browser response |
+| Tool lease/handoff secret | Worker/Manager/guest Tool service | model context, Workspace |
 
-## Kubernetes importer plane
+## Hot proxy configuration
 
-| Workload/namespace | Ingress | DNS | Public egress | Cluster/private/link-local | Platform networks |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Disposable dependency bootstrap Pod / `agent-dock-sandboxes` | proxy Pod only | deny | exact-host HTTPS through proxy only | proxy rejects every non-public answer | none |
-| Importer Pod / `agent-dock-importers` | proxy Pod only | deny | exact `github.com:443` through a signed capability only | proxy rejects every non-public answer | none |
-| Capability proxy / `agent-dock-egress` | labelled setup/import Pods only | cluster DNS only | TCP/443 only | NetworkPolicy exclusion plus per-resolution application check | none |
+The platform administrator updates the proxy origin through a versioned Control
+Plane API. The Cube egress gateway reloads the latest committed configuration
+for new connections. Existing connections retain their already-established
+route; no cluster restart is required.
 
-Both namespaces receive pre-created default-deny NetworkPolicies. Neither the
-importer nor a dependency-bootstrap Pod receives DNS or arbitrary public HTTPS.
-Their only egress is the proxy ClusterIP. The Manager signs a short-lived
-capability for exact recipe hosts or the fixed `github.com` import host; the
-proxy resolves names and rejects non-public answers. Standard NetworkPolicy
-provides the L3/L4 path while the application capability supplies the domain,
-port, lifetime, connection, concurrency, byte and duration boundary.
+## Evidence
 
-Importer/bootstrap Pods set `dnsPolicy: None`, publish no port, and are
-unreachable from the Manager except through Kubernetes attach/exec
-subresources. A disposable Pod selected for dependency setup can connect only
-to the proxy Service. For a Cube environment with `dependencyHosts`, the
-Manager captures only that bootstrap Pod's regular-file Workspace, destroys the
-Pod and capability, and restores the bytes into a newly created
-Cube microVM. Processes, network namespaces, connections and capability
-material are not promoted. That remains a reproducible environment-preparation
-boundary, but the ordinary Cube Tool microVM subsequently has ADR-0063's
-proxy-mediated public-web egress.
-
-## Credential and authority matrix
-
-| Component | Tenant API auth | Model secret | DB | Object store | Manager token | GitHub key/token | Kubernetes credential | Docker/containerd socket |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Browser/Web | cookie/bearer | no | no | no | no | no | no | no |
-| Control Plane | digest verification | encrypted credential authority | yes | no | no | service RPC only | no | no |
-| Trusted Pi Runner | no public token | turn-scoped gateway + trusted resolver | yes | scoped identity | yes | service RPC only | no | no |
-| Sandbox Manager | no | no | no | no | own verifier | no | importer namespaces plus one named RuntimeClass read; Cube API key separately | no |
-| Workspace Data Mover | no | no | no | dedicated Kopia read/write credential | own verifier | no | no | no |
-| Kubernetes API relay | no | no | no | no | no | no | no | no |
-| GitHub Gateway | no | no | no | no | no | App key + memory-only token | no | no |
-| Provider relays | no | no | no | no | no | no | no | no |
-| Cube Tool microVM | no | no | no | no | no | no | no Kubernetes/Cube credential; only gateway address | no |
-| Cube web-egress gateway | no | no | no | no | no | no | no ServiceAccount token; polling token only | no |
-| Importer Pod | no | no | no | no | no | no | no ServiceAccount token | no |
-
-Only the trusted host operator uses Docker to build the product images and the
-K3s containerd socket to import the Tool image. Neither socket is mounted into
-an application container.
-
-## Executable denial evidence
-
-The primary live gate verifies from inside real Cube KVM Tool guests that they:
-
-- can reach a stable public HTTPS endpoint through the trusted gateway;
-- cannot reach a public IP directly;
-- cannot reach CubeAPI, the Control Plane/PostgreSQL-class platform endpoints
-  or link-local metadata;
-- cannot read Runner/Manager environment, model/platform credentials or a Kubernetes
-  token;
-- cannot find a Docker/containerd socket or another tenant's Workspace.
-
-It additionally verifies a guest kernel distinct from the host, UID/GID,
-capabilities, rlimit behavior, bounded output, cancellation and complete
-microVM deletion. The retained `sandbox:check` separately verifies the gVisor
-importer/regression boundary.
-
-## Dependency network
-
-Dependency installation uses a separately authenticated CONNECT proxy with
-exact-host Ed25519 capabilities, proxy-side DNS resolution, private/special IP
-rejection, TCP/443-only forwarding, connection/byte/duration bounds and
-redacted audit logs. Redirects require another CONNECT and therefore another
-exact allowed host. The issuer private key remains in the Sandbox Manager;
-Kubernetes receives only its public key. Cube Tool microVMs are never added to
-provider egress, the importer namespace, or a platform network. Their sole
-outbound route is the stable trusted web gateway; the gateway alone reaches the
-operator's HTTP(S) proxy.
+Live acceptance attempts to reach every denied platform/private destination
+from inside the guest, verifies public HTTPS through the gateway, checks the
+guest environment for credentials, and proves a second tenant cannot read the
+first tenant's Workspace.

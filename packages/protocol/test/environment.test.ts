@@ -38,18 +38,18 @@ describe("versioned project environment protocol", () => {
     expect(() => parseEnvironmentRuntimeSnapshot({ ...snapshot, profileVersion: "2" })).toThrow();
   });
 
-  it("validates concrete gVisor and toolchain evidence", () => {
+  it("validates concrete CubeSandbox and toolchain evidence", () => {
     const report = parseEnvironmentValidationReport({
       profileKey: snapshot.profileKey,
       profileVersion: snapshot.profileVersion,
       imageRevision: snapshot.imageRevision,
       specSha256: snapshot.specSha256,
       recipeSha256: snapshot.recipeSha256,
-      isolationBoundary: "gvisor",
-      runtime: "runsc",
-      networkMode: "deny_all",
+      isolationBoundary: "microvm",
+      runtime: "cubesandbox-kvm",
+      networkMode: "public_web_proxy_private_denied",
       runAsUser: "1000:1000",
-      readOnlyRootFilesystem: true,
+      readOnlyRootFilesystem: false,
       tools,
       recipeCommands: [],
     });
@@ -73,7 +73,7 @@ describe("versioned project environment protocol", () => {
       recipeSha256: snapshot.recipeSha256,
       isolationBoundary: "microvm",
       runtime: "cubesandbox-kvm",
-      networkMode: "public_egress_private_denied",
+      networkMode: "public_web_proxy_private_denied",
       runAsUser: "1000:1000",
       readOnlyRootFilesystem: false,
       tools,
@@ -83,7 +83,7 @@ describe("versioned project environment protocol", () => {
     expect(() =>
       parseEnvironmentValidationReport({
         ...report,
-        runtime: "runsc",
+        runtime: "legacy-runtime",
       }),
     ).toThrow();
     expect(() =>

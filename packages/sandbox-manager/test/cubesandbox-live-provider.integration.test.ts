@@ -372,9 +372,6 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         imageRevision: config.imageRevision,
         webProxy: config.webProxy,
         runtime: config.runtime,
-        importGitHub: async () => {
-          throw new Error("Repository import is outside the Cube live Provider gate");
-        },
         workspaceDataMover: new HttpWorkspaceDataMover({
           baseUrl: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
           serviceToken: await readPrivateKey(

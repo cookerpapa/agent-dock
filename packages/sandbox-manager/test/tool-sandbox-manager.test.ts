@@ -9,7 +9,6 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { generateKeyPairSync } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -56,11 +55,11 @@ const environmentValidation = {
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
   recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-  isolationBoundary: "gvisor" as const,
-  runtime: "runsc" as const,
-  networkMode: "deny_all" as const,
+  isolationBoundary: "microvm" as const,
+  runtime: "cubesandbox-kvm" as const,
+  networkMode: "public_web_proxy_private_denied" as const,
   runAsUser: "1000:1000" as const,
-  readOnlyRootFilesystem: true as const,
+  readOnlyRootFilesystem: false as const,
   tools: [
     { name: "node" as const, version: "v24.18.0" },
     { name: "java" as const, version: 'openjdk version "17.0.19"' },
@@ -97,14 +96,14 @@ function providerFixture() {
     assignment: nextAssignment,
   }));
   const provider: SandboxProvider = {
-    providerId: "gvisor",
+    providerId: "cubesandbox",
     async checkHealth() {},
     async create(spec) {
       createCount += 1;
       createSpec = spec;
       return {
         providerApiVersion: 1,
-        providerId: "gvisor",
+        providerId: "cubesandbox",
         activationId: spec.activationId,
         runtimeId: "66666666-6666-4666-8666-666666666666",
         runtimeName: `agent-dock-tool-${spec.activationId}`.slice(0, 63),
@@ -130,16 +129,16 @@ function providerFixture() {
     async inspect(handle) {
       return {
         providerApiVersion: 1,
-        providerId: "gvisor",
+        providerId: "cubesandbox",
         state: "running",
         handle,
         effectiveIsolation: {
-          isolationBoundary: "gvisor",
-          runtime: "runsc",
+          isolationBoundary: "microvm",
+          runtime: "cubesandbox-kvm",
           user: "1000:1000",
           privileged: false,
-          readOnlyRootFilesystem: true,
-          networkMode: "none",
+          readOnlyRootFilesystem: false,
+          networkMode: "public_web_proxy_private_denied",
           mountCount: 0,
           hasDockerSocket: false,
           pidLimit: 128,
@@ -148,7 +147,7 @@ function providerFixture() {
           cpuNano: 1_000_000_000,
           droppedCapabilities: ["ALL"],
           securityOptions: ["no-new-privileges"],
-          sandboxKernelRelease: "4.19.0-gvisor",
+          sandboxKernelRelease: "6.1.0-cube",
         },
       };
     },
@@ -500,66 +499,15 @@ describe("provider-backed Tool Sandbox Manager", () => {
   it("rejects unknown runtime selectors instead of accepting a fallback", async () => {
     await expect(
       loadSandboxManagerConfig({ AGENT_DOCK_SANDBOX_PROVIDER: "vercel" }),
-    ).rejects.toThrow("is invalid");
+    ).rejects.toThrow("Only the CubeSandbox Provider is supported");
   });
 
-  it("loads only the fixed Kubernetes gVisor deployment configuration", async () => {
+  it("loads only the CubeSandbox deployment configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
     const tokenPath = join(directory, "manager-token");
-    const issuerPath = join(directory, "dependency-egress-private-key.pem");
     try {
       await writeFile(tokenPath, `${"t".repeat(48)}\n`, { mode: 0o600 });
       await chmod(tokenPath, 0o600);
-      const { privateKey } = generateKeyPairSync("ed25519");
-      await writeFile(issuerPath, privateKey.export({ type: "pkcs8", format: "pem" }), {
-        mode: 0o600,
-      });
-      await chmod(issuerPath, 0o600);
-      await expect(
-        loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
-          AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
-        }),
-      ).resolves.toMatchObject({
-        toolImage: "agent-dock/tool-sandbox:test",
-        kubeconfigPath: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
-        runtimeClassName: "agent-dock-gvisor",
-        imagePullPolicy: "Never",
-        cleanPrewarmTarget: 2,
-        maximumActiveSandboxes: 2,
-        cleanPrewarmTtlMs: 300_000,
-        dependencyEgress: {
-          namespace: "agent-dock-egress",
-          configMapName: "dependency-egress-trust",
-          serviceName: "dependency-egress-proxy",
-          servicePort: 3128,
-          capabilityTtlMs: 900_000,
-        },
-      });
-      await chmod(issuerPath, 0o644);
-      await expect(
-        loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
-          AGENT_DOCK_DEPENDENCY_EGRESS_PRIVATE_KEY_FILE: issuerPath,
-        }),
-      ).rejects.toThrow(/not private/);
-      await chmod(issuerPath, 0o600);
-      await expect(
-        loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
-          AGENT_DOCK_MICROVM_TEMPLATE_PULL_POLICY: "sometimes",
-        }),
-      ).rejects.toThrow("was removed");
-
       const cubeKeyPath = join(directory, "cube-api-key");
       await writeFile(cubeKeyPath, `${"k".repeat(48)}\n`, { mode: 0o600 });
       await chmod(cubeKeyPath, 0o600);
@@ -570,9 +518,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_PROVIDER: "cubesandbox",
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
           AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
           AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
@@ -582,7 +528,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
           AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
         }),
       ).resolves.toMatchObject({
-        provider: "cubesandbox",
+        maximumActiveSandboxes: 2,
+        maximumWarmActivations: 4,
         cubeSandbox: {
           apiUrl: "https://cube-api.internal",
           apiKey: "k".repeat(48),
@@ -598,9 +545,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       await expect(
         loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_TOOL_SANDBOX_IMAGE: "agent-dock/tool-sandbox:test",
           AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_KUBECONFIG_PATH: "/run/agent-dock-kubernetes/sandbox-manager.kubeconfig",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),
       ).rejects.toThrow("was removed");

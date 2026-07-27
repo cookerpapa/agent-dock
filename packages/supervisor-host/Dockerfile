@@ -7,7 +7,6 @@ COPY scripts/harden-pi-dependencies.mjs scripts/harden-pi-dependencies.mjs
 COPY packages/control-plane/package.json packages/control-plane/package.json
 COPY packages/control-plane/tsconfig.json packages/control-plane/tsconfig.json
 COPY packages/database/package.json packages/database/package.json
-COPY packages/dependency-egress-proxy/package.json packages/dependency-egress-proxy/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json
 COPY packages/github-gateway/package.json packages/github-gateway/package.json
@@ -45,8 +44,6 @@ COPY packages/control-plane/tsconfig.json packages/control-plane/tsconfig.json
 COPY packages/control-plane/src packages/control-plane/src
 COPY packages/database/package.json packages/database/package.json
 COPY packages/database/src packages/database/src
-COPY packages/dependency-egress-proxy/package.json packages/dependency-egress-proxy/package.json
-COPY packages/dependency-egress-proxy/src packages/dependency-egress-proxy/src
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/domain/src packages/domain/src
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json

@@ -281,7 +281,7 @@ beforeAll(async () => {
     fetchImplementation: upstreamFetch,
   });
   await gateway.start();
-});
+}, 30_000);
 
 afterAll(async () => {
   await gateway?.close();

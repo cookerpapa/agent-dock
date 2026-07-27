@@ -1,4 +1,4 @@
-import { createPrivateKey, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, chown, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -240,26 +240,6 @@ async function ensureCubeEgressConfigToken(runtimeDirectory) {
   return true;
 }
 
-async function ensureDependencyEgressIssuer(runtimeDirectory) {
-  const path = resolve(runtimeDirectory, "secrets/dependency-egress-private-key.pem");
-  try {
-    const existing = await readPrivateFile(path);
-    const key = createPrivateKey(existing);
-    if (key.asymmetricKeyType !== "ed25519") {
-      throw new Error("Production dependency egress issuer key is invalid");
-    }
-    return false;
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  const { privateKey } = generateKeyPairSync("ed25519");
-  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-  await writePrivateFile(path, pem);
-  const application = applicationIdentity();
-  if (application.changeOwnership) await chown(path, application.uid, application.gid);
-  return true;
-}
-
 async function ensureObservabilitySecrets(runtimeDirectory) {
   const application = applicationIdentity();
   const created = [];
@@ -426,7 +406,6 @@ if (await validateExisting(runtimeDirectory)) {
   await ensureWorkspaceDataMoverState(runtimeDirectory);
   const workspaceDataMoverSecretsCreated = await ensureWorkspaceDataMoverSecrets(runtimeDirectory);
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
-  const dependencyEgressIssuerCreated = await ensureDependencyEgressIssuer(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
   const observabilitySecretsCreated = await ensureObservabilitySecrets(runtimeDirectory);
   const objectStoreCredentialMigrated =
@@ -440,7 +419,6 @@ if (await validateExisting(runtimeDirectory)) {
       sandboxMaterializerTokenCreated,
       workspaceDataMoverSecretsCreated,
       cubeEgressConfigTokenCreated,
-      dependencyEgressIssuerCreated,
       githubGatewaySecretsCreated,
       observabilitySecretsCreated,
       objectStoreCredentialMigrated,
@@ -570,13 +548,6 @@ await writePrivateFile(
   resolve(secretsDirectory, "cube-egress-config-token"),
   `${randomSecret()}\n`,
 );
-{
-  const { privateKey } = generateKeyPairSync("ed25519");
-  await writePrivateFile(
-    resolve(secretsDirectory, "dependency-egress-private-key.pem"),
-    privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-  );
-}
 await writePrivateFile(resolve(secretsDirectory, "github-gateway-token"), `${randomSecret()}\n`);
 await writePrivateFile(resolve(secretsDirectory, "github-webhook-secret"), `${randomSecret()}\n`);
 await writePrivateFile(resolve(secretsDirectory, "github-app-private-key.pem"), "not-configured\n");

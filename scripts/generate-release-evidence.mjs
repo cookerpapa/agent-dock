@@ -27,7 +27,7 @@ const IMAGE_NAMES = [
   "github-gateway",
   "web-ui",
   "tool-sandbox",
-  "dependency-egress-proxy",
+  "cube-egress-gateway",
 ];
 const MAX_CAPTURE_BYTES = 64 * 1_024 * 1_024;
 

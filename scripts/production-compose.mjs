@@ -8,23 +8,13 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
 const requestedProvider = process.env.AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER ?? "cubesandbox";
-if (
-  requestedProvider !== "cubesandbox" &&
-  !(
-    requestedProvider === "kubernetes-gvisor" &&
-    process.env.AGENT_DOCK_TEST_KUBERNETES_GVISOR_PROVIDER === "1"
-  )
-) {
-  throw new Error(
-    "Production Tool execution requires CubeSandbox; Kubernetes/gVisor is available only to the explicit deterministic test gate",
-  );
+if (requestedProvider !== "cubesandbox") {
+  throw new Error("Production Tool execution requires CubeSandbox");
 }
 const configuredOverride = process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE;
 const composeOverride =
   configuredOverride === undefined
-    ? requestedProvider === "cubesandbox"
-      ? resolve(repositoryRoot, "deploy/cubesandbox/compose.primary.yaml")
-      : undefined
+    ? resolve(repositoryRoot, "deploy/cubesandbox/compose.primary.yaml")
     : resolve(repositoryRoot, configuredOverride);
 const runtimeDirectory = resolve(
   repositoryRoot,
@@ -76,7 +66,6 @@ if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
 const applicationSecretNames = [
   "api-token",
   "database-url",
-  "dependency-egress-private-key.pem",
   "github-app-private-key.pem",
   "github-gateway-token",
   "github-webhook-secret",
@@ -90,9 +79,7 @@ const applicationSecretNames = [
   "workspace-kopia-aws-credentials",
   "supervisor-enrollment-token",
   "supervisor-management-token",
-  ...(requestedProvider === "cubesandbox" && !allowsStaleCubeTemplate
-    ? ["cubesandbox-api-key"]
-    : []),
+  ...(!allowsStaleCubeTemplate ? ["cubesandbox-api-key"] : []),
 ];
 const applicationSecrets = await Promise.all(
   applicationSecretNames.map((name) => lstat(resolve(runtimeDirectory, "secrets", name))),
@@ -241,7 +228,6 @@ const serviceArguments =
         "github-gateway",
         "web",
         "tool-sandbox-image",
-        "dependency-egress-proxy-image",
         "provider-egress-relay-image",
       ]
     : commandArguments;

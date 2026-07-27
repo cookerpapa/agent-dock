@@ -44,6 +44,7 @@ const project: ProjectResource = {
 
 const session: SessionResource = {
   sessionId: SESSION_ID,
+  title: "修复订单服务",
   projectId: project.projectId,
   workspaceId: project.workspaceId,
   state: "cold",

@@ -204,8 +204,9 @@ async function executeEnvironmentCommand(
   command: EnvironmentRecipeCommand,
   workspaceDirectory: string,
   dependencyProxy?: DependencyProxyBootstrap,
+  webProxy?: ToolWebProxyBootstrap,
 ): Promise<EnvironmentCommandExecution> {
-  if (command.network === "dependency" && dependencyProxy === undefined) {
+  if (command.network === "dependency" && dependencyProxy === undefined && webProxy === undefined) {
     throw new ToolWorkerError(
       "environment_dependency_network_unavailable",
       `Environment command ${command.id} requires an unavailable dependency network policy`,
@@ -252,7 +253,7 @@ async function executeEnvironmentCommand(
     detached: process.platform !== "win32",
     env:
       command.network === "dependency"
-        ? safeToolEnvironment(dependencyProxy)
+        ? safeToolEnvironment(dependencyProxy, webProxy)
         : safeToolEnvironment(),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -314,6 +315,7 @@ export async function executeEnvironmentRecipe(
   workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
   options: {
     dependencyProxy?: DependencyProxyBootstrap;
+    webProxy?: ToolWebProxyBootstrap;
     environmentStage?: ToolWorkerEnvironmentStage;
     verifyDependencyProxy?: (proxy: DependencyProxyBootstrap) => Promise<void>;
   } = {},
@@ -330,11 +332,13 @@ export async function executeEnvironmentRecipe(
   }
   const dependencyHosts = environment.recipe.dependencyHosts ?? [];
   const dependencyProxy = options.dependencyProxy;
+  const webProxy = options.webProxy;
+  const dependencyNetworkAvailable = dependencyProxy !== undefined || webProxy !== undefined;
   const stage = options.environmentStage;
   let phases: readonly (readonly ["setup" | "verification", readonly EnvironmentRecipeCommand[]])[];
   let results: EnvironmentRecipeCommandResult[] = [];
   if (stage?.type === "dependency_setup") {
-    if (dependencyHosts.length < 1 || dependencyProxy === undefined) {
+    if (dependencyHosts.length < 1 || !dependencyNetworkAvailable) {
       throw new ToolWorkerError(
         "environment_dependency_network_unavailable",
         "Dependency setup did not receive its accepted network capability",
@@ -343,7 +347,7 @@ export async function executeEnvironmentRecipe(
     }
     phases = [["setup", environment.recipe.setupCommands]];
   } else if (stage?.type === "offline_restore") {
-    if (dependencyHosts.length < 1 || dependencyProxy !== undefined) {
+    if (dependencyHosts.length < 1 || dependencyNetworkAvailable) {
       throw new ToolWorkerError(
         "environment_dependency_network_invalid",
         "Offline environment restore received an invalid network state",
@@ -368,7 +372,7 @@ export async function executeEnvironmentRecipe(
     results = [...stage.setupCommands];
     phases = [["verification", environment.recipe.verificationCommands]];
   } else {
-    if (dependencyHosts.length > 0 !== (dependencyProxy !== undefined)) {
+    if (dependencyHosts.length > 0 !== dependencyNetworkAvailable) {
       throw new ToolWorkerError(
         "environment_dependency_network_unavailable",
         "Environment dependency network capability did not match the accepted recipe",
@@ -389,7 +393,12 @@ export async function executeEnvironmentRecipe(
   for (const [phase, commands] of phases) {
     for (const command of commands) {
       const startedAt = Date.now();
-      const result = await executeEnvironmentCommand(command, workspaceDirectory, dependencyProxy);
+      const result = await executeEnvironmentCommand(
+        command,
+        workspaceDirectory,
+        dependencyProxy,
+        webProxy,
+      );
       if (result.timedOut) {
         throw new ToolWorkerError(
           "environment_command_timeout",
@@ -1002,6 +1011,7 @@ export async function runToolWorker(): Promise<void> {
               ...(message.dependencyProxy === undefined
                 ? {}
                 : { dependencyProxy: message.dependencyProxy }),
+              ...(message.webProxy === undefined ? {} : { webProxy: message.webProxy }),
               ...(message.environmentStage === undefined
                 ? {}
                 : { environmentStage: message.environmentStage }),

@@ -28,31 +28,22 @@ describe("product chat experience", () => {
     expect(markup).not.toContain("配置模型");
   });
 
-  it("renders the product inspector navigation without executing browser effects", () => {
+  it("renders the Workspace as a directory without executing browser effects", () => {
     const markup = renderToStaticMarkup(
       <WorkspaceInspector
         api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
-        busy={false}
         onClose={() => undefined}
         onError={() => undefined}
-        onForked={async () => undefined}
-        onRetry={async () => undefined}
-        onSessionChanged={async () => undefined}
         refreshSignal={0}
-        role="owner"
-        projectId="30000000-0000-4000-8000-000000000001"
         sessionId="10000000-0000-4000-8000-000000000001"
-        source={{ kind: "sample_java", status: "ready" }}
+        workspaceName="order-service"
       />,
     );
-    expect(markup).toContain("Session inspector");
-    expect(markup).toContain("workspace");
-    expect(markup).toContain("runs");
-    expect(markup).toContain("tests");
-    expect(markup).toContain("usage");
-    expect(markup).toContain("activity");
-    expect(markup).toContain("parallel");
-    expect(markup).toContain("Versioned workspace");
+    expect(markup).toContain("WORKSPACE");
+    expect(markup).toContain("order-service");
+    expect(markup).toContain("/workspace");
+    expect(markup).not.toContain("runs");
+    expect(markup).not.toContain("usage");
   });
 
   it("renders Pi-style command output instead of a collapsed JSON tool card", () => {

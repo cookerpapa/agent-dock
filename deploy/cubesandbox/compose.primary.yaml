@@ -7,7 +7,6 @@ services:
         condition: service_healthy
     environment:
       AGENT_DOCK_SANDBOX_PROVIDER: cubesandbox
-      AGENT_DOCK_CLEAN_PREWARM_TARGET: "0"
       AGENT_DOCK_CUBESANDBOX_API_URL: http://cube-api-relay:3000
       AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: /run/agent-dock-secrets/cubesandbox-api-key
       AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: ${AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:?set the READY Cube template ID}

@@ -2767,3 +2767,29 @@
   protocol without moving file or command execution out of CubeSandbox.
 - The extension test asserts the execution mode on every registered Tool.
   Sandbox Supervisor typecheck and its complete 65-test suite pass.
+## 2026-07-27 — Cube-only runtime and Workspace-first conversations
+
+- Runtime: removed the executable alternate Sandbox Provider, Kubernetes
+  runtime client/API relay, execution-plane Helm chart, host installer,
+  dependency bootstrap proxy and their production image/configuration paths.
+  `SandboxManager` now constructs only `CubeSandboxProvider`; environment setup
+  runs in the same Cube boundary through the deployment Web proxy.
+- Product: removed repository import and runtime-verification controls from the
+  browser. A conversation now has its own title and must select an existing
+  named Workspace or create a new empty Workspace. Multiple conversations may
+  share one durable `/workspace`.
+- Deletion: added tenant-scoped, idempotent soft deletion for conversations.
+  Archived Sessions disappear from list/direct-read APIs while the shared
+  Workspace and audit history remain.
+- Workspace UI: replaced the operational multi-endpoint inspector with a
+  committed directory tree and safe file preview. Loading depends only on
+  Workspace versions/files, eliminating the previous rejected-request refresh
+  loop.
+- Administration: added explicit `platformAdministrator` identity. Ordinary
+  tenant owners stay in the conversation product; the dedicated operator
+  account lands on the hot model/Cube-proxy settings page.
+- Operations: deleted the ignored pre-runtime execution snapshot and obsolete
+  dependency issuer secret, corrected production build/deploy/backup/release
+  scripts, and rewrote current architecture/runbook documents around the sole
+  Cube path. Historical ADRs, research, migrations and evidence remain
+  immutable records.

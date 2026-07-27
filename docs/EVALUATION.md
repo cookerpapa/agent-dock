@@ -33,15 +33,15 @@ restart/reconnect evidence.
 ## Sandbox security
 
 ```bash
-npm run sandbox:check
+npm run cubesandbox:live-check
+npm run production:check
 ```
 
-This source-build gate attests runsc/KVM and the live gVisor kernel, then runs
-the Provider contract and a real Pi remote-tool repair. It validates resources,
-offline networking, `/proc` and credential isolation, tenant-separated
-workspaces, traversal/symlink denial, output bounds, cancellation, and exact
-resource cleanup. The latest result is
-`docs/reports/gvisor-sandbox-latest.json`.
+The live gate attests the Cube KVM guest and runs the Provider contract plus a
+real Pi remote-tool repair. It validates resources, public-proxy/private-denied
+networking, credential isolation, tenant-separated Workspaces,
+traversal/symlink denial, output bounds, cancellation, checkpoint restore and
+exact resource cleanup.
 
 ## Control Plane load
 

@@ -95,7 +95,7 @@ async function imageEvidence(imageVersion) {
     "github-gateway",
     "web-ui",
     "tool-sandbox",
-    "dependency-egress-proxy",
+    "cube-egress-gateway",
   ];
   return Promise.all(
     repositories.map(async (repository) => {

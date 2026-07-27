@@ -437,6 +437,7 @@ export const TenantIdentityResourceSchema = Type.Object(
     userId: UuidSchema,
     displayName: Type.String({ minLength: 1, maxLength: 256 }),
     role: TenantApiRoleSchema,
+    platformAdministrator: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -700,6 +701,7 @@ export const ProjectResourceSchema = Type.Object(
 export const CreateSessionRequestSchema = Type.Object(
   {
     workspaceId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
   },
   { additionalProperties: false },
 );
@@ -707,6 +709,7 @@ export const CreateSessionRequestSchema = Type.Object(
 export const SessionResourceSchema = Type.Object(
   {
     sessionId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     state: Type.Literal("cold"),
@@ -730,9 +733,10 @@ export const ConversationTurnStateSchema = Type.Union([
 export const ConversationSummaryResourceSchema = Type.Object(
   {
     sessionId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
     projectId: UuidSchema,
     workspaceId: UuidSchema,
-    projectName: Type.String({ minLength: 1, maxLength: 256 }),
+    workspaceName: Type.String({ minLength: 1, maxLength: 256 }),
     state: SessionStateSchema,
     turnCount: NonNegativeSafeIntegerSchema,
     createdAt: UtcTimestampSchema,
@@ -753,6 +757,7 @@ export const ConversationListResourceSchema = Type.Object(
 export const ConversationSessionResourceSchema = Type.Object(
   {
     sessionId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     state: SessionStateSchema,
@@ -760,6 +765,26 @@ export const ConversationSessionResourceSchema = Type.Object(
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
     lastActiveAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceSummaryResourceSchema = Type.Object(
+  {
+    workspaceId: UuidSchema,
+    projectId: UuidSchema,
+    name: Type.String({ minLength: 1, maxLength: 256 }),
+    sessionCount: NonNegativeSafeIntegerSchema,
+    createdAt: UtcTimestampSchema,
+    lastActiveAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const WorkspaceListResourceSchema = Type.Object(
+  {
+    workspaces: Type.Array(WorkspaceSummaryResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -1683,6 +1708,8 @@ export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
 export type SessionResource = Static<typeof SessionResourceSchema>;
+export type WorkspaceSummaryResource = Static<typeof WorkspaceSummaryResourceSchema>;
+export type WorkspaceListResource = Static<typeof WorkspaceListResourceSchema>;
 export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
 export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
 export type ConversationListResource = Static<typeof ConversationListResourceSchema>;
@@ -2092,7 +2119,18 @@ export function parseTenantRegistrationResource(value: unknown): TenantRegistrat
 }
 
 export function parseCreateSessionRequest(value: unknown): CreateSessionRequest {
-  return parseSchema(CreateSessionRequestSchema, value, "create-session request");
+  const request = parseSchema(CreateSessionRequestSchema, value, "create-session request");
+  const title = request.title.trim();
+  if (
+    title.length === 0 ||
+    new TextEncoder().encode(title).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(title)
+  ) {
+    throw new ControlPlaneApiValidationError(
+      "Conversation title must contain 1-256 safe UTF-8 bytes",
+    );
+  }
+  return { ...request, title };
 }
 
 export function parseAcceptTurnRequest(value: unknown): AcceptTurnRequest {
@@ -2117,6 +2155,10 @@ export function parseProjectResource(value: unknown): ProjectResource {
 
 export function parseSessionResource(value: unknown): SessionResource {
   return parseSchema(SessionResourceSchema, value, "session resource");
+}
+
+export function parseWorkspaceListResource(value: unknown): WorkspaceListResource {
+  return parseSchema(WorkspaceListResourceSchema, value, "workspace list resource");
 }
 
 export function parseConversationListResource(value: unknown): ConversationListResource {

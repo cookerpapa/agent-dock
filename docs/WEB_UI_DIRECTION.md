@@ -69,10 +69,10 @@ exist through explicit product operations.
 
 `packages/web-ui` now enters through username/password login or registration and
 restores a durable HttpOnly-cookie session on reload. The authenticated shell
-shows tenant-scoped recent conversations at left and the selected transcript at
-right. Sending the first message lazily provisions an empty Workspace;
-importing a fixture or exact GitHub commit is an explicit separate action. No
-API token, provider key, model profile, or model picker is shown to a normal
+shows tenant-scoped named conversations at left and the selected transcript at
+right. Starting a conversation requires selecting an existing named Workspace
+or creating a new empty one. The browser has no repository-import workflow. No
+API token, provider key, model profile, or model picker is shown to an ordinary
 user.
 
 The transcript preserves event order, merges adjacent text deltas, renders
@@ -88,28 +88,29 @@ validated before they enter React state. No raw Pi object, credential reference,
 provider token, or API body is logged.
 
 The one-command demo uses the supported persistent production topology. After
-each successful turn, the trusted host stores Pi JSONL and a bounded workspace
-manifest before completion is published. A follow-up on the same session
-restores both into a new disposable gVisor Sandbox, so the composer can
-honestly remain available after settlement. The composer now also remains
+each successful turn, the trusted host stores Pi JSONL and the committed
+Workspace checkpoint before completion is published. A follow-up restores Pi
+state on any eligible Worker and reuses or restores the Session's Cube
+activation. The composer remains
 available during an active turn: another prompt is visibly queued as a separate
 follow-up, receives and displays its durable mailbox position, and never implies
 that it steered the running model loop. S3-compatible checkpoint storage
 remains below the UI and never exposes object keys or raw storage credentials to
 the browser.
 
-## Implemented product inspector
+## Implemented Workspace directory
 
-Milestone 7 adds a responsive right-side Session inspector while preserving the
-Pi-export-inspired transcript. Its tabs present immutable Workspace history,
-structured compare, files, Artifacts, durable Run/Attempt transitions, tests,
-tenant/run usage, context compaction, owner metrics, and a derived execution
-activity feed. Fork/rollback/archive and retry-as-new-Run are idempotent public
-API actions; terminal history is never rewritten.
+The responsive right side is a directory view of the current committed
+`/workspace`, not an operations dashboard. It loads only Workspace versions,
+files and the selected file body. Operational Runs, usage and environment
+diagnostics remain in telemetry/admin APIs, so a denied unrelated request
+cannot blank or repeatedly reload the directory.
 
 Preview is deliberately inert: at most 256 KiB of valid UTF-8 is rendered in an
 escaped `<pre>`, binary data is labelled, and repository HTML/scripts are never
-embedded. The optional GitHub App workflow lets an owner synchronize an
-installation, choose only an enabled exact-commit repository, and explicitly
-deliver the selected Workspace version as branch/commit/Check/Pull Request
-through the trusted Gateway. With no configured App, the server fails closed.
+embedded. Deleting a conversation requires confirmation and leaves its shared
+Workspace intact.
+
+A dedicated platform administrator bypasses the conversation shell and lands
+on the settings page for model and Cube proxy configuration. Tenant owners
+remain ordinary conversation users.

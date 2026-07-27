@@ -11,7 +11,7 @@ import { request as requestHttps } from "node:https";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { connect as connectTls } from "node:tls";
 import type { Duplex } from "node:stream";
-import { isPublicDependencyAddress } from "../../dependency-egress-proxy/src/address-policy.ts";
+import { isPublicAddress } from "./public-address-policy.ts";
 import type { CubeEgressRuntimeConfiguration } from "./configuration-poller.ts";
 
 const MAXIMUM_PROXY_HEADER_BYTES = 16 * 1_024;
@@ -40,7 +40,7 @@ function deny(socket: Duplex, status: number, reason: string): void {
 
 function normalizedHost(value: string): string | undefined {
   const host = value.toLowerCase().replace(/\.$/, "");
-  if (isIP(host) !== 0) return isPublicDependencyAddress(host) ? host : undefined;
+  if (isIP(host) !== 0) return isPublicAddress(host) ? host : undefined;
   if (
     host.length < 4 ||
     host.length > 253 ||
@@ -52,14 +52,14 @@ function normalizedHost(value: string): string | undefined {
 }
 
 async function publicAddresses(host: string): Promise<readonly string[]> {
-  if (isIP(host) !== 0) return isPublicDependencyAddress(host) ? [host] : [];
+  if (isIP(host) !== 0) return isPublicAddress(host) ? [host] : [];
   const [ipv4, ipv6] = await Promise.allSettled([resolve4(host), resolve6(host)]);
   const addresses = [
     ...(ipv4.status === "fulfilled" ? ipv4.value : []),
     ...(ipv6.status === "fulfilled" ? ipv6.value : []),
   ];
   const unique = [...new Set(addresses)].slice(0, 16);
-  return unique.length > 0 && unique.every(isPublicDependencyAddress) ? unique : [];
+  return unique.length > 0 && unique.every(isPublicAddress) ? unique : [];
 }
 
 function upstreamSocket(url: URL): Socket {

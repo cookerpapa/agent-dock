@@ -1,5 +1,22 @@
 # Initial backlog
 
+## Workspace-first Cube-only product cleanup
+
+- [x] Remove the executable Kubernetes/runtime-class Sandbox Provider, host
+  installer, execution-plane chart and dependency bootstrap proxy
+- [x] Make CubeSandbox the only deployment-selectable Tool runtime and execute
+  environment setup in Cube through the hot-configured Web proxy
+- [x] Remove the browser repository-import action and runtime badge
+- [x] Store conversation titles independently from Workspace names
+- [x] List named Workspaces and select/create one when starting a conversation
+- [x] Add tenant-scoped conversation deletion while retaining the Workspace
+- [x] Replace the all-or-nothing operational inspector with a stable committed
+  `/workspace` directory/file view
+- [x] Separate platform administration from tenant owner and route the
+  dedicated administrator directly to settings
+- [x] Remove current operational documentation and release scripts for the
+  superseded execution plane
+
 Only the current phase should contain implementation work. Later phases remain
 in `ROADMAP.md` until their prerequisites are complete.
 

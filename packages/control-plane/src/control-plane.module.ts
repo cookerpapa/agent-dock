@@ -114,6 +114,9 @@ export class ControlPlaneModule {
                 maximumUnsettledTurns: 10,
                 maximumConcurrentTurns: 1,
               },
+              ...(options.platformOperatorTenantId === undefined
+                ? {}
+                : { platformOperatorTenantId: options.platformOperatorTenantId }),
             }),
           }),
         },

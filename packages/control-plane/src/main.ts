@@ -85,6 +85,7 @@ export async function startControlPlane(): Promise<void> {
         ),
       secureCookie: config.webSessionCookieSecure,
       sessionTtlMs: config.webSessionTtlMs,
+      platformOperatorTenantId: config.platformOperatorTenantId,
     });
     await objectStore.checkHealth();
     temporalOrchestrator = new TemporalRunOrchestrator({

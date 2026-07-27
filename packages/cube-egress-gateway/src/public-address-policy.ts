@@ -20,6 +20,7 @@ for (const [address, prefix] of [
 ] as const) {
   blockedIpv4.addSubnet(address, prefix, "ipv4");
 }
+
 const blockedIpv6 = new BlockList();
 for (const [address, prefix] of [
   ["::", 128],
@@ -37,7 +38,7 @@ for (const [address, prefix] of [
   blockedIpv6.addSubnet(address, prefix, "ipv6");
 }
 
-export function isPublicDependencyAddress(address: string): boolean {
+export function isPublicAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4) return !blockedIpv4.check(address, "ipv4");
   if (family === 6) {

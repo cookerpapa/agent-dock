@@ -5,7 +5,6 @@ import {
   parseToolSandboxOperationResponse,
   type EnvironmentValidationReport,
   type EnvironmentToolchainReport,
-  type GitHubRepositorySource,
   type SandboxManagerMaterializeFileRequest,
   type SandboxManagerMaterializeFileResponse,
   type SupervisorRuntimeAssignment,
@@ -151,10 +150,6 @@ export type CubeSandboxProviderOptions = Readonly<{
   runtimeClient?: CubeSandboxRuntimeClient;
   runtime?: OfficialCubeSandboxRuntimeClientOptions;
   readyTimeoutMs?: number;
-  importGitHub: (source: GitHubRepositorySource, signal: AbortSignal) => Promise<Uint8Array>;
-  checkImporter?: () => Promise<void>;
-  closeImporter?: () => Promise<void>;
-  bootstrapProvider?: SandboxProvider;
   webProxy: ToolWebProxyBootstrap;
   workspaceDataMover: WorkspaceDataMover;
 }>;
@@ -548,10 +543,6 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly #imageRevision: string;
   readonly #client: CubeSandboxRuntimeClient;
   readonly #readyTimeoutMs: number;
-  readonly #importGitHub: CubeSandboxProviderOptions["importGitHub"];
-  readonly #checkImporter: (() => Promise<void>) | undefined;
-  readonly #closeImporter: (() => Promise<void>) | undefined;
-  readonly #bootstrapProvider: SandboxProvider | undefined;
   readonly #webProxy: ToolWebProxyBootstrap;
   readonly #workspaceDataMover: WorkspaceDataMover;
   readonly #activations = new Map<string, CubeActivation>();
@@ -561,10 +552,6 @@ export class CubeSandboxProvider implements SandboxProvider {
     this.#templateId = bounded(options.templateId, "CubeSandbox template ID", 256);
     this.#imageRevision = bounded(options.imageRevision, "CubeSandbox image revision", 128);
     this.#readyTimeoutMs = positiveInteger(options.readyTimeoutMs, READY_TIMEOUT_MS, 300_000);
-    this.#importGitHub = options.importGitHub;
-    this.#checkImporter = options.checkImporter;
-    this.#closeImporter = options.closeImporter;
-    this.#bootstrapProvider = options.bootstrapProvider;
     this.#workspaceDataMover = options.workspaceDataMover;
     if (
       !isIPv4(options.webProxy.host) ||
@@ -586,11 +573,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   }
 
   async checkHealth(): Promise<void> {
-    await Promise.all([
-      this.#client.checkHealth(),
-      this.#checkImporter?.(),
-      this.#workspaceDataMover.checkHealth(),
-    ]);
+    await Promise.all([this.#client.checkHealth(), this.#workspaceDataMover.checkHealth()]);
     this.#runtimeProbe ??= this.#probeRuntime();
     try {
       await this.#runtimeProbe;
@@ -642,37 +625,6 @@ export class CubeSandboxProvider implements SandboxProvider {
     if (kopiaCheckpoint !== undefined) {
       return this.#createFromKopiaCheckpoint(spec, kopiaCheckpoint);
     }
-    let workspaceRestore = spec.workspaceRestore;
-    let offlineSetupCommands: EnvironmentToolchainReport["recipeCommands"] | undefined;
-    if (spec.environment.recipe.dependencyHosts !== undefined) {
-      if (this.#bootstrapProvider === undefined) {
-        throw new SandboxManagerError(
-          "cubesandbox_dependency_bootstrap_unavailable",
-          "CubeSandbox dependency bootstrap was unavailable",
-          false,
-        );
-      }
-      let bootstrapHandle: SandboxHandle | undefined;
-      try {
-        bootstrapHandle = await this.#bootstrapProvider.create(spec);
-        const captured = await this.#bootstrapProvider.snapshot(bootstrapHandle, randomUUID());
-        if (captured.type !== "tool_sandbox.captured") {
-          throw new SandboxManagerError(
-            "cubesandbox_dependency_bootstrap_failed",
-            "Dependency bootstrap did not produce a Workspace",
-            false,
-          );
-        }
-        workspaceRestore = captured.workspace;
-        offlineSetupCommands = captured.environment.recipeCommands.filter(
-          (command) => command.phase === "setup",
-        );
-      } finally {
-        if (bootstrapHandle !== undefined) {
-          await this.#bootstrapProvider.destroy(bootstrapHandle).catch(() => undefined);
-        }
-      }
-    }
     const bindingSha256 = physicalBindingSha256(
       spec.activationId,
       spec.assignment,
@@ -713,16 +665,10 @@ export class CubeSandboxProvider implements SandboxProvider {
             activationId: spec.activationId,
             environment: spec.environment,
             workspaceSeed: spec.workspaceSeed,
-            ...(workspaceRestore === undefined ? {} : { workspaceRestore }),
-            webProxy: this.#webProxy,
-            ...(offlineSetupCommands === undefined
+            ...(spec.workspaceRestore === undefined
               ? {}
-              : {
-                  environmentStage: {
-                    type: "offline_restore",
-                    setupCommands: offlineSetupCommands,
-                  },
-                }),
+              : { workspaceRestore: spec.workspaceRestore }),
+            webProxy: this.#webProxy,
           },
           timeoutMs: this.#readyTimeoutMs,
           maximumResponseBytes: 1 * 1_024 * 1_024,
@@ -1475,19 +1421,11 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
   }
 
-  importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
-    return this.#importGitHub(source, signal);
-  }
-
   async close(): Promise<void> {
     const instances = [...this.#activations.values()].map((activation) => activation.instance);
     this.#activations.clear();
     await Promise.allSettled(instances.map((instance) => this.#client.destroy(instance.sandboxId)));
-    await Promise.all([
-      this.#client.close(),
-      this.#workspaceDataMover.close(),
-      this.#closeImporter?.(),
-    ]);
+    await Promise.all([this.#client.close(), this.#workspaceDataMover.close()]);
   }
 
   async #probeRuntime(): Promise<void> {

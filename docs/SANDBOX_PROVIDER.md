@@ -1,208 +1,130 @@
-# Sandbox Providers
+# Sandbox Provider
 
-## Supported boundary
+## Supported runtime
 
-AgentDock has one supported ordinary Tool execution Provider:
-`CubeSandboxProvider`. It creates independent KVM guests through the pinned
-Tencent CubeSandbox v0.6.0 CubeAPI/CubeMaster/Cubelet/CubeShim plane.
-
-`KubernetesGvisorSandboxProvider` remains executable only for:
-
-- the exact-commit repository importer and dependency bootstrap boundary;
-- the explicit deterministic production regression gate.
-
-It is not an ordinary production Tool fallback. There is no tenant-, prompt-,
-browser- or model-controlled runtime selector, local-process Provider,
-ordinary-runc Provider, Docker Desktop path or paid managed-provider branch.
-Missing KVM, Cube authentication, closed network policy, current-commit READY
-template or live runtime evidence makes production unready.
-
-ADR-0030 owns the provider-neutral contract, ADR-0052 records the Cube
-evaluation, and ADR-0053 is the current execution-plane decision.
-
-## Layering
+The production Sandbox Manager supports one runtime:
 
 ```text
-Trusted Pi Worker pool
-    | authenticated Tool RPC + activation capability
-    v
-ToolSandboxManager
-    | authorization, replay control, assignment fencing
-    v
 CubeSandboxProvider
-    | fixed CubeAPI lifecycle + private-token CubeProxy data path
-    v
-CubeMaster -> Cubelet -> CubeShim/KVM
-    v
-Untrusted Tool microVM
-    | /workspace; no platform credential or outbound network
+  → Cube API
+  → CubeMaster / Cubelet
+  → CubeShim / KVM microVM
 ```
 
-The Pi Worker has no Cube credential or Kubernetes credential. The Manager
-holds a mode-0600 CubeAPI key and reaches CubeAPI/CubeProxy through
-credential-free fixed-target relays. The relays cannot dial a destination
-selected by a request. The guest receives neither the API key nor its private
-traffic token.
+The deployment fails closed if `AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER` is not
+`cubesandbox`. There is no runtime fallback.
 
-The Manager separately holds a least-privilege kubeconfig for importer Pods. It
-has no Docker/containerd socket. No Tool or importer workload receives a
-ServiceAccount token.
+## Contract
 
-## Provider contract
+The trusted Manager owns a provider-neutral lifecycle contract:
 
-The Provider implements:
+```ts
+interface SandboxProvider {
+  checkHealth(): Promise<void>;
+  create(spec: SandboxCreateSpec): Promise<SandboxHandle>;
+  retainForWarm?(handle: SandboxHandle): Promise<SandboxHandle>;
+  rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle>;
+  exec(handle: SandboxHandle, request: ToolRequest, signal?: AbortSignal): Promise<ToolResult>;
+  readFile(handle: SandboxHandle, input: ReadInput, signal?: AbortSignal): Promise<Uint8Array>;
+  writeFile(handle: SandboxHandle, input: WriteInput, signal?: AbortSignal): Promise<void>;
+  snapshot(handle: SandboxHandle, requestId: string): Promise<CaptureResult>;
+  inspect(handle: SandboxHandle): Promise<SandboxInspection>;
+  stop(handle: SandboxHandle): Promise<void>;
+  destroy(handle: SandboxHandle): Promise<void>;
+  close(): Promise<void>;
+}
+```
 
-- `checkHealth` and a real KVM runtime probe;
-- `create`, `exec`, `readFile`, `writeFile`, `snapshot` and `inspect`;
-- cancellation plus idempotent `stop`/`destroy`;
-- exact assignment inventory and orphan reconciliation;
-- `close`.
+Native Cube SDK objects never cross into the Pi Worker.
 
-The immutable handle binds API version, tenant, project, Workspace, Session,
-Turn, RunAttempt, Supervisor boot, logical sandbox, command, lease, fence,
-activation and opaque physical runtime identity. The model never receives a
-native Cube sandbox ID. Before every Tool operation, the Provider re-reads the
-instance and verifies the complete metadata assignment. Reused operation or
-capture IDs fail closed.
+## Identity
 
-If Cube transport fails after arbitrary Bash might have started, the result is
-`UNKNOWN`, the guest is destroyed and the command is not blindly replayed.
+Every activation binds:
 
-The browser, prompt, repository and model cannot supply a template, image,
-native sandbox ID, network policy, resource shape, mount, device, command
-wrapper or runtime configuration.
+- tenant;
+- Project and Workspace;
+- Session and Turn;
+- RunAttempt;
+- Supervisor boot;
+- command, lease and fencing token;
+- environment image/specification hash.
 
-## Demand-activated Run lifecycle
+The Manager derives runtime identity. The model, browser and Pi Tool arguments
+cannot supply a runtime ID or weaken policy.
 
-A Run first receives only a logical capability reservation. No guest is
-created until the first authenticated `read`, `write`, `edit` or `bash`
-operation. Repository instructions are loaded from the already committed
-Workspace snapshot in the trusted Worker, so reading `AGENTS.md` does not
-accidentally activate Cube.
+## Lifecycle
 
 ```text
-chat:
-  reserve -> Pi/model -> save Pi JSONL -> release unused reservation
-  Cube activations = 0
-
-code:
-  reserve -> first Tool -> create/restore Cube KVM guest
-  -> many Tools -> capture Workspace/Pi
-  -> commit content checkpoint under Attempt/fence
-  -> revoke old Tool Worker -> retain running Session guest
-
-later code Run:
-  matching Workspace revision + higher fence
-  -> rotate handoff authority -> fresh Tool Worker attach
+logical Tool reservation
+  → no microVM yet
+first Tool call
+  → create/restore Cube activation
+subsequent Tool calls
+  → reuse exact active activation
+Run boundary
+  → revoke old Tool capability
+  → checkpoint dirty Workspace
+  → retain eligible activation as IDLE_WARM
+idle expiry/failure
+  → destroy activation
+future Tool call
+  → restore into a fresh activation
 ```
 
-Cube's lifecycle state is not used as the ownership CAS. AgentDock revokes the
-old Run's Tool capability, requires a strictly higher business fence, rotates a
-Manager-only handoff secret and keeps warm reuse scoped to the exact tenant/
-project/Workspace/Session. Environment or committed-Workspace revision
-mismatch, failure, cancellation, timeout, Manager restart or any ambiguous
-transition destroys the VM. Guest survival is an interactive optimization, not
-a durability mechanism.
+Pure chat has no Sandbox lifecycle.
 
-## Versioned Project environment
+## Fixed policy
 
-Every accepted Run carries one immutable Project environment snapshot:
+The template and Manager enforce:
+
+- KVM microVM boundary;
+- non-platform user identity;
+- no host mount or runtime socket;
+- no platform/model/object-store/database credentials;
+- bounded CPU, memory, processes, open files, disk, output and time;
+- public HTTP/HTTPS through the trusted proxy;
+- denial of private, loopback, link-local, metadata and platform networks;
+- exact cleanup and orphan reconciliation.
+
+## Tool surface
+
+Pi receives ordinary Tools such as:
 
 ```text
-environmentVersionId / versionNumber
-profileKey = agent-dock-fullstack
-profileVersion = 1
-imageRevision = immutable deployment revision
-specSha256 = canonical profile specification
-recipeSha256 = canonical offline recipe
+read
+write
+edit
+bash
+git
+tests
 ```
 
-`ToolSandboxManager` accepts the request only when the profile and image
-revision match its startup configuration. Production also validates that the
-Cube template evidence binds the exact AgentDock Git revision, pushed image
-digest, READY template ID and closed specification SHA-256.
+The Tool adapter converts each call into an authenticated Manager request
+containing the server-owned activation binding. Lazy activation, proxy
+configuration and Cube lifecycle remain invisible to Pi.
 
-During initialization, the Tool Worker compares the expected revision with the
-value baked into the image and probes Node.js 24, Java 17, Python 3.11 and Git
-2. The Provider combines that report with real `cubesandbox-kvm`,
-guest-kernel, deny-all network, UID/GID 1000:1000, no-new-privileges and
-zero-effective-capability evidence. Cube's CoW guest root is writable, so the
-report does not falsely claim a read-only OCI rootfs.
+## Checkpoints
 
-Recipes with `dependencyHosts` use the retained disposable gVisor bootstrap and
-the ADR-0044 Ed25519 proxy. After content capture and exact bootstrap
-destruction, a fresh Cube guest restores the regular files. gVisor never
-executes an ordinary Agent Tool Call; the resulting Cube guest uses the
-deployment-owned proxy-mediated public-web policy.
+The guest filesystem is not the durable authority. The trusted Data Mover
+flushes the Session-bound Cube Volume/POSIX Workspace and creates an immutable
+Kopia checkpoint. PostgreSQL advances the Workspace head only through
+base-revision CAS under the current fence.
 
-## Fixed Cube Tool policy
+## Acceptance
 
-```text
-upstream: TencentCloud/CubeSandbox v0.6.0
-template: immutable READY ID + image digest + current Git revision
-network: allow_internet_access=true; allow only 10.255.255.254/32; deny all other IPv4
-inbound: allowPublicTraffic=false; private-token port 49984 only
-user: 1000:1000
-privileged: false
-capabilities: zero effective / drop ALL
-allowPrivilegeEscalation: false / no-new-privileges
-host mounts / Docker socket / Kubernetes token: forbidden
-CPU: 1 logical core policy; 2 vCPU template ceiling
-memory: 768 MiB policy; 2000 MiB template ceiling
-guest process limit: 128
-open files: 1024
-CoW writable layer / Workspace bound: 1 GiB
-tool output: 1 MiB
-command timeout: at most 300 seconds
-turn wall clock: 900 seconds
-```
+Automated and live checks cover:
 
-CubeVS permits only the trusted host-network web gateway. The Tool Worker
-receives that gateway address in proxy variables; the gateway hot-loads the
-operator proxy, resolves targets itself and rejects non-public answers.
-`cubesandbox:live-check` requires proxy-mediated HTTPS from a real guest while
-direct public and platform/private probes fail.
+- runtime/guest identity;
+- credential absence;
+- cross-tenant file isolation;
+- private/platform network denial;
+- public proxy egress;
+- path traversal and symlink escape;
+- output and timeout bounds;
+- cancellation/process cleanup;
+- Workspace restore;
+- multi-round Pi state;
+- zero residual runtimes after destruction.
 
-The template replaces Cube's inherited entrypoint. Root `envd` is not started,
-because it would expose an unmediated second command/file channel. Port 49983
-must not have a listener.
-
-## Repository importer
-
-Repository import is not Agent Tool egress. A fixed-purpose gVisor Pod runs in
-`agent-dock-importers`; it receives a normalized GitHub repository plus exact
-commit, no prompt and no credential, and never runs repository code. It has no
-DNS and can reach only the capability proxy ClusterIP. A per-import Ed25519
-capability permits only `github.com:443` and bounds time, connections,
-concurrency and bytes; the proxy rejects every non-public DNS answer.
-Redirects, hooks, credential helpers, submodules, LFS and interactive
-authentication are disabled. The importer is deleted after returning a
-bounded manifest.
-
-This path uses `RuntimeClass/agent-dock-gvisor -> runsc/KVM` and scoped
-Kubernetes RBAC. It remains separately attested by `npm run sandbox:check`.
-
-## Runtime acceptance
-
-```bash
-npm run cubesandbox:template-check
-npm run cubesandbox:live-check
-AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 npm run production:semantic-check
-```
-
-The local template gate proves protocol/toolchain compatibility but explicitly
-does not claim KVM isolation. The live gate proves a distinct guest kernel,
-two-tenant same-path Workspace isolation, credential absence, platform/public
-network denial, path/output/resource bounds, cancellation and zero-orphan
-cleanup. The real production gate then consumes model tokens and proves:
-
-- pure chat creates zero Cube guest;
-- two coding Runs in one Session use different guests;
-- the second Run restores and modifies the first checkpoint;
-- provider usage and semantic projections commit;
-- cross-tenant conversation reads return 404;
-- no test-session guest remains.
-
-See [`deploy/cubesandbox/README.md`](../deploy/cubesandbox/README.md),
-[`CUBESANDBOX_PROVIDER.md`](CUBESANDBOX_PROVIDER.md), and
-[`THREAT_MODEL.md`](THREAT_MODEL.md).
+Historical runtime implementations are retained only in immutable ADR/research
+history, not as executable providers.

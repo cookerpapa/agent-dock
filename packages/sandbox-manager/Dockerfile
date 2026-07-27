@@ -4,7 +4,6 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
-COPY packages/dependency-egress-proxy/package.json packages/dependency-egress-proxy/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
@@ -25,8 +24,6 @@ COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
-COPY packages/dependency-egress-proxy/package.json packages/dependency-egress-proxy/package.json
-COPY packages/dependency-egress-proxy/src packages/dependency-egress-proxy/src
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/observability/src packages/observability/src
 COPY packages/protocol/package.json packages/protocol/package.json

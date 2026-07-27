@@ -334,7 +334,7 @@ async function createAssignedTurn(options: {
   const sessionResponse = await http.inject({
     method: "POST",
     url: `/v1/projects/${project.projectId}/sessions`,
-    payload: { workspaceId: project.workspaceId },
+    payload: { workspaceId: project.workspaceId, title: "Test conversation" },
   });
   expect(sessionResponse.statusCode).toBe(201);
   const assignedSession = sessionResponse.json() as SessionResource;
@@ -555,13 +555,14 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     session = sessionResponse.json() as SessionResource;
     expect(session).toMatchObject({
       projectId: project.projectId,
       workspaceId: project.workspaceId,
+      title: "Test conversation",
       state: "cold",
       modelProfileId: IDS.profile,
     });
@@ -807,7 +808,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${repositoryProject.projectId}/sessions`,
-      payload: { workspaceId: repositoryProject.workspaceId },
+      payload: { workspaceId: repositoryProject.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const repositorySession = sessionResponse.json<SessionResource>();
@@ -1318,7 +1319,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const mailboxSession = sessionResponse.json() as SessionResource;
@@ -1760,7 +1761,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${phaseProject.projectId}/sessions`,
-      payload: { workspaceId: phaseProject.workspaceId },
+      payload: { workspaceId: phaseProject.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const phaseSession = sessionResponse.json() as SessionResource;
@@ -1868,7 +1869,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const raceSession = sessionResponse.json() as SessionResource;
@@ -1982,7 +1983,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const failedSession = sessionResponse.json() as SessionResource;
@@ -2114,7 +2115,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const piSession = sessionResponse.json() as SessionResource;
@@ -2697,7 +2698,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const cancellationSession = sessionResponse.json() as SessionResource;
@@ -3021,7 +3022,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const failedSession = sessionResponse.json() as SessionResource;
@@ -3093,7 +3094,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const longSession = sessionResponse.json() as SessionResource;
@@ -3180,7 +3181,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId },
+      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
     });
     expect(sessionResponse.statusCode).toBe(201);
     const expiredSession = sessionResponse.json() as SessionResource;
@@ -3487,7 +3488,7 @@ describe.sequential("single-user durable turn intake API", () => {
       const sessionResponse = await http.inject({
         method: "POST",
         url: `/v1/projects/${project.projectId}/sessions`,
-        payload: { workspaceId: project.workspaceId },
+        payload: { workspaceId: project.workspaceId, title: "Test conversation" },
       });
       expect(sessionResponse.statusCode).toBe(201);
       const replaySession = sessionResponse.json() as SessionResource;

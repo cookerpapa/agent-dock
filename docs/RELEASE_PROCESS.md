@@ -11,10 +11,10 @@ separate deployment decision.
 - install only the lockfile with `npm ci --ignore-scripts`, then run
   `npm run dependencies:harden` to apply and verify the reviewed Pi shrinkwrap
   security patches;
-- run `npm run ci` (including the closed Helm policy gate), `npm run container:check`,
-  `npm run sandbox:check`, and `npm run production:check`;
-- verify K3s/containerd maps `RuntimeClass/agent-dock-gvisor` to `runsc` with
-  KVM; the Sandbox gate fails closed if the class, policy or live gVisor Pod is
+- run `npm run ci`, `npm run container:check`,
+  `npm run cubesandbox:live-check`, and `npm run production:check`;
+- verify the pinned Cube template, KVM guest evidence, fixed network policy and
+  live Cube Tool path; the Sandbox gate fails closed if any evidence is
   unavailable;
 - choose one immutable image version. Do not reuse a published version for a
   different commit.

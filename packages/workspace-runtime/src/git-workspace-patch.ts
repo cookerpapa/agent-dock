@@ -56,7 +56,15 @@ export async function collectGitWorkspacePatch(
 ): Promise<WorkspacePatch> {
   const untracked = (
     await executeGit(
-      ["ls-files", "--others", "--exclude-standard", "-z", "--", ".", ...TRUSTED_METADATA_PATHSPECS],
+      [
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ".",
+        ...TRUSTED_METADATA_PATHSPECS,
+      ],
       workspaceDirectory,
       environment,
       identity,

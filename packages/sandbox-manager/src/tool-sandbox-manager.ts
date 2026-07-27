@@ -529,6 +529,13 @@ export class ToolSandboxManager {
   }
 
   async importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
+    if (this.#provider.importGitHub === undefined) {
+      throw new SandboxManagerError(
+        "repository_import_removed",
+        "Repository import is not available; clone the repository from a Cube Tool session",
+        false,
+      );
+    }
     return this.#provider.importGitHub(source, signal);
   }
 

@@ -9,7 +9,6 @@ LABEL org.opencontainers.image.title="AgentDock Cube egress gateway" \
 
 ENV NODE_ENV=production
 WORKDIR /app
-COPY packages/dependency-egress-proxy/src/address-policy.ts packages/dependency-egress-proxy/src/address-policy.ts
 COPY packages/cube-egress-gateway/src packages/cube-egress-gateway/src
 RUN rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack

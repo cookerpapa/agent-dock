@@ -185,21 +185,16 @@ the private file, and forces every create request to enable outbound public
 Internet while denying private/link-local/metadata ranges and public inbound
 traffic. The per-microVM Cube traffic token remains inside the trusted Provider.
 
-The K3s/gVisor plane remains available only to the exact-commit importer and
-the explicit deterministic production gate. It is not an ordinary Tool
-fallback. Project recipes with `dependencyHosts` execute in a disposable
-capability-scoped gVisor bootstrap; only captured regular-file Workspace bytes
-are restored into a newly created Cube guest for verification and ordinary Tool
-execution. That guest receives the same deployment-owned
-`public_egress_private_denied` policy as every ordinary Cube activation.
+Cube is the only Tool and environment-setup runtime. Project recipes execute in
+the same deployment-owned Cube boundary and use the configured Web proxy when
+their commands require public HTTP/HTTPS. There is no alternate bootstrap
+runtime or fallback.
 
-Cube's full-public mode performs native guest networking and NAT; it does not
-inherit `HTTP_PROXY` from the trusted host. Every Cube node must therefore have
-a native IPv4 or IPv6 public route. A proxy-only WSL `mirrored` environment
-without an IPv4 default route is unsupported for this tier. The live gate first
-probes its configured public HTTPS endpoint directly from the trusted host and
-then from a real guest, so this prerequisite fails explicitly rather than
-producing false network evidence.
+The guest receives `HTTP_PROXY`/`HTTPS_PROXY` for the trusted Cube egress
+gateway. The gateway can hot-route new connections through the
+administrator-configured WSL/host upstream proxy while continuing to deny
+private, link-local, metadata and platform destinations. Proxy-unaware
+protocols do not gain an implicit direct route through that gateway.
 
 ## Lifecycle and rollback
 

@@ -77,7 +77,7 @@ Environment mutation never edits an active version in place:
 
 ```text
 owner creates recipe -> pending/inactive
-pending -> fresh gVisor validation Run -> validated/inactive
+pending -> fresh Cube validation Run -> validated/inactive
 validated + expected-active CAS -> active
 failed -> inert history (create a new candidate)
 older validated + expected-active CAS -> rollback target becomes active

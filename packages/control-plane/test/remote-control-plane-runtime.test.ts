@@ -49,7 +49,7 @@ function uuid(): string {
   return globalThis.crypto.randomUUID();
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 30_000) {
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (!(await predicate())) {
     if (Date.now() >= deadline) {

@@ -291,6 +291,7 @@ export interface TenantModelCredentialTable {
 
 export interface SessionTable {
   id: string;
+  title: Generated<string>;
   tenant_id: string;
   project_id: string;
   workspace_id: string;

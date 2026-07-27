@@ -149,38 +149,18 @@ const EnvironmentValidationCommonSchema = {
   recipeCommands: Type.Array(EnvironmentRecipeCommandResultSchema, { maxItems: 20 }),
 } as const;
 
-export const EnvironmentValidationReportSchema = Type.Union([
-  Type.Object(
-    {
-      ...EnvironmentValidationCommonSchema,
-      isolationBoundary: Type.Literal("gvisor"),
-      runtime: Type.Literal("runsc"),
-      networkMode: Type.Literal("deny_all"),
-      readOnlyRootFilesystem: Type.Literal(true),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      ...EnvironmentValidationCommonSchema,
-      isolationBoundary: Type.Literal("microvm"),
-      runtime: Type.Literal("cubesandbox-kvm"),
-      // Historical checkpoints may truthfully retain deny_all. New Cube
-      // activations attest the deployment-owned full-public/private-denied
-      // policy selected in ADR-0062.
-      networkMode: Type.Union([
-        Type.Literal("deny_all"),
-        Type.Literal("public_egress_private_denied"),
-        Type.Literal("public_web_proxy_private_denied"),
-      ]),
-      // Cube's disposable CoW guest rootfs is writable. The non-root Tool
-      // Worker and the independent guest kernel, rather than a read-only OCI
-      // rootfs, are the effective execution boundary.
-      readOnlyRootFilesystem: Type.Literal(false),
-    },
-    { additionalProperties: false },
-  ),
-]);
+export const EnvironmentValidationReportSchema = Type.Object(
+  {
+    ...EnvironmentValidationCommonSchema,
+    isolationBoundary: Type.Literal("microvm"),
+    runtime: Type.Literal("cubesandbox-kvm"),
+    networkMode: Type.Literal("public_web_proxy_private_denied"),
+    // Cube's disposable CoW guest rootfs is writable. The non-root Tool
+    // Worker and the independent guest kernel are the effective boundary.
+    readOnlyRootFilesystem: Type.Literal(false),
+  },
+  { additionalProperties: false },
+);
 
 export const ProjectEnvironmentResourceSchema = Type.Object(
   {

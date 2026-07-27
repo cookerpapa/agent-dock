@@ -34,6 +34,7 @@ import {
   parseTestResultListResource,
   parseUsageSummaryResource,
   parseWorkspaceFileListResource,
+  parseWorkspaceListResource,
   parseWorkspaceOperationResource,
   parseWorkspaceVersionCompareResource,
   parseWorkspaceVersionListResource,
@@ -71,6 +72,7 @@ import {
   type TurnThinkingLevel,
   type UsageSummaryResource,
   type WorkspaceFileListResource,
+  type WorkspaceListResource,
   type WorkspaceOperationResource,
   type WorkspaceSourceRequest,
   type WorkspaceVersionCompareResource,
@@ -401,6 +403,29 @@ export class AgentDockApi {
   async listConversations(): Promise<ConversationListResource> {
     return parseConversationListResource(
       await request(this.#fetch, "/v1/conversations", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async listWorkspaces(): Promise<WorkspaceListResource> {
+    return parseWorkspaceListResource(
+      await request(this.#fetch, "/v1/workspaces", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async deleteConversation(
+    sessionId: string,
+    idempotencyKey: string,
+  ): Promise<WorkspaceOperationResource> {
+    return parseWorkspaceOperationResource(
+      await request(
+        this.#fetch,
+        `/v1/conversations/${encodeURIComponent(sessionId)}`,
+        {
+          method: "DELETE",
+          headers: { "idempotency-key": idempotencyKey },
+        },
+        this.#authorizationToken,
+      ),
     );
   }
 
@@ -748,7 +773,7 @@ export class AgentDockApi {
 
   async createProject(
     name: string,
-    source: WorkspaceSourceRequest = { kind: "sample_java" },
+    source: WorkspaceSourceRequest = { kind: "empty" },
   ): Promise<ProjectResource> {
     return parseProjectResource(
       await request(
@@ -760,12 +785,16 @@ export class AgentDockApi {
     );
   }
 
-  async createSession(project: ProjectResource): Promise<SessionResource> {
+  async createSession(
+    projectId: string,
+    workspaceId: string,
+    title: string,
+  ): Promise<SessionResource> {
     return parseSessionResource(
       await request(
         this.#fetch,
-        `/v1/projects/${encodeURIComponent(project.projectId)}/sessions`,
-        jsonRequest({ workspaceId: project.workspaceId }),
+        `/v1/projects/${encodeURIComponent(projectId)}/sessions`,
+        jsonRequest({ workspaceId, title }),
         this.#authorizationToken,
       ),
     );
@@ -817,6 +846,7 @@ export function newIdempotencyKey(
     | "fork"
     | "rollback"
     | "archive"
+    | "delete"
     | "retry"
     | "pr"
     | "environment-create"

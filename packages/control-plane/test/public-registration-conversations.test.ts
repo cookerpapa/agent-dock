@@ -8,6 +8,7 @@ import type {
   ProjectResource,
   SessionResource,
   TenantRegistrationResource,
+  WorkspaceListResource,
 } from "@agent-dock/protocol";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
@@ -177,7 +178,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       method: "POST",
       url: `/v1/projects/${alphaProject.projectId}/sessions`,
       headers: authorization(alpha.apiToken),
-      payload: { workspaceId: alphaProject.workspaceId },
+      payload: { workspaceId: alphaProject.workspaceId, title: "Test conversation" },
     });
     expect(createAlphaSession.statusCode).toBe(201);
     alphaSession = createAlphaSession.json<SessionResource>();
@@ -202,7 +203,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       method: "POST",
       url: `/v1/projects/${bravoProject.projectId}/sessions`,
       headers: authorization(bravo.apiToken),
-      payload: { workspaceId: bravoProject.workspaceId },
+      payload: { workspaceId: bravoProject.workspaceId, title: "Test conversation" },
     });
     expect(bravoSessionResponse.statusCode).toBe(201);
     bravoSession = bravoSessionResponse.json<SessionResource>();
@@ -325,6 +326,79 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         })
       ).statusCode,
     ).toBe(403);
+  });
+
+  it("reuses one Workspace across named conversations and deletes only the selected conversation", async () => {
+    const secondSessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${alphaProject.projectId}/sessions`,
+      headers: authorization(alpha.apiToken),
+      payload: {
+        workspaceId: alphaProject.workspaceId,
+        title: "Follow-up in the same workspace",
+      },
+    });
+    expect(secondSessionResponse.statusCode).toBe(201);
+    const secondSession = secondSessionResponse.json<SessionResource>();
+
+    const workspacesResponse = await http.inject({
+      method: "GET",
+      url: "/v1/workspaces",
+      headers: authorization(alpha.apiToken),
+    });
+    expect(workspacesResponse.statusCode).toBe(200);
+    expect(workspacesResponse.json<WorkspaceListResource>()).toMatchObject({
+      truncated: false,
+      workspaces: [
+        {
+          workspaceId: alphaProject.workspaceId,
+          projectId: alphaProject.projectId,
+          name: "Alpha private repair",
+          sessionCount: 2,
+        },
+      ],
+    });
+
+    const deleted = await http.inject({
+      method: "DELETE",
+      url: `/v1/conversations/${secondSession.sessionId}`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "delete-alpha-follow-up",
+      },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(
+      (
+        await http.inject({
+          method: "GET",
+          url: `/v1/conversations/${secondSession.sessionId}`,
+          headers: authorization(alpha.apiToken),
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    const remaining = await http.inject({
+      method: "GET",
+      url: "/v1/conversations",
+      headers: authorization(alpha.apiToken),
+    });
+    expect(remaining.json<ConversationListResource>().conversations).toEqual([
+      expect.objectContaining({
+        sessionId: alphaSession.sessionId,
+        title: "Test conversation",
+        workspaceName: "Alpha private repair",
+      }),
+    ]);
+    const workspacesAfterDelete = await http.inject({
+      method: "GET",
+      url: "/v1/workspaces",
+      headers: authorization(alpha.apiToken),
+    });
+    expect(workspacesAfterDelete.json<WorkspaceListResource>().workspaces[0]).toMatchObject({
+      workspaceId: alphaProject.workspaceId,
+      sessionCount: 1,
+    });
   });
 
   it("serializes concurrent registration at the configured total-tenant cap", async () => {

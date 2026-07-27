@@ -139,7 +139,7 @@
       "gridPos": { "h": 5, "w": 12, "x": 0, "y": 29 },
       "targets": [
         {
-          "expr": "sum(agent_dock_sandbox_active{provider=\"gvisor\"})",
+          "expr": "sum(agent_dock_sandbox_active{provider=\"cubesandbox\"})",
           "refId": "A"
         }
       ]
@@ -151,7 +151,7 @@
       "gridPos": { "h": 5, "w": 12, "x": 12, "y": 29 },
       "targets": [
         {
-          "expr": "sum(agent_dock_sandbox_prewarm{provider=\"gvisor\"})",
+          "expr": "sum(agent_dock_sandbox_prewarm{provider=\"cubesandbox\"})",
           "refId": "A"
         }
       ]

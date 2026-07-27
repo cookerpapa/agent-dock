@@ -2,7 +2,6 @@ import type {
   AgentWorkspaceSeed,
   EnvironmentRuntimeSnapshot,
   EnvironmentValidationReport,
-  GitHubRepositorySource,
   SandboxCheckpointBlob,
   SandboxManagerMaterializeFileRequest,
   SandboxManagerMaterializeFileResponse,
@@ -107,9 +106,10 @@ export type SandboxHandle = Readonly<{
   environmentValidation: EnvironmentValidationReport;
 }>;
 
-type SandboxRuntimeIsolation =
-  | Readonly<{ isolationBoundary: "gvisor"; runtime: "runsc" }>
-  | Readonly<{ isolationBoundary: "microvm"; runtime: "cubesandbox-kvm" }>;
+type SandboxRuntimeIsolation = Readonly<{
+  isolationBoundary: "microvm";
+  runtime: "cubesandbox-kvm";
+}>;
 
 export type SandboxEffectiveIsolation = SandboxRuntimeIsolation &
   Readonly<{
@@ -213,6 +213,9 @@ export interface SandboxProvider {
   listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]>;
   terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
   confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
-  importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array>;
+  importGitHub?(
+    source: import("@agent-dock/protocol").GitHubRepositorySource,
+    signal: AbortSignal,
+  ): Promise<Uint8Array>;
   close(): Promise<void>;
 }

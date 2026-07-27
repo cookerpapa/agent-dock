@@ -1,762 +1,239 @@
 # AgentDock
 
-AgentDock is an unofficial, cloud-oriented coding-agent runtime built around
-the Pi SDK and native Session format. The goal is not to wrap Pi in a web page, but to build the control
-plane and execution infrastructure required to run coding agents safely and
-reliably for multiple users.
+AgentDock is a self-hosted, multi-tenant Cloud Coding Agent built on the Pi SDK.
+It separates the trusted Agent Loop from untrusted code execution and turns Pi
+sessions, Workspace state, scheduling, streaming events and model access into a
+durable cloud product.
 
-## Project positioning
+The current production path is deliberately singular:
 
-The finished system should demonstrate:
+```text
+Browser
+  → NestJS Control Plane
+  → Temporal Run Workflow
+  → horizontally scalable trusted Pi Worker
+  → authenticated Tool RPC
+  → Sandbox Manager
+  → CubeSandbox KVM microVM
+```
 
-- ordered, durable agent sessions;
-- real-time agent and tool event streaming;
-- isolated workspaces and sandboxed tool execution;
-- cancellation, approval, retry, eviction, and recovery;
-- tenant quotas, scheduling, leases, and backpressure;
-- subagent trees with independent context and resource budgets;
-- Git worktree isolation for concurrent writing agents;
-- observability, load testing, and failure-injection evidence.
+There is no alternate container runtime or lower-security fallback.
 
-This repository is intentionally documentation-first. Business code should be
-added one verified vertical slice at a time.
+## Product
+
+An ordinary user sees:
+
+- username/password login and optional public registration;
+- a ChatGPT-style conversation surface;
+- named conversations in the left sidebar;
+- named Workspaces that can be created or selected for a new conversation;
+- Pi-style streaming text, Tool calls, command output and code highlighting;
+- a `/workspace` directory browser with committed files and previews;
+- conversation deletion without deleting the shared Workspace.
+
+A dedicated platform administrator lands on a separate settings page. The
+administrator can rotate the deployment model credential/model and the
+CubeSandbox outbound proxy configuration without restarting the cluster.
+Tenant ownership does not grant platform administration.
 
 ## Architecture
 
 ```text
-Browser / CLI
-    |
-    | REST + SSE
-    v
-TypeScript Control Plane (NestJS)
-    |-- transactional admission, session mailbox and outbox relay
-    |-- sandbox leases and fencing tokens
-    |-- approvals, quotas, usage, event index
-    |-- PostgreSQL + MinIO/S3
-    |
-    | bounded Run IDs only
-    v
-Temporal Server
-    |-- one durable Workflow per accepted Run
-    |-- Task Queue fairness, retry timers, cancellation and Worker matching
-    |
-    | capacity-aware soft affinity, then common Task Queue fallback
-    v
-Trusted TypeScript Agent Runner
-    |-- capacity-one Pi SDK AgentSession and model capability
-    |-- event spool and session snapshots
-    |-- no runtime socket/Kubernetes credential/local untrusted tools
-    |-- fixed model TLS via internal bridge -> Unix socket -> host egress relay
-    |
-    | authenticated narrow Tool RPC
-    v
-Trusted Sandbox Manager
-    |
-    | fixed CubeAPI / CubeProxy relays
-    v
-CubeAPI -> CubeMaster -> Cubelet -> CubeShim / KVM
-    |
-    v
-Untrusted demand-activated Tool microVM
-    |-- isolated workspace, shell, compiler and tests
-    `-- public-only egress, no platform credential/private route; bounded resources
+┌─────────────────────────────────────────────────────────────────┐
+│ Browser                                                         │
+│ login / conversations / Workspace directory / admin settings    │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ REST + resumable SSE
+┌───────────────────────────────▼─────────────────────────────────┐
+│ Control Plane                                                   │
+│ auth / tenants / sessions / Run admission / idempotency / CAS   │
+│ PostgreSQL business state / MinIO immutable artifacts           │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ one Workflow per accepted Run
+┌───────────────────────────────▼─────────────────────────────────┐
+│ Temporal                                                        │
+│ durable timers / retries / cancellation / Worker matching       │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ capacity-aware soft affinity
+┌───────────────────────────────▼─────────────────────────────────┐
+│ Trusted Pi Worker pool                                          │
+│ Pi SDK AgentSession / native JSONL restore / model gateway       │
+│ bounded event spool / no untrusted local bash / no Cube key      │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ leased and fenced Tool RPC
+┌───────────────────────────────▼─────────────────────────────────┐
+│ Trusted Sandbox Manager                                         │
+│ Cube lifecycle / assignment verification / checkpoint CAS       │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ Cube API
+┌───────────────────────────────▼─────────────────────────────────┐
+│ Untrusted CubeSandbox microVM                                   │
+│ /workspace / bash / edit / git / build / test                   │
+│ no platform credentials / public-only proxy / bounded resources │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Initial technology choices
+Cold conversations do not retain a Pi process or microVM. A Run restores the
+Pi-native checkpoint into any eligible Worker. Pure chat never provisions a
+Sandbox. The first Tool call activates Cube; later Tool calls in the warm
+Session reuse it while its idle lease remains valid. Eviction preserves the
+Workspace through the trusted Volume/Data-Mover checkpoint path, not through
+the Worker filesystem.
 
-- Control plane: TypeScript, Node.js, NestJS with the Fastify adapter
-- Runner: horizontally scalable, capacity-one TypeScript Workers embedding the
-  pinned Pi SDK; no per-message Pi process
-- Run orchestration: pinned self-hosted Temporal Server 1.29.1 and TypeScript
-  SDK 1.21.1; one Workflow per Run, capacity-reserved Worker-specific Activity
-  queues for hot Sessions, and a common Activity queue as the fairness fallback
-- Internal management/event protocol: versioned TypeBox schemas over an
-  outbound WebSocket; this channel does not assign production Runs
-- Browser event delivery: SSE with resumable sequence numbers
-- Metadata and durable commands: PostgreSQL with Kysely
-- Session/workspace artifacts: S3-compatible object storage, with MinIO used as
-  the disposable compatibility fixture and a private file adapter for the demo
-- Checkpoint restore cache: each trusted Pi Worker keeps a 10-minute, 32 MiB
-  bounded cache of immutable S3 objects; PostgreSQL still resolves and
-  revalidates the current checkpoint head on every Run
-- Workspace input: one built-in/empty source, one exact GitHub commit, or 2–8
-  exact public/private repositories under disjoint named roots; every Run
-  freezes the source set before queue acceptance
-- Sandbox: pinned Tencent CubeSandbox v0.6.0; CubeMaster schedules one
-  credential-free KVM Tool microVM on the first real Tool Call
-- Workspace durability: Cube's Volume Plugin mounts a Session-bound POSIX
-  execution copy; a trusted Kopia Data Mover snapshots/restores immutable bytes
-  while PostgreSQL Fence/CAS alone advances the current Workspace head
-- Repository importer: Kubernetes `RuntimeClass` with gVisor `runsc`/KVM until
-  an equivalent Cube temporary-egress/fresh-offline transition is validated
-- Provider policy: Cube is deployment-owned and fail-closed; no browser,
-  tenant, model, or Tool Call can select a runtime or lower-security fallback
-- Frontend: React, kept deliberately small
-- Observability: OpenTelemetry, Prometheus, Grafana, Loki, Tempo
-- Tests: Vitest, Testcontainers, k6, Toxiproxy
+See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
-Kafka, Flink, Redis, billing, RAG, mobile applications, and IDE
-plugins are not part of the initial implementation. They should be introduced
-only after a measured requirement appears.
+## Durable state
 
-## Core invariants
+PostgreSQL is authoritative for:
 
-1. A session has at most one normal active turn at a time.
-2. A command is durably stored before the API reports it as accepted.
-3. Reusing an idempotency key never creates a second turn.
-4. Only the runner holding the current fencing token may mutate a session.
-5. Every session event has a monotonically increasing sequence number.
-6. Cold sessions consume no dedicated process, OS thread, or sandbox.
-7. A tool with external side effects is never blindly described as exactly-once.
-8. Two writer agents never modify the same worktree concurrently.
-9. Tenant workspaces, session state, artifacts, and secrets are isolated.
-10. Every milestone has executable acceptance tests and failure tests.
+- tenants, users, roles and browser sessions;
+- Projects, Workspaces, conversations, messages and Runs;
+- RunAttempt leases, heartbeat, fencing tokens and terminal state;
+- event sequence cursors, idempotency keys and Workspace head CAS;
+- model/proxy configuration metadata and usage records.
+
+MinIO/S3 stores immutable:
+
+- Pi native JSONL segment manifests;
+- Workspace/Kopia checkpoints;
+- artifacts and Review Bundles.
+
+The active Pi `messages[]` is reconstructed by the Pi SDK from its native
+checkpoint. AgentDock does not rebuild model context from the rendered browser
+transcript. Pi compaction therefore survives Worker movement and cold restore.
+
+## Workspace model
+
+A Workspace is the durable `/workspace` directory. It can be shared by
+multiple conversations, while every conversation keeps an independent title
+and Pi transcript:
+
+```text
+Workspace "order-service"
+├── Conversation "fix flaky payment test"
+├── Conversation "add idempotency key"
+└── committed Workspace versions
+```
+
+The browser no longer has a special repository-import workflow. The Agent can
+use normal `git`, package-manager and download commands inside the connected
+Cube microVM. Public network access is routed through the deployment-owned
+proxy and rejects private, link-local, metadata and platform destinations.
+
+## Security invariants
+
+1. Pi/model credentials remain in the trusted Worker and model gateway.
+2. User commands execute only inside CubeSandbox KVM microVMs.
+3. Tool requests are bound to tenant, Workspace, Session, RunAttempt, lease and
+   monotonically increasing fencing token.
+4. A stale Worker cannot execute a Tool or advance the Workspace head.
+5. Cube receives no database, MinIO, model, platform or orchestration
+   credential.
+6. Public egress does not imply private-network or platform reachability.
+7. One tenant cannot list, read or mutate another tenant's conversations or
+   Workspaces.
+8. Tool side effects are never blindly retried as exactly-once execution.
+
+See [Threat model](docs/THREAT_MODEL.md) and
+[Network matrix](docs/NETWORK_MATRIX.md).
+
+## Technology
+
+- TypeScript / Node.js 24
+- NestJS with Fastify
+- React
+- PostgreSQL with Kysely
+- MinIO/S3
+- Temporal Server and TypeScript SDK
+- Pi SDK and native Pi Session format
+- Tencent CubeSandbox with KVM
+- Kopia-backed trusted Workspace checkpointing
+- OpenTelemetry, Prometheus, Grafana, Loki and Tempo
+- Vitest plus live Cube/model acceptance scripts
+
+## Local production deployment
+
+Prerequisites are a Linux/WSL2 host with Docker, KVM, the local Cube cluster
+installed by the repository scripts, and the private production environment
+file initialized.
+
+```bash
+npm ci --ignore-scripts
+npm run dependencies:harden
+npm run cubesandbox:cluster-install
+npm run cubesandbox:init
+npm run production:deploy
+```
+
+The Web product is served on:
+
+```text
+http://127.0.0.1:8080
+```
+
+Useful commands:
+
+```bash
+npm run production:ps
+npm run production:logs
+npm run production:check
+npm run production:backup
+```
+
+`production:check` is the real CubeSandbox production acceptance path. It can
+consume model tokens and must be run only with the required live-check
+acknowledgement/configuration.
+
+See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for configuration,
+backup, recovery and operator procedures.
+
+## Verification
+
+Zero-token checks:
+
+```bash
+npm run format:check
+npm run build
+npm run check
+npm run security:audit
+```
+
+Targeted boundaries:
+
+```bash
+npm test --workspace @agent-dock/control-plane
+npm test --workspace @agent-dock/sandbox-manager
+npm test --workspace @agent-dock/web-ui
+npm run cubesandbox:template-check
+```
+
+The live gate verifies the real Cube runtime, credential absence, network
+policy, cross-tenant isolation, resource limits, cancellation, checkpoint
+restore, multi-round Pi state and cleanup. Claims in the resume or project
+documentation should be based on these reproducible measurements.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Architecture decisions](docs/adr/)
 - [Threat model](docs/THREAT_MODEL.md)
-- [Sandbox Provider contract](docs/SANDBOX_PROVIDER.md)
-- [Primary CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
+- [Sandbox Provider](docs/SANDBOX_PROVIDER.md)
+- [CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
 - [Network matrix](docs/NETWORK_MATRIX.md)
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
-- [Production deployment runbook](docs/PRODUCTION_DEPLOYMENT.md)
-- [Local Kubernetes Pi Worker cutover](docs/LOCAL_KUBERNETES_PI_WORKERS.md)
-- [Release evidence process](docs/RELEASE_PROCESS.md)
-- [Implementation roadmap](docs/ROADMAP.md)
-- [Long-term Cloud Agent Platform plan](docs/PLATFORM_PRODUCT_PLAN.md)
-- [Initial backlog](docs/BACKLOG.md)
-- [Vibe coding playbook](docs/VIBE_CODING_PLAYBOOK.md)
+- [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
-- [Extension compatibility matrix](docs/EXTENSION_COMPATIBILITY.md)
-- [Web UI direction](docs/WEB_UI_DIRECTION.md)
-- [Agent cloud runtime landscape research](docs/research/2026-07-18-agent-cloud-runtime-landscape.md)
-- [Strong Sandbox Provider selection](docs/research/2026-07-20-strong-sandbox-provider-selection.md)
-- [CubeSandbox KVM acceptance evidence](docs/reports/cubesandbox-kvm-acceptance-latest.md)
-- [Tool Sandbox admission and Worker capacity evidence](docs/reports/tool-sandbox-admission-latest.md)
-- [Cursor Cloud Agent adoption research](docs/research/2026-07-22-cursor-cloud-agent-lessons.md)
-- [`cloud-agent-platform` comparison](docs/research/2026-07-23-cloud-agent-platform-comparison.md)
-- [Durable orchestration and conversation-storage research](docs/research/2026-07-25-durable-orchestration-and-conversation-storage.md)
-- [Kubernetes Pi Workers and shared conversation-state research](docs/research/2026-07-26-kubernetes-pi-workers-and-shared-conversation-state.md)
-- [ADR-0001: runtime language and Pi integration](docs/adr/0001-runtime-language-and-pi-integration.md)
-- [ADR-0002: versioned AgentDock event envelope](docs/adr/0002-versioned-event-envelope.md)
-- [ADR-0003: state ownership and ACK boundary](docs/adr/0003-state-ownership-and-acknowledgement-boundary.md)
-- [ADR-0004: command delivery, sequence, leases, and fencing](docs/adr/0004-command-delivery-sequence-and-fencing.md)
-- [ADR-0005: pluggable execution and recovery tiers](docs/adr/0005-pluggable-execution-recovery-tiers.md)
-- [ADR-0006: v0 scope, model profiles, and credentials](docs/adr/0006-v0-product-scope-model-profiles-and-credentials.md)
-- [ADR-0007: supervisor execution handshake and model snapshot](docs/adr/0007-supervisor-execution-handshake-and-model-snapshot.md)
-- [ADR-0008: durable event ACK and resumable SSE replay](docs/adr/0008-durable-event-ack-and-sse-replay.md)
-- [ADR-0009: durable turn cancellation and process-exit confirmation](docs/adr/0009-durable-turn-cancellation.md)
-- [ADR-0010: ephemeral Docker sandbox and bounded final patch](docs/adr/0010-ephemeral-docker-sandbox-and-bounded-patch.md)
-- [ADR-0011: settled checkpoint commit and cold restore](docs/adr/0011-settled-checkpoint-commit-and-cold-restore.md)
-- [ADR-0012: crash-safe supervisor event spool and restart replay](docs/adr/0012-crash-safe-supervisor-event-spool.md)
-- [ADR-0013: explicit session mailbox order and queued follow-ups](docs/adr/0013-explicit-session-mailbox-order.md)
-- [ADR-0014: lease renewal and assignment reconciliation](docs/adr/0014-lease-renewal-and-assignment-reconciliation.md)
-- [ADR-0015: authenticated supervisor registration and durable health](docs/adr/0015-supervisor-registration-and-health-management.md)
-- [ADR-0016: authenticated outbound supervisor WebSocket transport](docs/adr/0016-supervisor-websocket-transport.md)
-- [ADR-0017: two-phase remote command delivery](docs/adr/0017-two-phase-remote-command-delivery.md)
-- [ADR-0018: supervisor reconnect and generation recovery](docs/adr/0018-supervisor-reconnect-and-generation-recovery.md)
-- [ADR-0019: cross-instance supervisor command ownership](docs/adr/0019-cross-instance-supervisor-command-ownership.md)
-- [ADR-0020: cross-replica session event notification](docs/adr/0020-cross-replica-session-event-notification.md)
-- [ADR-0021: S3-compatible settled checkpoint storage](docs/adr/0021-s3-compatible-settled-checkpoint-storage.md)
-- [ADR-0022: remote control-plane worker lifecycle](docs/adr/0022-remote-control-plane-worker-lifecycle.md)
-- [ADR-0023: production Supervisor host and self-hosted topology](docs/adr/0023-production-supervisor-host-and-self-hosted-topology.md)
-- [ADR-0024: permanent event rejection and spool quarantine](docs/adr/0024-permanent-event-rejection-and-spool-quarantine.md)
-- [ADR-0025: private multi-tenant identity and fair scheduling](docs/adr/0025-private-multi-tenant-identity-and-fair-scheduling.md)
-- [ADR-0026: opt-in self-service registration and conversation discovery](docs/adr/0026-opt-in-self-service-registration-and-conversation-discovery.md)
-- [ADR-0027: tenant model credentials and brokered Pi execution](docs/adr/0027-tenant-model-credentials-and-brokered-pi-execution.md)
-- [ADR-0028: controlled public GitHub workspace import](docs/adr/0028-controlled-github-workspace-import.md)
-- [ADR-0029: trusted Pi runner and remote tool sandbox](docs/adr/0029-trusted-pi-runner-and-remote-tool-sandbox.md)
-- [ADR-0030: pluggable sandbox provider boundary](docs/adr/0030-pluggable-sandbox-provider-boundary.md)
-- [ADR-0031: durable Run Attempt protocol](docs/adr/0031-durable-run-attempt-protocol.md)
-- [ADR-0032: versioned Workspaces and GitHub Gateway](docs/adr/0032-versioned-workspaces-and-github-gateway.md)
-- [ADR-0033: context and model governance](docs/adr/0033-context-and-model-governance.md)
-- [ADR-0034: observability and reproducible evaluation](docs/adr/0034-observability-and-reproducible-evaluation.md)
-- [ADR-0035: superseded Docker Sandboxes microVM Provider](docs/adr/0035-docker-sandboxes-microvm-provider.md)
-- [ADR-0036: product operations and release evidence](docs/adr/0036-product-operations-and-release-evidence.md)
-- [ADR-0037: browser accounts and a platform-managed model](docs/adr/0037-browser-accounts-and-platform-managed-model.md)
-- [ADR-0038: gVisor-only untrusted tool execution](docs/adr/0038-gvisor-only-tool-execution.md)
-- [ADR-0041: remove the cumulative per-Run token budget](docs/adr/0041-remove-per-run-token-budget.md)
-- [ADR-0042: versioned Project environments](docs/adr/0042-versioned-project-environment-plane.md)
-- [ADR-0043: Cursor-informed Cloud Agent product loop](docs/adr/0043-cursor-informed-cloud-agent-product-loop.md)
-- [ADR-0044: capability-scoped dependency egress](docs/adr/0044-capability-scoped-dependency-egress.md)
-- [ADR-0045: single-consumption clean gVisor prewarming](docs/adr/0045-single-consumption-clean-prewarm.md)
-- [ADR-0046: capability-scoped public repository import](docs/adr/0046-capability-scoped-repository-import.md)
-- [ADR-0049: transactional semantic conversation projections](docs/adr/0049-transactional-semantic-conversation-projections.md)
-- [ADR-0050: capability-free trusted provider egress relay](docs/adr/0050-capability-free-trusted-provider-egress-relay.md)
-- [ADR-0051: bounded parallel candidate races](docs/adr/0051-parallel-candidate-races.md)
-- [ADR-0052: CubeSandbox KVM microVM Provider experiment](docs/adr/0052-cubesandbox-microvm-provider-experiment.md)
-- [ADR-0053: CubeSandbox primary Tool execution plane](docs/adr/0053-cubesandbox-primary-execution-plane.md)
-- [ADR-0054: horizontal Pi Worker pool and native session checkpoints](docs/adr/0054-horizontal-pi-worker-pool-and-native-session-checkpoints.md)
-- [ADR-0055: mature orchestration adoption and segmented Pi checkpoints](docs/adr/0055-durable-orchestration-and-segmented-pi-checkpoints.md)
-- [ADR-0056: Temporal as the sole Run scheduler](docs/adr/0056-temporal-as-sole-run-scheduler.md)
-- [ADR-0057: capacity-one Pi Workers and global Tool admission](docs/adr/0057-capacity-one-pi-workers-and-global-tool-admission.md)
-- [ADR-0058: Kubernetes Pi Worker pool and external conversation state](docs/adr/0058-kubernetes-pi-worker-pool-and-external-conversation-state.md)
-- [ADR-0059: single-node Kubernetes Pi Worker cutover](docs/adr/0059-single-node-kubernetes-pi-worker-cutover.md)
-- [ADR-0061: capacity-aware Temporal Worker affinity](docs/adr/0061-capacity-aware-temporal-worker-affinity.md)
-- [ADR-0062: Cube full-public egress with private-network denial](docs/adr/0062-cube-full-public-egress-with-private-network-denial.md)
-- [ADR-0064: Cube-native large Workspace checkpoints](docs/adr/0064-cube-native-workspace-checkpoints.md)
-- [ADR-0067: Cube POSIX volumes and Kopia Workspace authority](docs/adr/0067-cube-posix-volumes-and-kopia-workspace-authority.md)
-
-## Current executable spikes
-
-The first compatibility boundary lives in
-[`spikes/pi-extension-compat`](spikes/pi-extension-compat). It starts a real,
-pinned Pi RPC process, loads an extension, bridges a confirm/notify exchange,
-maps that exchange through the public event contract, and verifies clean
-shutdown without spending model tokens. The reusable TypeBox contract and Pi
-adapter live in [`packages/protocol`](packages/protocol) and
-[`packages/sandbox-supervisor`](packages/sandbox-supervisor). The same live
-exchange now passes through the versioned supervisor wire contract and a bounded
-reference spool that verifies cumulative ACK and reconnect replay behavior.
-
-The execution-density experiment lives in
-[`spikes/pi-embedded-rehydrate`](spikes/pi-embedded-rehydrate). Without calling
-a model or spawning a Pi child process, it runs three logical Pi sessions in one
-Node worker, recreates and disposes the SDK runtime for every activation,
-restores messages and `appendEntry` extension state from JSONL, enforces
-same-session FIFO plus bounded cross-session concurrency, and resumes through a
-fresh backend instance using only a durable checkpoint path. This backend is for
-trusted portable extensions only; it does not weaken the production sandbox
-boundary.
-
-An explicitly enabled live-provider probe shares the same embedded boundary and
-has verified ChatGPT-subscription token usage plus JSONL rehydration across a
-fresh backend instance. The embedded worker owns the environment-aware HTTP
-bootstrap that Pi's CLI would otherwise perform. The probe is never part of
-`npm run check`, disables tools and extensions, uses temporary session state,
-and requires an explicit quota-consumption environment flag.
-
-The deterministic model boundary lives in
-[`packages/fake-model-server`](packages/fake-model-server). It serves real
-OpenAI-compatible HTTP/SSE on loopback and the pinned Pi `0.80.10` adapter
-contract-tests text, fragmented tool calls, 429, request timeout, explicit
-abort, malformed SSE, mid-stream disconnect, and a three-tool Java repair loop
-without provider tokens.
-
-## Local verification and CI
-
-The same quality command used by GitHub Actions is reproducible from a clean
-checkout:
-
-```bash
-npm ci --ignore-scripts
-npm run dependencies:harden
-npm run ci
-```
-
-Pi 0.80.10 publishes an internal `npm-shrinkwrap.json`, so npm root overrides
-cannot update two vulnerable transitive packages even though compatible patch
-releases exist. `dependencies:harden` replaces only those two installed package
-directories from exact npm aliases, verifies their actual versions, and fails
-closed on a different Pi version. Production images run the same replacement
-and check; the security audit reconciles only the two exact stale shrinkwrap
-paths and still blocks every other high/critical finding.
-
-It checks Prettier formatting, the production frontend build, TypeScript types,
-the complete unit/contract suite, authenticated-backup cryptography, the two
-zero-token Pi spikes, and high-severity dependency advisories. The separate
-Gitleaks job scans complete Git history with read-only repository permissions.
-Six parallel supply-chain jobs generate image CycloneDX SBOMs, retain complete
-HIGH/CRITICAL reports, and reject fixable HIGH/CRITICAL findings. The opt-in
-live subscription probe is deliberately excluded from these commands.
-
-The hardened Phase 0 runner topology, including its effective Docker
-`HostConfig`, is exercised with:
-
-```bash
-npm run container:check
-```
-
-The retained importer/runtime regression gate verifies the scoped
-Kubernetes/gVisor boundary:
-
-```bash
-npm run sandbox:check
-```
-
-The primary execution-plane gates validate the Cube Tool image locally and
-then create real KVM guests for two tenants, including checkpoint, network
-denial, cancellation, and orphan cleanup:
-
-```bash
-npm run cubesandbox:template-check
-npm run cubesandbox:live-check
-```
-
-Host installation and fail-closed prerequisites are documented in
-[`deploy/host/README.md`](deploy/host/README.md). The latest measured result is
-in [`docs/reports/gvisor-sandbox-latest.md`](docs/reports/gvisor-sandbox-latest.md).
-
-Portable settled-checkpoint storage is verified against a digest-pinned,
-loopback-only, disposable MinIO fixture. The test creates no volume, spends no
-model tokens, conditionally publishes immutable objects, destroys the writer,
-restores through a fresh S3 client, detects remote corruption, and removes the
-container afterward:
-
-```bash
-npm run object-store:check
-```
-
-The fixture proves S3 API compatibility; it is not a production MinIO version
-or deployment recommendation.
-
-The one-command demo now uses the supported persistent production topology; the
-old whole-Pi ordinary-Docker demo was removed so there is no lower-security
-execution path. It serves the product at `http://127.0.0.1:8080`:
-
-```bash
-npm run demo
-```
-
-`npm run demo` is an alias for `npm run production:deploy`. Public registration
-and the platform model are controlled by the persisted production runtime
-configuration described below.
-
-## Self-hosted production deployment
-
-The supported single-host production topology is reproducible from a clean
-checkout after the one-time host setup in
-[`deploy/host/README.md`](deploy/host/README.md):
-
-```bash
-npm ci --ignore-scripts
-npm run dependencies:harden
-npm run production:deploy
-npm run production:token
-```
-
-For a fresh loopback deployment that should allow browser-created test tenants,
-opt in before the first initialization so the bounded setting is persisted in
-the private runtime configuration:
-
-```bash
-AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true \
-AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32 \
-npm run production:deploy
-```
-
-It starts persistent PostgreSQL and MinIO, an internal Temporal service, an
-authenticated remote control plane, a bounded trusted non-root Pi Worker pool,
-a separate authenticated Sandbox Manager, the Web ingress, and Cube's KVM
-execution plane. No
-application service owns a Docker/containerd socket. Pi and the tenant model
-credential remain in the trusted Runner; `read/write/edit/bash` cross a narrow
-RPC boundary into a host-mount-free, credential-free Tool microVM with
-full public outbound networking and explicit private/link-local/metadata
-denial. Only the Web ingress publishes a loopback port.
-The Manager retains provider-neutral capability and identity enforcement, while
-`CubeSandboxProvider` owns physical lifecycle. A Run receives logical Tool
-authority without creating a VM; the first Tool Call asks CubeMaster to
-schedule one. Chat-only Runs never touch Cube. Cube v0.6.0 lacks the metadata
-CAS required for a safe higher-fence online rebind, so a completed Run destroys
-its VM and a follow-up restores the committed Workspace into a new activation.
-The separate gVisor plane is retained only for the constrained exact-commit
-repository importer and is not a Tool fallback.
-
-The Runner has no host network and no directly routed public network. Its
-loopback Model Gateway sends provider TLS through a private internal bridge,
-Unix socket and exact-host relay. The relay has no model/platform credential,
-does not terminate TLS and listens on no host TCP port; Tool Pods cannot reach
-it. This also supports hosts whose only public path is an operator
-`HTTPS_PROXY`. See ADR-0050 and the network matrix.
-
-Each Project also owns an append-only, operator-managed environment version.
-Turn acceptance snapshots that exact profile, tool-image revision and canonical
-specification hash into the Run. Owners can derive an inactive version with a
-bounded offline setup/verification recipe, validate it in a fresh Cube
-microVM, and only then activate or roll it back with expected-current CAS;
-every change is audited and failed candidates remain inert. The first Tool
-activation verifies Node.js 24, Java 17, Python 3.11 and Git inside the actual
-Cube guest before repository commands may run; the resulting
-`cubesandbox-kvm`, network, user, rootfs and toolchain evidence is committed
-with the Workspace checkpoint and shown in the Web conversation header. Cube
-v0.6.0 activations are never rebound: every later coding Run restores the
-committed Workspace into a new guest with the exact accepted environment
-identity. See ADR-0042, ADR-0053 and the
-[production runbook](docs/PRODUCTION_DEPLOYMENT.md) for host setup, secrets,
-health, backup, upgrade, recovery, and the disposable full-topology acceptance
-command.
-
-Ordinary Cube Tool commands now have general public Internet access under
-ADR-0062, while private, link-local, metadata and platform address classes
-remain blocked by CubeVS. Immutable dependency installation remains available
-as explicit environment configuration through the retained Kubernetes/gVisor
-bootstrap path:
-
-```json
-{
-  "schemaVersion": 1,
-  "dependencyHosts": ["registry.npmjs.org"],
-  "setupCommands": [
-    {
-      "id": "npm-install",
-      "command": "npm ci --ignore-scripts --no-audit --no-fund",
-      "cwd": ".",
-      "timeoutMs": 120000,
-      "network": "dependency"
-    }
-  ],
-  "verificationCommands": [
-    {
-      "id": "npm-test",
-      "command": "npm test",
-      "cwd": ".",
-      "timeoutMs": 120000,
-      "network": "none"
-    }
-  ]
-}
-```
-
-Only the marked immutable setup command receives that bootstrap's short-lived
-exact-host proxy capability. Its process group is terminated at the command
-boundary. The Manager captures the prepared Workspace, destroys and confirms
-absence of that exact bootstrap Pod, then restores the regular files into
-Cube. This preparation path remains useful for reproducible environment
-versions, but it is no longer an offline-runtime claim: later arbitrary Tool
-commands in the Cube guest have the deployment-owned full-public policy.
-
-This is production-complete for the bounded private multi-tenant Java fixture
-and controlled GitHub repositories pinned to exact commits (one repository or
-2–8 repositories under disjoint roots; public by default and private through
-an explicitly configured GitHub App),
-with either the deterministic fake or an owner-configured DeepSeek model.
-Request identity, roles, encrypted per-tenant provider credentials,
-resource/event/checkpoint isolation, PostgreSQL admission quotas, Temporal
-Task Queue fairness, token usage,
-opt-in loopback self-registration, and tenant-scoped conversation discovery
-share one bounded Supervisor pool. Cold conversations retain durable Pi and
-workspace checkpoints but consume no Pi child process, Tool Sandbox, dedicated
-thread, or timer. The Web Session inspector exposes immutable Workspace
-history/files/compare, safe Artifact previews, Runs/Attempts, tests,
-usage/context, workspace operations, owner activity, and optional GitHub PR
-delivery. It can also fork one immutable Workspace baseline into two to four
-isolated candidate Sessions, admit them through the same PostgreSQL policy and
-Temporal Task Queue with a race-local concurrency cap, compare immutable Review Bundles,
-and CAS-promote an accepted candidate only after an explicit human decision.
-Cold encrypted backup/restore and checksummed release evidence are executable
-operator paths. It is not an arbitrary Git host, untrusted extension host,
-hostile public Internet SaaS, multi-node Kubernetes release, direct Internet
-ingress, or an unconstrained autonomous subagent tree.
+- [Backlog](docs/BACKLOG.md)
 
 ## Current status
 
-Phase 0: the public event envelope, Pi UI adapter, bidirectional
-supervisor/control-plane wire contract, and executable ACK/replay semantics are
-implemented. The local Pi RPC extension compatibility spike passes end to end,
-and the embedded rehydration spike proves that cold logical sessions do not need
-dedicated Pi processes. The domain package now enforces explicit session, turn,
-sandbox, approval, and agent-node transitions plus allowlisted model-profile
-resolution. The database package now supplies a versioned Kysely/PostgreSQL
-schema with executable ownership, idempotency, ordering, connection generation,
-fencing, ACK, and usage constraints. A hardened two-service Docker Compose topology, pinned runner
-images, and executable container-configuration contracts are implemented. The
-two images and probes pass on Docker Engine `29.6.2` with Compose `5.1.3`. Runtime
-inspection confirms UID/GID `1000:1000`, a read-only root filesystem, no host
-mounts or published ports, dropped capabilities, `no-new-privileges`, and
-enforced CPU, memory, PID, and `/tmp` limits. Fake activations have no network;
-real activations have only the internal model-gateway network. The deterministic fake model
-server makes streaming and provider failures executable without tokens.
-Formatting, tests, zero-token spikes, dependency audit, effective container
-checks, and full-history secret scanning are defined in GitHub Actions. Their
-first hosted runs will occur after the repository is pushed. Phase 0 is complete.
+The repository implements the full vertical path from browser authentication
+through durable Run orchestration, Pi SDK execution, Cube Tool execution,
+streaming events, Pi/Workspace checkpoints and multi-tenant recovery. It also
+contains horizontal Pi Worker manifests, Session-affinity scheduling,
+administrator-owned hot configuration, fault/load evaluation and deployment
+automation.
 
-Phase 1 now has a NestJS/Fastify durable-intake API, transactional outbox
-dispatcher, and a local supervisor integration boundary. The public API
-atomically creates a project/workspace and cold session, then accepts an
-idempotent turn only after PostgreSQL commits the turn, command, and outbox rows.
-The dispatcher acquires a durable session lease and monotonically increasing
-fence, delivers a closed `turn.execute` command containing the immutable model
-snapshot, persists the exact supervisor ACK, and only then lets pinned Pi
-`0.80.10` receive the prompt. Pi text deltas and completion are translated into
-versioned AgentDock events. Each event is stored with its command/lease/fence,
-the contiguous database cursor advances in the same transaction, and only the
-committed prefix is cumulatively ACKed to the supervisor spool. The session SSE
-endpoint joins live delivery with durable `Last-Event-ID` replay without a
-query/subscribe gap. A transactional PostgreSQL high-water notification now
-wakes SSE connections on other control-plane replicas; those replicas always
-read event bodies from the durable table, coalesce duplicate hints, reconnect
-their dedicated listener with bounded jitter, and use the SSE heartbeat as a
-missed-notification recovery poll. Completion and post-ACK failure both release
-lease and sandbox capacity transactionally.
-
-ADR-0049 keeps that complete event log while adding a compact conversation read
-model. A fenced terminal event transactionally materializes coalesced text,
-Tool, approval, notification and terminal state for the Turn. Completed
-conversations hydrate from that semantic projection and open SSE at the durable
-high-water mark; only an active unprojected suffix is replayed. Missing legacy
-projections rebuild from durable events on first read.
-
-The fourth Phase 1 slice adds durable cancellation as an independent command
-path, so a cancel can reach Pi while the execute dispatcher is blocked awaiting
-the model. The API returns `202` only after cancellation intent commits. A
-side-effect-free supervisor ACK is then persisted as the race's linearization
-point before Pi receives its native `abort`. On POSIX, an uncooperative Pi or
-tool descendant is escalated through process-group `SIGTERM`/`SIGKILL`, and
-`turn.cancelled` is published only after the complete group has disappeared.
-The terminal event remains fenced, durable, ordered, resumable through SSE, and
-owns final turn/session settlement. Natural completion wins if it commits first;
-a post-ACK cancellation failure fails the session without returning an
-unconfirmed sandbox reservation to the ready pool.
-
-The fifth Phase 1 slice originally replaced the local workspace with one
-ephemeral Docker activation containing Pi and its tools. ADR-0029 supersedes
-that production boundary: pinned Pi now stays in the trusted non-root Runner,
-with extension discovery and built-in local tools disabled, while one fixed
-image-owned extension routes `read/write/edit/bash` to a separate ephemeral
-Tool Sandbox. ADR-0053 now supplies that boundary with a Cube KVM microVM; the
-Kubernetes/gVisor implementation remains only for the importer and
-deterministic regression gate. The Tool guest has no host mount, ServiceAccount
-token, runtime socket, platform network or inherited credential, and has
-bounded CPU, memory, processes, disk, output and wall-clock time. The
-deterministic model still drives a failing test, source edit, and passing
-verification; every tool boundary is durably ACKed, `turn.completed` carries
-the bounded unified diff, and completion/cancellation confirm microVM removal.
-
-The sixth Phase 1 slice adds the React session surface. It retains Pi `/export`'s
-compact monospace language, independently scrolling and keyboard-resizable tree
-sidebar, narrow transcript, restrained user cards, unboxed Markdown assistant
-text, and collapsible tool details. It creates project/session/turn resources
-through REST, validates all public responses, and consumes SSE with a streaming
-parser that sends `Last-Event-ID`, rejects identity/sequence violations,
-deduplicates replay, and visibly reconnects. Tool lifecycle, cancellation,
-terminal failure, approvals, the durable sequence cursor, sandbox status, and
-the final diff have explicit non-color-only states. Remote Markdown images are
-not fetched, and no Pi payload, credential reference, or provider token is
-written to the DOM or browser console.
-
-The Web demo and routine CI/production acceptance use the embedded deterministic
-model, so they consume no provider token. Production additionally supports an
-explicit owner-configured DeepSeek profile: AES-256-GCM ciphertext stays in
-PostgreSQL, the master key stays at the trusted control-plane/Supervisor boundary,
-Pi receives only a short-lived gateway capability, and provider-reported token
-usage is written per tenant/turn. The demo deliberately retains the in-process
-integration bridge. The production entry point composes authenticated provisioning, the
-outbound Supervisor WebSocket, registration/heartbeat, execute/cancel,
-command ACK/commit/result, durable event ACK, bounded dispatch workers,
-retirement maintenance, and graceful drain. The client performs bounded
-same-boot reconnect after transient transport loss. The default project source
-is one trusted sample fixture; a project may instead name a normalized public
-GitHub `owner/repository` plus an exact 40-hex commit. At each successful settled
-boundary, trusted Pi JSONL is stored as tenant/session-scoped,
-content-addressed line segments plus an immutable manifest. For an ordinary
-Cube Tool Run, the guest is sealed and a content-hashed file index plus Git
-patch are captured. The trusted Data Mover snapshots the flushed POSIX
-Workspace into Kopia, and only its identity/fence-bound reference crosses the
-private Tool channel before `turn.completed`. A warm exact-Session activation
-stays running for the bounded idle TTL: the old Run's Tool capability and
-Worker are revoked, user background processes remain alive, and the next Run
-rotates authority under a higher fence. After eviction or failure a fresh Cube
-VM mounts the volume restored from the committed Kopia snapshot. Production
-therefore supports genuine same-session follow-up without keeping an idle Pi
-process alive or making the Cube node copy authoritative.
-
-The ephemeral demo still uses a private host directory coupled to its temporary
-database. The production storage boundary has an S3-compatible adapter:
-PostgreSQL retains the fenced logical pointers and independent hashes, while the
-bucket retains immutable Pi segment/manifest and Workspace bytes. Whole-file Pi
-v1 artifacts remain readable and the next settled Run migrates them forward. A
-test discards the writer and restores through a fresh client against disposable
-MinIO, so this path no longer depends on one Supervisor host directory. The
-production Compose topology uses that adapter against persistent MinIO and
-keeps credentials only in the trusted Supervisor host. For a GitHub source, one
-expiring PostgreSQL lease
-elects a disposable, credential-free importer through the Sandbox Manager. It
-fetches only the pinned commit from a separate gVisor Pod whose NetworkPolicy
-permits DNS and public HTTPS but excludes private/cluster/node ranges, rejects
-unsupported files, removes Git metadata, and publishes a content-addressed
-immutable seed to MinIO. No user-controlled command or repository hook runs in
-the importer. Every activation
-reverifies that seed; the first Pi turn creates its Git baseline from it, and
-follow-ups overlay the settled checkpoint without cloning again. Private
-repositories, arbitrary URLs, submodules, LFS, branch refresh, pull-request
-write-back, and repositories above the current manifest limits remain outside
-the supported boundary. Policy-approved extension loading, queued-turn
-withdrawal, acknowledged-cancellation crash recovery, and Windows Job Object
-containment are also deferred.
-
-Supervisor event delivery now has a replaceable crash-safe file spool. The demo
-uses it to atomically persist each closed event before enqueue, coalesce adjacent
-text deltas, publish bounded `event.publish_batch` messages asynchronously, and
-advance a synced cumulative cursor before deleting ACKed files. A fresh store
-instance can scan and redeliver the pending suffix; a PostgreSQL integration
-test proves that an event committed before its ACK connection fails is
-re-ACKed after lease release without creating a duplicate row. This protects
-already-produced events, but does not pretend to resume an in-flight tool or
-settle an acknowledged command with an unknown execution outcome.
-
-Long turns now use the existing closed supervisor heartbeat protocol. One
-shared loop reports every active assignment with its lease/fence and produced/
-ACKed event cursors; PostgreSQL renews only an exact, unexpired lifecycle match.
-An omitted or stale renewal revokes the runtime, and post-ACK lease loss fails
-the session instead of returning it to the ready pool. The trusted host can
-inventory Kubernetes assignments by supervisor/boot/sandbox/command/session/
-turn/lease/fence annotations, re-inspect the complete identity and Pod UID before removal, and confirm
-absence before settling `assignment_lost` or releasing capacity. An
-unacknowledged command may retain its mailbox position and retry only after that
-absence proof. Reconciliation is an explicit post-owner-exit boundary; it does
-not infer that a supervisor process is dead merely because a lease timestamp
-expired.
-
-Supervisor registration and liveness now have a durable, transport-neutral
-control-plane manager. A trusted provisioner must pre-create the exact
-supervisor/boot/sandbox identity; untrusted registration JSON cannot invent it.
-PostgreSQL records one current connection generation, transport ownership,
-pinned runtime versions, capabilities, heartbeat policy, and expiry. Same-boot
-reconnect supersedes the old connection, while a new boot fences and quarantines
-the old sandbox. Timeout only enqueues a claimed/retryable retirement job: a
-trusted host must first confirm that the exact boot can no longer create a
-runtime, after which the existing reconciler may settle ambiguous work and
-release capacity. A crashed retirement claimant can be replaced by another
-control-plane instance. The production entry point now wires a file-backed
-single-host provisioner, per-boot hashed WebSocket credentials, and a fixed
-authenticated HTTP owner/inventory adapter to the trusted Supervisor host.
-
-The supervisor network contract is now executable through the
-official Fastify WebSocket plugin and a sandbox-side `ws` client. Upgrade
-authentication happens before the socket opens; tests retain a development
-authorizer, while production validates an expiring provisioned credential ID
-and constant-time secret digest from PostgreSQL. The first frame must register, frames are processed
-in order with payload/queue bounds, one negotiated heartbeat timer covers all
-active assignments, and PostgreSQL rejects an old socket even when reconnecting
-through another control-plane listener. Socket close still waits for durable
-health expiry.
-
-The process-lifetime reconnect client creates a fresh single-generation socket
-after retryable failures, using bounded exponential backoff with jitter. It
-first revokes and waits for every old assignment to settle, so reconnect cannot
-overlap two Pi/tool processes for one session. Authentication, protocol, and
-superseded-identity failures are terminal. The registration transaction now
-persists the current `acceptingAssignments` drain state, and the remote backend
-resolves its guarded lease coordinator at the start of each new command. A
-committed command interrupted by disconnect is still failed as ambiguous rather
-than replayed on the new connection.
-
-Cross-instance command ownership uses the existing PostgreSQL claim transaction
-instead of adding another broker. An execute dispatcher is eligible only when
-its fixed sandbox has capacity and an unexpired, assignment-accepting connection
-owned by the local control-plane instance. Cancellation follows the target
-session lease to that sandbox's current connection owner and remains eligible
-while the Supervisor is draining. When the same boot reconnects elsewhere, the
-old replica returns `idle` without consuming an outbox attempt and the new owner
-can claim immediately.
-
-`RemoteControlPlaneRuntime` now composes those mechanisms into one explicit
-process lifecycle. REST, SSE, remote event ingestion, and PostgreSQL notification
-share the same durable event store and process-local wake hub. One discovery loop
-creates bounded execute and independent cancellation lanes from each live
-Supervisor's provisioned capacity; one separate maintenance loop expires
-connections and advances retirement work. Lane count scales with live capacity,
-not stored sessions, and no session receives a process, thread, socket, or timer.
-Shutdown first stops new claims, rejects Supervisor upgrades, detaches transports,
-waits for ambiguous exchanges to settle through the existing failure policy, and
-then closes Nest. Production `main.ts` enables this topology only after all
-file-backed secrets, bootstrap rows, the fixed Supervisor management endpoint,
-provisioner, owner-stop proof, and assignment inventory have passed fail-fast
-configuration and readiness checks.
-
-Cross-replica browser delivery also reuses PostgreSQL instead of adding a second
-event broker. Event commit transactionally emits only a versioned
-tenant/session/sequence high-water hint; every control-plane replica keeps one
-dedicated `LISTEN` connection and wakes its process-local subscribers. The hub
-stores one coalesced sequence hint per subscriber, never event bodies, and SSE
-then reads the contiguous durable suffix. Duplicate hints are harmless, listener
-reconnect wakes all local streams, and heartbeat polling bounds recovery if a
-hint is missed. Production `main.ts` wires this transport from `DATABASE_URL`.
-
-Capability `command.two_phase.v1` additionally enables multiplexed remote
-execute/cancel delivery. The Supervisor prepares without starting Pi and returns
-an exact ACK; only after the dispatcher persists `ACKNOWLEDGED/RUNNING` does the
-control plane send `command.commit`. A failed persistence sends best-effort
-`command.release`. Runtime completion/failure returns `command.result`, while
-each spooled public event still waits for PostgreSQL commit and cumulative
-`event.ack`. Wrong-stage or wrong-fence frames fail closed. Losing the shared
-lease channel releases uncommitted preparations and revokes running assignments.
-This preserves persist-before-side-effect ordering but does not claim
-distributed exactly-once execution.
-
-ADR-0006 fixed the first product slice as single-user and self-hosted. ADR-0025
-now adds private multi-tenant credentials (`owner`, `member`, `viewer`),
-request-scoped stores and SSE, transactional admission quotas, tenant-prefixed
-checkpoints, and least-recently-served global dispatch. The running control
-plane has no configured tenant and does not mount a tenant API token. ADR-0026
-adds explicitly enabled, capacity-bounded registration for the loopback
-deployment plus authenticated recent-conversation discovery. ADR-0037 adds
-username/password browser accounts with revocable persistent cookies and makes
-the platform operator's encrypted model the inherited backend default. The
-product UI has no model picker or bearer-token prompt. It does not claim email
-verification, password recovery, OIDC, billing, abuse controls, or a public-SaaS
-threat model.
-
-Phase 1 is complete: the persistent Web product accepts a turn, streams durable
-events and remote tool calls, exposes the bounded Git patch, and confirms Cube
-microVM teardown after completion or cancellation. The disposable
-`npm run production:check` reproduces this path with a deterministic model from
-a clean checkout through its explicit gVisor test profile; normal production
-defaults to Cube. `npm run demo` starts the interactive product.
-The first Phase 2 slice now adds cold Pi/workspace rehydration: a follow-up runs
-in another Cube microVM, sees the previous assistant message, verifies the
-previous Java edit, continues event sequence numbers, and replaces the settled
-checkpoint. Each accepted prompt now receives an immutable per-session mailbox
-position allocated under a PostgreSQL row lock. Prompts submitted while a turn
-is active are explicit queued follow-ups—not steer—and the Web page displays
-their durable positions. A five-input integration test concurrently accepts the
-four followers, forces tied timestamps, and proves strict FIFO, no overlap, and
-idempotent replay without position gaps.
-The S3-compatible checkpoint adapter is now complete and MinIO-tested. Phase 2
-now also has an explicit remote control-plane composition whose bounded workers
-automatically execute and cancel real WebSocket Supervisor work while maintenance
-continues independently. The production slice supplies the concrete trusted
-Supervisor/Pi Worker pool, separate authenticated Sandbox Manager, fresh boot
-identity, exact owner-stop/inventory proof,
-file-backed public/enrollment/management credentials, S3 checkpoint composition,
-private networks, persistent volumes, pinned images, Web ingress, and executable
-restart/scale/recovery acceptance. Permanently stale post-disconnect spool events
-are explicitly rejected and checksummed in quarantine; an ambiguous committed
-command is failed and never replayed.
-
-The controlled GitHub workspace slice is also executable in production. The Web
-new-workspace panel accepts either the sample or a normalized public GitHub
-repository pinned to an exact commit SHA. An opt-in live command imports a tiny
-repository, runs two real Pi/DeepSeek turns with tools, verifies a cumulative
-patch and token ledger, proves the immutable seed is reused, and confirms that
-no importer survives:
-
-```bash
-AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
-```
-
-The primary Cube product path has a focused real-token acceptance command. It
-proves pure-chat zero activation, warm same-Session coding, Kopia recovery after
-deleting the local POSIX copy, semantic projections, cross-tenant API denial
-and exact Cube cleanup:
-
-```bash
-AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 npm run production:semantic-check
-```
-
-Multi-tenant model scheduling and checkpoint restoration can be measured with
-an explicitly enabled real-token load:
-
-```bash
-AGENT_DOCK_LIVE_MULTI_TENANT_LOAD=1 \
-  npm run production:multi-tenant-model-load
-```
-
-The bounded parallel candidate-race slice is independently reproducible. It
-forks one immutable parent baseline into two child Sessions, spends real model
-tokens, proves overlapping Runs in distinct Cube Tool microVMs, verifies
-immutable red/green Review Bundles, CAS-promotes the deterministic recommendation
-and confirms exact Sandbox cleanup:
-
-```bash
-AGENT_DOCK_LIVE_PARALLEL_CHECK=1 npm run production:parallel-check
-```
-
-The latest sanitized evidence is
-[`docs/reports/parallel-candidate-race-acceptance-latest.md`](docs/reports/parallel-candidate-race-acceptance-latest.md).
-
-Routine CI and `npm run production:check` remain deterministic and consume no
-provider quota. See ADR-0028 and the production runbook for the source limits
-and trust boundary.
+Historical ADRs, migration files and research reports remain as immutable
+engineering history. They do not represent selectable runtimes in the current
+product.

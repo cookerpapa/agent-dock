@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -72,6 +73,7 @@ import {
   type WorkspaceVersionCompareResource,
   type WorkspaceVersionListResource,
   type WorkspaceVersionResource,
+  type WorkspaceListResource,
 } from "@agent-dock/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -162,6 +164,7 @@ export class ControlPlaneController {
       userId: identity.userId,
       displayName: identity.displayName,
       role: identity.role,
+      platformAdministrator: this.platformRuntimeSettings.isPlatformAdministrator(identity),
     };
   }
 
@@ -336,6 +339,28 @@ export class ControlPlaneController {
   async listConversations(@Req() request: FastifyRequest): Promise<ConversationListResource> {
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).listConversations();
+  }
+
+  @Get("workspaces")
+  async listWorkspaces(@Req() request: FastifyRequest): Promise<WorkspaceListResource> {
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.controlPlaneStores.forIdentity(identity).listWorkspaces();
+  }
+
+  @Delete("conversations/:sessionId")
+  async deleteConversation(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+  ): Promise<WorkspaceOperationResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.workspaceVersions.archive(
+      identity.tenantId,
+      parseIdempotencyKey(idempotencyKeyValue),
+      sessionId,
+      { archived: true },
+    );
   }
 
   @Get("conversations/:sessionId")
@@ -676,7 +701,7 @@ export class ControlPlaneController {
     const identity = this.tenantRequestContext.requireMutation(httpRequest);
     return this.controlPlaneStores
       .forIdentity(identity)
-      .createSession(projectId, request.workspaceId);
+      .createSession(projectId, request.workspaceId, request.title);
   }
 
   @Post("sessions/:sessionId/turns")

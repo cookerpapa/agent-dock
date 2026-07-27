@@ -28,6 +28,7 @@ describe("tenant-aware browser API", () => {
       userId: "10000000-0000-4000-8000-000000000003",
       displayName: "Alice",
       role: "owner" as const,
+      platformAdministrator: false,
     };
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(init?.credentials).toBe("same-origin");
@@ -373,6 +374,7 @@ describe("tenant-aware browser API", () => {
           userId: "10000000-0000-4000-8000-000000000003",
           displayName: "Alpha Operator",
           role: "viewer",
+          platformAdministrator: false,
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
@@ -385,6 +387,7 @@ describe("tenant-aware browser API", () => {
       userId: "10000000-0000-4000-8000-000000000003",
       displayName: "Alpha Operator",
       role: "viewer",
+      platformAdministrator: false,
     });
     expect(fetchImplementation).toHaveBeenCalledWith(
       "/v1/identity",
@@ -440,7 +443,8 @@ describe("tenant-aware browser API", () => {
                     sessionId: "20000000-0000-4000-8000-000000000001",
                     projectId: "30000000-0000-4000-8000-000000000001",
                     workspaceId: "40000000-0000-4000-8000-000000000001",
-                    projectName: "Alpha repair",
+                    title: "Repair checkout",
+                    workspaceName: "Alpha repair",
                     state: "idle",
                     turnCount: 1,
                     createdAt,
@@ -463,6 +467,7 @@ describe("tenant-aware browser API", () => {
                   sessionId: "20000000-0000-4000-8000-000000000001",
                   projectId: "30000000-0000-4000-8000-000000000001",
                   workspaceId: "40000000-0000-4000-8000-000000000001",
+                  title: "Repair checkout",
                   state: "idle",
                   modelProfileId: "50000000-0000-4000-8000-000000000001",
                   createdAt,
@@ -480,7 +485,7 @@ describe("tenant-aware browser API", () => {
     const api = new AgentDockApi(fetchImplementation, token);
 
     await expect(api.listConversations()).resolves.toMatchObject({
-      conversations: [{ projectName: "Alpha repair" }],
+      conversations: [{ title: "Repair checkout", workspaceName: "Alpha repair" }],
     });
     await expect(
       api.getConversation("20000000-0000-4000-8000-000000000001"),

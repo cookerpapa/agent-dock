@@ -27,24 +27,6 @@ export {
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "./cubesandbox-runtime-client.ts";
 export {
-  KUBERNETES_GVISOR_RUNTIME_NAME,
-  KUBERNETES_SANDBOX_ANNOTATIONS,
-  KUBERNETES_SANDBOX_LABELS,
-  KubernetesGvisorSandboxProvider,
-  buildKubernetesCleanPrewarmPod,
-  buildKubernetesRepositoryImportPod,
-  buildKubernetesToolSandboxPod,
-  type KubernetesGvisorSandboxProviderOptions,
-  type KubernetesCleanPrewarmPodOptions,
-  type KubernetesRepositoryImportPodOptions,
-  type KubernetesToolPodOptions,
-} from "./kubernetes-gvisor-sandbox-provider.ts";
-export {
-  OfficialKubernetesRuntimeClient,
-  type KubernetesImagePullPolicy,
-  type KubernetesRuntimeClient,
-} from "./kubernetes-runtime-client.ts";
-export {
   DEFAULT_TOOL_SANDBOX_POLICY,
   SANDBOX_PROVIDER_API_VERSION,
   SandboxManagerError,

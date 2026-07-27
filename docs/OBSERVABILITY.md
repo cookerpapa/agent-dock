@@ -34,10 +34,9 @@ observability network:
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
 | Sandbox Manager | `sandbox-manager:9466/metrics` | Provider lifecycle, tools, process |
 
-`agent_dock_sandbox_prewarm{provider="gvisor"}` reports only never-used,
-tenant-free Pods waiting for a single-consumption claim. It is separate from
-`agent_dock_sandbox_active`, which reports assigned and exact-Session warm
-Sandboxes.
+`agent_dock_sandbox_active{provider="cubesandbox"}` reports assigned and
+exact-Session warm Cube activations. Provider lifecycle, warm reuse and cleanup
+are also visible through Run/Tool spans and Cube reconciliation logs.
 
 The bearer token is generated under the private runtime directory and mounted
 read-only. It is not the user API token. Prometheus is available through the

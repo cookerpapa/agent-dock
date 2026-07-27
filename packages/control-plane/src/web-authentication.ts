@@ -41,6 +41,7 @@ export type WebAuthenticationOptions = {
     | (() =>
         PrivateTenantInitialModel | undefined | Promise<PrivateTenantInitialModel | undefined>);
   secureCookie?: boolean;
+  platformOperatorTenantId?: string;
   sessionTtlMs?: number;
   idGenerator?: () => string;
   randomBytes?: (size: number) => Buffer;
@@ -119,13 +120,20 @@ function timestamp(value: Date | string): string {
   return parsed.toISOString();
 }
 
-function identityResource(identity: TenantRequestIdentity): TenantIdentityResource {
+function identityResource(
+  identity: TenantRequestIdentity,
+  platformOperatorTenantId: string | undefined,
+): TenantIdentityResource {
   return {
     tenantId: identity.tenantId,
     tenantSlug: identity.tenantSlug,
     userId: identity.userId,
     displayName: identity.displayName,
     role: identity.role,
+    platformAdministrator:
+      identity.role === "owner" &&
+      platformOperatorTenantId !== undefined &&
+      identity.tenantId === platformOperatorTenantId,
   };
 }
 
@@ -446,7 +454,10 @@ export class WebAuthenticationService implements TenantApiAuthenticator {
     });
     return {
       token,
-      resource: { identity: identityResource(identity), expiresAt: timestamp(expiresAt) },
+      resource: {
+        identity: identityResource(identity, this.#options.platformOperatorTenantId),
+        expiresAt: timestamp(expiresAt),
+      },
     };
   }
 }
