@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { directoryEntries, visibleDirectoryEntries } from "../src/WorkspaceInspector.tsx";
+import {
+  canPreviewWorkspaceFile,
+  directoryEntries,
+  MAXIMUM_WORKSPACE_PREVIEW_BYTES,
+  visibleDirectoryEntries,
+} from "../src/WorkspaceInspector.tsx";
 
 const files = [
   {
@@ -50,5 +55,25 @@ describe("Workspace directory tree", () => {
         (entry) => entry.path,
       ),
     ).toEqual(["src", "src/components", "src/components/Button.tsx", "src/index.ts", "README.md"]);
+  });
+
+  it("keeps oversized files outside the bounded browser materialization path", () => {
+    const previewFile = {
+      path: "src/components/Button.tsx",
+      sizeBytes: MAXIMUM_WORKSPACE_PREVIEW_BYTES,
+      sha256: "d".repeat(64),
+      executable: false,
+    };
+    expect(
+      canPreviewWorkspaceFile({
+        ...previewFile,
+      }),
+    ).toBe(true);
+    expect(
+      canPreviewWorkspaceFile({
+        ...previewFile,
+        sizeBytes: MAXIMUM_WORKSPACE_PREVIEW_BYTES + 1,
+      }),
+    ).toBe(false);
   });
 });

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceFileResource, WorkspaceVersionResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError } from "./api.ts";
 
+export const MAXIMUM_WORKSPACE_PREVIEW_BYTES = 512 * 1_024;
+
 export type DirectoryEntry =
   | Readonly<{ kind: "directory"; path: string; depth: number; name: string }>
   | Readonly<{
@@ -78,6 +80,10 @@ export function visibleDirectoryEntries(
   });
 }
 
+export function canPreviewWorkspaceFile(file: WorkspaceFileResource): boolean {
+  return file.sizeBytes <= MAXIMUM_WORKSPACE_PREVIEW_BYTES;
+}
+
 function sizeLabel(bytes: number): string {
   if (bytes < 1_024) return `${String(bytes)} B`;
   if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
@@ -113,6 +119,7 @@ export function WorkspaceInspector({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [selectedBinary, setSelectedBinary] = useState(false);
+  const [selectedTooLarge, setSelectedTooLarge] = useState(false);
   const [rootExpanded, setRootExpanded] = useState(true);
   const [expandedDirectories, setExpandedDirectories] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -201,6 +208,11 @@ export function WorkspaceInspector({
     setSelectedPath(file.path);
     setSelectedText(null);
     setSelectedBinary(false);
+    setSelectedTooLarge(!canPreviewWorkspaceFile(file));
+    if (!canPreviewWorkspaceFile(file)) {
+      setFileLoading(false);
+      return;
+    }
     setFileLoading(true);
     try {
       const result = await api.readWorkspaceFile(version.versionId, file.path);
@@ -313,6 +325,14 @@ export function WorkspaceInspector({
               </header>
               {fileLoading ? (
                 <div className="workspace-preview-empty">正在读取文件…</div>
+              ) : selectedTooLarge ? (
+                <div className="workspace-preview-empty">
+                  <span>文件较大，无法在线预览</span>
+                  <small>
+                    网页预览上限为 {sizeLabel(MAXIMUM_WORKSPACE_PREVIEW_BYTES)}
+                    ，Agent 仍可在 Sandbox 中读取和处理此文件。
+                  </small>
+                </div>
               ) : selectedBinary ? (
                 <div className="workspace-preview-empty">这是二进制文件，无法在此预览。</div>
               ) : (
