@@ -65,15 +65,22 @@ if (piVersion !== "0.80.10") {
 }
 
 function inspectPatches() {
-  return securityPatches.map((securityPatch) => ({
-    ...securityPatch,
-    actualVersion: readPackageVersion(securityPatch.targetRoot),
-    declaredVersion:
-      securityPatch.declaringPackageRoot === undefined
-        ? null
-        : JSON.parse(readFileSync(join(securityPatch.declaringPackageRoot, "package.json"), "utf8"))
-            .dependencies?.[securityPatch.name],
-  }));
+  return securityPatches
+    .filter(
+      (securityPatch) =>
+        securityPatch.declaringPackageRoot === undefined ||
+        readPackageVersion(securityPatch.declaringPackageRoot) !== null,
+    )
+    .map((securityPatch) => ({
+      ...securityPatch,
+      actualVersion: readPackageVersion(securityPatch.targetRoot),
+      declaredVersion:
+        securityPatch.declaringPackageRoot === undefined
+          ? null
+          : JSON.parse(
+              readFileSync(join(securityPatch.declaringPackageRoot, "package.json"), "utf8"),
+            ).dependencies?.[securityPatch.name],
+    }));
 }
 
 let installedPatches = inspectPatches();

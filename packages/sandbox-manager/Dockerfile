@@ -10,8 +10,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
 WORKDIR /src/kopia
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    go mod edit -require=google.golang.org/grpc@v1.82.1 \
-    && go mod download \
+    go get google.golang.org/grpc@v1.82.1 \
     && mkdir -p /out \
     && go build -trimpath -tags nohtmlui \
       -ldflags="-s -w -X github.com/kopia/kopia/repo.BuildVersion=0.23.1 -X github.com/kopia/kopia/repo.BuildInfo=72ec08fd8edb86c67ed27099bf1b955e1f308ffa -X github.com/kopia/kopia/repo.BuildGitHubRepo=kopia/kopia" \
