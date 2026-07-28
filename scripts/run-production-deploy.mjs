@@ -1,9 +1,19 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, statfs } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+
+async function assertDeploymentDiskHeadroom() {
+  const filesystem = await statfs(repositoryRoot);
+  const availableRatio = filesystem.bavail / filesystem.blocks;
+  if (!Number.isFinite(availableRatio) || availableRatio < 0.15) {
+    throw new Error(
+      `Production deployment requires at least 15% free disk space; found ${(availableRatio * 100).toFixed(1)}%. Reclaim build caches before deploying so Kubernetes does not evict CubeSandbox services.`,
+    );
+  }
+}
 
 function run(script, args = []) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -24,6 +34,7 @@ function run(script, args = []) {
   });
 }
 
+await assertDeploymentDiskHeadroom();
 await run("scripts/init-production.mjs");
 await run("scripts/init-cubesandbox-runtime.mjs");
 await run("scripts/register-cubesandbox-tool-template.mjs");

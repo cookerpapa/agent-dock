@@ -32,6 +32,7 @@ const cubeMasterCliPath = resolve(runtimeDirectory, "cubesandbox/cubemastercli")
 const authorizerImage = "agent-dock/cube-api-authorizer:local";
 const cubeEgressGatewayImage = "agent-dock/cube-egress-gateway:local";
 const cubeEgressConfigTokenPath = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
+const k3sImageDirectory = "/var/lib/rancher/k3s/agent/images";
 const wslStableNodeIp = "10.255.255.254";
 const wslStableNodeInterface = "agentdock0";
 const wslStableNodeMtu = 1_500;
@@ -58,6 +59,9 @@ const k3sWslPreparePath = "/usr/local/libexec/agent-dock-prepare-k3s-wsl";
 const k3sServiceRouteHelperPath = "/usr/local/libexec/agent-dock-route-k3s-services";
 const k3sServiceRouteDropInPath =
   "/etc/systemd/system/k3s.service.d/agent-dock-cube-service-route.conf";
+const cubeSysctlPath = "/etc/sysctl.d/90-agent-dock-cubesandbox.conf";
+const inotifyInstanceLimitPath = "/proc/sys/fs/inotify/max_user_instances";
+const minimumInotifyInstances = 1_024;
 const k3sServiceCidr = "10.43.0.0/16";
 const templateRegistryTlsSecret = "agent-dock-cube-template-registry-tls";
 const templateRegistryDockerTrustDirectory = "/etc/docker/certs.d/localhost:5000";
@@ -119,6 +123,54 @@ function run(command, args, options = {}) {
   });
 }
 
+function canonicalImageReference(image) {
+  const [name, digest] = image.split("@", 2);
+  const segments = name.split("/");
+  const qualified =
+    segments.length === 1
+      ? `docker.io/library/${name}`
+      : !segments[0].includes(".") && !segments[0].includes(":") && segments[0] !== "localhost"
+        ? `docker.io/${name}`
+        : name;
+  return digest === undefined ? qualified : `${qualified}@${digest}`;
+}
+
+async function listK3sImages() {
+  return new Set(
+    (
+      await capture("ctr", [
+        "--address",
+        "/run/k3s/containerd/containerd.sock",
+        "--namespace",
+        "k8s.io",
+        "images",
+        "list",
+        "--quiet",
+      ])
+    ).split(/\r?\n/),
+  );
+}
+
+async function stagePinnedK3sImages(archiveName, images, timeoutMs = 10 * 60_000) {
+  await mkdir(k3sImageDirectory, { recursive: true, mode: 0o700 });
+  const archivePath = join(k3sImageDirectory, archiveName);
+  const partialArchivePath = `${archivePath}.partial`;
+  try {
+    await rm(partialArchivePath, { force: true });
+    await run("docker", ["image", "save", "--output", partialArchivePath, ...images]);
+    await rename(partialArchivePath, archivePath);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const imported = await listK3sImages();
+      if (images.every((image) => imported.has(canonicalImageReference(image)))) return;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+    }
+    throw new Error(`K3s did not import pinned image archive ${archiveName}`);
+  } finally {
+    await rm(partialArchivePath, { force: true });
+  }
+}
+
 function assertSingleNode(value) {
   const nodes = JSON.parse(value)?.items;
   if (!Array.isArray(nodes) || nodes.length !== 1) {
@@ -157,6 +209,35 @@ async function readOptional(path) {
   } catch (error) {
     if (error?.code === "ENOENT") return undefined;
     throw error;
+  }
+}
+
+async function ensureHostInotifyCapacity() {
+  const configuredLimit = Number((await readFile(inotifyInstanceLimitPath, "utf8")).trim());
+  if (!Number.isSafeInteger(configuredLimit) || configuredLimit < 1) {
+    throw new Error("The host inotify instance limit is invalid");
+  }
+
+  const desiredLimit = Math.max(configuredLimit, minimumInotifyInstances);
+  const configuration = [
+    "# Managed by AgentDock for the local CubeSandbox Kubernetes profile.",
+    `fs.inotify.max_user_instances = ${String(desiredLimit)}`,
+    "",
+  ].join("\n");
+  if ((await readOptional(cubeSysctlPath)) !== configuration) {
+    const temporaryPath = `${cubeSysctlPath}.agent-dock.tmp`;
+    await writeFile(temporaryPath, configuration, { mode: 0o644 });
+    await rename(temporaryPath, cubeSysctlPath);
+  }
+  if (configuredLimit < desiredLimit) {
+    await writeFile(inotifyInstanceLimitPath, `${String(desiredLimit)}\n`);
+  }
+
+  const effectiveLimit = Number((await readFile(inotifyInstanceLimitPath, "utf8")).trim());
+  if (!Number.isSafeInteger(effectiveLimit) || effectiveLimit < minimumInotifyInstances) {
+    throw new Error(
+      `CubeSandbox requires fs.inotify.max_user_instances >= ${String(minimumInotifyInstances)}`,
+    );
   }
 }
 
@@ -879,6 +960,7 @@ await capture("test", ["-r", cubeEgressConfigTokenPath]);
 await capture("test", ["-c", "/dev/kvm"]);
 await capture("which", ["mkfs.xfs"]);
 await capture("which", ["helm"]);
+await ensureHostInotifyCapacity();
 const nodeNetwork = await ensureStableWslNodeAddress();
 await ensureSharedRootMount();
 await ensureBpfFilesystem();
@@ -919,109 +1001,83 @@ await run("docker", [
   ".",
 ]);
 
-const temporary = await mkdtemp(join(tmpdir(), "agent-dock-cube-install-"));
-try {
-  const archive = join(temporary, "cube-api-authorizer.tar");
-  await run("docker", ["image", "save", "--output", archive, authorizerImage]);
-  await run("ctr", [
-    "--address",
-    "/run/k3s/containerd/containerd.sock",
-    "--namespace",
-    "k8s.io",
-    "images",
-    "import",
-    "--all-platforms",
-    archive,
-  ]);
-  const egressArchive = join(temporary, "cube-egress-gateway.tar");
-  await run("docker", ["image", "save", "--output", egressArchive, cubeEgressGatewayImage]);
-  await run("ctr", [
-    "--address",
-    "/run/k3s/containerd/containerd.sock",
-    "--namespace",
-    "k8s.io",
-    "images",
-    "import",
-    "--all-platforms",
-    egressArchive,
-  ]);
+await stagePinnedK3sImages("agent-dock-cube-platform-local.tar", [
+  authorizerImage,
+  cubeEgressGatewayImage,
+]);
+// `kubectl apply` owns the namespace declaratively without printing any
+// credential. Generate the Secret JSON in memory and stream it to apply.
+const namespace = await capture("kubectl", [
+  "create",
+  "namespace",
+  "cube-system",
+  "--dry-run=client",
+  "-o",
+  "json",
+]);
+await run("kubectl", ["apply", "-f", "-"], { input: namespace });
+const secret = await capture("kubectl", [
+  "-n",
+  "cube-system",
+  "create",
+  "secret",
+  "generic",
+  "agent-dock-cube-api-credential",
+  `--from-file=api-key=${credentialPath}`,
+  "--dry-run=client",
+  "-o",
+  "json",
+]);
+await run("kubectl", ["apply", "-f", "-"], { input: secret });
+const egressSecret = await capture("kubectl", [
+  "-n",
+  "cube-system",
+  "create",
+  "secret",
+  "generic",
+  "agent-dock-cube-egress-config",
+  `--from-file=config-token=${cubeEgressConfigTokenPath}`,
+  "--dry-run=client",
+  "-o",
+  "json",
+]);
+await run("kubectl", ["apply", "-f", "-"], { input: egressSecret });
+await run("kubectl", ["apply", "-f", "deploy/cubesandbox/authorizer.yaml"]);
+await run("kubectl", ["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
+await run("kubectl", [
+  "-n",
+  "cube-system",
+  "rollout",
+  "status",
+  "deployment/agent-dock-cube-api-authorizer",
+  "--timeout=180s",
+]);
+await run("kubectl", [
+  "-n",
+  "cube-system",
+  "rollout",
+  "status",
+  "deployment/agent-dock-cube-egress-gateway",
+  "--timeout=180s",
+]);
 
-  // `kubectl apply` owns the namespace declaratively without printing any
-  // credential. Generate the Secret JSON in memory and stream it to apply.
-  const namespace = await capture("kubectl", [
-    "create",
-    "namespace",
-    "cube-system",
-    "--dry-run=client",
-    "-o",
-    "json",
-  ]);
-  await run("kubectl", ["apply", "-f", "-"], { input: namespace });
-  const secret = await capture("kubectl", [
-    "-n",
-    "cube-system",
-    "create",
-    "secret",
-    "generic",
-    "agent-dock-cube-api-credential",
-    `--from-file=api-key=${credentialPath}`,
-    "--dry-run=client",
-    "-o",
-    "json",
-  ]);
-  await run("kubectl", ["apply", "-f", "-"], { input: secret });
-  const egressSecret = await capture("kubectl", [
-    "-n",
-    "cube-system",
-    "create",
-    "secret",
-    "generic",
-    "agent-dock-cube-egress-config",
-    `--from-file=config-token=${cubeEgressConfigTokenPath}`,
-    "--dry-run=client",
-    "-o",
-    "json",
-  ]);
-  await run("kubectl", ["apply", "-f", "-"], { input: egressSecret });
-  await run("kubectl", ["apply", "-f", "deploy/cubesandbox/authorizer.yaml"]);
-  await run("kubectl", ["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
-  await run("kubectl", [
-    "-n",
-    "cube-system",
-    "rollout",
-    "status",
-    "deployment/agent-dock-cube-api-authorizer",
-    "--timeout=180s",
-  ]);
-  await run("kubectl", [
-    "-n",
-    "cube-system",
-    "rollout",
-    "status",
-    "deployment/agent-dock-cube-egress-gateway",
-    "--timeout=180s",
-  ]);
-
-  await run("helm", [
-    "upgrade",
-    "--install",
-    "cube",
-    join(cubeRepository, "deploy/kubernetes/chart"),
-    "--namespace",
-    "cube-system",
-    "--values",
-    join(cubeRepository, "deploy/kubernetes/chart/values-single-node.yaml"),
-    "--values",
-    resolve(repositoryRoot, "deploy/cubesandbox/values-agent-dock-single-node.yaml"),
-    "--values",
-    secretValuesPath,
-    "--wait",
-    "--timeout",
-    "90m",
-  ]);
-} finally {
-  await rm(temporary, { recursive: true, force: true });
-}
+await run("helm", [
+  "upgrade",
+  "--install",
+  "cube",
+  join(cubeRepository, "deploy/kubernetes/chart"),
+  "--namespace",
+  "cube-system",
+  "--values",
+  join(cubeRepository, "deploy/kubernetes/chart/values-single-node.yaml"),
+  "--values",
+  resolve(repositoryRoot, "deploy/cubesandbox/values-agent-dock-single-node.yaml"),
+  "--values",
+  secretValuesPath,
+  "--wait",
+  "--timeout",
+  "90m",
+]);
 await installPosixVolumePlugin();
 if (nodeNetwork.changed) {
   await restartCubeWorkloadsAfterNetworkChange();

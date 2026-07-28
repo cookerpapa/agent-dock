@@ -296,6 +296,23 @@ async function cubeMasterCli(args, timeout) {
   );
 }
 
+async function retryReadOnlyCubeMasterCli(args, timeout, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      return await cubeMasterCli(args, timeout);
+    } catch (error) {
+      lastError = error;
+      if (attempt < 5) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, attempt * 2_000));
+      }
+    }
+  }
+  throw new Error(
+    `${label} failed after bounded retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+}
+
 const revision = await repositoryHead();
 const dirty = await capture(
   "git",
@@ -468,54 +485,76 @@ const templateSpecification = Object.freeze({
 const templateSpecSha256 = createHash("sha256")
   .update(JSON.stringify(templateSpecification), "utf8")
   .digest("hex");
-const created = parseJson(
-  await cubeMasterCli(
-    [
-      "tpl",
-      "create-from-image",
-      "--image",
-      clusterImage,
-      "--writable-layer-size",
-      "1G",
-      "--expose-port",
-      "49984",
-      "--probe",
-      "49984",
-      "--probe-path",
-      "/health",
-      "--cpu",
-      "2000",
-      "--memory",
-      "2000",
-      "--with-cube-ca=false",
-      "--allow-internet-access",
-      "--detach",
-      "--json",
-    ],
-    120_000,
-  ),
-  "Cube template create response",
+const initialInventory = parseJson(
+  await retryReadOnlyCubeMasterCli(["tpl", "list", "--json"], 60_000, "Cube template inventory"),
+  "Cube template inventory",
 );
-assertSuccessfulCubeResponse(created, "Cube template create");
-const jobId = nestedString(created, "job_id");
-if (!/^[0-9a-f-]{36}$/.test(jobId ?? "")) {
-  throw new Error("Cube template create response did not contain a valid job ID");
-}
-const watched = parseJson(
-  await cubeMasterCli(
-    ["tpl", "watch", "--job-id", jobId, "--interval", "2s", "--json"],
-    30 * 60_000,
-  ),
-  "Cube template watch response",
+assertSuccessfulCubeResponse(initialInventory, "Cube template inventory");
+const reusableTemplate = initialInventory?.data?.find(
+  (value) =>
+    value?.status === "READY" &&
+    value?.image_info === clusterImage &&
+    /^tpl-[a-z0-9]{24}$/.test(value?.template_id ?? "") &&
+    /^[0-9a-f-]{36}$/.test(value?.job_id ?? ""),
 );
-assertSuccessfulCubeResponse(watched, "Cube template watch");
-const templateId = nestedString(watched, "template_id");
-if (!/^tpl-[a-z0-9]{24}$/.test(templateId ?? "")) {
-  throw new Error("Cube template watch response did not contain a valid template ID");
+
+let templateId = reusableTemplate?.template_id;
+let jobId = reusableTemplate?.job_id;
+if (templateId === undefined || jobId === undefined) {
+  const created = parseJson(
+    await cubeMasterCli(
+      [
+        "tpl",
+        "create-from-image",
+        "--image",
+        clusterImage,
+        "--writable-layer-size",
+        "1G",
+        "--expose-port",
+        "49984",
+        "--probe",
+        "49984",
+        "--probe-path",
+        "/health",
+        "--cpu",
+        "2000",
+        "--memory",
+        "2000",
+        "--with-cube-ca=false",
+        "--allow-internet-access",
+        "--detach",
+        "--json",
+      ],
+      120_000,
+    ),
+    "Cube template create response",
+  );
+  assertSuccessfulCubeResponse(created, "Cube template create");
+  jobId = nestedString(created, "job_id");
+  if (!/^[0-9a-f-]{36}$/.test(jobId ?? "")) {
+    throw new Error("Cube template create response did not contain a valid job ID");
+  }
+  const watched = parseJson(
+    await retryReadOnlyCubeMasterCli(
+      ["tpl", "watch", "--job-id", jobId, "--interval", "2s", "--json"],
+      30 * 60_000,
+      "Cube template watch",
+    ),
+    "Cube template watch response",
+  );
+  assertSuccessfulCubeResponse(watched, "Cube template watch");
+  templateId = nestedString(watched, "template_id");
+  if (!/^tpl-[a-z0-9]{24}$/.test(templateId ?? "")) {
+    throw new Error("Cube template watch response did not contain a valid template ID");
+  }
 }
 
 const listed = parseJson(
-  await cubeMasterCli(["tpl", "list", "--json"], 60_000),
+  await retryReadOnlyCubeMasterCli(
+    ["tpl", "list", "--json"],
+    60_000,
+    "Cube template inventory confirmation",
+  ),
   "Cube template inventory",
 );
 assertSuccessfulCubeResponse(listed, "Cube template inventory");

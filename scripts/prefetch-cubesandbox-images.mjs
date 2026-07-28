@@ -1,9 +1,10 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, rename, rm } from "node:fs/promises";
 
 const containerdAddress = "/run/k3s/containerd/containerd.sock";
+const k3sImageDirectory = "/var/lib/rancher/k3s/agent/images";
+const archivePath = `${k3sImageDirectory}/agent-dock-cubesandbox-v0.6.0.tar`;
+const partialArchivePath = `${archivePath}.partial`;
 const images = [
   "busybox:1.36",
   "cube-sandbox-int.tencentcloudcr.com/cube-sandbox/alpine-k8s:1.28.15",
@@ -26,6 +27,18 @@ const images = [
   "redis:7-alpine",
   "registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
 ];
+
+function canonicalImageReference(image) {
+  const [name, digest] = image.split("@", 2);
+  const segments = name.split("/");
+  const qualified =
+    segments.length === 1
+      ? `docker.io/library/${name}`
+      : !segments[0].includes(".") && !segments[0].includes(":") && segments[0] !== "localhost"
+        ? `docker.io/${name}`
+        : name;
+  return digest === undefined ? qualified : `${qualified}@${digest}`;
+}
 
 if (process.getuid?.() !== 0) {
   throw new Error("CubeSandbox image prefetch must run as root to access K3s containerd");
@@ -77,6 +90,34 @@ async function pullWithRetry(image) {
   throw lastError;
 }
 
+async function dockerImageExists(image) {
+  return capture("docker", ["image", "inspect", image])
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function waitForImportedImages(timeoutMs = 10 * 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const imported = new Set(
+      (
+        await capture("ctr", [
+          "--address",
+          containerdAddress,
+          "--namespace",
+          "k8s.io",
+          "images",
+          "list",
+          "--quiet",
+        ])
+      ).split(/\r?\n/),
+    );
+    if (images.every((image) => imported.has(canonicalImageReference(image)))) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error("K3s did not finish importing the pinned CubeSandbox image archive");
+}
+
 const existing = new Set(
   (
     await capture("ctr", [
@@ -90,33 +131,29 @@ const existing = new Set(
     ])
   ).split(/\r?\n/),
 );
-const directory = await mkdtemp(join(tmpdir(), "agent-dock-cube-images-"));
 const results = [];
 try {
   for (const [index, image] of images.entries()) {
-    if (existing.has(image)) {
-      process.stdout.write(`[${index + 1}/${images.length}] already imported ${image}\n`);
-      results.push({ image, imported: true, reused: true });
-      continue;
+    const local = await dockerImageExists(image);
+    if (!local) {
+      process.stdout.write(`[${index + 1}/${images.length}] pulling ${image}\n`);
+      await pullWithRetry(image);
+    } else {
+      process.stdout.write(`[${index + 1}/${images.length}] available locally ${image}\n`);
     }
-    process.stdout.write(`[${index + 1}/${images.length}] pulling ${image}\n`);
-    await pullWithRetry(image);
-    const archive = join(directory, `cube-${String(index)}.tar`);
-    await run("docker", ["image", "save", "--output", archive, image]);
-    await run("ctr", [
-      "--address",
-      containerdAddress,
-      "--namespace",
-      "k8s.io",
-      "images",
-      "import",
-      archive,
-    ]);
-    await rm(archive, { force: true });
-    results.push({ image, imported: true, reused: false });
+    results.push({
+      image,
+      imported: true,
+      reused: existing.has(canonicalImageReference(image)),
+    });
   }
+  await mkdir(k3sImageDirectory, { recursive: true, mode: 0o700 });
+  await rm(partialArchivePath, { force: true });
+  await run("docker", ["image", "save", "--output", partialArchivePath, ...images]);
+  await rename(partialArchivePath, archivePath);
+  await waitForImportedImages();
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  await rm(partialArchivePath, { force: true });
 }
 
-process.stdout.write(`${JSON.stringify({ images: results })}\n`);
+process.stdout.write(`${JSON.stringify({ images: results, pinnedArchive: archivePath })}\n`);

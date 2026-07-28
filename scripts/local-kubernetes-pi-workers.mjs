@@ -338,8 +338,7 @@ async function importDockerImageIntoK3d(image, pull) {
   }
   const imageKey = image.replaceAll(/[^a-zA-Z0-9_.-]/gu, "-");
   const archive = join(importDirectory, `${String(process.pid)}-${imageKey}.tar`);
-  const remoteArchive =
-    `/var/lib/rancher/k3s/agent/images/agent-dock-${String(process.pid)}-${imageKey}.tar`;
+  const remoteArchive = `/var/lib/rancher/k3s/agent/images/agent-dock-${String(process.pid)}-${imageKey}.tar`;
   try {
     await run("docker", ["save", "--output", archive, image]);
     await run("docker", [
