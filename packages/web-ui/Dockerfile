@@ -17,8 +17,21 @@ RUN npm run build --workspace @agent-dock/web-ui
 FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS caddy-builder
 
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org|direct
-RUN apk add --no-cache ca-certificates git
-RUN git clone --filter=blob:none https://github.com/caddyserver/caddy.git /src/caddy \
+RUN installed=0 \
+    && for attempt in 1 2 3; do \
+      if apk add --no-cache ca-certificates git; then installed=1; break; fi; \
+      sleep "$((attempt * 2))"; \
+    done \
+    && test "$installed" = 1
+RUN cloned=0 \
+    && for attempt in 1 2 3; do \
+      rm -rf /src/caddy \
+      && if git clone --filter=blob:none https://github.com/caddyserver/caddy.git /src/caddy; then \
+        cloned=1; break; \
+      fi; \
+      sleep "$((attempt * 2))"; \
+    done \
+    && test "$cloned" = 1 \
     && cd /src/caddy \
     && git checkout --detach e2eee6a7fce366321294c9c2a79f3146891dcbdf \
     && test "$(git rev-parse HEAD)" = "e2eee6a7fce366321294c9c2a79f3146891dcbdf"

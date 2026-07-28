@@ -1,8 +1,9 @@
 # Release evidence process
 
-AgentDock's supported release process binds a clean Git revision to seven local
-production images and machine-readable dependency/security evidence. It does
-not currently push, sign, or publish images; registry policy and signing need a
+AgentDock's supported release process binds a clean Git revision to six
+application images and the three images owned by its CubeSandbox execution
+plane, plus machine-readable dependency/security evidence. It does not
+currently push, sign, or publish images; registry policy and signing need a
 separate deployment decision.
 
 ## Preconditions
@@ -13,6 +14,8 @@ separate deployment decision.
   security patches;
 - run `npm run ci`,
   `npm run cubesandbox:live-check`, and `npm run production:check`;
+- install the Cube platform images and register the immutable Tool template
+  from the same clean Git revision;
 - verify the pinned Cube template, KVM guest evidence, fixed network policy and
   live Cube Tool path; the Sandbox gate fails closed if any evidence is
   unavailable;
@@ -47,7 +50,7 @@ agent-dock-root.cdx.json
 images/control-plane.cdx.json
 images/control-plane.vulnerabilities.json
 images/control-plane.policy-vulnerabilities.json
-... one SBOM/two-report set for each of seven images
+... one SBOM/two-report set for each of nine images
 ```
 
 `manifest.json` records:
@@ -77,12 +80,12 @@ Docker socket. Its root filesystem and capabilities are removed; only the
 database cache and evidence directory are writable. Network is enabled only for
 the one vulnerability-database refresh, then disabled for all image scans.
 
-The `tool-sandbox` local image scan selects Trivy's `os` package type. Debian's
-package inventory therefore covers the packaged Node and OpenJDK runtimes
-without downloading Trivy's optional Java index; repository application
-packages remain covered by the root npm audit/SBOM. This override and rationale
-are recorded in `manifest.json`. CI deliberately performs the unrestricted
-image scan, including language packages.
+The `cubesandbox-tool` image scan selects Trivy's `os` package type. The guest
+package inventory therefore covers the packaged Node, Python and OpenJDK
+runtimes without downloading Trivy's optional Java index; repository
+application packages remain covered by the root npm audit/SBOM. This override
+and rationale are recorded in `manifest.json`. CI deliberately performs the
+unrestricted image scan, including language packages.
 
 The Web runtime compiles Caddy 2.11.4 from its verified release commit with a
 pinned Go 1.26.5 builder and the fixed `google.golang.org/grpc@v1.82.1`, then
@@ -91,7 +94,7 @@ inheriting stale packages from an older prebuilt Caddy image while preserving
 the standard Caddy module set. The actual final image, not either build stage,
 is what the release gate scans.
 
-CI independently builds a matrix of all six images, generates CycloneDX with
+CI independently builds a matrix of all nine images, generates CycloneDX with
 Anchore SBOM Action, records all HIGH/CRITICAL findings with Trivy, runs the same
 fixable-finding gate, and uploads each evidence set for 14 days. Checkout,
 Node, Anchore, Trivy, Gitleaks, and artifact Actions are pinned to immutable

@@ -113,8 +113,14 @@ jobs:
             dockerfile: packages/github-gateway/Dockerfile
           - image: web-ui
             dockerfile: packages/web-ui/Dockerfile
-          - image: tool-sandbox
-            dockerfile: packages/tool-sandbox/Dockerfile
+          - image: provider-egress-relay
+            dockerfile: packages/provider-egress-relay/Dockerfile
+          - image: cube-api-authorizer
+            dockerfile: packages/cube-api-authorizer/Dockerfile
+          - image: cube-egress-gateway
+            dockerfile: packages/cube-egress-gateway/Dockerfile
+          - image: cubesandbox-tool
+            dockerfile: deploy/cubesandbox/Dockerfile.tool
 
     steps:
       - name: Check out repository

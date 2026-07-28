@@ -131,6 +131,27 @@ function validateManifest(value) {
   ) {
     throw new Error("Backup manifest is invalid or unsupported");
   }
+  const expectedImages = new Set([
+    ...[
+      "control-plane",
+      "supervisor-host",
+      "sandbox-manager",
+      "github-gateway",
+      "web-ui",
+      "provider-egress-relay",
+    ].map((repository) => `agent-dock/${repository}:${value.imageVersion}`),
+    "agent-dock/cube-api-authorizer:local",
+    "agent-dock/cube-egress-gateway:local",
+    `localhost:5000/agent-dock/cubesandbox-tool:${value.gitCommit}`,
+  ]);
+  for (const image of value.images) {
+    if (typeof image?.reference !== "string" || !expectedImages.delete(image.reference)) {
+      throw new Error("Backup image evidence is invalid or duplicated");
+    }
+  }
+  if (expectedImages.size !== 0) {
+    throw new Error("Backup image evidence does not cover the current execution architecture");
+  }
   const expectedFiles = new Set([
     "runtime.tar.gz",
     ...BACKUP_VOLUMES.map((name) => `volumes/${name}.tar.gz`),
@@ -155,7 +176,9 @@ async function verifyImages(images) {
   for (const image of images) {
     if (
       typeof image?.reference !== "string" ||
-      !/^agent-dock\/[a-z-]+:[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(image.reference) ||
+      !/^(?:agent-dock\/[a-z-]+:[A-Za-z0-9][A-Za-z0-9_.-]*|localhost:5000\/agent-dock\/cubesandbox-tool:[0-9a-f]{40})$/.test(
+        image.reference,
+      ) ||
       typeof image?.imageId !== "string" ||
       !/^sha256:[0-9a-f]{64}$/.test(image.imageId)
     ) {

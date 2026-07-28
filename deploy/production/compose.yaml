@@ -1126,17 +1126,6 @@ services:
     stop_grace_period: 15s
     logging: *bounded-logging
 
-  tool-sandbox-image:
-    profiles: [image-only]
-    image: agent-dock/tool-sandbox:${AGENT_DOCK_IMAGE_VERSION:-production}
-    build:
-      context: ../..
-      dockerfile: packages/tool-sandbox/Dockerfile
-      args: *application-build-args
-      network: host
-    network_mode: none
-    restart: "no"
-
   provider-egress-relay-image:
     profiles: [image-only]
     image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}

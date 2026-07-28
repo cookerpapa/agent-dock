@@ -12,7 +12,7 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
 const BACKUP_MAGIC = Buffer.from("AGENTDOCK-BACKUP-V1\0", "utf8");
-export const BACKUP_FORMAT_VERSION = 1;
+export const BACKUP_FORMAT_VERSION = 2;
 export const BACKUP_VOLUMES = [
   "postgres-data",
   "minio-data",

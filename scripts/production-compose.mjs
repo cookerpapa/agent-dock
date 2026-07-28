@@ -235,7 +235,6 @@ const serviceArguments =
         "sandbox-manager",
         "github-gateway",
         "web",
-        "tool-sandbox-image",
         "provider-egress-relay-image",
       ]
     : commandArguments;

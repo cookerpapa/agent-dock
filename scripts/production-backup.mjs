@@ -87,24 +87,26 @@ async function assertRuntimeTree(path) {
   await walk(path);
 }
 
-async function imageEvidence(imageVersion) {
-  const repositories = [
+async function imageEvidence(imageVersion, cubeToolRevision) {
+  const productionRepositories = [
     "control-plane",
     "supervisor-host",
     "sandbox-manager",
     "github-gateway",
     "web-ui",
-    "tool-sandbox",
-    "cube-egress-gateway",
+    "provider-egress-relay",
+  ];
+  const references = [
+    ...productionRepositories.map((repository) => `agent-dock/${repository}:${imageVersion}`),
+    "agent-dock/cube-api-authorizer:local",
+    "agent-dock/cube-egress-gateway:local",
+    `localhost:5000/agent-dock/cubesandbox-tool:${cubeToolRevision}`,
   ];
   return Promise.all(
-    repositories.map(async (repository) => {
-      const reference = `agent-dock/${repository}:${imageVersion}`;
-      return {
-        reference,
-        imageId: await capture("docker", ["image", "inspect", "--format", "{{.Id}}", reference]),
-      };
-    }),
+    references.map(async (reference) => ({
+      reference,
+      imageId: await capture("docker", ["image", "inspect", "--format", "{{.Id}}", reference]),
+    })),
   );
 }
 
@@ -133,6 +135,19 @@ const environment = Object.fromEntries(
 const imageVersion = environment.AGENT_DOCK_IMAGE_VERSION;
 if (imageVersion === undefined || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(imageVersion)) {
   throw new Error("Production image version is missing or invalid");
+}
+const gitCommit = await capture("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot });
+const gitDirty =
+  (await capture("git", ["status", "--porcelain"], { cwd: repositoryRoot })).length > 0;
+const cubeTemplate = JSON.parse(
+  await readFile(resolve(options.runtimeDirectory, "cubesandbox/template.json"), "utf8"),
+);
+const cubeToolRevision = cubeTemplate?.imageRevision;
+if (typeof cubeToolRevision !== "string" || !/^[0-9a-f]{40}$/.test(cubeToolRevision)) {
+  throw new Error("Production CubeSandbox template image revision is missing or invalid");
+}
+if (cubeToolRevision !== gitCommit) {
+  throw new Error("Production CubeSandbox template does not match the checked-out Git revision");
 }
 await capture(process.execPath, ["scripts/production-compose.mjs", "config", "--quiet"], {
   cwd: repositoryRoot,
@@ -177,9 +192,6 @@ try {
       };
     }),
   );
-  const gitCommit = await capture("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot });
-  const gitDirty =
-    (await capture("git", ["status", "--porcelain"], { cwd: repositoryRoot })).length > 0;
   const manifest = {
     formatVersion: BACKUP_FORMAT_VERSION,
     createdAt: new Date().toISOString(),
@@ -187,7 +199,7 @@ try {
     gitCommit,
     gitDirty,
     imageVersion,
-    images: await imageEvidence(imageVersion),
+    images: await imageEvidence(imageVersion, cubeToolRevision),
     volumes: BACKUP_VOLUMES,
     files,
   };

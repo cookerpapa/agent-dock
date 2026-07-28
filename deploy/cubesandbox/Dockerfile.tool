@@ -8,8 +8,8 @@ FROM ${CUBE_BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get install --fix-missing --yes --no-install-recommends \
         bash \
         ca-certificates \
         git \

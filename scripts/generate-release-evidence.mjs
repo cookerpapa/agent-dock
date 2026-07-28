@@ -21,15 +21,15 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const TRIVY_IMAGE =
   "aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e";
 const TRIVY_IGNORE_POLICY = resolve(repositoryRoot, ".trivyignore.yaml");
-const IMAGE_NAMES = [
+const PRODUCTION_IMAGE_NAMES = [
   "control-plane",
   "supervisor-host",
   "sandbox-manager",
   "github-gateway",
   "web-ui",
-  "tool-sandbox",
-  "cube-egress-gateway",
+  "provider-egress-relay",
 ];
+const CUBE_PLATFORM_IMAGES = ["cube-api-authorizer", "cube-egress-gateway"];
 const MAX_CAPTURE_BYTES = 64 * 1_024 * 1_024;
 
 function parseArguments(argv) {
@@ -268,9 +268,25 @@ try {
   await run("docker", [...trivyBase, "image", "--cache-dir", "/cache", "--download-db-only"]);
 
   const images = [];
-  for (const imageName of IMAGE_NAMES) {
-    const reference = `agent-dock/${imageName}:${options.imageVersion}`;
-    const evidence = await inspectImage(reference, options.imageVersion, revision);
+  const imageDescriptors = [
+    ...PRODUCTION_IMAGE_NAMES.map((imageName) => ({
+      imageName,
+      reference: `agent-dock/${imageName}:${options.imageVersion}`,
+      labelVersion: options.imageVersion,
+    })),
+    ...CUBE_PLATFORM_IMAGES.map((imageName) => ({
+      imageName,
+      reference: `agent-dock/${imageName}:local`,
+      labelVersion: "cube-primary",
+    })),
+    {
+      imageName: "cubesandbox-tool",
+      reference: `localhost:5000/agent-dock/cubesandbox-tool:${revision}`,
+      labelVersion: "cube-primary",
+    },
+  ];
+  for (const { imageName, reference, labelVersion } of imageDescriptors) {
+    const evidence = await inspectImage(reference, labelVersion, revision);
     const archiveName = `${imageName}.tar`;
     const archivePath = resolve(temporaryDirectory, archiveName);
     await run("docker", ["image", "save", "--output", archivePath, reference]);
@@ -298,7 +314,7 @@ try {
       "vuln",
       "--severity",
       "HIGH,CRITICAL",
-      ...(imageName === "tool-sandbox" ? ["--pkg-types", "os"] : []),
+      ...(imageName === "cubesandbox-tool" ? ["--pkg-types", "os"] : []),
     ];
     await run("docker", [
       ...scanBase,
@@ -359,10 +375,10 @@ try {
       maximumFixableFindings: 0,
       exceptionPolicy: await fileEvidence(stageDirectory, ".trivyignore.yaml"),
       packageTypeOverrides: {
-        "agent-dock/tool-sandbox": {
+        "localhost:5000/agent-dock/cubesandbox-tool": {
           packageTypes: ["os"],
           rationale:
-            "Repository npm audit/SBOM covers its application packages; this image scan covers Debian-packaged Node and OpenJDK without requiring Trivy's optional 892 MiB Java index. CI still performs the unrestricted image scan.",
+            "Repository npm audit/SBOM covers its application packages; this image scan covers the Cube guest's OS packages without requiring Trivy's optional Java index. CI still performs the unrestricted image scan.",
         },
       },
     },

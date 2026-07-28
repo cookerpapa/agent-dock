@@ -1,7 +1,20 @@
 FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS kopia-builder
 ENV GOPROXY=https://proxy.golang.org|direct
-RUN apk add --no-cache ca-certificates git
-RUN git clone --filter=blob:none https://github.com/kopia/kopia.git /src/kopia \
+RUN installed=0 \
+    && for attempt in 1 2 3; do \
+      if apk add --no-cache ca-certificates git; then installed=1; break; fi; \
+      sleep "$((attempt * 2))"; \
+    done \
+    && test "$installed" = 1
+RUN cloned=0 \
+    && for attempt in 1 2 3; do \
+      rm -rf /src/kopia \
+      && if git clone --filter=blob:none https://github.com/kopia/kopia.git /src/kopia; then \
+        cloned=1; break; \
+      fi; \
+      sleep "$((attempt * 2))"; \
+    done \
+    && test "$cloned" = 1 \
     && cd /src/kopia \
     && git checkout --detach 72ec08fd8edb86c67ed27099bf1b955e1f308ffa \
     && test "$(git rev-parse HEAD)" = "72ec08fd8edb86c67ed27099bf1b955e1f308ffa"

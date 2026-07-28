@@ -3,8 +3,10 @@
 Status: accepted, 2026-07-20.
 
 Amended by ADR-0037, which replaces the operator-oriented landing flow with
-browser accounts and a conversation-first product shell. The inspector and
-release evidence defined here remain unchanged.
+browser accounts and a conversation-first product shell. The current
+CubeSandbox architecture also replaces the standalone Tool Sandbox image in
+backup and release evidence with the Cube API authorizer, egress gateway and
+immutable Cube Tool template.
 
 ## Context
 
