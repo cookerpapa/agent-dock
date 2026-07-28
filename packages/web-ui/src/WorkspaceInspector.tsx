@@ -14,6 +14,9 @@ type DirectoryEntry =
 
 function message(error: unknown): string {
   if (error instanceof AgentDockApiError) return error.message;
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return `Workspace 目录读取失败：${error.message}`;
+  }
   return "Workspace 目录暂时无法读取。";
 }
 
@@ -121,11 +124,26 @@ export function WorkspaceInspector({
         setSelectedText(null);
         return;
       }
-      const listed = await api.listWorkspaceFiles(current.versionId);
+      const listedFiles: WorkspaceFileResource[] = [];
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      for (;;) {
+        const listed = await api.listWorkspaceFiles(current.versionId, cursor);
+        if (listed.versionId !== current.versionId) {
+          throw new Error("目录分页返回了错误的 Workspace 版本");
+        }
+        listedFiles.push(...listed.files);
+        if (!listed.truncated) break;
+        if (listed.nextCursor === undefined || seenCursors.has(listed.nextCursor)) {
+          throw new Error("目录分页游标无效");
+        }
+        seenCursors.add(listed.nextCursor);
+        cursor = listed.nextCursor;
+      }
       if (generation !== loadGeneration.current) return;
-      setFiles(listed.files);
+      setFiles(listedFiles);
       setSelectedPath((path) =>
-        path !== null && listed.files.some((file) => file.path === path) ? path : null,
+        path !== null && listedFiles.some((file) => file.path === path) ? path : null,
       );
     } catch (error: unknown) {
       if (generation === loadGeneration.current) {

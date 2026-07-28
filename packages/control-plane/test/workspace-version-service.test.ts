@@ -270,6 +270,19 @@ describe.sequential("versioned Workspace service", () => {
         { path: "README.md", executable: false },
         { path: "bin/run.sh", executable: true },
       ],
+      truncated: false,
+    });
+    const firstFilePage = await service.files(IDS.tenant, IDS.version2, undefined, 1);
+    expect(firstFilePage).toMatchObject({
+      files: [{ path: "README.md" }],
+      truncated: true,
+      nextCursor: "README.md",
+    });
+    await expect(
+      service.files(IDS.tenant, IDS.version2, firstFilePage.nextCursor, 1),
+    ).resolves.toMatchObject({
+      files: [{ path: "bin/run.sh" }],
+      truncated: false,
     });
     await expect(service.file(IDS.tenant, IDS.version2, "README.md")).resolves.toMatchObject({
       bytes: Buffer.from("second\n"),

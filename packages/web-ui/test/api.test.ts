@@ -520,4 +520,30 @@ describe("tenant-aware browser API", () => {
     const file = await api.readWorkspaceFile(versionId, "src/Main.java");
     expect(new TextDecoder().decode(file.bytes)).toBe("class Main {}\n");
   });
+
+  it("requests subsequent immutable Workspace file pages with an encoded cursor", async () => {
+    const versionId = "20000000-0000-4000-8000-000000000001";
+    const cursor = "src/目录/Main.java";
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe(
+        `/v1/workspace-versions/${versionId}/files?cursor=${encodeURIComponent(cursor)}`,
+      );
+      return new Response(
+        JSON.stringify({
+          versionId,
+          files: [],
+          truncated: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+
+    await expect(api.listWorkspaceFiles(versionId, cursor)).resolves.toEqual({
+      versionId,
+      files: [],
+      truncated: false,
+    });
+  });
 });

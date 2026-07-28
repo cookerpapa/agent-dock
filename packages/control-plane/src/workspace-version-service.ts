@@ -245,17 +245,15 @@ export class WorkspaceVersionService {
     let versionQuery = this.#versionQuery(tenantId).where("version.state", "=", "settled");
     versionQuery =
       session.forkedFromSessionId === null
-        ? versionQuery
-            .where("version.workspace_id", "=", session.workspaceId)
-            .where(
-              sql<boolean>`exists (
+        ? versionQuery.where("version.workspace_id", "=", session.workspaceId).where(
+            sql<boolean>`exists (
                 select 1
                 from sessions as origin_session
                 where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
                   and origin_session.id = ${sql.ref("version.session_id")}
                   and origin_session.forked_from_session_id is null
               )`,
-            )
+          )
         : versionQuery.where("version.session_id", "=", sessionId);
     const rows = await versionQuery
       .orderBy("version.created_at", "desc")
@@ -264,9 +262,7 @@ export class WorkspaceVersionService {
       .execute();
     return {
       sessionId,
-      ...(session.currentVersionId === null
-        ? {}
-        : { currentVersionId: session.currentVersionId }),
+      ...(session.currentVersionId === null ? {} : { currentVersionId: session.currentVersionId }),
       archived: session.archivedAt !== null,
       versions: rows.slice(0, MAX_VERSIONS).map(versionResource),
       truncated: rows.length > MAX_VERSIONS,
@@ -277,16 +273,41 @@ export class WorkspaceVersionService {
     return versionResource(await this.#getVersionRow(tenantId, versionId));
   }
 
-  async files(tenantId: string, versionId: string): Promise<WorkspaceFileListResource> {
+  async files(
+    tenantId: string,
+    versionId: string,
+    cursor?: string,
+    pageSize = 512,
+  ): Promise<WorkspaceFileListResource> {
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 512) {
+      throw new TypeError("Workspace file page size is invalid");
+    }
     const loaded = await this.#loadWorkspace(tenantId, versionId);
+    let start = 0;
+    if (cursor !== undefined) {
+      let low = 0;
+      let high = loaded.files.length;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        const path = loaded.files[middle]?.path;
+        if (path !== undefined && path <= cursor) low = middle + 1;
+        else high = middle;
+      }
+      start = low;
+    }
+    const page = loaded.files.slice(start, start + pageSize);
+    const truncated = start + page.length < loaded.files.length;
+    const last = page.at(-1);
     return {
       versionId,
-      files: loaded.files.map((file) => ({
+      files: page.map((file) => ({
         path: file.path,
         executable: file.executable,
         sizeBytes: file.sizeBytes,
         sha256: file.sha256,
       })),
+      truncated,
+      ...(truncated && last !== undefined ? { nextCursor: last.path } : {}),
     };
   }
 
@@ -675,16 +696,14 @@ export class WorkspaceVersionService {
           .where("version.state", "=", "settled");
         targetQuery =
           session.forkedFromSessionId === null
-            ? targetQuery
-                .where("version.workspace_id", "=", session.workspaceId)
-                .where(
-                  sql<boolean>`exists (
+            ? targetQuery.where("version.workspace_id", "=", session.workspaceId).where(
+                sql<boolean>`exists (
                     select 1 from sessions as origin_session
                     where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
                       and origin_session.id = ${sql.ref("version.session_id")}
                       and origin_session.forked_from_session_id is null
                   )`,
-                )
+              )
             : targetQuery.where("version.session_id", "=", sessionId);
         const target = await targetQuery.executeTakeFirst();
         if (target === undefined)

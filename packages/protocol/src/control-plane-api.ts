@@ -1479,10 +1479,17 @@ export const WorkspaceFileResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const WorkspaceFileCursorSchema = Type.String({
+  minLength: 1,
+  maxLength: 512,
+});
+
 export const WorkspaceFileListResourceSchema = Type.Object(
   {
     versionId: UuidSchema,
     files: Type.Array(WorkspaceFileResourceSchema, { maxItems: 512 }),
+    truncated: Type.Boolean(),
+    nextCursor: Type.Optional(WorkspaceFileCursorSchema),
   },
   { additionalProperties: false },
 );
@@ -2335,6 +2342,11 @@ export function parseWorkspaceVersionListResource(value: unknown): WorkspaceVers
 
 export function parseWorkspaceFileListResource(value: unknown): WorkspaceFileListResource {
   return parseSchema(WorkspaceFileListResourceSchema, value, "workspace-file-list resource");
+}
+
+export function parseWorkspaceFileCursor(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return parseSchema(WorkspaceFileCursorSchema, value, "workspace-file cursor");
 }
 
 export function parseWorkspaceVersionCompareResource(

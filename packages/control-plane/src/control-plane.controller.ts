@@ -39,6 +39,7 @@ import {
   parseRollbackWorkspaceRequest,
   parseSetGitHubRepositoryRequest,
   parseUuidPathParameter,
+  parseWorkspaceFileCursor,
   type AcceptedTurnResource,
   type AuthSessionResource,
   type AcceptedTurnCancellationResource,
@@ -525,10 +526,12 @@ export class ControlPlaneController {
   async listWorkspaceFiles(
     @Req() request: FastifyRequest,
     @Param("versionId") versionIdValue: unknown,
+    @Query("cursor") cursorValue: unknown,
   ): Promise<WorkspaceFileListResource> {
     const versionId = parseUuidPathParameter(versionIdValue, "versionId");
+    const cursor = parseWorkspaceFileCursor(cursorValue);
     const identity = this.tenantRequestContext.resolve(request);
-    return this.workspaceVersions.files(identity.tenantId, versionId);
+    return this.workspaceVersions.files(identity.tenantId, versionId, cursor);
   }
 
   @Get("workspace-versions/:versionId/file")

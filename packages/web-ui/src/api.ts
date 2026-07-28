@@ -619,11 +619,12 @@ export class AgentDockApi {
     );
   }
 
-  async listWorkspaceFiles(versionId: string): Promise<WorkspaceFileListResource> {
+  async listWorkspaceFiles(versionId: string, cursor?: string): Promise<WorkspaceFileListResource> {
+    const query = cursor === undefined ? "" : `?cursor=${encodeURIComponent(cursor)}`;
     return parseWorkspaceFileListResource(
       await request(
         this.#fetch,
-        `/v1/workspace-versions/${encodeURIComponent(versionId)}/files`,
+        `/v1/workspace-versions/${encodeURIComponent(versionId)}/files${query}`,
         { method: "GET" },
         this.#authorizationToken,
       ),
