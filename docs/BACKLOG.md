@@ -354,3 +354,6 @@ extension-policy support would overstate the current boundary.
 - [x] Add capacity-aware same-Session Worker affinity with row-locked slot
   reservations, boot-specific Temporal Activity queues, a shared process-local
   capacity gate, short private-queue timeout and common-queue fallback
+- [x] ADR-0070: disable transparent Agent Activity replay after Start ACK,
+  settle Worker loss as `interrupted`, preserve partial durable output, and
+  require an idempotent linked continuation Run

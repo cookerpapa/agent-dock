@@ -7,6 +7,7 @@ import {
   sleep,
 } from "@temporalio/workflow";
 import {
+  TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS,
   validateTemporalRunWorkflowInput,
   type TemporalRunActivities,
   type TemporalRunActivityResult,
@@ -21,10 +22,7 @@ const COMMON_ACTIVITY_OPTIONS = {
   heartbeatTimeout: "20 seconds",
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   retry: {
-    initialInterval: "2 seconds",
-    backoffCoefficient: 2,
-    maximumInterval: "30 seconds",
-    maximumAttempts: 3,
+    maximumAttempts: TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS,
   },
 } as const;
 
@@ -53,7 +51,7 @@ export async function agentDockRunWorkflow(
       ...COMMON_ACTIVITY_OPTIONS,
       taskQueue: input.affinity.taskQueue,
       scheduleToStartTimeout: "2 seconds",
-      retry: { maximumAttempts: 1 },
+      retry: { maximumAttempts: TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS },
     });
     try {
       const preferred = await executePreferred(input);

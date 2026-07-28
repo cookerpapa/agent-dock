@@ -17,7 +17,7 @@ Run: queued -> claimed -> provisioning -> restoring? -> running
                       \-> cancel_requested -> cancelled
      \-> queued (a failed pre-ACK Attempt only)
 
-Attempt terminal alternatives: failed | timed_out | superseded
+Run/Attempt terminal alternatives: interrupted | failed | timed_out | superseded
 ```
 
 AgentDock does not claim exactly-once execution for shell commands or external
@@ -42,15 +42,18 @@ Supervisor boot and Temporal Worker identity
 `attemptId` is independent from `leaseId`. Lease acquisition binds the exact
 current Attempt to sandbox, lease, and fence in PostgreSQL before execution ACK.
 A retry before durable acknowledgement terminates the old Attempt and creates a
-new one. Once execution is acknowledged, a crash is ambiguous and the Run fails
-instead of blindly replaying commands.
+new one. Start ACK is the conservative non-replay boundary: once execution is
+acknowledged, a crash settles the Run as `interrupted` instead of blindly
+replaying the model or Tools.
 
 ## Durable Workflow start
 
 1. The relay starts `agent-dock-run-v1-{runId}` with only tenant, Session, Run
    and command UUIDs. `USE_EXISTING` makes outbox redelivery idempotent.
 2. Temporal matches `executeRunCommand` to the common
-   `agent-dock-pi-runs-v1` Task Queue.
+   `agent-dock-pi-runs-v1` Task Queue. The Agent Activity has
+   `maximumAttempts: 1`; only pre-ACK application reconciliation can requeue
+   the work.
 3. The Activity's exact PostgreSQL claim rechecks Session FIFO, tenant
    concurrency, Run state and command identity. Ineligible work returns
    `deferred`; the Workflow waits on a durable timer.
@@ -203,6 +206,23 @@ Natural completion wins if it commits before cancellation's linearization
 point. A cleanup failure fails closed and retains/quarantines capacity for
 reconciliation.
 
+## Interruption and continuation
+
+Reconciliation handles Worker loss in two different ways:
+
+- before Start ACK, terminate the old Attempt and requeue the same Run;
+- after Start ACK, confirm runtime absence, settle Run/Attempt/Turn as
+  `interrupted`, preserve the append-only event history, and return the Session
+  to `idle`.
+
+An interrupted Run is immutable. `POST /v1/runs/:runId/continuations` creates a
+new mailbox Turn, Command and Run with `continued_from_run_id`. The new Run
+restores the last committed Pi/Workspace checkpoint pair and receives a bounded
+instruction to inspect files, tests and incomplete Tool evidence before doing
+more work. Partial assistant text remains in the old transcript but is not
+promoted into a complete Pi message. Idempotency and a one-child constraint
+prevent duplicate continuation Runs.
+
 ## Crash and restart behavior
 
 | Failure | Behavior |
@@ -211,8 +231,8 @@ reconciliation.
 | Control Plane replica loss | another relay adopts the deterministic existing Workflow ID |
 | Temporal service loss | accepted Runs remain in PostgreSQL; persisted Workflow history resumes after service recovery |
 | Supervisor management socket loss | same boot reconnects for liveness; it is not the Run-matching channel |
-| Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
-| Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay |
+| Pi Worker loss before durable Start ACK | assignment/outbox reconciliation may restart the deterministic failed Workflow and PostgreSQL creates a new eligible fenced Attempt |
+| Runner loss after Start ACK | old runtime is removed, Run becomes `interrupted`, durable output is retained, and only an explicit linked continuation may proceed |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
 | Source Cube VM or local POSIX copy destroyed after checkpoint | Data Mover restores the committed Kopia snapshot, then the next higher-fence Attempt creates a fresh base-template VM |
 | Cube execution node/disk loss | recover on a node that mounts the shared POSIX path; the Kopia repository, not the node copy, is authoritative |

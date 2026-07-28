@@ -102,6 +102,13 @@ The active Pi `messages[]` is reconstructed by the Pi SDK from its native
 checkpoint. AgentDock does not rebuild model context from the rendered browser
 transcript. Pi compaction therefore survives Worker movement and cold restore.
 
+If a Worker disappears after its durable Start ACK, the active Run becomes
+`interrupted`; Temporal does not replay the non-deterministic Agent Loop.
+Already-persisted text and Tool events remain visible. The user can explicitly
+continue with a new linked Run, which restores the last committed Pi and
+Workspace state and verifies uncertain work before proceeding. Browser-only
+disconnects simply resume the durable event stream.
+
 ## Workspace model
 
 A Workspace is the durable `/workspace` directory. It can be shared by

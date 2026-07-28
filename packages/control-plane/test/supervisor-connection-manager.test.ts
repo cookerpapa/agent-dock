@@ -709,7 +709,7 @@ describe.sequential("durable supervisor registration and health management", () 
         .select(["state", "failure_code"])
         .where("id", "=", accepted.turnId)
         .executeTakeFirstOrThrow(),
-    ).toEqual({ state: "failed", failure_code: "assignment_lost" });
+    ).toEqual({ state: "interrupted", failure_code: "worker_lost_after_start" });
     expect(
       await database
         .selectFrom("sandboxes")

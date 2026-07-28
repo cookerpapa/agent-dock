@@ -29,6 +29,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Replace the operational inspector with a committed directory/file view.
 - [x] Separate platform administrator identity from tenant ownership.
 - [x] Remove the browser repository-import workflow.
+- [x] Preserve partial output on post-start Worker loss and continue through a
+  distinct user-initiated Run.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

@@ -497,9 +497,9 @@ export class CancellationDispatcher {
           "Cancellation outbox identity does not match its durable commands",
         );
       }
-      if (row.inputKind !== "prompt" || row.inputText === null) {
+      if ((row.inputKind !== "prompt" && row.inputKind !== "continue") || row.inputText === null) {
         throw new CancellationDispatcherInvariantError(
-          "The v1 cancellation dispatcher only targets durable prompt turns",
+          "The cancellation dispatcher requires durable prompt or continuation input",
         );
       }
 
@@ -551,7 +551,10 @@ export class CancellationDispatcher {
             commandId: row.targetCommandId,
             idempotencyKey: row.targetIdempotencyKey,
             nextEventSeq: row.nextEventSeq,
-            input: { kind: "prompt", prompt: row.inputText },
+            input:
+              row.inputKind === "continue"
+                ? { kind: "continue", text: row.inputText }
+                : { kind: "prompt", prompt: row.inputText },
             model: {
               profileId: row.modelProfileId,
               provider: row.provider,

@@ -3,6 +3,12 @@ export const TEMPORAL_RUN_TASK_QUEUE = "agent-dock-pi-runs-v1";
 export const TEMPORAL_DEFAULT_NAMESPACE = "agent-dock";
 export const TEMPORAL_RUN_WORKFLOW_ID_PREFIX = "agent-dock-run-v1-";
 export const TEMPORAL_WORKER_AFFINITY_TASK_QUEUE_PREFIX = "agent-dock-pi-worker-v1-";
+/**
+ * Agent execution becomes non-replayable as soon as its durable Start ACK is
+ * accepted. Pre-ACK recovery is owned by the assignment/outbox reconciler, so
+ * Temporal must never transparently invoke the same Agent Activity twice.
+ */
+export const TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS = 1;
 
 export type TemporalWorkerAffinity = {
   reservationId: string;
@@ -25,6 +31,13 @@ export type TemporalRunActivityResult =
       runId: string;
       commandId: string;
       attempt: number;
+    }
+  | {
+      status: "interrupted";
+      runId: string;
+      commandId: string;
+      attempt: number;
+      failureCode: string;
     }
   | {
       status: "failed";

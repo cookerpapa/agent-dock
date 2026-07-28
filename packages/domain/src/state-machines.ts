@@ -10,6 +10,7 @@ export const TurnStateSchema = Type.Union([
   Type.Literal("waiting_approval"),
   Type.Literal("cancelling"),
   Type.Literal("completed"),
+  Type.Literal("interrupted"),
   Type.Literal("failed"),
   Type.Literal("cancelled"),
 ]);
@@ -57,6 +58,7 @@ export const RunStateSchema = Type.Union([
   Type.Literal("checkpointing"),
   Type.Literal("cancel_requested"),
   Type.Literal("completed"),
+  Type.Literal("interrupted"),
   Type.Literal("failed"),
   Type.Literal("cancelled"),
   Type.Literal("timed_out"),
@@ -71,6 +73,7 @@ export const RunAttemptStateSchema = Type.Union([
   Type.Literal("checkpointing"),
   Type.Literal("cancel_requested"),
   Type.Literal("completed"),
+  Type.Literal("interrupted"),
   Type.Literal("failed"),
   Type.Literal("cancelled"),
   Type.Literal("timed_out"),
@@ -95,7 +98,7 @@ const sessionTransitions = {
   starting: ["idle", "failed"],
   idle: ["running", "evicting", "failed"],
   running: ["idle", "waiting_approval", "cancelling", "failed"],
-  waiting_approval: ["running", "cancelling", "failed"],
+  waiting_approval: ["running", "idle", "cancelling", "failed"],
   cancelling: ["idle", "failed"],
   failed: ["recovering"],
   recovering: ["idle", "failed"],
@@ -104,11 +107,12 @@ const sessionTransitions = {
 
 const turnTransitions = {
   queued: ["dispatching", "cancelling"],
-  dispatching: ["queued", "running", "cancelling", "failed"],
-  running: ["waiting_approval", "cancelling", "completed", "failed"],
-  waiting_approval: ["running", "cancelling", "failed"],
-  cancelling: ["cancelled", "failed"],
+  dispatching: ["queued", "running", "cancelling", "interrupted", "failed"],
+  running: ["waiting_approval", "cancelling", "completed", "interrupted", "failed"],
+  waiting_approval: ["running", "cancelling", "interrupted", "failed"],
+  cancelling: ["cancelled", "interrupted", "failed"],
   completed: [],
+  interrupted: [],
   failed: [],
   cancelled: [],
 } as const satisfies TransitionTable<TurnState>;
@@ -149,21 +153,54 @@ const commandTransitions = {
 
 const runTransitions = {
   queued: ["claimed", "cancel_requested", "failed"],
-  claimed: ["queued", "provisioning", "cancel_requested", "failed", "timed_out", "superseded"],
+  claimed: [
+    "queued",
+    "provisioning",
+    "cancel_requested",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
   provisioning: [
     "queued",
     "restoring",
     "running",
     "cancel_requested",
+    "interrupted",
     "failed",
     "timed_out",
     "superseded",
   ],
-  restoring: ["queued", "running", "cancel_requested", "failed", "timed_out", "superseded"],
-  running: ["checkpointing", "cancel_requested", "completed", "failed", "timed_out", "superseded"],
-  checkpointing: ["cancel_requested", "completed", "failed", "timed_out", "superseded"],
-  cancel_requested: ["cancelled", "failed", "timed_out", "superseded"],
+  restoring: [
+    "queued",
+    "running",
+    "cancel_requested",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  running: [
+    "checkpointing",
+    "cancel_requested",
+    "completed",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  checkpointing: [
+    "cancel_requested",
+    "completed",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  cancel_requested: ["cancelled", "interrupted", "failed", "timed_out", "superseded"],
   completed: [],
+  interrupted: [],
   failed: [],
   cancelled: [],
   timed_out: [],
@@ -171,13 +208,37 @@ const runTransitions = {
 } as const satisfies TransitionTable<RunState>;
 
 const runAttemptTransitions = {
-  claimed: ["provisioning", "failed", "timed_out", "superseded"],
-  provisioning: ["restoring", "running", "cancel_requested", "failed", "timed_out", "superseded"],
-  restoring: ["running", "cancel_requested", "failed", "timed_out", "superseded"],
-  running: ["checkpointing", "cancel_requested", "completed", "failed", "timed_out", "superseded"],
-  checkpointing: ["cancel_requested", "completed", "failed", "timed_out", "superseded"],
-  cancel_requested: ["cancelled", "failed", "timed_out", "superseded"],
+  claimed: ["provisioning", "interrupted", "failed", "timed_out", "superseded"],
+  provisioning: [
+    "restoring",
+    "running",
+    "cancel_requested",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  restoring: ["running", "cancel_requested", "interrupted", "failed", "timed_out", "superseded"],
+  running: [
+    "checkpointing",
+    "cancel_requested",
+    "completed",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  checkpointing: [
+    "cancel_requested",
+    "completed",
+    "interrupted",
+    "failed",
+    "timed_out",
+    "superseded",
+  ],
+  cancel_requested: ["cancelled", "interrupted", "failed", "timed_out", "superseded"],
   completed: [],
+  interrupted: [],
   failed: [],
   cancelled: [],
   timed_out: [],
@@ -283,7 +344,9 @@ export function transitionRunAttempt(from: RunAttemptState, to: RunAttemptState)
 }
 
 export function isTerminalTurnState(state: TurnState): boolean {
-  return state === "completed" || state === "failed" || state === "cancelled";
+  return (
+    state === "completed" || state === "interrupted" || state === "failed" || state === "cancelled"
+  );
 }
 
 export function isTerminalApprovalState(state: ApprovalState): boolean {
@@ -305,6 +368,7 @@ export function isTerminalCommandState(state: CommandState): boolean {
 export function isTerminalRunState(state: RunState): boolean {
   return (
     state === "completed" ||
+    state === "interrupted" ||
     state === "failed" ||
     state === "cancelled" ||
     state === "timed_out" ||
@@ -315,6 +379,7 @@ export function isTerminalRunState(state: RunState): boolean {
 export function isTerminalRunAttemptState(state: RunAttemptState): boolean {
   return (
     state === "completed" ||
+    state === "interrupted" ||
     state === "failed" ||
     state === "cancelled" ||
     state === "timed_out" ||

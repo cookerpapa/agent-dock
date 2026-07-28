@@ -271,13 +271,6 @@ export class PiSdkTurnRunner {
     publishEvent: PiRpcEventPublisher,
     signal?: AbortSignal,
   ): Promise<PiRpcTurnResult> {
-    if (command.payload.input.kind !== "prompt") {
-      throw new PiRpcTurnError(
-        "unsupported_input",
-        "This Pi SDK runner only supports prompt input",
-        false,
-      );
-    }
     const runtimeConfig = validateRuntimeConfig(
       command,
       await this.#options.resolveModelRuntime(command.payload.model),

@@ -93,6 +93,17 @@ type AcceptedTurnCancellationRow = {
   commandPayload: Record<string, unknown>;
 };
 
+type NewTurnInput =
+  | {
+      kind: "prompt";
+      prompt: string;
+      thinkingLevel?: ModelThinkingLevel;
+    }
+  | {
+      kind: "continue";
+      sourceRunId: string;
+    };
+
 type AcceptedRunRewindRow = AcceptedTurnRow & {
   rewindId: string;
   sourceRunId: string;
@@ -475,6 +486,30 @@ function turnRequestFingerprint(request: AcceptTurnRequest): string {
       }),
     )
     .digest("hex");
+}
+
+function continuationRequestFingerprint(sourceRunId: string): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        schemaVersion: 1,
+        inputKind: "continue",
+        sourceRunId,
+      }),
+    )
+    .digest("hex");
+}
+
+function continuationPrompt(sourcePrompt: string): string {
+  return [
+    "The previous AgentDock execution was interrupted after it started.",
+    "Continue the user's task from the last committed Pi checkpoint and Workspace state.",
+    "Re-inspect relevant files and test state before editing.",
+    "Do not assume an incomplete Tool call succeeded, and do not repeat an external side effect without verifying it first.",
+    "",
+    "Original user request:",
+    sourcePrompt,
+  ].join("\n");
 }
 
 function cancellationRequestFingerprint(gracePeriodMs: number): string {
@@ -1118,6 +1153,7 @@ export class ControlPlaneStore {
         "command.created_at as acceptedAt",
         "source_rewind.replacement_run_id as supersededByRunId",
         "replacement_rewind.source_run_id as rewoundFromRunId",
+        "run.continued_from_run_id as continuedFromRunId",
       ])
       .where("command.tenant_id", "=", this.#tenantId)
       .where("command.session_id", "=", sessionId)
@@ -1133,6 +1169,7 @@ export class ControlPlaneStore {
       .filter(
         (row) =>
           row.turnState === "completed" ||
+          row.turnState === "interrupted" ||
           row.turnState === "failed" ||
           row.turnState === "cancelled",
       )
@@ -1180,10 +1217,14 @@ export class ControlPlaneStore {
       }),
     );
     const turns = includedRows.map((row) => {
-      if (row.inputKind !== "prompt" || row.prompt === null || row.mailboxPosition === null) {
+      if (
+        (row.inputKind !== "prompt" && row.inputKind !== "continue") ||
+        row.prompt === null ||
+        row.mailboxPosition === null
+      ) {
         throw new ControlPlaneStoreError(
           "control_plane_misconfigured",
-          "Conversation contains an invalid prompt turn",
+          "Conversation contains an invalid durable turn",
         );
       }
       return {
@@ -1191,12 +1232,13 @@ export class ControlPlaneStore {
         turnId: row.turnId,
         commandId: row.commandId,
         mailboxPosition: positiveSafeInteger(row.mailboxPosition, "Conversation mailbox position"),
-        prompt: row.prompt,
+        prompt: row.inputKind === "continue" ? "继续上次中断的任务" : row.prompt,
         state: row.turnState,
         projection:
           row.supersededByRunId === null ? ("canonical" as const) : ("superseded" as const),
         ...(row.supersededByRunId === null ? {} : { supersededByRunId: row.supersededByRunId }),
         ...(row.rewoundFromRunId === null ? {} : { rewoundFromRunId: row.rewoundFromRunId }),
+        ...(row.continuedFromRunId === null ? {} : { continuedFromRunId: row.continuedFromRunId }),
         ...(transcriptByTurnId.has(row.turnId)
           ? { transcript: transcriptByTurnId.get(row.turnId)! }
           : {}),
@@ -1392,7 +1434,16 @@ export class ControlPlaneStore {
     }
 
     try {
-      return await this.#acceptNewTurn(sessionId, idempotencyKey, request, fingerprint);
+      return await this.#acceptNewTurn(
+        sessionId,
+        idempotencyKey,
+        {
+          kind: "prompt",
+          prompt: request.prompt,
+          ...(request.thinkingLevel === undefined ? {} : { thinkingLevel: request.thinkingLevel }),
+        },
+        fingerprint,
+      );
     } catch (error) {
       if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) {
         throw error;
@@ -1405,6 +1456,54 @@ export class ControlPlaneStore {
         );
       }
       return acceptedTurnResource(concurrentWinner, fingerprint, true);
+    }
+  }
+
+  async acceptRunContinuation(
+    runId: string,
+    idempotencyKey: string,
+  ): Promise<AcceptedTurnResource> {
+    const source = await this.#database
+      .selectFrom("runs")
+      .select(["session_id as sessionId", "state"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("id", "=", runId)
+      .executeTakeFirst();
+    if (source === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Run was not found");
+    }
+    if (source.state !== "interrupted") {
+      throw new ControlPlaneStoreError(
+        "conflict",
+        "Only an interrupted Run can be continued explicitly",
+      );
+    }
+    const fingerprint = continuationRequestFingerprint(runId);
+    const existing = await this.#findAcceptedTurn(source.sessionId, idempotencyKey);
+    if (existing !== undefined) {
+      return acceptedTurnResource(existing, fingerprint, true);
+    }
+    try {
+      return await this.#acceptNewTurn(
+        source.sessionId,
+        idempotencyKey,
+        { kind: "continue", sourceRunId: runId },
+        fingerprint,
+      );
+    } catch (error) {
+      if (isPostgresConstraint(error, "commands_session_idempotency_unique")) {
+        const concurrentWinner = await this.#findAcceptedTurn(source.sessionId, idempotencyKey);
+        if (concurrentWinner !== undefined) {
+          return acceptedTurnResource(concurrentWinner, fingerprint, true);
+        }
+      }
+      if (isPostgresConstraint(error, "runs_one_continuation_per_source_unique")) {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          "This interrupted Run already has a continuation",
+        );
+      }
+      throw error;
     }
   }
 
@@ -1842,10 +1941,20 @@ export class ControlPlaneStore {
     const existing = await this.#findAcceptedTurn(sessionId, idempotencyKey);
     if (existing) return acceptedTurnResource(existing, fingerprint, true);
     try {
-      return await this.#acceptNewTurn(sessionId, idempotencyKey, request, fingerprint, {
-        environmentVersionId,
-        actorUserId,
-      });
+      return await this.#acceptNewTurn(
+        sessionId,
+        idempotencyKey,
+        {
+          kind: "prompt",
+          prompt: request.prompt,
+          ...(request.thinkingLevel === undefined ? {} : { thinkingLevel: request.thinkingLevel }),
+        },
+        fingerprint,
+        {
+          environmentVersionId,
+          actorUserId,
+        },
+      );
     } catch (error) {
       if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) throw error;
       const concurrentWinner = await this.#findAcceptedTurn(sessionId, idempotencyKey);
@@ -1932,6 +2041,7 @@ export class ControlPlaneStore {
       cancelled: 7,
       timed_out: 7,
       superseded: 7,
+      interrupted: 7,
     };
     const failure = (
       code: string | null,
@@ -1972,6 +2082,9 @@ export class ControlPlaneStore {
               ),
             },
           }),
+      ...(run.continued_from_run_id === null
+        ? {}
+        : { continuedFromRunId: run.continued_from_run_id }),
       traceId: run.trace_id,
       attemptCount: nonNegativeSafeInteger(run.attempt_count, "Run attempt count"),
       ...(run.current_attempt_id === null ? {} : { currentAttemptId: run.current_attempt_id }),
@@ -2102,7 +2215,7 @@ export class ControlPlaneStore {
   async #acceptNewTurn(
     sessionId: string,
     idempotencyKey: string,
-    request: AcceptTurnRequest,
+    input: NewTurnInput,
     fingerprint: string,
     validation?: { environmentVersionId: string; actorUserId: string },
   ): Promise<AcceptedTurnResource> {
@@ -2203,7 +2316,65 @@ export class ControlPlaneStore {
         session.next_mailbox_position,
         "Next mailbox position",
       );
-      const model = await this.#resolveModelSnapshot(transaction, request.thinkingLevel);
+      let turnInputKind: "prompt" | "continue" = "prompt";
+      let turnInputText: string;
+      let continuedFromRunId: string | null = null;
+      let thinkingLevel = input.kind === "prompt" ? input.thinkingLevel : undefined;
+      if (input.kind === "prompt") {
+        turnInputText = input.prompt;
+      } else {
+        const source = await transaction
+          .selectFrom("runs as source_run")
+          .innerJoin("turns as source_turn", (join) =>
+            join
+              .onRef("source_turn.tenant_id", "=", "source_run.tenant_id")
+              .onRef("source_turn.id", "=", "source_run.turn_id"),
+          )
+          .innerJoin("commands as source_command", (join) =>
+            join
+              .onRef("source_command.tenant_id", "=", "source_run.tenant_id")
+              .onRef("source_command.id", "=", "source_run.command_id"),
+          )
+          .select([
+            "source_run.session_id as sessionId",
+            "source_run.state",
+            "source_run.current_attempt_id as currentAttemptId",
+            "source_turn.input_text as inputText",
+            "source_turn.thinking_level as thinkingLevel",
+            "source_command.mailbox_position as mailboxPosition",
+          ])
+          .where("source_run.tenant_id", "=", this.#tenantId)
+          .where("source_run.id", "=", input.sourceRunId)
+          .forUpdate("source_run")
+          .executeTakeFirst();
+        if (
+          source === undefined ||
+          source.sessionId !== session.id ||
+          source.state !== "interrupted" ||
+          source.currentAttemptId === null ||
+          source.inputText === null ||
+          source.mailboxPosition === null
+        ) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "The continuation source is no longer an eligible interrupted Run",
+          );
+        }
+        if (
+          positiveSafeInteger(source.mailboxPosition, "Continuation source mailbox position") !==
+          mailboxPosition - 1
+        ) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Only the latest interrupted Run can be continued",
+          );
+        }
+        turnInputKind = "continue";
+        turnInputText = continuationPrompt(source.inputText);
+        continuedFromRunId = input.sourceRunId;
+        thinkingLevel = source.thinkingLevel;
+      }
+      const model = await this.#resolveModelSnapshot(transaction, thinkingLevel);
       const environment =
         validation === undefined
           ? await this.#activeEnvironmentForRun(transaction, session.project_id)
@@ -2242,8 +2413,8 @@ export class ControlPlaneStore {
           tenant_id: this.#tenantId,
           session_id: session.id,
           state: "queued",
-          input_kind: "prompt",
-          input_text: request.prompt,
+          input_kind: turnInputKind,
+          input_text: turnInputText,
           model_profile_id: model.profileId,
           provider: model.provider,
           model_id: model.modelId,
@@ -2326,6 +2497,7 @@ export class ControlPlaneStore {
           ),
           workspace_base_version_id: workspaceBaseVersionId,
           pi_session_base_artifact_id: piSessionBaseArtifact?.id ?? null,
+          continued_from_run_id: continuedFromRunId,
           idempotency_key: idempotencyKey,
           state: "queued",
           current_attempt_id: null,

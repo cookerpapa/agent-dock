@@ -142,7 +142,8 @@ export async function transitionCurrentRunAttempt(
       : transitionRunAttempt(row.attemptState, input.attemptState);
   const terminalRun = isTerminalRunState(runState);
   const terminalAttempt = isTerminalRunAttemptState(attemptState);
-  const failureRequired = runState === "failed" || runState === "timed_out";
+  const failureRequired =
+    runState === "interrupted" || runState === "failed" || runState === "timed_out";
   if (failureRequired !== (input.failure !== undefined)) {
     throw new TypeError("Run failure metadata does not match its target state");
   }
@@ -206,13 +207,7 @@ export async function transitionCurrentRunAttempt(
         .where("run_id", "=", identity.runId)
         .where("attempt_id", "=", identity.attemptId)
         .where("state", "=", "staged")
-        .returning([
-          "id",
-          "workspace_id",
-          "session_id",
-          "pi_artifact_id",
-          "workspace_artifact_id",
-        ])
+        .returning(["id", "workspace_id", "session_id", "pi_artifact_id", "workspace_artifact_id"])
         .executeTakeFirst();
       if (version !== undefined) {
         await transaction

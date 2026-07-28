@@ -347,6 +347,15 @@ export class TemporalPiWorker {
         attempt: run.attemptCount,
       };
     }
+    if (run.state === "interrupted") {
+      return {
+        status: "interrupted",
+        runId: input.runId,
+        commandId: input.commandId,
+        attempt: run.attemptCount,
+        failureCode: run.failureCode ?? "worker_lost_after_start",
+      };
+    }
     if (["failed", "timed_out", "superseded"].includes(run.state)) {
       return {
         status: "failed",

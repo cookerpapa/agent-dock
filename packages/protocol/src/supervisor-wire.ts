@@ -65,6 +65,7 @@ const PromptInputSchema = Type.Object(
 const ContinueInputSchema = Type.Object(
   {
     kind: Type.Literal("continue"),
+    text: Type.String({ minLength: 1, maxLength: 1_000_000 }),
   },
   { additionalProperties: false },
 );

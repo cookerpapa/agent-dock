@@ -59,11 +59,12 @@ The Worker pool uses:
 
 - a common Activity Task Queue for fairness/fallback;
 - capacity-one Worker-specific queues for soft Session affinity;
-- durable timers and retry policy;
+- durable defer timers and a single-attempt Agent Activity policy;
 - explicit cancellation.
 
 Affinity is an optimization. Any Worker can restore a Session and produce the
-correct result.
+correct result for a new Run. A started Agent Activity is never transparently
+replayed on another Worker.
 
 ### Trusted Pi Worker
 
@@ -311,9 +312,15 @@ immutable start snapshot.
 ## 11. Failure and recovery
 
 - Duplicate browser submission: idempotency key returns the original Run.
-- Worker crash before Tool execution: Temporal retries on another Worker.
-- Worker crash with possible Tool side effect: old fence is revoked and the
-  runtime is destroyed unless exact execution state is known.
+- Browser disconnect: the Run continues; `Last-Event-ID` replays the durable
+  suffix without replacing visible output.
+- Worker loss before durable Start ACK: assignment reconciliation may requeue
+  the same Run under a new fenced Attempt.
+- Worker loss after Start ACK: destroy or prove absence of the old runtime,
+  settle the Run as `interrupted`, preserve every durable event, and wait for
+  an explicit continuation Run. Temporal does not replay the Agent Activity.
+- Possible Tool side effect: the continuation inspects committed Workspace and
+  Tool evidence; uncertain external effects remain unknown until reconciled.
 - Cube loss: restore the committed Workspace into a fresh activation.
 - object upload succeeds but DB commit fails: immutable orphan is garbage
   collected later.
@@ -345,6 +352,7 @@ not require changing the Worker execution contract.
 
 - [ADR-0053: CubeSandbox primary runtime](adr/0053-cubesandbox-primary-execution-plane.md)
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
+- [ADR-0070: Visible Attempt interruption and explicit continuation](adr/0070-visible-attempt-interruption-and-explicit-continuation.md)
 - [ADR-0064: Workspace checkpoints](adr/0064-cube-native-workspace-checkpoints.md)
 - [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
 

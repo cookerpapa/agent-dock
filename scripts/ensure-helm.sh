@@ -34,7 +34,7 @@ curl --fail --silent --show-error --location \
   "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
   --output "${HELM_ARCHIVE}"
 printf '%s  %s\n' "${HELM_ARCHIVE_SHA256}" "${HELM_ARCHIVE}" | sha256sum --check --status
-tar -xzf "${HELM_ARCHIVE}" -C "${HELM_TEMPORARY_DIRECTORY}"
+tar --no-same-owner -xzf "${HELM_ARCHIVE}" -C "${HELM_TEMPORARY_DIRECTORY}"
 
 install -d -m 0755 "${HELM_DIRECTORY}"
 install -m 0755 "${HELM_TEMPORARY_DIRECTORY}/linux-amd64/helm" "${HELM_BINARY}"

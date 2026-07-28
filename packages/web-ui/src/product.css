@@ -979,6 +979,7 @@ button:disabled {
 
 .product-notification,
 .product-turn-error,
+.product-turn-interrupted,
 .product-muted-line {
   margin: 9px 0;
   padding: 9px 11px;
@@ -997,6 +998,28 @@ button:disabled {
 .product-turn-error {
   display: grid;
   gap: 3px;
+}
+.product-turn-interrupted {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #5c5232;
+  background: #2c281d;
+  color: #e2cc83;
+}
+.product-continuation-button {
+  width: fit-content;
+  margin-top: 3px;
+  padding: 6px 10px;
+  border: 1px solid #796b3d;
+  border-radius: 7px;
+  background: #3a321e;
+  color: #f0dc9b;
+  cursor: pointer;
+  font: inherit;
+}
+.product-continuation-button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .product-patch {

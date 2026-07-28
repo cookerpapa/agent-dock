@@ -73,16 +73,13 @@ jobs:
       - name: Verify effective HostConfig and run both containers
         run: npm run container:check
 
-      - name: Verify the fenced Docker Pi workspace path
-        run: npm run sandbox:check
-
       - name: Verify S3-compatible checkpoint portability
         run: npm run object-store:check
 
-  production:
-    name: Disposable production topology
+  deployment-contracts:
+    name: Deployment manifest contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -90,7 +87,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js for the production verifier
+      - name: Set up Node.js for deployment verifiers
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.18.0
@@ -99,8 +96,16 @@ jobs:
       - name: Install pinned dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
 
-      - name: Build and verify the complete disposable production topology
-        run: npm run production:check
+      - name: Verify Compose, Helm, and Supervisor image closure
+        run: |
+          npm run container:config
+          npm run helm:check
+          npm run image:closure-check
+
+      # The real production gate requires KVM, a private CubeSandbox cluster,
+      # runtime evidence and an explicit token-cost acknowledgement. It runs on
+      # the deployment host via `npm run production:check`, not on a generic
+      # GitHub-hosted runner.
 
   supply-chain:
     name: SBOM and vulnerability gate (${{ matrix.image }})
@@ -122,8 +127,12 @@ jobs:
             dockerfile: packages/web-ui/Dockerfile
           - image: tool-sandbox
             dockerfile: packages/tool-sandbox/Dockerfile
-          - image: dependency-egress-proxy
-            dockerfile: packages/dependency-egress-proxy/Dockerfile
+          - image: provider-egress-relay
+            dockerfile: packages/provider-egress-relay/Dockerfile
+          - image: cube-api-authorizer
+            dockerfile: packages/cube-api-authorizer/Dockerfile
+          - image: cube-egress-gateway
+            dockerfile: packages/cube-egress-gateway/Dockerfile
 
     steps:
       - name: Check out repository

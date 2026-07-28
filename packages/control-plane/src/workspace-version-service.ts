@@ -245,17 +245,15 @@ export class WorkspaceVersionService {
     let versionQuery = this.#versionQuery(tenantId).where("version.state", "=", "settled");
     versionQuery =
       session.forkedFromSessionId === null
-        ? versionQuery
-            .where("version.workspace_id", "=", session.workspaceId)
-            .where(
-              sql<boolean>`exists (
+        ? versionQuery.where("version.workspace_id", "=", session.workspaceId).where(
+            sql<boolean>`exists (
                 select 1
                 from sessions as origin_session
                 where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
                   and origin_session.id = ${sql.ref("version.session_id")}
                   and origin_session.forked_from_session_id is null
               )`,
-            )
+          )
         : versionQuery.where("version.session_id", "=", sessionId);
     const rows = await versionQuery
       .orderBy("version.created_at", "desc")
@@ -264,9 +262,7 @@ export class WorkspaceVersionService {
       .execute();
     return {
       sessionId,
-      ...(session.currentVersionId === null
-        ? {}
-        : { currentVersionId: session.currentVersionId }),
+      ...(session.currentVersionId === null ? {} : { currentVersionId: session.currentVersionId }),
       archived: session.archivedAt !== null,
       versions: rows.slice(0, MAX_VERSIONS).map(versionResource),
       truncated: rows.length > MAX_VERSIONS,
@@ -675,16 +671,14 @@ export class WorkspaceVersionService {
           .where("version.state", "=", "settled");
         targetQuery =
           session.forkedFromSessionId === null
-            ? targetQuery
-                .where("version.workspace_id", "=", session.workspaceId)
-                .where(
-                  sql<boolean>`exists (
+            ? targetQuery.where("version.workspace_id", "=", session.workspaceId).where(
+                sql<boolean>`exists (
                     select 1 from sessions as origin_session
                     where origin_session.tenant_id = ${sql.ref("version.tenant_id")}
                       and origin_session.id = ${sql.ref("version.session_id")}
                       and origin_session.forked_from_session_id is null
                   )`,
-                )
+              )
             : targetQuery.where("version.session_id", "=", sessionId);
         const target = await targetQuery.executeTakeFirst();
         if (target === undefined)

@@ -59,10 +59,15 @@ export type TurnExecutionRequest = {
   commandId: string;
   idempotencyKey: string;
   nextEventSeq: string;
-  input: {
-    kind: "prompt";
-    prompt: string;
-  };
+  input:
+    | {
+        kind: "prompt";
+        prompt: string;
+      }
+    | {
+        kind: "continue";
+        text: string;
+      };
   model: {
     profileId: string;
     provider: string;
@@ -832,9 +837,9 @@ export class OutboxDispatcher {
           "Turn-command outbox identity does not match its durable command",
         );
       }
-      if (row.inputKind !== "prompt" || row.inputText === null) {
+      if ((row.inputKind !== "prompt" && row.inputKind !== "continue") || row.inputText === null) {
         throw new OutboxDispatcherInvariantError(
-          "The v1 turn dispatcher only accepts durable prompt turns",
+          "The turn dispatcher requires durable prompt or continuation input",
         );
       }
       if (row.mailboxPosition === null) {
@@ -1039,7 +1044,10 @@ export class OutboxDispatcher {
           commandId: row.commandId,
           idempotencyKey: row.idempotencyKey,
           nextEventSeq: row.nextEventSeq,
-          input: { kind: "prompt", prompt: row.inputText },
+          input:
+            row.inputKind === "continue"
+              ? { kind: "continue", text: row.inputText }
+              : { kind: "prompt", prompt: row.inputText },
           model: {
             profileId: row.modelProfileId,
             provider: row.provider,

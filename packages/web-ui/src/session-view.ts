@@ -15,7 +15,7 @@ import type { SessionStreamStatus } from "./sse.ts";
 type ApprovalPayload = Extract<AgentDockEvent, { type: "approval.requested" }>["payload"];
 
 export type TurnViewStatus =
-  "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+  "queued" | "running" | "cancelling" | "completed" | "interrupted" | "failed" | "cancelled";
 
 export type TranscriptItem =
   | {
@@ -66,6 +66,7 @@ export type TurnView = {
   projection: "canonical" | "superseded";
   supersededByRunId: string | null;
   rewoundFromRunId: string | null;
+  continuedFromRunId: string | null;
   status: TurnViewStatus;
   items: readonly TranscriptItem[];
   startedSequence: number | null;
@@ -102,7 +103,12 @@ export type SessionViewAction =
   | { type: "session.created"; project: ProjectResource; session: SessionResource }
   | { type: "conversation.loaded"; conversation: ConversationDetailResource }
   | { type: "project.environment.refreshed"; environment: ProjectEnvironmentResource }
-  | { type: "turn.accepted"; accepted: AcceptedTurnResource; prompt: string }
+  | {
+      type: "turn.accepted";
+      accepted: AcceptedTurnResource;
+      prompt: string;
+      continuedFromRunId?: string;
+    }
   | { type: "turn.cancellation.requested"; turnId: string }
   | {
       type: "run.reconciled";
@@ -137,6 +143,7 @@ function unknownTurn(turnId: string): TurnView {
     projection: "canonical",
     supersededByRunId: null,
     rewoundFromRunId: null,
+    continuedFromRunId: null,
     status: "running",
     items: [],
     startedSequence: null,
@@ -461,6 +468,16 @@ export function sessionViewReducer(
         projection: turn.projection,
         supersededByRunId: turn.supersededByRunId ?? null,
         rewoundFromRunId: turn.rewoundFromRunId ?? null,
+        continuedFromRunId: turn.continuedFromRunId ?? null,
+        ...(turn.state === "interrupted"
+          ? {
+              failure: {
+                code: "worker_lost_after_start",
+                message: "执行在开始后中断。已显示的内容会保留，请从最后一次确认的状态继续。",
+                retryable: false,
+              },
+            }
+          : {}),
         status:
           turn.state === "queued" || turn.state === "dispatching"
             ? "queued"
@@ -488,6 +505,7 @@ export function sessionViewReducer(
       projection: "canonical",
       supersededByRunId: null,
       rewoundFromRunId: null,
+      continuedFromRunId: action.continuedFromRunId ?? null,
       status: turn.startedSequence === null ? "queued" : turn.status,
     }));
     return { ...state, turns, apiError: null };
@@ -495,7 +513,12 @@ export function sessionViewReducer(
   if (action.type === "run.reconciled") {
     const turns = state.turns.map((turn): TurnView => {
       if (turn.runId !== action.run.runId) return turn;
-      if (turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled") {
+      if (
+        turn.status === "completed" ||
+        turn.status === "interrupted" ||
+        turn.status === "failed" ||
+        turn.status === "cancelled"
+      ) {
         return turn;
       }
       if (action.run.state === "completed") {
@@ -511,6 +534,19 @@ export function sessionViewReducer(
           status: "cancelled",
           stopReason: "cancelled",
           cancellation: { reason: "cancelled", forced: false },
+        };
+      }
+      if (action.run.state === "interrupted") {
+        return {
+          ...turn,
+          status: "interrupted",
+          failure: {
+            code: action.run.failure?.code ?? "worker_lost_after_start",
+            message:
+              action.run.failure?.message ??
+              "执行在开始后中断。已显示的内容会保留，请从最后一次确认的状态继续。",
+            retryable: false,
+          },
         };
       }
       if (

@@ -1821,7 +1821,10 @@ describe.sequential("single-user durable turn intake API", () => {
             leaseId: lease.leaseId,
             fencingToken: lease.fencingToken,
             nextEventSeq: Number(request.nextEventSeq),
-            input: { kind: "prompt", text: request.input.prompt },
+            input:
+              request.input.kind === "continue"
+                ? { kind: "continue", text: request.input.text }
+                : { kind: "prompt", text: request.input.prompt },
             model: {
               ...request.model,
               credentialBindingVersion: Number(request.model.credentialBindingVersion),
@@ -3293,11 +3296,11 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(inventory.assignments).toHaveLength(0);
     expect(await readTurnExecution(fixture.accepted)).toMatchObject({
       commandState: "failed",
-      commandFailureCode: "assignment_lost",
-      turnState: "failed",
-      turnFailureCode: "assignment_lost",
+      commandFailureCode: "worker_lost_after_start",
+      turnState: "interrupted",
+      turnFailureCode: "worker_lost_after_start",
       failureRetryable: false,
-      sessionState: "failed",
+      sessionState: "idle",
     });
     expect(
       await database
@@ -3306,6 +3309,48 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("id", "=", IDS.reconciliationSandbox)
         .executeTakeFirstOrThrow(),
     ).toEqual({ state: "ready", active_sessions: 0 });
+
+    const continuation = await http.inject({
+      method: "POST",
+      url: `/v1/runs/${fixture.accepted.runId}/continuations`,
+      headers: { "idempotency-key": "continue-interrupted-run-1" },
+    });
+    expect(continuation.statusCode, continuation.body).toBe(202);
+    const continued = continuation.json() as AcceptedTurnResource;
+    expect(continued).toMatchObject({ mailboxPosition: 2, replayed: false });
+    expect(
+      await database
+        .selectFrom("runs as run")
+        .innerJoin("turns as turn", "turn.id", "run.turn_id")
+        .select([
+          "run.continued_from_run_id as continuedFromRunId",
+          "turn.input_kind as inputKind",
+          "turn.input_text as inputText",
+        ])
+        .where("run.id", "=", continued.runId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      continuedFromRunId: fixture.accepted.runId,
+      inputKind: "continue",
+      inputText: expect.stringContaining("Original user request:"),
+    });
+    const replay = await http.inject({
+      method: "POST",
+      url: `/v1/runs/${fixture.accepted.runId}/continuations`,
+      headers: { "idempotency-key": "continue-interrupted-run-1" },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toMatchObject({ runId: continued.runId, replayed: true });
+
+    const continuationDispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new DeterministicExecutionBackend(),
+    });
+    await expect(continuationDispatcher.dispatchNext()).resolves.toMatchObject({
+      status: "completed",
+      commandId: continued.commandId,
+    });
   });
 
   it("requeues a confirmed-absent assignment that never reached durable ACK", async () => {
@@ -3394,8 +3439,8 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     expect(await readTurnExecution(fixture.accepted)).toMatchObject({
       commandState: "failed",
-      turnState: "failed",
-      sessionState: "failed",
+      turnState: "interrupted",
+      sessionState: "idle",
     });
     expect(
       await database
@@ -3429,9 +3474,9 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(inventory.assignments).toHaveLength(0);
     expect(await readTurnExecution(fixture.accepted)).toMatchObject({
       commandState: "failed",
-      commandFailureCode: "assignment_lost",
-      turnState: "failed",
-      sessionState: "failed",
+      commandFailureCode: "worker_lost_after_start",
+      turnState: "interrupted",
+      sessionState: "idle",
     });
     expect(
       await database

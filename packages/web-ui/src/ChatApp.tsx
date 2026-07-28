@@ -312,7 +312,17 @@ function AssistantItem({
   );
 }
 
-function ConversationTurn({ turn }: { turn: TurnView }) {
+function ConversationTurn({
+  turn,
+  canContinue,
+  continuing,
+  onContinue,
+}: {
+  turn: TurnView;
+  canContinue: boolean;
+  continuing: boolean;
+  onContinue: (turn: TurnView) => void;
+}) {
   const working =
     turn.status === "queued" || turn.status === "running" || turn.status === "cancelling";
   const lastToolIndex = turn.items.reduce(
@@ -333,6 +343,11 @@ function ConversationTurn({ turn }: { turn: TurnView }) {
       {turn.rewoundFromRunId ? (
         <div className="product-muted-line">
           已恢复到运行 {turn.rewoundFromRunId.slice(0, 8)} 之前的对话与工作区。
+        </div>
+      ) : null}
+      {turn.continuedFromRunId ? (
+        <div className="product-muted-line">
+          这是运行 {turn.continuedFromRunId.slice(0, 8)} 中断后的显式继续。
         </div>
       ) : null}
       <div className="product-message product-user-message">
@@ -360,9 +375,23 @@ function ConversationTurn({ turn }: { turn: TurnView }) {
             ))
           )}
           {turn.failure ? (
-            <div className="product-turn-error">
-              <strong>这次运行失败了</strong>
+            <div
+              className={
+                turn.status === "interrupted" ? "product-turn-interrupted" : "product-turn-error"
+              }
+            >
+              <strong>{turn.status === "interrupted" ? "执行已中断" : "这次运行失败了"}</strong>
               <span>{turn.failure.message}</span>
+              {turn.status === "interrupted" && canContinue ? (
+                <button
+                  className="product-continuation-button"
+                  disabled={continuing}
+                  onClick={() => onContinue(turn)}
+                  type="button"
+                >
+                  {continuing ? "正在继续…" : "从已确认状态继续"}
+                </button>
+              ) : null}
             </div>
           ) : null}
           {turn.cancellation ? <div className="product-muted-line">已停止生成</div> : null}
@@ -508,7 +537,9 @@ export default function ChatApp() {
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceSummaryResource[]>([]);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [operation, setOperation] = useState<"creating" | "submitting" | "cancelling" | null>(null);
+  const [operation, setOperation] = useState<
+    "creating" | "submitting" | "continuing" | "cancelling" | null
+  >(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
@@ -679,6 +710,7 @@ export default function ChatApp() {
         update({ type: "run.reconciled", run });
         if (
           run.state === "completed" ||
+          run.state === "interrupted" ||
           run.state === "failed" ||
           run.state === "cancelled" ||
           run.state === "timed_out" ||
@@ -915,6 +947,28 @@ export default function ChatApp() {
         newIdempotencyKey("cancel"),
       );
       update({ type: "turn.cancellation.requested", turnId: currentTurn.turnId });
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function continueInterruptedTurn(turn: TurnView): Promise<void> {
+    if (turn.runId === null || turn.status !== "interrupted" || !canMutate || operation !== null) {
+      return;
+    }
+    setOperation("continuing");
+    update({ type: "api.error.cleared" });
+    try {
+      const accepted = await api.continueRun(turn.runId, newIdempotencyKey("continue"));
+      update({
+        type: "turn.accepted",
+        accepted,
+        prompt: "继续上次中断的任务",
+        continuedFromRunId: turn.runId,
+      });
+      await refreshConversations();
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {
@@ -1321,8 +1375,18 @@ export default function ChatApp() {
               </div>
             ) : (
               <div className="product-transcript">
-                {state.turns.map((turn) => (
-                  <ConversationTurn key={turn.turnId} turn={turn} />
+                {state.turns.map((turn, index) => (
+                  <ConversationTurn
+                    canContinue={
+                      canMutate &&
+                      index === state.turns.length - 1 &&
+                      turn.projection === "canonical"
+                    }
+                    continuing={operation === "continuing"}
+                    key={turn.turnId}
+                    onContinue={(candidate) => void continueInterruptedTurn(candidate)}
+                    turn={turn}
+                  />
                 ))}
                 <div ref={transcriptEndRef} />
               </div>

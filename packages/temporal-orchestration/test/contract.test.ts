@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS,
   temporalRunWorkflowId,
   temporalWorkerAffinityTaskQueue,
   validateTemporalRunWorkflowInput,
@@ -14,6 +15,10 @@ const INPUT = {
 };
 
 describe("Temporal orchestration contract", () => {
+  it("never transparently replays a started Agent Activity", () => {
+    expect(TEMPORAL_AGENT_ACTIVITY_MAXIMUM_ATTEMPTS).toBe(1);
+  });
+
   it("keeps workflow history inputs to bounded durable references", () => {
     expect(validateTemporalRunWorkflowInput(INPUT)).toEqual(INPUT);
     expect(temporalRunWorkflowId(INPUT.runId)).toBe(`agent-dock-run-v1-${INPUT.runId}`);

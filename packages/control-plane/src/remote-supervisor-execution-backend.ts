@@ -411,7 +411,10 @@ export class RemoteSupervisorExecutionBackend
         leaseId: lease.leaseId,
         fencingToken: lease.fencingToken,
         nextEventSeq: positiveSafeInteger(request.nextEventSeq, "next event sequence"),
-        input: { kind: "prompt", text: request.input.prompt },
+        input:
+          request.input.kind === "continue"
+            ? { kind: "continue", text: request.input.text }
+            : { kind: "prompt", text: request.input.prompt },
         model: {
           profileId: request.model.profileId,
           provider: request.model.provider,

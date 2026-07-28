@@ -350,6 +350,7 @@ export interface RunTable {
   conversation_base_seq: GeneratedInt8;
   workspace_base_version_id: GeneratedNullable<string>;
   pi_session_base_artifact_id: GeneratedNullable<string>;
+  continued_from_run_id: GeneratedNullable<string>;
   idempotency_key: string;
   trace_id: Generated<string>;
   state: RunState;

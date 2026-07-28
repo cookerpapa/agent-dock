@@ -33,6 +33,7 @@ import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
 const TERMINAL_RUN_STATES = new Set<RunState>([
   "completed",
+  "interrupted",
   "failed",
   "cancelled",
   "timed_out",
@@ -1503,6 +1504,7 @@ export class CandidateRaceService {
           .count<string>("run.id")
           .filterWhere("run.state", "in", [
             "completed",
+            "interrupted",
             "failed",
             "cancelled",
             "timed_out",

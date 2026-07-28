@@ -480,6 +480,22 @@ export class ControlPlaneController {
       );
   }
 
+  @Post("runs/:runId/continuations")
+  @HttpCode(202)
+  async continueRun(
+    @Req() request: FastifyRequest,
+    @Param("runId") runIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+  ): Promise<AcceptedTurnResource> {
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.controlPlaneStores
+      .forIdentity(identity)
+      .acceptRunContinuation(
+        parseUuidPathParameter(runIdValue, "runId"),
+        parseIdempotencyKey(idempotencyKeyValue),
+      );
+  }
+
   @Get("runs/:runId/review-bundle")
   async getRunReviewBundle(
     @Req() request: FastifyRequest,

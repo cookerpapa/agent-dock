@@ -553,6 +553,20 @@ export class AgentDockApi {
     );
   }
 
+  async continueRun(runId: string, idempotencyKey: string): Promise<AcceptedTurnResource> {
+    return parseAcceptedTurnResource(
+      await request(
+        this.#fetch,
+        `/v1/runs/${encodeURIComponent(runId)}/continuations`,
+        {
+          method: "POST",
+          headers: { "idempotency-key": idempotencyKey },
+        },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async getRunReviewBundle(runId: string): Promise<ReviewBundleResource> {
     return parseReviewBundleResource(
       await request(
@@ -842,6 +856,7 @@ export class AgentDockApi {
 export function newIdempotencyKey(
   prefix:
     | "turn"
+    | "continue"
     | "cancel"
     | "fork"
     | "rollback"

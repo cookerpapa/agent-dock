@@ -393,6 +393,59 @@ describe("session transcript reducer", () => {
     });
   });
 
+  it("preserves partial output when an interrupted Run is continued explicitly", () => {
+    const interruptedRunId = accepted.runId;
+    let state = sessionViewReducer(preparedState(), {
+      type: "stream.event",
+      event: envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
+    });
+    state = sessionViewReducer(state, {
+      type: "stream.event",
+      event: envelope(2, {
+        type: "assistant.text.delta",
+        payload: { text: "I changed the workspace, then the Worker stopped." },
+      }),
+    });
+    state = sessionViewReducer(state, {
+      type: "run.reconciled",
+      run: {
+        runId: interruptedRunId,
+        state: "interrupted",
+        failure: {
+          code: "worker_lost_after_start",
+          message: "Worker disappeared after Start ACK",
+          retryable: false,
+        },
+      },
+    });
+
+    const continuation = {
+      ...accepted,
+      turnId: "20000000-0000-4000-8000-000000000002",
+      runId: "50000000-0000-4000-8000-000000000003",
+      commandId: "60000000-0000-4000-8000-000000000002",
+      mailboxPosition: 2,
+    };
+    state = sessionViewReducer(state, {
+      type: "turn.accepted",
+      accepted: continuation,
+      prompt: "继续上次中断的任务",
+      continuedFromRunId: interruptedRunId,
+    });
+
+    expect(state.turns).toHaveLength(2);
+    expect(state.turns[0]).toMatchObject({
+      runId: interruptedRunId,
+      status: "interrupted",
+      items: [{ kind: "text", text: "I changed the workspace, then the Worker stopped." }],
+    });
+    expect(state.turns[1]).toMatchObject({
+      runId: continuation.runId,
+      status: "queued",
+      continuedFromRunId: interruptedRunId,
+    });
+  });
+
   it("refuses to render a sequence gap", () => {
     const state = sessionViewReducer(preparedState(), {
       type: "stream.event",

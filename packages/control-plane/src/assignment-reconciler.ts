@@ -21,6 +21,9 @@ import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =
   "The sandbox assignment disappeared before the turn reached a durable terminal state";
+const WORKER_INTERRUPTED = "worker_lost_after_start";
+const WORKER_INTERRUPTED_MESSAGE =
+  "Execution was interrupted after it started. Existing output is preserved; continue explicitly from the last committed state.";
 const DEFAULT_RECONCILIATION_LIMIT = 100;
 
 const ACTIVE_SESSION_STATES = new Set(["starting", "running", "waiting_approval", "cancelling"]);
@@ -569,13 +572,13 @@ export class AssignmentReconciler {
         attemptId: run.attemptId,
       },
       {
-        runState: "failed",
-        attemptState: "failed",
+        runState: "interrupted",
+        attemptState: "interrupted",
         reason: "assignment_lost_after_ack",
         now,
         failure: {
-          code: ASSIGNMENT_LOST,
-          message: ASSIGNMENT_LOST_MESSAGE,
+          code: WORKER_INTERRUPTED,
+          message: WORKER_INTERRUPTED_MESSAGE,
           retryable: false,
         },
         transitionId: randomUUID(),
@@ -588,7 +591,7 @@ export class AssignmentReconciler {
         .set({
           state: transitionCommand(command.state, "failed"),
           completed_at: now,
-          failure_code: ASSIGNMENT_LOST,
+          failure_code: WORKER_INTERRUPTED,
         })
         .where("id", "=", command.id)
         .where("state", "=", command.state)
@@ -597,7 +600,7 @@ export class AssignmentReconciler {
         .updateTable("outbox")
         .set({
           published_at: sql<Date>`coalesce(${sql.ref("published_at")}, ${now})`,
-          last_error: ASSIGNMENT_LOST,
+          last_error: WORKER_INTERRUPTED,
         })
         .where("tenant_id", "=", session.tenant_id)
         .where(sql<boolean>`${sql.ref("payload")} ->> 'commandId' = ${command.id}`)
@@ -631,9 +634,9 @@ export class AssignmentReconciler {
     await transaction
       .updateTable("turns")
       .set({
-        state: transitionTurn(turn.state, "failed"),
-        failure_code: ASSIGNMENT_LOST,
-        failure_message: ASSIGNMENT_LOST_MESSAGE,
+        state: transitionTurn(turn.state, "interrupted"),
+        failure_code: WORKER_INTERRUPTED,
+        failure_message: WORKER_INTERRUPTED_MESSAGE,
         failure_retryable: false,
         settled_at: now,
       })
@@ -643,7 +646,7 @@ export class AssignmentReconciler {
     await transaction
       .updateTable("sessions")
       .set({
-        state: transitionSession(session.state, "failed"),
+        state: transitionSession(session.state, "idle"),
         row_version: sql<string>`${sql.ref("row_version")} + 1`,
         updated_at: now,
         last_active_at: now,

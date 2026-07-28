@@ -2841,3 +2841,21 @@
 - Automated evidence covers new-conversation inheritance, shared history,
   same-Workspace execution serialization, candidate parallelism and migration
   schema.
+
+## 2026-07-27 — Interruption-safe Agent continuation
+
+- Accepted ADR-0070 and made the durable Start ACK the conservative boundary
+  after which an Agent Activity cannot be transparently replayed. Both common
+  and affinity Temporal queues now use one Activity attempt; pre-ACK recovery
+  remains the outbox/assignment reconciler's fenced responsibility.
+- Added `interrupted` Run, RunAttempt and Turn state with PostgreSQL constraints
+  and transition history. Post-ACK Worker loss confirms old-runtime absence,
+  preserves all durable public events, settles the command with
+  `worker_lost_after_start`, and returns the Session to `idle`.
+- Added an idempotent continuation endpoint and Web action. A continuation is a
+  distinct Run linked by `continued_from_run_id`, restores only committed
+  Pi/Workspace state, and instructs the Agent to inspect incomplete Tool and
+  file state instead of assuming uncertain work succeeded.
+- Regression evidence covers pre-ACK requeue, post-ACK interruption,
+  continuation uniqueness/lineage, downstream execution, one-attempt Temporal
+  policy, and retaining partial browser output beside the new Run.

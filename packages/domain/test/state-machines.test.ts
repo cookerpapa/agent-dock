@@ -86,7 +86,10 @@ describe("domain state machines", () => {
     expect(transitionTurn("dispatching", "queued")).toBe("queued");
     expect(canTransitionTurn("running", "queued")).toBe(false);
     expect(() => transitionTurn("running", "queued")).toThrow(DomainTransitionError);
-    expect(transitionTurn("running", "failed")).toBe("failed");
+    expect(transitionTurn("running", "interrupted")).toBe("interrupted");
+    expect(transitionRun("running", "interrupted")).toBe("interrupted");
+    expect(transitionRunAttempt("running", "interrupted")).toBe("interrupted");
+    expect(isTerminalTurnState("interrupted")).toBe(true);
   });
 
   it("retries commands only before acknowledgement", () => {

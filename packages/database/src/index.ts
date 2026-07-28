@@ -55,6 +55,7 @@ export {
   downSupervisorBootCredentials,
   downVersionedWorkspacesAndGitHubDelivery,
   downHotPlatformRuntimeSettings,
+  downInterruptedRunsAndContinuations,
   downWorkspaceFirstConversations,
   migrationProvider,
   upDurableEventDelivery,
@@ -79,6 +80,7 @@ export {
   upSupervisorBootCredentials,
   upVersionedWorkspacesAndGitHubDelivery,
   upHotPlatformRuntimeSettings,
+  upInterruptedRunsAndContinuations,
   upWorkspaceFirstConversations,
 } from "./migrations/index.ts";
 
