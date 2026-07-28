@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceFileResource, WorkspaceVersionResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError } from "./api.ts";
 
@@ -127,15 +127,26 @@ export function WorkspaceInspector({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const onErrorRef = useRef(onError);
-  const loadGeneration = useRef(0);
+  const directoryLoadGeneration = useRef(0);
+  const fileLoadGeneration = useRef(0);
 
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
 
   useEffect(() => {
+    directoryLoadGeneration.current += 1;
+    fileLoadGeneration.current += 1;
     setRootExpanded(true);
     setExpandedDirectories(new Set());
+    setVersion(null);
+    setFiles([]);
+    setSelectedPath(null);
+    setSelectedText(null);
+    setSelectedBinary(false);
+    setSelectedTooLarge(false);
+    setLoading(false);
+    setFileLoading(false);
   }, [sessionId]);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -146,11 +157,17 @@ export function WorkspaceInspector({
       setSelectedText(null);
       return;
     }
-    const generation = ++loadGeneration.current;
+    const generation = ++directoryLoadGeneration.current;
+    fileLoadGeneration.current += 1;
     setLoading(true);
+    setFileLoading(false);
+    setSelectedPath(null);
+    setSelectedText(null);
+    setSelectedBinary(false);
+    setSelectedTooLarge(false);
     try {
       const versions = await api.listWorkspaceVersions(sessionId);
-      if (generation !== loadGeneration.current) return;
+      if (generation !== directoryLoadGeneration.current) return;
       const current =
         versions.currentVersionId === undefined
           ? null
@@ -179,56 +196,58 @@ export function WorkspaceInspector({
         seenCursors.add(listed.nextCursor);
         cursor = listed.nextCursor;
       }
-      if (generation !== loadGeneration.current) return;
+      if (generation !== directoryLoadGeneration.current) return;
       setFiles(listedFiles);
-      setSelectedPath((path) =>
-        path !== null && listedFiles.some((file) => file.path === path) ? path : null,
-      );
     } catch (error: unknown) {
-      if (generation === loadGeneration.current) {
+      if (generation === directoryLoadGeneration.current) {
         setVersion(null);
         setFiles([]);
         onErrorRef.current(message(error));
       }
     } finally {
-      if (generation === loadGeneration.current) setLoading(false);
+      if (generation === directoryLoadGeneration.current) setLoading(false);
     }
   }, [api, sessionId]);
 
   useEffect(() => {
     void refresh();
     return () => {
-      loadGeneration.current += 1;
+      directoryLoadGeneration.current += 1;
+      fileLoadGeneration.current += 1;
     };
   }, [refresh, refreshSignal]);
 
   async function openFile(file: WorkspaceFileResource): Promise<void> {
     if (version === null) return;
-    const generation = ++loadGeneration.current;
+    const generation = ++fileLoadGeneration.current;
+    const previewable = canPreviewWorkspaceFile(file);
     setSelectedPath(file.path);
     setSelectedText(null);
     setSelectedBinary(false);
-    setSelectedTooLarge(!canPreviewWorkspaceFile(file));
-    if (!canPreviewWorkspaceFile(file)) {
+    setSelectedTooLarge(!previewable);
+    if (!previewable) {
       setFileLoading(false);
       return;
     }
     setFileLoading(true);
     try {
       const result = await api.readWorkspaceFile(version.versionId, file.path);
-      if (generation !== loadGeneration.current) return;
+      if (generation !== fileLoadGeneration.current) return;
       const text = decodedText(result.bytes);
       setSelectedText(text);
       setSelectedBinary(text === null);
     } catch (error: unknown) {
-      if (generation === loadGeneration.current) onErrorRef.current(message(error));
+      if (generation === fileLoadGeneration.current) onErrorRef.current(message(error));
     } finally {
-      if (generation === loadGeneration.current) setFileLoading(false);
+      if (generation === fileLoadGeneration.current) setFileLoading(false);
     }
   }
 
-  const entries = directoryEntries(files);
-  const visibleEntries = rootExpanded ? visibleDirectoryEntries(entries, expandedDirectories) : [];
+  const entries = useMemo(() => directoryEntries(files), [files]);
+  const visibleEntries = useMemo(
+    () => (rootExpanded ? visibleDirectoryEntries(entries, expandedDirectories) : []),
+    [entries, expandedDirectories, rootExpanded],
+  );
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
 
   function toggleDirectory(path: string): void {

@@ -1827,10 +1827,10 @@ export function parseCreateProjectRequest(value: unknown): CreateProjectRequest 
       "Project name must contain a non-whitespace character",
     );
   }
-  if (request.source === undefined || request.source.kind === "sample_java") {
+  if (request.source?.kind === "sample_java") {
     return { name, source: { kind: "sample_java" } };
   }
-  if (request.source.kind === "empty") {
+  if (request.source === undefined || request.source.kind === "empty") {
     return { name, source: { kind: "empty" } };
   }
   if (request.source.kind === "repository_set") {

@@ -18,18 +18,8 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve, sep } from "node:path";
-import { TextDecoder } from "node:util";
 
 const WORKSPACE_ROOT = "/workspace";
-const OPERATION_URL_ENV = "AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL";
-const ACTIVATION_ID_ENV = "AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID";
-const CAPABILITY_ENV = "AGENT_DOCK_TRUSTED_TOOL_CAPABILITY";
-const REMAINING_TOOL_CALLS_ENV = "AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS";
-const MAXIMUM_TOOL_OUTPUT_BYTES_ENV = "AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES";
-const TOOL_OUTPUT_DIRECTORY_ENV = "AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY";
-const PROJECT_INSTRUCTIONS_BASE64_ENV = "AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64";
-const TRACEPARENT_ENV = "AGENT_DOCK_TRUSTED_TRACEPARENT";
-const TRACESTATE_ENV = "AGENT_DOCK_TRUSTED_TRACESTATE";
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024;
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -47,14 +37,6 @@ class RemoteToolError extends Error {
     this.code = code;
     this.retryable = retryable;
   }
-}
-
-function requiredEnvironment(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value.length < 1 || value.length > 4_096 || /[\r\n\0]/.test(value)) {
-    throw new Error(`Trusted remote tool configuration ${name} is invalid`);
-  }
-  return value;
 }
 
 export type TrustedRemoteToolsRuntimeConfiguration = {
@@ -140,41 +122,6 @@ function validateRuntimeConfiguration(
     ...(traceparent === undefined ? {} : { traceparent }),
     ...(tracestate === undefined ? {} : { tracestate }),
   };
-}
-
-function runtimeConfigurationFromEnvironment(): TrustedRemoteToolsRuntimeConfiguration {
-  const encodedProjectInstructions = process.env[PROJECT_INSTRUCTIONS_BASE64_ENV];
-  let projectInstructions: string | undefined;
-  if (encodedProjectInstructions !== undefined) {
-    const decoded = Buffer.from(encodedProjectInstructions, "base64");
-    if (
-      encodedProjectInstructions.length > 24_000 ||
-      decoded.toString("base64") !== encodedProjectInstructions ||
-      decoded.byteLength > MAX_PROJECT_INSTRUCTIONS_BYTES + 64
-    ) {
-      throw new Error("Trusted project instructions are invalid");
-    }
-    try {
-      projectInstructions = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
-    } catch {
-      throw new Error("Trusted project instructions are invalid");
-    }
-  }
-  return validateRuntimeConfiguration({
-    operationUrl: requiredEnvironment(OPERATION_URL_ENV),
-    activationId: requiredEnvironment(ACTIVATION_ID_ENV),
-    capability: requiredEnvironment(CAPABILITY_ENV),
-    remainingToolCalls: Number(requiredEnvironment(REMAINING_TOOL_CALLS_ENV)),
-    maximumToolOutputBytes: Number(requiredEnvironment(MAXIMUM_TOOL_OUTPUT_BYTES_ENV)),
-    toolOutputDirectory: requiredEnvironment(TOOL_OUTPUT_DIRECTORY_ENV),
-    ...(projectInstructions === undefined ? {} : { projectInstructions }),
-    ...(process.env[TRACEPARENT_ENV] === undefined
-      ? {}
-      : { traceparent: process.env[TRACEPARENT_ENV] }),
-    ...(process.env[TRACESTATE_ENV] === undefined
-      ? {}
-      : { tracestate: process.env[TRACESTATE_ENV] }),
-  });
 }
 
 function boundedOutput(value: Buffer, maximumBytes: number): Buffer {
@@ -495,8 +442,4 @@ export function createTrustedRemoteToolsExtension(
 ): InlineExtension {
   const runtime = validateRuntimeConfiguration(configuration);
   return (pi) => registerTrustedRemoteTools(pi, runtime);
-}
-
-export default function trustedRemoteTools(pi: ExtensionAPI): void {
-  registerTrustedRemoteTools(pi, runtimeConfigurationFromEnvironment());
 }

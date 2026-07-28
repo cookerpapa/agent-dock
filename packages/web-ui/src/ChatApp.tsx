@@ -883,7 +883,7 @@ export default function ChatApp() {
       if (workspaceChoice === "new") {
         const name = newWorkspaceName.trim();
         if (name.length === 0) return;
-        const created = await api.createProject(name, { kind: "empty" });
+        const created = await api.createProject(name);
         projectId = created.projectId;
         workspaceId = created.workspaceId;
       } else {

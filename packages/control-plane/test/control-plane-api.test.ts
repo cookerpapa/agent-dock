@@ -19,9 +19,9 @@ import {
 import {
   FileEventSpoolStore,
   LocalSandboxSupervisor,
-  PiRpcTurnCancelledError,
-  PiRpcTurnError,
-  PiRpcTurnRunner,
+  PiTurnCancelledError,
+  PiTurnError,
+  PiSdkTurnRunner,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
 } from "@agent-dock/sandbox-supervisor";
@@ -123,9 +123,9 @@ async function seedSingleUserProfile(): Promise<void> {
     .values({
       id: IDS.credential,
       tenant_id: IDS.tenant,
-      provider: "openai-codex",
-      kind: "oauth",
-      secret_ref: "broker://owner/openai-codex",
+      provider: "agent-dock-fake",
+      kind: "brokered",
+      secret_ref: "broker://test/agent-dock-fake",
       version: 1,
       status: "active",
     })
@@ -136,8 +136,8 @@ async function seedSingleUserProfile(): Promise<void> {
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "default",
-      provider: "openai-codex",
-      model_id: "gpt-5.4-mini",
+      provider: "agent-dock-fake",
+      model_id: "agent-dock-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off", "low"],
       credential_binding_id: IDS.credential,
@@ -539,7 +539,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const projectResponse = await http.inject({
       method: "POST",
       url: "/v1/projects",
-      payload: { name: "  Sample Java Repair  " },
+      payload: { name: "  Sample Java Repair  ", source: { kind: "sample_java" } },
     });
     expect(projectResponse.statusCode).toBe(201);
     project = projectResponse.json() as ProjectResource;
@@ -2118,7 +2118,7 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(failedCancellation.publishedAt).not.toBeNull();
   });
 
-  it("executes a fenced command through pinned Pi RPC and the loopback fake model", async () => {
+  it("executes a fenced command through pinned Pi SDK and the loopback fake model", async () => {
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
@@ -2139,7 +2139,7 @@ describe.sequential("single-user durable turn intake API", () => {
       .insertInto("sandboxes")
       .values({
         id: IDS.sandbox,
-        supervisor_id: "local-pi-rpc-test",
+        supervisor_id: "local-pi-sdk-test",
         boot_id: IDS.sandboxBoot,
         state: "ready",
         max_concurrent_sessions: 1,
@@ -2168,7 +2168,7 @@ describe.sequential("single-user durable turn intake API", () => {
 
     try {
       await fakeModel.start();
-      const runner = new PiRpcTurnRunner({
+      const runner = new PiSdkTurnRunner({
         resolveWorkspaceDirectory: () => workspaceDirectory,
         resolveModelRuntime: (model) => ({
           provider: model.provider,
@@ -2266,8 +2266,6 @@ describe.sequential("single-user durable turn intake API", () => {
       expect(liveResponse.headers.get("content-type")).toContain("text/event-stream");
       const liveEventsPromise = readSseEvents(liveResponse, 4);
       const dispatchResult = await dispatcher.dispatchNext();
-      const liveEvents = await liveEventsPromise;
-      liveAbort.abort();
       expect(dispatchResult).toEqual({
         status: "completed",
         commandId: accepted.commandId,
@@ -2275,6 +2273,8 @@ describe.sequential("single-user durable turn intake API", () => {
         turnId: accepted.turnId,
         attempt: 1,
       });
+      const liveEvents = await liveEventsPromise;
+      liveAbort.abort();
 
       expect(events.map((message) => message.payload.event.type)).toEqual([
         "turn.started",
@@ -2326,7 +2326,7 @@ describe.sequential("single-user durable turn intake API", () => {
       ).toBe(true);
       expect(fakeModel.observations).toHaveLength(1);
       expect(fakeModel.observations[0]).toMatchObject({
-        model: "gpt-5.4-mini",
+        model: "agent-dock-fake",
         messageCount: 2,
         toolCount: 0,
         authorizationPresent: true,
@@ -2502,8 +2502,8 @@ describe.sequential("single-user durable turn intake API", () => {
             input: { kind: "prompt", prompt: "Return the deterministic fake response." },
             model: {
               profileId: IDS.profile,
-              provider: "openai-codex",
-              modelId: "gpt-5.4-mini",
+              provider: "agent-dock-fake",
+              modelId: "agent-dock-fake",
               thinkingLevel: "off",
               credentialBindingId: IDS.credential,
               credentialBindingVersion: "1",
@@ -2722,7 +2722,7 @@ describe.sequential("single-user durable turn intake API", () => {
       .insertInto("sandboxes")
       .values({
         id: IDS.cancellationSandbox,
-        supervisor_id: "local-pi-rpc-cancellation-test",
+        supervisor_id: "local-pi-sdk-cancellation-test",
         boot_id: IDS.cancellationSandboxBoot,
         state: "ready",
         max_concurrent_sessions: 1,
@@ -2741,7 +2741,7 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     try {
       await fakeModel.start();
-      const runner = new PiRpcTurnRunner({
+      const runner = new PiSdkTurnRunner({
         resolveWorkspaceDirectory: () => workspaceDirectory,
         resolveModelRuntime: (model) => ({
           provider: model.provider,
@@ -3049,7 +3049,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const supervisor = new LocalSandboxSupervisor({
       runner: {
         async run() {
-          throw new PiRpcTurnError("model_timeout", "Model request timed out", true);
+          throw new PiTurnError("model_timeout", "Model request timed out", true);
         },
       },
     });
@@ -3213,7 +3213,7 @@ describe.sequential("single-user durable turn intake API", () => {
               "abort",
               () => {
                 const reason = signal.reason as { reason: "lease_revoked" };
-                reject(new PiRpcTurnCancelledError(reason.reason, false));
+                reject(new PiTurnCancelledError(reason.reason, false));
               },
               { once: true },
             );

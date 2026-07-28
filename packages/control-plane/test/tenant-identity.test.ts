@@ -17,7 +17,7 @@ const IDS = {
   binding: "a0000000-0000-4000-8000-000000000003",
   profile: "a0000000-0000-4000-8000-000000000004",
   ownerCredential: "a0000000-0000-4000-8000-000000000005",
-  legacyCredential: "a0000000-0000-4000-8000-000000000006",
+  safetyCredential: "a0000000-0000-4000-8000-000000000006",
   expiredCredential: "a0000000-0000-4000-8000-000000000007",
 };
 
@@ -118,28 +118,6 @@ describe.sequential("tenant API identity", () => {
     await expect(authenticator.authenticate("short")).resolves.toBeUndefined();
   });
 
-  it("keeps a bounded legacy production token usable during migration", async () => {
-    const legacy = `legacy-${"l".repeat(48)}`;
-    await database
-      .insertInto("tenant_api_credentials")
-      .values({
-        credential_id: IDS.legacyCredential,
-        tenant_id: IDS.tenant,
-        user_id: IDS.user,
-        label: "migrated production token",
-        role: "owner",
-        secret_sha256: tenantApiTokenDigest(legacy),
-        created_at: NOW,
-      })
-      .execute();
-    const authenticator = new PostgresTenantApiAuthenticator({ database, clock: () => NOW });
-    await expect(authenticator.authenticate(legacy)).resolves.toMatchObject({
-      credentialId: IDS.legacyCredential,
-      tenantId: IDS.tenant,
-      role: "owner",
-    });
-  });
-
   it("rejects expired, revoked, and unknown credentials without blocking a disabled tenant's safety access", async () => {
     const expired = generateTenantApiCredential(IDS.expiredCredential, "e".repeat(43));
     await database
@@ -171,13 +149,21 @@ describe.sequential("tenant API identity", () => {
       authenticator.authenticate(generateTenantApiCredential(undefined, "u".repeat(43)).token),
     ).resolves.toBeUndefined();
 
+    const safety = await issueTenantApiCredential(database, {
+      tenantId: IDS.tenant,
+      userId: IDS.user,
+      label: "disabled tenant safety access",
+      role: "owner",
+      credentialId: IDS.safetyCredential,
+      clock: () => NOW,
+      randomSecret: () => "s".repeat(43),
+    });
     await database
       .updateTable("tenant_runtime_policies")
       .set({ enabled: false })
       .where("tenant_id", "=", IDS.tenant)
       .execute();
-    const legacy = `legacy-${"l".repeat(48)}`;
-    await expect(authenticator.authenticate(legacy)).resolves.toMatchObject({
+    await expect(authenticator.authenticate(safety.token)).resolves.toMatchObject({
       tenantId: IDS.tenant,
       role: "owner",
     });

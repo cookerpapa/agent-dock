@@ -19,7 +19,6 @@
     "ws": "8.21.1"
   },
   "devDependencies": {
-    "@agent-dock/sandbox-manager": "0.1.0",
     "@types/ws": "8.18.1"
   }
 }

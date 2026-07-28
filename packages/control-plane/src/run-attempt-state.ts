@@ -10,7 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 
-export class RunAttemptLifecycleError extends Error {
+class RunAttemptLifecycleError extends Error {
   readonly code: string;
   readonly retryable = false;
 
@@ -29,7 +29,7 @@ export type CurrentRunAttemptIdentity = {
   fencingToken?: number;
 };
 
-export type RunAttemptFailure = {
+type RunAttemptFailure = {
   code: string;
   message: string;
   retryable: boolean;

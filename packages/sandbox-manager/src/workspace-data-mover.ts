@@ -30,9 +30,9 @@ const VOLUME_GENERATION_FILE = "generation";
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
 
-export const WORKSPACE_DATA_MOVER_PREPARE_PATH = "/v1/workspaces/prepare";
-export const WORKSPACE_DATA_MOVER_SNAPSHOT_PATH = "/v1/workspaces/snapshot";
-export const WORKSPACE_DATA_MOVER_MATERIALIZE_PATH = "/v1/workspaces/materialize";
+const WORKSPACE_DATA_MOVER_PREPARE_PATH = "/v1/workspaces/prepare";
+const WORKSPACE_DATA_MOVER_SNAPSHOT_PATH = "/v1/workspaces/snapshot";
+const WORKSPACE_DATA_MOVER_MATERIALIZE_PATH = "/v1/workspaces/materialize";
 
 export type WorkspaceDataMoverIdentity = Readonly<{
   tenantId: string;

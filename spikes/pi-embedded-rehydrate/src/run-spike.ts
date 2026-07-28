@@ -137,7 +137,6 @@ try {
         allActivationsDisposed: replacementBackend.metrics.activeActivations === 0,
         extensionShutdownEvents: shutdownCount,
         modelCalls: 0,
-        piExecutionMode: "embedded-sdk",
       },
       null,
       2,

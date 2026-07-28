@@ -28,37 +28,22 @@ export {
   type FileEventSpoolStoreOptions,
 } from "./file-event-spool.ts";
 
-export {
-  PiRpcAdapterError,
-  PiRpcEventAdapter,
-  type ApprovalDecision,
-  type PiExtensionUiResponse,
-  type PiRpcAdapterOutcome,
-  type PiRpcEventAdapterOptions,
-  type ResolvedApproval,
-} from "./pi-rpc-event-adapter.ts";
-
-export {
-  PiRpcAgentEventAdapter,
-  type PiRpcAgentEventAdapterOutcome,
-} from "./pi-rpc-agent-event-adapter.ts";
+export { PiAgentEventAdapter, type PiAgentEventAdapterOutcome } from "./pi-agent-event-adapter.ts";
 
 export {
   PINNED_PI_CODING_AGENT_VERSION,
-  PiRpcTurnCancelledError,
-  PiRpcTurnError,
-  PiRpcTurnRunner,
+  PiTurnCancelledError,
+  PiTurnError,
   type PiModelRuntimeConfig,
-  type PiBuiltinToolName,
-  type PiRpcCancellationSignal,
-  type PiRpcEventPublisher,
-  type PiRpcInterruptedCheckpoint,
-  type PiRpcSettledCheckpoint,
-  type PiRpcToolOutputArtifact,
-  type PiRpcToolOutputCapture,
-  type PiRpcTurnResult,
-  type PiRpcTurnRunnerOptions,
-} from "./pi-rpc-turn-runner.ts";
+  type PiCancellationSignal,
+  type PiEventPublisher,
+  type PiInterruptedCheckpoint,
+  type PiSettledCheckpoint,
+  type PiToolOutputArtifact,
+  type PiToolOutputCapture,
+  type PiTurnResult,
+  type PiTurnRuntimeOptions,
+} from "./pi-turn-runtime.ts";
 export {
   appendPiInterruption,
   PI_INTERRUPTION_CUSTOM_TYPE,

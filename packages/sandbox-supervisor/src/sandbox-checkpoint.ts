@@ -9,7 +9,7 @@ import {
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
-import { PiRpcTurnError } from "./pi-rpc-turn-runner.ts";
+import { PiTurnError } from "./pi-turn-runtime.ts";
 import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 export type LoadedSandboxCheckpoint = {
@@ -72,8 +72,8 @@ function sha256(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function checkpointError(message: string): PiRpcTurnError {
-  return new PiRpcTurnError("invalid_checkpoint", message, false);
+function checkpointError(message: string): PiTurnError {
+  return new PiTurnError("invalid_checkpoint", message, false);
 }
 
 function assertNonEmptyBounded(value: Uint8Array, maxBytes: number, description: string): void {

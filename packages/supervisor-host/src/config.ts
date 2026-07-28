@@ -25,7 +25,6 @@ export type SupervisorHostConfig = {
   temporalTaskQueue: string;
   temporalWorkerDeploymentName?: string;
   temporalWorkerBuildId?: string;
-  piExecutionMode: "rpc" | "embedded-sdk";
   sandboxManagerBaseUrl: string;
   sandboxManagerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
@@ -84,12 +83,6 @@ function integerValue(
     throw new TypeError(`${name} must be an integer from ${String(minimum)} to ${String(maximum)}`);
   }
   return parsed;
-}
-
-function piExecutionMode(value: string | undefined): "rpc" | "embedded-sdk" {
-  if (value === undefined || value === "rpc") return "rpc";
-  if (value === "embedded-sdk") return "embedded-sdk";
-  throw new TypeError("AGENT_DOCK_PI_EXECUTION_MODE must be rpc or embedded-sdk");
 }
 
 function baseUrl(value: string, allowInsecure: boolean): string {
@@ -325,7 +318,6 @@ export async function loadSupervisorHostConfig(
       255,
     ),
     ...temporalWorkerDeployment,
-    piExecutionMode: piExecutionMode(environment.AGENT_DOCK_PI_EXECUTION_MODE),
     sandboxManagerBaseUrl: internalServiceBaseUrl(
       required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
       allowInsecureInternalHttp,

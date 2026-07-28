@@ -1,6 +1,6 @@
 import { createAgentDockEventFactory } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
-import { PiRpcAgentEventAdapter } from "../src/index.ts";
+import { PiAgentEventAdapter } from "../src/index.ts";
 
 function createAdapter() {
   let eventIndex = 0;
@@ -11,7 +11,7 @@ function createAdapter() {
     "44444444-4444-4444-8444-444444444444",
     "55555555-5555-4555-8555-555555555555",
   ];
-  return new PiRpcAgentEventAdapter(
+  return new PiAgentEventAdapter(
     createAgentDockEventFactory(
       { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
       {
@@ -24,7 +24,7 @@ function createAdapter() {
   );
 }
 
-describe("PiRpcAgentEventAdapter", () => {
+describe("PiAgentEventAdapter", () => {
   it("maps a complete Pi text run without exposing raw Pi objects", () => {
     const adapter = createAdapter();
     const started = adapter.adapt({ type: "agent_start" });
@@ -300,7 +300,7 @@ describe("PiRpcAgentEventAdapter", () => {
   });
 
   it("bounds persisted tool output", () => {
-    const adapter = new PiRpcAgentEventAdapter(
+    const adapter = new PiAgentEventAdapter(
       createAgentDockEventFactory(
         { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
         { idGenerator: () => "11111111-1111-4111-8111-111111111111" },

@@ -74,7 +74,6 @@ import {
   type WorkspaceFileListResource,
   type WorkspaceListResource,
   type WorkspaceOperationResource,
-  type WorkspaceSourceRequest,
   type WorkspaceVersionCompareResource,
   type WorkspaceVersionListResource,
   type WorkspaceVersionResource,
@@ -772,15 +771,12 @@ export class AgentDockApi {
     );
   }
 
-  async createProject(
-    name: string,
-    source: WorkspaceSourceRequest = { kind: "empty" },
-  ): Promise<ProjectResource> {
+  async createProject(name: string): Promise<ProjectResource> {
     return parseProjectResource(
       await request(
         this.#fetch,
         "/v1/projects",
-        jsonRequest({ name, source }),
+        jsonRequest({ name, source: { kind: "empty" } }),
         this.#authorizationToken,
       ),
     );

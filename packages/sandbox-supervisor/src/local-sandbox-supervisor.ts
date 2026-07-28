@@ -20,11 +20,11 @@ import {
   type SupervisorEventSpoolRecoveryResult,
 } from "./in-memory-event-spool.ts";
 import {
-  PiRpcTurnCancelledError,
-  type PiRpcCancellationSignal,
-  type PiRpcEventPublisher,
-  type PiRpcTurnResult,
-} from "./pi-rpc-turn-runner.ts";
+  PiTurnCancelledError,
+  type PiCancellationSignal,
+  type PiEventPublisher,
+  type PiTurnResult,
+} from "./pi-turn-runtime.ts";
 import {
   BatchedEventPublisher,
   type SupervisorEventPublication,
@@ -33,14 +33,14 @@ import {
 export interface SupervisorTurnRunner {
   run(
     command: ExecuteTurnCommandMessage,
-    publishEvent: PiRpcEventPublisher,
+    publishEvent: PiEventPublisher,
     signal: AbortSignal,
-  ): Promise<PiRpcTurnResult>;
+  ): Promise<PiTurnResult>;
 }
 
 export type PreparedTurnExecution = {
   ack: CommandAckMessage;
-  run(): Promise<PiRpcTurnResult>;
+  run(): Promise<PiTurnResult>;
   releaseBeforeStart(): void;
   revokeLease(): void;
 };
@@ -92,7 +92,7 @@ type Assignment = {
   eventSpool?: SupervisorEventSpool;
   abortController: AbortController;
   state: AssignmentState;
-  runPromise?: Promise<PiRpcTurnResult>;
+  runPromise?: Promise<PiTurnResult>;
   leaseValidUntil?: string;
 };
 
@@ -526,7 +526,7 @@ export class LocalSandboxSupervisor {
     return candidate;
   }
 
-  #run(assignment: Assignment): Promise<PiRpcTurnResult> {
+  #run(assignment: Assignment): Promise<PiTurnResult> {
     if (assignment.runPromise !== undefined) return assignment.runPromise;
     const current = this.#currentBySession.get(assignment.command.payload.sessionId);
     if (current !== assignment || assignment.state !== "prepared") {
@@ -535,7 +535,7 @@ export class LocalSandboxSupervisor {
       );
     }
     assignment.state = "running";
-    let execution: Promise<PiRpcTurnResult>;
+    let execution: Promise<PiTurnResult>;
     try {
       const eventSpool = this.#eventSpoolFactory({
         sessionId: assignment.command.payload.sessionId,
@@ -568,7 +568,7 @@ export class LocalSandboxSupervisor {
           return result;
         },
         (error: unknown) => {
-          if (error instanceof PiRpcTurnCancelledError && assignment.state === "cancelling") {
+          if (error instanceof PiTurnCancelledError && assignment.state === "cancelling") {
             assignment.state = "cancelled";
           } else if (assignment.state !== "superseded") {
             assignment.state = "failed";
@@ -587,7 +587,7 @@ export class LocalSandboxSupervisor {
   #runWithEventSpool(
     assignment: Assignment,
     eventSpool: SupervisorEventSpool,
-  ): Promise<PiRpcTurnResult> {
+  ): Promise<PiTurnResult> {
     assignment.eventSpool = eventSpool;
     const publisher = new BatchedEventPublisher({
       publish: assignment.publishEvent,
@@ -692,7 +692,7 @@ export class LocalSandboxSupervisor {
     ) {
       return;
     }
-    const cancellationSignal: PiRpcCancellationSignal = {
+    const cancellationSignal: PiCancellationSignal = {
       kind: "agent-dock.turn-cancellation",
       reason: "lease_revoked",
       gracePeriodMs: 0,
@@ -720,7 +720,7 @@ export class LocalSandboxSupervisor {
 
     cancellation.state = "running";
     assignment.state = "cancelling";
-    const cancellationSignal: PiRpcCancellationSignal = {
+    const cancellationSignal: PiCancellationSignal = {
       kind: "agent-dock.turn-cancellation",
       reason: cancellation.command.payload.reason,
       gracePeriodMs: cancellation.command.payload.gracePeriodMs ?? 1_000,
@@ -735,7 +735,7 @@ export class LocalSandboxSupervisor {
         );
       },
       (error: unknown) => {
-        if (!(error instanceof PiRpcTurnCancelledError)) {
+        if (!(error instanceof PiTurnCancelledError)) {
           cancellation.state = "failed";
           throw error;
         }

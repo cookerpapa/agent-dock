@@ -4,29 +4,28 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import trustedRemoteTools, {
-  createTrustedRemoteToolsExtension,
-} from "../src/trusted-remote-tools-extension.ts";
+import { createTrustedRemoteToolsExtension } from "../src/trusted-remote-tools-extension.ts";
 
-const ENVIRONMENT = {
-  AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: "http://127.0.0.1:4999/v1/tool-operations",
-  AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID: "10000000-0000-4000-8000-000000000001",
-  AGENT_DOCK_TRUSTED_TOOL_CAPABILITY: `adts_${"a".repeat(43)}`,
-  AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: "0",
-  AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: "1024",
-  AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY: "/tmp/agent-dock-tool-output-test",
-  AGENT_DOCK_TRUSTED_TRACEPARENT: "00-11111111111111111111111111111111-2222222222222222-01",
+const BASE_CONFIGURATION = {
+  operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
+  activationId: "10000000-0000-4000-8000-000000000001",
+  capability: `adts_${"a".repeat(43)}`,
+  remainingToolCalls: 0,
+  maximumToolOutputBytes: 1_024,
+  toolOutputDirectory: "/tmp/agent-dock-tool-output-test",
+  traceparent: "00-11111111111111111111111111111111-2222222222222222-01",
 } as const;
 
-const original = new Map<string, string | undefined>();
+function installInlineExtension(
+  extension: ReturnType<typeof createTrustedRemoteToolsExtension>,
+  pi: ExtensionAPI,
+): void {
+  if (typeof extension === "function") extension(pi);
+  else extension.factory(pi);
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  for (const [name, value] of original) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
-  original.clear();
 });
 
 describe("trusted remote tools extension governance", () => {
@@ -55,16 +54,9 @@ describe("trusted remote tools extension governance", () => {
     expect(registered.map((tool) => tool.name).sort()).toEqual(["bash", "edit", "read", "write"]);
     expect(registered.every((tool) => tool.executionMode === "sequential")).toBe(true);
     expect(handlers.has("before_agent_start")).toBe(true);
-    expect(process.env.AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID).not.toBe(
-      "10000000-0000-4000-8000-000000000099",
-    );
   });
 
-  it("rejects a Pi tool call before RPC when the durable run budget is exhausted", async () => {
-    for (const [name, value] of Object.entries(ENVIRONMENT)) {
-      original.set(name, process.env[name]);
-      process.env[name] = value;
-    }
+  it("rejects a Pi tool call before Tool RPC when the durable run budget is exhausted", async () => {
     const registered: ToolDefinition[] = [];
     const pi = {
       registerTool(tool: ToolDefinition) {
@@ -72,7 +64,7 @@ describe("trusted remote tools extension governance", () => {
       },
       on() {},
     } as unknown as ExtensionAPI;
-    trustedRemoteTools(pi);
+    installInlineExtension(createTrustedRemoteToolsExtension(BASE_CONFIGURATION), pi);
     expect(registered.map((tool) => tool.name).sort()).toEqual(["bash", "edit", "read", "write"]);
     await expect(
       registered
@@ -90,17 +82,6 @@ describe("trusted remote tools extension governance", () => {
   it("layers bounded project instructions and preserves a large read result", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "agent-dock-tool-output-extension-test-"));
     try {
-      for (const [name, value] of Object.entries({
-        ...ENVIRONMENT,
-        AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: "1",
-        AGENT_DOCK_TRUSTED_TOOL_OUTPUT_DIRECTORY: directory,
-        AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
-          "Prefer deterministic tests.",
-        ).toString("base64"),
-      })) {
-        original.set(name, process.env[name]);
-        process.env[name] = value;
-      }
       const registered: ToolDefinition[] = [];
       const handlers = new Map<string, (...args: never[]) => unknown>();
       const pi = {
@@ -112,9 +93,7 @@ describe("trusted remote tools extension governance", () => {
         },
       } as unknown as ExtensionAPI;
       vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
-        expect(new Headers(init.headers).get("traceparent")).toBe(
-          ENVIRONMENT.AGENT_DOCK_TRUSTED_TRACEPARENT,
-        );
+        expect(new Headers(init.headers).get("traceparent")).toBe(BASE_CONFIGURATION.traceparent);
         const request = JSON.parse(String(init.body)) as {
           activationId: string;
           operationId: string;
@@ -140,7 +119,15 @@ describe("trusted remote tools extension governance", () => {
           headers: { "content-type": "application/json" },
         });
       });
-      trustedRemoteTools(pi);
+      installInlineExtension(
+        createTrustedRemoteToolsExtension({
+          ...BASE_CONFIGURATION,
+          remainingToolCalls: 1,
+          toolOutputDirectory: directory,
+          projectInstructions: "Prefer deterministic tests.",
+        }),
+        pi,
+      );
       const beforeAgentStart = handlers.get("before_agent_start");
       expect(beforeAgentStart).toBeDefined();
       const context = (await beforeAgentStart!({
@@ -158,7 +145,7 @@ describe("trusted remote tools extension governance", () => {
         type: "before_provider_headers",
         headers: providerHeaders,
       } as never);
-      expect(providerHeaders.traceparent).toBe(ENVIRONMENT.AGENT_DOCK_TRUSTED_TRACEPARENT);
+      expect(providerHeaders.traceparent).toBe(BASE_CONFIGURATION.traceparent);
 
       await registered
         .find((tool) => tool.name === "read")!

@@ -650,6 +650,20 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       .where("id", "=", IDS.session)
       .executeTakeFirstOrThrow();
     expect(session.pi_session_snapshot_key).not.toBeNull();
+    await database
+      .updateTable("artifacts")
+      .set({ media_type: "application/json" })
+      .where("object_key", "=", session.pi_session_snapshot_key!)
+      .executeTakeFirstOrThrow();
+    await expect(freshStore.load(command(2))).rejects.toMatchObject({
+      code: "checkpoint_incompatible",
+      retryable: false,
+    });
+    await database
+      .updateTable("artifacts")
+      .set({ media_type: PI_SESSION_MANIFEST_MEDIA_TYPE })
+      .where("object_key", "=", session.pi_session_snapshot_key!)
+      .executeTakeFirstOrThrow();
     await writeFile(resolve(objectRoot, session.pi_session_snapshot_key!), "corrupt");
     await expect(freshStore.load(command(2))).rejects.toMatchObject({ code: "checkpoint_corrupt" });
 

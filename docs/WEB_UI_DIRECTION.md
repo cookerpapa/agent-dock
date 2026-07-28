@@ -44,7 +44,7 @@ The product page adds:
 - compact sandbox/runner health details for debugging;
 - an event sequence indicator useful for demonstrating durable SSE replay.
 
-Raw Pi RPC payloads, lease secrets, credential references, and provider tokens
+Raw Pi runtime events, lease secrets, credential references, and provider tokens
 must never appear in the DOM or browser developer logs.
 
 ## Deferred behavior

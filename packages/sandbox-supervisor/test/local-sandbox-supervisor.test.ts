@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
   FileEventSpoolStore,
   LocalSandboxSupervisor,
-  PiRpcTurnCancelledError,
+  PiTurnCancelledError,
   type SupervisorTurnRunner,
 } from "../src/index.ts";
 
@@ -378,7 +378,7 @@ describe("LocalSandboxSupervisor", () => {
             "abort",
             () => {
               const reason = signal.reason as { reason: "user_request" };
-              reject(new PiRpcTurnCancelledError(reason.reason, false));
+              reject(new PiTurnCancelledError(reason.reason, false));
             },
             { once: true },
           );
@@ -398,7 +398,7 @@ describe("LocalSandboxSupervisor", () => {
       reason: "user_request",
       forced: false,
     });
-    await expect(execution).rejects.toBeInstanceOf(PiRpcTurnCancelledError);
+    await expect(execution).rejects.toBeInstanceOf(PiTurnCancelledError);
     expect(observedSignal?.aborted).toBe(true);
     expect(supervisor.activeSessionCount).toBe(0);
   });
@@ -412,7 +412,7 @@ describe("LocalSandboxSupervisor", () => {
             "abort",
             () => {
               const reason = signal.reason as { reason: "lease_revoked" };
-              reject(new PiRpcTurnCancelledError(reason.reason, false));
+              reject(new PiTurnCancelledError(reason.reason, false));
             },
             { once: true },
           );
@@ -478,7 +478,7 @@ describe("LocalSandboxSupervisor", () => {
             "abort",
             () => {
               const reason = signal.reason as { reason: "lease_revoked" };
-              reject(new PiRpcTurnCancelledError(reason.reason, false));
+              reject(new PiTurnCancelledError(reason.reason, false));
             },
             { once: true },
           );
@@ -551,7 +551,7 @@ describe("LocalSandboxSupervisor", () => {
             "abort",
             () => {
               const reason = signal.reason as { reason: "lease_revoked" };
-              reject(new PiRpcTurnCancelledError(reason.reason, false));
+              reject(new PiTurnCancelledError(reason.reason, false));
             },
             { once: true },
           );
@@ -631,7 +631,7 @@ describe("LocalSandboxSupervisor", () => {
           }
           abortObserved = true;
           await teardownGate;
-          throw new PiRpcTurnCancelledError("lease_revoked", false);
+          throw new PiTurnCancelledError("lease_revoked", false);
         },
       },
     });

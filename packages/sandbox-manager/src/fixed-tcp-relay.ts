@@ -91,7 +91,7 @@ export function createFixedTcpRelay(options: FixedTcpRelayOptions): Server {
   return server;
 }
 
-export function closeFixedTcpRelay(server: Server): void {
+function closeFixedTcpRelay(server: Server): void {
   server.close();
   for (const socket of relaySockets.get(server) ?? []) socket.destroy();
 }

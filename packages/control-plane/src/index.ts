@@ -175,13 +175,12 @@ export {
   type RemoteControlPlaneRuntimeState,
 } from "./remote-control-plane-runtime.ts";
 export {
-  RemoteSupervisorWorkerRuntime,
-  type RemoteSupervisorDispatchBindingSource,
-  type RemoteSupervisorWorkerActivity,
-  type RemoteSupervisorWorkerRuntimeOptions,
-  type RemoteSupervisorWorkerRuntimeState,
+  SupervisorMaintenanceRuntime,
+  type SupervisorMaintenanceActivity,
+  type SupervisorMaintenanceRuntimeOptions,
+  type SupervisorMaintenanceRuntimeState,
   type SupervisorMaintenanceRunner,
-} from "./remote-supervisor-worker-runtime.ts";
+} from "./supervisor-maintenance-runtime.ts";
 export {
   OutboxDispatcher,
   OutboxDispatcherInvariantError,

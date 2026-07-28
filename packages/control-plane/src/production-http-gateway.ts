@@ -7,7 +7,7 @@ export const CONTROL_PLANE_READY_PATH = "/health/ready";
 export const TENANT_REGISTRATION_PATH = "/v1/registrations";
 export const ACCOUNT_REGISTRATION_PATH = "/v1/auth/register";
 export const ACCOUNT_LOGIN_PATH = "/v1/auth/login";
-export const CUBE_EGRESS_CONFIGURATION_INTERNAL_PATH = "/v1/internal/cube-egress-configuration";
+const CUBE_EGRESS_CONFIGURATION_INTERNAL_PATH = "/v1/internal/cube-egress-configuration";
 
 export type ProductionHttpGatewayOptions = {
   authenticator: TenantApiAuthenticator;

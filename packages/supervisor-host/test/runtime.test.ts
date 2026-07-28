@@ -192,13 +192,12 @@ describe("SupervisorHostRuntime", () => {
       managementHost: "127.0.0.1",
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
-      maxConcurrentSessions: 2,
+      maxConcurrentSessions: 1,
       temporalAddress: "temporal.test:7233",
       temporalNamespace: "agent-dock-test",
       temporalTaskQueue: "agent-dock-pi-runs-test",
       temporalWorkerDeploymentName: "agent-dock-pi-workers",
       temporalWorkerBuildId: "runtime-test-build",
-      piExecutionMode: "rpc",
       sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
       sandboxManagerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
@@ -223,7 +222,6 @@ describe("SupervisorHostRuntime", () => {
         new SupervisorHostRuntime({
           config: {
             ...baseConfig,
-            piExecutionMode: "embedded-sdk",
             maxConcurrentSessions: 2,
           },
           database,
@@ -231,7 +229,7 @@ describe("SupervisorHostRuntime", () => {
           sandboxManager: sandboxManager(),
           temporalWorkerFactory,
         }),
-    ).toThrow("Embedded Pi SDK Workers require exactly one concurrent Session");
+    ).toThrow("Pi SDK Workers require exactly one concurrent Session");
     let first: SupervisorHostRuntime | undefined;
     let second: SupervisorHostRuntime | undefined;
     try {

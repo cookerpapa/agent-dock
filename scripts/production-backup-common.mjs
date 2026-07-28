@@ -11,7 +11,7 @@ import { appendFile, chmod, lstat, open, readFile, stat, writeFile } from "node:
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
-export const BACKUP_MAGIC = Buffer.from("AGENTDOCK-BACKUP-V1\0", "utf8");
+const BACKUP_MAGIC = Buffer.from("AGENTDOCK-BACKUP-V1\0", "utf8");
 export const BACKUP_FORMAT_VERSION = 1;
 export const BACKUP_VOLUMES = [
   "postgres-data",
@@ -24,7 +24,7 @@ export const BACKUP_VOLUMES = [
   "grafana-data",
   "jaeger-data",
 ];
-export const BACKUP_HELPER_IMAGE =
+const BACKUP_HELPER_IMAGE =
   "busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028";
 
 const scrypt = promisify(scryptCallback);

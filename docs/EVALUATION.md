@@ -10,7 +10,7 @@ rendering and include the methodology and exclusions.
 npm run eval:coding -- --register
 ```
 
-Ten isolated Calculator repairs exercise durable acceptance, Pi RPC, streamed
+Ten isolated Calculator repairs exercise durable acceptance, the Pi SDK, streamed
 tool calls, offline Tool Sandboxes, failed-then-passed focused Java tests,
 Workspace checkpoint commit, file restoration, trace identity, and cleanup.
 The fake model emits a fixed action sequence, so this measures the platform's

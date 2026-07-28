@@ -3,8 +3,8 @@
 ## Mission
 
 Build a portfolio-quality, cloud-oriented coding-agent runtime around Pi's
-native RPC mode. The project must demonstrate reliable agent infrastructure, not merely a
-chat UI or a collection of framework integrations.
+public embedded SDK. The project must demonstrate reliable agent
+infrastructure, not merely a chat UI or a collection of framework integrations.
 
 ## Before changing code
 
@@ -21,14 +21,14 @@ protocol, record the decision under `docs/adr/` before implementation.
 
 ## Engineering rules
 
-- Keep Pi-specific RPC messages inside the trusted runner/sandbox-supervisor adapter; the
-  public API and durable domain model must use AgentDock-owned schemas.
+- Keep Pi-specific runtime events inside the trusted
+  runner/sandbox-supervisor adapter; the public API and durable domain model
+  must use AgentDock-owned schemas.
 - Run the fixed Pi core only in the trusted Agent Runner, never in the API/control-plane
   process. Route every untrusted file or shell operation to a separate Tool Sandbox.
-- Load only image-owned trusted infrastructure extensions in the Agent Runner. Future
-  user/project extensions require a separately threat-modelled sandbox boundary.
+- Load only code-owned trusted infrastructure tools in the Agent Runner.
+  User/project extensions are outside the current product boundary.
 - Use Pi's public tool/extension APIs rather than patching its agent loop.
-- Treat unsupported TUI-only extension behavior explicitly in a compatibility matrix.
 - Persist commands before acknowledging them.
 - Use idempotency keys, leases, and fencing tokens for distributed mutations.
 - Preserve per-session ordering without dedicating a process or OS thread to a cold session.

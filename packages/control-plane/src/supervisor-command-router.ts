@@ -21,7 +21,7 @@ const DEFAULT_COMMAND_RESULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_PENDING_COMMANDS = 1_000;
 
 export type SupervisorRemoteCommand = ExecuteTurnCommandMessage | CancelTurnCommandMessage;
-export type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
+type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
 export type SupervisorCommandConnection = {
   supervisorId: string;

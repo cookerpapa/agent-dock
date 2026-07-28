@@ -5,7 +5,7 @@
     {
       "id": "checkpoint-commit-failure",
       "workspace": "@agent-dock/sandbox-supervisor",
-      "file": "test/pi-rpc-turn-runner.integration.test.ts",
+      "file": "test/pi-sdk-turn-runner.integration.test.ts",
       "test": "does not publish completion when settled checkpoint commit fails",
       "invariant": "A Run cannot become completed before its settled checkpoint commits."
     },

@@ -2841,3 +2841,39 @@
 - Automated evidence covers new-conversation inheritance, shared history,
   same-Workspace execution serialization, candidate parallelism and migration
   schema.
+
+## 2026-07-28 — Current-path repository review
+
+- Removed the complete Pi RPC subprocess fallback, environment-selected
+  execution mode, environment-configured Tool extension, obsolete RPC/TUI and
+  Temporal-adoption spikes, phase-zero Compose topology, and unused standalone
+  GitHub import workers. The trusted runtime now has one executable path:
+  capacity-one Pi SDK Worker to Tool RPC to CubeSandbox.
+- Removed the pre-Temporal PostgreSQL binding-discovery scheduler instead of
+  retaining it behind a test flag. `SupervisorMaintenanceRuntime` now performs
+  connection/orphan reconciliation only; Temporal remains the sole Run
+  scheduler.
+- Removed authentication of unindexed legacy bearer tokens. Tenant API
+  credentials now require the current `adk_<credential-id>.<secret>` format,
+  allowing one indexed lookup followed by constant-time digest comparison.
+- Removed the production bootstrap fallback that reused `USER_ID` when
+  `API_CREDENTIAL_ID` was absent. Runtime reuse now verifies that the
+  deployment manifest, environment and private API Token all name the same
+  current-format credential before any service is rebuilt.
+- Removed whole-file Pi checkpoint fallback. Restore accepts only the current
+  content-addressed v2 manifest and pinned Pi version; unsupported media types
+  fail with `checkpoint_incompatible`.
+- Fixed a Workspace inspector race where directory refresh and file materialize
+  shared one generation counter, allowing either loading indicator to remain
+  stuck. Directory and file operations now invalidate independently, and a
+  refresh never shows content from an older Workspace version.
+- New browser projects always request an empty Workspace. The browser client no
+  longer exposes a generic source parameter after repository import was removed
+  from the product UI.
+- Corrected deterministic control-plane fixtures that tried to use an API key
+  with Pi's OAuth-only `openai-codex` Provider. SDK integration now uses the
+  supported fake Provider; production Provider coverage remains the DeepSeek
+  capability Gateway.
+- Added regression evidence for strict checkpoint media types, SDK completion
+  and cancellation, maintenance-only runtime lifecycle, current-format tenant
+  credentials and empty-Workspace project creation.

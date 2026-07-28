@@ -163,7 +163,6 @@ const environment = Object.fromEntries(
 );
 assert.equal(environment.AGENT_DOCK_SUPERVISOR_ID, "$(POD_NAME)");
 assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "1");
-assert.equal(environment.AGENT_DOCK_PI_EXECUTION_MODE, "embedded-sdk");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED, "true");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME, "agent-dock-pi-workers");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID, "development");

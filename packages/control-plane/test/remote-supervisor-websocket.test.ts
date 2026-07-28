@@ -12,7 +12,7 @@ import {
 } from "@agent-dock/protocol";
 import {
   LocalSandboxSupervisor,
-  PiRpcTurnCancelledError,
+  PiTurnCancelledError,
   ReconnectingSupervisorWebSocketClient,
   SupervisorWebSocketClient,
   type SupervisorTurnRunner,
@@ -515,7 +515,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
               }),
             ),
           );
-          throw new PiRpcTurnCancelledError(cancellation.reason, false);
+          throw new PiTurnCancelledError(cancellation.reason, false);
         },
       },
     });
@@ -1035,7 +1035,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
             }),
           ),
         );
-        throw new PiRpcTurnCancelledError(cancellation.reason, false);
+        throw new PiTurnCancelledError(cancellation.reason, false);
       },
     };
     const network = await startNetwork(seeded, runner);
@@ -1118,7 +1118,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
           );
         }
         revokedReason = (signal.reason as { reason?: string } | undefined)?.reason;
-        throw new PiRpcTurnCancelledError("lease_revoked", false);
+        throw new PiTurnCancelledError("lease_revoked", false);
       },
     };
     const network = await startNetwork(seeded, runner);

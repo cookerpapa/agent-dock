@@ -1,8 +1,8 @@
 import {
   LocalSandboxSupervisor,
   LocalSandboxSupervisorError,
-  PiRpcTurnCancelledError,
-  PiRpcTurnError,
+  PiTurnCancelledError,
+  PiTurnError,
 } from "@agent-dock/sandbox-supervisor";
 import {
   AgentDockWireProtocolError,
@@ -93,7 +93,7 @@ function positiveSafeInteger(value: string, name: string): number {
 
 function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof TurnExecutionBackendError) return error;
-  if (error instanceof PiRpcTurnCancelledError) {
+  if (error instanceof PiTurnCancelledError) {
     if (error.reason === "lease_revoked") {
       return new TurnExecutionBackendError(
         "lease_revoked",
@@ -104,7 +104,7 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
     }
     return new TurnExecutionCancelledError(error.reason, error.forced);
   }
-  if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
+  if (error instanceof SessionLeaseCoordinatorError || error instanceof PiTurnError) {
     return new TurnExecutionBackendError(error.code, error.message, error.retryable);
   }
   if (error instanceof DurableEventStoreError) {
@@ -129,7 +129,7 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
 
 function normalizeCancellationError(error: unknown): TurnCancellationBackendError {
   if (error instanceof TurnCancellationBackendError) return error;
-  if (error instanceof SessionLeaseCoordinatorError || error instanceof PiRpcTurnError) {
+  if (error instanceof SessionLeaseCoordinatorError || error instanceof PiTurnError) {
     return new TurnCancellationBackendError(error.code, error.message, error.retryable);
   }
   if (error instanceof LocalSandboxSupervisorError) {

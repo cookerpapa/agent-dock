@@ -211,9 +211,7 @@ export async function startControlPlane(): Promise<void> {
               serviceToken: config.githubGatewayServiceToken,
             }),
           }),
-      worker: {
-        maxLanesPerConnection: config.maximumLanesPerSupervisor,
-        metrics: observability.metrics,
+      maintenance: {
         onActivity: (activity) =>
           operationalLog({
             service: "agent-dock-control-plane",

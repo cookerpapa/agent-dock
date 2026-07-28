@@ -24,7 +24,6 @@ export type ProductionControlPlaneConfig = {
   allowInsecureInternalHttp: boolean;
   host: string;
   port: number;
-  maximumLanesPerSupervisor: number;
   temporalAddress: string;
   temporalNamespace: string;
   temporalTaskQueue: string;
@@ -282,13 +281,6 @@ export async function loadProductionControlPlaneConfig(
     allowInsecureInternalHttp,
     host: bounded(environment.HOST ?? "127.0.0.1", "HOST"),
     port: integerValue(environment, "PORT", 3000, 1, 65_535),
-    maximumLanesPerSupervisor: integerValue(
-      environment,
-      "AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR",
-      8,
-      1,
-      256,
-    ),
     temporalAddress: bounded(
       required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
       "AGENT_DOCK_TEMPORAL_ADDRESS",
@@ -388,7 +380,7 @@ export function loadProductionBootstrapConfig(
     ),
     userId,
     apiCredentialId: parseUuidPathParameter(
-      environment.AGENT_DOCK_API_CREDENTIAL_ID ?? userId,
+      required(environment, "AGENT_DOCK_API_CREDENTIAL_ID"),
       "AGENT_DOCK_API_CREDENTIAL_ID",
     ),
     credentialBindingId: parseUuidPathParameter(

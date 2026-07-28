@@ -86,8 +86,8 @@ The current v2 implementation stores line-aligned, content-addressed JSONL
 segments and commits an immutable manifest after each settled Run. It does not
 append every token to PostgreSQL and does not store one mutable database
 `messages[]` column. Restore verifies every segment and the whole-session digest.
-Legacy whole-file v1 snapshots remain readable and migrate on the next settled
-Run.
+Only the current content-addressed manifest format is accepted; older
+development snapshots are intentionally incompatible.
 
 ## How the next turn resumes
 
@@ -228,6 +228,6 @@ to exhaust the host.
 
 Long-session storage uses the safe optimization described in ADR-0055:
 tenant/session-scoped content-addressed, line-aligned JSONL segments plus an
-immutable manifest. Whole-file v1 checkpoints remain readable. Reconstructing
+immutable manifest. Reconstructing
 history from UI messages remains incompatible because it would lose Pi-specific
 branch, compact, tool, model, and extension state.

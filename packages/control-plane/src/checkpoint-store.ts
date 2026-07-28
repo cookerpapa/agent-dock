@@ -8,7 +8,8 @@ import {
   parseEnvironmentValidationReport,
 } from "@agent-dock/protocol";
 import {
-  PiRpcTurnError,
+  PINNED_PI_CODING_AGENT_VERSION,
+  PiTurnError,
   validatePiSessionSnapshot,
   validateWorkspaceSnapshot,
   type CapturedEnvironmentSandboxCheckpoint,
@@ -31,8 +32,6 @@ import {
   restorePiSessionManifest,
   type PiSessionManifest,
 } from "./pi-session-manifest.ts";
-
-const PINNED_PI_VERSION = "0.80.10";
 
 export interface CheckpointObjectStore {
   put(objectKey: string, bytes: Uint8Array): Promise<void>;
@@ -89,8 +88,8 @@ type CheckpointMetadata = {
 
 type LoadedPiSessionState = {
   bytes: Uint8Array;
-  manifest?: PiSessionManifest;
-  manifestSha256?: string;
+  manifest: PiSessionManifest;
+  manifestSha256: string;
 };
 
 type PreparedPiSessionArtifact = {
@@ -100,7 +99,7 @@ type PreparedPiSessionArtifact = {
   mediaType: string;
 };
 
-export class SandboxCheckpointStoreError extends PiRpcTurnError {
+export class SandboxCheckpointStoreError extends PiTurnError {
   constructor(code: string, safeMessage: string, retryable: boolean) {
     super(code, safeMessage, retryable);
     this.name = "SandboxCheckpointStoreError";
@@ -1103,7 +1102,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       }
     }
 
-    const prepared = preparePiSessionManifest(piSession, PINNED_PI_VERSION, previous);
+    const prepared = preparePiSessionManifest(piSession, PINNED_PI_CODING_AGENT_VERSION, previous);
     await Promise.all(
       prepared.newSegments.map(async (segment) => {
         const objectKey = this.#piSegmentObjectKey(command, segment.descriptor.sha256);
@@ -1132,11 +1131,15 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     const stored = await this.#objectStore.get(reference.objectKey);
     this.#verifyObject(stored, reference, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session");
     if (reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE) {
-      return { bytes: stored };
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_incompatible",
+        "Pi session checkpoint format is unsupported",
+        false,
+      );
     }
     try {
       const manifest = decodePiSessionManifest(stored);
-      if (manifest.piVersion !== PINNED_PI_VERSION) {
+      if (manifest.piVersion !== PINNED_PI_CODING_AGENT_VERSION) {
         throw new PiSessionManifestError("Pi session manifest version is incompatible");
       }
       const bytes = await restorePiSessionManifest(manifest, async (descriptor) =>

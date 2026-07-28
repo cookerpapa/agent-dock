@@ -59,7 +59,7 @@ jobs:
           retention-days: 14
 
   containers:
-    name: Hardened containers and portable checkpoint paths
+    name: CubeSandbox template and portable checkpoint paths
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -77,9 +77,6 @@ jobs:
 
       - name: Install pinned dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
-
-      - name: Verify effective HostConfig and run both containers
-        run: npm run container:check
 
       - name: Build the current CubeSandbox Tool template
         run: >-

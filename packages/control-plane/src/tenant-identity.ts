@@ -5,9 +5,9 @@ import type { FastifyRequest } from "fastify";
 
 const TOKEN_PATTERN =
   /^adk_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43,256})$/i;
-const BOUNDED_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const DUMMY_DIGEST = Buffer.alloc(32);
+const DUMMY_CREDENTIAL_ID = "00000000-0000-4000-8000-000000000000";
 const LAST_USED_WRITE_INTERVAL_MS = 5 * 60 * 1_000;
 const requestIdentities = new WeakMap<FastifyRequest, TenantRequestIdentity>();
 
@@ -106,8 +106,8 @@ function tokenDigestBuffer(value: string): Buffer {
 }
 
 export function tenantApiTokenDigest(value: string): string {
-  if (!BOUNDED_TOKEN_PATTERN.test(value)) {
-    throw new TypeError("tenant API token must contain 32-4096 bounded ASCII bytes");
+  if (!TOKEN_PATTERN.test(value)) {
+    throw new TypeError("tenant API token must use the current adk credential format");
   }
   return tokenDigestBuffer(value).toString("hex");
 }
@@ -160,11 +160,10 @@ export class PostgresTenantApiAuthenticator implements TenantApiAuthenticator {
 
   async authenticate(token: string): Promise<TenantRequestIdentity | undefined> {
     const now = validDate(this.#clock(), "tenant authenticator clock");
-    const bounded = BOUNDED_TOKEN_PATTERN.test(token);
-    const candidateDigest = bounded ? tokenDigestBuffer(token) : DUMMY_DIGEST;
-    const credentialId = bounded ? parsedCredentialId(token) : undefined;
+    const credentialId = parsedCredentialId(token);
+    const candidateDigest = credentialId === undefined ? DUMMY_DIGEST : tokenDigestBuffer(token);
 
-    let query = this.#database
+    const row = await this.#database
       .selectFrom("tenant_api_credentials as credential")
       .innerJoin("tenants as tenant", "tenant.id", "credential.tenant_id")
       .innerJoin("users as user_row", (join) =>
@@ -178,18 +177,15 @@ export class PostgresTenantApiAuthenticator implements TenantApiAuthenticator {
           .onRef("profile.tenant_id", "=", "policy.tenant_id")
           .onRef("profile.id", "=", "policy.default_model_profile_id"),
       )
-      .select(credentialSelect());
-    query =
-      credentialId === undefined
-        ? query.where("credential.secret_sha256", "=", candidateDigest.toString("hex"))
-        : query.where("credential.credential_id", "=", credentialId);
-    const row = await query.executeTakeFirst();
+      .select(credentialSelect())
+      .where("credential.credential_id", "=", credentialId ?? DUMMY_CREDENTIAL_ID)
+      .executeTakeFirst();
 
     const digestMatches = timingSafeEqual(candidateDigest, digestBuffer(row?.secretSha256));
     const expiresAt =
       row?.expiresAt === null || row?.expiresAt === undefined ? undefined : new Date(row.expiresAt);
     if (
-      !bounded ||
+      credentialId === undefined ||
       row === undefined ||
       !digestMatches ||
       row.revokedAt !== null ||

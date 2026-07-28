@@ -26,9 +26,9 @@ import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool
 import { EventDeliveryRejectedError } from "./in-memory-event-spool.ts";
 import {
   PINNED_PI_CODING_AGENT_VERSION,
-  PiRpcTurnCancelledError,
-  PiRpcTurnError,
-} from "./pi-rpc-turn-runner.ts";
+  PiTurnCancelledError,
+  PiTurnError,
+} from "./pi-turn-runtime.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 1_000;
@@ -221,14 +221,14 @@ function sameCommandIdentity(
 }
 
 function normalizedFailure(error: unknown): SafeCommandFailure {
-  if (error instanceof PiRpcTurnCancelledError && error.reason === "lease_revoked") {
+  if (error instanceof PiTurnCancelledError && error.reason === "lease_revoked") {
     return {
       code: "lease_revoked",
       message: "Execution lease was revoked and the runtime stopped",
       retryable: false,
     };
   }
-  if (error instanceof PiRpcTurnError) {
+  if (error instanceof PiTurnError) {
     return {
       code: /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(error.code) ? error.code : "pi_execution_failed",
       message: error.message.slice(0, 4_096) || "Pi execution failed",
@@ -814,7 +814,7 @@ export class SupervisorWebSocketClient {
     } catch (error: unknown) {
       if (
         entry.kind === "turn.execute" &&
-        error instanceof PiRpcTurnCancelledError &&
+        error instanceof PiTurnCancelledError &&
         error.reason !== "lease_revoked"
       ) {
         result = this.#commandResult(entry, commit, {

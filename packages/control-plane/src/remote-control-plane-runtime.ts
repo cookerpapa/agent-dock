@@ -10,9 +10,9 @@ import {
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
 import { DurableEventStore } from "./durable-event-store.ts";
 import {
-  RemoteSupervisorWorkerRuntime,
-  type RemoteSupervisorWorkerRuntimeOptions,
-} from "./remote-supervisor-worker-runtime.ts";
+  SupervisorMaintenanceRuntime,
+  type SupervisorMaintenanceRuntimeOptions,
+} from "./supervisor-maintenance-runtime.ts";
 import { SessionEventHub } from "./session-event-hub.ts";
 import {
   SupervisorCommandRouter,
@@ -44,10 +44,7 @@ type GatewayConfiguration = Omit<
   "manager" | "authorizer" | "commandRouter"
 >;
 
-type WorkerConfiguration = Omit<
-  RemoteSupervisorWorkerRuntimeOptions,
-  "database" | "bindingSource" | "maintenanceRunner"
->;
+type MaintenanceConfiguration = Omit<SupervisorMaintenanceRuntimeOptions, "maintenanceRunner">;
 
 export type RemoteControlPlaneRuntimeOptions = Omit<
   ControlPlaneApplicationOptions,
@@ -63,7 +60,7 @@ export type RemoteControlPlaneRuntimeOptions = Omit<
   connectionManager?: ConnectionManagerConfiguration;
   commandRouter?: CommandRouterConfiguration;
   gateway?: GatewayConfiguration;
-  worker?: WorkerConfiguration;
+  maintenance?: MaintenanceConfiguration;
 };
 
 export type RemoteControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
@@ -75,7 +72,7 @@ export class RemoteControlPlaneRuntime {
   readonly commandRouter: SupervisorCommandRouter;
   readonly connectionManager: SupervisorConnectionManager;
   readonly gateway: SupervisorWebSocketGateway;
-  readonly worker: RemoteSupervisorWorkerRuntime;
+  readonly maintenance: SupervisorMaintenanceRuntime;
   #state: RemoteControlPlaneRuntimeState = "ready";
   #closing: Promise<void> | undefined;
 
@@ -86,7 +83,7 @@ export class RemoteControlPlaneRuntime {
     commandRouter: SupervisorCommandRouter;
     connectionManager: SupervisorConnectionManager;
     gateway: SupervisorWebSocketGateway;
-    worker: RemoteSupervisorWorkerRuntime;
+    maintenance: SupervisorMaintenanceRuntime;
   }) {
     this.application = options.application;
     this.eventHub = options.eventHub;
@@ -94,7 +91,7 @@ export class RemoteControlPlaneRuntime {
     this.commandRouter = options.commandRouter;
     this.connectionManager = options.connectionManager;
     this.gateway = options.gateway;
-    this.worker = options.worker;
+    this.maintenance = options.maintenance;
   }
 
   get state(): RemoteControlPlaneRuntimeState {
@@ -111,7 +108,7 @@ export class RemoteControlPlaneRuntime {
     if (host.trim().length === 0) throw new TypeError("runtime host must not be empty");
     try {
       await this.application.listen(port, host);
-      this.worker.start();
+      this.maintenance.start();
       this.#state = "running";
       return this.application.getUrl();
     } catch (error: unknown) {
@@ -128,10 +125,10 @@ export class RemoteControlPlaneRuntime {
   async #close(): Promise<void> {
     if (this.#state === "closed") return;
     this.#state = "closing";
-    this.worker.beginDrain();
+    this.maintenance.beginDrain();
     this.gateway.shutdown();
     try {
-      await this.worker.stop();
+      await this.maintenance.stop();
     } finally {
       try {
         await this.application.close();
@@ -175,10 +172,8 @@ export async function createRemoteControlPlaneRuntime(
     authorizer: options.supervisorAuthorizer,
     commandRouter,
   });
-  const worker = new RemoteSupervisorWorkerRuntime({
-    ...options.worker,
-    database: options.database,
-    bindingSource: gateway,
+  const maintenance = new SupervisorMaintenanceRuntime({
+    ...options.maintenance,
     maintenanceRunner: connectionManager,
   });
 
@@ -247,6 +242,6 @@ export async function createRemoteControlPlaneRuntime(
     commandRouter,
     connectionManager,
     gateway,
-    worker,
+    maintenance,
   });
 }

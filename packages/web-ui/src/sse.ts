@@ -21,7 +21,7 @@ export type SseFrame = {
   retry?: number;
 };
 
-export class SessionStreamError extends Error {
+class SessionStreamError extends Error {
   readonly retryable: boolean;
 
   constructor(message: string, retryable: boolean) {

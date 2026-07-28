@@ -26,19 +26,19 @@ import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { appendPiInterruption } from "./pi-interrupted-session.ts";
-import { PiRpcAgentEventAdapter } from "./pi-rpc-agent-event-adapter.ts";
+import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
 import {
-  PiRpcTurnCancelledError,
-  PiRpcTurnError,
+  PiTurnCancelledError,
+  PiTurnError,
   type PiModelRuntimeConfig,
-  type PiRpcCancellationSignal,
-  type PiRpcEventPublisher,
-  type PiRpcInterruptedCheckpoint,
-  type PiRpcSettledCheckpoint,
-  type PiRpcToolOutputArtifact,
-  type PiRpcToolOutputCapture,
-  type PiRpcTurnResult,
-} from "./pi-rpc-turn-runner.ts";
+  type PiCancellationSignal,
+  type PiEventPublisher,
+  type PiInterruptedCheckpoint,
+  type PiSettledCheckpoint,
+  type PiToolOutputArtifact,
+  type PiToolOutputCapture,
+  type PiTurnResult,
+} from "./pi-turn-runtime.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -56,9 +56,9 @@ export type PiSdkTurnRunnerOptions = {
   idGenerator?: () => string;
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
-  onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
-  onInterrupted?: (checkpoint: PiRpcInterruptedCheckpoint) => Promise<void> | void;
-  persistToolOutputArtifact?: (output: PiRpcToolOutputCapture) => Promise<PiRpcToolOutputArtifact>;
+  onSettled?: (checkpoint: PiSettledCheckpoint) => Promise<void> | void;
+  onInterrupted?: (checkpoint: PiInterruptedCheckpoint) => Promise<void> | void;
+  persistToolOutputArtifact?: (output: PiToolOutputCapture) => Promise<PiToolOutputArtifact>;
   onIsolationFailure?: (error: PiSdkIsolationFailure) => Promise<void> | void;
 };
 
@@ -113,7 +113,7 @@ function deferred<T>(): {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
-      rejectPromise(new PiRpcTurnError("pi_timeout", `${label} timed out`, true));
+      rejectPromise(new PiTurnError("pi_timeout", `${label} timed out`, true));
     }, timeoutMs);
     timer.unref();
     promise.then(
@@ -137,26 +137,26 @@ function validateRuntimeConfig(
     config.provider !== command.payload.model.provider ||
     config.modelId !== command.payload.model.modelId
   ) {
-    throw new PiRpcTurnError(
+    throw new PiTurnError(
       "model_binding_mismatch",
       "Resolved model runtime does not match the accepted turn",
       false,
     );
   }
   if (config.apiKey.length === 0) {
-    throw new PiRpcTurnError("credential_unavailable", "Model credential is unavailable", true);
+    throw new PiTurnError("credential_unavailable", "Model credential is unavailable", true);
   }
   let baseUrl: URL;
   try {
     baseUrl = new URL(config.baseUrl);
   } catch {
-    throw new PiRpcTurnError("invalid_model_runtime", "Model endpoint is invalid", false);
+    throw new PiTurnError("invalid_model_runtime", "Model endpoint is invalid", false);
   }
   if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") {
-    throw new PiRpcTurnError("invalid_model_runtime", "Model endpoint is invalid", false);
+    throw new PiTurnError("invalid_model_runtime", "Model endpoint is invalid", false);
   }
   if (command.payload.model.thinkingLevel !== "off" && config.reasoning !== true) {
-    throw new PiRpcTurnError(
+    throw new PiTurnError(
       "invalid_model_runtime",
       "The accepted thinking level is unsupported by the resolved model",
       false,
@@ -165,7 +165,7 @@ function validateRuntimeConfig(
   return config;
 }
 
-function cancellationSignal(value: unknown): PiRpcCancellationSignal {
+function cancellationSignal(value: unknown): PiCancellationSignal {
   if (
     !isRecord(value) ||
     value.kind !== "agent-dock.turn-cancellation" ||
@@ -176,9 +176,9 @@ function cancellationSignal(value: unknown): PiRpcCancellationSignal {
     !Number.isSafeInteger(value.gracePeriodMs) ||
     (value.gracePeriodMs as number) < 0
   ) {
-    throw new PiRpcTurnError("invalid_cancellation", "Turn cancellation signal was invalid", false);
+    throw new PiTurnError("invalid_cancellation", "Turn cancellation signal was invalid", false);
   }
-  return value as PiRpcCancellationSignal;
+  return value as PiCancellationSignal;
 }
 
 function streamedTextDelta(
@@ -271,11 +271,11 @@ export class PiSdkTurnRunner {
 
   async run(
     command: ExecuteTurnCommandMessage,
-    publishEvent: PiRpcEventPublisher,
+    publishEvent: PiEventPublisher,
     signal?: AbortSignal,
-  ): Promise<PiRpcTurnResult> {
+  ): Promise<PiTurnResult> {
     if (command.payload.input.kind !== "prompt") {
-      throw new PiRpcTurnError(
+      throw new PiTurnError(
         "unsupported_input",
         "This Pi SDK runner only supports prompt input",
         false,
@@ -289,7 +289,7 @@ export class PiSdkTurnRunner {
     const workspaceDirectory = resolve(await this.#options.resolveWorkspaceDirectory(command));
     const workspaceStat = await stat(workspaceDirectory).catch(() => undefined);
     if (!workspaceStat?.isDirectory()) {
-      throw new PiRpcTurnError("workspace_unavailable", "Workspace directory is unavailable", true);
+      throw new PiTurnError("workspace_unavailable", "Workspace directory is unavailable", true);
     }
 
     const temporaryRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-sdk-"));
@@ -318,7 +318,7 @@ export class PiSdkTurnRunner {
     let emitNextTextImmediately = true;
     let eventChain = Promise.resolve();
     let fatalError: Error | undefined;
-    let cancellationError: PiRpcTurnCancelledError | undefined;
+    let cancellationError: PiTurnCancelledError | undefined;
     let cancellationEvent: EventPublishMessage | undefined;
     let cancellationTask: Promise<void> | undefined;
     let removeAbortListener: (() => void) | undefined;
@@ -326,10 +326,10 @@ export class PiSdkTurnRunner {
     let sessionManager: SessionManager | undefined;
     let baseEntryIds = new Set<string>();
     let interruptedCheckpointCaptured = false;
-    const terminal = deferred<PiRpcTurnResult>();
+    const terminal = deferred<PiTurnResult>();
     void terminal.promise.catch(() => undefined);
 
-    const eventAdapter = new PiRpcAgentEventAdapter(
+    const eventAdapter = new PiAgentEventAdapter(
       createAgentDockEventFactory(
         {
           sessionId: command.payload.sessionId,
@@ -353,7 +353,7 @@ export class PiSdkTurnRunner {
     const captureInterruptedConversation = async (reason: string): Promise<void> => {
       if (interruptedCheckpointCaptured || this.#options.onInterrupted === undefined) return;
       if (sessionManager === undefined) {
-        throw new PiRpcTurnError(
+        throw new PiTurnError(
           "checkpoint_capture_failed",
           "Pi did not create a Session for the interrupted Run",
           true,
@@ -373,7 +373,7 @@ export class PiSdkTurnRunner {
           ? undefined
           : await readFile(persistedSessionFile).catch(() => undefined);
       if (piSession === undefined) {
-        throw new PiRpcTurnError(
+        throw new PiTurnError(
           "checkpoint_capture_failed",
           "Pi did not produce a readable interrupted Session snapshot",
           true,
@@ -404,15 +404,12 @@ export class PiSdkTurnRunner {
         },
       });
       if (candidate.type !== "event.publish") {
-        throw new PiRpcTurnError("pi_protocol_error", "Pi event envelope was invalid", false);
+        throw new PiTurnError("pi_protocol_error", "Pi event envelope was invalid", false);
       }
       return candidate;
     };
 
-    const settleCancellation = (
-      error: PiRpcTurnCancelledError,
-      event: EventPublishMessage,
-    ): void => {
+    const settleCancellation = (error: PiTurnCancelledError, event: EventPublishMessage): void => {
       if (cancellationError !== undefined) return;
       cancellationError = error;
       cancellationEvent = event;
@@ -424,7 +421,7 @@ export class PiSdkTurnRunner {
       const outcome = eventAdapter.adapt(sourceEvent);
       if (outcome.kind === "ignored") return;
       if (outcome.kind === "invalid") {
-        throw new PiRpcTurnError("pi_protocol_error", outcome.reason, false);
+        throw new PiTurnError("pi_protocol_error", outcome.reason, false);
       }
       let publicEvent = outcome.event;
       if (
@@ -447,7 +444,7 @@ export class PiSdkTurnRunner {
             metadata.isSymbolicLink() ||
             metadata.size > MAX_TOOL_OUTPUT_BYTES
           ) {
-            throw new PiRpcTurnError(
+            throw new PiTurnError(
               "tool_output_artifact_invalid",
               "Trusted tool output artifact was invalid",
               false,
@@ -472,7 +469,7 @@ export class PiSdkTurnRunner {
               ? undefined
               : await readFile(persistedSessionFile).catch(() => undefined);
           if (piSession === undefined) {
-            throw new PiRpcTurnError(
+            throw new PiTurnError(
               "checkpoint_capture_failed",
               "Pi did not produce a readable settled session snapshot",
               true,
@@ -498,7 +495,7 @@ export class PiSdkTurnRunner {
       const envelope = eventMessage(publicEvent);
       if (publicEvent.type === "turn.cancelled") {
         settleCancellation(
-          new PiRpcTurnCancelledError(publicEvent.payload.reason, publicEvent.payload.forced),
+          new PiTurnCancelledError(publicEvent.payload.reason, publicEvent.payload.forced),
           envelope,
         );
         return;
@@ -509,7 +506,7 @@ export class PiSdkTurnRunner {
         terminal.resolve({ stopReason: publicEvent.payload.stopReason });
       } else if (publicEvent.type === "turn.failed") {
         terminal.reject(
-          new PiRpcTurnError(
+          new PiTurnError(
             publicEvent.payload.code,
             publicEvent.payload.message,
             publicEvent.payload.retryable,
@@ -568,7 +565,7 @@ export class PiSdkTurnRunner {
       }
     };
 
-    let result: PiRpcTurnResult | undefined;
+    let result: PiTurnResult | undefined;
     let runError: unknown;
     try {
       const createRuntime: CreateAgentSessionRuntimeFactory = async (runtimeOptions) => {
@@ -606,11 +603,7 @@ export class PiSdkTurnRunner {
         });
         const model = services.modelRuntime.getModel(runtimeConfig.provider, runtimeConfig.modelId);
         if (model === undefined) {
-          throw new PiRpcTurnError(
-            "invalid_model_runtime",
-            "Configured model is unavailable",
-            false,
-          );
+          throw new PiTurnError("invalid_model_runtime", "Configured model is unavailable", false);
         }
         const created = await createAgentSessionFromServices({
           services,
@@ -643,7 +636,7 @@ export class PiSdkTurnRunner {
         mode: "rpc",
         onError: (error) => {
           extensionErrors.push(error);
-          fail(new PiRpcTurnError("pi_extension_error", "Pi extension failed", false));
+          fail(new PiTurnError("pi_extension_error", "Pi extension failed", false));
         },
       });
       unsubscribe = runtime.session.subscribe(queueEvent);
@@ -658,9 +651,7 @@ export class PiSdkTurnRunner {
             terminal.promise.then(
               () => "other" as const,
               (error: unknown) =>
-                error instanceof PiRpcTurnCancelledError
-                  ? ("cancelled" as const)
-                  : ("other" as const),
+                error instanceof PiTurnCancelledError ? ("cancelled" as const) : ("other" as const),
             ),
             abort.then(
               () => "abort_returned" as const,
@@ -687,7 +678,7 @@ export class PiSdkTurnRunner {
           }
           const forced = eventAdapter.forceCancellation(cancellation.reason);
           if (forced.kind !== "mapped" || forced.event.type !== "turn.cancelled") {
-            throw new PiRpcTurnError(
+            throw new PiTurnError(
               "pi_protocol_error",
               "Pi SDK cancellation did not create a terminal event",
               false,
@@ -697,7 +688,7 @@ export class PiSdkTurnRunner {
             "Pi SDK did not settle within the cancellation grace period",
           );
           settleCancellation(
-            new PiRpcTurnCancelledError(cancellation.reason, true),
+            new PiTurnCancelledError(cancellation.reason, true),
             eventMessage(forced.event),
           );
         })().catch((error: unknown) => {
@@ -721,7 +712,7 @@ export class PiSdkTurnRunner {
       try {
         await runtime.session.prompt(acceptedPrompt, { source: "rpc" });
         if (extensionErrors.length > 0) {
-          throw new PiRpcTurnError("pi_extension_error", "Pi extension failed", false);
+          throw new PiTurnError("pi_extension_error", "Pi extension failed", false);
         }
         flushPendingText();
         await eventChain;
@@ -781,7 +772,7 @@ export class PiSdkTurnRunner {
     if (runError !== undefined) throw runError;
     if (fatalError !== undefined) throw fatalError;
     if (result === undefined) {
-      throw new PiRpcTurnError(
+      throw new PiTurnError(
         "pi_protocol_error",
         "Pi SDK turn ended without a terminal result",
         false,

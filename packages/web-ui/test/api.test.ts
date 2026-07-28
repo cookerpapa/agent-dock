@@ -56,19 +56,14 @@ describe("tenant-aware browser API", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
 
-  it("creates a project from a normalized exact-commit GitHub source", async () => {
+  it("creates an empty project workspace without exposing import controls", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
-    const commitSha = "b".repeat(40);
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("/v1/projects");
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
       expect(JSON.parse(String(init?.body))).toEqual({
         name: "Pinned repository",
-        source: {
-          kind: "github_public",
-          repository: "octocat/hello-world",
-          commitSha,
-        },
+        source: { kind: "empty" },
       });
       return new Response(
         JSON.stringify({
@@ -77,24 +72,15 @@ describe("tenant-aware browser API", () => {
           name: "Pinned repository",
           createdAt: "2026-07-19T00:00:00.000Z",
           environment,
-          source: {
-            kind: "github_public",
-            repository: "octocat/hello-world",
-            commitSha,
-            status: "pending",
-          },
+          source: { kind: "empty", status: "ready" },
         }),
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
     const api = new AgentDockApi(fetchImplementation, token);
-    await expect(
-      api.createProject("Pinned repository", {
-        kind: "github_public",
-        repository: "octocat/hello-world",
-        commitSha,
-      }),
-    ).resolves.toMatchObject({ source: { kind: "github_public", status: "pending" } });
+    await expect(api.createProject("Pinned repository")).resolves.toMatchObject({
+      source: { kind: "empty", status: "ready" },
+    });
   });
 
   it("manages environment candidates through versioned, idempotent APIs", async () => {

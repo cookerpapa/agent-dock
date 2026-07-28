@@ -10,7 +10,7 @@ type JsonRecord = Record<string, unknown>;
 type AssistantStopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 type TurnCancellationReason = CancelTurnCommandMessage["payload"]["reason"];
 
-export type PiRpcAgentEventAdapterOutcome =
+export type PiAgentEventAdapterOutcome =
   | { kind: "mapped"; event: AgentDockEvent; terminal: boolean }
   | { kind: "ignored"; sourceType: string }
   | { kind: "invalid"; sourceType: string; reason: string };
@@ -108,7 +108,7 @@ function streamedToolCallIdentity(streamEvent: JsonRecord): StreamedToolCallIden
  * Converts the reviewed, public subset of Pi agent events into AgentDock v1
  * events. Pi event objects never leave this adapter.
  */
-export class PiRpcAgentEventAdapter {
+export class PiAgentEventAdapter {
   readonly #eventFactory: AgentDockEventFactory;
   readonly #inputKind: "prompt" | "continue";
   #agentStarted = false;
@@ -142,7 +142,7 @@ export class PiRpcAgentEventAdapter {
     this.#cancellationReason = reason;
   }
 
-  forceCancellation(reason: TurnCancellationReason): PiRpcAgentEventAdapterOutcome {
+  forceCancellation(reason: TurnCancellationReason): PiAgentEventAdapterOutcome {
     this.requestCancellation(reason);
     this.#settled = true;
     return this.#cancelled(reason, true);
@@ -152,7 +152,7 @@ export class PiRpcAgentEventAdapter {
     identity: StreamedToolCallIdentity,
     delta: string,
     flush: boolean,
-  ): PiRpcAgentEventAdapterOutcome {
+  ): PiAgentEventAdapterOutcome {
     const pending = this.#pendingToolInputDeltas.get(identity.toolCallId);
     if (pending !== undefined && pending.toolName !== identity.toolName) {
       return {
@@ -183,7 +183,7 @@ export class PiRpcAgentEventAdapter {
     };
   }
 
-  adapt(value: unknown): PiRpcAgentEventAdapterOutcome {
+  adapt(value: unknown): PiAgentEventAdapterOutcome {
     const type = sourceType(value);
     if (!isRecord(value) || typeof value.type !== "string") {
       return { kind: "invalid", sourceType: type, reason: "Pi event must be a JSON object" };
@@ -486,7 +486,7 @@ export class PiRpcAgentEventAdapter {
     };
   }
 
-  #cancelled(reason: TurnCancellationReason, forced: boolean): PiRpcAgentEventAdapterOutcome {
+  #cancelled(reason: TurnCancellationReason, forced: boolean): PiAgentEventAdapterOutcome {
     return {
       kind: "mapped",
       terminal: true,

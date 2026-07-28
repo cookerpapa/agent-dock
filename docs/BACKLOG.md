@@ -19,6 +19,11 @@
   same-Workspace Runs while retaining isolated Candidate-Race branches
 - [x] Remove current operational documentation and release scripts for the
   superseded execution plane
+- [x] Remove the superseded Pi RPC subprocess, extension-UI compatibility
+  spike, Temporal adoption spike and old checkpoint readers after the SDK,
+  Temporal and v2 manifest cutovers
+- [x] Require current-format indexed API credentials across runtime
+  initialization, bootstrap and request authentication
 
 Only the current phase should contain implementation work. Later phases remain
 in `ROADMAP.md` until their prerequisites are complete.

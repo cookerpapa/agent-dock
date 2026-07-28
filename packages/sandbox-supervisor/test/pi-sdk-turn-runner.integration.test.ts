@@ -9,7 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PiSdkTurnRunner } from "../src/index.ts";
+import { PiSdkTurnRunner, PiTurnError } from "../src/index.ts";
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -64,6 +64,41 @@ async function waitFor(
 }
 
 describe("PiSdkTurnRunner integration", () => {
+  it("does not publish completion when settled checkpoint commit fails", async () => {
+    const fakeModel = new FakeModelServer();
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-checkpoint-fail-test-"));
+    const events: EventPublishMessage[] = [];
+    try {
+      await fakeModel.start();
+      const runner = new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        onSettled: () => {
+          throw new PiTurnError(
+            "checkpoint_save_failed",
+            "Settled checkpoint could not be committed",
+            true,
+          );
+        },
+      });
+      await expect(
+        runner.run(command, (event) => {
+          events.push(event);
+        }),
+      ).rejects.toMatchObject({ code: "checkpoint_save_failed", retryable: true });
+      expect(events.some((event) => event.payload.event.type === "turn.completed")).toBe(false);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("runs the direct SDK without exposing its runtime credential", async () => {
     const fakeModel = new FakeModelServer();
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-runner-test-"));
@@ -307,7 +342,7 @@ describe("PiSdkTurnRunner integration", () => {
       });
 
       await expect(running).rejects.toMatchObject({
-        name: "PiRpcTurnCancelledError",
+        name: "PiTurnCancelledError",
         reason: "user_request",
         forced: false,
       });

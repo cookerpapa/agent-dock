@@ -769,35 +769,6 @@ async function buildAndImportWorkerImage(revision) {
   return { image, tag };
 }
 
-async function migrateLegacyMutableClaimTemplate() {
-  const current = await kubectlCapture([
-    "--namespace",
-    workerNamespace,
-    "get",
-    "statefulset",
-    workerStatefulSetName,
-    "--output",
-    "json",
-  ]).catch(() => undefined);
-  if (current === undefined) return;
-  const statefulSet = JSON.parse(current);
-  const labels = statefulSet.spec?.volumeClaimTemplates?.[0]?.metadata?.labels;
-  if (labels?.["agent-dock.io/worker-build-id"] === undefined) return;
-  // Early local chart revisions put the changing Build ID into this immutable
-  // template. Runs are already drained before cutover, and PVC retention is
-  // Retain, so recreate only the controller and Pods while preserving state.
-  await kubectlRun([
-    "--namespace",
-    workerNamespace,
-    "delete",
-    "statefulset",
-    workerStatefulSetName,
-    "--cascade=foreground",
-    "--wait=true",
-    "--timeout=2m",
-  ]);
-}
-
 async function waitForWorkerPodInventory(timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   const expected = new Set(workerIds);
@@ -824,7 +795,6 @@ async function waitForWorkerPodInventory(timeoutMs = 120_000) {
 
 async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvironment) {
   await applyWorkerSecret();
-  await migrateLegacyMutableClaimTemplate();
   const externalCidrs = [...new Set(resolvedTargets.map((target) => `${target.address}/32`))];
   const arguments_ = [
     "upgrade",

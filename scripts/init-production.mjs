@@ -8,6 +8,9 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const defaultRuntimeDirectory = resolve(repositoryRoot, "deploy/production/runtime");
 const deploymentVersion = 1;
 const maxRuntimeFileBytes = 64 * 1_024;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const apiTokenPattern =
+  /^adk_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{43,256}$/i;
 
 function parseRuntimeDirectory(argv) {
   let configured = process.env.AGENT_DOCK_RUNTIME_DIRECTORY;
@@ -310,6 +313,10 @@ async function validateExisting(runtimeDirectory) {
   if (manifest?.formatVersion !== deploymentVersion) {
     throw new Error("Production runtime has an unsupported deployment format");
   }
+  const apiCredentialId = manifest?.identities?.apiCredentialId;
+  if (typeof apiCredentialId !== "string" || !uuidPattern.test(apiCredentialId)) {
+    throw new Error("Production deployment manifest lacks the current API credential identity");
+  }
   const expected = [
     ".env",
     "deployment.json",
@@ -328,6 +335,24 @@ async function validateExisting(runtimeDirectory) {
     ),
   );
   await assertPrivateDirectory(resolve(runtimeDirectory, "secrets"));
+  const environment = Object.fromEntries(
+    (await readPrivateFile(resolve(runtimeDirectory, ".env")))
+      .split(/\r?\n/)
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const separator = line.indexOf("=");
+        if (separator < 1) throw new Error("Production environment file is invalid");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      }),
+  );
+  if (environment.AGENT_DOCK_API_CREDENTIAL_ID !== apiCredentialId) {
+    throw new Error("Production API credential identity is inconsistent");
+  }
+  const apiToken = (await readPrivateFile(resolve(runtimeDirectory, "secrets/api-token"))).trim();
+  const tokenMatch = apiTokenPattern.exec(apiToken);
+  if (tokenMatch?.[1]?.toLowerCase() !== apiCredentialId.toLowerCase()) {
+    throw new Error("Production API token does not use the current credential identity");
+  }
   return true;
 }
 
@@ -586,7 +611,6 @@ const environment = [
   "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE=http://{supervisorId}:4100",
   "AGENT_DOCK_PI_WORKER_DEPLOYMENT=compose",
   "AGENT_DOCK_SUPERVISOR_CAPACITY=1",
-  "AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR=8",
   `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,
   `AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=${publicRegistrationMaximumTenants}`,
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS=${publicTenantMaximumProjects}`,

@@ -37,8 +37,8 @@ export type PreparedPiSessionManifest = {
 
 export type PreviousPiSessionManifest = {
   bytes: Uint8Array;
-  manifest?: PiSessionManifest;
-  manifestSha256?: string;
+  manifest: PiSessionManifest;
+  manifestSha256: string;
 };
 
 export class PiSessionManifestError extends Error {
@@ -165,14 +165,10 @@ export function preparePiSessionManifest(
   ) {
     mode = "append";
     previousManifestSha256 = previous.manifestSha256;
-    const v1BaseSegments = previous.manifest === undefined ? segment(previous.bytes) : [];
-    const baseSegments =
-      previous.manifest === undefined
-        ? v1BaseSegments.map((entry) => entry.descriptor)
-        : previous.manifest.segments.map((descriptor) => ({ ...descriptor }));
+    const baseSegments = previous.manifest.segments.map((descriptor) => ({ ...descriptor }));
     const suffix = sessionBytes.slice(previous.bytes.byteLength);
     const suffixSegments = segmentSuffix(suffix);
-    newSegments = [...v1BaseSegments, ...suffixSegments];
+    newSegments = suffixSegments;
     descriptors = [...baseSegments, ...suffixSegments.map((entry) => entry.descriptor)];
   }
 

@@ -17,12 +17,7 @@ import {
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { SupervisorTurnRunner } from "./local-sandbox-supervisor.ts";
-import {
-  PiRpcTurnError,
-  PiRpcTurnRunner,
-  type PiRpcEventPublisher,
-  type PiRpcTurnResult,
-} from "./pi-rpc-turn-runner.ts";
+import { PiTurnError, type PiEventPublisher, type PiTurnResult } from "./pi-turn-runtime.ts";
 import {
   PiSdkTurnRunner,
   type PiSdkIsolationFailure,
@@ -97,12 +92,10 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   workspaceSeedResolver?: AgentWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
   runAttemptPhaseObserver?: RunAttemptPhaseObserver;
-  trustedExtensionPath?: string;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   idGenerator?: () => string;
   metrics?: AgentDockMetrics;
-  piExecutionMode?: "rpc" | "embedded-sdk";
   onPiSdkIsolationFailure?: (error: PiSdkIsolationFailure) => Promise<void> | void;
 };
 
@@ -124,12 +117,8 @@ function assignment(
   };
 }
 
-function safePiError(
-  error: unknown,
-  fallbackCode: string,
-  fallbackMessage: string,
-): PiRpcTurnError {
-  if (error instanceof PiRpcTurnError) return error;
+function safePiError(error: unknown, fallbackCode: string, fallbackMessage: string): PiTurnError {
+  if (error instanceof PiTurnError) return error;
   if (
     typeof error === "object" &&
     error !== null &&
@@ -138,19 +127,15 @@ function safePiError(
     "retryable" in error &&
     typeof error.retryable === "boolean"
   ) {
-    return new PiRpcTurnError(error.code, fallbackMessage, error.retryable);
+    return new PiTurnError(error.code, fallbackMessage, error.retryable);
   }
-  return new PiRpcTurnError(fallbackCode, fallbackMessage, true);
+  return new PiTurnError(fallbackCode, fallbackMessage, true);
 }
 
 async function releaseModelRuntimeLease(
   lease: TrustedModelRuntimeLease | undefined,
 ): Promise<void> {
   if (lease !== undefined) await lease.release();
-}
-
-function defaultTrustedExtensionPath(): string {
-  return resolve(import.meta.dirname, "trusted-remote-tools-extension.ts");
 }
 
 export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
@@ -162,12 +147,10 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #workspaceSeedResolver: AgentWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #runAttemptPhaseObserver: RunAttemptPhaseObserver | undefined;
-  readonly #trustedExtensionPath: string;
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
   readonly #idGenerator: () => string;
   readonly #metrics: AgentDockMetrics | undefined;
-  readonly #piExecutionMode: "rpc" | "embedded-sdk";
   readonly #onPiSdkIsolationFailure:
     ((error: PiSdkIsolationFailure) => Promise<void> | void) | undefined;
 
@@ -180,22 +163,18 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#workspaceSeedResolver = options.workspaceSeedResolver;
     this.#checkpointStore = options.checkpointStore;
     this.#runAttemptPhaseObserver = options.runAttemptPhaseObserver;
-    this.#trustedExtensionPath = resolve(
-      options.trustedExtensionPath ?? defaultTrustedExtensionPath(),
-    );
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#turnTimeoutMs = options.turnTimeoutMs;
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
     this.#metrics = options.metrics;
-    this.#piExecutionMode = options.piExecutionMode ?? "rpc";
     this.#onPiSdkIsolationFailure = options.onPiSdkIsolationFailure;
   }
 
   async run(
     command: ExecuteTurnCommandMessage,
-    publishEvent: PiRpcEventPublisher,
+    publishEvent: PiEventPublisher,
     signal: AbortSignal,
-  ): Promise<PiRpcTurnResult> {
+  ): Promise<PiTurnResult> {
     this.#metrics?.activeRuns.inc();
     const startedAt = performance.now();
     try {
@@ -230,13 +209,13 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
 
   async #run(
     command: ExecuteTurnCommandMessage,
-    publishEvent: PiRpcEventPublisher,
+    publishEvent: PiEventPublisher,
     signal: AbortSignal,
-  ): Promise<PiRpcTurnResult> {
+  ): Promise<PiTurnResult> {
     const downstreamTrace = activeTraceCarrier() ?? command.payload.traceContext;
     const trustedWorkspace = await stat(this.#trustedWorkspaceDirectory).catch(() => undefined);
     if (!trustedWorkspace?.isDirectory()) {
-      throw new PiRpcTurnError(
+      throw new PiTurnError(
         "trusted_runner_workspace_unavailable",
         "Trusted Agent Runner virtual workspace is unavailable",
         true,
@@ -298,7 +277,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     let modelRuntimeLease: TrustedModelRuntimeLease | undefined;
     if (!usesEmbeddedFake) {
       if (this.#modelRuntimeLeaseResolver === undefined) {
-        throw new PiRpcTurnError(
+        throw new PiTurnError(
           "credential_unavailable",
           "A real model runtime is not configured for this Agent Runner",
           true,
@@ -310,7 +289,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         modelRuntimeLease.runtime.modelId !== command.payload.model.modelId
       ) {
         await releaseModelRuntimeLease(modelRuntimeLease).catch(() => undefined);
-        throw new PiRpcTurnError(
+        throw new PiTurnError(
           "model_binding_mismatch",
           "Resolved model runtime does not match the accepted turn",
           false,
@@ -437,7 +416,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             };
       const onSettled: NonNullable<PiSdkTurnRunnerOptions["onSettled"]> = async ({ piSession }) => {
         if (activation === undefined) {
-          throw new PiRpcTurnError(
+          throw new PiTurnError(
             "tool_sandbox_unavailable",
             "Tool Sandbox was unavailable at settlement",
             true,
@@ -565,67 +544,32 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               ),
             }),
       };
-      const runner =
-        this.#piExecutionMode === "embedded-sdk"
-          ? new PiSdkTurnRunner({
-              ...commonRunnerOptions,
-              createInlineExtensions: ({ toolOutputDirectory }) => [
-                createTrustedRemoteToolsExtension({
-                  operationUrl: this.#manager.operationUrl,
-                  activationId: activation!.activationId,
-                  capability: activation!.capability,
-                  remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
-                  maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
-                  toolOutputDirectory,
-                  ...(projectInstructions === undefined ? {} : { projectInstructions }),
-                  ...(downstreamTrace === undefined
+      const activeSandbox = activation;
+      const runner = new PiSdkTurnRunner({
+        ...commonRunnerOptions,
+        createInlineExtensions: ({ toolOutputDirectory }) => [
+          createTrustedRemoteToolsExtension({
+            operationUrl: this.#manager.operationUrl,
+            activationId: activeSandbox.activationId,
+            capability: activeSandbox.capability,
+            remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
+            maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+            toolOutputDirectory,
+            ...(projectInstructions === undefined ? {} : { projectInstructions }),
+            ...(downstreamTrace === undefined
+              ? {}
+              : {
+                  traceparent: downstreamTrace.traceparent,
+                  ...(downstreamTrace.tracestate === undefined
                     ? {}
-                    : {
-                        traceparent: downstreamTrace.traceparent,
-                        ...(downstreamTrace.tracestate === undefined
-                          ? {}
-                          : { tracestate: downstreamTrace.tracestate }),
-                      }),
+                    : { tracestate: downstreamTrace.tracestate }),
                 }),
-              ],
-              ...(this.#onPiSdkIsolationFailure === undefined
-                ? {}
-                : { onIsolationFailure: this.#onPiSdkIsolationFailure }),
-            })
-          : new PiRpcTurnRunner({
-              ...commonRunnerOptions,
-              disableBuiltinTools: true,
-              trustedExtensionPaths: [this.#trustedExtensionPath],
-              trustedEnvironment: {
-                AGENT_DOCK_TRUSTED_TOOL_OPERATION_URL: this.#manager.operationUrl,
-                AGENT_DOCK_TRUSTED_TOOL_ACTIVATION_ID: activation.activationId,
-                AGENT_DOCK_TRUSTED_TOOL_CAPABILITY: activation.capability,
-                AGENT_DOCK_TRUSTED_REMAINING_TOOL_CALLS: String(
-                  command.payload.budgets?.remainingToolCalls ?? 128,
-                ),
-                AGENT_DOCK_TRUSTED_MAXIMUM_TOOL_OUTPUT_BYTES: String(
-                  command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
-                ),
-                ...(projectInstructions === undefined
-                  ? {}
-                  : {
-                      AGENT_DOCK_TRUSTED_PROJECT_INSTRUCTIONS_BASE64: Buffer.from(
-                        projectInstructions,
-                        "utf8",
-                      ).toString("base64"),
-                    }),
-                ...(downstreamTrace === undefined
-                  ? {}
-                  : {
-                      AGENT_DOCK_TRUSTED_TRACEPARENT: downstreamTrace.traceparent,
-                      ...(downstreamTrace.tracestate === undefined
-                        ? {}
-                        : {
-                            AGENT_DOCK_TRUSTED_TRACESTATE: downstreamTrace.tracestate,
-                          }),
-                    }),
-              },
-            });
+          }),
+        ],
+        ...(this.#onPiSdkIsolationFailure === undefined
+          ? {}
+          : { onIsolationFailure: this.#onPiSdkIsolationFailure }),
+      });
       const result = await runner.run(command, publishEvent, signal);
       completedSuccessfully = true;
       return result;

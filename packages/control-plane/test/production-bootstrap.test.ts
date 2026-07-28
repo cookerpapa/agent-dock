@@ -27,7 +27,7 @@ const CONFIG: ProductionBootstrapConfig = {
   maximumUnsettledTurns: 100,
   maximumConcurrentTurns: 2,
 };
-const API_TOKEN = `api-${"a".repeat(48)}`;
+const API_TOKEN = `adk_${CONFIG.apiCredentialId}.${"a".repeat(43)}`;
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -178,7 +178,11 @@ describe.sequential("production bootstrap and configuration", () => {
     roots.push(root);
     const environment = {
       DATABASE_URL_FILE: await secret(root, "database", "postgresql://db.invalid/agentdock"),
-      AGENT_DOCK_API_TOKEN_FILE: await secret(root, "api", `api-${"a".repeat(48)}`),
+      AGENT_DOCK_API_TOKEN_FILE: await secret(
+        root,
+        "api",
+        `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+      ),
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
         root,
         "enrollment",
@@ -208,6 +212,7 @@ describe.sequential("production bootstrap and configuration", () => {
       AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
       AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
+      AGENT_DOCK_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: "http://{supervisorId}:4100",
       AGENT_DOCK_IMAGE_REVISION: "sha-0123456789abcdef",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
@@ -241,7 +246,9 @@ describe.sequential("production bootstrap and configuration", () => {
     expect(runtime).not.toHaveProperty("tenantId");
     expect(runtime).not.toHaveProperty("defaultModelProfileId");
     expect(runtime).not.toHaveProperty("apiToken");
-    await expect(loadProductionApiToken(environment)).resolves.toBe(`api-${"a".repeat(48)}`);
+    await expect(loadProductionApiToken(environment)).resolves.toBe(
+      `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+    );
 
     const apiPath = environment.AGENT_DOCK_API_TOKEN_FILE;
     await chmod(apiPath, 0o644);

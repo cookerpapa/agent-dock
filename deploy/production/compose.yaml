@@ -36,7 +36,6 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
-  AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR: ${AGENT_DOCK_MAXIMUM_LANES_PER_SUPERVISOR:-8}
   AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
   AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID: ${AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID:-}
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
@@ -74,7 +73,7 @@ x-bootstrap-environment: &bootstrap-environment
   AGENT_DOCK_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
   AGENT_DOCK_TENANT_SLUG: ${AGENT_DOCK_TENANT_SLUG:-agent-dock}
   AGENT_DOCK_USER_ID: ${AGENT_DOCK_USER_ID:?run npm run production:init first}
-  AGENT_DOCK_API_CREDENTIAL_ID: ${AGENT_DOCK_API_CREDENTIAL_ID:-${AGENT_DOCK_USER_ID:?run npm run production:init first}}
+  AGENT_DOCK_API_CREDENTIAL_ID: ${AGENT_DOCK_API_CREDENTIAL_ID:?run npm run production:init first}
   AGENT_DOCK_CREDENTIAL_BINDING_ID: ${AGENT_DOCK_CREDENTIAL_BINDING_ID:?run npm run production:init first}
   AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID: ${AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
   AGENT_DOCK_MODEL_PROFILE_NAME: deterministic-java-repair
@@ -566,7 +565,6 @@ services:
       AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
       AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
       AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
-      AGENT_DOCK_PI_EXECUTION_MODE: embedded-sdk
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state

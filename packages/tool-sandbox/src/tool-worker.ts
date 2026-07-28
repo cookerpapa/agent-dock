@@ -36,8 +36,8 @@ import { createInterface } from "node:readline";
 import { isIPv4 } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
-export const TOOL_WORKSPACE_DIRECTORY = "/workspace";
-export const SAMPLE_JAVA_FIXTURE = "/opt/agent-dock/sample-java-repair";
+const TOOL_WORKSPACE_DIRECTORY = "/workspace";
+const SAMPLE_JAVA_FIXTURE = "/opt/agent-dock/sample-java-repair";
 const TOOL_IMAGE_REVISION_FILE = "/opt/agent-dock/image-revision";
 
 export class ToolWorkerError extends Error {

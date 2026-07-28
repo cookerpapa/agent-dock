@@ -13,7 +13,7 @@ import {
   type GitHubRepositorySource,
   type WorkspaceSourceSetSnapshot,
 } from "@agent-dock/protocol";
-import { PiRpcTurnError, validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor";
+import { PiTurnError, validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
 import { createWorkspaceSnapshot, mergeWorkspaceSnapshots } from "@agent-dock/workspace-runtime";
@@ -111,7 +111,7 @@ export class GatewayGitHubWorkspaceImporter implements PrivateGitHubWorkspaceImp
   }
 }
 
-export class WorkspaceSeedError extends PiRpcTurnError {
+export class WorkspaceSeedError extends PiTurnError {
   constructor(code: string, safeMessage: string, retryable: boolean) {
     super(code, safeMessage, retryable);
     this.name = "WorkspaceSeedError";
