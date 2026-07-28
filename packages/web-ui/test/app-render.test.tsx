@@ -1,11 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import ChatApp, {
-  AuthScreen,
-  ConversationOutline,
-  ConversationTurn,
-  ToolActivity,
-} from "../src/ChatApp.tsx";
+import ChatApp, { AuthScreen, ConversationTurn, ToolActivity } from "../src/ChatApp.tsx";
+import { ConversationOutline } from "../src/ConversationOutline.tsx";
 import { AgentDockApi } from "../src/api.ts";
 import type { TurnView } from "../src/session-view.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
@@ -77,6 +73,7 @@ describe("product chat experience", () => {
   it("renders historical user questions as a compact conversation navigator", () => {
     const markup = renderToStaticMarkup(
       <ConversationOutline
+        scrollerRef={{ current: null }}
         turns={[
           turn("10000000-0000-4000-8000-000000000011", "分析一下当前架构"),
           turn("10000000-0000-4000-8000-000000000012", "然后修复所有测试"),

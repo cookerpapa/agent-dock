@@ -11,6 +11,7 @@ import type {
   WorkspaceSummaryResource,
 } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
+import { ConversationOutline } from "./ConversationOutline.tsx";
 import {
   activeTurn,
   createInitialSessionView,
@@ -322,6 +323,7 @@ export function ConversationTurn({ turn }: { turn: TurnView }) {
   return (
     <section
       className={`product-turn${turn.projection === "superseded" ? " product-turn-superseded" : ""}`}
+      data-conversation-turn-id={turn.turnId}
       id={`turn-${turn.turnId}`}
     >
       {turn.projection === "superseded" ? (
@@ -369,74 +371,6 @@ export function ConversationTurn({ turn }: { turn: TurnView }) {
         </div>
       </div>
     </section>
-  );
-}
-
-function outlineLabel(prompt: string): string {
-  return prompt.replace(/\s+/gu, " ").trim() || "未命名问题";
-}
-
-export function ConversationOutline({ turns }: { turns: readonly TurnView[] }) {
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(
-    () => turns.at(-1)?.turnId ?? null,
-  );
-
-  useEffect(() => {
-    if (activeTurnId !== null && turns.some((turn) => turn.turnId === activeTurnId)) return;
-    setActiveTurnId(turns.at(-1)?.turnId ?? null);
-  }, [activeTurnId, turns]);
-
-  useEffect(() => {
-    const scroller = document.querySelector<HTMLElement>(".product-chat-scroll");
-    if (scroller === null || turns.length === 0) return;
-    const updateActiveTurn = (): void => {
-      const activationLine = scroller.getBoundingClientRect().top + 120;
-      let current = turns[0]?.turnId ?? null;
-      for (const turn of turns) {
-        const element = document.getElementById(`turn-${turn.turnId}`);
-        if (element === null || element.getBoundingClientRect().top > activationLine) break;
-        current = turn.turnId;
-      }
-      setActiveTurnId(current);
-    };
-    scroller.addEventListener("scroll", updateActiveTurn, { passive: true });
-    updateActiveTurn();
-    return () => scroller.removeEventListener("scroll", updateActiveTurn);
-  }, [turns]);
-
-  function jumpToTurn(turnId: string): void {
-    setActiveTurnId(turnId);
-    document.getElementById(`turn-${turnId}`)?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }
-
-  return (
-    <aside className="product-conversation-outline" aria-label="历史问题导航">
-      <header>
-        <div>
-          <strong>对话导航</strong>
-          <span>快速跳转到历史问题</span>
-        </div>
-        <small>{String(turns.length)}</small>
-      </header>
-      <nav>
-        {turns.map((turn, index) => (
-          <button
-            aria-current={activeTurnId === turn.turnId ? "true" : undefined}
-            className={activeTurnId === turn.turnId ? "active" : ""}
-            key={turn.turnId}
-            onClick={() => jumpToTurn(turn.turnId)}
-            title={outlineLabel(turn.prompt)}
-            type="button"
-          >
-            <span>{String(index + 1).padStart(2, "0")}</span>
-            <strong>{outlineLabel(turn.prompt)}</strong>
-          </button>
-        ))}
-      </nav>
-    </aside>
   );
 }
 
@@ -592,6 +526,7 @@ export default function ChatApp() {
   const [settingsSaving, setSettingsSaving] = useState<"model" | "proxy" | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
   const lastSequenceRef = useRef(0);
+  const chatScrollerRef = useRef<HTMLElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const currentTurn = activeTurn(state);
   const canMutate = identity?.role !== "viewer";
@@ -1371,7 +1306,7 @@ export default function ChatApp() {
             inspectorOpen ? "with-inspector" : outlineVisible ? "with-outline" : ""
           }`}
         >
-          <section className="product-chat-scroll">
+          <section className="product-chat-scroll" ref={chatScrollerRef}>
             {state.turns.length === 0 ? (
               <div className="product-welcome">
                 <div className="product-logo product-logo-large">A</div>
@@ -1405,7 +1340,7 @@ export default function ChatApp() {
               workspaceName={state.project?.name ?? null}
             />
           ) : outlineVisible ? (
-            <ConversationOutline turns={state.turns} />
+            <ConversationOutline scrollerRef={chatScrollerRef} turns={state.turns} />
           ) : null}
         </div>
 
