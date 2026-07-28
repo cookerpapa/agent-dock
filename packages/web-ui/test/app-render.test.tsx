@@ -1,8 +1,36 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import ChatApp, { AuthScreen, ToolActivity } from "../src/ChatApp.tsx";
+import ChatApp, {
+  AuthScreen,
+  ConversationOutline,
+  ConversationTurn,
+  ToolActivity,
+} from "../src/ChatApp.tsx";
 import { AgentDockApi } from "../src/api.ts";
+import type { TurnView } from "../src/session-view.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
+
+function turn(turnId: string, prompt: string): TurnView {
+  return {
+    runId: null,
+    turnId,
+    commandId: null,
+    mailboxPosition: null,
+    prompt,
+    acceptedAt: null,
+    projection: "canonical",
+    supersededByRunId: null,
+    rewoundFromRunId: null,
+    status: "completed",
+    items: [],
+    startedSequence: null,
+    terminalSequence: null,
+    stopReason: "stop",
+    failure: null,
+    cancellation: null,
+    workspacePatch: null,
+  };
+}
 
 describe("product chat experience", () => {
   it("restores a durable login without rendering the old operator console", () => {
@@ -44,6 +72,36 @@ describe("product chat experience", () => {
     expect(markup).toContain("/workspace");
     expect(markup).not.toContain("runs");
     expect(markup).not.toContain("usage");
+  });
+
+  it("renders historical user questions as a compact conversation navigator", () => {
+    const markup = renderToStaticMarkup(
+      <ConversationOutline
+        turns={[
+          turn("10000000-0000-4000-8000-000000000011", "分析一下当前架构"),
+          turn("10000000-0000-4000-8000-000000000012", "然后修复所有测试"),
+        ]}
+      />,
+    );
+    expect(markup).toContain("对话导航");
+    expect(markup).toContain("分析一下当前架构");
+    expect(markup).toContain("然后修复所有测试");
+    expect(markup).toContain('aria-current="true"');
+  });
+
+  it("does not render the removed per-turn patch viewer", () => {
+    const renderedTurn = {
+      ...turn("10000000-0000-4000-8000-000000000013", "修改代码"),
+      workspacePatch: {
+        format: "unified_diff" as const,
+        patch: "diff --git a/secret.ts b/secret.ts\n",
+        truncated: false,
+      },
+    };
+    const markup = renderToStaticMarkup(<ConversationTurn turn={renderedTurn} />);
+    expect(markup).toContain("修改代码");
+    expect(markup).not.toContain("查看本轮代码修改");
+    expect(markup).not.toContain("secret.ts");
   });
 
   it("renders Pi-style command output instead of a collapsed JSON tool card", () => {

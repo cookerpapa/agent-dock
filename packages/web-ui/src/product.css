@@ -549,6 +549,10 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) minmax(360px, min(440px, 42vw));
 }
 
+.product-content.with-outline {
+  grid-template-columns: minmax(0, 1fr) minmax(210px, min(260px, 24vw));
+}
+
 .product-chat-scroll {
   min-width: 0;
   min-height: 0;
@@ -697,8 +701,7 @@ button:disabled {
   font-size: 15px;
 }
 .product-markdown pre,
-.product-tool pre,
-.product-patch pre {
+.product-tool pre {
   max-width: 100%;
   overflow: auto;
   padding: 13px;
@@ -997,18 +1000,6 @@ button:disabled {
 .product-turn-error {
   display: grid;
   gap: 3px;
-}
-
-.product-patch {
-  margin-top: 12px;
-}
-.product-patch summary {
-  color: #9f94de;
-  cursor: pointer;
-  font-size: 12px;
-}
-.product-patch pre {
-  max-height: 420px;
 }
 
 .product-composer-area {
@@ -1342,6 +1333,105 @@ button:disabled {
   background: #191919;
 }
 
+.product-conversation-outline {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid #303030;
+  background: #191919;
+}
+
+.product-conversation-outline > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 15px 14px 12px;
+  border-bottom: 1px solid #2d2d2d;
+}
+
+.product-conversation-outline > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.product-conversation-outline > header strong {
+  color: #d4d4d4;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.product-conversation-outline > header span {
+  color: #696969;
+  font-size: 9px;
+}
+
+.product-conversation-outline > header small {
+  display: grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #3b3b3b;
+  border-radius: 7px;
+  color: #898989;
+  font-size: 9px;
+}
+
+.product-conversation-outline > nav {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  scrollbar-color: #444 transparent;
+  scrollbar-width: thin;
+}
+
+.product-conversation-outline > nav button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  padding: 9px 8px;
+  border: 0;
+  background: transparent;
+  color: #8b8b8b;
+  text-align: left;
+}
+
+.product-conversation-outline > nav button:hover {
+  background: #242424;
+  color: #bdbdbd;
+}
+
+.product-conversation-outline > nav button.active {
+  background: #2d2a3b;
+  color: #ded9f7;
+}
+
+.product-conversation-outline > nav button > span {
+  padding-top: 1px;
+  color: #595959;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.product-conversation-outline > nav button.active > span {
+  color: #887bd4;
+}
+
+.product-conversation-outline > nav button > strong {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .workspace-directory-header {
   display: flex;
   align-items: flex-start;
@@ -1542,7 +1632,13 @@ button:disabled {
   .product-content.with-inspector {
     grid-template-columns: minmax(0, 1fr);
   }
+  .product-content.with-outline {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .product-content.with-inspector .product-chat-scroll {
+    display: none;
+  }
+  .product-conversation-outline {
     display: none;
   }
   .workspace-directory {

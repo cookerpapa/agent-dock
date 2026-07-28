@@ -312,7 +312,7 @@ function AssistantItem({
   );
 }
 
-function ConversationTurn({ turn }: { turn: TurnView }) {
+export function ConversationTurn({ turn }: { turn: TurnView }) {
   const working =
     turn.status === "queued" || turn.status === "running" || turn.status === "cancelling";
   const lastToolIndex = turn.items.reduce(
@@ -366,15 +366,77 @@ function ConversationTurn({ turn }: { turn: TurnView }) {
             </div>
           ) : null}
           {turn.cancellation ? <div className="product-muted-line">已停止生成</div> : null}
-          {turn.workspacePatch ? (
-            <details className="product-patch">
-              <summary>查看本轮代码修改</summary>
-              <pre>{turn.workspacePatch.patch}</pre>
-            </details>
-          ) : null}
         </div>
       </div>
     </section>
+  );
+}
+
+function outlineLabel(prompt: string): string {
+  return prompt.replace(/\s+/gu, " ").trim() || "未命名问题";
+}
+
+export function ConversationOutline({ turns }: { turns: readonly TurnView[] }) {
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(
+    () => turns.at(-1)?.turnId ?? null,
+  );
+
+  useEffect(() => {
+    if (activeTurnId !== null && turns.some((turn) => turn.turnId === activeTurnId)) return;
+    setActiveTurnId(turns.at(-1)?.turnId ?? null);
+  }, [activeTurnId, turns]);
+
+  useEffect(() => {
+    const scroller = document.querySelector<HTMLElement>(".product-chat-scroll");
+    if (scroller === null || turns.length === 0) return;
+    const updateActiveTurn = (): void => {
+      const activationLine = scroller.getBoundingClientRect().top + 120;
+      let current = turns[0]?.turnId ?? null;
+      for (const turn of turns) {
+        const element = document.getElementById(`turn-${turn.turnId}`);
+        if (element === null || element.getBoundingClientRect().top > activationLine) break;
+        current = turn.turnId;
+      }
+      setActiveTurnId(current);
+    };
+    scroller.addEventListener("scroll", updateActiveTurn, { passive: true });
+    updateActiveTurn();
+    return () => scroller.removeEventListener("scroll", updateActiveTurn);
+  }, [turns]);
+
+  function jumpToTurn(turnId: string): void {
+    setActiveTurnId(turnId);
+    document.getElementById(`turn-${turnId}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  return (
+    <aside className="product-conversation-outline" aria-label="历史问题导航">
+      <header>
+        <div>
+          <strong>对话导航</strong>
+          <span>快速跳转到历史问题</span>
+        </div>
+        <small>{String(turns.length)}</small>
+      </header>
+      <nav>
+        {turns.map((turn, index) => (
+          <button
+            aria-current={activeTurnId === turn.turnId ? "true" : undefined}
+            className={activeTurnId === turn.turnId ? "active" : ""}
+            key={turn.turnId}
+            onClick={() => jumpToTurn(turn.turnId)}
+            title={outlineLabel(turn.prompt)}
+            type="button"
+          >
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <strong>{outlineLabel(turn.prompt)}</strong>
+          </button>
+        ))}
+      </nav>
+    </aside>
   );
 }
 
@@ -540,6 +602,7 @@ export default function ChatApp() {
     state.sessionState === "running" ||
     state.sessionState === "waiting_approval" ||
     state.sessionState === "cancelling";
+  const outlineVisible = !inspectorOpen && state.turns.length > 0;
 
   const update = useCallback((action: Parameters<typeof sessionViewReducer>[1]) => {
     setState((current) => sessionViewReducer(current, action));
@@ -1303,7 +1366,11 @@ export default function ChatApp() {
           </div>
         ) : null}
 
-        <div className={`product-content ${inspectorOpen ? "with-inspector" : ""}`}>
+        <div
+          className={`product-content ${
+            inspectorOpen ? "with-inspector" : outlineVisible ? "with-outline" : ""
+          }`}
+        >
           <section className="product-chat-scroll">
             {state.turns.length === 0 ? (
               <div className="product-welcome">
@@ -1337,6 +1404,8 @@ export default function ChatApp() {
               sessionId={state.session?.sessionId ?? null}
               workspaceName={state.project?.name ?? null}
             />
+          ) : outlineVisible ? (
+            <ConversationOutline turns={state.turns} />
           ) : null}
         </div>
 
