@@ -22,9 +22,11 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     cd /src/kopia \
     && go mod edit -toolchain=go1.26.5 \
+    && export GOPROXY='https://goproxy.cn|https://proxy.golang.org|direct' \
     && downloaded=0 \
     && for attempt in 1 2 3; do \
-      if go get google.golang.org/grpc@v1.82.1 && go mod download; then downloaded=1; break; fi; \
+      if go get google.golang.org/grpc@v1.82.1 golang.org/x/text@v0.39.0 \
+        && go mod download; then downloaded=1; break; fi; \
     done \
     && test "$downloaded" = 1 \
     && CGO_ENABLED=0 go build -trimpath \

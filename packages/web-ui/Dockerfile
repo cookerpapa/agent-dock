@@ -39,9 +39,11 @@ RUN cloned=0 \
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     cd /src/caddy \
+    && export GOPROXY='https://goproxy.cn|https://proxy.golang.org|direct' \
     && downloaded=0 \
     && for attempt in 1 2 3; do \
-      if go get google.golang.org/grpc@v1.82.1 && go mod download; then downloaded=1; break; fi; \
+      if go get google.golang.org/grpc@v1.82.1 golang.org/x/text@v0.39.0 \
+        && go mod download; then downloaded=1; break; fi; \
     done \
     && test "$downloaded" = 1 \
     && go build -trimpath \
