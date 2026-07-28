@@ -9,6 +9,7 @@ import type {
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+  MAX_WORKSPACE_SNAPSHOT_BYTES,
 } from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
@@ -773,7 +774,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
         new PutObjectCommand({
           Bucket: configuration.options.bucket,
           Key: `${configuration.physicalPrefix}/probes/oversized.bin`,
-          Body: Buffer.alloc(2 * 1_024 * 1_024 + 1),
+          Body: Buffer.alloc(MAX_WORKSPACE_SNAPSHOT_BYTES + 1),
         }),
       );
       await expect(readerObjectStore.get("probes/oversized.bin")).rejects.toMatchObject({
