@@ -1409,14 +1409,18 @@ button:disabled {
 
 .workspace-root-row,
 .workspace-tree-directory,
-.workspace-file-tree > button {
+.workspace-tree-file {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 7px;
   min-height: 28px;
+  border: 0;
+  background: transparent;
   color: #bdbdbd;
   font-size: 11px;
+  text-align: left;
 }
 
 .workspace-root-row {
@@ -1427,14 +1431,14 @@ button:disabled {
   color: #aaa;
 }
 
-.workspace-file-tree > button {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
+.workspace-root-row:hover,
+.workspace-tree-directory:hover,
+.workspace-tree-file:hover {
+  background: #272727;
 }
 
-.workspace-file-tree > button > span:nth-child(2) {
+.workspace-tree-directory > span:nth-child(2),
+.workspace-tree-file > span:nth-child(2) {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -1442,12 +1446,12 @@ button:disabled {
   white-space: nowrap;
 }
 
-.workspace-file-tree > button small {
+.workspace-tree-file small {
   color: #626262;
   font-size: 9px;
 }
 
-.workspace-file-tree > button.active {
+.workspace-tree-file.active {
   background: #302d3f;
   color: #e3defb;
 }

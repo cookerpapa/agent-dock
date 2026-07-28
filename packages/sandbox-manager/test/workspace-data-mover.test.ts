@@ -79,6 +79,42 @@ describe("trusted Workspace Data Mover", () => {
     }
   });
 
+  it("streams materialized files larger than the control-message envelope", async () => {
+    const bytes = Buffer.alloc(96 * 1_024, "agent-dock\n");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const mover: WorkspaceDataMover = {
+      checkHealth: vi.fn(async () => undefined),
+      prepare: vi.fn(async () => ({ restored: true })),
+      snapshot: vi.fn(async () => ({ snapshotId: "snapshot-large-file" })),
+      materialize: vi.fn(async () => ({ bytes, sha256 })),
+      close: vi.fn(async () => undefined),
+    };
+    const server = new WorkspaceDataMoverServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: TOKEN,
+      mover,
+    });
+    const address = await server.listen();
+    try {
+      const client = new HttpWorkspaceDataMover({
+        baseUrl: address,
+        serviceToken: TOKEN,
+      });
+      await expect(
+        client.materialize({
+          ...identity,
+          snapshotId: "snapshot-large-file",
+          path: "large-source.ts",
+          expectedSha256: sha256,
+          maximumBytes: bytes.byteLength,
+        }),
+      ).resolves.toEqual({ bytes, sha256 });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("derives a tenant-bound volume identity and rejects traversal before invoking Kopia", async () => {
     expect(workspaceVolumeId(identity)).toBe(identity.volumeId);
     expect(workspaceVolumeId({ ...identity, tenantId: "tenant-data-mover-other" })).not.toBe(

@@ -791,7 +791,10 @@ export class WorkspaceDataMoverServer {
         const result = await this.#mover.materialize(
           request.body as WorkspaceDataMoverMaterializeInput,
         );
-        return { data: Buffer.from(result.bytes).toString("base64"), sha256: result.sha256 };
+        return reply
+          .header("content-type", "application/octet-stream")
+          .header("content-length", result.bytes.byteLength)
+          .send(Buffer.from(result.bytes));
       } catch (error: unknown) {
         return this.#failure(reply, error);
       }
@@ -871,33 +874,64 @@ export class HttpWorkspaceDataMover implements WorkspaceDataMover {
   async materialize(
     input: WorkspaceDataMoverMaterializeInput,
   ): Promise<{ bytes: Uint8Array; sha256: string }> {
-    const result = (await this.#request(WORKSPACE_DATA_MOVER_MATERIALIZE_PATH, input)) as {
-      data?: unknown;
-      sha256?: unknown;
-    };
+    const response = await fetch(`${this.#baseUrl}${WORKSPACE_DATA_MOVER_MATERIALIZE_PATH}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.#serviceToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(this.#requestTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new WorkspaceDataMoverError(
+        "workspace_data_mover_request_failed",
+        "Workspace Data Mover request failed",
+        response.status >= 500,
+      );
+    }
+    const declaredLength = response.headers.get("content-length");
     if (
-      typeof result.data !== "string" ||
-      typeof result.sha256 !== "string" ||
-      !SHA256_PATTERN.test(result.sha256)
+      declaredLength !== null &&
+      (!/^(0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > input.maximumBytes)
     ) {
+      await response.body?.cancel();
       throw new WorkspaceDataMoverError(
         "workspace_data_mover_response_invalid",
         "Workspace Data Mover response was invalid",
         false,
       );
     }
-    const bytes = Buffer.from(result.data, "base64");
-    if (
-      bytes.toString("base64") !== result.data ||
-      createHash("sha256").update(bytes).digest("hex") !== result.sha256
-    ) {
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    const reader = response.body?.getReader();
+    if (reader !== undefined) {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        totalBytes += chunk.value.byteLength;
+        if (totalBytes > input.maximumBytes) {
+          await reader.cancel();
+          throw new WorkspaceDataMoverError(
+            "workspace_data_mover_response_invalid",
+            "Workspace Data Mover response was invalid",
+            false,
+          );
+        }
+        chunks.push(chunk.value);
+      }
+    }
+    const bytes = Buffer.concat(chunks, totalBytes);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (sha256 !== input.expectedSha256) {
       throw new WorkspaceDataMoverError(
         "workspace_data_mover_response_invalid",
         "Workspace Data Mover response was invalid",
         false,
       );
     }
-    return { bytes, sha256: result.sha256 };
+    return { bytes, sha256 };
   }
 
   async close(): Promise<void> {}

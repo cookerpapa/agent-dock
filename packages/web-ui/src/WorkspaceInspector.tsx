@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceFileResource, WorkspaceVersionResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError } from "./api.ts";
 
-type DirectoryEntry =
+export type DirectoryEntry =
   | Readonly<{ kind: "directory"; path: string; depth: number; name: string }>
   | Readonly<{
       kind: "file";
@@ -20,7 +20,9 @@ function message(error: unknown): string {
   return "Workspace 目录暂时无法读取。";
 }
 
-function directoryEntries(files: readonly WorkspaceFileResource[]): readonly DirectoryEntry[] {
+export function directoryEntries(
+  files: readonly WorkspaceFileResource[],
+): readonly DirectoryEntry[] {
   const directories = new Set<string>();
   for (const file of files) {
     const parts = file.path.split("/");
@@ -43,15 +45,36 @@ function directoryEntries(files: readonly WorkspaceFileResource[]): readonly Dir
       file,
     })),
   ].sort((left, right) => {
-    const leftParent = left.path.includes("/")
-      ? left.path.slice(0, left.path.lastIndexOf("/"))
-      : "";
-    const rightParent = right.path.includes("/")
-      ? right.path.slice(0, right.path.lastIndexOf("/"))
-      : "";
-    if (leftParent !== rightParent) return leftParent.localeCompare(rightParent);
-    if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
-    return left.name.localeCompare(right.name);
+    const leftParts = left.path.split("/");
+    const rightParts = right.path.split("/");
+    const commonLength = Math.min(leftParts.length, rightParts.length);
+    for (let index = 0; index < commonLength; index += 1) {
+      if (leftParts[index] === rightParts[index]) continue;
+      const leftIsDirectory = index < leftParts.length - 1 || left.kind === "directory";
+      const rightIsDirectory = index < rightParts.length - 1 || right.kind === "directory";
+      if (leftIsDirectory !== rightIsDirectory) return leftIsDirectory ? -1 : 1;
+      return (leftParts[index] ?? "").localeCompare(rightParts[index] ?? "");
+    }
+    return leftParts.length - rightParts.length;
+  });
+}
+
+function parentDirectory(path: string): string | null {
+  const separator = path.lastIndexOf("/");
+  return separator === -1 ? null : path.slice(0, separator);
+}
+
+export function visibleDirectoryEntries(
+  entries: readonly DirectoryEntry[],
+  expandedDirectories: ReadonlySet<string>,
+): readonly DirectoryEntry[] {
+  return entries.filter((entry) => {
+    let parent = parentDirectory(entry.path);
+    while (parent !== null) {
+      if (!expandedDirectories.has(parent)) return false;
+      parent = parentDirectory(parent);
+    }
+    return true;
   });
 }
 
@@ -90,6 +113,10 @@ export function WorkspaceInspector({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [selectedBinary, setSelectedBinary] = useState(false);
+  const [rootExpanded, setRootExpanded] = useState(true);
+  const [expandedDirectories, setExpandedDirectories] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const onErrorRef = useRef(onError);
@@ -98,6 +125,11 @@ export function WorkspaceInspector({
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    setRootExpanded(true);
+    setExpandedDirectories(new Set());
+  }, [sessionId]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (sessionId === null) {
@@ -184,7 +216,17 @@ export function WorkspaceInspector({
   }
 
   const entries = directoryEntries(files);
+  const visibleEntries = rootExpanded ? visibleDirectoryEntries(entries, expandedDirectories) : [];
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
+
+  function toggleDirectory(path: string): void {
+    setExpandedDirectories((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
 
   return (
     <aside className="workspace-directory" aria-label="Workspace 目录">
@@ -210,10 +252,15 @@ export function WorkspaceInspector({
       </div>
       <div className="workspace-directory-body">
         <nav className="workspace-file-tree" aria-label="/workspace 文件">
-          <div className="workspace-root-row">
-            <span>▾</span>
+          <button
+            aria-expanded={rootExpanded}
+            className="workspace-root-row"
+            onClick={() => setRootExpanded((expanded) => !expanded)}
+            type="button"
+          >
+            <span>{rootExpanded ? "▾" : "▸"}</span>
             <strong>/workspace</strong>
-          </div>
+          </button>
           {loading ? (
             <div className="workspace-empty">正在读取目录…</div>
           ) : entries.length === 0 ? (
@@ -221,19 +268,23 @@ export function WorkspaceInspector({
               这个目录还是空的。让 Agent 创建文件后，完成的版本会显示在这里。
             </div>
           ) : (
-            entries.map((entry) =>
+            visibleEntries.map((entry) =>
               entry.kind === "directory" ? (
-                <div
+                <button
+                  aria-expanded={expandedDirectories.has(entry.path)}
                   className="workspace-tree-directory"
                   key={`directory:${entry.path}`}
+                  onClick={() => toggleDirectory(entry.path)}
                   style={{ paddingLeft: `${String(16 + entry.depth * 16)}px` }}
+                  title={entry.path}
+                  type="button"
                 >
-                  <span>▸</span>
-                  {entry.name}
-                </div>
+                  <span>{expandedDirectories.has(entry.path) ? "▾" : "▸"}</span>
+                  <span>{entry.name}</span>
+                </button>
               ) : (
                 <button
-                  className={selectedPath === entry.path ? "active" : ""}
+                  className={`workspace-tree-file${selectedPath === entry.path ? " active" : ""}`}
                   key={`file:${entry.path}`}
                   onClick={() => void openFile(entry.file)}
                   style={{ paddingLeft: `${String(18 + entry.depth * 16)}px` }}
