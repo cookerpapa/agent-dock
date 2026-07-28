@@ -611,7 +611,6 @@ export class CubeSandboxProvider implements SandboxProvider {
       kopiaCheckpoint !== undefined &&
       (kopiaCheckpoint.tenantId !== spec.assignment.tenantId ||
         kopiaCheckpoint.workspaceId !== spec.assignment.workspaceId ||
-        kopiaCheckpoint.imageRevision !== this.#imageRevision ||
         kopiaCheckpoint.environmentSpecSha256 !== spec.environment.specSha256 ||
         (kopiaCheckpoint.sourceSessionId === spec.assignment.sessionId &&
           spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken))
@@ -1269,14 +1268,10 @@ export class CubeSandboxProvider implements SandboxProvider {
     const snapshotBytes = decodeWorkspaceSnapshotBlob(request.snapshot);
     const kopia = parseKopiaWorkspaceCheckpoint(snapshotBytes);
     if (kopia !== undefined) {
-      if (
-        kopia.tenantId !== request.tenantId ||
-        kopia.workspaceId !== request.workspaceId ||
-        kopia.imageRevision !== this.#imageRevision
-      ) {
+      if (kopia.tenantId !== request.tenantId || kopia.workspaceId !== request.workspaceId) {
         throw new SandboxManagerError(
           "cubesandbox_checkpoint_binding_invalid",
-          "Kopia Workspace checkpoint did not match the requested Workspace or runtime image",
+          "Kopia Workspace checkpoint did not match the requested Workspace",
           false,
         );
       }

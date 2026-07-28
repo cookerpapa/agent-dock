@@ -97,6 +97,8 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
   healthChecks = 0;
   closed = false;
 
+  constructor(readonly imageRevision = "development") {}
+
   async checkHealth(): Promise<void> {
     this.healthChecks += 1;
   }
@@ -139,7 +141,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     this.requests.push({ sandboxId: instance.sandboxId, input });
     if (input.path === "/v1/evidence") {
       return {
-        imageRevision: "development",
+        imageRevision: this.imageRevision,
         kernelRelease: "6.12.0-cube.guest",
         cpuCount: 1,
         memoryBytes: 740 * 1_024 * 1_024,
@@ -392,6 +394,32 @@ describe("CubeSandbox Provider contract", () => {
       path: "result.txt",
       content: Buffer.from("cube\n").toString("base64"),
     });
+    const upgradedManager = new ToolSandboxManager({
+      provider: new CubeSandboxProvider({
+        templateId: "agent-dock-tool-v2",
+        imageRevision: "next-deployment",
+        webProxy: WEB_PROXY,
+        runtimeClient: new FakeCubeRuntimeClient(),
+        workspaceDataMover: fakeWorkspaceDataMover(),
+      }),
+      imageRevision: "next-deployment",
+    });
+    await expect(
+      upgradedManager.materializeFile({
+        managerProtocolVersion: 1,
+        type: "workspace.materialize_file",
+        requestId: "10000000-0000-4000-8000-000000000024",
+        tenantId: assignment.tenantId,
+        workspaceId: assignment.workspaceId,
+        snapshot: captured.workspace,
+        path: "result.txt",
+      }),
+    ).resolves.toMatchObject({
+      type: "workspace.file_materialized",
+      path: "result.txt",
+      content: Buffer.from("cube\n").toString("base64"),
+    });
+    await upgradedManager.close();
     expect(workspaceDataMover.materialize).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: assignment.sessionId,
@@ -631,6 +659,64 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.creates).toHaveLength(1);
     await provider.destroy(handle);
     await provider.close();
+  });
+
+  it("restores a portable Workspace checkpoint after the Tool image is upgraded", async () => {
+    const originalProvider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: new FakeCubeRuntimeClient(),
+      workspaceDataMover: fakeWorkspaceDataMover(),
+    });
+    const originalHandle = await originalProvider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: originalProvider.defaultPolicy,
+    });
+    const captured = await originalProvider.snapshot(
+      originalHandle,
+      "10000000-0000-4000-8000-000000000049",
+    );
+    if (captured.type !== "tool_sandbox.captured") {
+      throw new Error("CubeSandbox capture response was missing");
+    }
+    await originalProvider.destroy(originalHandle);
+    await originalProvider.close();
+
+    const upgradedRuntime = new FakeCubeRuntimeClient("next-deployment");
+    const upgradedDataMover = fakeWorkspaceDataMover();
+    const upgradedProvider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v2",
+      imageRevision: "next-deployment",
+      webProxy: WEB_PROXY,
+      runtimeClient: upgradedRuntime,
+      workspaceDataMover: upgradedDataMover,
+    });
+    const upgradedAssignment = {
+      ...assignment,
+      fencingToken: assignment.fencingToken + 1,
+    };
+    const upgradedHandle = await upgradedProvider.create({
+      activationId: "20000000-0000-4000-8000-000000000050",
+      assignment: upgradedAssignment,
+      environment: { ...environment, imageRevision: "next-deployment" },
+      workspaceSeed: { kind: "sample_java" },
+      workspaceRestore: captured.workspace,
+      policy: upgradedProvider.defaultPolicy,
+    });
+    expect(upgradedDataMover.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: assignment.tenantId,
+        workspaceId: assignment.workspaceId,
+        snapshotId: "a".repeat(32),
+      }),
+    );
+    expect(upgradedRuntime.creates).toHaveLength(1);
+    await upgradedProvider.destroy(upgradedHandle);
+    await upgradedProvider.close();
   });
 
   it("destroys an uncertain VM instead of replaying an arbitrary command", async () => {
