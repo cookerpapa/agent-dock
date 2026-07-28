@@ -1096,6 +1096,7 @@ const ReviewBundleArtifactSchema = Type.Object(
     artifactId: UuidSchema,
     kind: Type.Union([
       Type.Literal("pi_session_snapshot"),
+      Type.Literal("pi_interrupted_session_snapshot"),
       Type.Literal("workspace_snapshot"),
       Type.Literal("tool_output"),
       Type.Literal("patch"),
@@ -1417,6 +1418,7 @@ export const WorkspaceArtifactResourceSchema = Type.Object(
     artifactId: UuidSchema,
     kind: Type.Union([
       Type.Literal("pi_session_snapshot"),
+      Type.Literal("pi_interrupted_session_snapshot"),
       Type.Literal("workspace_snapshot"),
       Type.Literal("tool_output"),
       Type.Literal("patch"),

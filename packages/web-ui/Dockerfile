@@ -16,12 +16,23 @@ RUN npm run build --workspace @agent-dock/web-ui
 
 FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS caddy-builder
 
-ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org|direct
+RUN apk add --no-cache ca-certificates git
+RUN git clone --filter=blob:none https://github.com/caddyserver/caddy.git /src/caddy \
+    && cd /src/caddy \
+    && git checkout --detach e2eee6a7fce366321294c9c2a79f3146891dcbdf \
+    && test "$(git rev-parse HEAD)" = "e2eee6a7fce366321294c9c2a79f3146891dcbdf"
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    go install -trimpath \
+    cd /src/caddy \
+    && downloaded=0 \
+    && for attempt in 1 2 3; do \
+      if go get google.golang.org/grpc@v1.82.1 && go mod download; then downloaded=1; break; fi; \
+    done \
+    && test "$downloaded" = 1 \
+    && go build -trimpath \
       -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4-agent-dock" \
-      github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+      -o /go/bin/caddy ./cmd/caddy \
     && /go/bin/caddy version | grep -F "v2.11.4-agent-dock"
 
 FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40

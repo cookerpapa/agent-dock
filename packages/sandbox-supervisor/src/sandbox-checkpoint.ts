@@ -52,6 +52,11 @@ export interface SandboxCheckpointStore {
     baseRevision: string | null,
     piSession: Uint8Array,
   ): Promise<SavedSandboxCheckpoint>;
+  saveInterruptedConversation(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    piSession: Uint8Array,
+  ): Promise<SavedSandboxCheckpoint>;
   save(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
@@ -129,6 +134,7 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
   const lines = text.split("\n").filter((line) => line.length > 0);
   if (lines.length < 2) throw checkpointError("Pi session snapshot is not settled");
   let hasAssistant = false;
+  let hasInterruptionMarker = false;
   for (const [index, line] of lines.entries()) {
     let parsed: unknown;
     try {
@@ -155,8 +161,13 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
     ) {
       hasAssistant = true;
     }
+    if (parsed.type === "custom_message" && parsed.customType === "agent-dock.run_interrupted") {
+      hasInterruptionMarker = true;
+    }
   }
-  if (!hasAssistant) throw checkpointError("Pi session snapshot has no settled assistant message");
+  if (!hasAssistant && !hasInterruptionMarker) {
+    throw checkpointError("Pi session snapshot has no assistant message or interruption boundary");
+  }
 }
 
 export function encodeSettledCheckpoint(

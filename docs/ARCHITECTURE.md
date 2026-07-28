@@ -75,7 +75,8 @@ A Worker slot executes one active Run:
 4. open it through the Pi SDK;
 5. append the new user prompt;
 6. stream model and Tool events;
-7. commit the new Pi checkpoint after `agent_settled`;
+7. commit the new Pi checkpoint after successful `agent_settled`, or an
+   explicitly typed interrupted checkpoint after terminal failure/cancellation;
 8. dispose the in-memory AgentSession.
 
 The Worker does not run user Bash locally. It has no Cube control credential,
@@ -254,6 +255,29 @@ PostgreSQL checkpoint head
 
 Compacted Sessions therefore behave exactly as Pi defines. AgentDock does not
 flatten or invent a replacement `messages[]`.
+
+### Interrupted Runs
+
+A started Run that fails or is cancelled does not advance the Workspace head.
+The Worker does preserve Pi's native Session branch and appends a hidden,
+model-visible `agent-dock.run_interrupted` marker before storing an
+`pi_interrupted_session_snapshot`. If Pi failed before recording the accepted
+prompt, the Worker appends that user message first. It never converts streamed
+browser deltas into an assistant message.
+
+The next Run therefore restores:
+
+```text
+last committed Pi branch
+  → accepted interrupted user prompt
+  → any native Pi error/aborted assistant and Tool results
+  → explicit interruption marker
+  → next user prompt
+```
+
+The marker warns the Agent to inspect the Workspace because Tool side effects
+may be partial. Pre-execution dispatch failures do not create this checkpoint
+and may be retried without changing the conversation head.
 
 ## 8. Event delivery
 

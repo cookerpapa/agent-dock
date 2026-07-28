@@ -52,12 +52,19 @@ export {
   type PiBuiltinToolName,
   type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
+  type PiRpcInterruptedCheckpoint,
   type PiRpcSettledCheckpoint,
   type PiRpcToolOutputArtifact,
   type PiRpcToolOutputCapture,
   type PiRpcTurnResult,
   type PiRpcTurnRunnerOptions,
 } from "./pi-rpc-turn-runner.ts";
+export {
+  appendPiInterruption,
+  PI_INTERRUPTION_CUSTOM_TYPE,
+  piInterruptionMessage,
+  piSessionEntryIds,
+} from "./pi-interrupted-session.ts";
 
 export {
   PiSdkIsolationFailure,

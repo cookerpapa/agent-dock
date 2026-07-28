@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const TRIVY_IMAGE =
   "aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e";
+const TRIVY_IGNORE_POLICY = resolve(repositoryRoot, ".trivyignore.yaml");
 const IMAGE_NAMES = [
   "control-plane",
   "supervisor-host",
@@ -166,6 +167,8 @@ function trivyContainerArguments({ cacheDirectory, inputDirectory, outputDirecto
     `type=bind,source=${inputDirectory},target=/input,readonly`,
     "--mount",
     `type=bind,source=${outputDirectory},target=/output`,
+    "--mount",
+    `type=bind,source=${TRIVY_IGNORE_POLICY},target=/policy/.trivyignore.yaml,readonly`,
     TRIVY_IMAGE,
   ];
 }
@@ -250,6 +253,11 @@ try {
   const rootSbom = await capture("npm", ["sbom", "--sbom-format=cyclonedx", "--omit=dev"]);
   JSON.parse(rootSbom);
   await writeFile(rootSbomPath, `${rootSbom}\n`, { mode: 0o600 });
+  await writeFile(
+    resolve(stageDirectory, ".trivyignore.yaml"),
+    await readFile(TRIVY_IGNORE_POLICY),
+    { mode: 0o600 },
+  );
 
   const trivyBase = trivyContainerArguments({
     cacheDirectory: options.cacheDirectory,
@@ -270,6 +278,7 @@ try {
 
     const outputRoot = `images/${imageName}`;
     const reportRelativePath = `${outputRoot}.vulnerabilities.json`;
+    const policyReportRelativePath = `${outputRoot}.policy-vulnerabilities.json`;
     const sbomRelativePath = `${outputRoot}.cdx.json`;
     const scanBase = trivyContainerArguments({
       cacheDirectory: options.cacheDirectory,
@@ -307,18 +316,36 @@ try {
       "--output",
       `/output/${sbomRelativePath}`,
     ]);
+    await run("docker", [
+      ...scanBase,
+      ...common,
+      "--ignorefile",
+      "/policy/.trivyignore.yaml",
+      "--format",
+      "json",
+      "--output",
+      `/output/${policyReportRelativePath}`,
+    ]);
     const report = JSON.parse(await readFile(resolve(stageDirectory, reportRelativePath), "utf8"));
+    const policyReport = JSON.parse(
+      await readFile(resolve(stageDirectory, policyReportRelativePath), "utf8"),
+    );
     const vulnerabilities = vulnerabilitySummary(report);
+    const policyVulnerabilities = vulnerabilitySummary(policyReport);
     images.push({
       ...evidence,
       vulnerabilities,
+      policyVulnerabilities,
       vulnerabilityReport: await fileEvidence(stageDirectory, reportRelativePath),
+      policyVulnerabilityReport: await fileEvidence(stageDirectory, policyReportRelativePath),
       sbom: await fileEvidence(stageDirectory, sbomRelativePath),
     });
   }
 
   const blocked = images.filter(
-    (image) => image.vulnerabilities.HIGH.fixable > 0 || image.vulnerabilities.CRITICAL.fixable > 0,
+    (image) =>
+      image.policyVulnerabilities.HIGH.fixable > 0 ||
+      image.policyVulnerabilities.CRITICAL.fixable > 0,
   );
   const manifest = {
     format: "agent-dock.release-evidence.v1",
@@ -330,6 +357,7 @@ try {
       severities: ["HIGH", "CRITICAL"],
       reportUnfixed: true,
       maximumFixableFindings: 0,
+      exceptionPolicy: await fileEvidence(stageDirectory, ".trivyignore.yaml"),
       packageTypeOverrides: {
         "agent-dock/tool-sandbox": {
           packageTypes: ["os"],
@@ -346,8 +374,13 @@ try {
 
   const evidencePaths = [
     "agent-dock-root.cdx.json",
+    ".trivyignore.yaml",
     "manifest.json",
-    ...images.flatMap((image) => [image.sbom.path, image.vulnerabilityReport.path]),
+    ...images.flatMap((image) => [
+      image.sbom.path,
+      image.vulnerabilityReport.path,
+      image.policyVulnerabilityReport.path,
+    ]),
   ].toSorted();
   const checksums = await Promise.all(
     evidencePaths.map(
@@ -363,7 +396,7 @@ try {
       `Release blocked by fixable HIGH/CRITICAL findings: ${blocked
         .map(
           (image) =>
-            `${image.reference} (fixable HIGH=${String(image.vulnerabilities.HIGH.fixable)}, fixable CRITICAL=${String(image.vulnerabilities.CRITICAL.fixable)})`,
+            `${image.reference} (policy fixable HIGH=${String(image.policyVulnerabilities.HIGH.fixable)}, policy fixable CRITICAL=${String(image.policyVulnerabilities.CRITICAL.fixable)})`,
         )
         .join(", ")}`,
     );

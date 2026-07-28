@@ -26,6 +26,7 @@ import * as hotPlatformRuntimeSettings from "./024_hot_platform_runtime_settings
 import * as largeWorkspaceCheckpoints from "./025_large_workspace_checkpoints.ts";
 import * as workspaceFirstConversations from "./026_workspace_first_conversations.ts";
 import * as sharedWorkspaceHeads from "./027_shared_workspace_heads.ts";
+import * as interruptedPiConversations from "./028_interrupted_pi_conversations.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -57,6 +58,7 @@ export const migrationProvider: MigrationProvider = {
       "025_large_workspace_checkpoints": largeWorkspaceCheckpoints,
       "026_workspace_first_conversations": workspaceFirstConversations,
       "027_shared_workspace_heads": sharedWorkspaceHeads,
+      "028_interrupted_pi_conversations": interruptedPiConversations,
     };
   },
 };
@@ -195,3 +197,8 @@ export {
   down as downSharedWorkspaceHeads,
   up as upSharedWorkspaceHeads,
 } from "./027_shared_workspace_heads.ts";
+
+export {
+  down as downInterruptedPiConversations,
+  up as upInterruptedPiConversations,
+} from "./028_interrupted_pi_conversations.ts";

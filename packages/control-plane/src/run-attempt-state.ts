@@ -206,13 +206,7 @@ export async function transitionCurrentRunAttempt(
         .where("run_id", "=", identity.runId)
         .where("attempt_id", "=", identity.attemptId)
         .where("state", "=", "staged")
-        .returning([
-          "id",
-          "workspace_id",
-          "session_id",
-          "pi_artifact_id",
-          "workspace_artifact_id",
-        ])
+        .returning(["id", "workspace_id", "session_id", "pi_artifact_id", "workspace_artifact_id"])
         .executeTakeFirst();
       if (version !== undefined) {
         await transaction
@@ -325,6 +319,15 @@ export async function transitionCurrentRunAttempt(
             "Current Workspace version artifact is missing",
           );
         }
+        const currentInterruptedPi = await transaction
+          .selectFrom("artifacts as artifact")
+          .select("artifact.object_key as objectKey")
+          .where("artifact.tenant_id", "=", identity.tenantId)
+          .where("artifact.session_id", "=", session.id)
+          .where("artifact.run_id", "=", identity.runId)
+          .where("artifact.kind", "=", "pi_interrupted_session_snapshot")
+          .orderBy("artifact.created_at", "desc")
+          .executeTakeFirst();
         const priorPi = await transaction
           .selectFrom("artifacts as artifact")
           .innerJoin("turns as turn", (join) =>
@@ -336,16 +339,27 @@ export async function transitionCurrentRunAttempt(
           .select("artifact.object_key as objectKey")
           .where("artifact.tenant_id", "=", identity.tenantId)
           .where("artifact.session_id", "=", session.id)
-          .where("artifact.kind", "=", "pi_session_snapshot")
           .where("artifact.run_id", "!=", identity.runId)
-          .where("turn.state", "=", "completed")
+          .where((expression) =>
+            expression.or([
+              expression.and([
+                expression("artifact.kind", "=", "pi_session_snapshot"),
+                expression("turn.state", "=", "completed"),
+              ]),
+              expression.and([
+                expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
+                expression("turn.state", "in", ["failed", "cancelled"]),
+              ]),
+            ]),
+          )
           .orderBy("turn.settled_at", "desc")
           .orderBy("artifact.created_at", "desc")
           .executeTakeFirst();
         await transaction
           .updateTable("sessions")
           .set({
-            pi_session_snapshot_key: priorPi?.objectKey ?? session.versionPiKey,
+            pi_session_snapshot_key:
+              currentInterruptedPi?.objectKey ?? priorPi?.objectKey ?? session.versionPiKey,
             workspace_snapshot_key: session.workspaceKey,
             row_version: sql<string>`${sql.ref("row_version")} + 1`,
             updated_at: now,

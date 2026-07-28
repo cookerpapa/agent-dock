@@ -9,6 +9,7 @@ import type {
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+  MAX_WORKSPACE_SNAPSHOT_BYTES,
 } from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
@@ -25,6 +26,7 @@ import {
   decodePiSessionManifest,
   type S3CheckpointObjectStoreOptions,
 } from "../src/index.ts";
+import { transitionCurrentRunAttempt } from "../src/run-attempt-state.ts";
 
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",
@@ -132,6 +134,31 @@ function piSession(label: string): Uint8Array {
           message: { role: "assistant", content: [{ type: "text", text: entry }] },
         }),
       ),
+      "",
+    ].join("\n"),
+  );
+}
+
+function interruptedPiSession(label: string): Uint8Array {
+  return Buffer.from(
+    [
+      JSON.stringify({ type: "session", version: 3, id: "pi-checkpoint", cwd: "/workspace" }),
+      JSON.stringify({
+        type: "message",
+        id: `user-${label}`,
+        parentId: null,
+        timestamp: "2026-07-28T00:00:00.000Z",
+        message: { role: "user", content: [{ type: "text", text: label }] },
+      }),
+      JSON.stringify({
+        type: "custom_message",
+        id: `interrupted-${label}`,
+        parentId: `user-${label}`,
+        timestamp: "2026-07-28T00:00:01.000Z",
+        customType: "agent-dock.run_interrupted",
+        content: "<run_interrupted>Run failed.</run_interrupted>",
+        display: false,
+      }),
       "",
     ].join("\n"),
   );
@@ -637,6 +664,107 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
   }, 30_000);
 });
 
+describe("PostgreSQL interrupted conversation checkpoint store", () => {
+  it("commits a typed Pi artifact while the current fenced Run is cancelling", async () => {
+    const isolatedPglite = await PGlite.create();
+    const isolatedSocket = new PGLiteSocketServer({
+      db: isolatedPglite,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const isolatedObjectRoot = await mkdtemp(
+      resolve(tmpdir(), "agent-dock-interrupted-checkpoint-test-"),
+    );
+    let isolatedDatabase: Kysely<Database> | undefined;
+    try {
+      await isolatedSocket.start();
+      isolatedDatabase = createDatabase({
+        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
+        maxConnections: 2,
+      });
+      await runMigrations(isolatedDatabase, "up");
+      await seed(isolatedDatabase);
+      await isolatedDatabase.transaction().execute(async (transaction) => {
+        await transaction
+          .updateTable("sessions")
+          .set({ state: "cancelling" })
+          .where("id", "=", IDS.session)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("turns")
+          .set({ state: "cancelling" })
+          .where("id", "=", IDS.turn1)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("runs")
+          .set({ state: "cancel_requested" })
+          .where("id", "=", IDS.run1)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("run_attempts")
+          .set({ state: "cancel_requested" })
+          .where("id", "=", IDS.attempt1)
+          .executeTakeFirstOrThrow();
+      });
+
+      const store = new PostgresSandboxCheckpointStore({
+        database: isolatedDatabase,
+        objectStore: new FileCheckpointObjectStore({ rootDirectory: isolatedObjectRoot }),
+        idGenerator: () => "80000000-0000-4000-8000-000000000001",
+      });
+      await expect(
+        store.saveInterruptedConversation(
+          command(1),
+          null,
+          interruptedPiSession("cancelled request"),
+        ),
+      ).resolves.toMatchObject({ revision: expect.stringMatching(/^[0-9a-f]{64}$/) });
+      const artifact = await isolatedDatabase
+        .selectFrom("artifacts")
+        .select(["kind", "object_key"])
+        .where("run_id", "=", IDS.run1)
+        .executeTakeFirstOrThrow();
+      expect(artifact.kind).toBe("pi_interrupted_session_snapshot");
+      const session = await isolatedDatabase
+        .selectFrom("sessions")
+        .select("pi_session_snapshot_key")
+        .where("id", "=", IDS.session)
+        .executeTakeFirstOrThrow();
+      expect(session.pi_session_snapshot_key).toBe(artifact.object_key);
+      await isolatedDatabase.transaction().execute((transaction) =>
+        transitionCurrentRunAttempt(
+          transaction,
+          {
+            tenantId: IDS.tenant,
+            runId: IDS.run1,
+            attemptId: IDS.attempt1,
+            leaseId: IDS.lease1,
+            fencingToken: 1,
+          },
+          {
+            runState: "cancelled",
+            attemptState: "cancelled",
+            reason: "test_cancellation_confirmed",
+            now: new Date(),
+            stopReason: "cancelled",
+          },
+        ),
+      );
+      const retained = await isolatedDatabase
+        .selectFrom("sessions")
+        .select("pi_session_snapshot_key")
+        .where("id", "=", IDS.session)
+        .executeTakeFirstOrThrow();
+      expect(retained.pi_session_snapshot_key).toBe(artifact.object_key);
+    } finally {
+      await isolatedDatabase?.destroy();
+      await isolatedSocket.stop().catch(() => undefined);
+      await isolatedPglite.close().catch(() => undefined);
+      await rm(isolatedObjectRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
 type S3IntegrationConfiguration = {
   options: S3CheckpointObjectStoreOptions;
   physicalPrefix: string;
@@ -711,6 +839,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
 
       const writerObjectStore = new S3CheckpointObjectStore(configuration.options);
       let savedRevision: string;
+      let savedWorkspaceRevision: string;
       try {
         const writer = new PostgresSandboxCheckpointStore({
           database: isolatedDatabase,
@@ -726,6 +855,10 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
           environment: ENVIRONMENT_VALIDATION,
         });
         savedRevision = saved.revision;
+        if (saved.workspaceRevision === undefined) {
+          throw new Error("Settled Workspace checkpoint did not return its content revision");
+        }
+        savedWorkspaceRevision = saved.workspaceRevision;
         await writerObjectStore.put("probes/immutable.bin", Buffer.from("first"));
         await insertCompletedEvent(1, isolatedDatabase);
       } finally {
@@ -748,6 +881,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
         revision: savedRevision,
         piSession: piSession("remote"),
         workspace: workspace("remote"),
+        workspaceRevision: savedWorkspaceRevision,
       });
 
       const session = await isolatedDatabase
@@ -772,7 +906,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
         new PutObjectCommand({
           Bucket: configuration.options.bucket,
           Key: `${configuration.physicalPrefix}/probes/oversized.bin`,
-          Body: Buffer.alloc(2 * 1_024 * 1_024 + 1),
+          Body: Buffer.alloc(MAX_WORKSPACE_SNAPSHOT_BYTES + 1),
         }),
       );
       await expect(readerObjectStore.get("probes/oversized.bin")).rejects.toMatchObject({

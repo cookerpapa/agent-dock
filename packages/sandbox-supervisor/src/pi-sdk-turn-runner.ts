@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { appendPiInterruption } from "./pi-interrupted-session.ts";
 import { PiRpcAgentEventAdapter } from "./pi-rpc-agent-event-adapter.ts";
 import {
   PiRpcTurnCancelledError,
@@ -32,6 +33,7 @@ import {
   type PiModelRuntimeConfig,
   type PiRpcCancellationSignal,
   type PiRpcEventPublisher,
+  type PiRpcInterruptedCheckpoint,
   type PiRpcSettledCheckpoint,
   type PiRpcToolOutputArtifact,
   type PiRpcToolOutputCapture,
@@ -55,6 +57,7 @@ export type PiSdkTurnRunnerOptions = {
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
+  onInterrupted?: (checkpoint: PiRpcInterruptedCheckpoint) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiRpcToolOutputCapture) => Promise<PiRpcToolOutputArtifact>;
   onIsolationFailure?: (error: PiSdkIsolationFailure) => Promise<void> | void;
 };
@@ -278,6 +281,7 @@ export class PiSdkTurnRunner {
         false,
       );
     }
+    const acceptedPrompt = command.payload.input.text;
     const runtimeConfig = validateRuntimeConfig(
       command,
       await this.#options.resolveModelRuntime(command.payload.model),
@@ -294,7 +298,9 @@ export class PiSdkTurnRunner {
     const sessionFile = resolve(sessionDirectory, "session.jsonl");
     const toolOutputDirectory = resolve(temporaryRoot, "tool-outputs");
     const persistSession =
-      this.#options.restorePiSession !== undefined || this.#options.onSettled !== undefined;
+      this.#options.restorePiSession !== undefined ||
+      this.#options.onSettled !== undefined ||
+      this.#options.onInterrupted !== undefined;
     await Promise.all([
       mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
       mkdir(toolOutputDirectory, { recursive: true, mode: 0o700 }),
@@ -317,6 +323,9 @@ export class PiSdkTurnRunner {
     let cancellationTask: Promise<void> | undefined;
     let removeAbortListener: (() => void) | undefined;
     let isolationFailure: PiSdkIsolationFailure | undefined;
+    let sessionManager: SessionManager | undefined;
+    let baseEntryIds = new Set<string>();
+    let interruptedCheckpointCaptured = false;
     const terminal = deferred<PiRpcTurnResult>();
     void terminal.promise.catch(() => undefined);
 
@@ -340,6 +349,39 @@ export class PiSdkTurnRunner {
           : { maximumToolOutputBytes: command.payload.budgets.maximumToolOutputBytes }),
       },
     );
+
+    const captureInterruptedConversation = async (reason: string): Promise<void> => {
+      if (interruptedCheckpointCaptured || this.#options.onInterrupted === undefined) return;
+      if (sessionManager === undefined) {
+        throw new PiRpcTurnError(
+          "checkpoint_capture_failed",
+          "Pi did not create a Session for the interrupted Run",
+          true,
+        );
+      }
+      appendPiInterruption(sessionManager, {
+        baseEntryIds,
+        acceptedPrompt,
+        reason,
+        runId: command.payload.runId,
+        attemptId: command.payload.attemptId,
+        timestamp: validDate(this.#clock).valueOf(),
+      });
+      const persistedSessionFile = sessionManager.getSessionFile();
+      const piSession =
+        persistedSessionFile === undefined
+          ? undefined
+          : await readFile(persistedSessionFile).catch(() => undefined);
+      if (piSession === undefined) {
+        throw new PiRpcTurnError(
+          "checkpoint_capture_failed",
+          "Pi did not produce a readable interrupted Session snapshot",
+          true,
+        );
+      }
+      await this.#options.onInterrupted({ piSession, reason });
+      interruptedCheckpointCaptured = true;
+    };
 
     const fail = (error: Error): void => {
       if (fatalError !== undefined) return;
@@ -447,6 +489,11 @@ export class PiSdkTurnRunner {
             };
           }
         }
+      }
+      if (publicEvent.type === "turn.failed") {
+        await captureInterruptedConversation(`failed:${publicEvent.payload.code}`);
+      } else if (publicEvent.type === "turn.cancelled") {
+        await captureInterruptedConversation(`cancelled:${publicEvent.payload.reason}`);
       }
       const envelope = eventMessage(publicEvent);
       if (publicEvent.type === "turn.cancelled") {
@@ -577,10 +624,11 @@ export class PiSdkTurnRunner {
         });
         return { ...created, services, diagnostics: services.diagnostics };
       };
-      const sessionManager =
+      sessionManager =
         this.#options.restorePiSession === undefined
           ? SessionManager.create(workspaceDirectory, sessionDirectory)
           : SessionManager.open(sessionFile, sessionDirectory, workspaceDirectory);
+      baseEntryIds = new Set(sessionManager.getEntries().map((entry) => entry.id));
       runtime = await createAgentSessionRuntime(createRuntime, {
         cwd: workspaceDirectory,
         agentDir: agentDirectory,
@@ -671,7 +719,7 @@ export class PiSdkTurnRunner {
       }, this.#turnTimeoutMs);
       turnTimer.unref();
       try {
-        await runtime.session.prompt(command.payload.input.text, { source: "rpc" });
+        await runtime.session.prompt(acceptedPrompt, { source: "rpc" });
         if (extensionErrors.length > 0) {
           throw new PiRpcTurnError("pi_extension_error", "Pi extension failed", false);
         }
@@ -704,6 +752,25 @@ export class PiSdkTurnRunner {
             );
           },
         );
+      }
+      if (
+        result === undefined &&
+        !interruptedCheckpointCaptured &&
+        this.#options.onInterrupted !== undefined
+      ) {
+        const failure = runError ?? fatalError ?? cancellationError;
+        const reason =
+          cancellationError !== undefined
+            ? `cancelled:${cancellationError.reason}`
+            : failure !== undefined &&
+                typeof failure === "object" &&
+                "code" in failure &&
+                typeof failure.code === "string"
+              ? `failed:${failure.code}`
+              : "failed:worker_interrupted";
+        await captureInterruptedConversation(reason).catch((error: unknown) => {
+          runError ??= error;
+        });
       }
       await rm(temporaryRoot, { recursive: true, force: true });
       if (isolationFailure !== undefined && this.#options.onIsolationFailure !== undefined) {

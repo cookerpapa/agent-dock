@@ -511,6 +511,24 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
         }
       };
+      const onInterrupted: NonNullable<PiSdkTurnRunnerOptions["onInterrupted"]> = async ({
+        piSession,
+      }) => {
+        if (this.#checkpointStore === undefined) return;
+        try {
+          await this.#checkpointStore.saveInterruptedConversation(
+            command,
+            loadedCheckpoint?.revision ?? null,
+            piSession,
+          );
+        } catch (error: unknown) {
+          throw safePiError(
+            error,
+            "checkpoint_save_failed",
+            "The interrupted conversation checkpoint could not be committed",
+          );
+        }
+      };
       const commonRunnerOptions = {
         resolveWorkspaceDirectory: () => this.#trustedWorkspaceDirectory,
         resolveModelRuntime,
@@ -525,6 +543,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           ? {}
           : { restorePiSession: loadedCheckpoint.piSession }),
         onSettled,
+        onInterrupted,
         ...(this.#requestTimeoutMs === undefined
           ? {
               requestTimeoutMs: usesEmbeddedFake

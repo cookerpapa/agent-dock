@@ -1,6 +1,6 @@
 # Release evidence process
 
-AgentDock's supported release process binds a clean Git revision to six local
+AgentDock's supported release process binds a clean Git revision to seven local
 production images and machine-readable dependency/security evidence. It does
 not currently push, sign, or publish images; registry policy and signing need a
 separate deployment decision.
@@ -42,10 +42,12 @@ operator may select another private cache with `--cache-dir`.
 ```text
 manifest.json
 SHA256SUMS
+.trivyignore.yaml
 agent-dock-root.cdx.json
 images/control-plane.cdx.json
 images/control-plane.vulnerabilities.json
-... one SBOM/report pair for each of six images
+images/control-plane.policy-vulnerabilities.json
+... one SBOM/two-report set for each of seven images
 ```
 
 `manifest.json` records:
@@ -54,7 +56,7 @@ images/control-plane.vulnerabilities.json
 - image version, exact local image IDs, optional registry digests, creation
   time, platform, and OCI labels;
 - the immutable Trivy image digest and policy;
-- HIGH/CRITICAL total and fixable counts;
+- complete and policy-effective HIGH/CRITICAL total and fixable counts;
 - size and SHA-256 for every SBOM/report.
 
 `SHA256SUMS` covers the root SBOM, manifest, and all image evidence. Retain the
@@ -62,11 +64,13 @@ whole directory next to the release record; do not keep only screenshots.
 
 ## Gate and review
 
-The automated gate requires zero fixable HIGH and zero fixable CRITICAL
-findings in every image. Unfixable findings remain in the complete
-HIGH/CRITICAL report and require explicit review; the gate is not a statement
-that the image has no lower-severity or unknown risk. Root `npm audit` remains a
-separate lockfile gate.
+The automated gate requires zero policy-effective fixable HIGH and zero
+policy-effective fixable CRITICAL findings in every image. The unfiltered
+HIGH/CRITICAL report remains part of the evidence, so a narrow exception never
+erases the original finding. Unfixable findings and documented exceptions
+require explicit review; the gate is not a statement that the image has no
+lower-severity or unknown risk. Root `npm audit` remains a separate lockfile
+gate.
 
 The local scanner receives read-only `docker image save` archives, not the
 Docker socket. Its root filesystem and capabilities are removed; only the
@@ -80,17 +84,31 @@ packages remain covered by the root npm audit/SBOM. This override and rationale
 are recorded in `manifest.json`. CI deliberately performs the unrestricted
 image scan, including language packages.
 
-The Web runtime compiles Caddy 2.11.4 from the pinned module with a pinned Go
-1.26.5 builder, then copies the static binary into a pinned minimal Alpine
-runtime. This avoids inheriting stale packages from an older prebuilt Caddy
-image while preserving the standard Caddy module set. The actual final image,
-not either build stage, is what the release gate scans.
+The Web runtime compiles Caddy 2.11.4 from its verified release commit with a
+pinned Go 1.26.5 builder and the fixed `google.golang.org/grpc@v1.82.1`, then
+copies the static binary into a pinned minimal Alpine runtime. This avoids
+inheriting stale packages from an older prebuilt Caddy image while preserving
+the standard Caddy module set. The actual final image, not either build stage,
+is what the release gate scans.
 
 CI independently builds a matrix of all six images, generates CycloneDX with
 Anchore SBOM Action, records all HIGH/CRITICAL findings with Trivy, runs the same
 fixable-finding gate, and uploads each evidence set for 14 days. Checkout,
 Node, Anchore, Trivy, Gitleaks, and artifact Actions are pinned to immutable
 commits in `.github/workflows/ci.yml`.
+
+GitHub-hosted CI runs deterministic zero-token, container-contract and
+Cube-template checks. It does not pretend to execute the KVM- and
+credential-dependent `production:check`; that gate remains an explicit release
+precondition on the deployment host.
+
+The Temporal 1.21.1 native core bridge currently embeds
+`quinn-proto@0.11.14`, including on the upstream SDK main branch. AgentDock
+does not expose a QUIC listener, so the affected unauthenticated QUIC stream
+reassembly path is unreachable. `.trivyignore.yaml` contains a purl-scoped
+exception expiring on 2026-08-31. All other fixable HIGH/CRITICAL findings
+remain release blockers, and the exception must be removed when Temporal
+publishes a bridge with `quinn-proto@0.11.15` or newer.
 
 ## Release limitations
 

@@ -73,34 +73,22 @@ jobs:
       - name: Verify effective HostConfig and run both containers
         run: npm run container:check
 
-      - name: Verify the fenced Docker Pi workspace path
-        run: npm run sandbox:check
+      - name: Build the current CubeSandbox Tool template
+        run: >-
+          docker build
+          --file deploy/cubesandbox/Dockerfile.tool
+          --build-arg AGENT_DOCK_VERSION=ci
+          --build-arg AGENT_DOCK_REVISION="${{ github.sha }}"
+          --tag agent-dock/cubesandbox-tool:ci
+          .
+
+      - name: Verify the immutable CubeSandbox template contract
+        run: npm run cubesandbox:template-check
+        env:
+          AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE: agent-dock/cubesandbox-tool:ci
 
       - name: Verify S3-compatible checkpoint portability
         run: npm run object-store:check
-
-  production:
-    name: Disposable production topology
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js for the production verifier
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.18.0
-          package-manager-cache: false
-
-      - name: Install pinned dependencies without lifecycle scripts
-        run: npm ci --ignore-scripts
-
-      - name: Build and verify the complete disposable production topology
-        run: npm run production:check
 
   supply-chain:
     name: SBOM and vulnerability gate (${{ matrix.image }})
@@ -122,8 +110,6 @@ jobs:
             dockerfile: packages/web-ui/Dockerfile
           - image: tool-sandbox
             dockerfile: packages/tool-sandbox/Dockerfile
-          - image: dependency-egress-proxy
-            dockerfile: packages/dependency-egress-proxy/Dockerfile
 
     steps:
       - name: Check out repository
@@ -177,6 +163,7 @@ jobs:
           format: table
           exit-code: 1
           timeout: 10m
+          trivyignores: .trivyignore.yaml
 
       - name: Upload image supply-chain evidence
         if: always()

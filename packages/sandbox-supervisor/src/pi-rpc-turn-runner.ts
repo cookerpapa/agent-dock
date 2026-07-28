@@ -8,6 +8,7 @@ import {
   type ExecuteTurnCommandMessage,
   type WorkspacePatch,
 } from "@agent-dock/protocol";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
@@ -15,6 +16,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { appendPiInterruption, piSessionEntryIds } from "./pi-interrupted-session.ts";
 import { PiRpcAgentEventAdapter } from "./pi-rpc-agent-event-adapter.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -58,11 +60,16 @@ export type PiRpcTurnRunnerOptions = {
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   onSettled?: (checkpoint: PiRpcSettledCheckpoint) => Promise<void> | void;
+  onInterrupted?: (checkpoint: PiRpcInterruptedCheckpoint) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiRpcToolOutputCapture) => Promise<PiRpcToolOutputArtifact>;
 };
 
 export type PiRpcSettledCheckpoint = {
   piSession: Uint8Array;
+};
+
+export type PiRpcInterruptedCheckpoint = PiRpcSettledCheckpoint & {
+  reason: string;
 };
 
 export type PiRpcToolOutputCapture = {
@@ -539,6 +546,7 @@ export class PiRpcTurnRunner {
         false,
       );
     }
+    const acceptedPrompt = command.payload.input.text;
 
     const runtimeConfig = validateRuntimeConfig(
       command,
@@ -557,7 +565,10 @@ export class PiRpcTurnRunner {
     const sessionFile = resolve(sessionDirectory, "session.jsonl");
     const toolOutputDirectory = resolve(temporaryRoot, "tool-outputs");
     const persistSession =
-      this.#options.restorePiSession !== undefined || this.#options.onSettled !== undefined;
+      this.#options.restorePiSession !== undefined ||
+      this.#options.onSettled !== undefined ||
+      this.#options.onInterrupted !== undefined;
+    const baseEntryIds = piSessionEntryIds(this.#options.restorePiSession);
     try {
       await Promise.all([
         mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
@@ -661,6 +672,39 @@ export class PiRpcTurnRunner {
     let cancellationError: PiRpcTurnCancelledError | undefined;
     let cancellationTask: Promise<void> | undefined;
     let removeAbortListener: (() => void) | undefined;
+    let interruptedCheckpointCaptured = false;
+
+    const captureInterruptedConversation = async (reason: string): Promise<void> => {
+      if (interruptedCheckpointCaptured || this.#options.onInterrupted === undefined) return;
+      let sessionManager: SessionManager;
+      try {
+        sessionManager = SessionManager.open(sessionFile, sessionDirectory, workspaceDirectory);
+      } catch {
+        throw new PiRpcTurnError(
+          "checkpoint_capture_failed",
+          "Pi did not produce a readable interrupted Session snapshot",
+          true,
+        );
+      }
+      appendPiInterruption(sessionManager, {
+        baseEntryIds,
+        acceptedPrompt,
+        reason,
+        runId: command.payload.runId,
+        attemptId: command.payload.attemptId,
+        timestamp: validDate(this.#clock).valueOf(),
+      });
+      const piSession = await readFile(sessionFile).catch(() => undefined);
+      if (piSession === undefined) {
+        throw new PiRpcTurnError(
+          "checkpoint_capture_failed",
+          "Pi did not produce a readable interrupted Session snapshot",
+          true,
+        );
+      }
+      await this.#options.onInterrupted({ piSession, reason });
+      interruptedCheckpointCaptured = true;
+    };
 
     const fail = (error: Error): void => {
       if (fatalError !== undefined) return;
@@ -858,6 +902,11 @@ export class PiRpcTurnRunner {
           }
         }
       }
+      if (publicEvent.type === "turn.failed") {
+        await captureInterruptedConversation(`failed:${publicEvent.payload.code}`);
+      } else if (publicEvent.type === "turn.cancelled") {
+        await captureInterruptedConversation(`cancelled:${publicEvent.payload.reason}`);
+      }
       const candidate = eventMessage(publicEvent);
       if (publicEvent.type === "turn.cancelled") {
         settleCancellation(
@@ -968,7 +1017,7 @@ export class PiRpcTurnRunner {
     let terminationError: unknown;
     try {
       await request("set_auto_retry", { enabled: false });
-      const promptAck = request("prompt", { message: command.payload.input.text });
+      const promptAck = request("prompt", { message: acceptedPrompt });
       if (signal !== undefined) {
         const beginCancellation = (): void => {
           if (cancellationTask !== undefined) return;
@@ -1030,6 +1079,25 @@ export class PiRpcTurnRunner {
       }
       flushPendingText();
       await messageChain.catch(() => undefined);
+      if (
+        result === undefined &&
+        !interruptedCheckpointCaptured &&
+        this.#options.onInterrupted !== undefined
+      ) {
+        const failure = runError ?? fatalError ?? cancellationError;
+        const reason =
+          cancellationError !== undefined
+            ? `cancelled:${cancellationError.reason}`
+            : failure !== undefined &&
+                typeof failure === "object" &&
+                "code" in failure &&
+                typeof failure.code === "string"
+              ? `failed:${failure.code}`
+              : "failed:worker_interrupted";
+        await captureInterruptedConversation(reason).catch((error: unknown) => {
+          runError ??= error;
+        });
+      }
       if (cancellationEvent !== undefined && terminationError === undefined) {
         try {
           await publishEvent(cancellationEvent);

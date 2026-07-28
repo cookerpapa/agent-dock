@@ -468,14 +468,55 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     baseRevision: string | null,
     piSession: Uint8Array,
   ): Promise<SavedSandboxCheckpoint> {
+    return this.#saveConversationArtifact(
+      command,
+      baseRevision,
+      piSession,
+      "pi_session_snapshot",
+      false,
+    );
+  }
+
+  async saveInterruptedConversation(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    piSession: Uint8Array,
+  ): Promise<SavedSandboxCheckpoint> {
+    return this.#saveConversationArtifact(
+      command,
+      baseRevision,
+      piSession,
+      "pi_interrupted_session_snapshot",
+      true,
+    );
+  }
+
+  async #saveConversationArtifact(
+    command: ExecuteTurnCommandMessage,
+    baseRevision: string | null,
+    piSession: Uint8Array,
+    kind: "pi_session_snapshot" | "pi_interrupted_session_snapshot",
+    allowCancellation: boolean,
+  ): Promise<SavedSandboxCheckpoint> {
     validatePiSessionSnapshot(piSession);
-    const piArtifact = await this.#preparePiSessionArtifact(command, baseRevision, piSession);
+    const piArtifact = await this.#preparePiSessionArtifact(
+      command,
+      baseRevision,
+      piSession,
+      allowCancellation,
+    );
     const { artifactId, reference } = piArtifact;
     let saved: SavedSandboxCheckpoint | undefined;
     try {
       saved = await this.#database.transaction().execute(async (transaction) => {
         const now = validDate(this.#clock);
-        const current = await this.#lockSession(transaction, command, now);
+        const current = await this.#assertCurrentSession(
+          transaction,
+          command,
+          now,
+          true,
+          allowCancellation,
+        );
         const settled = await this.#settledMetadata(transaction, command, current);
         if ((settled?.revision ?? null) !== baseRevision) {
           throw new SandboxCheckpointStoreError(
@@ -492,7 +533,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             session_id: command.payload.sessionId,
             turn_id: command.payload.turnId,
             run_id: command.payload.runId,
-            kind: "pi_session_snapshot",
+            kind,
             object_key: reference.objectKey,
             sha256: reference.sha256,
             size_bytes: reference.sizeBytes,
@@ -843,8 +884,15 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     transaction: Transaction<Database>,
     command: ExecuteTurnCommandMessage,
     now: Date,
+    allowCancellation = false,
   ): Promise<CheckpointMetadata | undefined> {
-    const session = await this.#assertCurrentSession(transaction, command, now, false);
+    const session = await this.#assertCurrentSession(
+      transaction,
+      command,
+      now,
+      false,
+      allowCancellation,
+    );
     return this.#settledMetadata(transaction, command, session);
   }
 
@@ -863,11 +911,18 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         ? undefined
         : await transaction
             .selectFrom("artifacts as artifact")
-            .innerJoin("session_events as terminal", (join) =>
+            .innerJoin("turns as terminal", (join) =>
               join
                 .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
                 .onRef("terminal.session_id", "=", "artifact.session_id")
-                .onRef("terminal.turn_id", "=", "artifact.turn_id"),
+                .onRef("terminal.id", "=", "artifact.turn_id"),
+            )
+            .leftJoin("session_events as terminal_event", (join) =>
+              join
+                .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
+                .onRef("terminal_event.session_id", "=", "artifact.session_id")
+                .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
+                .on("terminal_event.type", "=", "turn.completed"),
             )
             .select([
               "artifact.object_key",
@@ -877,18 +932,35 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             ])
             .where("artifact.tenant_id", "=", command.payload.tenantId)
             .where("artifact.session_id", "=", command.payload.sessionId)
-            .where("artifact.kind", "=", "pi_session_snapshot")
             .where("artifact.object_key", "=", session.piSessionKey)
-            .where("terminal.type", "=", "turn.completed")
+            .where((expression) =>
+              expression.or([
+                expression.and([
+                  expression("artifact.kind", "=", "pi_session_snapshot"),
+                  expression("terminal_event.type", "=", "turn.completed"),
+                ]),
+                expression.and([
+                  expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
+                  expression("terminal.state", "in", ["failed", "cancelled"]),
+                ]),
+              ]),
+            )
             .executeTakeFirst();
     if (pi === undefined) {
       pi = await transaction
         .selectFrom("artifacts as artifact")
-        .innerJoin("session_events as terminal", (join) =>
+        .innerJoin("turns as terminal", (join) =>
           join
             .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
             .onRef("terminal.session_id", "=", "artifact.session_id")
-            .onRef("terminal.turn_id", "=", "artifact.turn_id"),
+            .onRef("terminal.id", "=", "artifact.turn_id"),
+        )
+        .leftJoin("session_events as terminal_event", (join) =>
+          join
+            .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
+            .onRef("terminal_event.session_id", "=", "artifact.session_id")
+            .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
+            .on("terminal_event.type", "=", "turn.completed"),
         )
         .select([
           "artifact.object_key",
@@ -898,9 +970,23 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         ])
         .where("artifact.tenant_id", "=", command.payload.tenantId)
         .where("artifact.session_id", "=", command.payload.sessionId)
-        .where("artifact.kind", "=", "pi_session_snapshot")
-        .where("terminal.type", "=", "turn.completed")
-        .orderBy("terminal.seq", "desc")
+        .where((expression) =>
+          expression.or([
+            expression.and([
+              expression("artifact.kind", "=", "pi_session_snapshot"),
+              expression("terminal_event.type", "=", "turn.completed"),
+            ]),
+            expression.and([
+              expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
+              expression("terminal.state", "in", ["failed", "cancelled"]),
+            ]),
+          ]),
+        )
+        .orderBy(
+          sql<Date>`coalesce(${sql.ref("terminal.settled_at")}, ${sql.ref("terminal_event.occurred_at")})`,
+          "desc",
+        )
+        .orderBy("artifact.created_at", "desc")
         .executeTakeFirst();
     }
     let workspace:
@@ -995,13 +1081,14 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
     piSession: Uint8Array,
+    allowCancellation = false,
   ): Promise<PreparedPiSessionArtifact> {
     let previous: LoadedPiSessionState | undefined;
     if (baseRevision !== null) {
       const metadata = await this.#database
         .transaction()
         .execute(async (transaction) =>
-          this.#loadMetadata(transaction, command, validDate(this.#clock)),
+          this.#loadMetadata(transaction, command, validDate(this.#clock), allowCancellation),
         );
       if (metadata?.revision !== baseRevision) {
         throw new SandboxCheckpointStoreError(
@@ -1121,7 +1208,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     now: Date,
   ) {
-    return this.#assertCurrentSession(transaction, command, now, true);
+    return this.#assertCurrentSession(transaction, command, now, true, false);
   }
 
   async #assertCurrentSession(
@@ -1129,6 +1216,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     now: Date,
     lock: boolean,
+    allowCancellation = false,
   ): Promise<{
     piSessionKey: string | null;
     workspaceKey: string | null;
@@ -1235,8 +1323,9 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       row.leaseId !== command.payload.leaseId ||
       Number(row.fencingToken) !== command.payload.fencingToken ||
       Number(row.sessionFencingToken) !== command.payload.fencingToken ||
-      row.sessionState !== "running" ||
-      row.turnState !== "running" ||
+      (row.sessionState !== "running" &&
+        !(allowCancellation && row.sessionState === "cancelling")) ||
+      (row.turnState !== "running" && !(allowCancellation && row.turnState === "cancelling")) ||
       row.commandKind !== "turn.execute" ||
       row.commandState !== "acknowledged" ||
       row.runId !== command.payload.runId ||
@@ -1248,11 +1337,13 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       (row.runState !== "provisioning" &&
         row.runState !== "restoring" &&
         row.runState !== "running" &&
-        row.runState !== "checkpointing") ||
+        row.runState !== "checkpointing" &&
+        !(allowCancellation && row.runState === "cancel_requested")) ||
       (row.attemptState !== "provisioning" &&
         row.attemptState !== "restoring" &&
         row.attemptState !== "running" &&
-        row.attemptState !== "checkpointing") ||
+        row.attemptState !== "checkpointing" &&
+        !(allowCancellation && row.attemptState === "cancel_requested")) ||
       new Date(row.validUntil).valueOf() <= now.valueOf()
     ) {
       throw new SandboxCheckpointStoreError(

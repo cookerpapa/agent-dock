@@ -25,7 +25,9 @@ COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/tool-sandbox/package.json packages/tool-sandbox/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm install --global npm@12.0.1 \
+    && npm ci --omit=dev --ignore-scripts \
+    && npm cache clean --force
 
 COPY packages/protocol/src packages/protocol/src
 COPY packages/tool-sandbox/src packages/tool-sandbox/src

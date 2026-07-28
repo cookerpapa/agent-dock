@@ -270,9 +270,11 @@ describe("PiSdkTurnRunner integration", () => {
 
   it("cooperatively aborts a live SDK model request", async () => {
     const fakeModel = new FakeModelServer({ defaultScenario: "timeout" });
+    const recoveryModel = new FakeModelServer();
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-cancel-test-"));
     const events: EventPublishMessage[] = [];
     const controller = new AbortController();
+    let interruptedCheckpoint: Uint8Array | undefined;
     try {
       await fakeModel.start();
       const running = new PiSdkTurnRunner({
@@ -285,6 +287,10 @@ describe("PiSdkTurnRunner integration", () => {
           apiKey: FAKE_MODEL_API_KEY,
         }),
         turnTimeoutMs: 20_000,
+        onInterrupted: ({ piSession, reason }) => {
+          expect(reason).toBe("cancelled:user_request");
+          interruptedCheckpoint = piSession;
+        },
       }).run(
         command,
         (event) => {
@@ -310,8 +316,43 @@ describe("PiSdkTurnRunner integration", () => {
         "turn.cancelled",
       ]);
       await waitFor(() => fakeModel.observations[0]?.completion === "client_aborted");
+      const interruptedJsonl = Buffer.from(interruptedCheckpoint!).toString("utf8");
+      expect(interruptedJsonl).toContain('"role":"user"');
+      expect(interruptedJsonl).toContain('"customType":"agent-dock.run_interrupted"');
+
+      await recoveryModel.start();
+      await new PiSdkTurnRunner({
+        restorePiSession: interruptedCheckpoint!,
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: recoveryModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+      }).run(
+        {
+          ...command,
+          messageId: "11111111-1111-4111-8111-111111111130",
+          payload: {
+            ...command.payload,
+            commandId: "22222222-2222-4222-8222-222222222240",
+            idempotencyKey: "sdk-cancel-recovery",
+            runId: "44444444-4444-4444-8444-444444444445",
+            turnId: "turn-cancel-recovery",
+            attemptId: "55555555-5555-4555-8555-555555555556",
+            fencingToken: 8,
+            nextEventSeq: 8,
+            input: { kind: "prompt", text: "Continue after the interruption." },
+          },
+        },
+        () => undefined,
+      );
+      expect(recoveryModel.observations[0]?.messageCount).toBeGreaterThanOrEqual(3);
     } finally {
       await fakeModel.stop();
+      await recoveryModel.stop();
       await rm(workspace, { recursive: true, force: true });
     }
   }, 30_000);

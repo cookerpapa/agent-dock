@@ -354,3 +354,8 @@ extension-policy support would overstate the current boundary.
 - [x] Add capacity-aware same-Session Worker affinity with row-locked slot
   reservations, boot-specific Temporal Activity queues, a shared process-local
   capacity gate, short private-queue timeout and common-queue fallback
+- [x] Preserve failed/cancelled started Runs as typed Pi-native interrupted
+  checkpoints with an explicit model-visible interruption boundary, while
+  keeping Workspace commit success-only
+- [ ] Remove the time-bounded `quinn-proto` Trivy exception as soon as the
+  Temporal TypeScript SDK publishes a core bridge containing 0.11.15 or newer

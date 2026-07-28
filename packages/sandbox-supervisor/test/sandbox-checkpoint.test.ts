@@ -1,6 +1,7 @@
 import {
   decodeSettledCheckpoint,
   encodeSettledCheckpoint,
+  validatePiSessionSnapshot,
   validateLoadedCheckpoint,
 } from "../src/index.ts";
 import { describe, expect, it } from "vitest";
@@ -68,5 +69,37 @@ describe("settled sandbox checkpoint envelope", () => {
         workspace: emptyWorkspace,
       }),
     ).toThrow(/sandbox workspace/i);
+  });
+
+  it("accepts a first-Run interruption boundary without inventing an assistant message", () => {
+    const interrupted = Buffer.from(
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "pi-interrupted-session-test",
+          cwd: "/workspace",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "user-entry",
+          parentId: null,
+          timestamp: "2026-07-28T00:00:00.000Z",
+          message: { role: "user", content: [{ type: "text", text: "interrupted request" }] },
+        }),
+        JSON.stringify({
+          type: "custom_message",
+          id: "interruption-entry",
+          parentId: "user-entry",
+          timestamp: "2026-07-28T00:00:01.000Z",
+          customType: "agent-dock.run_interrupted",
+          content: "<run_interrupted>Run failed.</run_interrupted>",
+          display: false,
+        }),
+        "",
+      ].join("\n"),
+    );
+
+    expect(() => validatePiSessionSnapshot(interrupted)).not.toThrow();
   });
 });

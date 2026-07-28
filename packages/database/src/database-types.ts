@@ -52,6 +52,7 @@ export type ApprovalKind = "confirm" | "select" | "input" | "editor";
 export type ApprovalOutcome = "approved" | "rejected" | "cancelled";
 export type ArtifactKind =
   | "pi_session_snapshot"
+  | "pi_interrupted_session_snapshot"
   | "workspace_snapshot"
   | "tool_output"
   | "patch"

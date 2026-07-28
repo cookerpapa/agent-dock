@@ -433,6 +433,7 @@ describe("PiRpcTurnRunner integration", () => {
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-runner-cancel-test-"));
     const events: EventPublishMessage[] = [];
     const controller = new AbortController();
+    let interruptedCheckpoint: Uint8Array | undefined;
     try {
       await fakeModel.start();
       const runner = new PiRpcTurnRunner({
@@ -445,6 +446,10 @@ describe("PiRpcTurnRunner integration", () => {
           apiKey: FAKE_MODEL_API_KEY,
         }),
         turnTimeoutMs: 20_000,
+        onInterrupted: ({ piSession, reason }) => {
+          expect(reason).toBe("cancelled:user_request");
+          interruptedCheckpoint = piSession;
+        },
       });
 
       const running = runner.run(
@@ -476,6 +481,9 @@ describe("PiRpcTurnRunner integration", () => {
         payload: { reason: "user_request", forced: false },
       });
       await waitFor(() => fakeModel.observations[0]?.completion === "client_aborted");
+      const interruptedJsonl = Buffer.from(interruptedCheckpoint!).toString("utf8");
+      expect(interruptedJsonl).toContain('"role":"user"');
+      expect(interruptedJsonl).toContain('"customType":"agent-dock.run_interrupted"');
       expect(await readdir(workspace)).toEqual([]);
     } finally {
       await fakeModel.stop();

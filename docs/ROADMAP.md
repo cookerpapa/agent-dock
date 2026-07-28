@@ -29,6 +29,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Replace the operational inspector with a committed directory/file view.
 - [x] Separate platform administrator identity from tenant ownership.
 - [x] Remove the browser repository-import workflow.
+- [x] Preserve Pi-native failed/cancelled conversation branches without
+  promoting unsuccessful Workspace state.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
