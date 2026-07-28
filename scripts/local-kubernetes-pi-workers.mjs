@@ -297,19 +297,35 @@ async function imageExistsInK3d(image) {
     .catch(() => false);
 }
 
+async function pullPublicImage(image) {
+  const publicDockerConfig = join(runtimeDirectory, "kubernetes", "public-docker-config");
+  await mkdir(publicDockerConfig, { recursive: true, mode: 0o700 });
+  let lastError;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      await run("docker", ["pull", image], {
+        environment: childEnvironment({ DOCKER_CONFIG: publicDockerConfig }),
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, attempt * 2_000));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function importDockerImageIntoK3d(image, pull) {
   if (await imageExistsInK3d(image)) return;
   const importDirectory = join(runtimeDirectory, "kubernetes", "image-import");
-  const publicDockerConfig = join(runtimeDirectory, "kubernetes", "public-docker-config");
   await mkdir(importDirectory, { recursive: true, mode: 0o700 });
-  await mkdir(publicDockerConfig, { recursive: true, mode: 0o700 });
   if (pull) {
     // Public cluster bootstrap images do not require registry credentials. An
     // isolated config also avoids making local credential-helper availability a
     // prerequisite for an unattended cutover.
-    await run("docker", ["pull", image], {
-      environment: childEnvironment({ DOCKER_CONFIG: publicDockerConfig }),
-    });
+    await pullPublicImage(image);
   }
   const imageKey = image.replaceAll(/[^a-zA-Z0-9_.-]/gu, "-");
   const archive = join(importDirectory, `${String(process.pid)}-${imageKey}.tar`);

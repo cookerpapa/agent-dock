@@ -2877,3 +2877,6 @@
 - Added regression evidence for strict checkpoint media types, SDK completion
   and cancellation, maintenance-only runtime lifecycle, current-format tenant
   credentials and empty-Workspace project creation.
+- Deployment verification exposed transient Docker Hub TLS failures while
+  preloading pinned K3s system images. Public bootstrap pulls now use bounded
+  retries while retaining an isolated credential-free Docker configuration.
