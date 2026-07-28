@@ -150,8 +150,12 @@ async function registerTenant(index, suffix) {
   const api = new AgentDockApi(fetchFromProduction, body.apiToken);
   const model = await api.getModelConfiguration();
   assert.equal(model.mode, "real", `${tenantSlug} did not inherit the platform real model`);
-  const project = await api.createProject(`Multi-tenant model load ${suffix}`, { kind: "empty" });
-  const session = await api.createSession(project);
+  const project = await api.createProject(`Multi-tenant model load ${suffix}`);
+  const session = await api.createSession(
+    project.projectId,
+    project.workspaceId,
+    `Multi-tenant model load ${suffix}`,
+  );
   return {
     tenantSlug,
     tenantId: body.tenantId,

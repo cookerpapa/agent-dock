@@ -220,7 +220,11 @@ const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 const suffix = `${new Date().toISOString()}-${randomUUID().slice(0, 8)}`;
 const project = await api.createProject(`Parallel candidate acceptance ${suffix}`);
-const parent = await api.createSession(project);
+const parent = await api.createSession(
+  project.projectId,
+  project.workspaceId,
+  `Parallel candidate acceptance ${suffix}`,
+);
 const sessionsForCleanup = new Set([parent.sessionId]);
 const checkedAt = new Date().toISOString();
 

@@ -373,10 +373,12 @@ try {
   const candidates = await Promise.all(
     Array.from({ length: candidateCount }, async (_, index) => {
       const marker = `PI-POOL-${suffix.toUpperCase()}-${String(index + 1)}`;
-      const project = await api.createProject(`Pi Worker pool acceptance ${suffix}-${index + 1}`, {
-        kind: "empty",
-      });
-      const session = await api.createSession(project);
+      const project = await api.createProject(`Pi Worker pool acceptance ${suffix}-${index + 1}`);
+      const session = await api.createSession(
+        project.projectId,
+        project.workspaceId,
+        `Pi Worker pool acceptance ${suffix}-${index + 1}`,
+      );
       const turn = await runTurn(
         session.sessionId,
         `Remember this marker for my next message: ${marker}. Do not call tools. Reply exactly ACK.`,
@@ -417,10 +419,12 @@ try {
 
   const concurrent = await Promise.all(
     Array.from({ length: 4 }, async (_, index) => {
-      const concurrentProject = await api.createProject(`Pi pool lane ${index + 1} ${suffix}`, {
-        kind: "empty",
-      });
-      const concurrentSession = await api.createSession(concurrentProject);
+      const concurrentProject = await api.createProject(`Pi pool lane ${index + 1} ${suffix}`);
+      const concurrentSession = await api.createSession(
+        concurrentProject.projectId,
+        concurrentProject.workspaceId,
+        `Pi pool lane ${index + 1} ${suffix}`,
+      );
       const turn = await runTurn(
         concurrentSession.sessionId,
         [

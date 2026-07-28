@@ -635,8 +635,12 @@ const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 
 const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-const project = await api.createProject(`Cube production acceptance ${suffix}`, { kind: "empty" });
-const session = await api.createSession(project);
+const project = await api.createProject(`Cube production acceptance ${suffix}`);
+const session = await api.createSession(
+  project.projectId,
+  project.workspaceId,
+  `Cube production acceptance ${suffix}`,
+);
 let largeSession;
 
 try {
@@ -743,10 +747,12 @@ try {
     "Cube isolation acceptance tenant",
   );
   const foreignApi = new AgentDockApi(fetchFromProduction, registration.apiToken);
-  const foreignProject = await foreignApi.createProject(`Foreign Cube project ${suffix}`, {
-    kind: "empty",
-  });
-  const foreignSession = await foreignApi.createSession(foreignProject);
+  const foreignProject = await foreignApi.createProject(`Foreign Cube project ${suffix}`);
+  const foreignSession = await foreignApi.createSession(
+    foreignProject.projectId,
+    foreignProject.workspaceId,
+    `Cube foreign-tenant isolation ${suffix}`,
+  );
   await assert.rejects(
     api.getConversation(foreignSession.sessionId),
     (error) => error instanceof AgentDockApiError && error.status === 404,
@@ -756,7 +762,11 @@ try {
     (error) => error instanceof AgentDockApiError && error.status === 404,
   );
 
-  largeSession = await api.createSession(project);
+  largeSession = await api.createSession(
+    project.projectId,
+    project.workspaceId,
+    `Cube large-workspace acceptance ${suffix}`,
+  );
   const largeFirst = await runTurn(
     largeSession.sessionId,
     [
