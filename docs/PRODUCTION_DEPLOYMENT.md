@@ -36,10 +36,18 @@ test -r /dev/kvm -a -w /dev/kvm
 ```bash
 npm ci --ignore-scripts
 npm run dependencies:harden
-npm run cubesandbox:cluster-install
+npm run production:init
 npm run cubesandbox:init
+# Run this operator-only step from a root shell.
+npm run cubesandbox:cluster-install
 npm run production:deploy
 ```
+
+Run the initialization commands as the intended runtime owner. Only
+`cubesandbox:cluster-install` runs as root; when a custom
+`AGENT_DOCK_RUNTIME_DIRECTORY` is used, preserve that setting in the root
+shell. The two initialization commands are idempotent, so
+`production:deploy` validates and reuses the same private runtime.
 
 `production:deploy`:
 

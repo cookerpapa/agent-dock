@@ -173,8 +173,10 @@ file initialized.
 ```bash
 npm ci --ignore-scripts
 npm run dependencies:harden
-npm run cubesandbox:cluster-install
+npm run production:init
 npm run cubesandbox:init
+# Run this operator-only step from a root shell.
+npm run cubesandbox:cluster-install
 npm run production:deploy
 ```
 
