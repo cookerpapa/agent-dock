@@ -7,8 +7,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY scripts/harden-pi-dependencies.mjs scripts/harden-pi-dependencies.mjs
+COPY scripts/retry-npm-command.sh scripts/retry-npm-command.sh
 COPY spikes/pi-embedded-rehydrate/package.json spikes/pi-embedded-rehydrate/package.json
-RUN npm ci --omit=dev --ignore-scripts \
+RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
     && node scripts/harden-pi-dependencies.mjs \
     && node scripts/harden-pi-dependencies.mjs --check \
     && npm cache clean --force

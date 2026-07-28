@@ -3,9 +3,10 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY scripts/retry-npm-command.sh scripts/retry-npm-command.sh
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/web-ui/package.json packages/web-ui/package.json
-RUN npm ci --ignore-scripts
+RUN sh scripts/retry-npm-command.sh ci --ignore-scripts
 COPY packages/protocol/src packages/protocol/src
 COPY packages/web-ui/index.html packages/web-ui/index.html
 COPY packages/web-ui/src packages/web-ui/src

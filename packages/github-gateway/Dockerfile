@@ -3,11 +3,13 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY scripts/retry-npm-command.sh scripts/retry-npm-command.sh
 COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/github-gateway/tsconfig.json packages/github-gateway/tsconfig.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
+    && npm cache clean --force
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 
