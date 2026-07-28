@@ -297,6 +297,15 @@ async function imageExistsInK3d(image) {
     .catch(() => false);
 }
 
+async function waitForImageInK3d(image, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await imageExistsInK3d(image)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error(`K3s did not import image ${image} within ${String(timeoutMs)}ms`);
+}
+
 async function pullPublicImage(image) {
   const publicDockerConfig = join(runtimeDirectory, "kubernetes", "public-docker-config");
   await mkdir(publicDockerConfig, { recursive: true, mode: 0o700 });
@@ -329,20 +338,23 @@ async function importDockerImageIntoK3d(image, pull) {
   }
   const imageKey = image.replaceAll(/[^a-zA-Z0-9_.-]/gu, "-");
   const archive = join(importDirectory, `${String(process.pid)}-${imageKey}.tar`);
-  const remoteArchive = `/tmp/agent-dock-${String(process.pid)}-${imageKey}.tar`;
+  const remoteArchive =
+    `/var/lib/rancher/k3s/agent/images/agent-dock-${String(process.pid)}-${imageKey}.tar`;
   try {
     await run("docker", ["save", "--output", archive, image]);
-    await run("docker", ["cp", archive, `${serverContainer}:${remoteArchive}`]);
     await run("docker", [
       "exec",
       serverContainer,
-      "ctr",
-      "--namespace",
-      "k8s.io",
-      "images",
-      "import",
-      remoteArchive,
+      "mkdir",
+      "-p",
+      "/var/lib/rancher/k3s/agent/images",
     ]);
+    await run("docker", ["cp", archive, `${serverContainer}:${remoteArchive}`]);
+    // K3s watches this directory and imports archives through its air-gap
+    // pipeline. Unlike a bare `ctr images import`, that path pins the image so
+    // kubelet garbage collection cannot remove a bootstrap or worker image
+    // before the next Pod needs it.
+    await waitForImageInK3d(image);
   } finally {
     await rm(archive, { force: true });
     await run("docker", ["exec", serverContainer, "rm", "-f", remoteArchive]).catch(
