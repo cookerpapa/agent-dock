@@ -234,6 +234,25 @@ try {
   assert(/^Python 3\.11\./.test(versions.get("python") ?? ""), "Python 3.11 was missing");
   assert(/^git version 2\./.test(versions.get("git") ?? ""), "Git 2 evidence was missing");
 
+  const pythonTls = await jsonRequest(
+    baseUrl,
+    "/v1/operation",
+    operationEnvelope(activationId, randomUUID(), {
+      operation: "bash.exec",
+      command: 'python3 -c "import ssl; print(ssl.OPENSSL_VERSION)"',
+      cwd: "/workspace",
+      timeoutMs: 10_000,
+    }),
+  );
+  const pythonTlsOutput =
+    pythonTls.type === "tool_sandbox.operation_result" && pythonTls.operation === "bash.exec"
+      ? Buffer.from(pythonTls.output, "base64").toString("utf8")
+      : "";
+  assert(
+    pythonTls.exitCode === 0 && /^OpenSSL 3\./.test(pythonTlsOutput),
+    "Python TLS support was not usable inside the Cube template",
+  );
+
   const source =
     "def counting_sort(values):\n" +
     "    if not values:\n" +
@@ -288,7 +307,7 @@ try {
     "/v1/operation",
     operationEnvelope(activationId, randomUUID(), {
       operation: "bash.exec",
-      command: `node -e ${JSON.stringify(envdProbeProgram)}`,
+      command: `test ! -e /usr/bin/envd && node -e ${JSON.stringify(envdProbeProgram)}`,
       cwd: "/workspace",
       timeoutMs: 5_000,
     }),
