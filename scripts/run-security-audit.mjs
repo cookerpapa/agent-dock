@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,6 +72,8 @@ for (const [name, vulnerability] of Object.entries(auditReport.vulnerabilities ?
     .map((item) => item.url);
   const isExactShrinkwrapFalsePositive =
     remediation !== undefined &&
+    JSON.parse(readFileSync(join(repositoryRoot, remediation.node, "package.json"), "utf8"))
+      .version === remediation.installedVersion &&
     Array.isArray(vulnerability.nodes) &&
     vulnerability.nodes.length === 1 &&
     vulnerability.nodes[0] === remediation.node &&

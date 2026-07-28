@@ -26,6 +26,14 @@ COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/tool-sandbox/package.json packages/tool-sandbox/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN npm install --global npm@12.0.1 \
+    && npm pack --pack-destination /tmp brace-expansion@5.0.8 \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+    && install -d /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+    && tar -xzf /tmp/brace-expansion-5.0.8.tgz \
+        --strip-components=1 \
+        -C /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+    && rm /tmp/brace-expansion-5.0.8.tgz \
+    && node -e 'if (require("/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json").version !== "5.0.8") process.exit(1)' \
     && npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 
