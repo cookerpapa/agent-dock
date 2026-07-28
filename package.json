@@ -13,6 +13,7 @@
   ],
   "dependencies": {
     "pi-security-brace-expansion": "npm:brace-expansion@5.0.8",
+    "pi-security-minimatch": "npm:minimatch@10.2.6",
     "pi-security-protobufjs": "npm:protobufjs@7.6.5",
     "platform-security-find-my-way": "npm:find-my-way@9.7.0"
   },

@@ -14,6 +14,12 @@ const securityPatches = [
     targetRoot: join(piRoot, "node_modules", "brace-expansion"),
   },
   {
+    name: "minimatch",
+    sourcePackage: "pi-security-minimatch",
+    version: "10.2.6",
+    targetRoot: join(piRoot, "node_modules", "minimatch"),
+  },
+  {
     name: "protobufjs",
     sourcePackage: "pi-security-protobufjs",
     version: "7.6.5",
