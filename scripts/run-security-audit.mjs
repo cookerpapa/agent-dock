@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const auditEnvironment = { ...process.env };
+if (auditEnvironment.npm_config_cache !== undefined) {
+  delete auditEnvironment.NPM_CONFIG_CACHE;
+}
 
 execFileSync(
   process.execPath,
@@ -17,6 +21,7 @@ execFileSync(
 const auditResult = spawnSync(npmCommand, ["audit", "--json", "--audit-level=high"], {
   cwd: repositoryRoot,
   encoding: "utf8",
+  env: auditEnvironment,
   maxBuffer: 16 * 1024 * 1024,
 });
 

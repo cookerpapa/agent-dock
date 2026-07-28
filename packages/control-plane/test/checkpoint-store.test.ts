@@ -748,6 +748,7 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
         revision: savedRevision,
         piSession: piSession("remote"),
         workspace: workspace("remote"),
+        workspaceRevision: createHash("sha256").update(workspace("remote")).digest("hex"),
       });
 
       const session = await isolatedDatabase

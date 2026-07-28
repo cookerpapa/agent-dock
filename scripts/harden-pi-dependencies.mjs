@@ -1,4 +1,4 @@
-import { cpSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,7 @@ const securityPatches = [
     sourcePackage: "pi-security-minimatch",
     version: "10.2.6",
     targetRoot: join(piRoot, "node_modules", "minimatch"),
+    declaringPackageRoot: piRoot,
   },
   {
     name: "protobufjs",
@@ -37,6 +38,7 @@ const securityPatches = [
       "node_modules",
       "find-my-way",
     ),
+    declaringPackageRoot: join(repositoryRoot, "node_modules", "@nestjs", "platform-fastify"),
   },
 ];
 
@@ -66,12 +68,20 @@ function inspectPatches() {
   return securityPatches.map((securityPatch) => ({
     ...securityPatch,
     actualVersion: readPackageVersion(securityPatch.targetRoot),
+    declaredVersion:
+      securityPatch.declaringPackageRoot === undefined
+        ? null
+        : JSON.parse(readFileSync(join(securityPatch.declaringPackageRoot, "package.json"), "utf8"))
+            .dependencies?.[securityPatch.name],
   }));
 }
 
 let installedPatches = inspectPatches();
 const missingPatches = installedPatches.filter(
-  (securityPatch) => securityPatch.actualVersion !== securityPatch.version,
+  (securityPatch) =>
+    securityPatch.actualVersion !== securityPatch.version ||
+    (securityPatch.declaringPackageRoot !== undefined &&
+      securityPatch.declaredVersion !== securityPatch.version),
 );
 
 if (missingPatches.length > 0 && checkOnly) {
@@ -79,7 +89,7 @@ if (missingPatches.length > 0 && checkOnly) {
     `Pi security dependencies are not hardened: ${missingPatches
       .map(
         (securityPatch) =>
-          `${securityPatch.name}=${securityPatch.actualVersion ?? "missing"} (expected ${securityPatch.version})`,
+          `${securityPatch.name}=${securityPatch.actualVersion ?? "missing"} declared=${securityPatch.declaredVersion ?? "unchanged"} (expected ${securityPatch.version})`,
       )
       .join(", ")}`,
   );
@@ -87,36 +97,51 @@ if (missingPatches.length > 0 && checkOnly) {
 
 if (missingPatches.length > 0) {
   for (const securityPatch of missingPatches) {
-    const sourceRoot = join(repositoryRoot, "node_modules", securityPatch.sourcePackage);
-    const sourceVersion = readPackageVersion(sourceRoot);
-    if (sourceVersion !== securityPatch.version) {
-      throw new Error(
-        `Missing verified Pi security patch source ${securityPatch.sourcePackage}@${securityPatch.version}`,
-      );
+    if (securityPatch.actualVersion !== securityPatch.version) {
+      const sourceRoot = join(repositoryRoot, "node_modules", securityPatch.sourcePackage);
+      const sourceVersion = readPackageVersion(sourceRoot);
+      if (sourceVersion !== securityPatch.version) {
+        throw new Error(
+          `Missing verified Pi security patch source ${securityPatch.sourcePackage}@${securityPatch.version}`,
+        );
+      }
+
+      const targetRoot = securityPatch.targetRoot;
+      const temporaryRoot = `${targetRoot}.agent-dock-${process.pid}`;
+      rmSync(temporaryRoot, { recursive: true, force: true });
+      cpSync(sourceRoot, temporaryRoot, {
+        recursive: true,
+        verbatimSymlinks: true,
+      });
+      const copiedVersion = readPackageVersion(temporaryRoot);
+      if (copiedVersion !== securityPatch.version) {
+        rmSync(temporaryRoot, { recursive: true, force: true });
+        throw new Error(
+          `Copied Pi security patch ${securityPatch.name} has version ${copiedVersion ?? "missing"}`,
+        );
+      }
+      rmSync(targetRoot, { recursive: true, force: true });
+      renameSync(temporaryRoot, targetRoot);
     }
 
-    const targetRoot = securityPatch.targetRoot;
-    const temporaryRoot = `${targetRoot}.agent-dock-${process.pid}`;
-    rmSync(temporaryRoot, { recursive: true, force: true });
-    cpSync(sourceRoot, temporaryRoot, {
-      recursive: true,
-      verbatimSymlinks: true,
-    });
-    const copiedVersion = readPackageVersion(temporaryRoot);
-    if (copiedVersion !== securityPatch.version) {
-      rmSync(temporaryRoot, { recursive: true, force: true });
-      throw new Error(
-        `Copied Pi security patch ${securityPatch.name} has version ${copiedVersion ?? "missing"}`,
-      );
+    if (
+      securityPatch.declaringPackageRoot !== undefined &&
+      securityPatch.declaredVersion !== securityPatch.version
+    ) {
+      const packagePath = join(securityPatch.declaringPackageRoot, "package.json");
+      const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+      packageJson.dependencies[securityPatch.name] = securityPatch.version;
+      writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
     }
-    rmSync(targetRoot, { recursive: true, force: true });
-    renameSync(temporaryRoot, targetRoot);
   }
   installedPatches = inspectPatches();
 }
 
 const incorrectPatches = installedPatches.filter(
-  (securityPatch) => securityPatch.actualVersion !== securityPatch.version,
+  (securityPatch) =>
+    securityPatch.actualVersion !== securityPatch.version ||
+    (securityPatch.declaringPackageRoot !== undefined &&
+      securityPatch.declaredVersion !== securityPatch.version),
 );
 if (incorrectPatches.length > 0) {
   throw new Error(

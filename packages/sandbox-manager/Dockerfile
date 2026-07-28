@@ -1,4 +1,23 @@
-FROM kopia/kopia@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e AS kopia
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS kopia-builder
+
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+WORKDIR /src
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    go mod download github.com/kopia/kopia@v0.23.1 \
+    && cp -R /go/pkg/mod/github.com/kopia/kopia@v0.23.1 /src/kopia \
+    && chmod -R u+w /src/kopia
+WORKDIR /src/kopia
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    go mod edit -require=google.golang.org/grpc@v1.82.1 \
+    && go mod download \
+    && mkdir -p /out \
+    && go build -trimpath -tags nohtmlui \
+      -ldflags="-s -w -X github.com/kopia/kopia/repo.BuildVersion=0.23.1 -X github.com/kopia/kopia/repo.BuildInfo=72ec08fd8edb86c67ed27099bf1b955e1f308ffa -X github.com/kopia/kopia/repo.BuildGitHubRepo=kopia/kopia" \
+      -o /out/kopia \
+      github.com/kopia/kopia \
+    && /out/kopia --version | grep -F "0.23.1"
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dependencies
 WORKDIR /app
@@ -19,7 +38,7 @@ LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=kopia /bin/kopia /usr/local/bin/kopia
+COPY --from=kopia-builder /out/kopia /usr/local/bin/kopia
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
 COPY package.json package-lock.json ./

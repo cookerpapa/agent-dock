@@ -17,11 +17,16 @@ RUN npm run build --workspace @agent-dock/web-ui
 FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS caddy-builder
 
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    go install -trimpath \
+    go mod init agent-dock.invalid/caddy-build \
+    && go get github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+    && go get google.golang.org/grpc@v1.82.1 \
+    && go build -trimpath \
       -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4-agent-dock" \
-      github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
+      -o /go/bin/caddy \
+      github.com/caddyserver/caddy/v2/cmd/caddy \
     && /go/bin/caddy version | grep -F "v2.11.4-agent-dock"
 
 FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40

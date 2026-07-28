@@ -66,8 +66,18 @@ COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestrati
 COPY packages/temporal-orchestration/src packages/temporal-orchestration/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
+# The prebuilt bridge ships its full Rust source tree and Cargo.lock. They are
+# build inputs, not runtime inputs, and make scanners report optional crates
+# that are not linked into the shipped Node native module.
 RUN cd /app/packages/sandbox-manager \
     && node --input-type=module --eval "await import('undici')" \
+    && rm -rf /app/node_modules/@temporalio/core-bridge/bridge-macros \
+              /app/node_modules/@temporalio/core-bridge/sdk-core \
+              /app/node_modules/@temporalio/core-bridge/scripts \
+              /app/node_modules/@temporalio/core-bridge/src \
+              /app/node_modules/@temporalio/core-bridge/ts \
+    && rm -f /app/node_modules/@temporalio/core-bridge/Cargo.lock \
+             /app/node_modules/@temporalio/core-bridge/Cargo.toml \
     && rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 

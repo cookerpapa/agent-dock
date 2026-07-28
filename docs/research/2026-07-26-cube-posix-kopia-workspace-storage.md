@@ -46,11 +46,18 @@ authority inside one trusted, narrow data-mover service. Tenant isolation is
 enforced before a Kopia command is constructed, and untrusted sandboxes never
 connect to that service or repository.
 
-The production image pins the official multi-architecture manifest:
+The production image builds the no-UI CLI from the immutable `v0.23.1` source
+tag. The upstream release image was originally pinned, but its binary was
+compiled before fixes for Go `CVE-2026-39822` and gRPC
+`GHSA-hrxh-6v49-42gf` were available. The source rebuild uses the already
+pinned Go `1.26.5` builder and raises only gRPC to its first fixed release:
 
 ```text
-kopia/kopia:0.23.1
-sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e
+kopia/kopia source: v0.23.1
+release commit: 72ec08fd8edb86c67ed27099bf1b955e1f308ffa
+google.golang.org/grpc: v1.82.1
+golang:1.26.5-alpine3.23
+sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc
 ```
 
 Sources:
@@ -75,4 +82,3 @@ deduplication. Build only:
 
 PostgreSQL remains the only Workspace-head authority. Cube and Kopia do not
 become competing schedulers or metadata authorities.
-
