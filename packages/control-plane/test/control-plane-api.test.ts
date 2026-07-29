@@ -44,6 +44,7 @@ import {
   PostgresSessionEventNotifications,
   PostgresSandboxCheckpointStore,
   PostgresRunAttemptPhaseObserver,
+  SessionEventHub,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
   type TurnCancellationBackend,
@@ -2256,6 +2257,7 @@ describe.sequential("single-user durable turn intake API", () => {
         tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
+        eventNotificationPublisher: sessionEventNotifications!,
       });
 
       const liveAbort = new AbortController();
@@ -2273,6 +2275,7 @@ describe.sequential("single-user durable turn intake API", () => {
         turnId: accepted.turnId,
         attempt: 1,
       });
+      application.get(SessionEventHub).notifyThrough(IDS.tenant, piSession.sessionId, 4);
       const liveEvents = await liveEventsPromise;
       liveAbort.abort();
 
@@ -2280,12 +2283,11 @@ describe.sequential("single-user durable turn intake API", () => {
         "turn.started",
         "assistant.text.delta",
         "assistant.text.delta",
-        "turn.completed",
       ]);
-      expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3, 4]);
-      expect(acknowledgedSequences.at(-1)).toBe(4);
+      expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3]);
+      expect(acknowledgedSequences.at(-1)).toBe(3);
       expect(acknowledgedSequences.length).toBeLessThan(4);
-      expect(persistedSequencesBeforeAck).toEqual([1, 2, 3, 4]);
+      expect(persistedSequencesBeforeAck).toEqual([1, 2, 3]);
       expect(rejectedGap).toBe(true);
       expect(rejectedStaleFence).toBe(true);
       expect(liveEvents.map((event) => event.id)).toEqual([1, 2, 3, 4]);
@@ -2314,7 +2316,7 @@ describe.sequential("single-user durable turn intake API", () => {
             message.payload.fencingToken === 1,
         ),
       ).toBe(true);
-      expect(durableStatesAtPublish).toHaveLength(4);
+      expect(durableStatesAtPublish).toHaveLength(3);
       expect(
         durableStatesAtPublish.every(
           (state) =>
@@ -2359,8 +2361,8 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("session_id", "=", piSession.sessionId)
         .orderBy("seq", "asc")
         .execute();
-      expect(persistedEvents).toEqual(
-        events.map((message) => ({
+      expect(persistedEvents).toEqual([
+        ...events.map((message) => ({
           seq: String(message.payload.event.seq),
           type: message.payload.event.type,
           agent_id: "root",
@@ -2368,7 +2370,15 @@ describe.sequential("single-user durable turn intake API", () => {
           lease_id: message.payload.leaseId,
           fencing_token: String(message.payload.fencingToken),
         })),
-      );
+        {
+          seq: "4",
+          type: "turn.completed",
+          agent_id: "root",
+          command_id: accepted.commandId,
+          lease_id: events[0]?.payload.leaseId,
+          fencing_token: "1",
+        },
+      ]);
       const cursor = await database
         .selectFrom("session_event_cursors")
         .select(["last_persisted_seq", "acknowledged_through_seq"])
@@ -2447,18 +2457,18 @@ describe.sequential("single-user durable turn intake API", () => {
           .executeTakeFirstOrThrow(),
       ).toEqual({ source_event_count: 4 });
 
-      const duplicate = structuredClone(events[3]!);
+      const duplicate = structuredClone(events[2]!);
       duplicate.messageId = globalThis.crypto.randomUUID();
       await expect(durableEventStore.ingest(duplicate)).resolves.toMatchObject({
         type: "event.ack",
-        payload: { acknowledgedThroughSeq: 4 },
+        payload: { acknowledgedThroughSeq: 3 },
       });
-      const conflict = structuredClone(events[3]!);
+      const conflict = structuredClone(events[2]!);
       conflict.messageId = globalThis.crypto.randomUUID();
-      if (conflict.payload.event.type !== "turn.completed") {
-        throw new Error("Expected terminal completion event");
+      if (conflict.payload.event.type !== "assistant.text.delta") {
+        throw new Error("Expected assistant text event");
       }
-      conflict.payload.event.payload.stopReason = "conflicting-redelivery";
+      conflict.payload.event.payload.text = "conflicting-redelivery";
       await expect(durableEventStore.ingest(conflict)).rejects.toMatchObject({
         code: "event_conflict",
       });
@@ -2757,47 +2767,7 @@ describe.sequential("single-user durable turn intake API", () => {
       const backend = new LocalSupervisorExecutionBackend({
         supervisor,
         leaseCoordinator,
-        eventIngestor: {
-          async ingest(value) {
-            const message = parseSupervisorToControlMessage(value);
-            const cancelledEvent =
-              message.type === "event.publish"
-                ? message.payload.event.type === "turn.cancelled"
-                  ? message.payload.event
-                  : undefined
-                : message.type === "event.publish_batch"
-                  ? message.payload.events.find((event) => event.type === "turn.cancelled")
-                  : undefined;
-            if (
-              cancelledEvent !== undefined &&
-              (message.type === "event.publish" || message.type === "event.publish_batch")
-            ) {
-              await expect(
-                durableEventStore.ingest({
-                  protocolVersion: 1,
-                  messageId: globalThis.crypto.randomUUID(),
-                  sentAt: message.sentAt,
-                  type: "event.publish",
-                  payload: {
-                    leaseId: message.payload.leaseId,
-                    fencingToken: message.payload.fencingToken,
-                    ...(message.payload.commandId === undefined
-                      ? {}
-                      : { commandId: message.payload.commandId }),
-                    event: {
-                      ...cancelledEvent,
-                      eventId: globalThis.crypto.randomUUID(),
-                      type: "turn.completed",
-                      payload: { stopReason: "late_completion" },
-                    },
-                  },
-                }),
-              ).rejects.toMatchObject({ code: "invalid_event" });
-              rejectedLateCompletion = true;
-            }
-            return durableEventStore.ingest(message);
-          },
-        },
+        eventIngestor: durableEventStore,
         onEvent(message) {
           events.push(message);
         },
@@ -2807,11 +2777,13 @@ describe.sequential("single-user durable turn intake API", () => {
         tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
+        eventNotificationPublisher: sessionEventNotifications!,
       });
       const cancellationDispatcher = new CancellationDispatcher({
         database,
         backend,
         leaseManager: leaseCoordinator,
+        eventNotificationPublisher: sessionEventNotifications!,
       });
 
       const liveAbort = new AbortController();
@@ -2832,6 +2804,30 @@ describe.sequential("single-user durable turn intake API", () => {
           fakeModel.activeRequests === 1
         );
       });
+      await waitForCondition(() => events.length === 1);
+      const startedPublication = events[0];
+      if (startedPublication === undefined) throw new Error("Expected a started event");
+      await expect(
+        durableEventStore.ingest({
+          protocolVersion: 1,
+          messageId: globalThis.crypto.randomUUID(),
+          sentAt: startedPublication.sentAt,
+          type: "event.publish",
+          payload: {
+            leaseId: startedPublication.payload.leaseId,
+            fencingToken: startedPublication.payload.fencingToken,
+            commandId: accepted.commandId,
+            event: {
+              ...startedPublication.payload.event,
+              eventId: globalThis.crypto.randomUUID(),
+              seq: 2,
+              type: "turn.completed",
+              payload: { stopReason: "late_completion" },
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_event" });
+      rejectedLateCompletion = true;
 
       const cancellationResponse = await http.inject({
         method: "POST",
@@ -2923,11 +2919,12 @@ describe.sequential("single-user durable turn intake API", () => {
         .executeTakeFirstOrThrow();
 
       const cancellationDispatch = cancellationDispatcher.dispatchNext();
-      const [cancellationResult, executionResult, liveEvents] = await Promise.all([
+      const [cancellationResult, executionResult] = await Promise.all([
         cancellationDispatch,
         execution,
-        liveEventsPromise,
       ]);
+      application.get(SessionEventHub).notifyThrough(IDS.tenant, cancellationSession.sessionId, 2);
+      const liveEvents = await liveEventsPromise;
       liveAbort.abort();
       expect(cancellationResult).toMatchObject({
         status: "cancelled",
@@ -2979,10 +2976,7 @@ describe.sequential("single-user durable turn intake API", () => {
       expect(cancellationState.acknowledgedAt).not.toBeNull();
       expect(cancellationState.completedAt).not.toBeNull();
       expect(cancellationState.publishedAt).not.toBeNull();
-      expect(events.map((message) => message.payload.event.type)).toEqual([
-        "turn.started",
-        "turn.cancelled",
-      ]);
+      expect(events.map((message) => message.payload.event.type)).toEqual(["turn.started"]);
       expect(rejectedLateCompletion).toBe(true);
       expect(events.every((message) => message.payload.commandId === accepted.commandId)).toBe(
         true,
@@ -3582,8 +3576,9 @@ describe.sequential("single-user durable turn intake API", () => {
         .select(["event_id", "seq", "type"])
         .where("session_id", "=", replaySession.sessionId)
         .execute();
-      expect(persistedBeforeReplay).toHaveLength(1);
+      expect(persistedBeforeReplay).toHaveLength(2);
       expect(persistedBeforeReplay[0]).toMatchObject({ seq: "1", type: "turn.started" });
+      expect(persistedBeforeReplay[1]).toMatchObject({ seq: "2", type: "turn.failed" });
 
       const restartedStore = new FileEventSpoolStore({ rootDirectory: spoolRoot });
       const restartedSupervisor = new LocalSandboxSupervisor({
@@ -3610,7 +3605,7 @@ describe.sequential("single-user durable turn intake API", () => {
           .select((expression) => expression.fn.countAll<string>().as("count"))
           .where("session_id", "=", replaySession.sessionId)
           .executeTakeFirstOrThrow(),
-      ).toEqual({ count: "1" });
+      ).toEqual({ count: "2" });
       await expect(
         new FileEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
           throw new Error("A drained spool must not publish");
@@ -3677,5 +3672,56 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(turnCount.count).toBe("0");
     expect(commandCount.count).toBe("0");
     expect(mailboxAfterFailure).toEqual(mailboxBeforeFailure);
+  });
+
+  it("does not expose a terminal event when the final settlement transaction rolls back", async () => {
+    const accepted = await acceptTurn(
+      "terminal-transaction-rollback",
+      "exercise the final settlement transaction",
+    );
+    const dispatcher = new OutboxDispatcher({
+      database,
+      tenantId: IDS.tenant,
+      backend: new DeterministicExecutionBackend([
+        { kind: "complete", stopReason: "prepared-result" },
+      ]),
+      eventNotificationPublisher: {
+        async publish() {
+          throw new Error("simulated terminal notification failure");
+        },
+      },
+    });
+
+    await expect(dispatcher.dispatchNext()).rejects.toThrow(
+      "simulated terminal notification failure",
+    );
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "acknowledged",
+      turnState: "running",
+      sessionState: "running",
+      stopReason: null,
+    });
+    expect(
+      await database
+        .selectFrom("session_events")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("turn_id", "=", accepted.turnId)
+        .where("type", "in", ["turn.completed", "turn.failed", "turn.cancelled"])
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
+    expect(
+      await database
+        .selectFrom("conversation_turn_projections")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
+    expect(
+      await database
+        .selectFrom("review_bundles")
+        .select((expression) => expression.fn.countAll<string>().as("count"))
+        .where("run_id", "=", accepted.runId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
   });
 });

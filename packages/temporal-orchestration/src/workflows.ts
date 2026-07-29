@@ -7,6 +7,8 @@ import {
   sleep,
 } from "@temporalio/workflow";
 import {
+  TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT,
+  TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT,
   validateTemporalRunWorkflowInput,
   type TemporalRunActivities,
   type TemporalRunActivityResult,
@@ -16,8 +18,8 @@ import {
 const MAX_DISPATCH_CYCLES_PER_HISTORY = 200;
 
 const COMMON_ACTIVITY_OPTIONS = {
-  startToCloseTimeout: "12 minutes",
-  scheduleToCloseTimeout: "30 minutes",
+  startToCloseTimeout: TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT,
+  scheduleToCloseTimeout: TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT,
   heartbeatTimeout: "20 seconds",
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   retry: {

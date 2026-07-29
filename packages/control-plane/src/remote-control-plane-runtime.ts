@@ -164,6 +164,9 @@ export async function createRemoteControlPlaneRuntime(
         database: options.database,
         sandboxId: identity.sandboxId,
         inventory: options.assignmentInventoryFactory(identity),
+        ...(options.sessionEventNotifications === undefined
+          ? {}
+          : { eventNotificationPublisher: options.sessionEventNotifications }),
       }),
   });
   const gateway = new SupervisorWebSocketGateway({

@@ -2880,3 +2880,30 @@
 - Deployment verification exposed transient Docker Hub TLS failures while
   preloading pinned K3s system images. Public bootstrap pulls now use bounded
   retries while retaining an isolated credential-free Docker configuration.
+
+## 2026-07-29 — Atomic terminal commit and hard-crash semantic recovery
+
+- Replaced Worker-authored public terminal events with a private
+  `command.result` prepared-result boundary. The completed result carries the
+  bounded Workspace patch, while Supervisor event ingestion rejects
+  `turn.completed`, `turn.failed` and `turn.cancelled`.
+- Added one shared terminal writer used by execution, cancellation and lost
+  assignment paths. It inserts the terminal event, advances event cursors,
+  materializes the conversation projection and emits the database wake hint
+  inside the same transaction that settles canonical Run state and checkpoint
+  heads.
+- Added a deterministic rollback test: failure of the terminal notification
+  rolls back Run/Turn settlement, terminal event, semantic projection and
+  Review Bundle together. The browser can no longer observe completion before
+  the authoritative commit.
+- Catchable failures still persist Pi-native interrupted JSONL. For SIGKILL,
+  OOM or node loss, the checkpoint loader finds canonical terminal projections
+  newer than the Pi checkpoint and injects one bounded hidden recovery message
+  containing accepted prompts, public assistant output and Tool boundaries.
+  Running/preparing Tools become `unknown`; raw thinking is not reconstructed.
+- Raised Temporal Activity start-to-close from 12 to 45 minutes and
+  schedule-to-close from 30 minutes to 3 hours. Supervisor configuration checks
+  that the Pi Turn, Sandbox request and five-minute settlement allowance fit
+  inside the outer Activity deadline.
+- Added protocol, checkpoint-store, Pi Session, remote WebSocket and full
+  Control Plane regression evidence for the new boundary.

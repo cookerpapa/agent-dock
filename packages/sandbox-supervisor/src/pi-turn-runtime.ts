@@ -2,6 +2,7 @@ import type {
   CancelTurnCommandMessage,
   EventPublishMessage,
   ExecuteTurnCommandMessage,
+  WorkspacePatch,
 } from "@agent-dock/protocol";
 
 export type PiModelRuntimeConfig = {
@@ -36,6 +37,7 @@ export type PiToolOutputArtifact = {
 
 export type PiTurnResult = {
   stopReason: string;
+  workspacePatch?: WorkspacePatch;
 };
 
 export type PiCancellationSignal = {

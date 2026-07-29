@@ -123,7 +123,6 @@ describe("PiSdkTurnRunner integration", () => {
         "turn.started",
         "assistant.text.delta",
         "assistant.text.delta",
-        "turn.completed",
       ]);
       expect(JSON.stringify(events)).not.toContain(FAKE_MODEL_API_KEY);
       expect(JSON.stringify(events)).not.toContain("Return the deterministic fake response.");
@@ -346,10 +345,7 @@ describe("PiSdkTurnRunner integration", () => {
         reason: "user_request",
         forced: false,
       });
-      expect(events.map((event) => event.payload.event.type)).toEqual([
-        "turn.started",
-        "turn.cancelled",
-      ]);
+      expect(events.map((event) => event.payload.event.type)).toEqual(["turn.started"]);
       await waitFor(() => fakeModel.observations[0]?.completion === "client_aborted");
       const interruptedJsonl = Buffer.from(interruptedCheckpoint!).toString("utf8");
       expect(interruptedJsonl).toContain('"role":"user"');

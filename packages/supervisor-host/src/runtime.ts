@@ -426,6 +426,7 @@ export class SupervisorHostRuntime {
           database: this.#database,
           backend: localBackend,
           leaseManager: leaseCoordinator,
+          eventNotificationPublisher: eventNotifications,
           claimOwnerId: `temporal:${identity.supervisorId}:${identity.bootId}`,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
@@ -433,6 +434,7 @@ export class SupervisorHostRuntime {
           database: this.#database,
           backend: localBackend,
           leaseManager: leaseCoordinator,
+          eventNotificationPublisher: eventNotifications,
         }),
       });
       this.#temporalWorker = temporalWorker;

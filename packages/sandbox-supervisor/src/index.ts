@@ -50,6 +50,7 @@ export {
   piInterruptionMessage,
   piSessionEntryIds,
 } from "./pi-interrupted-session.ts";
+export { appendPiDurableRecovery, PI_DURABLE_RECOVERY_CUSTOM_TYPE } from "./pi-durable-recovery.ts";
 
 export {
   PiSdkIsolationFailure,
@@ -115,6 +116,8 @@ export {
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
+  type PiDurableRecoverySuffix,
+  type PiDurableRecoveryTurn,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,

@@ -505,7 +505,12 @@ export class RemoteSupervisorExecutionBackend
     if (result.payload.status === "cancelled") {
       throw new TurnExecutionCancelledError(result.payload.reason, result.payload.forced);
     }
-    return { stopReason: result.payload.stopReason };
+    return {
+      stopReason: result.payload.stopReason,
+      ...(result.payload.workspacePatch === undefined
+        ? {}
+        : { workspacePatch: result.payload.workspacePatch }),
+    };
   }
 
   #cancellationResult(

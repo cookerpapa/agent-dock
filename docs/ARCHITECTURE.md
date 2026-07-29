@@ -77,7 +77,8 @@ A Worker slot executes one active Run:
 6. stream model and Tool events;
 7. commit the new Pi checkpoint after successful `agent_settled`, or an
    explicitly typed interrupted checkpoint after terminal failure/cancellation;
-8. dispose the in-memory AgentSession.
+8. return a private prepared result to the Control Plane;
+9. dispose the in-memory AgentSession.
 
 The Worker does not run user Bash locally. It has no Cube control credential,
 container runtime socket or writable shared tenant filesystem.
@@ -209,7 +210,8 @@ Browser POST prompt
   → model stream
   → batched durable events + SSE
   → Pi native checkpoint commit
-  → Run completed
+  → private prepared result
+  → atomic terminal event + Run commit
 ```
 
 Cube is never contacted.
@@ -279,11 +281,29 @@ The marker warns the Agent to inspect the Workspace because Tool side effects
 may be partial. Pre-execution dispatch failures do not create this checkpoint
 and may be retried without changing the conversation head.
 
+If the Worker is killed by `SIGKILL`, OOM or node loss, it cannot append that
+native interruption marker. The next Worker then restores the latest committed
+Pi checkpoint and appends one hidden, model-visible semantic recovery suffix
+derived from canonical PostgreSQL Turn projections newer than the checkpoint.
+The suffix contains the accepted prompt, public assistant text, Tool
+boundaries/results and canonical failure/cancellation state. An in-flight Tool
+is marked `unknown`; raw thinking is never reconstructed. The next Pi
+checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
+authority.
+
 ## 8. Event delivery
 
-Pi events enter a bounded local queue. Adjacent text deltas are coalesced and
-published in ordered batches. PostgreSQL commits each batch with a unique
-`(run_id, attempt_no, seq)` identity and returns a cumulative ACK.
+Pi non-terminal events enter a bounded local queue. Adjacent text deltas are
+coalesced and published in ordered batches. PostgreSQL commits each batch with
+a unique `(run_id, attempt_no, seq)` identity and returns a cumulative ACK.
+The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
+its private `command.result` is only a prepared result.
+
+The Control Plane creates the public terminal event in the same PostgreSQL
+transaction that settles Run/Attempt/command/turn/session state, advances
+checkpoint and Workspace heads, materializes the semantic transcript and
+emits the database wake notification. A browser terminal event therefore
+cannot get ahead of canonical business/checkpoint state.
 
 SSE uses the same durable event table:
 
@@ -338,6 +358,9 @@ immutable start snapshot.
 - Worker crash before Tool execution: Temporal retries on another Worker.
 - Worker crash with possible Tool side effect: old fence is revoked and the
   runtime is destroyed unless exact execution state is known.
+- Worker hard crash after durable output but before Pi JSONL persistence:
+  restore the prior Pi checkpoint plus the bounded semantic recovery suffix;
+  do not synthesize raw thinking or replay unknown Tool side effects.
 - Cube loss: restore the committed Workspace into a fresh activation.
 - object upload succeeds but DB commit fails: immutable orphan is garbage
   collected later.
@@ -371,5 +394,6 @@ not require changing the Worker execution contract.
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
 - [ADR-0064: Workspace checkpoints](adr/0064-cube-native-workspace-checkpoints.md)
 - [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
+- [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)
 
 Older ADRs and migrations are immutable history, not supported runtime choices.

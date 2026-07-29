@@ -362,5 +362,13 @@ extension-policy support would overstate the current boundary.
 - [x] Preserve failed/cancelled started Runs as typed Pi-native interrupted
   checkpoints with an explicit model-visible interruption boundary, while
   keeping Workspace commit success-only
+- [x] Move public terminal events from the Worker stream into the fenced final
+  Control Plane transaction and carry the Workspace patch only in the private
+  prepared result
+- [x] Recover canonical prompts/public output/Tool boundaries newer than the
+  last Pi checkpoint as one bounded hidden semantic suffix after SIGKILL, OOM
+  or node loss; keep raw thinking excluded and unknown Tools non-replayable
+- [x] Align the Temporal Activity deadline above the maximum Pi Turn, Sandbox
+  request and settlement/cleanup budget
 - [ ] Remove the time-bounded `quinn-proto` Trivy exception as soon as the
   Temporal TypeScript SDK publishes a core bridge containing 0.11.15 or newer

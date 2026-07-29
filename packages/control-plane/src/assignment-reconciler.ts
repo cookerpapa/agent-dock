@@ -17,6 +17,8 @@ import type {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
+import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =
@@ -32,6 +34,7 @@ export type AssignmentReconcilerOptions = {
   sandboxId: string;
   inventory: SandboxAssignmentInventory;
   clock?: () => Date;
+  eventNotificationPublisher?: SessionEventNotificationPublisher;
 };
 
 export type AssignmentReconciliationResult = {
@@ -134,6 +137,7 @@ export class AssignmentReconciler {
   readonly #sandboxId: string;
   readonly #inventory: SandboxAssignmentInventory;
   readonly #clock: () => Date;
+  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
 
   constructor(options: AssignmentReconcilerOptions) {
     if (options.sandboxId.trim().length === 0) {
@@ -143,6 +147,7 @@ export class AssignmentReconciler {
     this.#sandboxId = options.sandboxId;
     this.#inventory = options.inventory;
     this.#clock = options.clock ?? (() => new Date());
+    this.#eventNotificationPublisher = options.eventNotificationPublisher;
   }
 
   async reconcileExpiredAssignments(
@@ -651,6 +656,28 @@ export class AssignmentReconciler {
       .where("id", "=", candidate.sessionId)
       .where("state", "=", session.state)
       .executeTakeFirstOrThrow();
+    await commitTerminalTurnEvent(transaction, {
+      tenantId: session.tenant_id,
+      sessionId: candidate.sessionId,
+      turnId: turn.id,
+      commandId: executeCommand.id,
+      agentId: "root",
+      leaseId: candidate.leaseId,
+      fencingToken: candidate.fencingToken,
+      body: {
+        type: "turn.failed",
+        payload: {
+          code: ASSIGNMENT_LOST,
+          message: ASSIGNMENT_LOST_MESSAGE,
+          retryable: false,
+        },
+      },
+      now,
+      eventId: randomUUID(),
+      ...(this.#eventNotificationPublisher === undefined
+        ? {}
+        : { notificationPublisher: this.#eventNotificationPublisher }),
+    });
     await this.#deleteLease(transaction, candidate);
     return "settled";
   }

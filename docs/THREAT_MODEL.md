@@ -106,6 +106,20 @@ automatically treated as retry-safe. If execution outcome is ambiguous, the
 operation is marked unknown or the activation is destroyed and restored from
 the last committed Workspace.
 
+### Forged or prematurely visible terminal state
+
+The Worker event channel rejects `turn.completed`, `turn.failed` and
+`turn.cancelled`. A Worker can return only a private prepared result. The
+Control Plane creates the public terminal event inside the same transaction as
+Run/Attempt settlement, checkpoint/Workspace-head CAS and semantic projection.
+A crash or notification failure therefore rolls back both the terminal event
+and canonical state.
+
+After an uncatchable Worker loss, only canonical public projections newer than
+the last Pi checkpoint can enter the hidden recovery suffix. Raw model thinking
+is excluded and in-flight Tool outcomes are marked unknown, preventing
+untrusted partial output from becoming a claim that a side effect completed.
+
 ### Browser/admin confusion
 
 Tenant `owner` grants only tenant authority. A separate

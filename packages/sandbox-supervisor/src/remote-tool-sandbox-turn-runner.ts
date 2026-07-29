@@ -521,6 +521,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         ...(loadedCheckpoint?.piSession === undefined
           ? {}
           : { restorePiSession: loadedCheckpoint.piSession }),
+        ...(loadedCheckpoint?.recoverySuffix === undefined
+          ? {}
+          : { recoverySuffix: loadedCheckpoint.recoverySuffix }),
         onSettled,
         onInterrupted,
         ...(this.#requestTimeoutMs === undefined

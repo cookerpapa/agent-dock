@@ -4,6 +4,7 @@ import {
   AgentDockEventSchema,
   SessionStateSchema,
   TurnCancellationReasonSchema,
+  WorkspacePatchSchema,
 } from "./event-envelope.ts";
 import {
   NonNegativeSafeIntegerSchema,
@@ -319,6 +320,7 @@ const CompletedExecuteCommandResultPayloadSchema = Type.Object(
     commandKind: Type.Literal("turn.execute"),
     status: Type.Literal("completed"),
     stopReason: Type.String({ minLength: 1, maxLength: 256 }),
+    workspacePatch: Type.Optional(WorkspacePatchSchema),
   },
   { additionalProperties: false },
 );

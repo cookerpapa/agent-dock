@@ -3,6 +3,9 @@ export const TEMPORAL_RUN_TASK_QUEUE = "agent-dock-pi-runs-v1";
 export const TEMPORAL_DEFAULT_NAMESPACE = "agent-dock";
 export const TEMPORAL_RUN_WORKFLOW_ID_PREFIX = "agent-dock-run-v1-";
 export const TEMPORAL_WORKER_AFFINITY_TASK_QUEUE_PREFIX = "agent-dock-pi-worker-v1-";
+export const TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 45 * 60_000;
+export const TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT = "45 minutes";
+export const TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT = "3 hours";
 
 export type TemporalWorkerAffinity = {
   reservationId: string;

@@ -190,6 +190,19 @@ export class DurableEventStore implements DurableEventIngestor {
       throw new DurableEventStoreError("invalid_event", "Expected an event publication");
     }
     const publications = this.#publications(parsed);
+    if (
+      publications.some(
+        ({ payload }) =>
+          payload.event.type === "turn.completed" ||
+          payload.event.type === "turn.failed" ||
+          payload.event.type === "turn.cancelled",
+      )
+    ) {
+      throw new DurableEventStoreError(
+        "invalid_event",
+        "Terminal Turn events are committed only by the Control Plane",
+      );
+    }
     const first = publications[0];
     const last = publications.at(-1);
     if (first === undefined || last === undefined) {

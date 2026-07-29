@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT,
+  TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT,
+  TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
   temporalRunWorkflowId,
   temporalWorkerAffinityTaskQueue,
   validateTemporalRunWorkflowInput,
@@ -14,6 +17,15 @@ const INPUT = {
 };
 
 describe("Temporal orchestration contract", () => {
+  it("keeps the outer Activity deadline above the bounded Agent and Sandbox cleanup path", () => {
+    expect(TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT).toBe("45 minutes");
+    expect(TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS).toBe(45 * 60_000);
+    expect(TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT).toBe("3 hours");
+    expect(TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS).toBeGreaterThan(
+      15 * 60_000 + 15 * 60_000 + 5 * 60_000,
+    );
+  });
+
   it("keeps workflow history inputs to bounded durable references", () => {
     expect(validateTemporalRunWorkflowInput(INPUT)).toEqual(INPUT);
     expect(temporalRunWorkflowId(INPUT.runId)).toBe(`agent-dock-run-v1-${INPUT.runId}`);

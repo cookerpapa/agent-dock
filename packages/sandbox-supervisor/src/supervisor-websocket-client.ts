@@ -802,6 +802,9 @@ export class SupervisorWebSocketClient {
         result = this.#commandResult(entry, commit, {
           status: "completed",
           stopReason: execution.stopReason,
+          ...(execution.workspacePatch === undefined
+            ? {}
+            : { workspacePatch: execution.workspacePatch }),
         });
       } else {
         const cancellation = await entry.prepared.run();
@@ -836,7 +839,11 @@ export class SupervisorWebSocketClient {
     entry: RemotePreparedCommand,
     commit: CommandCommitMessage,
     outcome:
-      | { status: "completed"; stopReason: string }
+      | {
+          status: "completed";
+          stopReason: string;
+          workspacePatch?: import("@agent-dock/protocol").WorkspacePatch;
+        }
       | {
           status: "completed";
           reason: CancelTurnCommandMessage["payload"]["reason"];

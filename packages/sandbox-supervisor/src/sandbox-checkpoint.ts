@@ -5,6 +5,7 @@ import {
   type EnvironmentValidationReport,
   type SandboxCheckpointBlob,
   type SandboxSettledCheckpoint,
+  type ConversationTurnTranscriptResource,
   type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
@@ -13,10 +14,23 @@ import { PiTurnError } from "./pi-turn-runtime.ts";
 import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 export type LoadedSandboxCheckpoint = {
-  revision: string;
+  revision?: string;
   piSession?: Uint8Array;
   workspace?: Uint8Array;
   workspaceRevision?: string;
+  recoverySuffix?: PiDurableRecoverySuffix;
+};
+
+export type PiDurableRecoveryTurn = {
+  turnId: string;
+  input: string;
+  transcript: ConversationTurnTranscriptResource;
+};
+
+export type PiDurableRecoverySuffix = {
+  checkpointThroughSequence: number;
+  recoveredThroughSequence: number;
+  turns: readonly PiDurableRecoveryTurn[];
 };
 
 export type CapturedSandboxCheckpoint = {
@@ -231,8 +245,19 @@ export function validateLoadedCheckpoint(
   checkpoint: LoadedSandboxCheckpoint | undefined,
 ): LoadedSandboxCheckpoint | undefined {
   if (checkpoint === undefined) return undefined;
-  if (checkpoint.revision.length < 1 || checkpoint.revision.length > 256) {
+  if (
+    checkpoint.revision !== undefined &&
+    (checkpoint.revision.length < 1 || checkpoint.revision.length > 256)
+  ) {
     throw checkpointError("Checkpoint revision is invalid");
+  }
+  if (
+    checkpoint.revision === undefined &&
+    (checkpoint.piSession !== undefined ||
+      checkpoint.workspace !== undefined ||
+      checkpoint.workspaceRevision !== undefined)
+  ) {
+    throw checkpointError("Checkpoint revision is missing");
   }
   const restoredPiSession = checkpoint.piSession;
   if (restoredPiSession !== undefined) validatePiSessionSnapshot(restoredPiSession);
@@ -247,7 +272,44 @@ export function validateLoadedCheckpoint(
     throw checkpointError("Workspace checkpoint metadata is incomplete");
   }
   if (checkpoint.workspace !== undefined && checkpoint.workspaceRevision === undefined) {
-    return { ...checkpoint, workspaceRevision: sha256(checkpoint.workspace) };
+    return {
+      ...checkpoint,
+      workspaceRevision: sha256(checkpoint.workspace),
+      ...(checkpoint.recoverySuffix === undefined
+        ? {}
+        : { recoverySuffix: validateRecoverySuffix(checkpoint.recoverySuffix) }),
+    };
   }
-  return checkpoint;
+  return {
+    ...checkpoint,
+    ...(checkpoint.recoverySuffix === undefined
+      ? {}
+      : { recoverySuffix: validateRecoverySuffix(checkpoint.recoverySuffix) }),
+  };
+}
+
+function validateRecoverySuffix(suffix: PiDurableRecoverySuffix): PiDurableRecoverySuffix {
+  if (
+    !Number.isSafeInteger(suffix.checkpointThroughSequence) ||
+    suffix.checkpointThroughSequence < 0 ||
+    !Number.isSafeInteger(suffix.recoveredThroughSequence) ||
+    suffix.recoveredThroughSequence <= suffix.checkpointThroughSequence ||
+    suffix.turns.length < 1 ||
+    suffix.turns.length > 32
+  ) {
+    throw checkpointError("Pi durable recovery suffix is invalid");
+  }
+  for (const turn of suffix.turns) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        turn.turnId,
+      ) ||
+      turn.input.length < 1 ||
+      Buffer.byteLength(turn.input, "utf8") > 100_000 ||
+      turn.transcript.throughSequence > suffix.recoveredThroughSequence
+    ) {
+      throw checkpointError("Pi durable recovery turn is invalid");
+    }
+  }
+  return suffix;
 }

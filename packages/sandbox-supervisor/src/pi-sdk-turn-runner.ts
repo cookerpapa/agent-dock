@@ -26,7 +26,9 @@ import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { appendPiInterruption } from "./pi-interrupted-session.ts";
+import { appendPiDurableRecovery } from "./pi-durable-recovery.ts";
 import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
+import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
 import {
   PiTurnCancelledError,
   PiTurnError,
@@ -56,6 +58,7 @@ export type PiSdkTurnRunnerOptions = {
   idGenerator?: () => string;
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
+  recoverySuffix?: PiDurableRecoverySuffix;
   onSettled?: (checkpoint: PiSettledCheckpoint) => Promise<void> | void;
   onInterrupted?: (checkpoint: PiInterruptedCheckpoint) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiToolOutputCapture) => Promise<PiToolOutputArtifact>;
@@ -319,7 +322,6 @@ export class PiSdkTurnRunner {
     let eventChain = Promise.resolve();
     let fatalError: Error | undefined;
     let cancellationError: PiTurnCancelledError | undefined;
-    let cancellationEvent: EventPublishMessage | undefined;
     let cancellationTask: Promise<void> | undefined;
     let removeAbortListener: (() => void) | undefined;
     let isolationFailure: PiSdkIsolationFailure | undefined;
@@ -409,10 +411,9 @@ export class PiSdkTurnRunner {
       return candidate;
     };
 
-    const settleCancellation = (error: PiTurnCancelledError, event: EventPublishMessage): void => {
+    const settleCancellation = (error: PiTurnCancelledError): void => {
       if (cancellationError !== undefined) return;
       cancellationError = error;
-      cancellationEvent = event;
       fatalError = error;
       terminal.reject(error);
     };
@@ -422,6 +423,43 @@ export class PiSdkTurnRunner {
       if (outcome.kind === "ignored") return;
       if (outcome.kind === "invalid") {
         throw new PiTurnError("pi_protocol_error", outcome.reason, false);
+      }
+      if (outcome.kind === "settled") {
+        if (outcome.result.status === "completed") {
+          if (this.#options.onSettled !== undefined) {
+            const persistedSessionFile = runtime?.session.sessionFile;
+            const piSession =
+              persistedSessionFile === undefined
+                ? undefined
+                : await readFile(persistedSessionFile).catch(() => undefined);
+            if (piSession === undefined) {
+              throw new PiTurnError(
+                "checkpoint_capture_failed",
+                "Pi did not produce a readable settled session snapshot",
+                true,
+              );
+            }
+            await this.#options.onSettled({ piSession });
+          }
+          const workspacePatch = await this.#options.collectWorkspacePatch?.();
+          terminal.resolve({
+            stopReason: outcome.result.stopReason,
+            ...(workspacePatch === undefined ? {} : { workspacePatch }),
+          });
+          return;
+        }
+        if (outcome.result.status === "cancelled") {
+          await captureInterruptedConversation(`cancelled:${outcome.result.reason}`);
+          settleCancellation(
+            new PiTurnCancelledError(outcome.result.reason, outcome.result.forced),
+          );
+          return;
+        }
+        await captureInterruptedConversation(`failed:${outcome.result.code}`);
+        terminal.reject(
+          new PiTurnError(outcome.result.code, outcome.result.message, outcome.result.retryable),
+        );
+        return;
       }
       let publicEvent = outcome.event;
       if (
@@ -461,58 +499,8 @@ export class PiSdkTurnRunner {
           };
         }
       }
-      if (publicEvent.type === "turn.completed") {
-        if (this.#options.onSettled !== undefined) {
-          const persistedSessionFile = runtime?.session.sessionFile;
-          const piSession =
-            persistedSessionFile === undefined
-              ? undefined
-              : await readFile(persistedSessionFile).catch(() => undefined);
-          if (piSession === undefined) {
-            throw new PiTurnError(
-              "checkpoint_capture_failed",
-              "Pi did not produce a readable settled session snapshot",
-              true,
-            );
-          }
-          await this.#options.onSettled({ piSession });
-        }
-        if (this.#options.collectWorkspacePatch !== undefined) {
-          const workspacePatch = await this.#options.collectWorkspacePatch();
-          if (workspacePatch !== undefined) {
-            publicEvent = {
-              ...publicEvent,
-              payload: { ...publicEvent.payload, workspacePatch },
-            };
-          }
-        }
-      }
-      if (publicEvent.type === "turn.failed") {
-        await captureInterruptedConversation(`failed:${publicEvent.payload.code}`);
-      } else if (publicEvent.type === "turn.cancelled") {
-        await captureInterruptedConversation(`cancelled:${publicEvent.payload.reason}`);
-      }
       const envelope = eventMessage(publicEvent);
-      if (publicEvent.type === "turn.cancelled") {
-        settleCancellation(
-          new PiTurnCancelledError(publicEvent.payload.reason, publicEvent.payload.forced),
-          envelope,
-        );
-        return;
-      }
       await publishEvent(envelope);
-      if (!outcome.terminal) return;
-      if (publicEvent.type === "turn.completed") {
-        terminal.resolve({ stopReason: publicEvent.payload.stopReason });
-      } else if (publicEvent.type === "turn.failed") {
-        terminal.reject(
-          new PiTurnError(
-            publicEvent.payload.code,
-            publicEvent.payload.message,
-            publicEvent.payload.retryable,
-          ),
-        );
-      }
     };
 
     const enqueue = (event: AgentSessionEvent): void => {
@@ -621,6 +609,9 @@ export class PiSdkTurnRunner {
         this.#options.restorePiSession === undefined
           ? SessionManager.create(workspaceDirectory, sessionDirectory)
           : SessionManager.open(sessionFile, sessionDirectory, workspaceDirectory);
+      if (this.#options.recoverySuffix !== undefined) {
+        appendPiDurableRecovery(sessionManager, this.#options.recoverySuffix);
+      }
       baseEntryIds = new Set(sessionManager.getEntries().map((entry) => entry.id));
       runtime = await createAgentSessionRuntime(createRuntime, {
         cwd: workspaceDirectory,
@@ -677,20 +668,18 @@ export class PiSdkTurnRunner {
             if (cancellationError !== undefined || fatalError !== undefined) return;
           }
           const forced = eventAdapter.forceCancellation(cancellation.reason);
-          if (forced.kind !== "mapped" || forced.event.type !== "turn.cancelled") {
+          if (forced.kind !== "settled" || forced.result.status !== "cancelled") {
             throw new PiTurnError(
               "pi_protocol_error",
-              "Pi SDK cancellation did not create a terminal event",
+              "Pi SDK cancellation did not create a terminal result",
               false,
             );
           }
           isolationFailure = new PiSdkIsolationFailure(
             "Pi SDK did not settle within the cancellation grace period",
           );
-          settleCancellation(
-            new PiTurnCancelledError(cancellation.reason, true),
-            eventMessage(forced.event),
-          );
+          await captureInterruptedConversation(`cancelled:${forced.result.reason}`);
+          settleCancellation(new PiTurnCancelledError(forced.result.reason, forced.result.forced));
         })().catch((error: unknown) => {
           fail(error instanceof Error ? error : new Error(String(error)));
         });
@@ -726,13 +715,6 @@ export class PiSdkTurnRunner {
       if (cancellationTask !== undefined) await cancellationTask.catch(() => undefined);
       flushPendingText();
       await eventChain.catch(() => undefined);
-      if (cancellationEvent !== undefined) {
-        try {
-          await publishEvent(cancellationEvent);
-        } catch (error: unknown) {
-          runError ??= error;
-        }
-      }
       removeAbortListener?.();
       unsubscribe?.();
       if (runtime !== undefined) {

@@ -489,12 +489,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
             ),
           );
           if (runnerCalls === 1) {
-            await publishEvent(
-              eventMessage(
-                command,
-                factory.next({ type: "turn.completed", payload: { stopReason: "first-owner" } }),
-              ),
-            );
             return { stopReason: "first-owner" };
           }
           cancellableRunnerStarted = true;
@@ -506,15 +500,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
           const cancellation = signal.reason as {
             reason: CancelTurnCommandMessage["payload"]["reason"];
           };
-          await publishEvent(
-            eventMessage(
-              command,
-              factory.next({
-                type: "turn.cancelled",
-                payload: { reason: cancellation.reason, forced: false },
-              }),
-            ),
-          );
           throw new PiTurnCancelledError(cancellation.reason, false);
         },
       },
@@ -669,9 +654,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
       expect(runnerCalls).toBe(2);
       expect(eventMessages.map((message) => message.payload.event.type)).toEqual([
         "turn.started",
-        "turn.completed",
         "turn.started",
-        "turn.cancelled",
       ]);
     } finally {
       await secondClient?.stop();
@@ -737,12 +720,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
             eventMessage(
               command,
               factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
-            ),
-          );
-          await publishEvent(
-            eventMessage(
-              command,
-              factory.next({ type: "turn.completed", payload: { stopReason: "reconnected" } }),
             ),
           );
           return { stopReason: "reconnected" };
@@ -825,10 +802,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
         commandId: seeded.accepted.commandId,
       });
       expect(runCalls).toBe(1);
-      expect(eventMessages.map((message) => message.payload.event.type)).toEqual([
-        "turn.started",
-        "turn.completed",
-      ]);
+      expect(eventMessages.map((message) => message.payload.event.type)).toEqual(["turn.started"]);
       expect(await lifecycle(seeded)).toMatchObject({
         commandState: "completed",
         turnState: "completed",
@@ -863,12 +837,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
           eventMessage(
             command,
             factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
-          ),
-        );
-        await publishEvent(
-          eventMessage(
-            command,
-            factory.next({ type: "turn.completed", payload: { stopReason: "remote-stop" } }),
           ),
         );
         return { stopReason: "remote-stop" };
@@ -929,7 +897,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
       expect(observed[1]?.state.publishedAt).not.toBeNull();
       expect(network.eventMessages.map((message) => message.payload.event.type)).toEqual([
         "turn.started",
-        "turn.completed",
       ]);
       expect(
         await database
@@ -1026,15 +993,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
         };
         expect(cancellation.kind).toBe("agent-dock.turn-cancellation");
         observedCancellation = { reason: cancellation.reason, forced: false };
-        await publishEvent(
-          eventMessage(
-            command,
-            factory.next({
-              type: "turn.cancelled",
-              payload: { reason: cancellation.reason, forced: false },
-            }),
-          ),
-        );
         throw new PiTurnCancelledError(cancellation.reason, false);
       },
     };
@@ -1071,7 +1029,6 @@ describe.sequential("remote two-phase supervisor execution", () => {
       expect(observedCancellation).toEqual({ reason: "user_request", forced: false });
       expect(network.eventMessages.map((message) => message.payload.event.type)).toEqual([
         "turn.started",
-        "turn.cancelled",
       ]);
       expect(await lifecycle(seeded)).toMatchObject({
         commandState: "completed",

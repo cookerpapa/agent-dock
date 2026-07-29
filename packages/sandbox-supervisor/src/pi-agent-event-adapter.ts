@@ -11,7 +11,15 @@ type AssistantStopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 type TurnCancellationReason = CancelTurnCommandMessage["payload"]["reason"];
 
 export type PiAgentEventAdapterOutcome =
-  | { kind: "mapped"; event: AgentDockEvent; terminal: boolean }
+  | { kind: "mapped"; event: AgentDockEvent; terminal: false }
+  | {
+      kind: "settled";
+      terminal: true;
+      result:
+        | { status: "completed"; stopReason: AssistantStopReason }
+        | { status: "failed"; code: string; message: string; retryable: boolean }
+        | { status: "cancelled"; reason: TurnCancellationReason; forced: boolean };
+    }
   | { kind: "ignored"; sourceType: string }
   | { kind: "invalid"; sourceType: string; reason: string };
 
@@ -433,45 +441,44 @@ export class PiAgentEventAdapter {
       }
       if (this.#lastAssistantStopReason === "error") {
         return {
-          kind: "mapped",
+          kind: "settled",
           terminal: true,
-          event: this.#eventFactory.next({
-            type: "turn.failed",
-            payload: { code: "model_error", message: "Model request failed", retryable: true },
-          }),
+          result: {
+            status: "failed",
+            code: "model_error",
+            message: "Model request failed",
+            retryable: true,
+          },
         };
       }
       if (this.#lastAssistantStopReason === "aborted") {
         return {
-          kind: "mapped",
+          kind: "settled",
           terminal: true,
-          event: this.#eventFactory.next({
-            type: "turn.failed",
-            payload: { code: "turn_aborted", message: "Turn was aborted", retryable: false },
-          }),
+          result: {
+            status: "failed",
+            code: "turn_aborted",
+            message: "Turn was aborted",
+            retryable: false,
+          },
         };
       }
       if (this.#lastAssistantStopReason === undefined) {
         return {
-          kind: "mapped",
+          kind: "settled",
           terminal: true,
-          event: this.#eventFactory.next({
-            type: "turn.failed",
-            payload: {
-              code: "pi_protocol_error",
-              message: "Pi settled without an assistant result",
-              retryable: false,
-            },
-          }),
+          result: {
+            status: "failed",
+            code: "pi_protocol_error",
+            message: "Pi settled without an assistant result",
+            retryable: false,
+          },
         };
       }
       return {
-        kind: "mapped",
+        kind: "settled",
         terminal: true,
-        event: this.#eventFactory.next({
-          type: "turn.completed",
-          payload: { stopReason: this.#lastAssistantStopReason },
-        }),
+        result: { status: "completed", stopReason: this.#lastAssistantStopReason },
       };
     }
 
@@ -488,12 +495,9 @@ export class PiAgentEventAdapter {
 
   #cancelled(reason: TurnCancellationReason, forced: boolean): PiAgentEventAdapterOutcome {
     return {
-      kind: "mapped",
+      kind: "settled",
       terminal: true,
-      event: this.#eventFactory.next({
-        type: "turn.cancelled",
-        payload: { reason, forced },
-      }),
+      result: { status: "cancelled", reason, forced },
     };
   }
 }

@@ -14,6 +14,7 @@ import {
   type CancelTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { randomUUID } from "node:crypto";
 import type {
   TurnExecutionAcknowledgement,
   TurnExecutionLeaseManager,
@@ -24,6 +25,8 @@ import {
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
+import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -122,6 +125,8 @@ export type CancellationDispatcherOptions = {
   retryDelayMs?: number;
   maxAttempts?: number;
   supervisorAffinity?: SupervisorDispatchAffinity;
+  idGenerator?: () => string;
+  eventNotificationPublisher?: SessionEventNotificationPublisher;
 };
 
 type ClaimedCancellation = {
@@ -161,16 +166,6 @@ function safeDate(clock: () => Date): Date {
     throw new TypeError("cancellation dispatcher clock must return a valid Date");
   }
   return value;
-}
-
-function safePositiveInteger(value: string, name: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new CancellationDispatcherInvariantError(
-      `${name} is outside the supported integer range`,
-    );
-  }
-  return parsed;
 }
 
 function parseCancellationPayload(value: Record<string, unknown>): {
@@ -225,6 +220,8 @@ export class CancellationDispatcher {
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
   readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
+  readonly #idGenerator: () => string;
+  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
 
   constructor(options: CancellationDispatcherOptions) {
     this.#database = options.database;
@@ -245,6 +242,8 @@ export class CancellationDispatcher {
       options.supervisorAffinity === undefined
         ? undefined
         : validateSupervisorDispatchAffinity(options.supervisorAffinity);
+    this.#idGenerator = options.idGenerator ?? randomUUID;
+    this.#eventNotificationPublisher = options.eventNotificationPublisher;
   }
 
   async dispatchNext(): Promise<CancellationDispatchNextResult> {
@@ -702,30 +701,6 @@ export class CancellationDispatcher {
         );
       }
 
-      const terminalEvent = await transaction
-        .selectFrom("session_events")
-        .select(["payload", "lease_id", "fencing_token"])
-        .where("tenant_id", "=", claim.request.target.tenantId)
-        .where("session_id", "=", claim.request.target.sessionId)
-        .where("turn_id", "=", claim.request.target.turnId)
-        .where("command_id", "=", claim.request.target.commandId)
-        .where("type", "=", "turn.cancelled")
-        .orderBy("seq", "desc")
-        .limit(1)
-        .executeTakeFirst();
-      if (
-        terminalEvent === undefined ||
-        terminalEvent.payload.reason !== result.reason ||
-        terminalEvent.payload.forced !== result.forced ||
-        terminalEvent.lease_id !== acknowledgement.leaseId ||
-        safePositiveInteger(terminalEvent.fencing_token, "terminal event fence") !==
-          acknowledgement.fencingToken
-      ) {
-        throw new CancellationDispatcherInvariantError(
-          "Cancellation termination confirmation lacks its durable terminal event",
-        );
-      }
-
       await this.#leaseManager.assertCurrent(
         transaction,
         claim.request.target,
@@ -800,6 +775,24 @@ export class CancellationDispatcher {
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
       expectOne(sessionUpdate.numUpdatedRows, "settling a cancelled session");
+      await commitTerminalTurnEvent(transaction, {
+        tenantId: claim.request.target.tenantId,
+        sessionId: claim.request.target.sessionId,
+        turnId: claim.request.target.turnId,
+        commandId: claim.request.target.commandId,
+        agentId: "root",
+        leaseId: acknowledgement.leaseId,
+        fencingToken: acknowledgement.fencingToken,
+        body: {
+          type: "turn.cancelled",
+          payload: { reason: result.reason, forced: result.forced },
+        },
+        now,
+        eventId: this.#idGenerator(),
+        ...(this.#eventNotificationPublisher === undefined
+          ? {}
+          : { notificationPublisher: this.#eventNotificationPublisher }),
+      });
 
       await this.#leaseManager.releaseCurrent(
         transaction,

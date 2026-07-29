@@ -54,14 +54,14 @@ describe("PiAgentEventAdapter", () => {
       event: { seq: 12, type: "assistant.text.delta", payload: { text: "hello" } },
     });
     expect(settled).toMatchObject({
-      kind: "mapped",
+      kind: "settled",
       terminal: true,
-      event: { seq: 13, type: "turn.completed", payload: { stopReason: "stop" } },
+      result: { status: "completed", stopReason: "stop" },
     });
     expect(JSON.stringify([started, delta, settled])).not.toContain("must-not-pass");
   });
 
-  it("maps provider failure to a safe terminal event", () => {
+  it("maps provider failure to a safe private terminal result", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });
     adapter.adapt({
@@ -75,17 +75,19 @@ describe("PiAgentEventAdapter", () => {
     const settled = adapter.adapt({ type: "agent_settled" });
 
     expect(settled).toMatchObject({
-      kind: "mapped",
+      kind: "settled",
       terminal: true,
-      event: {
-        type: "turn.failed",
-        payload: { code: "model_error", message: "Model request failed", retryable: true },
+      result: {
+        status: "failed",
+        code: "model_error",
+        message: "Model request failed",
+        retryable: true,
       },
     });
     expect(JSON.stringify(settled)).not.toContain("must-not-pass");
   });
 
-  it("maps an expected Pi abort to a public cancellation instead of failure", () => {
+  it("maps an expected Pi abort to a private cancellation result", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });
     adapter.requestCancellation("user_request");
@@ -95,12 +97,9 @@ describe("PiAgentEventAdapter", () => {
     });
 
     expect(adapter.adapt({ type: "agent_settled" })).toMatchObject({
-      kind: "mapped",
+      kind: "settled",
       terminal: true,
-      event: {
-        type: "turn.cancelled",
-        payload: { reason: "user_request", forced: false },
-      },
+      result: { status: "cancelled", reason: "user_request", forced: false },
     });
   });
 
@@ -109,9 +108,9 @@ describe("PiAgentEventAdapter", () => {
     adapter.adapt({ type: "agent_start" });
 
     expect(adapter.forceCancellation("shutdown")).toMatchObject({
-      kind: "mapped",
+      kind: "settled",
       terminal: true,
-      event: { type: "turn.cancelled", payload: { reason: "shutdown", forced: true } },
+      result: { status: "cancelled", reason: "shutdown", forced: true },
     });
     expect(adapter.adapt({ type: "agent_settled" })).toMatchObject({ kind: "invalid" });
   });

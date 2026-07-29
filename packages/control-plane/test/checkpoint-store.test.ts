@@ -440,6 +440,130 @@ async function insertCompletedEvent(
     .execute();
 }
 
+async function activateSecondTurnAfterHardCrash(targetDatabase: Kysely<Database>): Promise<void> {
+  const now = new Date();
+  await targetDatabase.transaction().execute(async (transaction) => {
+    await transaction.deleteFrom("session_leases").where("session_id", "=", IDS.session).execute();
+    await transaction
+      .updateTable("turns")
+      .set({
+        state: "failed",
+        failure_code: "assignment_lost",
+        failure_message: "The Worker disappeared before saving Pi state",
+        failure_retryable: true,
+        settled_at: now,
+      })
+      .where("id", "=", IDS.turn1)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("turns")
+      .set({ state: "running", started_at: now })
+      .where("id", "=", IDS.turn2)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("commands")
+      .set({ state: "acknowledged", acknowledged_at: now })
+      .where("id", "=", IDS.command2)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("sessions")
+      .set({ state: "running", last_fencing_token: 2 })
+      .where("id", "=", IDS.session)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("session_leases")
+      .values({
+        session_id: IDS.session,
+        lease_id: IDS.lease2,
+        sandbox_id: IDS.sandbox,
+        fencing_token: 2,
+        valid_until: new Date(now.valueOf() + 60_000),
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("run_attempts")
+      .values({
+        id: IDS.attempt2,
+        tenant_id: IDS.tenant,
+        run_id: IDS.run2,
+        attempt_number: 1,
+        state: "running",
+        claim_owner_id: "checkpoint-test",
+        claim_expires_at: new Date(now.valueOf() + 60_000),
+        sandbox_id: IDS.sandbox,
+        lease_id: IDS.lease2,
+        fencing_token: 2,
+        checkpoint_revision: null,
+        failure_code: null,
+        failure_message: null,
+        failure_retryable: null,
+        provisioning_at: now,
+        restoring_at: now,
+        running_at: now,
+        checkpointing_at: null,
+        last_heartbeat_at: now,
+        settled_at: null,
+        claimed_at: now,
+        created_at: now,
+        updated_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({
+        state: "running",
+        current_attempt_id: IDS.attempt2,
+        attempt_count: 1,
+        started_at: now,
+      })
+      .where("id", "=", IDS.run2)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .insertInto("conversation_turn_projections")
+      .values({
+        turn_id: IDS.turn1,
+        tenant_id: IDS.tenant,
+        session_id: IDS.session,
+        schema_version: 1,
+        through_seq: 3,
+        source_event_count: 3,
+        transcript: {
+          schemaVersion: 1,
+          throughSequence: 3,
+          startedSequence: 1,
+          terminalSequence: 3,
+          stopReason: null,
+          failure: {
+            code: "assignment_lost",
+            message: "The Worker disappeared before saving Pi state",
+            retryable: true,
+          },
+          cancellation: null,
+          workspacePatch: null,
+          items: [
+            {
+              kind: "text",
+              text: "I began changing the repository.",
+              firstSequence: 2,
+              lastSequence: 2,
+            },
+            {
+              kind: "tool",
+              toolCallId: "hard-crash-call",
+              toolName: "bash",
+              input: { command: "npm test" },
+              status: "running",
+              firstSequence: 2,
+              startedAt: now.toISOString(),
+            },
+          ],
+        },
+        projected_at: now,
+      })
+      .executeTakeFirstOrThrow();
+  });
+}
+
 beforeAll(async () => {
   pglite = await PGlite.create();
   socketServer = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
@@ -777,6 +901,64 @@ describe("PostgreSQL interrupted conversation checkpoint store", () => {
       await rm(isolatedObjectRoot, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+describe("PostgreSQL hard-crash semantic recovery", () => {
+  it("returns a durable semantic suffix when no newer Pi JSONL checkpoint exists", async () => {
+    const isolatedPglite = await PGlite.create();
+    const isolatedSocket = new PGLiteSocketServer({
+      db: isolatedPglite,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const isolatedObjectRoot = await mkdtemp(
+      resolve(tmpdir(), "agent-dock-hard-crash-checkpoint-test-"),
+    );
+    let isolatedDatabase: Kysely<Database> | undefined;
+    try {
+      await isolatedSocket.start();
+      isolatedDatabase = createDatabase({
+        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
+        maxConnections: 2,
+      });
+      await runMigrations(isolatedDatabase, "up");
+      await seed(isolatedDatabase);
+      await activateSecondTurnAfterHardCrash(isolatedDatabase);
+      const store = new PostgresSandboxCheckpointStore({
+        database: isolatedDatabase,
+        objectStore: new FileCheckpointObjectStore({ rootDirectory: isolatedObjectRoot }),
+      });
+
+      await expect(store.load(command(2))).resolves.toEqual({
+        recoverySuffix: {
+          checkpointThroughSequence: 0,
+          recoveredThroughSequence: 3,
+          turns: [
+            expect.objectContaining({
+              turnId: IDS.turn1,
+              input: "turn one",
+              transcript: expect.objectContaining({
+                throughSequence: 3,
+                failure: expect.objectContaining({ code: "assignment_lost" }),
+                items: expect.arrayContaining([
+                  expect.objectContaining({
+                    kind: "tool",
+                    toolCallId: "hard-crash-call",
+                    status: "running",
+                  }),
+                ]),
+              }),
+            }),
+          ],
+        },
+      });
+    } finally {
+      await isolatedDatabase?.destroy();
+      await isolatedSocket.stop();
+      await isolatedPglite.close();
+      await rm(isolatedObjectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 type S3IntegrationConfiguration = {

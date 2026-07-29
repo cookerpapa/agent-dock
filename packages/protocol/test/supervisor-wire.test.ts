@@ -338,6 +338,11 @@ describe("supervisor/control-plane wire protocol", () => {
         commandKind: "turn.execute",
         status: "completed",
         stopReason: "stop",
+        workspacePatch: {
+          format: "unified_diff",
+          patch: "diff --git a/example.ts b/example.ts\n",
+          truncated: false,
+        },
       },
     } as const;
     const cancelled = {

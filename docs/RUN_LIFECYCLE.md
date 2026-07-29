@@ -144,11 +144,14 @@ At `agent_settled`:
    additionally stages an immutable Workspace version and append-only
    environment validation bound to the current Run/Attempt, parent version,
    artifact hashes, lease, and fence.
-6. The terminal settlement transaction advances the checkpoint and current
+6. The Worker returns a private prepared result. It does not publish a public
+   terminal event.
+7. One terminal settlement transaction advances the checkpoint and current
    Workspace-version pointers with session-version/Run/Attempt/lease/fence CAS,
-   settles the staged version, and records the Attempt revision. A failure
-   abandons the staged version and restores the previous settled pointers.
-7. `turn.completed` is durably published as the commit marker.
+   settles the staged version, records the Attempt revision, materializes the
+   semantic transcript and inserts `turn.completed`. A failure abandons the
+   staged version and restores the previous settled pointers. The event and
+   business/checkpoint state commit or roll back together.
 8. Manager revokes the Run capability. A successful exact-Session warm release
    retains the running guest for the bounded idle TTL, but no Tool Worker or
    prior Run authority remains. A later Run must present a higher fence and
@@ -212,7 +215,7 @@ reconciliation.
 | Temporal service loss | accepted Runs remain in PostgreSQL; persisted Workflow history resumes after service recovery |
 | Supervisor management socket loss | same boot reconnects for liveness; it is not the Run-matching channel |
 | Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
-| Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay |
+| Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay; canonical public events newer than the last Pi checkpoint become a bounded semantic recovery suffix |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
 | Source Cube VM or local POSIX copy destroyed after checkpoint | Data Mover restores the committed Kopia snapshot, then the next higher-fence Attempt creates a fresh base-template VM |
 | Cube execution node/disk loss | recover on a node that mounts the shared POSIX path; the Kopia repository, not the node copy, is authoritative |

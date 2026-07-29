@@ -5,6 +5,7 @@ import {
   MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
+  parseConversationTurnTranscriptResource,
   parseEnvironmentValidationReport,
 } from "@agent-dock/protocol";
 import {
@@ -15,6 +16,7 @@ import {
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
+  type PiDurableRecoverySuffix,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,
@@ -81,6 +83,7 @@ type ArtifactReference = {
 
 type CheckpointMetadata = {
   piSession?: ArtifactReference;
+  piSessionThroughSequence: number;
   workspace?: ArtifactReference;
   revision: string;
   workspaceRevision?: string;
@@ -426,7 +429,13 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     const metadata = await this.#database.transaction().execute(async (transaction) => {
       return this.#loadMetadata(transaction, command, validDate(this.#clock));
     });
-    if (metadata === undefined) return undefined;
+    const recoverySuffix = await this.#loadRecoverySuffix(
+      command,
+      metadata?.piSessionThroughSequence ?? 0,
+    );
+    if (metadata === undefined) {
+      return recoverySuffix === undefined ? undefined : { recoverySuffix };
+    }
 
     const [piState, workspace] = await Promise.all([
       metadata.piSession === undefined
@@ -459,6 +468,73 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       ...(metadata.workspaceRevision === undefined
         ? {}
         : { workspaceRevision: metadata.workspaceRevision }),
+      ...(recoverySuffix === undefined ? {} : { recoverySuffix }),
+    };
+  }
+
+  async #loadRecoverySuffix(
+    command: ExecuteTurnCommandMessage,
+    checkpointThroughSequence: number,
+  ): Promise<PiDurableRecoverySuffix | undefined> {
+    const rows = await this.#database
+      .selectFrom("conversation_turn_projections as projection")
+      .innerJoin("turns as turn_row", (join) =>
+        join
+          .onRef("turn_row.tenant_id", "=", "projection.tenant_id")
+          .onRef("turn_row.session_id", "=", "projection.session_id")
+          .onRef("turn_row.id", "=", "projection.turn_id"),
+      )
+      .select([
+        "projection.turn_id as turnId",
+        "projection.through_seq as throughSequence",
+        "projection.transcript",
+        "turn_row.input_text as input",
+      ])
+      .where("projection.tenant_id", "=", command.payload.tenantId)
+      .where("projection.session_id", "=", command.payload.sessionId)
+      .where("projection.through_seq", ">", String(checkpointThroughSequence))
+      .where("turn_row.id", "!=", command.payload.turnId)
+      .where("turn_row.state", "in", ["completed", "failed", "cancelled"])
+      .orderBy("projection.through_seq", "asc")
+      .limit(33)
+      .execute();
+    if (rows.length === 0) return undefined;
+    if (rows.length > 32) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_recovery_overflow",
+        "Too many terminal Turns exist beyond the Pi checkpoint",
+        false,
+      );
+    }
+    const turns = rows.map((row) => {
+      if (row.input === null || row.input.length === 0) {
+        throw new SandboxCheckpointStoreError(
+          "checkpoint_recovery_invalid",
+          "A recoverable Turn has no accepted prompt",
+          false,
+        );
+      }
+      return {
+        turnId: row.turnId,
+        input: row.input,
+        transcript: parseConversationTurnTranscriptResource(row.transcript),
+      };
+    });
+    const recoveredThroughSequence = Number(rows.at(-1)!.throughSequence);
+    if (
+      !Number.isSafeInteger(recoveredThroughSequence) ||
+      recoveredThroughSequence <= checkpointThroughSequence
+    ) {
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_recovery_invalid",
+        "Pi recovery event sequence is invalid",
+        false,
+      );
+    }
+    return {
+      checkpointThroughSequence,
+      recoveredThroughSequence,
+      turns,
     };
   }
 
@@ -921,13 +997,18 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
                 .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
                 .onRef("terminal_event.session_id", "=", "artifact.session_id")
                 .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
-                .on("terminal_event.type", "=", "turn.completed"),
+                .on("terminal_event.type", "in", [
+                  "turn.completed",
+                  "turn.failed",
+                  "turn.cancelled",
+                ]),
             )
             .select([
               "artifact.object_key",
               "artifact.sha256",
               "artifact.size_bytes",
               "artifact.media_type",
+              "terminal_event.seq as terminal_seq",
             ])
             .where("artifact.tenant_id", "=", command.payload.tenantId)
             .where("artifact.session_id", "=", command.payload.sessionId)
@@ -941,6 +1022,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
                 expression.and([
                   expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
                   expression("terminal.state", "in", ["failed", "cancelled"]),
+                  expression("terminal_event.type", "in", ["turn.failed", "turn.cancelled"]),
                 ]),
               ]),
             )
@@ -959,13 +1041,14 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
             .onRef("terminal_event.session_id", "=", "artifact.session_id")
             .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
-            .on("terminal_event.type", "=", "turn.completed"),
+            .on("terminal_event.type", "in", ["turn.completed", "turn.failed", "turn.cancelled"]),
         )
         .select([
           "artifact.object_key",
           "artifact.sha256",
           "artifact.size_bytes",
           "artifact.media_type",
+          "terminal_event.seq as terminal_seq",
         ])
         .where("artifact.tenant_id", "=", command.payload.tenantId)
         .where("artifact.session_id", "=", command.payload.sessionId)
@@ -978,6 +1061,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             expression.and([
               expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
               expression("terminal.state", "in", ["failed", "cancelled"]),
+              expression("terminal_event.type", "in", ["turn.failed", "turn.cancelled"]),
             ]),
           ]),
         )
@@ -1071,6 +1155,10 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             },
           }),
       ...(workspaceReference === undefined ? {} : { workspace: workspaceReference }),
+      piSessionThroughSequence:
+        pi === undefined
+          ? 0
+          : safeSize(pi.terminal_seq ?? 0, Number.MAX_SAFE_INTEGER, "Pi event cursor"),
       revision: revisionFor(pi?.object_key, workspaceReference?.objectKey),
       ...(workspaceReference === undefined ? {} : { workspaceRevision: workspaceReference.sha256 }),
     };

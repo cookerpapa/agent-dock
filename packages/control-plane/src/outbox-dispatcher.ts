@@ -16,7 +16,11 @@ import {
   parseEnvironmentRuntimeSnapshot,
   parseTurnCommandOutboxPayload,
 } from "@agent-dock/protocol";
-import type { CancelTurnCommandMessage, TurnBudgetSnapshot } from "@agent-dock/protocol";
+import type {
+  CancelTurnCommandMessage,
+  TurnBudgetSnapshot,
+  WorkspacePatch,
+} from "@agent-dock/protocol";
 import type { EnvironmentRuntimeSnapshot, TraceContext } from "@agent-dock/protocol";
 import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
 import type { AgentDockMetrics } from "@agent-dock/observability";
@@ -28,6 +32,8 @@ import {
 } from "./supervisor-dispatch-affinity.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import { createCompletedRunReviewBundle } from "./review-bundle.ts";
+import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -87,6 +93,7 @@ export type TurnExecutionLifecycle = {
 
 export type TurnExecutionResult = {
   stopReason: string;
+  workspacePatch?: WorkspacePatch;
 };
 
 export interface TurnExecutionBackend {
@@ -204,6 +211,7 @@ export type OutboxDispatcherOptions = {
   leaseManager?: TurnExecutionLeaseManager;
   supervisorAffinity?: SupervisorDispatchAffinity;
   metrics?: AgentDockMetrics;
+  eventNotificationPublisher?: SessionEventNotificationPublisher;
 };
 
 type ClaimedTurn = {
@@ -320,6 +328,7 @@ export class OutboxDispatcher {
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
   readonly #metrics: AgentDockMetrics | undefined;
+  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
 
   constructor(options: OutboxDispatcherOptions) {
     this.#database = options.database;
@@ -350,6 +359,7 @@ export class OutboxDispatcher {
         ? undefined
         : validateSupervisorDispatchAffinity(options.supervisorAffinity);
     this.#metrics = options.metrics;
+    this.#eventNotificationPublisher = options.eventNotificationPublisher;
   }
 
   async dispatchNext(): Promise<DispatchNextResult> {
@@ -470,7 +480,7 @@ export class OutboxDispatcher {
             return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
           }
 
-          await this.#complete(claim, executionResult.stopReason, acknowledgement);
+          await this.#complete(claim, executionResult, acknowledgement);
           return {
             status: "completed",
             commandId: claim.request.commandId,
@@ -1268,7 +1278,7 @@ export class OutboxDispatcher {
 
   async #complete(
     claim: ClaimedTurn,
-    stopReason: string,
+    result: TurnExecutionResult,
     acknowledgement: TurnExecutionAcknowledgement | undefined,
   ): Promise<void> {
     const now = safeDate(this.#clock);
@@ -1317,7 +1327,7 @@ export class OutboxDispatcher {
           attemptState: "completed",
           reason: "execution_completed",
           now,
-          stopReason,
+          stopReason: result.stopReason,
           transitionId: this.#idGenerator(),
         },
       );
@@ -1339,7 +1349,7 @@ export class OutboxDispatcher {
         .updateTable("turns")
         .set({
           state: transitionTurn(rows.turnState, "completed"),
-          stop_reason: stopReason,
+          stop_reason: result.stopReason,
           settled_at: now,
         })
         .where("tenant_id", "=", claim.request.tenantId)
@@ -1361,6 +1371,30 @@ export class OutboxDispatcher {
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
       expectOne(sessionUpdate.numUpdatedRows, "settling a session");
+      const terminalEventId = this.#idGenerator();
+      await commitTerminalTurnEvent(transaction, {
+        tenantId: claim.request.tenantId,
+        sessionId: claim.request.sessionId,
+        turnId: claim.request.turnId,
+        commandId: claim.request.commandId,
+        agentId: "root",
+        leaseId: acknowledgement?.leaseId ?? terminalEventId,
+        fencingToken: acknowledgement?.fencingToken ?? claim.request.attemptNumber,
+        body: {
+          type: "turn.completed",
+          payload: {
+            stopReason: result.stopReason,
+            ...(result.workspacePatch === undefined
+              ? {}
+              : { workspacePatch: result.workspacePatch }),
+          },
+        },
+        now,
+        eventId: terminalEventId,
+        ...(this.#eventNotificationPublisher === undefined
+          ? {}
+          : { notificationPublisher: this.#eventNotificationPublisher }),
+      });
       await createCompletedRunReviewBundle(
         transaction,
         {
@@ -1373,7 +1407,7 @@ export class OutboxDispatcher {
           attemptId: claim.request.attemptId,
           environment: claim.request.environment,
         },
-        stopReason,
+        result.stopReason,
         now,
       );
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
@@ -1593,6 +1627,29 @@ export class OutboxDispatcher {
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
       expectOne(turnUpdate.numUpdatedRows, "failing a turn");
+      const terminalEventId = this.#idGenerator();
+      await commitTerminalTurnEvent(transaction, {
+        tenantId: claim.request.tenantId,
+        sessionId: claim.request.sessionId,
+        turnId: claim.request.turnId,
+        commandId: claim.request.commandId,
+        agentId: "root",
+        leaseId: acknowledgement?.leaseId ?? terminalEventId,
+        fencingToken: acknowledgement?.fencingToken ?? claim.request.attemptNumber,
+        body: {
+          type: "turn.failed",
+          payload: {
+            code: failure.code,
+            message: failure.safeMessage,
+            retryable: failure.retryable,
+          },
+        },
+        now,
+        eventId: terminalEventId,
+        ...(this.#eventNotificationPublisher === undefined
+          ? {}
+          : { notificationPublisher: this.#eventNotificationPublisher }),
+      });
 
       if (started) {
         if (rows.sessionState !== "running") {

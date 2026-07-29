@@ -1,8 +1,10 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS } from "@agent-dock/temporal-orchestration";
 
 const MAX_SECRET_BYTES = 16 * 1_024;
+const TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS = 5 * 60_000;
 
 export type SupervisorHostEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -251,6 +253,28 @@ export async function loadSupervisorHostConfig(
         ),
       }
     : {};
+  const sandboxManagerRequestTimeoutMs = integerValue(
+    environment,
+    "AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS",
+    300_000,
+    1_000,
+    900_000,
+  );
+  const piTurnTimeoutMs = integerValue(
+    environment,
+    "AGENT_DOCK_PI_TURN_TIMEOUT_MS",
+    10 * 60_000,
+    1_000,
+    15 * 60_000,
+  );
+  if (
+    piTurnTimeoutMs + sandboxManagerRequestTimeoutMs + TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS >
+    TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      "Pi Turn timeout plus Sandbox Manager timeout exceeds the Temporal Activity settlement budget",
+    );
+  }
   return {
     supervisorId: bounded(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
@@ -323,13 +347,7 @@ export async function loadSupervisorHostConfig(
       allowInsecureInternalHttp,
       "AGENT_DOCK_SANDBOX_MANAGER_URL",
     ),
-    sandboxManagerRequestTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS",
-      300_000,
-      1_000,
-      900_000,
-    ),
+    sandboxManagerRequestTimeoutMs,
     trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),
     bootStateDirectory: required(environment, "AGENT_DOCK_BOOT_STATE_DIRECTORY"),
     eventSpoolDirectory: required(environment, "AGENT_DOCK_EVENT_SPOOL_DIRECTORY"),
@@ -391,13 +409,7 @@ export async function loadSupervisorHostConfig(
       1_000,
       300_000,
     ),
-    piTurnTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_PI_TURN_TIMEOUT_MS",
-      10 * 60_000,
-      1_000,
-      15 * 60_000,
-    ),
+    piTurnTimeoutMs,
     repositoryImportLeaseMs: integerValue(
       environment,
       "AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS",
