@@ -297,6 +297,12 @@ async function imageExistsInK3d(image) {
     .catch(() => false);
 }
 
+async function imageExistsInDocker(image) {
+  return capture("docker", ["image", "inspect", image])
+    .then(() => true)
+    .catch(() => false);
+}
+
 async function waitForImageInK3d(image, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -307,6 +313,11 @@ async function waitForImageInK3d(image, timeoutMs = 120_000) {
 }
 
 async function pullPublicImage(image) {
+  // The trusted host image store is also the source for K3s' air-gap import.
+  // Reuse a previously verified local image so a transient public-registry
+  // outage cannot prevent an otherwise self-contained Worker rollout.
+  if (await imageExistsInDocker(image)) return;
+
   const publicDockerConfig = join(runtimeDirectory, "kubernetes", "public-docker-config");
   await mkdir(publicDockerConfig, { recursive: true, mode: 0o700 });
   let lastError;
