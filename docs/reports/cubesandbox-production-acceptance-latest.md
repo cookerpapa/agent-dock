@@ -1,18 +1,18 @@
 # CubeSandbox production acceptance
 
-- Checked at: 2026-07-28T17:24:47.603Z
+- Checked at: 2026-07-29T14:55:16.362Z
 - Provider/model: deepseek / deepseek-v4-flash
-- Pure-chat first text / settled: 1635 ms / 1863 ms
+- Pure-chat first text / settled: 1506 ms / 1646 ms
 - Pure-chat Tool calls / Cube activations: 0 / 0
-- First coding first text / settled: 8660 ms / 10920 ms
-- Follow-up first text / settled: 7237 ms / 8186 ms
+- First coding first text / settled: 8429 ms / 9997 ms
+- Follow-up first text / settled: 9403 ms / 10688 ms
 - Coding Tool calls: 2 + 3
 - Same running Session Cube KVM guest reused: true
 - Workspace restored across Runs: true
-- Large Workspace files / checkpoint reference: 3679 / 672067 bytes
+- Large Workspace files / checkpoint reference: 3684 / 672904 bytes
 - Large Workspace fresh-VM cold restore: true
-- Real input/output/cache-read tokens: 4023 / 2355 / 41344
-- Semantic compaction: 70 source events -> 8 transcript items
+- Real input/output/cache-read tokens: 3765 / 2251 / 41216
+- Semantic compaction: 65 source events -> 8 transcript items
 - Temporal Workflows / bounded-reference histories: 5 / 5
 - Cross-tenant conversation hidden: true
 - Explicit warm eviction / remaining Cube microVMs: true / 0
