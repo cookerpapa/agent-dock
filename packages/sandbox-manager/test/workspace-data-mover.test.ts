@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -188,13 +188,18 @@ if (args[0] === "snapshot" && args[1] === "create") {
 if (args[0] === "snapshot" && args[1] === "restore") {
   const source = args.at(-2);
   const target = args.at(-1);
+  if (source.endsWith("/workspace/restored.txt")) {
+    await writeFile(target, "materialized\\n");
+    process.exit(0);
+  }
   await mkdir(target, { recursive: true });
   await mkdir(target + "/.agent-dock-runtime", { recursive: true });
+  await mkdir(target + "/workspace", { recursive: true });
   await copyFile(
     ${JSON.stringify(generationBackup)},
     target + "/.agent-dock-runtime/generation",
   );
-  await writeFile(target + "/restored.txt", "restored from " + source + "\\n");
+  await writeFile(target + "/workspace/restored.txt", "restored from " + source + "\\n");
   process.exit(0);
 }
 process.exit(2);
@@ -219,10 +224,14 @@ process.exit(2);
         disableTls: true,
       },
     });
-    const volume = join(workspaceRoot, `agentdock-posix-${identity.volumeId}`);
+    const volumeEnvelope = join(workspaceRoot, `agentdock-posix-${identity.volumeId}`);
+    const volume = join(volumeEnvelope, "workspace");
     try {
       await expect(mover.prepare(identity)).resolves.toEqual({ restored: false });
-      await mkdir(volume, { recursive: true });
+      await expect(readdir(volume)).resolves.toEqual([]);
+      await expect(
+        readFile(join(volumeEnvelope, ".agent-dock-runtime/generation"), "utf8"),
+      ).resolves.toMatch(/^[0-9a-f]{64}\n$/);
       await writeFile(join(volume, "committed.txt"), "committed\n");
       await expect(
         mover.snapshot({
@@ -241,8 +250,8 @@ process.exit(2);
         "after checkpoint\n",
       );
 
-      for (const entry of await readdir(volume)) {
-        await rm(join(volume, entry), { recursive: true, force: true });
+      for (const entry of await readdir(volumeEnvelope)) {
+        await rm(join(volumeEnvelope, entry), { recursive: true, force: true });
       }
       await expect(mover.prepare({ ...identity, snapshotId: "snapshot-one" })).resolves.toEqual({
         restored: true,
@@ -250,6 +259,19 @@ process.exit(2);
       await expect(readFile(join(volume, "restored.txt"), "utf8")).resolves.toBe(
         "restored from snapshot-one\n",
       );
+      const materialized = Buffer.from("materialized\n");
+      await expect(
+        mover.materialize({
+          ...identity,
+          snapshotId: "snapshot-one",
+          path: "restored.txt",
+          expectedSha256: createHash("sha256").update(materialized).digest("hex"),
+          maximumBytes: 1_024,
+        }),
+      ).resolves.toEqual({
+        bytes: materialized,
+        sha256: createHash("sha256").update(materialized).digest("hex"),
+      });
 
       await expect(mover.prepare({ ...identity, snapshotId: "snapshot-two" })).resolves.toEqual({
         restored: true,
@@ -259,6 +281,20 @@ process.exit(2);
       );
       await expect(readFile(join(volume, "background-write.txt"), "utf8")).rejects.toMatchObject({
         code: "ENOENT",
+      });
+
+      await rm(volume, { recursive: true, force: true });
+      await symlink(root, volume, "dir");
+      await expect(
+        mover.snapshot({
+          ...identity,
+          activationId: "10000000-0000-4000-8000-000000000011",
+          fencingToken: 8,
+          bindingSha256: "b".repeat(64),
+        }),
+      ).rejects.toMatchObject({
+        code: "workspace_volume_generation_invalid",
+        retryable: false,
       });
     } finally {
       await mover.close();

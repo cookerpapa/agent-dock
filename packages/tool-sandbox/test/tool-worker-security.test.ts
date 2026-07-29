@@ -123,16 +123,12 @@ describe("credential-free Tool Sandbox worker", () => {
   it("keeps every remote file path beneath the isolated workspace", () => {
     expect(resolveToolWorkspacePath("src/Main.java")).toBe("/workspace/src/Main.java");
     expect(resolveToolWorkspacePath("/workspace/src/Main.java")).toBe("/workspace/src/Main.java");
-    for (const path of [
-      "../etc/passwd",
-      "/etc/passwd",
-      "src\\escape",
-      "bad\0path",
-      ".agent-dock-runtime/generation",
-      "/workspace/.agent-dock-runtime/generation",
-    ]) {
+    for (const path of ["../etc/passwd", "/etc/passwd", "src\\escape", "bad\0path"]) {
       expect(() => resolveToolWorkspacePath(path)).toThrow(ToolWorkerError);
     }
+    expect(resolveToolWorkspacePath(".agent-dock-runtime/user-file")).toBe(
+      "/workspace/.agent-dock-runtime/user-file",
+    );
   });
 
   it("accepts a restored non-Git workspace root and rejects a linked mount root", async () => {

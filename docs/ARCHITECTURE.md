@@ -127,6 +127,11 @@ RunAttempt, base revision and fence still match. Ordinary conversations share
 that head but retain independent Pi checkpoints. Explicit Fork/Candidate-Race
 Sessions use isolated branch heads until promotion.
 
+The physical POSIX Volume is a trusted envelope containing a generation marker
+and a `workspace/` child. Kopia snapshots the complete envelope, while the Cube
+Volume Plugin mounts only that child at `/workspace`. Platform checkpoint
+metadata is therefore outside the untrusted guest's filesystem view.
+
 Cube runtime lifetime and Workspace lifetime are independent.
 
 ## 3. State ownership
@@ -395,5 +400,6 @@ not require changing the Worker execution contract.
 - [ADR-0064: Workspace checkpoints](adr/0064-cube-native-workspace-checkpoints.md)
 - [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
 - [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)
+- [ADR-0072: Trusted Workspace Volume envelope](adr/0072-trusted-workspace-volume-envelope.md)
 
 Older ADRs and migrations are immutable history, not supported runtime choices.

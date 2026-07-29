@@ -11,6 +11,7 @@ set -euo pipefail
 
 readonly DEFAULT_BASE_DIR="/data/cube-shared/volume"
 readonly VOLUME_ID_PATTERN='^adw-[0-9a-f]{48}$'
+readonly VOLUME_WORKSPACE_DIRECTORY="workspace"
 
 operation=""
 volume_id=""
@@ -83,6 +84,7 @@ done
 [[ "$volume_id" =~ $VOLUME_ID_PATTERN ]] || fail
 [[ "$volume_base_dir" == "$DEFAULT_BASE_DIR" ]] || fail
 readonly volume_path="${DEFAULT_BASE_DIR}/agentdock-posix-${volume_id}"
+readonly workspace_path="${volume_path}/${VOLUME_WORKSPACE_DIRECTORY}"
 
 assert_safe_root() {
   [[ -d "$DEFAULT_BASE_DIR" && ! -L "$DEFAULT_BASE_DIR" ]] || fail
@@ -96,6 +98,14 @@ assert_safe_volume() {
   [[ "$resolved_volume" == "${resolved_root}/agentdock-posix-${volume_id}" ]] || fail
 }
 
+assert_safe_workspace() {
+  [[ -d "$workspace_path" && ! -L "$workspace_path" ]] || fail
+  local resolved_volume resolved_workspace
+  resolved_volume="$(realpath "$volume_path")"
+  resolved_workspace="$(realpath "$workspace_path")"
+  [[ "$resolved_workspace" == "${resolved_volume}/${VOLUME_WORKSPACE_DIRECTORY}" ]] || fail
+}
+
 case "$operation" in
   create)
     [[ -z "$name" || "$name" == "$volume_id" ]] || fail
@@ -106,7 +116,13 @@ case "$operation" in
     mkdir -p -- "$volume_path"
     chmod 0700 -- "$volume_path"
     chown 1000:1000 -- "$volume_path"
-    printf '%s\n' '{"token":"","private_data":"agentdock-posix-v1","error":""}'
+    if [[ -e "$workspace_path" && ! -d "$workspace_path" ]] || [[ -L "$workspace_path" ]]; then
+      fail
+    fi
+    mkdir -p -- "$workspace_path"
+    chmod 0700 -- "$workspace_path"
+    chown 1000:1000 -- "$workspace_path"
+    printf '%s\n' '{"token":"","private_data":"agentdock-posix-v2","error":""}'
     ;;
   destroy)
     assert_safe_root
@@ -122,19 +138,19 @@ case "$operation" in
     ;;
   attach)
     [[ -n "$sandbox_id" && -n "$namespace" && "$ref_count" =~ ^[0-9]+$ ]] || fail
-    [[ -z "$private_data" || "$private_data" == "agentdock-posix-v1" ]] || fail
+    [[ -z "$private_data" || "$private_data" == "agentdock-posix-v2" ]] || fail
     assert_safe_root
     assert_safe_volume
-    printf '{"host_path":"%s","metadata":{"driver":"agentdock-posix-v1"},"error":""}\n' \
-      "$volume_path"
+    assert_safe_workspace
+    printf '{"host_path":"%s","metadata":{"driver":"agentdock-posix-v2"},"error":""}\n' \
+      "$workspace_path"
     ;;
   detach)
     [[ -n "$sandbox_id" && -n "$namespace" && "$ref_count" =~ ^[0-9]+$ ]] || fail
-    [[ -z "$metadata" || "$metadata" == '{"driver":"agentdock-posix-v1"}' ]] || fail
+    [[ -z "$metadata" || "$metadata" == '{"driver":"agentdock-posix-v2"}' ]] || fail
     printf '%s\n' '{"error":""}'
     ;;
   *)
     fail
     ;;
 esac
-

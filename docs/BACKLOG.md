@@ -24,6 +24,8 @@
   Temporal and v2 manifest cutovers
 - [x] Require current-format indexed API credentials across runtime
   initialization, bootstrap and request authentication
+- [x] Mount only the user-data child of each trusted POSIX Volume into Cube so
+  generation metadata remains outside `/workspace`
 
 Only the current phase should contain implementation work. Later phases remain
 in `ROADMAP.md` until their prerequisites are complete.

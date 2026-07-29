@@ -2907,3 +2907,23 @@
   inside the outer Activity deadline.
 - Added protocol, checkpoint-store, Pi Session, remote WebSocket and full
   Control Plane regression evidence for the new boundary.
+
+## 2026-07-29 — Trusted Workspace Volume envelope
+
+- Audited root `.git` after removal of the browser's per-Run modification
+  panel. The repository remains an active backend dependency for prepared Run
+  results, Review Bundles, Candidate Race scoring and production acceptance,
+  so it remains in the user Workspace.
+- Changed the Cube POSIX Volume from a directly mounted root to a trusted
+  envelope containing sibling `.agent-dock-runtime/generation` and
+  `workspace/` paths. Cube now mounts only the latter at `/workspace`.
+- Kopia continues to snapshot the complete envelope, preserving an atomic
+  generation-plus-data recovery point. File materialization resolves user
+  paths beneath the `workspace/` snapshot child.
+- Advanced the Workspace Kopia reference to
+  `agent-dock.workspace-kopia-snapshot.v3` and the Cube Volume Plugin private
+  data to `agentdock-posix-v2`. Previous development layouts fail closed; no
+  compatibility reader is retained.
+- Removed application-level reserved-path filtering for
+  `.agent-dock-runtime`; platform metadata is now absent from the guest rather
+  than merely hidden from selected Tool APIs.

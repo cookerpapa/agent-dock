@@ -59,8 +59,6 @@ describe("shared workspace runtime", () => {
     const target = await temporaryDirectory("agent-dock-workspace-runtime-target-");
     await mkdir(resolve(target, ".git"));
     await writeFile(resolve(target, ".git/HEAD"), "fixture-baseline\n");
-    await mkdir(resolve(target, ".agent-dock-runtime"));
-    await writeFile(resolve(target, ".agent-dock-runtime/generation"), `${"a".repeat(64)}\n`);
     await writeFile(resolve(target, "stale.txt"), "remove me");
     await restoreWorkspaceSnapshot(target, restoredEnvelope);
 
@@ -68,9 +66,6 @@ describe("shared workspace runtime", () => {
       "fixture-baseline\n",
     );
     await expect(readFile(resolve(target, "src/App.java"), "utf8")).resolves.toBe("class App {}\n");
-    await expect(readFile(resolve(target, ".agent-dock-runtime/generation"), "utf8")).resolves.toBe(
-      `${"a".repeat(64)}\n`,
-    );
     await expect(readFile(resolve(target, "stale.txt"), "utf8")).rejects.toThrow();
     expect((await stat(resolve(target, "test.sh"))).mode & 0o111).not.toBe(0);
   });
@@ -89,15 +84,12 @@ describe("shared workspace runtime", () => {
     await writeFile(resolve(root, "tracked.txt"), "after\n");
     await rm(resolve(root, "deleted.txt"));
     await writeFile(resolve(root, "src/New.java"), "class New {}\n");
-    await mkdir(resolve(root, ".agent-dock-runtime"));
-    await writeFile(resolve(root, ".agent-dock-runtime/generation"), `${"a".repeat(64)}\n`);
     const patch = await collectGitWorkspacePatch(root);
 
     expect(patch.truncated).toBe(false);
     expect(patch.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
     expect(patch.patch).toContain("deleted file mode");
     expect(patch.patch).toContain("diff --git a/src/New.java b/src/New.java");
-    expect(patch.patch).not.toContain(".agent-dock-runtime");
     expect(await git(root, ["diff", "--cached"])).toBe("");
   });
 
@@ -142,8 +134,6 @@ describe("shared workspace runtime", () => {
     const root = await temporaryDirectory("agent-dock-cube-workspace-index-");
     await mkdir(resolve(root, ".git"));
     await writeFile(resolve(root, ".git/HEAD"), "ref: refs/heads/main\n");
-    await mkdir(resolve(root, ".agent-dock-runtime"));
-    await writeFile(resolve(root, ".agent-dock-runtime/generation"), `${"a".repeat(64)}\n`);
     await mkdir(resolve(root, "nested/.git"), { recursive: true });
     await writeFile(resolve(root, "nested/.git/config"), "[core]\n");
     await mkdir(resolve(root, "src"));
@@ -159,7 +149,6 @@ describe("shared workspace runtime", () => {
     expect(files).toHaveLength(601);
     expect(files[0]?.path).toBe("nested/.git/config");
     expect(files.some((file) => file.path === ".git/HEAD")).toBe(false);
-    expect(files.some((file) => file.path.startsWith(".agent-dock-runtime/"))).toBe(false);
   });
 
   it("indexes symlinks without following them", async () => {
@@ -222,5 +211,13 @@ describe("shared workspace runtime", () => {
     expect(() =>
       parseKopiaWorkspaceCheckpoint(Buffer.from(JSON.stringify(withUnexpectedField))),
     ).toThrow(/shape/);
+
+    const previousLayout = {
+      ...(JSON.parse(Buffer.from(checkpoint).toString("utf8")) as Record<string, unknown>),
+      format: "agent-dock.workspace-kopia-snapshot.v2",
+    };
+    expect(() =>
+      parseKopiaWorkspaceCheckpoint(Buffer.from(JSON.stringify(previousLayout))),
+    ).toThrow(/unsupported/);
   });
 });

@@ -14,7 +14,6 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { TRUSTED_WORKSPACE_METADATA_DIRECTORY } from "@agent-dock/workspace-runtime";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { fetch } from "undici";
 
@@ -26,6 +25,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const VOLUME_GENERATION_PATTERN = /^[0-9a-f]{64}$/;
+const VOLUME_METADATA_DIRECTORY = ".agent-dock-runtime";
+const VOLUME_WORKSPACE_DIRECTORY = "workspace";
 const VOLUME_GENERATION_FILE = "generation";
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
@@ -89,7 +90,7 @@ export type KopiaWorkspaceDataMoverOptions = Readonly<{
 }>;
 
 type VolumeState = Readonly<{
-  schemaVersion: 2;
+  schemaVersion: 3;
   tenantId: string;
   workspaceId: string;
   sessionId: string;
@@ -284,6 +285,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       if (snapshotId === undefined) {
         await this.#emptyDirectory(directory);
         await this.#removeState(identity.volumeId);
+        await this.#createWorkspaceDirectory(directory);
         await this.#createVolumeGeneration(directory);
         return { restored: false };
       }
@@ -293,6 +295,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       // its host directory survived.
       const state = await this.#readState(identity.volumeId);
       const volumeGeneration = await this.#readVolumeGeneration(directory);
+      const workspaceValid = await this.#hasValidWorkspaceDirectory(directory);
       if (
         state !== undefined &&
         state.tenantId === identity.tenantId &&
@@ -300,7 +303,8 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         state.sessionId === identity.sessionId &&
         state.volumeId === identity.volumeId &&
         state.snapshotId === snapshotId &&
-        volumeGeneration === state.volumeGeneration
+        volumeGeneration === state.volumeGeneration &&
+        workspaceValid
       ) {
         return { restored: false };
       }
@@ -316,15 +320,18 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
           directory,
         ]);
         const restoredGeneration = await this.#readVolumeGeneration(directory);
-        if (restoredGeneration === undefined) {
+        if (
+          restoredGeneration === undefined ||
+          !(await this.#hasValidWorkspaceDirectory(directory))
+        ) {
           throw new WorkspaceDataMoverError(
             "workspace_restore_generation_invalid",
-            "Committed Workspace snapshot did not contain its volume generation",
+            "Committed Workspace snapshot did not contain a valid Volume envelope",
             false,
           );
         }
         await this.#writeState({
-          schemaVersion: 2,
+          schemaVersion: 3,
           ...identity,
           snapshotId,
           volumeGeneration: restoredGeneration,
@@ -360,10 +367,10 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       await this.#ensureReady();
       const directory = await this.#ensureVolumeDirectory(identity.volumeId);
       const volumeGeneration = await this.#readVolumeGeneration(directory);
-      if (volumeGeneration === undefined) {
+      if (volumeGeneration === undefined || !(await this.#hasValidWorkspaceDirectory(directory))) {
         throw new WorkspaceDataMoverError(
           "workspace_volume_generation_invalid",
-          "Workspace volume generation was missing",
+          "Workspace Volume envelope was invalid",
           false,
         );
       }
@@ -393,7 +400,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       }
       const snapshotId = validatedSnapshotId(parsed.id);
       await this.#writeState({
-        schemaVersion: 2,
+        schemaVersion: 3,
         ...identity,
         snapshotId,
         volumeGeneration,
@@ -436,7 +443,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
           "--write-files-atomically",
           "--flush-files",
           "--skip-owners",
-          `${snapshotId}/${path}`,
+          `${snapshotId}/${VOLUME_WORKSPACE_DIRECTORY}/${path}`,
           target,
         ]);
         const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -581,8 +588,31 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     }
   }
 
+  async #createWorkspaceDirectory(directory: string): Promise<void> {
+    const workspaceDirectory = join(directory, VOLUME_WORKSPACE_DIRECTORY);
+    await mkdir(workspaceDirectory, { mode: 0o700 });
+    const metadata = await lstat(workspaceDirectory);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new WorkspaceDataMoverError(
+        "workspace_volume_path_invalid",
+        "Workspace Volume data path was invalid",
+        false,
+      );
+    }
+  }
+
+  async #hasValidWorkspaceDirectory(directory: string): Promise<boolean> {
+    try {
+      const workspaceDirectory = join(directory, VOLUME_WORKSPACE_DIRECTORY);
+      const metadata = await lstat(workspaceDirectory);
+      return metadata.isDirectory() && !metadata.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }
+
   async #createVolumeGeneration(directory: string): Promise<string> {
-    const metadataDirectory = join(directory, TRUSTED_WORKSPACE_METADATA_DIRECTORY);
+    const metadataDirectory = join(directory, VOLUME_METADATA_DIRECTORY);
     await mkdir(metadataDirectory, { mode: 0o700 });
     const generation = randomBytes(32).toString("hex");
     await writeFile(join(metadataDirectory, VOLUME_GENERATION_FILE), `${generation}\n`, {
@@ -593,7 +623,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
   }
 
   async #readVolumeGeneration(directory: string): Promise<string | undefined> {
-    const metadataDirectory = join(directory, TRUSTED_WORKSPACE_METADATA_DIRECTORY);
+    const metadataDirectory = join(directory, VOLUME_METADATA_DIRECTORY);
     const generationPath = join(metadataDirectory, VOLUME_GENERATION_FILE);
     try {
       const [directoryMetadata, generationMetadata, generation] = await Promise.all([
@@ -655,7 +685,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         ]
           .sort()
           .join("\0") ||
-      value.schemaVersion !== 2 ||
+      value.schemaVersion !== 3 ||
       typeof value.tenantId !== "string" ||
       typeof value.workspaceId !== "string" ||
       typeof value.sessionId !== "string" ||
@@ -674,7 +704,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         volumeId: value.volumeId,
       });
       return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         ...identity,
         snapshotId: validatedSnapshotId(value.snapshotId),
         volumeGeneration: value.volumeGeneration,

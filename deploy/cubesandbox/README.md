@@ -205,11 +205,20 @@ protocols do not gain an implicit direct route through that gateway.
 ## Lifecycle and rollback
 
 Cube is not a data authority. The installer loads the `agentdock-posix` binary
-Volume Plugin into CubeMaster and Cubelet. Cube mounts one deterministic
-Session-bound directory at `/workspace`; after the guest is sealed and flushed,
-the trusted Workspace Data Mover snapshots that directory into its dedicated
-Kopia repository. PostgreSQL Fence/CAS publishes only the current Attempt's
-immutable reference as the Workspace head.
+Volume Plugin into CubeMaster and Cubelet. Each deterministic Session-bound
+physical Volume is a trusted envelope:
+
+```text
+agentdock-posix-<volume-id>/
+├── .agent-dock-runtime/generation
+└── workspace/
+```
+
+Cube mounts only `workspace/` at `/workspace`. After the guest is sealed and
+flushed, the trusted Workspace Data Mover snapshots the complete envelope into
+its dedicated Kopia repository. PostgreSQL Fence/CAS publishes only the
+current Attempt's immutable reference as the Workspace head. The guest cannot
+list or mutate the sibling generation marker.
 
 The bundled single-node profile maps
 `runtime/state/cube-shared/volume` at `/data/cube-shared/volume`. A multi-node

@@ -22,9 +22,7 @@ import {
   collectGitWorkspacePatch,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
-  isTrustedWorkspaceMetadataPath,
   restoreWorkspaceSnapshot,
-  TRUSTED_WORKSPACE_METADATA_DIRECTORY,
 } from "@agent-dock/workspace-runtime";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -612,10 +610,6 @@ export function resolveToolWorkspacePath(input: string): string {
   if (!isInsideWorkspace(resolved)) {
     throw new ToolWorkerError("tool_path_escape", "Tool path escaped the workspace");
   }
-  const relativePath = relative(TOOL_WORKSPACE_DIRECTORY, resolved).split(sep).join("/");
-  if (isTrustedWorkspaceMetadataPath(relativePath)) {
-    throw new ToolWorkerError("tool_path_reserved", "Tool path is reserved by the runtime");
-  }
   return resolved;
 }
 
@@ -893,9 +887,7 @@ export async function prepareToolWorkspace(
   workspaceSeed: Parameters<typeof decodeWorkspaceSnapshotBlob>[0] | undefined,
   workspaceRestore: Parameters<typeof decodeWorkspaceSnapshotBlob>[0] | undefined,
 ): Promise<void> {
-  const existing = (await readdir(TOOL_WORKSPACE_DIRECTORY)).filter(
-    (entry) => entry !== TRUSTED_WORKSPACE_METADATA_DIRECTORY,
-  );
+  const existing = await readdir(TOOL_WORKSPACE_DIRECTORY);
   if (existing.length !== 0) {
     throw new ToolWorkerError("workspace_not_empty", "Tool workspace was not empty");
   }
@@ -919,18 +911,7 @@ export async function prepareToolWorkspace(
     ["config", "user.email", "fixture@agent-dock.invalid"],
     TOOL_WORKSPACE_DIRECTORY,
   );
-  await execute(
-    "git",
-    [
-      "add",
-      "--all",
-      "--",
-      ".",
-      `:(exclude)${TRUSTED_WORKSPACE_METADATA_DIRECTORY}`,
-      `:(exclude)${TRUSTED_WORKSPACE_METADATA_DIRECTORY}/**`,
-    ],
-    TOOL_WORKSPACE_DIRECTORY,
-  );
+  await execute("git", ["add", "--all", "--", "."], TOOL_WORKSPACE_DIRECTORY);
   // An empty product Workspace is a valid starting point. Keep a real Git
   // baseline even when there are no files so later edits still produce a
   // deterministic diff against the accepted source snapshot.
@@ -1030,9 +1011,7 @@ export async function runToolWorker(): Promise<void> {
             message.workspaceRestore !== undefined ||
             message.dependencyProxy !== undefined ||
             message.environmentStage !== undefined ||
-            (await readdir(TOOL_WORKSPACE_DIRECTORY)).filter(
-              (entry) => entry !== TRUSTED_WORKSPACE_METADATA_DIRECTORY,
-            ).length === 0
+            (await readdir(TOOL_WORKSPACE_DIRECTORY)).length === 0
           ) {
             throw new ToolWorkerError(
               "workspace_attach_invalid",

@@ -35,6 +35,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   recover hard-crash durable semantics without inventing a second transcript.
 - [x] Keep Temporal Activity deadlines above bounded Pi/Sandbox settlement and
   cleanup time.
+- [x] Move trusted Volume generation metadata outside the guest-visible
+  `/workspace` while preserving one Kopia checkpoint envelope.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

@@ -1,11 +1,5 @@
 import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
 import { execFile } from "node:child_process";
-import { TRUSTED_WORKSPACE_METADATA_DIRECTORY } from "./workspace-internals.ts";
-
-const TRUSTED_METADATA_PATHSPECS = Object.freeze([
-  `:(exclude)${TRUSTED_WORKSPACE_METADATA_DIRECTORY}`,
-  `:(exclude)${TRUSTED_WORKSPACE_METADATA_DIRECTORY}/**`,
-]);
 
 function executeGit(
   args: readonly string[],
@@ -56,15 +50,7 @@ export async function collectGitWorkspacePatch(
 ): Promise<WorkspacePatch> {
   const untracked = (
     await executeGit(
-      [
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-        "-z",
-        "--",
-        ".",
-        ...TRUSTED_METADATA_PATHSPECS,
-      ],
+      ["ls-files", "--others", "--exclude-standard", "-z", "--", "."],
       workspaceDirectory,
       environment,
       identity,
@@ -81,16 +67,7 @@ export async function collectGitWorkspacePatch(
     );
   }
   const diff = await executeGit(
-    [
-      "diff",
-      "--no-ext-diff",
-      "--binary",
-      "--src-prefix=a/",
-      "--dst-prefix=b/",
-      "--",
-      ".",
-      ...TRUSTED_METADATA_PATHSPECS,
-    ],
+    ["diff", "--no-ext-diff", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "--", "."],
     workspaceDirectory,
     environment,
     identity,

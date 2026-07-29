@@ -10,7 +10,8 @@ import {
 } from "./workspace-index.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
-export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v2";
+export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v3";
+const KOPIA_WORKSPACE_CHECKPOINT_FORMAT_PREFIX = "agent-dock.workspace-kopia-snapshot.";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -195,7 +196,15 @@ export function parseKopiaWorkspaceCheckpoint(
   } catch {
     throw checkpointError("Workspace checkpoint is not valid UTF-8 JSON");
   }
-  if (!isRecord(parsed) || parsed.format !== KOPIA_WORKSPACE_CHECKPOINT_FORMAT) return undefined;
+  if (!isRecord(parsed)) return undefined;
+  if (
+    typeof parsed.format === "string" &&
+    parsed.format.startsWith(KOPIA_WORKSPACE_CHECKPOINT_FORMAT_PREFIX) &&
+    parsed.format !== KOPIA_WORKSPACE_CHECKPOINT_FORMAT
+  ) {
+    throw checkpointError("Kopia Workspace checkpoint format is unsupported");
+  }
+  if (parsed.format !== KOPIA_WORKSPACE_CHECKPOINT_FORMAT) return undefined;
   return parseCheckpointRecord(parsed);
 }
 
