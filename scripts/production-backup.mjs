@@ -9,7 +9,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -74,9 +74,30 @@ function parseArguments(argv) {
 
 async function assertRuntimeTree(path) {
   let entries = 0;
+  function isUserWorkspaceEntry(current) {
+    const segments = relative(path, current).split(sep);
+    return (
+      segments.length > 5 &&
+      segments[0] === "state" &&
+      segments[1] === "cube-shared" &&
+      segments[2] === "volume" &&
+      /^agentdock-posix-adw-[0-9a-f]{48}$/.test(segments[3]) &&
+      segments[4] === "workspace"
+    );
+  }
   async function walk(current) {
     const metadata = await lstat(current);
-    if (metadata.isSymbolicLink() || (!metadata.isDirectory() && !metadata.isFile())) {
+    if (metadata.isSymbolicLink()) {
+      // User repositories commonly contain symlinks. The archive preserves
+      // the link itself without dereferencing it, while platform/runtime
+      // symlinks remain forbidden.
+      if (!isUserWorkspaceEntry(current)) {
+        throw new Error(`Production runtime contains an unsupported entry: ${current}`);
+      }
+      entries += 1;
+      return;
+    }
+    if (!metadata.isDirectory() && !metadata.isFile()) {
       throw new Error(`Production runtime contains an unsupported entry: ${current}`);
     }
     entries += 1;

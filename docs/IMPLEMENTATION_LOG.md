@@ -2946,3 +2946,7 @@
 - Retained Git inside the Cube image for repositories that users explicitly
   create or clone; only AgentDock-owned Git metadata moved to the trusted
   plane.
+- Corrected the cold-backup tree validator to preserve symlinks inside
+  untrusted user Workspace data without accepting symlinks in platform
+  runtime, configuration or secret paths. The archive does not dereference
+  those Workspace links.
