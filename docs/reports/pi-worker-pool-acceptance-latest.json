@@ -1,6 +1,6 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-29T14:56:21.550Z",
+  "checkedAt": "2026-07-30T16:06:51.330Z",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
@@ -13,25 +13,25 @@
     "differentWorker": true,
     "piSessionArtifactRestored": true,
     "markerRecovered": true,
-    "firstSettledMs": 1454,
-    "followUpSettledMs": 1887,
+    "firstSettledMs": 1457,
+    "followUpSettledMs": 1507,
     "candidateRuns": 2
   },
   "concurrency": {
     "runs": 4,
     "workerIds": [
       "agent-dock-pi-worker-local-v1-0",
+      "agent-dock-pi-worker-local-v1-0",
       "agent-dock-pi-worker-local-v1-1",
-      "agent-dock-pi-worker-local-v1-1",
-      "agent-dock-pi-worker-local-v1-0"
+      "agent-dock-pi-worker-local-v1-1"
     ],
     "distinctWorkers": 2,
-    "settledMs": [10303, 6178, 10089, 5630]
+    "settledMs": [9248, 4635, 4891, 9241]
   },
   "totalUsage": {
     "requests": 7,
-    "inputTokens": 582,
-    "outputTokens": 1327,
+    "inputTokens": 579,
+    "outputTokens": 1295,
     "cacheReadTokens": 8960,
     "cacheWriteTokens": 0
   }

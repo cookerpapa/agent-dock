@@ -1,6 +1,6 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-25T14:42:22.488Z",
+  "checkedAt": "2026-07-30T16:07:16.991Z",
   "tenants": 6,
   "runs": 12,
   "model": {
@@ -18,41 +18,41 @@
   },
   "latencyMs": {
     "acceptance": {
-      "minimum": 23,
-      "p50": 27,
-      "p95": 39,
-      "maximum": 39
+      "minimum": 25,
+      "p50": 28,
+      "p95": 38,
+      "maximum": 38
     },
     "firstText": {
-      "minimum": 1495,
-      "p50": 3542,
-      "p95": 13257,
-      "maximum": 13257
+      "minimum": 1333,
+      "p50": 2997,
+      "p95": 10174,
+      "maximum": 10174
     },
     "settled": {
-      "minimum": 1805,
-      "p50": 5611,
-      "p95": 16525,
-      "maximum": 16525
+      "minimum": 1561,
+      "p50": 4150,
+      "p95": 12878,
+      "maximum": 12878
     },
     "queueWait": {
-      "minimum": 260,
-      "p50": 2291,
-      "p95": 12255,
-      "maximum": 12255
+      "minimum": 364,
+      "p50": 1839,
+      "p95": 9007,
+      "maximum": 9007
     }
   },
   "workers": {
-    "distinct": ["agent-dock-supervisor-2", "agent-dock-supervisor-1"],
+    "distinct": ["agent-dock-pi-worker-local-v1-1", "agent-dock-pi-worker-local-v1-0"],
     "assignments": {
-      "agent-dock-supervisor-2": 6,
-      "agent-dock-supervisor-1": 6
+      "agent-dock-pi-worker-local-v1-1": 6,
+      "agent-dock-pi-worker-local-v1-0": 6
     }
   },
   "usage": {
     "requests": 12,
-    "inputTokens": 1362,
-    "outputTokens": 2128,
+    "inputTokens": 1344,
+    "outputTokens": 1847,
     "cacheReadTokens": 15360,
     "cacheWriteTokens": 0
   }
