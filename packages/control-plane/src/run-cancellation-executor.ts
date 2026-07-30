@@ -20,10 +20,6 @@ import type {
   TurnExecutionLeaseManager,
   TurnExecutionRequest,
 } from "./run-command-executor.ts";
-import {
-  validateSupervisorDispatchAffinity,
-  type SupervisorDispatchAffinity,
-} from "./supervisor-dispatch-affinity.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
@@ -70,21 +66,21 @@ export class TurnCancellationBackendError extends Error {
   }
 }
 
-export class CancellationDispatcherInvariantError extends Error {
+export class RunCancellationExecutorInvariantError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "CancellationDispatcherInvariantError";
+    this.name = "RunCancellationExecutorInvariantError";
   }
 }
 
-export class CancellationDispatcherStaleClaimError extends Error {
+export class RunCancellationExecutorStaleClaimError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "CancellationDispatcherStaleClaimError";
+    this.name = "RunCancellationExecutorStaleClaimError";
   }
 }
 
-export type CancellationDispatchNextResult =
+export type RunCancellationExecutionResult =
   | { status: "idle" }
   | {
       status: "cancelled";
@@ -115,16 +111,14 @@ export type CancellationDispatchNextResult =
       failureCode: string;
     };
 
-export type CancellationDispatcherOptions = {
+export type RunCancellationExecutorOptions = {
   database: Kysely<Database>;
-  tenantId?: string;
   backend: TurnCancellationBackend;
   leaseManager: TurnExecutionLeaseManager;
   clock?: () => Date;
   claimLeaseMs?: number;
   retryDelayMs?: number;
   maxAttempts?: number;
-  supervisorAffinity?: SupervisorDispatchAffinity;
   idGenerator?: () => string;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
 };
@@ -177,7 +171,7 @@ function parseCancellationPayload(value: Record<string, unknown>): {
   const reason = value.reason;
   const gracePeriodMs = value.gracePeriodMs;
   if (typeof targetCommandId !== "string" || targetCommandId.length === 0) {
-    throw new CancellationDispatcherInvariantError("Cancellation command target is missing");
+    throw new RunCancellationExecutorInvariantError("Cancellation command target is missing");
   }
   if (
     reason !== "user_request" &&
@@ -185,10 +179,10 @@ function parseCancellationPayload(value: Record<string, unknown>): {
     reason !== "lease_revoked" &&
     reason !== "shutdown"
   ) {
-    throw new CancellationDispatcherInvariantError("Cancellation command reason is invalid");
+    throw new RunCancellationExecutorInvariantError("Cancellation command reason is invalid");
   }
   if (!Number.isSafeInteger(gracePeriodMs) || (gracePeriodMs as number) < 0) {
-    throw new CancellationDispatcherInvariantError("Cancellation grace period is invalid");
+    throw new RunCancellationExecutorInvariantError("Cancellation grace period is invalid");
   }
   return { targetCommandId, reason, gracePeriodMs: gracePeriodMs as number };
 }
@@ -206,26 +200,23 @@ function normalizeFailure(error: unknown): CancellationFailure {
 
 function expectOne(changedRows: bigint, description: string): void {
   if (changedRows !== 1n) {
-    throw new CancellationDispatcherInvariantError(`${description} changed ${changedRows} rows`);
+    throw new RunCancellationExecutorInvariantError(`${description} changed ${changedRows} rows`);
   }
 }
 
-export class CancellationDispatcher {
+export class RunCancellationExecutor {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string | undefined;
   readonly #backend: TurnCancellationBackend;
   readonly #leaseManager: TurnExecutionLeaseManager;
   readonly #clock: () => Date;
   readonly #claimLeaseMs: number;
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
-  readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
   readonly #idGenerator: () => string;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
 
-  constructor(options: CancellationDispatcherOptions) {
+  constructor(options: RunCancellationExecutorOptions) {
     this.#database = options.database;
-    this.#tenantId = options.tenantId;
     this.#backend = options.backend;
     this.#leaseManager = options.leaseManager;
     this.#clock = options.clock ?? (() => new Date());
@@ -238,23 +229,15 @@ export class CancellationDispatcher {
       "retryDelayMs",
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
-    this.#supervisorAffinity =
-      options.supervisorAffinity === undefined
-        ? undefined
-        : validateSupervisorDispatchAffinity(options.supervisorAffinity);
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
-  }
-
-  async dispatchNext(): Promise<CancellationDispatchNextResult> {
-    return this.#dispatch();
   }
 
   /**
    * Executes the cancellation for one exact execution command. Temporal uses
    * this on the same Activity Worker that owns the live Pi runtime.
    */
-  async dispatchTargetCommand(targetCommandId: string): Promise<CancellationDispatchNextResult> {
+  async dispatchTargetCommand(targetCommandId: string): Promise<RunCancellationExecutionResult> {
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         targetCommandId,
@@ -265,7 +248,7 @@ export class CancellationDispatcher {
     return this.#dispatch(targetCommandId.toLowerCase());
   }
 
-  async #dispatch(targetCommandId?: string): Promise<CancellationDispatchNextResult> {
+  async #dispatch(targetCommandId: string): Promise<RunCancellationExecutionResult> {
     const claim = await this.#claimNext(targetCommandId);
     if (claim === undefined) return { status: "idle" };
 
@@ -281,7 +264,7 @@ export class CancellationDispatcher {
             candidate.fencingToken !== acknowledgement.fencingToken)
         ) {
           return Promise.reject(
-            new CancellationDispatcherInvariantError(
+            new RunCancellationExecutorInvariantError(
               "Cancellation acknowledgement changed after start",
             ),
           );
@@ -347,7 +330,7 @@ export class CancellationDispatcher {
     };
   }
 
-  async #claimNext(targetCommandId?: string): Promise<ClaimedCancellation | undefined> {
+  async #claimNext(targetCommandId: string): Promise<ClaimedCancellation | undefined> {
     const now = safeDate(this.#clock);
     const leaseUntil = new Date(now.valueOf() + this.#claimLeaseMs);
     return this.#database.transaction().execute(async (transaction) => {
@@ -434,38 +417,13 @@ export class CancellationDispatcher {
           "environment.recipe as environmentRecipe",
           "environment.recipe_sha256 as environmentRecipeSha256",
         ])
-        .where(
-          this.#tenantId === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`${sql.ref("outbox.tenant_id")} = ${this.#tenantId}`,
-        )
         .where("outbox.topic", "=", TURN_CANCELLATION_OUTBOX_TOPIC)
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
         .where("cancellation.kind", "=", "turn.cancel")
         .where("cancellation.state", "in", ["pending", "dispatched"])
         .where("target.kind", "=", "turn.execute")
-        .where(
-          targetCommandId === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`${sql.ref("target.id")} = ${targetCommandId}`,
-        )
-        .where(
-          this.#supervisorAffinity === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`exists (
-                select 1
-                from session_leases as affinity_lease
-                inner join supervisor_connections as affinity_connection
-                  on affinity_connection.sandbox_id = affinity_lease.sandbox_id
-                where affinity_lease.session_id = ${sql.ref("session_row.id")}
-                  and affinity_lease.sandbox_id = ${this.#supervisorAffinity.sandboxId}
-                  and affinity_lease.valid_until > ${now}
-                  and affinity_connection.control_plane_instance_id = ${this.#supervisorAffinity.controlPlaneInstanceId}
-                  and affinity_connection.state = 'active'
-                  and affinity_connection.expires_at > ${now}
-              )`,
-        )
+        .where("target.id", "=", targetCommandId)
         .orderBy("outbox.available_at", "asc")
         .orderBy("outbox.created_at", "asc")
         .orderBy("outbox.id", "asc")
@@ -492,12 +450,12 @@ export class CancellationDispatcher {
         outboxPayload.turnId !== row.turnId ||
         commandPayload.targetCommandId !== row.targetCommandId
       ) {
-        throw new CancellationDispatcherInvariantError(
+        throw new RunCancellationExecutorInvariantError(
           "Cancellation outbox identity does not match its durable commands",
         );
       }
       if (row.inputKind !== "prompt" || row.inputText === null) {
-        throw new CancellationDispatcherInvariantError(
+        throw new RunCancellationExecutorInvariantError(
           "The v1 cancellation dispatcher only targets durable prompt turns",
         );
       }
@@ -696,7 +654,7 @@ export class CancellationDispatcher {
         rows.sessionState !== "cancelling" ||
         rows.outboxPublishedAt === null
       ) {
-        throw new CancellationDispatcherInvariantError(
+        throw new RunCancellationExecutorInvariantError(
           "Only an acknowledged cancellation can settle a turn",
         );
       }
@@ -807,7 +765,7 @@ export class CancellationDispatcher {
     claim: ClaimedCancellation,
     started: boolean,
     failure: CancellationFailure,
-  ): Promise<CancellationDispatchNextResult> {
+  ): Promise<RunCancellationExecutionResult> {
     const now = safeDate(this.#clock);
     const shouldRetry = !started && failure.retryable && claim.attempt < this.#maxAttempts;
 
@@ -815,7 +773,7 @@ export class CancellationDispatcher {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (shouldRetry) {
         if (rows.cancellationCommandState !== "dispatched" || rows.outboxPublishedAt !== null) {
-          throw new CancellationDispatcherInvariantError(
+          throw new RunCancellationExecutorInvariantError(
             "Only an unacknowledged cancellation can return to the mailbox",
           );
         }
@@ -847,7 +805,7 @@ export class CancellationDispatcher {
         rows.cancellationCommandState !== expectedCancellationState ||
         started !== (rows.outboxPublishedAt !== null)
       ) {
-        throw new CancellationDispatcherInvariantError(
+        throw new RunCancellationExecutorInvariantError(
           "Cancellation lifecycle does not match the reported failure phase",
         );
       }
@@ -871,7 +829,7 @@ export class CancellationDispatcher {
           rows.turnState !== "cancelling" ||
           rows.sessionState !== "cancelling"
         ) {
-          throw new CancellationDispatcherInvariantError(
+          throw new RunCancellationExecutorInvariantError(
             "A started cancellation must own the cancelling lifecycle",
           );
         }
@@ -1032,17 +990,19 @@ export class CancellationDispatcher {
       .forUpdate(["cancellation", "target", "turn", "session_row", "outbox", "run", "run_attempt"])
       .executeTakeFirst();
     if (row === undefined) {
-      throw new CancellationDispatcherInvariantError(
+      throw new RunCancellationExecutorInvariantError(
         "Claimed cancellation lifecycle rows are missing",
       );
     }
     if (row.outboxAttempts !== claim.attempt) {
-      throw new CancellationDispatcherStaleClaimError(
+      throw new RunCancellationExecutorStaleClaimError(
         `Cancellation claim attempt ${claim.attempt} was superseded by attempt ${row.outboxAttempts}`,
       );
     }
     if (row.currentAttemptId !== claim.request.target.attemptId) {
-      throw new CancellationDispatcherStaleClaimError("Cancellation target attempt was superseded");
+      throw new RunCancellationExecutorStaleClaimError(
+        "Cancellation target attempt was superseded",
+      );
     }
     return row;
   }

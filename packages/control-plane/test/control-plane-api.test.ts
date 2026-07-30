@@ -33,7 +33,7 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
-  CancellationDispatcher,
+  RunCancellationExecutor,
   AssignmentReconciler,
   DeterministicExecutionBackend,
   DurableEventStore,
@@ -1940,13 +1940,14 @@ describe.sequential("single-user durable turn intake API", () => {
         throw new Error("Too-late cancellation must not release a lease");
       },
     };
-    const cancellationDispatcher = new CancellationDispatcher({
+    const cancellationDispatcher = new RunCancellationExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: cancellationBackend,
       leaseManager: unusedLeaseManager,
     });
-    await expect(cancellationDispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(
+      cancellationDispatcher.dispatchTargetCommand(accepted.commandId),
+    ).resolves.toMatchObject({
       status: "failed",
       commandId: cancellation.commandId,
       targetCommandId: accepted.commandId,
@@ -2060,15 +2061,14 @@ describe.sequential("single-user durable turn intake API", () => {
         );
       },
     };
-    const cancellationDispatcher = new CancellationDispatcher({
+    const cancellationDispatcher = new RunCancellationExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: cancellationBackend,
       leaseManager: retainedLeaseManager,
     });
 
     const [cancellationResult, executionResult] = await Promise.all([
-      cancellationDispatcher.dispatchNext(),
+      cancellationDispatcher.dispatchTargetCommand(accepted.commandId),
       execution,
     ]);
     expect(cancellationResult).toMatchObject({
@@ -2774,7 +2774,7 @@ describe.sequential("single-user durable turn intake API", () => {
         leaseManager: leaseCoordinator,
         eventNotificationPublisher: sessionEventNotifications!,
       });
-      const cancellationDispatcher = new CancellationDispatcher({
+      const cancellationDispatcher = new RunCancellationExecutor({
         database,
         backend,
         leaseManager: leaseCoordinator,
@@ -2913,7 +2913,7 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("tenant_id", "=", IDS.tenant)
         .executeTakeFirstOrThrow();
 
-      const cancellationDispatch = cancellationDispatcher.dispatchNext();
+      const cancellationDispatch = cancellationDispatcher.dispatchTargetCommand(accepted.commandId);
       const [cancellationResult, executionResult] = await Promise.all([
         cancellationDispatch,
         execution,

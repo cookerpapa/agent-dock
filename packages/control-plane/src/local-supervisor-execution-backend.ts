@@ -19,7 +19,7 @@ import {
   type TurnCancellationLifecycle,
   type TurnCancellationRequest,
   type TurnCancellationResult,
-} from "./cancellation-dispatcher.ts";
+} from "./run-cancellation-executor.ts";
 import {
   TurnExecutionBackendError,
   TurnExecutionCancelledError,

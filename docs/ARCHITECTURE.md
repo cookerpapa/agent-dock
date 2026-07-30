@@ -70,7 +70,9 @@ Each Activity receives one exact `commandId`. The Worker-side
 for that command; it has no API for polling or selecting another tenant,
 Session or Run. PostgreSQL mailbox/Workspace/quota checks can defer the exact
 command, while Temporal remains responsible for Task matching, cross-tenant
-fairness and retry timers.
+fairness and retry timers. Temporal cancellation reaches the owning Activity;
+its `RunCancellationExecutor` can claim only a cancellation record that targets
+that Activity's exact command.
 
 ### Trusted Pi Worker
 

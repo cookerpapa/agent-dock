@@ -22,7 +22,7 @@ import { type Kysely, sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   AssignmentReconciler,
-  CancellationDispatcher,
+  RunCancellationExecutor,
   ControlPlaneStore,
   DurableEventStore,
   HashedBearerSupervisorAuthorizer,
@@ -603,24 +603,14 @@ describe.sequential("remote two-phase supervisor execution", () => {
         `owner-cancel-${uuid()}`,
         { gracePeriodMs: 100 },
       );
-      const wrongFirstCancellation = new CancellationDispatcher({
+      const secondCancellation = new RunCancellationExecutor({
         database,
-        tenantId: seeded.tenantId,
-        backend: firstBinding.backend,
-        leaseManager: firstBinding.leaseCoordinator,
-        supervisorAffinity: firstBinding.supervisorAffinity,
-      });
-      await expect(wrongFirstCancellation.dispatchNext()).resolves.toEqual({ status: "idle" });
-      expect(await outboxAttempts(cancellation.commandId, TURN_CANCELLATION_OUTBOX_TOPIC)).toBe(0);
-
-      const secondCancellation = new CancellationDispatcher({
-        database,
-        tenantId: seeded.tenantId,
         backend: secondBinding.backend,
         leaseManager: secondBinding.leaseCoordinator,
-        supervisorAffinity: secondBinding.supervisorAffinity,
       });
-      await expect(secondCancellation.dispatchNext()).resolves.toMatchObject({
+      await expect(
+        secondCancellation.dispatchTargetCommand(followUp.commandId),
+      ).resolves.toMatchObject({
         status: "cancelled",
         commandId: cancellation.commandId,
       });
@@ -978,9 +968,8 @@ describe.sequential("remote two-phase supervisor execution", () => {
       backend: network.backend,
       leaseManager: network.leaseCoordinator,
     });
-    const cancellationDispatcher = new CancellationDispatcher({
+    const cancellationDispatcher = new RunCancellationExecutor({
       database,
-      tenantId: seeded.tenantId,
       backend: network.backend,
       leaseManager: network.leaseCoordinator,
     });
@@ -993,7 +982,9 @@ describe.sequential("remote two-phase supervisor execution", () => {
         `cancel-${uuid()}`,
         { gracePeriodMs: 100 },
       );
-      await expect(cancellationDispatcher.dispatchNext()).resolves.toMatchObject({
+      await expect(
+        cancellationDispatcher.dispatchTargetCommand(seeded.accepted.commandId),
+      ).resolves.toMatchObject({
         status: "cancelled",
         commandId: cancellation.commandId,
         targetCommandId: seeded.accepted.commandId,

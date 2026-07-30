@@ -5,7 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./cancellation-dispatcher": "./src/cancellation-dispatcher.ts",
+    "./run-cancellation-executor": "./src/run-cancellation-executor.ts",
     "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
     "./durable-event-store": "./src/durable-event-store.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",

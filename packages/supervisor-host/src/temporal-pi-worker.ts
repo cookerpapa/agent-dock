@@ -1,7 +1,7 @@
 import {
-  type CancellationDispatchNextResult,
-  CancellationDispatcher,
-} from "@agent-dock/control-plane/cancellation-dispatcher";
+  type RunCancellationExecutionResult,
+  RunCancellationExecutor,
+} from "@agent-dock/control-plane/run-cancellation-executor";
 import {
   type RunCommandExecutionResult,
   RunCommandExecutor,
@@ -37,7 +37,7 @@ export type TemporalPiWorkerOptions = {
     buildId: string;
   };
   commandExecutor: RunCommandExecutor;
-  cancellationDispatcher: CancellationDispatcher;
+  cancellationExecutor: RunCancellationExecutor;
 };
 
 export type TemporalPiWorkerState = "idle" | "starting" | "running" | "stopping" | "stopped";
@@ -79,7 +79,7 @@ export class TemporalPiWorker {
       }
     | undefined;
   readonly #commandExecutor: RunCommandExecutor;
-  readonly #cancellationDispatcher: CancellationDispatcher;
+  readonly #cancellationExecutor: RunCancellationExecutor;
   readonly #workerAffinity: PostgresTemporalWorkerAffinity;
   #state: TemporalPiWorkerState = "idle";
   #connection: NativeConnection | undefined;
@@ -113,7 +113,7 @@ export class TemporalPiWorker {
             buildId: bounded(options.workerDeployment.buildId, "workerDeployment.buildId", 255),
           };
     this.#commandExecutor = options.commandExecutor;
-    this.#cancellationDispatcher = options.cancellationDispatcher;
+    this.#cancellationExecutor = options.cancellationExecutor;
     this.#workerAffinity = new PostgresTemporalWorkerAffinity({
       database: this.#database,
     });
@@ -218,7 +218,7 @@ export class TemporalPiWorker {
     }
     this.#activeExecutions += 1;
     const context = Context.current();
-    let cancellation: Promise<CancellationDispatchNextResult> | undefined;
+    let cancellation: Promise<RunCancellationExecutionResult> | undefined;
     const beginCancellation = (): void => {
       cancellation ??= this.#cancelTarget(input.commandId);
     };
@@ -274,9 +274,9 @@ export class TemporalPiWorker {
     await this.#workerAffinity.release(input.affinity.reservationId).catch(() => undefined);
   }
 
-  async #cancelTarget(targetCommandId: string): Promise<CancellationDispatchNextResult> {
+  async #cancelTarget(targetCommandId: string): Promise<RunCancellationExecutionResult> {
     for (let attempt = 0; attempt < CANCELLATION_DISCOVERY_ATTEMPTS; attempt += 1) {
-      const result = await this.#cancellationDispatcher.dispatchTargetCommand(targetCommandId);
+      const result = await this.#cancellationExecutor.dispatchTargetCommand(targetCommandId);
       if (result.status !== "idle") return result;
       await delay(CANCELLATION_DISCOVERY_DELAY_MS);
     }

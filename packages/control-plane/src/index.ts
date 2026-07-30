@@ -123,18 +123,18 @@ export {
   type S3CheckpointObjectStoreOptions,
 } from "./s3-checkpoint-object-store.ts";
 export {
-  CancellationDispatcher,
-  CancellationDispatcherInvariantError,
-  CancellationDispatcherStaleClaimError,
+  RunCancellationExecutor,
+  RunCancellationExecutorInvariantError,
+  RunCancellationExecutorStaleClaimError,
   TurnCancellationBackendError,
-  type CancellationDispatchNextResult,
-  type CancellationDispatcherOptions,
+  type RunCancellationExecutionResult,
+  type RunCancellationExecutorOptions,
   type TurnCancellationBackend,
   type TurnCancellationLifecycle,
   type TurnCancellationReason,
   type TurnCancellationRequest,
   type TurnCancellationResult,
-} from "./cancellation-dispatcher.ts";
+} from "./run-cancellation-executor.ts";
 export {
   ControlPlaneModule,
   type ControlPlaneEventRuntime,

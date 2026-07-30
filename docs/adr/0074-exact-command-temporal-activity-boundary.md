@@ -23,20 +23,24 @@ implementations in one class.
 3. `RunCommandExecutor` never scans for another tenant, Session or Run. It
    performs only transactional eligibility checks, creates/supersedes the
    `RunAttempt`, invokes the trusted backend and commits lifecycle state.
-4. Temporal priority metadata uses `tenantId` as `fairnessKey`; PostgreSQL no
+4. Activity cancellation calls
+   `RunCancellationExecutor.dispatchTargetCommand(commandId)`. It may claim
+   only a cancellation that targets that exact running command; it cannot scan
+   for another tenant or Run.
+5. Temporal priority metadata uses `tenantId` as `fairnessKey`; PostgreSQL no
    longer advances `tenant_runtime_policies.last_scheduled_at` during Run
    execution.
-5. Temporal owns the retry timer for retryable pre-start failures. PostgreSQL
+6. Temporal owns the retry timer for retryable pre-start failures. PostgreSQL
    records the failed Attempt and immediately makes the same exact command
    eligible; the Workflow decides when to schedule its next Activity.
-6. PostgreSQL continues to reject an exact command when an earlier Session
+7. PostgreSQL continues to reject an exact command when an earlier Session
    message, an active Workspace writer, a tenant concurrency limit or a
    Candidate Race concurrency limit blocks it. The Workflow receives
    `deferred` and waits durably.
-7. Worker-specific Temporal queues and PostgreSQL-backed capacity reservations
+8. Worker-specific Temporal queues and PostgreSQL-backed capacity reservations
    remain a soft affinity optimization. They do not authorize the Activity or
    replace fences.
-8. Claim expiry, RunAttempt supersession, Session lease, fencing token and CAS
+9. Claim expiry, RunAttempt supersession, Session lease, fencing token and CAS
    remain mandatory because Temporal Activity delivery is not proof that an old
    Worker stopped producing side effects.
 
@@ -44,6 +48,8 @@ implementations in one class.
 
 - There is no production API that allows a Pi Worker to select arbitrary
   pending work from PostgreSQL.
+- There is no production API that allows a Pi Worker to select an unrelated
+  cancellation command.
 - Temporal owns cross-tenant ordering, Task matching and retry timers.
 - PostgreSQL remains the business-state and correctness authority without
   acting as a second Worker scheduler.

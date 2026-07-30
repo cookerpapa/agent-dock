@@ -1,4 +1,4 @@
-import { CancellationDispatcher } from "@agent-dock/control-plane/cancellation-dispatcher";
+import { RunCancellationExecutor } from "@agent-dock/control-plane/run-cancellation-executor";
 import {
   type CheckpointObjectStore,
   PostgresSandboxCheckpointStore,
@@ -430,7 +430,7 @@ export class SupervisorHostRuntime {
           claimOwnerId: `temporal:${identity.supervisorId}:${identity.bootId}`,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
-        cancellationDispatcher: new CancellationDispatcher({
+        cancellationExecutor: new RunCancellationExecutor({
           database: this.#database,
           backend: localBackend,
           leaseManager: leaseCoordinator,
