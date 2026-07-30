@@ -2950,3 +2950,15 @@
   untrusted user Workspace data without accepting symlinks in platform
   runtime, configuration or secret paths. The archive does not dereference
   those Workspace links.
+- Completed the incompatible v3-to-v4 production cutover behind an encrypted
+  196,862,465-byte cold backup. The cutover retained 54 users and tenants,
+  removed the old Project/Workspace/Session/Run graph plus its POSIX, Pi
+  checkpoint and Kopia objects, and restarted with two Kubernetes Pi Workers
+  on revision `b247246c5028368681031604912a8fcf3b4fe3b3`.
+- Real DeepSeek/Cube acceptance consumed 4,180 input, 2,405 output and 41,856
+  cache-read tokens across five Temporal Workflows. Pure chat created no Cube;
+  two coding Runs reused one warm KVM; a 3,684-file repository recovered from
+  Kopia into a fresh KVM; cross-tenant access was denied; every VM was
+  reclaimed. Physical evidence confirmed `.agent-dock-runtime/git` beside the
+  mounted data directory and no platform-created `.git` inside the user
+  Workspace.
