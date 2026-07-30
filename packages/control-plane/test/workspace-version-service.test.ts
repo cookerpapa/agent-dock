@@ -345,6 +345,7 @@ describe.sequential("versioned Workspace service", () => {
       fencingToken: 3,
       imageRevision: "development",
       environmentSpecSha256: "b".repeat(64),
+      gitBaselineCommit: "c".repeat(40),
       files: [
         {
           path: "README.md",

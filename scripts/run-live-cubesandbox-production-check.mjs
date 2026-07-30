@@ -406,6 +406,50 @@ async function workspaceVersionEvidence(runId) {
   return { fileCount, artifactBytes };
 }
 
+async function optionalMetadata(path) {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
+  const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
+  const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
+  const volumePath = resolve(volumeRoot, `agentdock-posix-${volumeId}`);
+  assert(
+    volumePath.startsWith(`${volumeRoot}/`),
+    "Workspace Git evidence escaped the shared-volume root",
+  );
+  const trustedGitPath = resolve(volumePath, ".agent-dock-runtime/git");
+  const workspacePath = resolve(volumePath, "workspace");
+  const [trustedGit, workspace, workspaceGit] = await Promise.all([
+    optionalMetadata(trustedGitPath),
+    optionalMetadata(workspacePath),
+    optionalMetadata(resolve(workspacePath, ".git")),
+  ]);
+  assert(
+    trustedGit?.isDirectory() && !trustedGit.isSymbolicLink(),
+    "Trusted Workspace Git metadata directory was absent",
+  );
+  assert(
+    workspace?.isDirectory() && !workspace.isSymbolicLink(),
+    "User Workspace directory was absent",
+  );
+  assert.equal(workspaceGit, undefined, "Platform Git metadata leaked into the user Workspace");
+  assert.match(
+    (await readFile(resolve(trustedGitPath, "HEAD"), "utf8")).trim(),
+    /^ref: refs\/heads\//,
+  );
+  return {
+    volumeId,
+    trustedMetadataSibling: true,
+    userWorkspaceGitEntryAbsent: true,
+  };
+}
+
 async function eraseLocalWorkspaceCopy(tenant, workspaceId, sessionId) {
   const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
   const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
@@ -663,6 +707,7 @@ try {
       "Create counting_sort.py with a counting_sort(values) implementation that supports negative integers and duplicates.",
       "Include executable Python tests in the file for empty, sorted, reverse, negative, and duplicate inputs.",
       "Run python3 counting_sort.py and make every test pass.",
+      "Do not initialize or create a Git repository or any .git entry.",
       "Do not only describe the code.",
     ].join(" "),
     chat.cursor,
@@ -721,6 +766,11 @@ try {
           JSON.stringify(event.payload).includes("4, -1, 4, 0, -1"),
       ),
     "Follow-up did not exercise the requested duplicate-negative regression input",
+  );
+  const gitPlacement = await trustedGitPlacementEvidence(
+    tenantId,
+    session.workspaceId,
+    session.sessionId,
   );
 
   const conversation = await api.getConversation(session.sessionId);
@@ -879,6 +929,7 @@ try {
       workspaceVersions: finalVersions.versions.length,
       finalFileBytes: Buffer.byteLength(finalSource, "utf8"),
     },
+    workspaceIsolation: gitPlacement,
     multiTenant: {
       crossTenantConversationHidden: true,
       lowerLevelCubeTenantGate: 2,
@@ -948,6 +999,7 @@ try {
         `- Coding Tool calls: ${String(report.firstCoding.toolCalls)} + ${String(report.followUpCoding.toolCalls)}`,
         `- Same running Session Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
+        `- Trusted Git metadata sibling / user .git absent: ${String(report.workspaceIsolation.trustedMetadataSibling)} / ${String(report.workspaceIsolation.userWorkspaceGitEntryAbsent)}`,
         `- Large Workspace files / checkpoint reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.checkpointReferenceBytes)} bytes`,
         `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
@@ -956,7 +1008,7 @@ try {
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary, rotated Tool authority and higher-fence rebind. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. Two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary, rotated Tool authority and higher-fence rebind. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

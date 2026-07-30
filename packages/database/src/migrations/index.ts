@@ -27,6 +27,7 @@ import * as largeWorkspaceCheckpoints from "./025_large_workspace_checkpoints.ts
 import * as workspaceFirstConversations from "./026_workspace_first_conversations.ts";
 import * as sharedWorkspaceHeads from "./027_shared_workspace_heads.ts";
 import * as interruptedPiConversations from "./028_interrupted_pi_conversations.ts";
+import * as externalPlatformGitMetadata from "./029_external_platform_git_metadata.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -59,6 +60,7 @@ export const migrationProvider: MigrationProvider = {
       "026_workspace_first_conversations": workspaceFirstConversations,
       "027_shared_workspace_heads": sharedWorkspaceHeads,
       "028_interrupted_pi_conversations": interruptedPiConversations,
+      "029_external_platform_git_metadata": externalPlatformGitMetadata,
     };
   },
 };
@@ -202,3 +204,8 @@ export {
   down as downInterruptedPiConversations,
   up as upInterruptedPiConversations,
 } from "./028_interrupted_pi_conversations.ts";
+
+export {
+  down as downExternalPlatformGitMetadata,
+  up as upExternalPlatformGitMetadata,
+} from "./029_external_platform_git_metadata.ts";

@@ -210,7 +210,9 @@ physical Volume is a trusted envelope:
 
 ```text
 agentdock-posix-<volume-id>/
-├── .agent-dock-runtime/generation
+├── .agent-dock-runtime/
+│   ├── generation
+│   └── git/
 └── workspace/
 ```
 
@@ -218,7 +220,8 @@ Cube mounts only `workspace/` at `/workspace`. After the guest is sealed and
 flushed, the trusted Workspace Data Mover snapshots the complete envelope into
 its dedicated Kopia repository. PostgreSQL Fence/CAS publishes only the
 current Attempt's immutable reference as the Workspace head. The guest cannot
-list or mutate the sibling generation marker.
+list or mutate the sibling generation marker or AgentDock's external Git
+baseline.
 
 The bundled single-node profile maps
 `runtime/state/cube-shared/volume` at `/data/cube-shared/volume`. A multi-node

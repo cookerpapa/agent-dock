@@ -56,6 +56,7 @@ export {
   workspaceVolumeId,
   type WorkspaceDataMover,
   type WorkspaceDataMoverIdentity,
+  type WorkspaceDataMoverInitializeBaselineInput,
   type WorkspaceDataMoverMaterializeInput,
   type WorkspaceDataMoverPrepareInput,
   type WorkspaceDataMoverSnapshotInput,

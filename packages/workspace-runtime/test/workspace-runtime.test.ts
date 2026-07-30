@@ -6,12 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   captureWorkspaceSnapshot,
   captureWorkspaceIndex,
-  collectGitWorkspacePatch,
+  collectExternalGitWorkspacePatch,
   createKopiaWorkspaceCheckpoint,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   createWorkspaceSnapshot,
   mergeWorkspaceSnapshots,
+  initializeExternalGitWorkspaceBaseline,
   parseWorkspaceSnapshot,
   parseKopiaWorkspaceCheckpoint,
   restoreWorkspaceSnapshot,
@@ -26,12 +27,25 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   return directory;
 }
 
-function git(root: string, args: readonly string[]): Promise<string> {
+function externalGit(
+  workTree: string,
+  gitDirectory: string,
+  args: readonly string[],
+): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
-    execFile("git", [...args], { cwd: root, encoding: "utf8" }, (error, stdout) => {
-      if (error) rejectPromise(error);
-      else resolvePromise(stdout);
-    });
+    execFile(
+      "git",
+      [...args],
+      {
+        cwd: workTree,
+        encoding: "utf8",
+        env: { ...process.env, GIT_DIR: gitDirectory, GIT_WORK_TREE: workTree },
+      },
+      (error, stdout) => {
+        if (error) rejectPromise(error);
+        else resolvePromise(stdout);
+      },
+    );
   });
 }
 
@@ -70,27 +84,28 @@ describe("shared workspace runtime", () => {
     expect((await stat(resolve(target, "test.sh"))).mode & 0o111).not.toBe(0);
   });
 
-  it("collects tracked edits, deletions, and untracked files without staging content", async () => {
+  it("keeps the platform baseline outside the user tree while collecting a cumulative patch", async () => {
     const root = await temporaryDirectory("agent-dock-workspace-runtime-patch-");
+    const metadata = await temporaryDirectory("agent-dock-workspace-runtime-metadata-");
+    const gitDirectory = resolve(metadata, "git");
     await mkdir(resolve(root, "src"));
     await writeFile(resolve(root, "tracked.txt"), "before\n");
     await writeFile(resolve(root, "deleted.txt"), "remove me\n");
-    await git(root, ["init", "--quiet"]);
-    await git(root, ["config", "user.name", "AgentDock Test"]);
-    await git(root, ["config", "user.email", "test@agent-dock.invalid"]);
-    await git(root, ["add", "--all"]);
-    await git(root, ["commit", "--quiet", "-m", "baseline"]);
+    const workspace = { workTree: root, gitDirectory };
+    const baseline = await initializeExternalGitWorkspaceBaseline(workspace);
 
     await writeFile(resolve(root, "tracked.txt"), "after\n");
     await rm(resolve(root, "deleted.txt"));
     await writeFile(resolve(root, "src/New.java"), "class New {}\n");
-    const patch = await collectGitWorkspacePatch(root);
+    const patch = await collectExternalGitWorkspacePatch(workspace);
 
+    expect(baseline).toMatch(/^[0-9a-f]{40}$/);
+    await expect(stat(resolve(root, ".git"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(patch.truncated).toBe(false);
     expect(patch.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
     expect(patch.patch).toContain("deleted file mode");
     expect(patch.patch).toContain("diff --git a/src/New.java b/src/New.java");
-    expect(await git(root, ["diff", "--cached"])).toBe("");
+    expect(await externalGit(root, gitDirectory, ["diff", "--cached"])).toBe("");
   });
 
   it("merges exact repository snapshots beneath disjoint normalized roots", () => {
@@ -180,6 +195,7 @@ describe("shared workspace runtime", () => {
       fencingToken: 9,
       imageRevision: "development",
       environmentSpecSha256: "c".repeat(64),
+      gitBaselineCommit: "e".repeat(40),
       files: [
         {
           path: "src/result.txt",

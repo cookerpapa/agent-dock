@@ -37,6 +37,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   cleanup time.
 - [x] Move trusted Volume generation metadata outside the guest-visible
   `/workspace` while preserving one Kopia checkpoint envelope.
+- [x] Move AgentDock's synthetic Git baseline and Patch calculation into the
+  trusted Volume envelope so `/workspace` contains only user data.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

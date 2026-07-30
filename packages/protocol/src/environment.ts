@@ -12,7 +12,7 @@ export const DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION = "1" as const;
 export const DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 =
   "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const;
 export const DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256 =
-  "5a851a442529ef2a092e5fb4f8f217703766a0142b267e4beb14fb1201aa1b6d" as const;
+  "2d6c5260fe7bc3901e454ff93106dc5ed263d6edbbabf7bafdf852021289e5ba" as const;
 
 const EnvironmentCommandIdSchema = Type.String({
   minLength: 1,
@@ -63,8 +63,8 @@ export const DEFAULT_PROJECT_ENVIRONMENT_RECIPE = {
   setupCommands: [],
   verificationCommands: [
     {
-      id: "git-worktree",
-      command: "git status --short",
+      id: "workspace-root",
+      command: 'test "$PWD" = /workspace && test -w .',
       cwd: ".",
       timeoutMs: 10_000,
       network: "none",

@@ -103,8 +103,6 @@ export {
   type RunAttemptPhaseObserver,
 } from "./run-attempt-phase.ts";
 
-export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
-
 export {
   decodeSettledCheckpoint,
   decodeWorkspaceSnapshot,

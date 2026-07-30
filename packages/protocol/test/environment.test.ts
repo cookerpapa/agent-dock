@@ -105,7 +105,7 @@ describe("versioned project environment protocol", () => {
           schemaVersion: 1,
           setupCommands: [
             {
-              id: "git-worktree",
+              id: "workspace-root",
               command: "true",
               cwd: ".",
               timeoutMs: 1_000,

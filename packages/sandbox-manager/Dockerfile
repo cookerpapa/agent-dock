@@ -54,6 +54,9 @@ LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=kopia-builder /out/kopia /usr/local/bin/kopia
 COPY --from=dependencies /app/node_modules /app/node_modules

@@ -128,8 +128,9 @@ At `agent_settled`:
 1. If a Tool was used, the Cube Provider closes the current Tool Worker,
    briefly freezes the remaining UID 1000 processes, flushes the
    Volume-Plugin-backed POSIX Workspace, and captures a content-hashed file
-   index plus cumulative Git patch. The trusted Data Mover creates an immutable
-   encrypted Kopia snapshot and returns only a bounded
+   index. While the guest remains frozen, the trusted Data Mover computes the
+   cumulative Git patch from its external baseline, creates an immutable
+   encrypted Kopia snapshot, and returns only a bounded
    Session/volume/environment/fence-bound reference. The guest supervisor then
    resumes the exact PID/start-time identities. Cube-native references are not
    accepted. Otherwise no Workspace capture/version or physical environment

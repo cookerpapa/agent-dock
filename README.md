@@ -125,8 +125,11 @@ The browser no longer has a special repository-import workflow. The Agent can
 use normal `git`, package-manager and download commands inside the connected
 Cube microVM. Public network access is routed through the deployment-owned
 proxy and rejects private, link-local, metadata and platform destinations.
-Cube mounts only the user-data child of the trusted POSIX Volume, so
-checkpoint generation metadata never appears inside `/workspace`.
+Cube mounts only the user-data child of the trusted POSIX Volume. Checkpoint
+generation state and AgentDock's synthetic Git baseline both remain in the
+trusted envelope, so a fresh `/workspace` contains only user files. A
+repository explicitly created or cloned by the user remains ordinary
+Workspace data.
 
 ## Security invariants
 

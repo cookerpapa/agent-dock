@@ -15,6 +15,7 @@ describe("trusted project instruction extraction", () => {
       fencingToken: 1,
       imageRevision: "test",
       environmentSpecSha256: "b".repeat(64),
+      gitBaselineCommit: "d".repeat(40),
       files: [
         {
           path: "AGENTS.md",

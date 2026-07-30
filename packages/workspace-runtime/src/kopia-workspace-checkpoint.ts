@@ -10,7 +10,7 @@ import {
 } from "./workspace-index.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
-export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v3";
+export const KOPIA_WORKSPACE_CHECKPOINT_FORMAT = "agent-dock.workspace-kopia-snapshot.v4";
 const KOPIA_WORKSPACE_CHECKPOINT_FORMAT_PREFIX = "agent-dock.workspace-kopia-snapshot.";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -18,6 +18,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
 const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
 const COMMAND_ID_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
+const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
 export type KopiaWorkspaceCheckpoint = Readonly<{
   format: typeof KOPIA_WORKSPACE_CHECKPOINT_FORMAT;
@@ -32,6 +33,7 @@ export type KopiaWorkspaceCheckpoint = Readonly<{
   fencingToken: number;
   imageRevision: string;
   environmentSpecSha256: string;
+  gitBaselineCommit: string;
   totalSizeBytes: number;
   files: readonly WorkspaceSnapshotFileMetadata[];
   recipeCommands: readonly EnvironmentRecipeCommandResult[];
@@ -126,6 +128,7 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
       "fencingToken",
       "imageRevision",
       "environmentSpecSha256",
+      "gitBaselineCommit",
       "totalSizeBytes",
       "files",
       "recipeCommands",
@@ -154,6 +157,8 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
     /[\u0000-\u001f\u007f]/.test(value.imageRevision) ||
     typeof value.environmentSpecSha256 !== "string" ||
     !SHA256_PATTERN.test(value.environmentSpecSha256) ||
+    typeof value.gitBaselineCommit !== "string" ||
+    !GIT_COMMIT_PATTERN.test(value.gitBaselineCommit) ||
     !Number.isSafeInteger(value.totalSizeBytes) ||
     (value.totalSizeBytes as number) < 0 ||
     (value.totalSizeBytes as number) > MAX_WORKSPACE_INDEX_TOTAL_BYTES
@@ -178,6 +183,7 @@ function parseCheckpointRecord(value: Record<string, unknown>): KopiaWorkspaceCh
     fencingToken: value.fencingToken as number,
     imageRevision: value.imageRevision,
     environmentSpecSha256: value.environmentSpecSha256,
+    gitBaselineCommit: value.gitBaselineCommit,
     totalSizeBytes,
     files,
     recipeCommands: validateRecipeCommands(value.recipeCommands),
@@ -227,6 +233,7 @@ export function createKopiaWorkspaceCheckpoint(
       fencingToken: input.fencingToken,
       imageRevision: input.imageRevision,
       environmentSpecSha256: input.environmentSpecSha256,
+      gitBaselineCommit: input.gitBaselineCommit,
       totalSizeBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0),
       files,
       recipeCommands,

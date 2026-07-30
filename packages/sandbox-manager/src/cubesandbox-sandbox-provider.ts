@@ -692,6 +692,12 @@ export class CubeSandboxProvider implements SandboxProvider {
           false,
         );
       }
+      await this.#workspaceDataMover.initializeBaseline({
+        tenantId: spec.assignment.tenantId,
+        workspaceId: spec.assignment.workspaceId,
+        sessionId: spec.assignment.sessionId,
+        volumeId,
+      });
       const environmentValidation: EnvironmentValidationReport = {
         ...toolchain,
         isolationBoundary: "microvm",
@@ -748,6 +754,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       sessionId: spec.assignment.sessionId,
       volumeId,
       snapshotId: checkpoint.snapshotId,
+      gitBaselineCommit: checkpoint.gitBaselineCommit,
     });
     const instance = await this.#client.create({
       templateId: this.#templateId,
@@ -1125,6 +1132,7 @@ export class CubeSandboxProvider implements SandboxProvider {
           fencingToken: handle.assignment.fencingToken,
           imageRevision: this.#imageRevision,
           environmentSpecSha256: handle.environment.specSha256,
+          gitBaselineCommit: kopia.gitBaselineCommit,
           files: raw.files as WorkspaceSnapshotFileMetadata[],
           recipeCommands: activation.toolchain.recipeCommands,
         }),
@@ -1135,7 +1143,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         requestId,
         activationId: handle.activationId,
         workspace,
-        ...(raw.workspacePatch === undefined ? {} : { workspacePatch: raw.workspacePatch }),
+        workspacePatch: kopia.workspacePatch,
         environment: handle.environmentValidation,
       });
       if (parsed.type !== "tool_sandbox.captured") {

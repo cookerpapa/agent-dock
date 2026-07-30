@@ -19,7 +19,6 @@ import {
 } from "@agent-dock/protocol";
 import {
   captureWorkspaceSnapshot,
-  collectGitWorkspacePatch,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   restoreWorkspaceSnapshot,
@@ -904,22 +903,6 @@ export async function prepareToolWorkspace(
       decodeWorkspaceSnapshotBlob(workspaceSeed),
     );
   }
-  await execute("git", ["init", "--quiet"], TOOL_WORKSPACE_DIRECTORY);
-  await execute("git", ["config", "user.name", "AgentDock Fixture"], TOOL_WORKSPACE_DIRECTORY);
-  await execute(
-    "git",
-    ["config", "user.email", "fixture@agent-dock.invalid"],
-    TOOL_WORKSPACE_DIRECTORY,
-  );
-  await execute("git", ["add", "--all", "--", "."], TOOL_WORKSPACE_DIRECTORY);
-  // An empty product Workspace is a valid starting point. Keep a real Git
-  // baseline even when there are no files so later edits still produce a
-  // deterministic diff against the accepted source snapshot.
-  await execute(
-    "git",
-    ["commit", "--allow-empty", "--quiet", "-m", "fixture baseline"],
-    TOOL_WORKSPACE_DIRECTORY,
-  );
   if (workspaceRestore !== undefined) {
     await restoreWorkspaceSnapshot(
       TOOL_WORKSPACE_DIRECTORY,
@@ -1066,10 +1049,6 @@ export async function runToolWorker(): Promise<void> {
             requestId: message.requestId,
             workspace: encodeWorkspaceSnapshotBlob(
               await captureWorkspaceSnapshot(TOOL_WORKSPACE_DIRECTORY),
-            ),
-            workspacePatch: await collectGitWorkspacePatch(
-              TOOL_WORKSPACE_DIRECTORY,
-              safeToolEnvironment(),
             ),
           });
         } catch (error: unknown) {

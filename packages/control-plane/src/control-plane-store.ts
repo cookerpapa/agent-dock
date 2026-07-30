@@ -1833,7 +1833,7 @@ export class ControlPlaneStore {
     const request: AcceptTurnRequest = {
       prompt: [
         `Validate AgentDock environment version ${environmentVersionId}.`,
-        "Before answering, call the bash tool exactly once with `git status --short` in /workspace.",
+        "Before answering, call the bash tool exactly once with `pwd && test ! -e /workspace/.git` in /workspace.",
         "Do not edit files. Report whether the environment is ready.",
       ].join(" "),
       thinkingLevel: "minimal",

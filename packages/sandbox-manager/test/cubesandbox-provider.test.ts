@@ -77,7 +77,16 @@ function fakeWorkspaceDataMover(): WorkspaceDataMover {
   return {
     checkHealth: vi.fn(async () => undefined),
     prepare: vi.fn(async () => ({ restored: false })),
-    snapshot: vi.fn(async () => ({ snapshotId: "a".repeat(32) })),
+    initializeBaseline: vi.fn(async () => ({ gitBaselineCommit: "b".repeat(40) })),
+    snapshot: vi.fn(async () => ({
+      snapshotId: "a".repeat(32),
+      gitBaselineCommit: "b".repeat(40),
+      workspacePatch: {
+        format: "unified_diff" as const,
+        patch: "diff --git a/result.txt b/result.txt\n",
+        truncated: false,
+      },
+    })),
     materialize: vi.fn(async () => {
       const bytes = Buffer.from("cube\n");
       return {
@@ -331,6 +340,13 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.creates).toHaveLength(0);
     const response = await manager.execute(reserved.capability, operation(reserved.activationId));
     expect(response).toMatchObject({ operation: "bash.exec", exitCode: 0 });
+    expect(workspaceDataMover.initializeBaseline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: assignment.tenantId,
+        workspaceId: assignment.workspaceId,
+        sessionId: assignment.sessionId,
+      }),
+    );
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]?.metadata).not.toHaveProperty("host-mount");
     expect(await manager.listAssignments(assignment.sandboxId)).toEqual([
@@ -369,6 +385,7 @@ describe("CubeSandbox Provider contract", () => {
       fencingToken: assignment.fencingToken,
       imageRevision: environment.imageRevision,
       environmentSpecSha256: environment.specSha256,
+      gitBaselineCommit: "b".repeat(40),
       totalSizeBytes: 5,
       files: [
         {
@@ -378,6 +395,11 @@ describe("CubeSandbox Provider contract", () => {
           sha256: createHash("sha256").update("cube\n").digest("hex"),
         },
       ],
+    });
+    expect(captured.workspacePatch).toEqual({
+      format: "unified_diff",
+      patch: "diff --git a/result.txt b/result.txt\n",
+      truncated: false,
     });
     expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("adch_");
     const materialized = await manager.materializeFile({
@@ -565,6 +587,7 @@ describe("CubeSandbox Provider contract", () => {
         workspaceId: assignment.workspaceId,
         sessionId: nextAssignment.sessionId,
         snapshotId: "a".repeat(32),
+        gitBaselineCommit: "b".repeat(40),
       }),
     );
     const initialize = runtime.requests.find(

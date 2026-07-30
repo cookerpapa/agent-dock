@@ -2927,3 +2927,22 @@
 - Removed application-level reserved-path filtering for
   `.agent-dock-runtime`; platform metadata is now absent from the guest rather
   than merely hidden from selected Tool APIs.
+
+## 2026-07-30 — Trusted external Git baseline
+
+- Moved AgentDock's synthetic Git directory from `/workspace/.git` to the
+  trusted Volume envelope at `.agent-dock-runtime/git`. Cube continues to
+  mount only the sibling `workspace/` directory.
+- Removed platform Git initialization and Patch collection from the untrusted
+  Tool Worker and Cube Tool service. The trusted Workspace Data Mover now
+  establishes the baseline before Agent Tools become available and computes
+  the cumulative binary Patch while the Cube process boundary is frozen.
+- Bound restore to the expected baseline commit and advanced the immutable
+  Workspace reference and Data Mover state to v4. Older development
+  checkpoints are intentionally unsupported.
+- Replaced the environment recipe's root `git status` assumption with a
+  writable `/workspace` boundary check and added a database migration for
+  existing default environments.
+- Retained Git inside the Cube image for repositories that users explicitly
+  create or clone; only AgentDock-owned Git metadata moved to the trusted
+  plane.

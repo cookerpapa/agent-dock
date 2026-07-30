@@ -187,10 +187,9 @@ try {
     "--user",
     "1000:1000",
     containerName,
-    "git",
-    "init",
-    "--quiet",
-    "/workspace",
+    "sh",
+    "-c",
+    "printf 'template check\\n' > /workspace/README.txt && test ! -e /workspace/.git",
   ]);
 
   const activationId = randomUUID();
@@ -215,15 +214,15 @@ try {
         setupCommands: [],
         verificationCommands: [
           {
-            id: "git-worktree",
-            command: "git status --short",
+            id: "workspace-root",
+            command: 'test "$PWD" = /workspace && test -w .',
             cwd: ".",
             timeoutMs: 10_000,
             network: "none",
           },
         ],
       },
-      recipeSha256: "5a851a442529ef2a092e5fb4f8f217703766a0142b267e4beb14fb1201aa1b6d",
+      recipeSha256: "2d6c5260fe7bc3901e454ff93106dc5ed263d6edbbabf7bafdf852021289e5ba",
     },
     workspaceSeed: { kind: "sample_java" },
     workspaceAttach: { recipeCommands: [] },

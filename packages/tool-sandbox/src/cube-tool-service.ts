@@ -8,7 +8,7 @@ import {
   type ToolWorkerInput,
   type ToolWorkerOutput,
 } from "@agent-dock/protocol";
-import { captureWorkspaceIndex, collectGitWorkspacePatch } from "@agent-dock/workspace-runtime";
+import { captureWorkspaceIndex } from "@agent-dock/workspace-runtime";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createInterface } from "node:readline";
@@ -751,18 +751,7 @@ const server = createServer((request, response) => {
         // The trusted data mover snapshots the host-side POSIX mount while
         // these exact PID/start-time identities remain stopped.
         await exec("/bin/sync", ["-f", "/workspace"]);
-        const [workspaceIndex, workspacePatch] = await Promise.all([
-          captureWorkspaceIndex("/workspace"),
-          collectGitWorkspacePatch(
-            "/workspace",
-            {
-              HOME: "/tmp/agent-dock-tool-home",
-              LANG: "C.UTF-8",
-              PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            },
-            { uid: TOOL_UID, gid: TOOL_GID },
-          ),
-        ]);
+        const workspaceIndex = await captureWorkspaceIndex("/workspace");
         authority = {
           ...previous,
           secret: recoverySecret,
@@ -772,7 +761,6 @@ const server = createServer((request, response) => {
           fencingToken: previous.fencingToken,
           frozenToolProcesses: frozenProcesses,
           files: workspaceIndex.files,
-          workspacePatch,
         });
       } catch (error: unknown) {
         checkpointFrozenProcesses = undefined;

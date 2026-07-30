@@ -35,4 +35,9 @@ export {
   type KopiaWorkspaceCheckpoint,
 } from "./kopia-workspace-checkpoint.ts";
 
-export { collectGitWorkspacePatch } from "./git-workspace-patch.ts";
+export {
+  collectExternalGitWorkspacePatch,
+  initializeExternalGitWorkspaceBaseline,
+  inspectExternalGitWorkspaceBaseline,
+  type ExternalGitWorkspace,
+} from "./external-git-workspace.ts";

@@ -1,3 +1,9 @@
+import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
+import {
+  collectExternalGitWorkspacePatch,
+  initializeExternalGitWorkspaceBaseline,
+  inspectExternalGitWorkspaceBaseline,
+} from "@agent-dock/workspace-runtime";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
@@ -25,13 +31,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const VOLUME_GENERATION_PATTERN = /^[0-9a-f]{64}$/;
+const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const VOLUME_METADATA_DIRECTORY = ".agent-dock-runtime";
 const VOLUME_WORKSPACE_DIRECTORY = "workspace";
 const VOLUME_GENERATION_FILE = "generation";
+const VOLUME_GIT_DIRECTORY = "git";
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
+const MAXIMUM_RESPONSE_BYTES = MAXIMUM_REQUEST_BYTES + 2 * MAX_WORKSPACE_PATCH_BYTES;
 
 const WORKSPACE_DATA_MOVER_PREPARE_PATH = "/v1/workspaces/prepare";
+const WORKSPACE_DATA_MOVER_INITIALIZE_BASELINE_PATH = "/v1/workspaces/initialize-baseline";
 const WORKSPACE_DATA_MOVER_SNAPSHOT_PATH = "/v1/workspaces/snapshot";
 const WORKSPACE_DATA_MOVER_MATERIALIZE_PATH = "/v1/workspaces/materialize";
 
@@ -43,7 +53,9 @@ export type WorkspaceDataMoverIdentity = Readonly<{
 }>;
 
 export type WorkspaceDataMoverPrepareInput = WorkspaceDataMoverIdentity &
-  Readonly<{ snapshotId?: string }>;
+  Readonly<{ snapshotId?: string; gitBaselineCommit?: string }>;
+
+export type WorkspaceDataMoverInitializeBaselineInput = WorkspaceDataMoverIdentity;
 
 export type WorkspaceDataMoverSnapshotInput = WorkspaceDataMoverIdentity &
   Readonly<{
@@ -63,7 +75,14 @@ export type WorkspaceDataMoverMaterializeInput = WorkspaceDataMoverIdentity &
 export interface WorkspaceDataMover {
   checkHealth(): Promise<void>;
   prepare(input: WorkspaceDataMoverPrepareInput): Promise<{ restored: boolean }>;
-  snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{ snapshotId: string }>;
+  initializeBaseline(
+    input: WorkspaceDataMoverInitializeBaselineInput,
+  ): Promise<{ gitBaselineCommit: string }>;
+  snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{
+    snapshotId: string;
+    gitBaselineCommit: string;
+    workspacePatch: WorkspacePatch;
+  }>;
   materialize(
     input: WorkspaceDataMoverMaterializeInput,
   ): Promise<{ bytes: Uint8Array; sha256: string }>;
@@ -90,13 +109,14 @@ export type KopiaWorkspaceDataMoverOptions = Readonly<{
 }>;
 
 type VolumeState = Readonly<{
-  schemaVersion: 3;
+  schemaVersion: 4;
   tenantId: string;
   workspaceId: string;
   sessionId: string;
   volumeId: string;
   snapshotId: string;
   volumeGeneration: string;
+  gitBaselineCommit: string;
 }>;
 
 export class WorkspaceDataMoverError extends Error {
@@ -170,6 +190,17 @@ function validatedSnapshotId(value: string): string {
     throw new WorkspaceDataMoverError(
       "workspace_snapshot_identity_invalid",
       "Workspace snapshot identity was invalid",
+      false,
+    );
+  }
+  return value;
+}
+
+function validatedGitBaselineCommit(value: string): string {
+  if (!GIT_COMMIT_PATTERN.test(value)) {
+    throw new WorkspaceDataMoverError(
+      "workspace_git_baseline_invalid",
+      "Workspace Git baseline was invalid",
       false,
     );
   }
@@ -279,6 +310,17 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     const identity = validatedIdentity(input);
     const snapshotId =
       input.snapshotId === undefined ? undefined : validatedSnapshotId(input.snapshotId);
+    const gitBaselineCommit =
+      input.gitBaselineCommit === undefined
+        ? undefined
+        : validatedGitBaselineCommit(input.gitBaselineCommit);
+    if ((snapshotId === undefined) !== (gitBaselineCommit === undefined)) {
+      throw new WorkspaceDataMoverError(
+        "workspace_restore_identity_invalid",
+        "Workspace restore snapshot and Git baseline must be supplied together",
+        false,
+      );
+    }
     return this.#withVolumeLock(identity.volumeId, async () => {
       await this.#ensureReady();
       const directory = await this.#ensureVolumeDirectory(identity.volumeId);
@@ -288,6 +330,13 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         await this.#createWorkspaceDirectory(directory);
         await this.#createVolumeGeneration(directory);
         return { restored: false };
+      }
+      if (gitBaselineCommit === undefined) {
+        throw new WorkspaceDataMoverError(
+          "workspace_restore_identity_invalid",
+          "Workspace restore Git baseline was missing",
+          false,
+        );
       }
       // Reuse requires both the trusted sidecar and the generation marker
       // carried by the live POSIX volume. The sidecar alone cannot distinguish
@@ -304,6 +353,8 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         state.volumeId === identity.volumeId &&
         state.snapshotId === snapshotId &&
         volumeGeneration === state.volumeGeneration &&
+        state.gitBaselineCommit === gitBaselineCommit &&
+        (await this.#readGitBaseline(directory)) === gitBaselineCommit &&
         workspaceValid
       ) {
         return { restored: false };
@@ -322,19 +373,21 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         const restoredGeneration = await this.#readVolumeGeneration(directory);
         if (
           restoredGeneration === undefined ||
-          !(await this.#hasValidWorkspaceDirectory(directory))
+          !(await this.#hasValidWorkspaceDirectory(directory)) ||
+          (await this.#readGitBaseline(directory)) !== gitBaselineCommit
         ) {
           throw new WorkspaceDataMoverError(
             "workspace_restore_generation_invalid",
-            "Committed Workspace snapshot did not contain a valid Volume envelope",
+            "Committed Workspace snapshot did not contain a valid Volume envelope and Git baseline",
             false,
           );
         }
         await this.#writeState({
-          schemaVersion: 3,
+          schemaVersion: 4,
           ...identity,
           snapshotId,
           volumeGeneration: restoredGeneration,
+          gitBaselineCommit,
         });
         return { restored: true };
       } catch (error: unknown) {
@@ -349,7 +402,48 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     });
   }
 
-  async snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{ snapshotId: string }> {
+  async initializeBaseline(
+    input: WorkspaceDataMoverInitializeBaselineInput,
+  ): Promise<{ gitBaselineCommit: string }> {
+    const identity = validatedIdentity(input);
+    return this.#withVolumeLock(identity.volumeId, async () => {
+      await this.#ensureReady();
+      const directory = await this.#ensureVolumeDirectory(identity.volumeId);
+      if (
+        (await this.#readVolumeGeneration(directory)) === undefined ||
+        !(await this.#hasValidWorkspaceDirectory(directory))
+      ) {
+        throw new WorkspaceDataMoverError(
+          "workspace_volume_generation_invalid",
+          "Workspace Volume envelope was invalid",
+          false,
+        );
+      }
+      const existing = await this.#readGitBaseline(directory);
+      if (existing !== undefined) return { gitBaselineCommit: existing };
+      const gitDirectory = join(directory, VOLUME_METADATA_DIRECTORY, VOLUME_GIT_DIRECTORY);
+      await rm(gitDirectory, { recursive: true, force: true });
+      try {
+        const gitBaselineCommit = validatedGitBaselineCommit(
+          await initializeExternalGitWorkspaceBaseline(this.#externalGitWorkspace(directory)),
+        );
+        return { gitBaselineCommit };
+      } catch {
+        await rm(gitDirectory, { recursive: true, force: true }).catch(() => undefined);
+        throw new WorkspaceDataMoverError(
+          "workspace_git_baseline_initialization_failed",
+          "Workspace Git baseline could not be initialized",
+          true,
+        );
+      }
+    });
+  }
+
+  async snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{
+    snapshotId: string;
+    gitBaselineCommit: string;
+    workspacePatch: WorkspacePatch;
+  }> {
     const identity = validatedIdentity(input);
     if (
       !UUID_PATTERN.test(input.activationId) ||
@@ -372,6 +466,26 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
           "workspace_volume_generation_invalid",
           "Workspace Volume envelope was invalid",
           false,
+        );
+      }
+      const gitBaselineCommit = await this.#readGitBaseline(directory);
+      if (gitBaselineCommit === undefined) {
+        throw new WorkspaceDataMoverError(
+          "workspace_git_baseline_invalid",
+          "Workspace Git baseline was missing or invalid",
+          false,
+        );
+      }
+      let workspacePatch: WorkspacePatch;
+      try {
+        workspacePatch = await collectExternalGitWorkspacePatch(
+          this.#externalGitWorkspace(directory),
+        );
+      } catch {
+        throw new WorkspaceDataMoverError(
+          "workspace_git_patch_failed",
+          "Workspace Patch could not be generated",
+          true,
         );
       }
       const output = await this.#kopia([
@@ -400,12 +514,13 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       }
       const snapshotId = validatedSnapshotId(parsed.id);
       await this.#writeState({
-        schemaVersion: 3,
+        schemaVersion: 4,
         ...identity,
         snapshotId,
         volumeGeneration,
+        gitBaselineCommit,
       });
-      return { snapshotId };
+      return { snapshotId, gitBaselineCommit, workspacePatch };
     });
   }
 
@@ -611,6 +726,26 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     }
   }
 
+  #externalGitWorkspace(directory: string): { workTree: string; gitDirectory: string } {
+    return {
+      workTree: join(directory, VOLUME_WORKSPACE_DIRECTORY),
+      gitDirectory: join(directory, VOLUME_METADATA_DIRECTORY, VOLUME_GIT_DIRECTORY),
+    };
+  }
+
+  async #readGitBaseline(directory: string): Promise<string | undefined> {
+    try {
+      const gitDirectory = join(directory, VOLUME_METADATA_DIRECTORY, VOLUME_GIT_DIRECTORY);
+      const metadata = await lstat(gitDirectory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) return undefined;
+      return validatedGitBaselineCommit(
+        await inspectExternalGitWorkspaceBaseline(this.#externalGitWorkspace(directory)),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   async #createVolumeGeneration(directory: string): Promise<string> {
     const metadataDirectory = join(directory, VOLUME_METADATA_DIRECTORY);
     await mkdir(metadataDirectory, { mode: 0o700 });
@@ -675,6 +810,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
       !isRecord(value) ||
       Object.keys(value).sort().join("\0") !==
         [
+          "gitBaselineCommit",
           "schemaVersion",
           "sessionId",
           "snapshotId",
@@ -685,14 +821,16 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         ]
           .sort()
           .join("\0") ||
-      value.schemaVersion !== 3 ||
+      value.schemaVersion !== 4 ||
       typeof value.tenantId !== "string" ||
       typeof value.workspaceId !== "string" ||
       typeof value.sessionId !== "string" ||
       typeof value.volumeId !== "string" ||
       typeof value.snapshotId !== "string" ||
       typeof value.volumeGeneration !== "string" ||
-      !VOLUME_GENERATION_PATTERN.test(value.volumeGeneration)
+      !VOLUME_GENERATION_PATTERN.test(value.volumeGeneration) ||
+      typeof value.gitBaselineCommit !== "string" ||
+      !GIT_COMMIT_PATTERN.test(value.gitBaselineCommit)
     ) {
       return undefined;
     }
@@ -704,10 +842,11 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
         volumeId: value.volumeId,
       });
       return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         ...identity,
         snapshotId: validatedSnapshotId(value.snapshotId),
         volumeGeneration: value.volumeGeneration,
+        gitBaselineCommit: value.gitBaselineCommit,
       };
     } catch {
       return undefined;
@@ -809,6 +948,15 @@ export class WorkspaceDataMoverServer {
         return this.#failure(reply, error);
       }
     });
+    this.#server.post(WORKSPACE_DATA_MOVER_INITIALIZE_BASELINE_PATH, async (request, reply) => {
+      try {
+        return await this.#mover.initializeBaseline(
+          request.body as WorkspaceDataMoverInitializeBaselineInput,
+        );
+      } catch (error: unknown) {
+        return this.#failure(reply, error);
+      }
+    });
     this.#server.post(WORKSPACE_DATA_MOVER_SNAPSHOT_PATH, async (request, reply) => {
       try {
         return await this.#mover.snapshot(request.body as WorkspaceDataMoverSnapshotInput);
@@ -895,10 +1043,59 @@ export class HttpWorkspaceDataMover implements WorkspaceDataMover {
     }>;
   }
 
-  snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{ snapshotId: string }> {
-    return this.#request(WORKSPACE_DATA_MOVER_SNAPSHOT_PATH, input) as Promise<{
-      snapshotId: string;
-    }>;
+  async initializeBaseline(
+    input: WorkspaceDataMoverInitializeBaselineInput,
+  ): Promise<{ gitBaselineCommit: string }> {
+    const response = await this.#request(WORKSPACE_DATA_MOVER_INITIALIZE_BASELINE_PATH, input);
+    if (
+      !isRecord(response) ||
+      Object.keys(response).length !== 1 ||
+      typeof response.gitBaselineCommit !== "string"
+    ) {
+      throw new WorkspaceDataMoverError(
+        "workspace_data_mover_response_invalid",
+        "Workspace Data Mover response was invalid",
+        false,
+      );
+    }
+    return { gitBaselineCommit: validatedGitBaselineCommit(response.gitBaselineCommit) };
+  }
+
+  async snapshot(input: WorkspaceDataMoverSnapshotInput): Promise<{
+    snapshotId: string;
+    gitBaselineCommit: string;
+    workspacePatch: WorkspacePatch;
+  }> {
+    const response = await this.#request(WORKSPACE_DATA_MOVER_SNAPSHOT_PATH, input);
+    if (
+      !isRecord(response) ||
+      Object.keys(response).sort().join("\0") !==
+        ["gitBaselineCommit", "snapshotId", "workspacePatch"].sort().join("\0") ||
+      typeof response.snapshotId !== "string" ||
+      typeof response.gitBaselineCommit !== "string" ||
+      !isRecord(response.workspacePatch) ||
+      Object.keys(response.workspacePatch).sort().join("\0") !==
+        ["format", "patch", "truncated"].sort().join("\0") ||
+      response.workspacePatch.format !== "unified_diff" ||
+      typeof response.workspacePatch.patch !== "string" ||
+      Buffer.byteLength(response.workspacePatch.patch, "utf8") > MAX_WORKSPACE_PATCH_BYTES ||
+      typeof response.workspacePatch.truncated !== "boolean"
+    ) {
+      throw new WorkspaceDataMoverError(
+        "workspace_data_mover_response_invalid",
+        "Workspace Data Mover response was invalid",
+        false,
+      );
+    }
+    return {
+      snapshotId: validatedSnapshotId(response.snapshotId),
+      gitBaselineCommit: validatedGitBaselineCommit(response.gitBaselineCommit),
+      workspacePatch: {
+        format: "unified_diff",
+        patch: response.workspacePatch.patch,
+        truncated: response.workspacePatch.truncated,
+      },
+    };
   }
 
   async materialize(
@@ -984,7 +1181,7 @@ export class HttpWorkspaceDataMover implements WorkspaceDataMover {
         response.status >= 500,
       );
     }
-    if (text.length > MAXIMUM_REQUEST_BYTES) {
+    if (Buffer.byteLength(text, "utf8") > MAXIMUM_RESPONSE_BYTES) {
       throw new WorkspaceDataMoverError(
         "workspace_data_mover_response_invalid",
         "Workspace Data Mover response was invalid",
