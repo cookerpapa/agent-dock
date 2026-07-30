@@ -163,6 +163,10 @@ Two internals are candidates for a behavior-preserving replacement:
 Neither implementation should be removed until a replacement passes crash,
 deduplication, corruption, cancellation, restart and live-model tests.
 
+The Pi checkpoint candidate has now been measured. The long-session result and
+the decision to retain the segmented native JSONL layout are recorded in
+[the 2026-07-30 storage report](reports/pi-session-storage-optimization-2026-07-30.md).
+
 ## Changes requiring explicit approval
 
 The following are not authorized by this document:

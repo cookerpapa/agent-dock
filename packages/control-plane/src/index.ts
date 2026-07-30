@@ -92,15 +92,17 @@ export {
   FileCheckpointObjectStore,
   PostgresSandboxCheckpointStore,
   SandboxCheckpointStoreError,
-  TtlCheckpointObjectStore,
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
   type FileCheckpointObjectStoreOptions,
   type PostgresSandboxCheckpointStoreOptions,
+} from "./checkpoint-store.ts";
+export {
+  TtlCheckpointObjectStore,
   type TtlCheckpointObjectStoreEvent,
   type TtlCheckpointObjectStoreOptions,
   type TtlCheckpointObjectStoreSnapshot,
-} from "./checkpoint-store.ts";
+} from "./checkpoint-object-cache.ts";
 export {
   PI_SESSION_MANIFEST_FORMAT,
   PI_SESSION_MANIFEST_MAX_SEGMENTS,
