@@ -16,11 +16,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CandidateRaceService,
   ControlPlaneStoreFactory,
-  OutboxDispatcher,
+  RunCommandExecutor,
   type TenantRequestIdentity,
   type TurnExecutionBackend,
 } from "../src/index.ts";
 import { createCompletedRunReviewBundle } from "../src/review-bundle.ts";
+import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 const IDS = {
   tenant: "71000000-0000-4000-8000-000000000001",
@@ -741,14 +742,18 @@ describe.sequential("candidate race orchestration", () => {
         return { stopReason: "scheduler-test" };
       },
     };
-    const activeLane = new OutboxDispatcher({ database, backend });
-    const probeLane = new OutboxDispatcher({ database, backend });
-    const first = activeLane.dispatchNext();
+    const activeLane = new RunCommandExecutor({ database, backend });
+    const probeLane = new RunCommandExecutor({ database, backend });
+    const first = dispatchNextTestCommand(database, activeLane, IDS.tenant);
     await entered;
-    await expect(probeLane.dispatchNext()).resolves.toEqual({ status: "idle" });
+    await expect(dispatchNextTestCommand(database, probeLane, IDS.tenant)).resolves.toEqual({
+      status: "idle",
+    });
     releaseFirst();
     await expect(first).resolves.toMatchObject({ status: "completed" });
-    await expect(probeLane.dispatchNext()).resolves.toMatchObject({ status: "completed" });
+    await expect(dispatchNextTestCommand(database, probeLane, IDS.tenant)).resolves.toMatchObject({
+      status: "completed",
+    });
     expect(executions).toBe(2);
     await expect(service.get(identity, race.orchestrationId)).resolves.toMatchObject({
       state: "failed",
@@ -800,8 +805,8 @@ describe.sequential("candidate race orchestration", () => {
         return { stopReason: "dispatch-cancel-test" };
       },
     };
-    const dispatcher = new OutboxDispatcher({ database, backend });
-    const execution = dispatcher.dispatchNext();
+    const dispatcher = new RunCommandExecutor({ database, backend });
+    const execution = dispatchNextTestCommand(database, dispatcher, IDS.tenant);
     await claimed;
 
     await expect(

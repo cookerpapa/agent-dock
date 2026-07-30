@@ -6,19 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   ControlPlaneStore,
-  OutboxDispatcher,
+  RunCommandExecutor,
+  type RunCommandExecutionResult,
   type TurnExecutionBackend,
   type TurnExecutionRequest,
 } from "../src/index.ts";
-
-const IDS = {
-  tenantA: "91000000-0000-4000-8000-000000000001",
-  bindingA: "91000000-0000-4000-8000-000000000002",
-  profileA: "91000000-0000-4000-8000-000000000003",
-  tenantB: "92000000-0000-4000-8000-000000000001",
-  bindingB: "92000000-0000-4000-8000-000000000002",
-  profileB: "92000000-0000-4000-8000-000000000003",
-} as const;
+import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -99,12 +92,12 @@ async function createQueuedTurns(
 }
 
 async function dispatchUntilWork(
-  dispatcher: OutboxDispatcher,
+  dispatcher: RunCommandExecutor,
   timeoutMs = 2_000,
-): Promise<Awaited<ReturnType<OutboxDispatcher["dispatchNext"]>>> {
+): Promise<RunCommandExecutionResult> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const result = await dispatcher.dispatchNext();
+    const result = await dispatchNextTestCommand(database, dispatcher);
     if (result.status !== "idle" || Date.now() >= deadline) return result;
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 10));
   }
@@ -143,7 +136,7 @@ describe.sequential("global tenant scheduling", () => {
     });
     const turns = await createQueuedTurns(store, 2, "temporal-target");
     const executed: string[] = [];
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
       backend: {
         async execute(request, lifecycle) {
@@ -170,52 +163,6 @@ describe.sequential("global tenant scheduling", () => {
     await expect(dispatcher.dispatchCommand("not-a-command")).rejects.toThrow(
       "commandId must be a UUID",
     );
-  });
-
-  it("serves a later tenant before an existing tenant drains its backlog", async () => {
-    const storeA = await seedTenant({
-      tenantId: IDS.tenantA,
-      bindingId: IDS.bindingA,
-      profileId: IDS.profileA,
-      slug: "fair-alpha",
-      maximumConcurrentTurns: 1,
-    });
-    const storeB = await seedTenant({
-      tenantId: IDS.tenantB,
-      bindingId: IDS.bindingB,
-      profileId: IDS.profileB,
-      slug: "fair-bravo",
-      maximumConcurrentTurns: 1,
-    });
-    const turnsA = await createQueuedTurns(storeA, 3, "alpha");
-    const executionOrder: Array<{ tenantId: string; commandId: string }> = [];
-    const backend: TurnExecutionBackend = {
-      async execute(request, lifecycle) {
-        executionOrder.push({ tenantId: request.tenantId, commandId: request.commandId });
-        await lifecycle.started();
-        return { stopReason: "fairness-test" };
-      },
-    };
-    const fixedClock = () => new Date("2100-01-01T00:00:00.000Z");
-    const dispatcher = new OutboxDispatcher({ database, backend, clock: fixedClock });
-
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
-      status: "completed",
-      commandId: turnsA[0]?.commandId,
-    });
-    const turnsB = await createQueuedTurns(storeB, 2, "bravo");
-    for (let index = 0; index < 4; index += 1) {
-      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({ status: "completed" });
-    }
-
-    expect(executionOrder).toEqual([
-      { tenantId: IDS.tenantA, commandId: turnsA[0]?.commandId },
-      { tenantId: IDS.tenantB, commandId: turnsB[0]?.commandId },
-      { tenantId: IDS.tenantA, commandId: turnsA[1]?.commandId },
-      { tenantId: IDS.tenantB, commandId: turnsB[1]?.commandId },
-      { tenantId: IDS.tenantA, commandId: turnsA[2]?.commandId },
-    ]);
-    await expect(dispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
   });
 
   it("enforces each tenant's concurrent-turn limit across competing lanes", async () => {
@@ -266,16 +213,19 @@ describe.sequential("global tenant scheduling", () => {
         return { stopReason: "concurrency-test" };
       },
     };
-    const laneOne = new OutboxDispatcher({ database, backend });
-    const laneTwo = new OutboxDispatcher({ database, backend });
-    const probeLane = new OutboxDispatcher({ database, backend });
-    const dispatches = [laneOne.dispatchNext(), laneTwo.dispatchNext()];
+    const laneOne = new RunCommandExecutor({ database, backend });
+    const laneTwo = new RunCommandExecutor({ database, backend });
+    const probeLane = new RunCommandExecutor({ database, backend });
+    const dispatches = [
+      dispatchNextTestCommand(database, laneOne),
+      dispatchNextTestCommand(database, laneTwo),
+    ];
     await twoEntered;
 
     expect(new Set(entered.map((request) => request.tenantId))).toEqual(
       new Set([tenantA, tenantB]),
     );
-    await expect(probeLane.dispatchNext()).resolves.toEqual({ status: "idle" });
+    await expect(dispatchNextTestCommand(database, probeLane)).resolves.toEqual({ status: "idle" });
     expect(maximumByTenant).toEqual(
       new Map([
         [tenantA, 1],
@@ -330,11 +280,11 @@ describe.sequential("global tenant scheduling", () => {
         return { stopReason: "shared-workspace-test" };
       },
     };
-    const activeLane = new OutboxDispatcher({ database, backend });
-    const probeLane = new OutboxDispatcher({ database, backend });
-    const first = activeLane.dispatchNext();
+    const activeLane = new RunCommandExecutor({ database, backend });
+    const probeLane = new RunCommandExecutor({ database, backend });
+    const first = dispatchNextTestCommand(database, activeLane);
     await firstEntered;
-    await expect(probeLane.dispatchNext()).resolves.toEqual({ status: "idle" });
+    await expect(dispatchNextTestCommand(database, probeLane)).resolves.toEqual({ status: "idle" });
     releaseFirst();
     await expect(first).resolves.toMatchObject({ status: "completed" });
     await expect(dispatchUntilWork(probeLane)).resolves.toMatchObject({ status: "completed" });

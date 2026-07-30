@@ -3,6 +3,7 @@ import {
   TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT,
   TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT,
   TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+  temporalRunPriority,
   temporalRunWorkflowId,
   temporalWorkerAffinityTaskQueue,
   validateTemporalRunWorkflowInput,
@@ -32,6 +33,14 @@ describe("Temporal orchestration contract", () => {
     expect(JSON.stringify(INPUT)).not.toContain("prompt");
     expect(JSON.stringify(INPUT)).not.toContain("messages");
     expect(JSON.stringify(INPUT)).not.toContain("credential");
+  });
+
+  it("routes tenant fairness through Temporal priority metadata", () => {
+    expect(temporalRunPriority(INPUT)).toEqual({
+      priorityKey: 3,
+      fairnessKey: INPUT.tenantId,
+      fairnessWeight: 1,
+    });
   });
 
   it("rejects unbounded or non-reference identities", () => {

@@ -27,7 +27,7 @@ import {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 import { DurableEventStoreError, type DurableEventIngestor } from "./durable-event-store.ts";
 import {
   SessionLeaseCoordinator,

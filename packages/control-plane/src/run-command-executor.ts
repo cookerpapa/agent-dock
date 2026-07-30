@@ -26,17 +26,12 @@ import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  validateSupervisorDispatchAffinity,
-  type SupervisorDispatchAffinity,
-} from "./supervisor-dispatch-affinity.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import { createCompletedRunReviewBundle } from "./review-bundle.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
-const DEFAULT_RETRY_DELAY_MS = 1_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const CANDIDATE_RACE_CANCELLATION_GRACE_PERIOD_MS = 2_000;
 
@@ -150,21 +145,21 @@ export class TurnExecutionCancelledError extends TurnExecutionBackendError {
   }
 }
 
-export class OutboxDispatcherInvariantError extends Error {
+export class RunCommandExecutorInvariantError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "OutboxDispatcherInvariantError";
+    this.name = "RunCommandExecutorInvariantError";
   }
 }
 
-export class OutboxDispatcherStaleClaimError extends Error {
+export class RunCommandExecutorStaleClaimError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "OutboxDispatcherStaleClaimError";
+    this.name = "RunCommandExecutorStaleClaimError";
   }
 }
 
-export type DispatchNextResult =
+export type RunCommandExecutionResult =
   | { status: "idle" }
   | {
       status: "cancellation_pending" | "cancelled";
@@ -198,18 +193,15 @@ export type DispatchNextResult =
       failureCode: string;
     };
 
-export type OutboxDispatcherOptions = {
+export type RunCommandExecutorOptions = {
   database: Kysely<Database>;
-  tenantId?: string;
   backend: TurnExecutionBackend;
   clock?: () => Date;
   claimLeaseMs?: number;
-  retryDelayMs?: number;
   maxAttempts?: number;
   claimOwnerId?: string;
   idGenerator?: () => string;
   leaseManager?: TurnExecutionLeaseManager;
-  supervisorAffinity?: SupervisorDispatchAffinity;
   metrics?: AgentDockMetrics;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
 };
@@ -251,7 +243,7 @@ function positiveInteger(value: number, name: string): number {
 function safeMailboxPosition(value: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new OutboxDispatcherInvariantError(
+    throw new RunCommandExecutorInvariantError(
       "The v1 turn dispatcher requires a positive mailbox position",
     );
   }
@@ -261,7 +253,7 @@ function safeMailboxPosition(value: string): number {
 function safeNonNegativeInteger(value: number | string, name: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new OutboxDispatcherInvariantError(`${name} must be a non-negative safe integer`);
+    throw new RunCommandExecutorInvariantError(`${name} must be a non-negative safe integer`);
   }
   return parsed;
 }
@@ -311,37 +303,29 @@ function normalizeFailure(error: unknown): ExecutionFailure {
 
 function expectOne(updatedRows: bigint, description: string): void {
   if (updatedRows !== 1n) {
-    throw new OutboxDispatcherInvariantError(`${description} changed ${updatedRows} rows`);
+    throw new RunCommandExecutorInvariantError(`${description} changed ${updatedRows} rows`);
   }
 }
 
-export class OutboxDispatcher {
+export class RunCommandExecutor {
   readonly #database: Kysely<Database>;
-  readonly #tenantId: string | undefined;
   readonly #backend: TurnExecutionBackend;
   readonly #clock: () => Date;
   readonly #claimLeaseMs: number;
-  readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
   readonly #claimOwnerId: string;
   readonly #idGenerator: () => string;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
-  readonly #supervisorAffinity: SupervisorDispatchAffinity | undefined;
   readonly #metrics: AgentDockMetrics | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
 
-  constructor(options: OutboxDispatcherOptions) {
+  constructor(options: RunCommandExecutorOptions) {
     this.#database = options.database;
-    this.#tenantId = options.tenantId;
     this.#backend = options.backend;
     this.#clock = options.clock ?? (() => new Date());
     this.#claimLeaseMs = positiveInteger(
       options.claimLeaseMs ?? DEFAULT_CLAIM_LEASE_MS,
       "claimLeaseMs",
-    );
-    this.#retryDelayMs = positiveInteger(
-      options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
-      "retryDelayMs",
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
     this.#claimOwnerId = options.claimOwnerId ?? "control-plane";
@@ -354,24 +338,16 @@ export class OutboxDispatcher {
     }
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#leaseManager = options.leaseManager;
-    this.#supervisorAffinity =
-      options.supervisorAffinity === undefined
-        ? undefined
-        : validateSupervisorDispatchAffinity(options.supervisorAffinity);
     this.#metrics = options.metrics;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
   }
 
-  async dispatchNext(): Promise<DispatchNextResult> {
-    return this.#dispatch();
-  }
-
   /**
-   * Executes one durable command selected by the external orchestration
-   * authority. Unlike dispatchNext(), this method never chooses between
-   * tenants, Sessions, or Runs.
+   * Executes exactly one durable command selected by Temporal. This component
+   * owns transactional admission and lifecycle commits; it never chooses
+   * between tenants, Sessions, or Runs.
    */
-  async dispatchCommand(commandId: string): Promise<DispatchNextResult> {
+  async dispatchCommand(commandId: string): Promise<RunCommandExecutionResult> {
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(commandId)
     ) {
@@ -380,7 +356,7 @@ export class OutboxDispatcher {
     return this.#dispatch(commandId.toLowerCase());
   }
 
-  async #dispatch(commandId?: string): Promise<DispatchNextResult> {
+  async #dispatch(commandId: string): Promise<RunCommandExecutionResult> {
     const claim = await this.#claimNext(commandId);
     if (!claim) return { status: "idle" };
 
@@ -389,7 +365,7 @@ export class OutboxDispatcher {
     this.#metrics?.activeRuns.inc();
     const executionStartedAt = performance.now();
     try {
-      const result = await withSpan<DispatchNextResult>({
+      const result = await withSpan<RunCommandExecutionResult>({
         serviceName: "agent-dock-control-plane",
         name: "run.dispatch",
         ...(claim.request.traceContext === undefined ? {} : { parent: claim.request.traceContext }),
@@ -407,7 +383,7 @@ export class OutboxDispatcher {
             started: (candidate) => {
               if (this.#leaseManager !== undefined && candidate === undefined) {
                 return Promise.reject(
-                  new OutboxDispatcherInvariantError(
+                  new RunCommandExecutorInvariantError(
                     "A fenced execution acknowledgement is required by the configured lease manager",
                   ),
                 );
@@ -418,7 +394,7 @@ export class OutboxDispatcher {
                   candidate?.fencingToken !== acknowledgement?.fencingToken)
               ) {
                 return Promise.reject(
-                  new OutboxDispatcherInvariantError(
+                  new RunCommandExecutorInvariantError(
                     "Execution acknowledgement changed after start",
                   ),
                 );
@@ -472,7 +448,7 @@ export class OutboxDispatcher {
               const externallySettled = await this.#observeCancellation(claim);
               if (externallySettled !== undefined) return externallySettled;
               if (error instanceof TurnExecutionCancelledError) {
-                throw new OutboxDispatcherInvariantError(
+                throw new RunCommandExecutorInvariantError(
                   "Cancellation confirmation arrived before its durable lifecycle",
                 );
               }
@@ -508,7 +484,7 @@ export class OutboxDispatcher {
     }
   }
 
-  async #observeCancellation(claim: ClaimedTurn): Promise<DispatchNextResult | undefined> {
+  async #observeCancellation(claim: ClaimedTurn): Promise<RunCommandExecutionResult | undefined> {
     return this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (
@@ -559,7 +535,7 @@ export class OutboxDispatcher {
     });
   }
 
-  async #claimNext(commandId?: string): Promise<ClaimedTurn | undefined> {
+  async #claimNext(commandId: string): Promise<ClaimedTurn | undefined> {
     const now = safeDate(this.#clock);
     const leaseUntil = new Date(now.valueOf() + this.#claimLeaseMs);
 
@@ -655,40 +631,12 @@ export class OutboxDispatcher {
           "policy.compaction_reserve_tokens as compactionReserveTokens",
           "policy.compaction_keep_recent_tokens as compactionKeepRecentTokens",
         ])
-        .where(
-          this.#tenantId === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`${sql.ref("outbox.tenant_id")} = ${this.#tenantId}`,
-        )
         .where("policy.enabled", "=", true)
         .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
         .where("outbox.published_at", "is", null)
         .where("outbox.available_at", "<=", now)
         .where("command.kind", "=", "turn.execute")
-        .where(
-          commandId === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`${sql.ref("command.id")} = ${commandId}`,
-        )
-        .where(
-          this.#supervisorAffinity === undefined
-            ? sql<boolean>`true`
-            : sql<boolean>`exists (
-                select 1
-                from sandboxes as affinity_sandbox
-                inner join supervisor_connections as affinity_connection
-                  on affinity_connection.sandbox_id = affinity_sandbox.id
-                  and affinity_connection.supervisor_id = affinity_sandbox.supervisor_id
-                  and affinity_connection.boot_id = affinity_sandbox.boot_id
-                where affinity_sandbox.id = ${this.#supervisorAffinity.sandboxId}
-                  and affinity_sandbox.state in ('ready', 'leased')
-                  and affinity_sandbox.active_sessions < affinity_sandbox.max_concurrent_sessions
-                  and affinity_connection.control_plane_instance_id = ${this.#supervisorAffinity.controlPlaneInstanceId}
-                  and affinity_connection.state = 'active'
-                  and affinity_connection.accepting_assignments = true
-                  and affinity_connection.expires_at > ${now}
-              )`,
-        )
+        .where("command.id", "=", commandId)
         .where(
           sql<boolean>`(
             (
@@ -783,13 +731,8 @@ export class OutboxDispatcher {
               )
           )`,
         )
-        .orderBy("policy.last_scheduled_at", "asc")
-        .orderBy("command.tenant_id", "asc")
-        .orderBy("outbox.available_at", "asc")
-        .orderBy("outbox.created_at", "asc")
-        .orderBy("outbox.id", "asc")
         .limit(1)
-        .forUpdate(["outbox", "session_row", "policy", "run"])
+        .forUpdate(["outbox", "session_row", "run"])
         .skipLocked()
         .executeTakeFirst();
 
@@ -838,17 +781,17 @@ export class OutboxDispatcher {
         payload.sessionId !== row.sessionId ||
         payload.turnId !== row.turnId
       ) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Turn-command outbox identity does not match its durable command",
         );
       }
       if (row.inputKind !== "prompt" || row.inputText === null) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "The v1 turn dispatcher only accepts durable prompt turns",
         );
       }
       if (row.mailboxPosition === null) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "The v1 turn dispatcher requires a positive mailbox position",
         );
       }
@@ -870,7 +813,7 @@ export class OutboxDispatcher {
 
       const attemptNumber = row.attempts + 1;
       if (row.runAttemptCount !== row.attempts) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Run attempt count does not match its durable outbox",
         );
       }
@@ -884,7 +827,7 @@ export class OutboxDispatcher {
           .forUpdate()
           .executeTakeFirst();
         if (previous === undefined) {
-          throw new OutboxDispatcherInvariantError("Current run attempt is missing");
+          throw new RunCommandExecutorInvariantError("Current run attempt is missing");
         }
         if (!isTerminalRunAttemptState(previous.state)) {
           const superseded = await transaction
@@ -978,20 +921,6 @@ export class OutboxDispatcher {
         .executeTakeFirst();
       expectOne(runUpdate.numUpdatedRows, "claiming a run");
 
-      const policyUpdate = await transaction
-        .updateTable("tenant_runtime_policies")
-        .set({
-          last_scheduled_at: sql<Date>`greatest(
-            ${sql.ref("last_scheduled_at")} + interval '1 microsecond',
-            ${now}
-          )`,
-          updated_at: now,
-        })
-        .where("tenant_id", "=", row.tenantId)
-        .where("enabled", "=", true)
-        .executeTakeFirst();
-      expectOne(policyUpdate.numUpdatedRows, "advancing tenant scheduling fairness");
-
       if (row.commandState === "pending" && row.turnState === "queued") {
         const commandUpdate = await transaction
           .updateTable("commands")
@@ -1015,7 +944,7 @@ export class OutboxDispatcher {
           .executeTakeFirst();
         expectOne(turnUpdate.numUpdatedRows, "claiming a turn");
       } else if (row.commandState !== "dispatched" || row.turnState !== "dispatching") {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           `Claimed command and turn states do not match (${row.commandState}/${row.turnState})`,
         );
       }
@@ -1115,12 +1044,12 @@ export class OutboxDispatcher {
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (rows.commandState !== "dispatched" || rows.turnState !== "dispatching") {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Only a dispatched command and turn can be acknowledged",
         );
       }
       if (rows.outboxPublishedAt !== null) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "An unpublished outbox record is required before command acknowledgement",
         );
       }
@@ -1152,7 +1081,7 @@ export class OutboxDispatcher {
       } else if (rows.sessionState === "idle") {
         nextSessionState = transitionSession(rows.sessionState, "running");
       } else {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           `Session cannot start a turn from ${rows.sessionState}`,
         );
       }
@@ -1290,7 +1219,7 @@ export class OutboxDispatcher {
         rows.sessionState !== "running" ||
         rows.outboxPublishedAt === null
       ) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Only an acknowledged running command can complete",
         );
       }
@@ -1421,7 +1350,7 @@ export class OutboxDispatcher {
     started: boolean,
     failure: ExecutionFailure,
     acknowledgement: TurnExecutionAcknowledgement | undefined,
-  ): Promise<DispatchNextResult> {
+  ): Promise<RunCommandExecutionResult> {
     const now = safeDate(this.#clock);
     const shouldRetry = !started && failure.retryable && claim.attempt < this.#maxAttempts;
 
@@ -1434,7 +1363,7 @@ export class OutboxDispatcher {
           rows.turnState !== "dispatching" ||
           rows.outboxPublishedAt !== null
         ) {
-          throw new OutboxDispatcherInvariantError(
+          throw new RunCommandExecutorInvariantError(
             "Only an unacknowledged command can return to the mailbox",
           );
         }
@@ -1509,7 +1438,10 @@ export class OutboxDispatcher {
         const outboxUpdate = await transaction
           .updateTable("outbox")
           .set({
-            available_at: new Date(now.valueOf() + this.#retryDelayMs),
+            // Temporal owns the retry timer. The durable command becomes
+            // eligible immediately after this transaction; the Workflow
+            // controls when its next Activity attempt is scheduled.
+            available_at: now,
             last_error: failure.code,
           })
           .where("tenant_id", "=", claim.request.tenantId)
@@ -1523,12 +1455,12 @@ export class OutboxDispatcher {
       const expectedCommandState = started ? "acknowledged" : "dispatched";
       const expectedTurnState = started ? "running" : "dispatching";
       if (rows.commandState !== expectedCommandState || rows.turnState !== expectedTurnState) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Command lifecycle does not match the reported execution phase",
         );
       }
       if (started !== (rows.outboxPublishedAt !== null)) {
-        throw new OutboxDispatcherInvariantError(
+        throw new RunCommandExecutorInvariantError(
           "Outbox publication does not match the reported execution phase",
         );
       }
@@ -1653,7 +1585,7 @@ export class OutboxDispatcher {
 
       if (started) {
         if (rows.sessionState !== "running") {
-          throw new OutboxDispatcherInvariantError(
+          throw new RunCommandExecutorInvariantError(
             "A started execution must own a running session",
           );
         }
@@ -1783,17 +1715,17 @@ export class OutboxDispatcher {
         (authority.outboxAttempts !== claim.attempt ||
           authority.attemptId !== claim.request.attemptId)
       ) {
-        throw new OutboxDispatcherStaleClaimError("Run attempt was superseded");
+        throw new RunCommandExecutorStaleClaimError("Run attempt was superseded");
       }
-      throw new OutboxDispatcherInvariantError("Claimed command lifecycle rows are missing");
+      throw new RunCommandExecutorInvariantError("Claimed command lifecycle rows are missing");
     }
     if (row.outboxAttempts !== claim.attempt) {
-      throw new OutboxDispatcherStaleClaimError(
+      throw new RunCommandExecutorStaleClaimError(
         `Outbox claim attempt ${claim.attempt} was superseded by attempt ${row.outboxAttempts}`,
       );
     }
     if (row.currentAttemptId !== claim.request.attemptId) {
-      throw new OutboxDispatcherStaleClaimError("Run attempt was superseded");
+      throw new RunCommandExecutorStaleClaimError("Run attempt was superseded");
     }
     return row;
   }

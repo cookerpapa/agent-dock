@@ -57,13 +57,20 @@ mutation are Activities.
 
 The Worker pool uses:
 
-- a common Activity Task Queue for fairness/fallback;
+- a common Activity Task Queue with `tenantId` fairness metadata;
 - capacity-one Worker-specific queues for soft Session affinity;
 - durable timers and retry policy;
 - explicit cancellation.
 
 Affinity is an optimization. Any Worker can restore a Session and produce the
 correct result.
+
+Each Activity receives one exact `commandId`. The Worker-side
+`RunCommandExecutor` performs transactional eligibility and lifecycle commits
+for that command; it has no API for polling or selecting another tenant,
+Session or Run. PostgreSQL mailbox/Workspace/quota checks can defer the exact
+command, while Temporal remains responsible for Task matching, cross-tenant
+fairness and retry timers.
 
 ### Trusted Pi Worker
 
@@ -211,9 +218,10 @@ No Pi Worker or Cube runtime is created yet.
 
 ```text
 Browser POST prompt
-  → PostgreSQL transaction: message + Run + Attempt + outbox
-  → Temporal Workflow
+  → PostgreSQL transaction: message + Run + command + outbox
+  → transactional relay starts deterministic Temporal Workflow
   → eligible Pi Worker
+  → exact-command transactional admission creates RunAttempt/fence
   → Pi checkpoint restore
   → model stream
   → batched durable events + SSE
@@ -400,6 +408,7 @@ not require changing the Worker execution contract.
 
 - [ADR-0053: CubeSandbox primary runtime](adr/0053-cubesandbox-primary-execution-plane.md)
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
+- [ADR-0074: exact-command Temporal Activity boundary](adr/0074-exact-command-temporal-activity-boundary.md)
 - [ADR-0064: Workspace checkpoints](adr/0064-cube-native-workspace-checkpoints.md)
 - [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
 - [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)

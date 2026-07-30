@@ -10,7 +10,7 @@ import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
 } from "@agent-dock/control-plane/model-credential-runtime";
-import { OutboxDispatcher } from "@agent-dock/control-plane/outbox-dispatcher";
+import { RunCommandExecutor } from "@agent-dock/control-plane/run-command-executor";
 import { PostgresSessionEventNotifications } from "@agent-dock/control-plane/postgres-session-event-notifications";
 import { PostgresRunAttemptPhaseObserver } from "@agent-dock/control-plane/run-attempt-runtime";
 import { SessionLeaseCoordinator } from "@agent-dock/control-plane/session-lease-coordinator";
@@ -422,7 +422,7 @@ export class SupervisorHostRuntime {
                 buildId: this.#config.temporalWorkerBuildId,
               },
             }),
-        executionDispatcher: new OutboxDispatcher({
+        commandExecutor: new RunCommandExecutor({
           database: this.#database,
           backend: localBackend,
           leaseManager: leaseCoordinator,

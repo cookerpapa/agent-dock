@@ -1,6 +1,7 @@
 import type { Database } from "@agent-dock/database";
 import {
   TEMPORAL_RUN_WORKFLOW,
+  temporalRunPriority,
   temporalRunWorkflowId,
   type TemporalRunWorkflowInput,
 } from "@agent-dock/temporal-orchestration";
@@ -281,11 +282,7 @@ export class TemporalRunOrchestrator {
         workflowIdConflictPolicy: "USE_EXISTING",
         workflowExecutionTimeout: "7 days",
         workflowRunTimeout: "24 hours",
-        priority: {
-          priorityKey: 3,
-          fairnessKey: input.tenantId,
-          fairnessWeight: 1,
-        },
+        priority: temporalRunPriority(input),
         staticSummary: "Execute one accepted AgentDock Run",
       });
       this.#started.set(input.commandId, Date.now());

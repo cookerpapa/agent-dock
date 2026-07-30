@@ -39,8 +39,8 @@ import {
   DurableEventStore,
   FileCheckpointObjectStore,
   LocalSupervisorExecutionBackend,
-  OutboxDispatcher,
-  OutboxDispatcherStaleClaimError,
+  RunCommandExecutor,
+  RunCommandExecutorStaleClaimError,
   PostgresSessionEventNotifications,
   PostgresSandboxCheckpointStore,
   PostgresRunAttemptPhaseObserver,
@@ -52,6 +52,7 @@ import {
   type TurnExecutionLeaseManager,
   createControlPlaneApplication,
 } from "../src/index.ts";
+import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -170,10 +171,10 @@ async function acceptTurn(idempotencyKey: string, prompt: string): Promise<Accep
   return response.json() as AcceptedTurnResource;
 }
 
-async function dispatchClaimableWork(dispatcher: OutboxDispatcher) {
+async function dispatchClaimableWork(dispatcher: RunCommandExecutor) {
   const deadline = Date.now() + 2_000;
   do {
-    const result = await dispatcher.dispatchNext();
+    const result = await dispatchNextTestCommand(database, dispatcher, IDS.tenant);
     if (result.status !== "idle") return result;
     // SKIP LOCKED makes a single poll legitimately idle while another
     // transaction is releasing a Session/policy row. Production pollers retry;
@@ -1129,13 +1130,12 @@ describe.sequential("single-user durable turn intake API", () => {
 
   it("dispatches a durable command through ACK to a completed turn", async () => {
     const backend = new DeterministicExecutionBackend([{ kind: "complete", stopReason: "done" }]);
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(firstAccepted.commandId)).resolves.toMatchObject({
       status: "completed",
       commandId: firstAccepted.commandId,
       turnId: firstAccepted.turnId,
@@ -1244,15 +1244,16 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     });
 
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "rewound" }]),
     });
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
-      status: "completed",
-      commandId: rewound.acceptedTurn.commandId,
-    });
+    await expect(dispatcher.dispatchCommand(rewound.acceptedTurn.commandId)).resolves.toMatchObject(
+      {
+        status: "completed",
+        commandId: rewound.acceptedTurn.commandId,
+      },
+    );
   });
 
   it("does not let two dispatchers execute the same claimed turn", async () => {
@@ -1285,18 +1286,19 @@ describe.sequential("single-user durable turn intake API", () => {
         return { stopReason: "agent_end" };
       },
     };
-    const firstDispatcher = new OutboxDispatcher({
+    const firstDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
     });
-    const secondDispatcher = new OutboxDispatcher({
+    const secondDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
     });
 
-    const dispatches = [firstDispatcher.dispatchNext(), secondDispatcher.dispatchNext()];
+    const dispatches = [
+      dispatchNextTestCommand(database, firstDispatcher, IDS.tenant),
+      dispatchNextTestCommand(database, secondDispatcher, IDS.tenant),
+    ];
     await claimed;
     const earlyResult = await Promise.race(dispatches);
     const executionsBeforeAcknowledgement = executions;
@@ -1389,15 +1391,14 @@ describe.sequential("single-user durable turn intake API", () => {
         }
       },
     };
-    const dispatcher = new OutboxDispatcher({ database, tenantId: IDS.tenant, backend });
-    const competingDispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({ database, backend });
+    const competingDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
     });
 
     const firstAccepted = await acceptMailboxTurn(1, 1);
-    const firstExecution = dispatcher.dispatchNext();
+    const firstExecution = dispatchNextTestCommand(database, dispatcher, IDS.tenant);
     await firstStarted;
     const concurrentAcceptances = await Promise.all(
       [2, 3, 4, 5].map((inputNumber) => acceptMailboxTurn(inputNumber)),
@@ -1433,7 +1434,9 @@ describe.sequential("single-user durable turn intake API", () => {
         accepted.slice(1).map((item) => item.resource.commandId),
       )
       .execute();
-    await expect(competingDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+    await expect(
+      dispatchNextTestCommand(database, competingDispatcher, IDS.tenant),
+    ).resolves.toEqual({ status: "idle" });
 
     releaseFirst();
     await expect(firstExecution).resolves.toMatchObject({
@@ -1518,15 +1521,14 @@ describe.sequential("single-user durable turn intake API", () => {
         return { stopReason: "stale_backend_must_not_finish" };
       },
     };
-    const staleDispatcher = new OutboxDispatcher({
+    const staleDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: staleBackend,
       clock: () => new Date(now),
       claimLeaseMs: 10,
     });
 
-    const staleDispatch = staleDispatcher.dispatchNext();
+    const staleDispatch = dispatchNextTestCommand(database, staleDispatcher, IDS.tenant);
     const staleOutcome = staleDispatch.then(
       () => undefined,
       (error: unknown) => error,
@@ -1535,14 +1537,13 @@ describe.sequential("single-user durable turn intake API", () => {
 
     now = new Date(now.valueOf() + 11);
     const currentBackend = new DeterministicExecutionBackend();
-    const currentDispatcher = new OutboxDispatcher({
+    const currentDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: currentBackend,
       clock: () => new Date(now),
       claimLeaseMs: 10,
     });
-    const currentResult = await currentDispatcher.dispatchNext();
+    const currentResult = await dispatchNextTestCommand(database, currentDispatcher, IDS.tenant);
     releaseStaleClaim();
     const staleError = await staleOutcome;
 
@@ -1551,7 +1552,7 @@ describe.sequential("single-user durable turn intake API", () => {
       commandId: accepted.commandId,
       attempt: 2,
     });
-    expect(staleError).toBeInstanceOf(OutboxDispatcherStaleClaimError);
+    expect(staleError).toBeInstanceOf(RunCommandExecutorStaleClaimError);
     expect(staleBackendWorkStarted).toBe(false);
     expect(await readTurnExecution(accepted)).toMatchObject({
       commandState: "completed",
@@ -1573,15 +1574,13 @@ describe.sequential("single-user durable turn intake API", () => {
       },
       { kind: "complete" },
     ]);
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
       clock: () => new Date(now),
-      retryDelayMs: 10,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toMatchObject({
       status: "retry_scheduled",
       commandId: accepted.commandId,
       attempt: 1,
@@ -1602,7 +1601,9 @@ describe.sequential("single-user durable turn intake API", () => {
       .set({ created_at: new Date(0) })
       .where("id", "=", accepted.commandId)
       .executeTakeFirstOrThrow();
-    await expect(dispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
+    await expect(dispatcher.dispatchCommand(follower.commandId)).resolves.toEqual({
+      status: "idle",
+    });
     expect(await readTurnExecution(follower)).toMatchObject({
       commandState: "pending",
       turnState: "queued",
@@ -1610,8 +1611,10 @@ describe.sequential("single-user durable turn intake API", () => {
       publishedAt: null,
     });
 
+    // Temporal owns the retry timer. Once that timer fires, the exact original
+    // command becomes eligible without a second PostgreSQL retry schedule.
     now = new Date(now.valueOf() + 11);
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toMatchObject({
       status: "completed",
       commandId: accepted.commandId,
       attempt: 2,
@@ -1624,7 +1627,7 @@ describe.sequential("single-user durable turn intake API", () => {
       publishedAt: expect.anything(),
       lastError: null,
     });
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(follower.commandId)).resolves.toMatchObject({
       status: "completed",
       commandId: follower.commandId,
       attempt: 1,
@@ -1678,21 +1681,19 @@ describe.sequential("single-user durable turn intake API", () => {
       retryable: true,
     } as const;
     const backend = new DeterministicExecutionBackend([failure, failure]);
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
       clock: () => new Date(now),
-      retryDelayMs: 10,
       maxAttempts: 2,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toMatchObject({
       status: "retry_scheduled",
       attempt: 1,
     });
     now = new Date(now.valueOf() + 11);
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toMatchObject({
       status: "failed",
       commandId: accepted.commandId,
       attempt: 2,
@@ -1726,13 +1727,12 @@ describe.sequential("single-user durable turn intake API", () => {
         retryable: true,
       },
     ]);
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
       status: "failed",
       commandId: accepted.commandId,
       attempt: 1,
@@ -1838,13 +1838,12 @@ describe.sequential("single-user durable turn intake API", () => {
         return { stopReason: "phase_protocol_verified" };
       },
     };
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
       leaseManager: leaseCoordinator,
     });
-    const phaseResult = await dispatcher.dispatchNext();
+    const phaseResult = await dispatchNextTestCommand(database, dispatcher, IDS.tenant);
     expect(phaseResult.status, JSON.stringify(phaseResult)).toBe("completed");
     const response = await http.inject({ method: "GET", url: `/v1/runs/${accepted.runId}` });
     expect(response.statusCode).toBe(200);
@@ -1906,12 +1905,11 @@ describe.sequential("single-user durable turn intake API", () => {
         return { stopReason: "natural_completion" };
       },
     };
-    const executionDispatcher = new OutboxDispatcher({
+    const executionDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: executionBackend,
     });
-    const execution = executionDispatcher.dispatchNext();
+    const execution = dispatchNextTestCommand(database, executionDispatcher, IDS.tenant);
     await started;
 
     const cancellationResponse = await http.inject({
@@ -2035,13 +2033,12 @@ describe.sequential("single-user durable turn intake API", () => {
         leaseReleases += 1;
       },
     };
-    const executionDispatcher = new OutboxDispatcher({
+    const executionDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: executionBackend,
       leaseManager: retainedLeaseManager,
     });
-    const execution = executionDispatcher.dispatchNext();
+    const execution = dispatchNextTestCommand(database, executionDispatcher, IDS.tenant);
     await executionStarted;
 
     const cancellationResponse = await http.inject({
@@ -2252,9 +2249,8 @@ describe.sequential("single-user durable turn intake API", () => {
           });
         },
       });
-      const dispatcher = new OutboxDispatcher({
+      const dispatcher = new RunCommandExecutor({
         database,
-        tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
         eventNotificationPublisher: sessionEventNotifications!,
@@ -2267,7 +2263,7 @@ describe.sequential("single-user durable turn intake API", () => {
       expect(liveResponse.status).toBe(200);
       expect(liveResponse.headers.get("content-type")).toContain("text/event-stream");
       const liveEventsPromise = readSseEvents(liveResponse, 4);
-      const dispatchResult = await dispatcher.dispatchNext();
+      const dispatchResult = await dispatchNextTestCommand(database, dispatcher, IDS.tenant);
       expect(dispatchResult).toEqual({
         status: "completed",
         commandId: accepted.commandId,
@@ -2772,9 +2768,8 @@ describe.sequential("single-user durable turn intake API", () => {
           events.push(message);
         },
       });
-      const executionDispatcher = new OutboxDispatcher({
+      const executionDispatcher = new RunCommandExecutor({
         database,
-        tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
         eventNotificationPublisher: sessionEventNotifications!,
@@ -2793,7 +2788,7 @@ describe.sequential("single-user durable turn intake API", () => {
       );
       expect(liveResponse.status).toBe(200);
       const liveEventsPromise = readSseEvents(liveResponse, 2);
-      const execution = executionDispatcher.dispatchNext();
+      const execution = dispatchNextTestCommand(database, executionDispatcher, IDS.tenant);
       void execution.catch(() => undefined);
       await waitForCondition(async () => {
         const lifecycle = await readTurnExecution(accepted);
@@ -3052,14 +3047,13 @@ describe.sequential("single-user durable turn intake API", () => {
       leaseCoordinator,
       eventIngestor: durableEventStore,
     });
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend,
       leaseManager: leaseCoordinator,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
       status: "failed",
       commandId: accepted.commandId,
       sessionId: failedSession.sessionId,
@@ -3124,9 +3118,8 @@ describe.sequential("single-user durable turn intake API", () => {
         },
       },
     });
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: new LocalSupervisorExecutionBackend({
         supervisor,
         leaseCoordinator,
@@ -3136,7 +3129,7 @@ describe.sequential("single-user durable turn intake API", () => {
       leaseManager: leaseCoordinator,
     });
 
-    const dispatch = dispatcher.dispatchNext();
+    const dispatch = dispatchNextTestCommand(database, dispatcher, IDS.tenant);
     await waitForCondition(async () => {
       const row = await database
         .selectFrom("session_leases")
@@ -3215,9 +3208,8 @@ describe.sequential("single-user durable turn intake API", () => {
         },
       },
     });
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: new LocalSupervisorExecutionBackend({
         supervisor,
         leaseCoordinator,
@@ -3227,7 +3219,7 @@ describe.sequential("single-user durable turn intake API", () => {
       leaseManager: leaseCoordinator,
     });
 
-    await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
       status: "failed",
       commandId: accepted.commandId,
       sessionId: expiredSession.sessionId,
@@ -3337,12 +3329,13 @@ describe.sequential("single-user durable turn intake API", () => {
         .executeTakeFirstOrThrow(),
     ).toEqual({ count: "0" });
 
-    const retryDispatcher = new OutboxDispatcher({
+    const retryDispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: new DeterministicExecutionBackend(),
     });
-    await expect(retryDispatcher.dispatchNext()).resolves.toMatchObject({
+    await expect(
+      dispatchNextTestCommand(database, retryDispatcher, IDS.tenant),
+    ).resolves.toMatchObject({
       status: "completed",
       commandId: fixture.accepted.commandId,
     });
@@ -3558,14 +3551,15 @@ describe.sequential("single-user durable turn intake API", () => {
           throw new Error("simulated ACK connection loss after PostgreSQL commit");
         },
       });
-      const dispatcher = new OutboxDispatcher({
+      const dispatcher = new RunCommandExecutor({
         database,
-        tenantId: IDS.tenant,
         backend,
         leaseManager: leaseCoordinator,
       });
 
-      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      await expect(
+        dispatchNextTestCommand(database, dispatcher, IDS.tenant),
+      ).resolves.toMatchObject({
         status: "failed",
         commandId: accepted.commandId,
         phase: "after_start",
@@ -3679,9 +3673,8 @@ describe.sequential("single-user durable turn intake API", () => {
       "terminal-transaction-rollback",
       "exercise the final settlement transaction",
     );
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: IDS.tenant,
       backend: new DeterministicExecutionBackend([
         { kind: "complete", stopReason: "prepared-result" },
       ]),
@@ -3692,7 +3685,7 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     });
 
-    await expect(dispatcher.dispatchNext()).rejects.toThrow(
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).rejects.toThrow(
       "simulated terminal notification failure",
     );
     expect(await readTurnExecution(accepted)).toMatchObject({

@@ -11,7 +11,7 @@
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
-    "./outbox-dispatcher": "./src/outbox-dispatcher.ts",
+    "./run-command-executor": "./src/run-command-executor.ts",
     "./run-attempt-runtime": "./src/run-attempt-runtime.ts",
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts"

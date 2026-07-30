@@ -4,7 +4,7 @@ import {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 
 export type DeterministicExecutionOutcome =
   | { kind: "complete"; stopReason?: string }

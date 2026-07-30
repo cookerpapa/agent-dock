@@ -99,10 +99,10 @@ Temporal should own durable Run orchestration, retry, cancellation, task
 matching and fairness. PostgreSQL should remain the business-state authority and
 transactional acceptance boundary.
 
-The current `Temporal Workflow -> Activity -> OutboxDispatcher` path should be
-redesigned so that the Activity executes the referenced command directly.
-Periodic PostgreSQL dispatch scanning, retry scheduling and fair-queue selection
-must not remain as a second scheduler.
+The former `Temporal Workflow -> Activity -> OutboxDispatcher` path is replaced
+by an exact-command `RunCommandExecutor`. Periodic PostgreSQL dispatch scanning,
+retry scheduling and fair-queue selection must not remain as a second
+scheduler.
 
 This refactor must preserve:
 
@@ -126,7 +126,7 @@ Priority targets:
 
 - `control-plane-store.ts`;
 - `control-plane-api.ts`;
-- `outbox-dispatcher.ts` during the Temporal cutover;
+- `run-command-executor.ts` after the Temporal cutover;
 - `candidate-race-service.ts`;
 - `checkpoint-store.ts`;
 - `ChatApp.tsx`.
@@ -207,4 +207,3 @@ Every simplification slice must demonstrate:
 7. SSE reconnect and interrupted-output recovery;
 8. no regression in measured first-token or total-settlement latency;
 9. a small, reviewable commit that can be reverted independently.
-

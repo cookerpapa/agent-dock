@@ -10,7 +10,7 @@ import type {
   TurnExecutionAcknowledgement,
   TurnExecutionLeaseManager,
   TurnExecutionRequest,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 
 const DEFAULT_LEASE_DURATION_MS = 60_000;
 

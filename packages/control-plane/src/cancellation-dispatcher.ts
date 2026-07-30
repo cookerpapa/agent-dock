@@ -19,7 +19,7 @@ import type {
   TurnExecutionAcknowledgement,
   TurnExecutionLeaseManager,
   TurnExecutionRequest,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 import {
   validateSupervisorDispatchAffinity,
   type SupervisorDispatchAffinity,

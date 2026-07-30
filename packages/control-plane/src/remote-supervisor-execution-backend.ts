@@ -23,7 +23,7 @@ import {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,

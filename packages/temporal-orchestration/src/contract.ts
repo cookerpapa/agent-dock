@@ -53,6 +53,12 @@ export interface TemporalRunActivities {
   executeRunCommand(input: TemporalRunWorkflowInput): Promise<TemporalRunActivityResult>;
 }
 
+export type TemporalRunPriority = {
+  priorityKey: number;
+  fairnessKey: string;
+  fairnessWeight: number;
+};
+
 function uuid(value: string, name: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     throw new TypeError(`${name} must be a UUID`);
@@ -88,6 +94,20 @@ export function validateTemporalRunWorkflowInput(
 
 export function temporalRunWorkflowId(runId: string): string {
   return `${TEMPORAL_RUN_WORKFLOW_ID_PREFIX}${uuid(runId, "runId")}`;
+}
+
+/**
+ * Temporal, rather than a PostgreSQL polling loop, owns cross-tenant task
+ * fairness. Keeping the policy beside the durable input makes that scheduling
+ * contract independently testable.
+ */
+export function temporalRunPriority(input: TemporalRunWorkflowInput): TemporalRunPriority {
+  const validated = validateTemporalRunWorkflowInput(input);
+  return {
+    priorityKey: 3,
+    fairnessKey: validated.tenantId,
+    fairnessWeight: 1,
+  };
 }
 
 export function temporalWorkerAffinityTaskQueue(sandboxId: string): string {

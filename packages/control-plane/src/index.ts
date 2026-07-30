@@ -182,20 +182,20 @@ export {
   type SupervisorMaintenanceRunner,
 } from "./supervisor-maintenance-runtime.ts";
 export {
-  OutboxDispatcher,
-  OutboxDispatcherInvariantError,
-  OutboxDispatcherStaleClaimError,
+  RunCommandExecutor,
+  RunCommandExecutorInvariantError,
+  RunCommandExecutorStaleClaimError,
   TurnExecutionBackendError,
   TurnExecutionCancelledError,
-  type DispatchNextResult,
-  type OutboxDispatcherOptions,
+  type RunCommandExecutionResult,
+  type RunCommandExecutorOptions,
   type TurnExecutionBackend,
   type TurnExecutionAcknowledgement,
   type TurnExecutionLeaseManager,
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./outbox-dispatcher.ts";
+} from "./run-command-executor.ts";
 export {
   TemporalRunOrchestrator,
   type TemporalRunOrchestratorActivity,

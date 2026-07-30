@@ -3,9 +3,9 @@ import {
   CancellationDispatcher,
 } from "@agent-dock/control-plane/cancellation-dispatcher";
 import {
-  type DispatchNextResult,
-  OutboxDispatcher,
-} from "@agent-dock/control-plane/outbox-dispatcher";
+  type RunCommandExecutionResult,
+  RunCommandExecutor,
+} from "@agent-dock/control-plane/run-command-executor";
 import { PostgresTemporalWorkerAffinity } from "@agent-dock/control-plane/temporal-worker-affinity";
 import type { Database } from "@agent-dock/database";
 import {
@@ -36,7 +36,7 @@ export type TemporalPiWorkerOptions = {
     deploymentName: string;
     buildId: string;
   };
-  executionDispatcher: OutboxDispatcher;
+  commandExecutor: RunCommandExecutor;
   cancellationDispatcher: CancellationDispatcher;
 };
 
@@ -78,7 +78,7 @@ export class TemporalPiWorker {
         buildId: string;
       }
     | undefined;
-  readonly #executionDispatcher: OutboxDispatcher;
+  readonly #commandExecutor: RunCommandExecutor;
   readonly #cancellationDispatcher: CancellationDispatcher;
   readonly #workerAffinity: PostgresTemporalWorkerAffinity;
   #state: TemporalPiWorkerState = "idle";
@@ -112,7 +112,7 @@ export class TemporalPiWorker {
             ),
             buildId: bounded(options.workerDeployment.buildId, "workerDeployment.buildId", 255),
           };
-    this.#executionDispatcher = options.executionDispatcher;
+    this.#commandExecutor = options.commandExecutor;
     this.#cancellationDispatcher = options.cancellationDispatcher;
     this.#workerAffinity = new PostgresTemporalWorkerAffinity({
       database: this.#database,
@@ -238,7 +238,7 @@ export class TemporalPiWorker {
     heartbeatTimer.unref();
 
     try {
-      const result = await this.#executionDispatcher.dispatchCommand(input.commandId);
+      const result = await this.#commandExecutor.dispatchCommand(input.commandId);
       if (context.cancellationSignal.aborted) {
         beginCancellation();
         await cancellation;
@@ -285,7 +285,7 @@ export class TemporalPiWorker {
 
   async #activityResult(
     input: TemporalRunWorkflowInput,
-    result: DispatchNextResult,
+    result: RunCommandExecutionResult,
   ): Promise<TemporalRunActivityResult> {
     if (result.status === "completed") {
       return {

@@ -26,7 +26,7 @@ import {
   ControlPlaneStore,
   DurableEventStore,
   HashedBearerSupervisorAuthorizer,
-  OutboxDispatcher,
+  RunCommandExecutor,
   RemoteSupervisorExecutionBackend,
   SupervisorCommandRouter,
   SupervisorConnectionManager,
@@ -36,6 +36,7 @@ import {
   type SupervisorBootIdentity,
   type TurnExecutionRequest,
 } from "../src/index.ts";
+import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 const CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000001";
 const SECOND_CONTROL_PLANE_ID = "30000000-0000-4000-8000-000000000002";
@@ -413,7 +414,7 @@ afterAll(async () => {
 });
 
 describe.sequential("remote two-phase supervisor execution", () => {
-  it("moves execute and cancellation claim ownership to the current socket replica", async () => {
+  it("preserves fenced execution and cancellation across a socket replica reconnect", async () => {
     const seeded = await seedTurn();
     const eventStore = new DurableEventStore({ database });
     const eventMessages: EventPublishMessage[] = [];
@@ -522,27 +523,14 @@ describe.sequential("remote two-phase supervisor execution", () => {
       const firstBinding = await firstGateway.createRemoteDispatchBinding(
         seeded.identity.sandboxId,
       );
-      const wrongSecondDispatcher = new OutboxDispatcher({
+      const firstDispatcher = new RunCommandExecutor({
         database,
-        tenantId: seeded.tenantId,
-        backend: secondGateway.createRemoteExecutionBackend(seeded.identity.sandboxId),
-        leaseManager: firstBinding.leaseCoordinator,
-        supervisorAffinity: {
-          sandboxId: seeded.identity.sandboxId,
-          controlPlaneInstanceId: SECOND_CONTROL_PLANE_ID,
-        },
-      });
-      await expect(wrongSecondDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
-      expect(await outboxAttempts(seeded.accepted.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
-
-      const firstDispatcher = new OutboxDispatcher({
-        database,
-        tenantId: seeded.tenantId,
         backend: firstBinding.backend,
         leaseManager: firstBinding.leaseCoordinator,
-        supervisorAffinity: firstBinding.supervisorAffinity,
       });
-      await expect(firstDispatcher.dispatchNext()).resolves.toMatchObject({ status: "completed" });
+      await expect(
+        firstDispatcher.dispatchCommand(seeded.accepted.commandId),
+      ).resolves.toMatchObject({ status: "completed" });
 
       const followUp = await seeded.store.acceptTurn(
         seeded.session.sessionId,
@@ -565,25 +553,11 @@ describe.sequential("remote two-phase supervisor execution", () => {
         return connection?.accepting_assignments === false;
       });
 
-      const staleFirstDispatcher = new OutboxDispatcher({
+      const secondDispatcher = new RunCommandExecutor({
         database,
-        tenantId: seeded.tenantId,
-        backend: firstBinding.backend,
-        leaseManager: firstBinding.leaseCoordinator,
-        supervisorAffinity: firstBinding.supervisorAffinity,
-      });
-      await expect(staleFirstDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
-      expect(await outboxAttempts(followUp.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
-
-      const secondDispatcher = new OutboxDispatcher({
-        database,
-        tenantId: seeded.tenantId,
         backend: secondBinding.backend,
         leaseManager: secondBinding.leaseCoordinator,
-        supervisorAffinity: secondBinding.supervisorAffinity,
       });
-      await expect(secondDispatcher.dispatchNext()).resolves.toEqual({ status: "idle" });
-      expect(await outboxAttempts(followUp.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
       secondClient.setAcceptingAssignments(true);
       await waitFor(async () => {
         const connection = await database
@@ -593,7 +567,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
           .executeTakeFirst();
         return connection?.accepting_assignments === true;
       });
-      const execution = secondDispatcher.dispatchNext();
+      const execution = secondDispatcher.dispatchCommand(followUp.commandId);
       await waitFor(() => cancellableRunnerStarted);
       const capacitySession = await seeded.store.createSession(
         seeded.project.projectId,
@@ -604,14 +578,14 @@ describe.sequential("remote two-phase supervisor execution", () => {
         `capacity-${uuid()}`,
         { prompt: "wait for sandbox capacity" },
       );
-      const capacityProbe = new OutboxDispatcher({
+      const capacityProbe = new RunCommandExecutor({
         database,
-        tenantId: seeded.tenantId,
         backend: secondBinding.backend,
         leaseManager: secondBinding.leaseCoordinator,
-        supervisorAffinity: secondBinding.supervisorAffinity,
       });
-      await expect(capacityProbe.dispatchNext()).resolves.toEqual({ status: "idle" });
+      await expect(capacityProbe.dispatchCommand(capacityTurn.commandId)).resolves.toEqual({
+        status: "idle",
+      });
       expect(await outboxAttempts(capacityTurn.commandId, TURN_COMMAND_OUTBOX_TOPIC)).toBe(0);
       secondClient.setAcceptingAssignments(false);
       await waitFor(async () => {
@@ -791,13 +765,14 @@ describe.sequential("remote two-phase supervisor execution", () => {
         code: "stale_connection",
       });
 
-      const dispatcher = new OutboxDispatcher({
+      const dispatcher = new RunCommandExecutor({
         database,
-        tenantId: seeded.tenantId,
         backend,
         leaseManager: staleLeaseCoordinator,
       });
-      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      await expect(
+        dispatchNextTestCommand(database, dispatcher, seeded.tenantId),
+      ).resolves.toMatchObject({
         status: "completed",
         commandId: seeded.accepted.commandId,
       });
@@ -863,15 +838,16 @@ describe.sequential("remote two-phase supervisor execution", () => {
       transport,
       leaseCoordinator: network.leaseCoordinator,
     });
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: seeded.tenantId,
       backend,
       leaseManager: network.leaseCoordinator,
     });
 
     try {
-      await expect(dispatcher.dispatchNext()).resolves.toMatchObject({
+      await expect(
+        dispatchNextTestCommand(database, dispatcher, seeded.tenantId),
+      ).resolves.toMatchObject({
         status: "completed",
         commandId: seeded.accepted.commandId,
         sessionId: seeded.session.sessionId,
@@ -997,9 +973,8 @@ describe.sequential("remote two-phase supervisor execution", () => {
       },
     };
     const network = await startNetwork(seeded, runner);
-    const executionDispatcher = new OutboxDispatcher({
+    const executionDispatcher = new RunCommandExecutor({
       database,
-      tenantId: seeded.tenantId,
       backend: network.backend,
       leaseManager: network.leaseCoordinator,
     });
@@ -1010,7 +985,7 @@ describe.sequential("remote two-phase supervisor execution", () => {
       leaseManager: network.leaseCoordinator,
     });
     try {
-      const execution = executionDispatcher.dispatchNext();
+      const execution = dispatchNextTestCommand(database, executionDispatcher, seeded.tenantId);
       await waitFor(() => runnerStarted);
       const cancellation = await seeded.store.acceptTurnCancellation(
         seeded.session.sessionId,
@@ -1079,14 +1054,13 @@ describe.sequential("remote two-phase supervisor execution", () => {
       },
     };
     const network = await startNetwork(seeded, runner);
-    const dispatcher = new OutboxDispatcher({
+    const dispatcher = new RunCommandExecutor({
       database,
-      tenantId: seeded.tenantId,
       backend: network.backend,
       leaseManager: network.leaseCoordinator,
     });
     try {
-      const execution = dispatcher.dispatchNext();
+      const execution = dispatchNextTestCommand(database, dispatcher, seeded.tenantId);
       await waitFor(() => runnerStarted);
       await network.client.stop();
       await expect(execution).resolves.toMatchObject({
