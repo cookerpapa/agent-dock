@@ -83,6 +83,34 @@ describe("tenant-aware browser API", () => {
     });
   });
 
+  it("allows internal acceptance clients to request the sample Java fixture explicitly", async () => {
+    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("/v1/projects");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        name: "Candidate fixture",
+        source: { kind: "sample_java" },
+      });
+      return new Response(
+        JSON.stringify({
+          projectId: "20000000-0000-4000-8000-000000000001",
+          workspaceId: "30000000-0000-4000-8000-000000000001",
+          name: "Candidate fixture",
+          createdAt: "2026-07-19T00:00:00.000Z",
+          environment,
+          source: { kind: "sample_java", status: "ready" },
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation, token);
+    await expect(
+      api.createProject("Candidate fixture", { kind: "sample_java" }),
+    ).resolves.toMatchObject({
+      source: { kind: "sample_java", status: "ready" },
+    });
+  });
+
   it("manages environment candidates through versioned, idempotent APIs", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const projectId = "20000000-0000-4000-8000-000000000001";

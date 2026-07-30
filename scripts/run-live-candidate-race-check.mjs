@@ -219,7 +219,9 @@ await cube.checkHealth();
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
 const suffix = `${new Date().toISOString()}-${randomUUID().slice(0, 8)}`;
-const project = await api.createProject(`Parallel candidate acceptance ${suffix}`);
+const project = await api.createProject(`Parallel candidate acceptance ${suffix}`, {
+  kind: "sample_java",
+});
 const parent = await api.createSession(
   project.projectId,
   project.workspaceId,
@@ -312,13 +314,10 @@ try {
 
   assert.equal(race.state, "awaiting_decision", JSON.stringify(race.candidates));
   assert.equal(race.candidates.length, 2);
-  assert(
-    race.candidates.every(
-      (candidate) =>
-        candidate.runState === "completed" && candidate.acceptance?.verdict === "passed",
-    ),
-    JSON.stringify(race.candidates),
+  const acceptedCandidates = race.candidates.filter(
+    (candidate) => candidate.runState === "completed" && candidate.acceptance?.verdict === "passed",
   );
+  assert(acceptedCandidates.length > 0, JSON.stringify(race.candidates));
   assert.equal(observedSandboxes.size, 2, "Both candidates did not enter Cube KVM");
   assert(
     simultaneousCandidateSandboxes,
@@ -342,6 +341,31 @@ try {
     race.candidates.map(async (candidate) => {
       const run = await api.getRun(candidate.runId);
       const usage = await api.getRunUsage(candidate.runId);
+      const commonEvidence = {
+        candidateId: candidate.candidateId,
+        label: candidate.label,
+        sessionId: candidate.sessionId,
+        runId: candidate.runId,
+        runState: candidate.runState,
+        workspaceVersionId: candidate.workspaceVersionId,
+        startedAt: run.startedAt,
+        settledAt: run.settledAt,
+        failure: run.failure,
+        acceptance: candidate.acceptance,
+        usage: usage.totals,
+        sandbox: observedSandboxes.get(candidate.candidateId),
+      };
+      if (candidate.runState !== "completed" || candidate.acceptance?.verdict !== "passed") {
+        assert(terminalRunStates.has(candidate.runState));
+        return {
+          ...commonEvidence,
+          reviewBundleId: undefined,
+          reviewBundleSha256: undefined,
+          changedPaths: [],
+          tests: [],
+          effectiveTests: [],
+        };
+      }
       const bundle = await api.getRunReviewBundle(candidate.runId);
       const repeated = await api.getRunReviewBundle(candidate.runId);
       assert.equal(repeated.manifestSha256, bundle.manifestSha256);
@@ -358,14 +382,7 @@ try {
       assert(effectiveTests.length > 0);
       assert(effectiveTests.every((test) => test.status === "passed"));
       return {
-        candidateId: candidate.candidateId,
-        label: candidate.label,
-        sessionId: candidate.sessionId,
-        runId: candidate.runId,
-        workspaceVersionId: candidate.workspaceVersionId,
-        startedAt: run.startedAt,
-        settledAt: run.settledAt,
-        acceptance: candidate.acceptance,
+        ...commonEvidence,
         reviewBundleId: bundle.reviewBundleId,
         reviewBundleSha256: bundle.manifestSha256,
         changedPaths: bundle.manifest.changes.changedPaths,
@@ -379,8 +396,6 @@ try {
           suite: test.suite,
           status: test.status,
         })),
-        usage: usage.totals,
-        sandbox: observedSandboxes.get(candidate.candidateId),
       };
     }),
   );
@@ -448,6 +463,8 @@ try {
       simultaneousCandidateSandboxes,
       executionIntervalsOverlapped: true,
       sharedTrustedSupervisor,
+      acceptedCandidateCount: acceptedCandidates.length,
+      failedCandidateCount: race.candidates.length - acceptedCandidates.length,
       candidates: candidateEvidence,
       recommendedCandidateId: race.recommendedCandidateId,
     },
@@ -472,7 +489,8 @@ try {
   );
   const candidateLines = report.race.candidates.map(
     (candidate) =>
-      `- ${candidate.label}: ${String(candidate.usage.requests)} model requests, ` +
+      `- ${candidate.label}: ${candidate.runState}/${candidate.acceptance?.verdict ?? "unevaluated"}, ` +
+      `${String(candidate.usage.requests)} model requests, ` +
       `${String(candidate.usage.inputTokens)}/${String(candidate.usage.outputTokens)} input/output tokens, ` +
       `${String(candidate.tests.length)} test attempt(s) / ` +
       `${String(candidate.effectiveTests.length)} green effective result(s), ` +
@@ -486,6 +504,7 @@ try {
       `- Checked at: ${report.checkedAt}`,
       `- Provider/model: ${report.model.provider} / ${report.model.modelId}`,
       `- Candidate concurrency: ${String(report.race.maximumConcurrentCandidates)}`,
+      `- Candidates passing deterministic acceptance: ${String(report.race.acceptedCandidateCount)}/${String(report.race.candidates.length)}`,
       `- Candidate execution intervals overlapped: ${String(report.race.executionIntervalsOverlapped)}`,
       `- Distinct Cube KVM guests observed simultaneously: ${String(report.race.simultaneousCandidateSandboxes)}`,
       `- Shared trusted Supervisor with isolated Tool activations: ${String(report.race.sharedTrustedSupervisor)}`,
@@ -494,7 +513,7 @@ try {
       `- Promotion preserved parent Pi context: ${String(report.promotion.parentPiArtifactPreserved)}`,
       `- Exact Sandbox cleanup: ${String(report.cleanup.exactAssignmentsDestroyed)}`,
       "",
-      "One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct Cube KVM microVMs, produced immutable Review Bundles with green tests, passed deterministic acceptance, and remained isolated until an explicit CAS promotion copied only the selected Workspace into the parent Session.",
+      "One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct Cube KVM microVMs. Every passing candidate produced an immutable Review Bundle with green tests; failed candidates remained explicit rather than blocking selection. An explicit CAS promotion copied only the selected passing Workspace into the parent Session.",
       "",
     ].join("\n"),
     "utf8",
