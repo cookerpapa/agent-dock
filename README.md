@@ -227,6 +227,7 @@ documentation should be based on these reproducible measurements.
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Architecture decisions](docs/adr/)
+- [Optimization boundary](docs/OPTIMIZATION_BOUNDARY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Sandbox Provider](docs/SANDBOX_PROVIDER.md)
 - [CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
