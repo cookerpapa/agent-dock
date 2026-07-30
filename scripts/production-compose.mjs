@@ -46,6 +46,23 @@ const piWorkerDeployment =
 if (piWorkerDeployment !== "compose" && piWorkerDeployment !== "kubernetes") {
   throw new Error("AGENT_DOCK_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
 }
+const supportedOptionalProfiles = new Set(["observability"]);
+const requestedOptionalProfiles = (
+  process.env.AGENT_DOCK_PRODUCTION_PROFILES ??
+  runtimeEnvironment.AGENT_DOCK_PRODUCTION_PROFILES ??
+  ""
+)
+  .split(",")
+  .map((profile) => profile.trim())
+  .filter((profile) => profile.length > 0);
+const unsupportedOptionalProfiles = requestedOptionalProfiles.filter(
+  (profile) => !supportedOptionalProfiles.has(profile),
+);
+if (unsupportedOptionalProfiles.length > 0) {
+  throw new Error(
+    `AGENT_DOCK_PRODUCTION_PROFILES contains unsupported profiles: ${unsupportedOptionalProfiles.join(", ")}`,
+  );
+}
 const allowsStaleCubeTemplate =
   recreatesOnlyControlPlane ||
   new Set(["down", "stop", "kill", "rm", "ps", "logs", "exec"]).has(command);
@@ -226,6 +243,12 @@ const profileArguments = [
   ...(piWorkerDeployment === "compose" || new Set(["down", "stop", "kill", "rm"]).has(command)
     ? ["--profile", "compose-pi-workers"]
     : []),
+  ...[
+    ...new Set([
+      ...requestedOptionalProfiles,
+      ...(new Set(["down", "stop", "kill", "rm"]).has(command) ? ["observability"] : []),
+    ]),
+  ].flatMap((profile) => ["--profile", profile]),
 ];
 const serviceArguments =
   command === "build" && commandArguments.length === 0
@@ -258,6 +281,9 @@ await new Promise((resolvePromise, rejectPromise) => {
       AGENT_DOCK_IMAGE_REVISION: imageRevision,
       AGENT_DOCK_APPLICATION_UID: String(applicationOwner.uid),
       AGENT_DOCK_APPLICATION_GID: String(applicationOwner.gid),
+      AGENT_DOCK_OTLP_TRACES_ENDPOINT:
+        process.env.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
+        (requestedOptionalProfiles.includes("observability") ? "http://jaeger:4318/v1/traces" : ""),
       ...cubeEnvironment,
     },
     stdio: "inherit",

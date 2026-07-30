@@ -159,7 +159,7 @@ See [Threat model](docs/THREAT_MODEL.md) and
 - Pi SDK and native Pi Session format
 - Tencent CubeSandbox with KVM
 - Kopia-backed trusted Workspace checkpointing
-- OpenTelemetry, Prometheus, Grafana, Loki and Tempo
+- optional OpenTelemetry, Prometheus, Grafana and Jaeger observability profile
 - Vitest plus live Cube/model acceptance scripts
 
 ## Local production deployment
@@ -174,6 +174,13 @@ npm run dependencies:harden
 npm run cubesandbox:cluster-install
 npm run cubesandbox:init
 npm run production:deploy
+```
+
+`production:deploy` starts the 15-service core product topology. Start the
+optional five-service metrics and tracing stack with:
+
+```bash
+npm run production:up:observability
 ```
 
 The Web product is served on:

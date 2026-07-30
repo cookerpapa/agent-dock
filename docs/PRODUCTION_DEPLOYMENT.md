@@ -190,6 +190,21 @@ npm run production:up
 npm run production:down
 ```
 
+The default command set starts the 15-service core topology. Prometheus,
+Jaeger, Grafana, their loopback ingress and their volume bootstrap are an
+explicit profile:
+
+```bash
+npm run production:config:observability
+npm run production:up:observability
+```
+
+The application metrics endpoints remain available inside the trusted
+observability network in the core profile, but OTLP export is disabled unless
+the profile is enabled or `AGENT_DOCK_OTLP_TRACES_ENDPOINT` is set explicitly.
+This keeps tracing pluggable without making the local dashboards a product
+startup dependency.
+
 `production:down` stops services but preserves named data volumes. Do not use a
 volume-deleting Compose command unless an explicit destructive reset is
 intended.
@@ -257,6 +272,7 @@ npm run build
 npm run check
 npm run security:audit
 npm run production:config
+npm run production:config:observability
 ```
 
 Real Cube/model path:

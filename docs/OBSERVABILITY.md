@@ -20,8 +20,15 @@ run.dispatch
      -> sandbox.stop
 ```
 
-Run detail returns `traceId`. In the private deployment Jaeger is available at
-`http://127.0.0.1:16686` and retains its Badger store in a named volume.
+Run detail returns `traceId`. Observability is an optional production profile:
+
+```bash
+npm run production:up:observability
+```
+
+When enabled, Jaeger is available at `http://127.0.0.1:16686` and retains its
+Badger store in a named volume. The core profile leaves OTLP export disabled,
+unless an external endpoint is configured explicitly.
 
 ## Metrics
 
@@ -69,6 +76,7 @@ read it and a tenant can never select another tenant in the request.
 
 ```bash
 npm run production:deploy
+npm run production:up:observability
 npm run eval:coding -- --register
 npm run eval:load
 curl -fsS http://127.0.0.1:9090/-/healthy
