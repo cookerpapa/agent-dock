@@ -8,6 +8,7 @@ import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agen
 import { Client, Connection } from "@temporalio/client";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
+import { PostgresTemporalWorkerAffinity } from "./temporal-worker-affinity.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_BATCH_SIZE = 100;
@@ -107,6 +108,7 @@ export class TemporalRunOrchestrator {
   readonly #pollIntervalMs: number;
   readonly #batchSize: number;
   readonly #onActivity: ((activity: TemporalRunOrchestratorActivity) => void) | undefined;
+  readonly #workerAffinity: PostgresTemporalWorkerAffinity;
   readonly #started = new Map<string, number>();
   readonly #cancelled = new Map<string, number>();
   #state: TemporalRunOrchestratorState = "idle";
@@ -126,6 +128,9 @@ export class TemporalRunOrchestrator {
     );
     this.#batchSize = positiveInteger(options.batchSize ?? DEFAULT_BATCH_SIZE, "batchSize");
     this.#onActivity = options.onActivity;
+    this.#workerAffinity = new PostgresTemporalWorkerAffinity({
+      database: this.#database,
+    });
   }
 
   get state(): TemporalRunOrchestratorState {
@@ -266,10 +271,12 @@ export class TemporalRunOrchestrator {
     if (observed !== undefined && Date.now() - observed < RECONCILIATION_INTERVAL_MS) return;
     const workflowId = temporalRunWorkflowId(input.runId);
     try {
+      const affinity = await this.#workerAffinity.reserve(input).catch(() => undefined);
+      const workflowInput = affinity === undefined ? input : { ...input, affinity };
       await this.#client!.workflow.start(TEMPORAL_RUN_WORKFLOW, {
         workflowId,
         taskQueue: this.#taskQueue,
-        args: [input],
+        args: [workflowInput],
         workflowIdReusePolicy: "ALLOW_DUPLICATE_FAILED_ONLY",
         workflowIdConflictPolicy: "USE_EXISTING",
         workflowExecutionTimeout: "7 days",

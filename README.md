@@ -54,7 +54,7 @@ Tenant ownership does not grant platform administration.
 │ Temporal                                                        │
 │ durable timers / retries / cancellation / Worker matching       │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │ shared fair Activity Task Queue
+                                │ capacity-aware soft affinity
 ┌───────────────────────────────▼─────────────────────────────────┐
 │ Trusted Pi Worker pool                                          │
 │ Pi SDK AgentSession / native JSONL restore / model gateway       │
@@ -94,7 +94,7 @@ PostgreSQL is authoritative for:
 
 MinIO/S3 stores immutable:
 
-- Pi native immutable JSONL checkpoints;
+- Pi native JSONL segment manifests;
 - Workspace/Kopia checkpoints;
 - artifacts and Review Bundles.
 
@@ -241,7 +241,7 @@ documentation should be based on these reproducible measurements.
 The repository implements the full vertical path from browser authentication
 through durable Run orchestration, Pi SDK execution, Cube Tool execution,
 streaming events, Pi/Workspace checkpoints and multi-tenant recovery. It also
-contains horizontal Pi Worker manifests, shared-queue fair scheduling,
+contains horizontal Pi Worker manifests, Session-affinity scheduling,
 administrator-owned hot configuration, fault/load evaluation and deployment
 automation.
 

@@ -4,6 +4,7 @@ import {
   TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT,
   TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
   temporalRunWorkflowId,
+  temporalWorkerAffinityTaskQueue,
   validateTemporalRunWorkflowInput,
 } from "../src/contract.ts";
 
@@ -37,5 +38,25 @@ describe("Temporal orchestration contract", () => {
     expect(() =>
       validateTemporalRunWorkflowInput({ ...INPUT, commandId: "not-a-command" }),
     ).toThrow("commandId must be a UUID");
+  });
+
+  it("accepts only a deterministic Worker-specific affinity queue", () => {
+    const sandboxId = "a1000000-0000-4000-8000-000000000005";
+    const reservationId = "a1000000-0000-4000-8000-000000000006";
+    const affinity = {
+      reservationId,
+      sandboxId,
+      taskQueue: temporalWorkerAffinityTaskQueue(sandboxId),
+    };
+    expect(validateTemporalRunWorkflowInput({ ...INPUT, affinity })).toEqual({
+      ...INPUT,
+      affinity,
+    });
+    expect(() =>
+      validateTemporalRunWorkflowInput({
+        ...INPUT,
+        affinity: { ...affinity, taskQueue: "attacker-controlled-queue" },
+      }),
+    ).toThrow("affinity.taskQueue does not match");
   });
 });

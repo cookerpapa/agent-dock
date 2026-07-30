@@ -360,9 +360,9 @@ extension-policy support would overstate the current boundary.
   real-token concurrent Runs
 - [x] Run the local single-node k3d Pi Worker cutover, real-token chat/Tool/
   restore/failover acceptance, and record measured evidence
-- [x] Remove capacity-aware same-Session Worker affinity after checkpoint
-  measurements showed that its private Task Queues and PostgreSQL reservations
-  did not justify their routing complexity; keep one Temporal fair Task Queue
+- [x] Add capacity-aware same-Session Worker affinity with row-locked slot
+  reservations, boot-specific Temporal Activity queues, a shared process-local
+  capacity gate, short private-queue timeout and common-queue fallback
 - [x] Preserve failed/cancelled started Runs as typed Pi-native interrupted
   checkpoints with an explicit model-visible interruption boundary, while
   keeping Workspace commit success-only

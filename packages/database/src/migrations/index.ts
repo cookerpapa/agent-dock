@@ -28,7 +28,6 @@ import * as workspaceFirstConversations from "./026_workspace_first_conversation
 import * as sharedWorkspaceHeads from "./027_shared_workspace_heads.ts";
 import * as interruptedPiConversations from "./028_interrupted_pi_conversations.ts";
 import * as externalPlatformGitMetadata from "./029_external_platform_git_metadata.ts";
-import * as removeTemporalWorkerAffinity from "./030_remove_temporal_worker_affinity.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -62,7 +61,6 @@ export const migrationProvider: MigrationProvider = {
       "027_shared_workspace_heads": sharedWorkspaceHeads,
       "028_interrupted_pi_conversations": interruptedPiConversations,
       "029_external_platform_git_metadata": externalPlatformGitMetadata,
-      "030_remove_temporal_worker_affinity": removeTemporalWorkerAffinity,
     };
   },
 };
@@ -211,8 +209,3 @@ export {
   down as downExternalPlatformGitMetadata,
   up as upExternalPlatformGitMetadata,
 } from "./029_external_platform_git_metadata.ts";
-
-export {
-  down as downRemoveTemporalWorkerAffinity,
-  up as upRemoveTemporalWorkerAffinity,
-} from "./030_remove_temporal_worker_affinity.ts";
