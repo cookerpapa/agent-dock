@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  FileEventSpoolStore,
+  WalEventSpoolStore,
   LocalSandboxSupervisor,
   PiTurnCancelledError,
   type SupervisorTurnRunner,
@@ -287,7 +287,7 @@ describe("LocalSandboxSupervisor", () => {
   it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "agent-dock-local-supervisor-spool-"));
     try {
-      const durableStore = new FileEventSpoolStore({ rootDirectory: root });
+      const durableStore = new WalEventSpoolStore({ rootDirectory: root });
       const event: EventPublishMessage = {
         protocolVersion: 1,
         messageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -333,7 +333,7 @@ describe("LocalSandboxSupervisor", () => {
       });
 
       const replayed: EventPublishMessage[] = [];
-      const restartedStore = new FileEventSpoolStore({ rootDirectory: root });
+      const restartedStore = new WalEventSpoolStore({ rootDirectory: root });
       const restartedSupervisor = new LocalSandboxSupervisor({
         runner: new RecordingRunner(),
         eventSpoolFactory: (options) => restartedStore.open(options),

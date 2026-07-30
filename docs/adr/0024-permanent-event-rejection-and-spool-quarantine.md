@@ -42,7 +42,7 @@ outcome. Transparent continuation of the old command would contradict ADR-0018.
    one pending publication. A mismatched or unsolicited rejection is a protocol
    failure. A matched rejection raises a typed permanent delivery error to the
    spool recovery boundary without failing the current socket.
-4. `FileEventSpoolStore` moves an assignment spool rejected as `stale_fence`
+4. `WalEventSpoolStore` moves an assignment WAL rejected as `stale_fence`
    atomically from the active recovery root to a separate private quarantine
    root. It writes a fsynced, checksummed rejection record containing only the
    assignment identity, sequence, safe reason code, and rejection time. It does

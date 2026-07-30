@@ -18,15 +18,15 @@ export {
 } from "./in-memory-event-spool.ts";
 
 export {
-  DEFAULT_FILE_EVENT_SPOOL_BYTES,
-  FileEventSpool,
-  FileEventSpoolStore,
-  MAX_FILE_EVENT_SPOOL_DIRECTORIES,
-  MAX_FILE_EVENT_SPOOL_MESSAGE_BYTES,
-  type FileEventSpoolOpenOptions,
-  type FileEventSpoolReplayResult,
-  type FileEventSpoolStoreOptions,
-} from "./file-event-spool.ts";
+  DEFAULT_WAL_EVENT_SPOOL_BYTES,
+  MAX_WAL_EVENT_SPOOL_FILES,
+  MAX_WAL_EVENT_SPOOL_MESSAGE_BYTES,
+  WalEventSpool,
+  WalEventSpoolStore,
+  type WalEventSpoolOpenOptions,
+  type WalEventSpoolReplayResult,
+  type WalEventSpoolStoreOptions,
+} from "./wal-event-spool.ts";
 
 export { PiAgentEventAdapter, type PiAgentEventAdapterOutcome } from "./pi-agent-event-adapter.ts";
 

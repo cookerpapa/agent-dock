@@ -596,7 +596,7 @@ services:
       AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
     volumes:
       - supervisor-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-spool:/var/lib/agent-dock/spool-volume
+      - supervisor-event-wal:/var/lib/agent-dock/spool-volume
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
         target: /run/agent-dock-secrets/database-url
@@ -671,7 +671,7 @@ services:
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2:4100
     volumes:
       - supervisor-1-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-1-spool:/var/lib/agent-dock/spool-volume
+      - supervisor-1-event-wal:/var/lib/agent-dock/spool-volume
     networks:
       management:
         aliases: !override
@@ -698,9 +698,9 @@ services:
     user: "0:0"
     volumes:
       - supervisor-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-spool:/var/lib/agent-dock/spool-volume
+      - supervisor-event-wal:/var/lib/agent-dock/spool-volume
       - supervisor-1-boot:/var/lib/agent-dock/boot-volume-1
-      - supervisor-1-spool:/var/lib/agent-dock/spool-volume-1
+      - supervisor-1-event-wal:/var/lib/agent-dock/spool-volume-1
     network_mode: none
     read_only: true
     init: true
@@ -1169,9 +1169,9 @@ volumes:
   postgres-data: {}
   minio-data: {}
   supervisor-boot: {}
-  supervisor-spool: {}
+  supervisor-event-wal: {}
   supervisor-1-boot: {}
-  supervisor-1-spool: {}
+  supervisor-1-event-wal: {}
   prometheus-data: {}
   grafana-data: {}
   jaeger-data: {}

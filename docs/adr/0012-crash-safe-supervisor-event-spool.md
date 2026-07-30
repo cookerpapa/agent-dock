@@ -1,6 +1,6 @@
 # ADR-0012: Crash-safe supervisor event spool and restart replay
 
-- Status: Accepted
+- Status: Superseded by ADR-0076
 - Date: 2026-07-19
 
 ## Context

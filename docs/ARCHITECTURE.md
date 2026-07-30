@@ -417,6 +417,7 @@ not require changing the Worker execution contract.
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
 - [ADR-0074: exact-command Temporal Activity boundary](adr/0074-exact-command-temporal-activity-boundary.md)
 - [ADR-0075: optional production observability profile](adr/0075-optional-production-observability-profile.md)
+- [ADR-0076: append-only Worker event WAL](adr/0076-append-only-worker-event-wal.md)
 - [ADR-0064: Workspace checkpoints](adr/0064-cube-native-workspace-checkpoints.md)
 - [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
 - [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)

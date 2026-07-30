@@ -17,7 +17,7 @@ import {
   parseSupervisorToControlMessage,
 } from "@agent-dock/protocol";
 import {
-  FileEventSpoolStore,
+  WalEventSpoolStore,
   LocalSandboxSupervisor,
   PiTurnCancelledError,
   PiTurnError,
@@ -3511,7 +3511,7 @@ describe.sequential("single-user durable turn intake API", () => {
         sandboxId: IDS.spoolSandbox,
         leaseDurationMs: 120_000,
       });
-      const firstStore = new FileEventSpoolStore({ rootDirectory: spoolRoot });
+      const firstStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
       const supervisor = new LocalSandboxSupervisor({
         runner: {
           async run(command, publishEvent) {
@@ -3574,7 +3574,7 @@ describe.sequential("single-user durable turn intake API", () => {
       expect(persistedBeforeReplay[0]).toMatchObject({ seq: "1", type: "turn.started" });
       expect(persistedBeforeReplay[1]).toMatchObject({ seq: "2", type: "turn.failed" });
 
-      const restartedStore = new FileEventSpoolStore({ rootDirectory: spoolRoot });
+      const restartedStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
       const restartedSupervisor = new LocalSandboxSupervisor({
         runner: {
           async run() {
@@ -3601,7 +3601,7 @@ describe.sequential("single-user durable turn intake API", () => {
           .executeTakeFirstOrThrow(),
       ).toEqual({ count: "2" });
       await expect(
-        new FileEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
+        new WalEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
           throw new Error("A drained spool must not publish");
         }),
       ).resolves.toEqual({

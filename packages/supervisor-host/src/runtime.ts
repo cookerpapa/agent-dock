@@ -20,7 +20,7 @@ import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
-  FileEventSpoolStore,
+  WalEventSpoolStore,
   LocalSandboxSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
@@ -358,7 +358,7 @@ export class SupervisorHostRuntime {
         onPiSdkIsolationFailure: (error) => this.#retireForPiSdkIsolationFailure(error),
         ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
-      const spoolStore = new FileEventSpoolStore({
+      const spoolStore = new WalEventSpoolStore({
         rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),
         quarantineDirectory: resolve(
           this.#config.eventSpoolDirectory,

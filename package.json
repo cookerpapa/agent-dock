@@ -43,6 +43,7 @@
     "kubernetes:pi-workers:check": "node scripts/local-kubernetes-pi-workers.mjs check",
     "object-store:check": "node scripts/run-minio-check.mjs",
     "benchmark:pi-session-storage": "node scripts/run-pi-session-storage-benchmark.mjs",
+    "benchmark:event-spool": "node --experimental-strip-types scripts/run-event-spool-benchmark.mjs",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:config:observability": "AGENT_DOCK_PRODUCTION_PROFILES=observability node scripts/production-compose.mjs config --quiet",
