@@ -202,10 +202,12 @@ function cubeIdentity(instance, sessionId) {
 
 async function cleanupSession(sessionId, strict) {
   try {
+    const retained = managedCubeForSession(await cube.list(), sessionId);
+    await Promise.all(retained.map((instance) => cube.destroy(instance.sandboxId)));
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       const instances = managedCubeForSession(await cube.list(), sessionId);
-      if (instances.length === 0) return 0;
+      if (instances.length === 0) return retained.length;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
     }
     throw new Error("Candidate Session retained a Cube microVM");
