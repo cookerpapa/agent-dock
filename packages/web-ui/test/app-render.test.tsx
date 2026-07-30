@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import ChatApp, { AuthScreen, ConversationTurn, ToolActivity } from "../src/ChatApp.tsx";
+import { AdminPage } from "../src/AdminPage.tsx";
+import { AuthScreen } from "../src/AuthScreen.tsx";
+import ChatApp from "../src/ChatApp.tsx";
 import { ConversationOutline } from "../src/ConversationOutline.tsx";
+import { ConversationTurn, ToolActivity } from "../src/ConversationTurn.tsx";
 import { AgentDockApi } from "../src/api.ts";
 import type { TurnView } from "../src/session-view.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
@@ -50,6 +53,27 @@ describe("product chat experience", () => {
     expect(markup).toContain("密码");
     expect(markup).not.toContain("API token");
     expect(markup).not.toContain("配置模型");
+  });
+
+  it("renders platform configuration in a dedicated administrator page", () => {
+    const markup = renderToStaticMarkup(
+      <AdminPage
+        api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
+        identity={{
+          tenantId: "10000000-0000-4000-8000-000000000001",
+          tenantSlug: "platform",
+          userId: "10000000-0000-4000-8000-000000000002",
+          displayName: "Platform Admin",
+          role: "owner",
+          platformAdministrator: true,
+        }}
+        onLogout={() => undefined}
+      />,
+    );
+    expect(markup).toContain("AgentDock 管理后台");
+    expect(markup).toContain("Pi Worker 模型");
+    expect(markup).toContain("CubeSandbox 公网代理");
+    expect(markup).not.toContain("最近对话");
   });
 
   it("renders the Workspace as a directory without executing browser effects", () => {
