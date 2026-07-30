@@ -175,6 +175,29 @@ assert.equal(
 assert.equal(environment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
 assert.equal(environment.AGENT_DOCK_CHECKPOINT_S3_BUCKET, "agent-dock-checkpoints");
 assert.equal(environment.AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL, "http://127.0.0.1:4200");
+assert.equal(
+  environment.AGENT_DOCK_OTLP_TRACES_ENDPOINT,
+  undefined,
+  "The default Worker pool must not require an optional tracing backend",
+);
+
+const tracedWorkerRendered = requireSuccess(
+  command(helm, [
+    "template",
+    "pi-workers-traced",
+    chart,
+    "--set",
+    "services.otlpTracesEndpoint=http://collector.example.test:4318/v1/traces",
+  ]),
+  "Pi Worker traced render",
+);
+const tracedWorker = parseAllDocuments(tracedWorkerRendered)
+  .map((document) => document.toJSON())
+  .find((resource) => resource?.kind === "StatefulSet").spec.template.spec.containers[0];
+assert.equal(
+  tracedWorker.env.find((entry) => entry.name === "AGENT_DOCK_OTLP_TRACES_ENDPOINT")?.value,
+  "http://collector.example.test:4318/v1/traces",
+);
 
 const secret = pod.volumes.find((volume) => volume.name === "secrets")?.secret;
 assert.equal(secret.secretName, "agent-dock-pi-worker-secrets");

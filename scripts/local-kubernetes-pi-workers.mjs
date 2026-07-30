@@ -92,12 +92,6 @@ const bridgeTargets = [
     port: 3129,
   },
   {
-    name: "jaeger",
-    composeService: "jaeger",
-    network: composeNetworks.observability,
-    port: 4318,
-  },
-  {
     name: "postgres",
     composeService: "postgres",
     network: composeNetworks.database,
@@ -114,6 +108,14 @@ const bridgeTargets = [
     composeService: "temporal",
     network: composeNetworks.temporal,
     port: 7233,
+  },
+];
+const optionalBridgeTargets = [
+  {
+    name: "jaeger",
+    composeService: "jaeger",
+    network: composeNetworks.observability,
+    port: 4318,
   },
 ];
 
@@ -480,6 +482,28 @@ async function composeContainer(service) {
   return ids[0];
 }
 
+async function optionalComposeContainer(service) {
+  const ids = (
+    await capture("docker", [
+      "ps",
+      "--filter",
+      "label=com.docker.compose.project=agent-dock-production",
+      "--filter",
+      `label=com.docker.compose.service=${service}`,
+      "--format",
+      "{{.ID}}",
+    ])
+  )
+    .split(/\r?\n/u)
+    .filter(Boolean);
+  if (ids.length > 1) {
+    throw new Error(
+      `Expected at most one running Compose ${service} container, found ${ids.length}`,
+    );
+  }
+  return ids[0];
+}
+
 async function networkIp(container, network) {
   const inspection = await dockerInspect(container);
   const address = inspection.NetworkSettings?.Networks?.[network]?.IPAddress;
@@ -559,6 +583,14 @@ async function bridgeComposeServices() {
   const resolved = [];
   for (const target of bridgeTargets) {
     const container = await composeContainer(target.composeService);
+    resolved.push({
+      ...target,
+      address: await networkIp(container, target.network),
+    });
+  }
+  for (const target of optionalBridgeTargets) {
+    const container = await optionalComposeContainer(target.composeService);
+    if (container === undefined) continue;
     resolved.push({
       ...target,
       address: await networkIp(container, target.network),
@@ -834,6 +866,13 @@ async function waitForWorkerPodInventory(timeoutMs = 120_000) {
 async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvironment) {
   await applyWorkerSecret();
   const externalCidrs = [...new Set(resolvedTargets.map((target) => `${target.address}/32`))];
+  const localJaegerAvailable = resolvedTargets.some((target) => target.name === "jaeger");
+  const otlpTracesEndpoint =
+    process.env.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
+    runtimeEnvironment.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
+    (localJaegerAvailable
+      ? "http://jaeger.agent-dock-system.svc.cluster.local:4318/v1/traces"
+      : "");
   const arguments_ = [
     "upgrade",
     "--install",
@@ -881,8 +920,8 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "services.githubGateway.url=http://github-gateway.agent-dock-system.svc.cluster.local:4400",
     "--set",
     "services.providerProxyUrl=http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129",
-    "--set",
-    "services.otlpTracesEndpoint=http://jaeger.agent-dock-system.svc.cluster.local:4318/v1/traces",
+    "--set-string",
+    `services.otlpTracesEndpoint=${otlpTracesEndpoint}`,
     "--set",
     "conversationStorage.existingSecret=agent-dock-pi-worker-secrets",
     "--set",

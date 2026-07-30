@@ -2976,3 +2976,7 @@
 - Added a provider-disconnect integration test proving visible partial
   assistant text is preserved in Pi-native interrupted JSONL together with the
   `agent-dock.run_interrupted` marker.
+- Fixed the local Kubernetes Worker cutover to treat Jaeger as the optional
+  profile documented by ADR-0075. Core deployments no longer create a dead
+  Jaeger bridge or inject an OTLP endpoint; an active local Jaeger container or
+  explicit endpoint enables tracing without changing the Worker image.

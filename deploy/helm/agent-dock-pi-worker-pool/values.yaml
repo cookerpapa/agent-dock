@@ -24,7 +24,7 @@ services:
     enabled: true
     url: http://github-gateway.agent-dock-system.svc.cluster.local:4400
   providerProxyUrl: http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129
-  otlpTracesEndpoint: http://jaeger.agent-dock-system.svc.cluster.local:4318/v1/traces
+  otlpTracesEndpoint: ""
 
 temporal:
   address: temporal.agent-dock-system.svc.cluster.local:7233
