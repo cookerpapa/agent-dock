@@ -496,12 +496,6 @@ describe("provider-backed Tool Sandbox Manager", () => {
     expect(manager.admittedCount).toBe(0);
   });
 
-  it("rejects unknown runtime selectors instead of accepting a fallback", async () => {
-    await expect(
-      loadSandboxManagerConfig({ AGENT_DOCK_SANDBOX_PROVIDER: "vercel" }),
-    ).rejects.toThrow("Only the CubeSandbox Provider is supported");
-  });
-
   it("loads only the CubeSandbox deployment configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
     const tokenPath = join(directory, "manager-token");
@@ -516,7 +510,6 @@ describe("provider-backed Tool Sandbox Manager", () => {
       await chmod(workspaceDataMoverTokenPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_PROVIDER: "cubesandbox",
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",

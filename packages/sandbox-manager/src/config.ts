@@ -117,10 +117,6 @@ export async function loadSandboxManagerConfig(
       "Legacy Sandbox Provider configuration was removed; select a current trusted Provider",
     );
   }
-  const provider = environment.AGENT_DOCK_SANDBOX_PROVIDER;
-  if (provider !== undefined && provider !== "cubesandbox") {
-    throw new TypeError("Only the CubeSandbox Provider is supported");
-  }
   const cubeProxyScheme = environment.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
   if (cubeProxyScheme !== "http" && cubeProxyScheme !== "https") {
     throw new TypeError("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME is invalid");

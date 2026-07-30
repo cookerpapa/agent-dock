@@ -7,10 +7,6 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
-const requestedProvider = process.env.AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER ?? "cubesandbox";
-if (requestedProvider !== "cubesandbox") {
-  throw new Error("Production Tool execution requires CubeSandbox");
-}
 const configuredOverride = process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE;
 const composeOverride =
   configuredOverride === undefined
@@ -164,79 +160,74 @@ async function readPrivateRuntimeJson(path, label) {
   }
 }
 
-let cubeEnvironment = {};
-if (requestedProvider === "cubesandbox") {
-  const clusterPath = resolve(runtimeDirectory, "cubesandbox/cluster.json");
-  const templatePath = resolve(runtimeDirectory, "cubesandbox/template.json");
-  const cluster = allowsStaleCubeTemplate
-    ? await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence").catch(
-        () => undefined,
-      )
-    : await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence");
-  const template = allowsStaleCubeTemplate
-    ? await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence").catch(
-        () => undefined,
-      )
-    : await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence");
-  const invalidClusterEvidence =
-    cluster?.formatVersion !== 1 ||
-    cluster?.cubeCommit !== "8721dd151971ce3c2966482bbd32904ad98f378e" ||
-    cluster?.podNetworkMtu !== 1_450 ||
-    isIP(cluster?.master?.host ?? "") !== 4 ||
-    !Number.isSafeInteger(cluster?.master?.port) ||
-    cluster.master.port < 1 ||
-    cluster.master.port > 65_535 ||
-    isIP(cluster?.registry?.host ?? "") !== 4 ||
-    !Number.isSafeInteger(cluster?.registry?.port) ||
-    cluster.registry.port < 1 ||
-    cluster.registry.port > 65_535 ||
-    isIP(cluster?.api?.host ?? "") !== 4 ||
-    !Number.isSafeInteger(cluster?.api?.port) ||
-    cluster.api.port < 1 ||
-    cluster.api.port > 65_535 ||
-    isIP(cluster?.proxy?.host ?? "") !== 4 ||
-    !Number.isSafeInteger(cluster?.proxy?.port) ||
-    cluster.proxy.port < 1 ||
-    cluster.proxy.port > 65_535 ||
-    cluster?.sandboxDomain !== "cube.app";
-  if (!allowsStaleCubeTemplate && invalidClusterEvidence) {
-    throw new Error("CubeSandbox cluster evidence is not the validated primary profile");
-  }
-  const invalidTemplateEvidence =
-    template?.formatVersion !== 1 ||
-    template?.cubeCommit !== cluster?.cubeCommit ||
-    !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "") ||
-    !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
-    !/^[a-f0-9]{64}$/.test(template?.templateSpecSha256 ?? "");
-  if (!allowsStaleCubeTemplate && invalidTemplateEvidence) {
-    throw new Error("CubeSandbox READY template evidence is invalid");
-  }
-  if (
-    !allowsStaleCubeTemplate &&
-    template !== undefined &&
-    template.imageRevision !== imageRevision
-  ) {
-    throw new Error(
-      "CubeSandbox READY template does not match this AgentDock Git revision; register a fresh immutable template",
-    );
-  }
-  cubeEnvironment = {
-    AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:
-      invalidTemplateEvidence || template === undefined
-        ? "tpl-000000000000000000000000"
-        : template.templateId,
-    AGENT_DOCK_CUBESANDBOX_DOMAIN:
-      invalidClusterEvidence || cluster === undefined ? "cube.app" : cluster.sandboxDomain,
-    AGENT_DOCK_CUBESANDBOX_API_NODE_IP:
-      invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.api.host,
-    AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:
-      invalidClusterEvidence || cluster === undefined ? "3000" : String(cluster.api.port),
-    AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:
-      invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.proxy.host,
-    AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:
-      invalidClusterEvidence || cluster === undefined ? "80" : String(cluster.proxy.port),
-  };
+const clusterPath = resolve(runtimeDirectory, "cubesandbox/cluster.json");
+const templatePath = resolve(runtimeDirectory, "cubesandbox/template.json");
+const cluster = allowsStaleCubeTemplate
+  ? await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence").catch(() => undefined)
+  : await readPrivateRuntimeJson(clusterPath, "CubeSandbox cluster evidence");
+const template = allowsStaleCubeTemplate
+  ? await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence").catch(
+      () => undefined,
+    )
+  : await readPrivateRuntimeJson(templatePath, "CubeSandbox template evidence");
+const invalidClusterEvidence =
+  cluster?.formatVersion !== 1 ||
+  cluster?.cubeCommit !== "8721dd151971ce3c2966482bbd32904ad98f378e" ||
+  cluster?.podNetworkMtu !== 1_450 ||
+  isIP(cluster?.master?.host ?? "") !== 4 ||
+  !Number.isSafeInteger(cluster?.master?.port) ||
+  cluster.master.port < 1 ||
+  cluster.master.port > 65_535 ||
+  isIP(cluster?.registry?.host ?? "") !== 4 ||
+  !Number.isSafeInteger(cluster?.registry?.port) ||
+  cluster.registry.port < 1 ||
+  cluster.registry.port > 65_535 ||
+  isIP(cluster?.api?.host ?? "") !== 4 ||
+  !Number.isSafeInteger(cluster?.api?.port) ||
+  cluster.api.port < 1 ||
+  cluster.api.port > 65_535 ||
+  isIP(cluster?.proxy?.host ?? "") !== 4 ||
+  !Number.isSafeInteger(cluster?.proxy?.port) ||
+  cluster.proxy.port < 1 ||
+  cluster.proxy.port > 65_535 ||
+  cluster?.sandboxDomain !== "cube.app";
+if (!allowsStaleCubeTemplate && invalidClusterEvidence) {
+  throw new Error("CubeSandbox cluster evidence is not the validated primary profile");
 }
+const invalidTemplateEvidence =
+  template?.formatVersion !== 1 ||
+  template?.cubeCommit !== cluster?.cubeCommit ||
+  !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "") ||
+  !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
+  !/^[a-f0-9]{64}$/.test(template?.templateSpecSha256 ?? "");
+if (!allowsStaleCubeTemplate && invalidTemplateEvidence) {
+  throw new Error("CubeSandbox READY template evidence is invalid");
+}
+if (
+  !allowsStaleCubeTemplate &&
+  template !== undefined &&
+  template.imageRevision !== imageRevision
+) {
+  throw new Error(
+    "CubeSandbox READY template does not match this AgentDock Git revision; register a fresh immutable template",
+  );
+}
+const cubeEnvironment = {
+  AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:
+    invalidTemplateEvidence || template === undefined
+      ? "tpl-000000000000000000000000"
+      : template.templateId,
+  AGENT_DOCK_CUBESANDBOX_DOMAIN:
+    invalidClusterEvidence || cluster === undefined ? "cube.app" : cluster.sandboxDomain,
+  AGENT_DOCK_CUBESANDBOX_API_NODE_IP:
+    invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.api.host,
+  AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:
+    invalidClusterEvidence || cluster === undefined ? "3000" : String(cluster.api.port),
+  AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:
+    invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.proxy.host,
+  AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:
+    invalidClusterEvidence || cluster === undefined ? "80" : String(cluster.proxy.port),
+};
 
 const profileArguments = [
   ...(command === "build" ? ["--profile", "image-only"] : []),

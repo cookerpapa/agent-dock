@@ -11,8 +11,8 @@ CubeSandboxProvider
   → CubeShim / KVM microVM
 ```
 
-The deployment fails closed if `AGENT_DOCK_PRODUCTION_SANDBOX_PROVIDER` is not
-`cubesandbox`. There is no runtime fallback.
+CubeSandbox is selected by construction. There is no production runtime
+selector and no fallback implementation to misconfigure.
 
 ## Contract
 

@@ -2,9 +2,9 @@ import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/prot
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
-export const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
-export const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-export const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
+const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
+const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;

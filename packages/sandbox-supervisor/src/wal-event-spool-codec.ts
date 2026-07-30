@@ -90,11 +90,11 @@ export type WalEventSpoolStoreOptions = {
 
 export type WalEventSpoolReplayResult = SupervisorEventSpoolRecoveryResult;
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
@@ -104,7 +104,7 @@ export function errorCode(error: unknown): string | undefined {
   return isRecord(error) && typeof error.code === "string" ? error.code : undefined;
 }
 
-export function sha256(value: string | Uint8Array): string {
+function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
@@ -182,7 +182,7 @@ export function parseAck(value: unknown): EventAckMessage {
   }
 }
 
-export function parseWalRecord(line: string): WalRecord {
+function parseWalRecord(line: string): WalRecord {
   let value: unknown;
   try {
     value = JSON.parse(line) as unknown;
@@ -338,7 +338,7 @@ export async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-export async function writeTemporaryFile(directory: string, bytes: Buffer): Promise<string> {
+async function writeTemporaryFile(directory: string, bytes: Buffer): Promise<string> {
   const path = resolve(directory, `.tmp-${randomUUID()}`);
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
@@ -401,7 +401,7 @@ export async function appendDurably(path: string, bytes: Buffer): Promise<void> 
   }
 }
 
-export async function truncatePartialTail(path: string, size: number): Promise<number> {
+async function truncatePartialTail(path: string, size: number): Promise<number> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
