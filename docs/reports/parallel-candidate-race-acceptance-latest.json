@@ -1,47 +1,50 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-23T16:53:36.426Z",
+  "checkedAt": "2026-07-30T16:38:48.317Z",
   "endpoint": "http://127.0.0.1:8080/",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
-  "projectId": "b81fea1a-cc19-47a1-9881-4369a20690a5",
-  "workspaceId": "b795d21c-acbb-49ac-9f8e-12452e34ab84",
-  "parentSessionId": "e03bb792-e472-449f-8478-8b4bc4ec2322",
-  "baseWorkspaceVersionId": "62b24799-da78-4c81-a02a-d8caf4e685a1",
+  "projectId": "8cd634bb-9970-429b-b16c-2e9ac860019e",
+  "workspaceId": "b56e2a28-7346-440f-8d54-4e0e6e970a68",
+  "parentSessionId": "9dcdc959-ce67-4bea-8ae4-0ff0d5d22ebd",
+  "baseWorkspaceVersionId": "d795971b-2eda-49da-8821-88cbfbfd8603",
   "seed": {
-    "runId": "6948b8e3-4191-4d42-bba4-53fbca6c9210",
-    "settledMs": 12501,
-    "reviewBundleId": "614f026b-7727-50e3-af17-01f859cfc757",
+    "runId": "cc833281-51db-42a0-bc74-791e11dd4195",
+    "settledMs": 10806,
+    "reviewBundleId": "1dc3cc40-07b4-5aa0-aff1-2b68dc3d1b93",
     "usage": {
-      "requests": 6,
-      "inputTokens": 803,
-      "outputTokens": 563,
-      "cacheReadTokens": 10880,
+      "requests": 5,
+      "inputTokens": 588,
+      "outputTokens": 421,
+      "cacheReadTokens": 8448,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "race": {
-    "orchestrationId": "7d27247a-eb83-48ed-b85c-92a923ee0d5d",
+    "orchestrationId": "35a45931-8e69-4bee-9675-19e911192ecc",
     "maximumConcurrentCandidates": 2,
-    "settledMs": 15681,
+    "settledMs": 16045,
     "simultaneousCandidateSandboxes": true,
     "executionIntervalsOverlapped": true,
-    "sharedTrustedSupervisor": true,
+    "sharedTrustedSupervisor": false,
+    "acceptedCandidateCount": 2,
+    "failedCandidateCount": 0,
     "candidates": [
       {
-        "candidateId": "936296bb-f440-4e31-a704-9f4981c123bd",
+        "candidateId": "03d13bec-b97d-4293-bfd8-c64bdeffc054",
         "label": "Minimal patch",
-        "sessionId": "92883538-ec0d-4c8d-94af-1c9149c841e6",
-        "runId": "bd176134-0b66-47d2-8f55-df4171e24d57",
-        "workspaceVersionId": "a311ec09-b983-45b0-ab5b-51b13aefcd47",
-        "startedAt": "2026-07-23T16:53:49.878Z",
-        "settledAt": "2026-07-23T16:54:03.327Z",
+        "sessionId": "5489889b-f16c-4a40-8cce-d65810afa0c0",
+        "runId": "391c0200-0e67-499d-88a5-01eade798339",
+        "runState": "completed",
+        "workspaceVersionId": "423d2b9f-0559-48ad-a7cb-f85b7a379f14",
+        "startedAt": "2026-07-30T16:38:58.396Z",
+        "settledAt": "2026-07-30T16:39:09.008Z",
         "acceptance": {
           "verdict": "passed",
-          "reviewBundleId": "c4830acb-8bff-588b-ac93-71d7847853a6",
+          "reviewBundleId": "face9b7e-b58d-54f2-a9af-45e6f68787e3",
           "scorecard": {
             "metrics": {
               "tests": {
@@ -50,150 +53,134 @@
                 "passed": 1,
                 "errored": 0
               },
-              "tokens": 15140,
+              "tokens": 7607,
               "runState": "completed",
-              "durationMs": 14364,
+              "durationMs": 11155,
+              "changedPaths": 1,
+              "costMicrousd": 0,
+              "modelRequests": 4
+            },
+            "reasons": []
+          },
+          "evaluatedAt": "2026-07-30T16:39:09.061Z"
+        },
+        "usage": {
+          "requests": 4,
+          "inputTokens": 722,
+          "outputTokens": 357,
+          "cacheReadTokens": 6528,
+          "cacheWriteTokens": 0,
+          "costMicrousd": 0
+        },
+        "sandbox": {
+          "nativeSandboxId": "6643800962024c4a90f4f1237689f4cf",
+          "activationId": "da33f8f4-a931-4ebd-9f23-14a8fbf1cf69",
+          "supervisorSandboxId": "f136f9df-b00c-410b-a2db-0db5bf1ad9be",
+          "runtime": "cubesandbox-kvm"
+        },
+        "reviewBundleId": "face9b7e-b58d-54f2-a9af-45e6f68787e3",
+        "reviewBundleSha256": "ac620a0ddf08f2e2483afca8508af46742b766d7dadbd7562df668bb9b283696",
+        "changedPaths": ["src/Calculator.java"],
+        "tests": [
+          {
+            "command": "cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ],
+        "effectiveTests": [
+          {
+            "command": "cd /workspace && ./eval/test.sh subtract",
+            "suite": "test.sh",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "candidateId": "09ea1365-46d2-4fc4-8b82-0963c3dfaf73",
+        "label": "Verification first",
+        "sessionId": "6468f8f3-cd9c-4732-9bd8-bf75adc62d1a",
+        "runId": "93780647-4214-4f11-80e8-c19d7a99280c",
+        "runState": "completed",
+        "workspaceVersionId": "bee59e34-e614-410f-86f9-91ec792f6bdf",
+        "startedAt": "2026-07-30T16:38:58.378Z",
+        "settledAt": "2026-07-30T16:39:13.694Z",
+        "acceptance": {
+          "verdict": "passed",
+          "reviewBundleId": "ca077807-0dc7-5f49-ad50-fea7201d1a30",
+          "scorecard": {
+            "metrics": {
+              "tests": {
+                "total": 1,
+                "failed": 0,
+                "passed": 1,
+                "errored": 0
+              },
+              "tokens": 16372,
+              "runState": "completed",
+              "durationMs": 15841,
               "changedPaths": 1,
               "costMicrousd": 0,
               "modelRequests": 7
             },
             "reasons": []
           },
-          "evaluatedAt": "2026-07-23T16:54:03.709Z"
+          "evaluatedAt": "2026-07-30T16:39:13.876Z"
         },
-        "reviewBundleId": "c4830acb-8bff-588b-ac93-71d7847853a6",
-        "reviewBundleSha256": "a65ab83a78520bfea0289bfed65eedccd5b1f24cca9b4d8e524169ad7a918398",
-        "changedPaths": ["src/Calculator.java"],
-        "tests": [
-          {
-            "command": "cd /workspace && ./eval/test.sh subtract",
-            "suite": "test.sh",
-            "status": "failed"
-          },
-          {
-            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
-            "suite": "test.sh",
-            "status": "passed"
-          }
-        ],
-        "effectiveTests": [
-          {
-            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
-            "suite": "test.sh",
-            "status": "passed"
-          }
-        ],
         "usage": {
           "requests": 7,
-          "inputTokens": 1164,
-          "outputTokens": 664,
-          "cacheReadTokens": 13312,
+          "inputTokens": 1003,
+          "outputTokens": 777,
+          "cacheReadTokens": 14592,
           "cacheWriteTokens": 0,
           "costMicrousd": 0
         },
         "sandbox": {
-          "name": "agent-dock-prewarm-8c7ba2da-1bdf-4922-acba-f1281a83c415",
-          "uid": "f347e02c-6244-4e50-9f79-5bdff6a603cd",
-          "activationId": "97a4da3d-a97c-41a0-9905-abb366861d53",
-          "supervisorSandboxId": "ac696278-1644-4e6b-95a3-1846655923ca",
-          "runtimeClassName": "agent-dock-gvisor"
-        }
-      },
-      {
-        "candidateId": "94137f26-22aa-42a3-acd9-e40adae0b933",
-        "label": "Verification first",
-        "sessionId": "c607d2ca-417c-4aea-bbaf-be42519ef60f",
-        "runId": "3526a9f8-f7a5-4343-a7b1-34e79a4cdcc8",
-        "workspaceVersionId": "ed3ba609-4a2f-4fca-a99c-91cb194387b6",
-        "startedAt": "2026-07-23T16:53:49.570Z",
-        "settledAt": "2026-07-23T16:54:04.364Z",
-        "acceptance": {
-          "verdict": "passed",
-          "reviewBundleId": "cb2eb332-8056-5509-aad2-14b8b3048051",
-          "scorecard": {
-            "metrics": {
-              "tests": {
-                "total": 1,
-                "failed": 0,
-                "passed": 1,
-                "errored": 0
-              },
-              "tokens": 17930,
-              "runState": "completed",
-              "durationMs": 15401,
-              "changedPaths": 1,
-              "costMicrousd": 0,
-              "modelRequests": 8
-            },
-            "reasons": []
-          },
-          "evaluatedAt": "2026-07-23T16:54:04.622Z"
+          "nativeSandboxId": "76607a46e76a44a49b5918c31239cc0a",
+          "activationId": "d76f24c5-21e8-42fc-ba55-a6bdc5d6389f",
+          "supervisorSandboxId": "3924e9a3-8b6f-42ab-9cfc-724d8259b9a0",
+          "runtime": "cubesandbox-kvm"
         },
-        "reviewBundleId": "cb2eb332-8056-5509-aad2-14b8b3048051",
-        "reviewBundleSha256": "d76621de02e286a9c9063679851959d77037e349ebb7938150d58a6024908fba",
+        "reviewBundleId": "ca077807-0dc7-5f49-ad50-fea7201d1a30",
+        "reviewBundleSha256": "7e827140acbf9a44b58a0c2fd54ee93583f3e7bec60a981715fe885d80e5cc93",
         "changedPaths": ["src/Calculator.java"],
         "tests": [
           {
             "command": "cd /workspace && ./eval/test.sh subtract",
-            "suite": "test.sh",
-            "status": "failed"
-          },
-          {
-            "command": "cd /workspace && ./eval/test.sh subtract",
-            "suite": "test.sh",
-            "status": "failed"
-          },
-          {
-            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
             "suite": "test.sh",
             "status": "passed"
           }
         ],
         "effectiveTests": [
           {
-            "command": "chmod +x /workspace/eval/test.sh && cd /workspace && ./eval/test.sh subtract",
+            "command": "cd /workspace && ./eval/test.sh subtract",
             "suite": "test.sh",
             "status": "passed"
           }
-        ],
-        "usage": {
-          "requests": 8,
-          "inputTokens": 1026,
-          "outputTokens": 776,
-          "cacheReadTokens": 16128,
-          "cacheWriteTokens": 0,
-          "costMicrousd": 0
-        },
-        "sandbox": {
-          "name": "agent-dock-prewarm-9035d856-08c3-459a-9aa8-77bbe4ec72be",
-          "uid": "1e90c423-e38c-4a58-a7b7-8b32be62b549",
-          "activationId": "e08b552a-42f7-43b8-88b4-8cd3aa2c6f41",
-          "supervisorSandboxId": "ac696278-1644-4e6b-95a3-1846655923ca",
-          "runtimeClassName": "agent-dock-gvisor"
-        }
+        ]
       }
     ],
-    "recommendedCandidateId": "936296bb-f440-4e31-a704-9f4981c123bd"
+    "recommendedCandidateId": "03d13bec-b97d-4293-bfd8-c64bdeffc054"
   },
   "promotion": {
-    "winnerCandidateId": "936296bb-f440-4e31-a704-9f4981c123bd",
-    "promotedWorkspaceVersionId": "b8a23814-0ec2-437d-8fd6-5486f0342b64",
-    "sourceWorkspaceVersionId": "a311ec09-b983-45b0-ab5b-51b13aefcd47",
+    "winnerCandidateId": "03d13bec-b97d-4293-bfd8-c64bdeffc054",
+    "promotedWorkspaceVersionId": "cdddd701-13e3-41b1-8fa0-7263f0bdc0be",
+    "sourceWorkspaceVersionId": "423d2b9f-0559-48ad-a7cb-f85b7a379f14",
     "parentPiArtifactPreserved": true,
     "decisionGate": "resolved"
   },
   "cleanup": {
     "sessions": [
       {
-        "sessionId": "e03bb792-e472-449f-8478-8b4bc4ec2322",
+        "sessionId": "9dcdc959-ce67-4bea-8ae4-0ff0d5d22ebd",
+        "count": 0
+      },
+      {
+        "sessionId": "5489889b-f16c-4a40-8cce-d65810afa0c0",
         "count": 1
       },
       {
-        "sessionId": "92883538-ec0d-4c8d-94af-1c9149c841e6",
-        "count": 1
-      },
-      {
-        "sessionId": "c607d2ca-417c-4aea-bbaf-be42519ef60f",
+        "sessionId": "6468f8f3-cd9c-4732-9bd8-bf75adc62d1a",
         "count": 1
       }
     ],

@@ -1,15 +1,16 @@
 # Parallel candidate race production acceptance
 
-- Checked at: 2026-07-23T16:53:36.426Z
+- Checked at: 2026-07-30T16:38:48.317Z
 - Provider/model: deepseek / deepseek-v4-flash
 - Candidate concurrency: 2
+- Candidates passing deterministic acceptance: 2/2
 - Candidate execution intervals overlapped: true
-- Distinct gVisor Pods observed simultaneously: true
-- Shared trusted Supervisor with isolated Tool activations: true
-- Minimal patch: 7 model requests, 1164/664 input/output tokens, 2 test attempt(s) / 1 green effective result(s), gVisor Pod f347e02c-6244-4e50-9f79-5bdff6a603cd, activation 97a4da3d-a97c-41a0-9905-abb366861d53
-- Verification first: 8 model requests, 1026/776 input/output tokens, 3 test attempt(s) / 1 green effective result(s), gVisor Pod 1e90c423-e38c-4a58-a7b7-8b32be62b549, activation e08b552a-42f7-43b8-88b4-8cd3aa2c6f41
-- Recommended/promoted candidate: 936296bb-f440-4e31-a704-9f4981c123bd
+- Distinct Cube KVM guests observed simultaneously: true
+- Shared trusted Supervisor with isolated Tool activations: false
+- Minimal patch: completed/passed, 4 model requests, 722/357 input/output tokens, 1 test attempt(s) / 1 green effective result(s), Cube microVM 6643800962024c4a90f4f1237689f4cf, activation da33f8f4-a931-4ebd-9f23-14a8fbf1cf69
+- Verification first: completed/passed, 7 model requests, 1003/777 input/output tokens, 1 test attempt(s) / 1 green effective result(s), Cube microVM 76607a46e76a44a49b5918c31239cc0a, activation d76f24c5-21e8-42fc-ba55-a6bdc5d6389f
+- Recommended/promoted candidate: 03d13bec-b97d-4293-bfd8-c64bdeffc054
 - Promotion preserved parent Pi context: true
 - Exact Sandbox cleanup: true
 
-One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct gVisor Pods, produced immutable Review Bundles with green tests, passed deterministic acceptance, and remained isolated until an explicit CAS promotion copied only the selected Workspace into the parent Session.
+One immutable parent Workspace was forked into two child Sessions. Both Runs executed concurrently in distinct Cube KVM microVMs. Every passing candidate produced an immutable Review Bundle with green tests; failed candidates remained explicit rather than blocking selection. An explicit CAS promotion copied only the selected passing Workspace into the parent Session.

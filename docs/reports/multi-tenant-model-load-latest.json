@@ -1,6 +1,6 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-30T16:07:16.991Z",
+  "checkedAt": "2026-07-30T16:42:52.847Z",
   "tenants": 6,
   "runs": 12,
   "model": {
@@ -18,28 +18,28 @@
   },
   "latencyMs": {
     "acceptance": {
-      "minimum": 25,
-      "p50": 28,
-      "p95": 38,
-      "maximum": 38
+      "minimum": 26,
+      "p50": 34,
+      "p95": 47,
+      "maximum": 47
     },
     "firstText": {
-      "minimum": 1333,
-      "p50": 2997,
-      "p95": 10174,
-      "maximum": 10174
+      "minimum": 1570,
+      "p50": 3317,
+      "p95": 13490,
+      "maximum": 13490
     },
     "settled": {
-      "minimum": 1561,
-      "p50": 4150,
-      "p95": 12878,
-      "maximum": 12878
+      "minimum": 1796,
+      "p50": 5236,
+      "p95": 17922,
+      "maximum": 17922
     },
     "queueWait": {
-      "minimum": 364,
-      "p50": 1839,
-      "p95": 9007,
-      "maximum": 9007
+      "minimum": 591,
+      "p50": 878,
+      "p95": 12109,
+      "maximum": 12109
     }
   },
   "workers": {
@@ -52,7 +52,7 @@
   "usage": {
     "requests": 12,
     "inputTokens": 1344,
-    "outputTokens": 1847,
+    "outputTokens": 2012,
     "cacheReadTokens": 15360,
     "cacheWriteTokens": 0
   }
