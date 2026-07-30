@@ -28,6 +28,8 @@ import { WebAuthenticationService } from "./web-authentication.ts";
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
 import { CandidateRaceService } from "./candidate-race-service.ts";
 import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
+import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
+import { TurnSteeringService } from "./turn-steering-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -46,6 +48,7 @@ export type ControlPlaneModuleOptions = Omit<
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;
   cubeEgressConfigToken?: string;
+  supervisorWebSocketGateway?: SupervisorWebSocketGateway;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -165,6 +168,16 @@ export class ControlPlaneModule {
             ...(options.cubeEgressConfigToken === undefined
               ? {}
               : { internalServiceToken: options.cubeEgressConfigToken }),
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
+        {
+          provide: TurnSteeringService,
+          useValue: new TurnSteeringService({
+            database: options.database,
+            ...(options.supervisorWebSocketGateway === undefined
+              ? {}
+              : { gateway: options.supervisorWebSocketGateway }),
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
         },

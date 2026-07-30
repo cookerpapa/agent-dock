@@ -12,6 +12,7 @@ import { ModelGovernanceError } from "./model-governance-service.ts";
 import { WebAuthenticationError } from "./web-authentication.ts";
 import { CandidateRaceError } from "./candidate-race-service.ts";
 import { PlatformRuntimeSettingsError } from "./platform-runtime-settings.ts";
+import { TurnSteeringError } from "./turn-steering-service.ts";
 
 type ErrorResponse = {
   status: number;
@@ -90,6 +91,15 @@ function mappedError(error: unknown): ErrorResponse {
             : error.code === "conflict" || error.code === "idempotency_conflict"
               ? 409
               : 503;
+    return { status, body: { error: { code: error.code, message: error.message } } };
+  }
+  if (error instanceof TurnSteeringError) {
+    const status =
+      error.code === "not_found"
+        ? 404
+        : error.code === "conflict" || error.code === "idempotency_conflict"
+          ? 409
+          : 503;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof CandidateRaceError) {

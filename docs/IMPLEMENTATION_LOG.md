@@ -2962,3 +2962,17 @@
   reclaimed. Physical evidence confirmed `.agent-dock-runtime/git` beside the
   mounted data directory and no platform-created `.git` inside the user
   Workspace.
+# 2026-07-31 — Explicit active Pi steer and interrupted-text proof
+
+- Added a durable, idempotent `turn.steer` API and a distinct Web **引导**
+  action; normal Enter submission remains a queued follow-up.
+- Added the `pi.steer.v1` capability and fenced two-phase
+  `command.turn.steer` delivery to the exact active Pi Worker.
+- The Worker now invokes Pi SDK `session.steer()` without exposing Worker,
+  Sandbox, Lease or Fence identity to the browser/model.
+- Added remote WebSocket coverage proving steer reaches the active Runner,
+  creates no second Turn, persists one completed command and replays
+  idempotently.
+- Added a provider-disconnect integration test proving visible partial
+  assistant text is preserved in Pi-native interrupted JSONL together with the
+  `agent-dock.run_interrupted` marker.

@@ -47,7 +47,10 @@ export default function ChatApp() {
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceSummaryResource[]>([]);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [operation, setOperation] = useState<"creating" | "submitting" | "cancelling" | null>(null);
+  const [operation, setOperation] = useState<
+    "creating" | "submitting" | "cancelling" | "steering" | null
+  >(null);
+  const [steerNotice, setSteerNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
@@ -374,6 +377,35 @@ export default function ChatApp() {
     }
   }
 
+  async function steerTurn(): Promise<void> {
+    const text = prompt.trim();
+    if (
+      state.session === null ||
+      currentTurn?.status !== "running" ||
+      !text ||
+      operation !== null
+    ) {
+      return;
+    }
+    setOperation("steering");
+    setSteerNotice(null);
+    update({ type: "api.error.cleared" });
+    try {
+      await api.steerTurn(
+        state.session.sessionId,
+        currentTurn.turnId,
+        text,
+        newIdempotencyKey("steer"),
+      );
+      setPrompt("");
+      setSteerNotice("已引导当前任务；Pi 会在当前工具调用结束后、下一次模型调用前处理。");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
   if (authPhase === "checking") {
     return (
       <main className="product-loading-page">
@@ -686,14 +718,25 @@ export default function ChatApp() {
               value={prompt}
             />
             {currentTurn?.status === "running" ? (
-              <button
-                className="product-stop-button"
-                onClick={() => void cancelTurn()}
-                title="停止"
-                type="button"
-              >
-                ■
-              </button>
+              <>
+                <button
+                  className="product-steer-button"
+                  disabled={!prompt.trim() || operation !== null}
+                  onClick={() => void steerTurn()}
+                  title="将这条消息注入当前运行中的 Agent Loop"
+                  type="button"
+                >
+                  引导
+                </button>
+                <button
+                  className="product-stop-button"
+                  onClick={() => void cancelTurn()}
+                  title="停止"
+                  type="button"
+                >
+                  ■
+                </button>
+              </>
             ) : (
               <button
                 className="product-send-button"
@@ -706,6 +749,9 @@ export default function ChatApp() {
               </button>
             )}
           </div>
+          {steerNotice === null ? null : (
+            <small className="product-steer-notice">{steerNotice}</small>
+          )}
           <small>Agent 可能会出错，请检查重要的代码修改和测试结果。</small>
         </footer>
       </main>

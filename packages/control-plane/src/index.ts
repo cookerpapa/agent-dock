@@ -170,6 +170,19 @@ export {
   RemoteSupervisorExecutionBackend,
   type RemoteSupervisorExecutionBackendOptions,
 } from "./remote-supervisor-execution-backend.ts";
+
+export {
+  TurnSteerBackendError,
+  type TurnSteerBackend,
+  type TurnSteerRequest,
+  type TurnSteerTarget,
+} from "./turn-steer.ts";
+
+export {
+  TurnSteeringError,
+  TurnSteeringService,
+  type TurnSteeringErrorCode,
+} from "./turn-steering-service.ts";
 export {
   createRemoteControlPlaneRuntime,
   RemoteControlPlaneRuntime,

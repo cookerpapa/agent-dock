@@ -198,10 +198,27 @@ describe("supervisor/control-plane wire protocol", () => {
         decision: { outcome: "approved", value: "yes" },
       },
     } as const;
+    const steer = {
+      ...envelope("44444444-1111-4111-8111-444444444444"),
+      type: "command.turn.steer",
+      payload: {
+        ...commandIdentity(),
+        commandId: "55555555-1111-4111-8111-555555555555",
+        targetCommandId: IDS.targetCommand,
+        text: "Focus on the failing integration test.",
+      },
+    } as const;
 
     expect(
-      [execute, cancel, resolve].map((message) => parseControlToSupervisorMessage(message).type),
-    ).toEqual(["command.turn.execute", "command.turn.cancel", "command.approval.resolve"]);
+      [execute, cancel, steer, resolve].map(
+        (message) => parseControlToSupervisorMessage(message).type,
+      ),
+    ).toEqual([
+      "command.turn.execute",
+      "command.turn.cancel",
+      "command.turn.steer",
+      "command.approval.resolve",
+    ]);
     const parsedExecute = parseControlToSupervisorMessage(execute);
     if (parsedExecute.type !== "command.turn.execute") throw new Error("Expected execute command");
     expect(parsedExecute.payload.traceContext?.traceparent).toContain(

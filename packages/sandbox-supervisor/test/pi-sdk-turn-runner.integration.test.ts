@@ -387,4 +387,45 @@ describe("PiSdkTurnRunner integration", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("preserves Pi-native partial assistant text in an interrupted checkpoint", async () => {
+    const fakeModel = new FakeModelServer({ defaultScenario: "disconnect" });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-disconnect-test-"));
+    const events: EventPublishMessage[] = [];
+    let interruptedCheckpoint: Uint8Array | undefined;
+    try {
+      await fakeModel.start();
+      await expect(
+        new PiSdkTurnRunner({
+          resolveWorkspaceDirectory: () => workspace,
+          resolveModelRuntime: (model) => ({
+            provider: model.provider,
+            modelId: model.modelId,
+            baseUrl: fakeModel.baseUrl,
+            api: "openai-completions",
+            apiKey: FAKE_MODEL_API_KEY,
+          }),
+          onInterrupted: ({ piSession }) => {
+            interruptedCheckpoint = piSession;
+          },
+        }).run(command, (event) => {
+          events.push(event);
+        }),
+      ).rejects.toMatchObject({ name: "PiTurnError" });
+
+      expect(
+        events.some(
+          (event) =>
+            event.payload.event.type === "assistant.text.delta" &&
+            event.payload.event.payload.text.includes("partial-before-disconnect"),
+        ),
+      ).toBe(true);
+      const interruptedJsonl = Buffer.from(interruptedCheckpoint!).toString("utf8");
+      expect(interruptedJsonl).toContain("partial-before-disconnect");
+      expect(interruptedJsonl).toContain('"customType":"agent-dock.run_interrupted"');
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

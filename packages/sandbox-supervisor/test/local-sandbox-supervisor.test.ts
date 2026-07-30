@@ -4,6 +4,7 @@ import type {
   EventPublishMessage,
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
+  SteerTurnCommandMessage,
 } from "@agent-dock/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
@@ -25,6 +26,7 @@ const IDS = {
   command: "22222222-2222-4222-8222-222222222222",
   command2: "33333333-3333-4333-8333-333333333333",
   cancellation: "66666666-6666-4666-8666-666666666666",
+  steer: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   lease: "44444444-4444-4444-8444-444444444444",
   lease2: "55555555-5555-4555-8555-555555555555",
   boot: "88888888-8888-4888-8888-888888888888",
@@ -104,6 +106,31 @@ function cancellation(target: ExecuteTurnCommandMessage = command()): CancelTurn
       fencingToken: target.payload.fencingToken,
       reason: "user_request",
       gracePeriodMs: 50,
+    },
+  };
+}
+
+function steer(target: ExecuteTurnCommandMessage = command()): SteerTurnCommandMessage {
+  return {
+    protocolVersion: 1,
+    messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    sentAt: "2026-07-18T08:00:01.000Z",
+    type: "command.turn.steer",
+    payload: {
+      commandId: IDS.steer,
+      targetCommandId: target.payload.commandId,
+      idempotencyKey: "steer-1",
+      tenantId: target.payload.tenantId,
+      projectId: target.payload.projectId,
+      workspaceId: target.payload.workspaceId,
+      sessionId: target.payload.sessionId,
+      runId: target.payload.runId,
+      turnId: target.payload.turnId,
+      attemptId: target.payload.attemptId,
+      agentId: target.payload.agentId,
+      leaseId: target.payload.leaseId,
+      fencingToken: target.payload.fencingToken,
+      text: "Inspect the boundary condition first.",
     },
   };
 }
@@ -403,6 +430,38 @@ describe("LocalSandboxSupervisor", () => {
     expect(supervisor.activeSessionCount).toBe(0);
   });
 
+  it("delivers a fenced steer only to the exact running assignment", async () => {
+    let settle!: () => void;
+    const observed: Array<{ targetCommandId: string; text: string }> = [];
+    const steeringRunner: SupervisorTurnRunner = {
+      async run() {
+        await new Promise<void>((resolvePromise) => {
+          settle = resolvePromise;
+        });
+        return { stopReason: "stop" };
+      },
+      async steer(targetCommandId, text) {
+        observed.push({ targetCommandId, text });
+      },
+    };
+    const supervisor = new LocalSandboxSupervisor({ runner: steeringRunner });
+    const execute = command();
+    const execution = supervisor.prepare(execute, rejectUnexpectedEvent).run();
+    const preparedSteer = supervisor.prepareSteer(steer(execute));
+
+    expect(preparedSteer.ack.payload.status).toBe("accepted");
+    expect(observed).toEqual([]);
+    await expect(preparedSteer.run()).resolves.toBeUndefined();
+    expect(observed).toEqual([
+      {
+        targetCommandId: execute.payload.commandId,
+        text: "Inspect the boundary condition first.",
+      },
+    ]);
+    settle();
+    await expect(execution).resolves.toEqual({ stopReason: "stop" });
+  });
+
   it("reports a running assignment and applies only its exact heartbeat renewal", async () => {
     const clock = () => new Date("2026-07-18T08:00:00.000Z");
     const abortingRunner: SupervisorTurnRunner = {
@@ -645,6 +704,7 @@ describe("LocalSandboxSupervisor", () => {
     expect(supervisor.revokeAllAssignments()).toEqual({
       releasedPreparations: 0,
       releasedCancellations: 0,
+      releasedSteers: 0,
       revokedExecutions: 1,
     });
     await Promise.resolve();

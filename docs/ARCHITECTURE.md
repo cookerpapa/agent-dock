@@ -299,6 +299,12 @@ The marker warns the Agent to inspect the Workspace because Tool side effects
 may be partial. Pre-execution dispatch failures do not create this checkpoint
 and may be retried without changing the conversation head.
 
+Catchable provider failures preserve Pi's native aborted/error assistant
+message. An integration test disconnects the provider after publishing
+`partial-before-disconnect` and proves that the same visible text is present in
+the interrupted Pi JSONL checkpoint. AgentDock still does not synthesize an
+assistant message from browser deltas: Pi-native state is the authority.
+
 If the Worker is killed by `SIGKILL`, OOM or node loss, it cannot append that
 native interruption marker. The next Worker then restores the latest committed
 Pi checkpoint and appends one hidden, model-visible semantic recovery suffix
@@ -308,6 +314,16 @@ boundaries/results and canonical failure/cancellation state. An in-flight Tool
 is marked `unknown`; raw thinking is never reconstructed. The next Pi
 checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
 authority.
+
+### Active steer
+
+An ordinary prompt submitted during a Run remains a queued follow-up. The
+separate steer endpoint persists one `turn.steer` command, resolves the exact
+active RunAttempt and sends a fenced two-phase `command.turn.steer` to the
+Worker that owns its Pi Runtime. Commit invokes Pi's public
+`session.steer(text)` API. The current Tool batch finishes first; Pi consumes
+the steer before its next model call. A settled Run rejects steer instead of
+turning it into another Turn.
 
 ## 8. Event delivery
 

@@ -250,6 +250,12 @@ export class PiSdkTurnRunner {
   readonly #shutdownTimeoutMs: number;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
+  #activeSession: AgentSession | undefined;
+  #finished = false;
+  readonly #steerWaiters = new Set<{
+    resolve: (session: AgentSession) => void;
+    reject: (error: Error) => void;
+  }>();
 
   constructor(options: PiSdkTurnRunnerOptions) {
     if (options.inlineExtensions !== undefined && options.createInlineExtensions !== undefined) {
@@ -270,6 +276,14 @@ export class PiSdkTurnRunner {
     );
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+  }
+
+  async steer(text: string): Promise<void> {
+    if (text.trim().length === 0 || text.length > 100_000) {
+      throw new PiTurnError("invalid_steer", "Steer text is invalid", false);
+    }
+    const session = this.#activeSession ?? (await this.#waitForSteerTarget());
+    await session.steer(text);
   }
 
   async run(
@@ -631,6 +645,9 @@ export class PiSdkTurnRunner {
         },
       });
       unsubscribe = runtime.session.subscribe(queueEvent);
+      this.#activeSession = runtime.session;
+      for (const waiter of this.#steerWaiters) waiter.resolve(runtime.session);
+      this.#steerWaiters.clear();
 
       const beginCancellation = (candidate: unknown): void => {
         if (cancellationTask !== undefined) return;
@@ -717,6 +734,15 @@ export class PiSdkTurnRunner {
       await eventChain.catch(() => undefined);
       removeAbortListener?.();
       unsubscribe?.();
+      this.#activeSession = undefined;
+      this.#finished = true;
+      const unavailable = new PiTurnError(
+        "steer_target_unavailable",
+        "Pi Run ended before the steer could be delivered",
+        false,
+      );
+      for (const waiter of this.#steerWaiters) waiter.reject(unavailable);
+      this.#steerWaiters.clear();
       if (runtime !== undefined) {
         await withTimeout(runtime.dispose(), this.#shutdownTimeoutMs, "Pi SDK dispose").catch(
           () => {
@@ -761,5 +787,28 @@ export class PiSdkTurnRunner {
       );
     }
     return result;
+  }
+
+  #waitForSteerTarget(): Promise<AgentSession> {
+    if (this.#finished) {
+      return Promise.reject(
+        new PiTurnError(
+          "steer_target_unavailable",
+          "Pi Run is no longer available for steering",
+          false,
+        ),
+      );
+    }
+    let waiter!: {
+      resolve: (session: AgentSession) => void;
+      reject: (error: Error) => void;
+    };
+    const ready = new Promise<AgentSession>((resolvePromise, rejectPromise) => {
+      waiter = { resolve: resolvePromise, reject: rejectPromise };
+      this.#steerWaiters.add(waiter);
+    });
+    return withTimeout(ready, this.#requestTimeoutMs, "Pi steer target").finally(() => {
+      this.#steerWaiters.delete(waiter);
+    });
   }
 }

@@ -108,7 +108,7 @@ extension-policy support would overstate the current boundary.
 - [x] Prove five queued same-session inputs preserve mailbox order with tied timestamps
 - [x] Specify active-session prompts as queued follow-ups and reserve explicit steer
 - [x] Expose mailbox positions and queued follow-up submission in the Web page
-- [ ] Implement an explicit steer API/command with runtime capability negotiation
+- [x] Implement an explicit steer API/command with runtime capability negotiation
 - [x] Renew leases during long turns and reconcile expired assignments/orphan Provider runtimes
 - [x] Persist authenticated supervisor registration, connection generations, and health expiry
 - [x] Require owner-stop proof through a retryable cross-replica sandbox-retirement queue

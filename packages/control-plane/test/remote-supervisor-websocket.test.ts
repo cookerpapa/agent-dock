@@ -31,6 +31,7 @@ import {
   SupervisorCommandRouter,
   SupervisorConnectionManager,
   SupervisorWebSocketGateway,
+  TurnSteeringService,
   type RemoteSupervisorCommandTransport,
   type SessionLeaseCoordinator,
   type SupervisorBootIdentity,
@@ -254,6 +255,7 @@ type NetworkHarness = {
   router: SupervisorCommandRouter;
   leaseCoordinator: SessionLeaseCoordinator;
   backend: RemoteSupervisorExecutionBackend;
+  gateway: SupervisorWebSocketGateway;
   eventMessages: EventPublishMessage[];
   close(): Promise<void>;
 };
@@ -323,6 +325,7 @@ async function startNetwork(
     router,
     leaseCoordinator,
     backend,
+    gateway,
     eventMessages,
     async close() {
       await client.stop();
@@ -1010,6 +1013,102 @@ describe.sequential("remote two-phase supervisor execution", () => {
       ).toEqual({ state: "completed" });
       expect(network.supervisor.activeSessionCount).toBe(0);
     } finally {
+      await network.close();
+    }
+  });
+
+  it("delivers a fenced steer to the active Pi Runner without creating another Turn", async () => {
+    const seeded = await seedTurn();
+    let runnerStarted = false;
+    let finishRun!: () => void;
+    const observed: Array<{ targetCommandId: string; text: string }> = [];
+    const runner: SupervisorTurnRunner = {
+      async run(command, publishEvent) {
+        const factory = createAgentDockEventFactory(
+          {
+            sessionId: command.payload.sessionId,
+            turnId: command.payload.turnId,
+            agentId: command.payload.agentId,
+          },
+          { initialSequence: command.payload.nextEventSeq - 1 },
+        );
+        await publishEvent(
+          eventMessage(
+            command,
+            factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
+          ),
+        );
+        runnerStarted = true;
+        await new Promise<void>((resolvePromise) => {
+          finishRun = resolvePromise;
+        });
+        return { stopReason: "stop" };
+      },
+      async steer(targetCommandId, text) {
+        observed.push({ targetCommandId, text });
+      },
+    };
+    const network = await startNetwork(seeded, runner);
+    const executor = new RunCommandExecutor({
+      database,
+      backend: network.backend,
+      leaseManager: network.leaseCoordinator,
+    });
+    try {
+      const execution = dispatchNextTestCommand(database, executor, seeded.tenantId);
+      await waitFor(() => runnerStarted);
+      const steering = new TurnSteeringService({ database, gateway: network.gateway });
+      const idempotencyKey = `steer-${uuid()}`;
+      const identity = {
+        credentialId: uuid(),
+        tenantId: seeded.tenantId,
+        tenantSlug: "remote-test",
+        userId: uuid(),
+        displayName: "Remote Test",
+        role: "owner" as const,
+        defaultModelProfileId: seeded.profileId,
+      };
+      const first = await steering.deliver(
+        identity,
+        seeded.session.sessionId,
+        seeded.accepted.turnId,
+        idempotencyKey,
+        { text: "Focus on the integration boundary before continuing." },
+      );
+      expect(first).toMatchObject({ state: "delivered", replayed: false });
+      await expect(
+        steering.deliver(
+          identity,
+          seeded.session.sessionId,
+          seeded.accepted.turnId,
+          idempotencyKey,
+          { text: "Focus on the integration boundary before continuing." },
+        ),
+      ).resolves.toMatchObject({ commandId: first.commandId, replayed: true });
+      expect(observed).toEqual([
+        {
+          targetCommandId: seeded.accepted.commandId,
+          text: "Focus on the integration boundary before continuing.",
+        },
+      ]);
+      finishRun();
+      await expect(execution).resolves.toMatchObject({ status: "completed" });
+      expect(
+        await database
+          .selectFrom("turns")
+          .select("id")
+          .where("session_id", "=", seeded.session.sessionId)
+          .execute(),
+      ).toHaveLength(1);
+      expect(
+        await database
+          .selectFrom("commands")
+          .select(["kind", "state"])
+          .where("id", "=", first.commandId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ kind: "turn.steer", state: "completed" });
+    } finally {
+      finishRun?.();
       await network.close();
     }
   });

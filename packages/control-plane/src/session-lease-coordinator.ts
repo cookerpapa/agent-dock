@@ -94,6 +94,17 @@ function requireUuid(value: string, name: string): string {
 
 const ACTIVE_SESSION_STATES = new Set(["running", "waiting_approval", "cancelling"]);
 const ACTIVE_TURN_STATES = new Set(["running", "waiting_approval", "cancelling"]);
+type CurrentAssignmentRequest = Pick<
+  TurnExecutionRequest,
+  | "tenantId"
+  | "projectId"
+  | "workspaceId"
+  | "sessionId"
+  | "runId"
+  | "turnId"
+  | "attemptId"
+  | "commandId"
+>;
 
 export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
   readonly #database: Kysely<Database>;
@@ -638,7 +649,9 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
     });
   }
 
-  async currentAssignment(request: TurnExecutionRequest): Promise<TurnExecutionAcknowledgement> {
+  async currentAssignment(
+    request: CurrentAssignmentRequest,
+  ): Promise<TurnExecutionAcknowledgement> {
     const now = validDate(this.#clock);
     return this.#database.transaction().execute(async (transaction) => {
       const session = await transaction
@@ -746,7 +759,7 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
 
   async #currentRunAttempt(
     transaction: Transaction<Database>,
-    request: TurnExecutionRequest,
+    request: CurrentAssignmentRequest,
     acknowledgement: TurnExecutionAcknowledgement,
   ): Promise<void> {
     const attempt = await transaction

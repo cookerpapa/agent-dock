@@ -2,6 +2,7 @@ import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   TWO_PHASE_COMMAND_CAPABILITY,
+  PI_STEER_CAPABILITY,
   type CancelTurnCommandMessage,
   type CommandAckMessage,
   type CommandCommitMessage,
@@ -10,6 +11,7 @@ import {
   type EventPublishMessage,
   type EventPublishBatchMessage,
   type ExecuteTurnCommandMessage,
+  type SteerTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@agent-dock/protocol";
 import type { DurableEventIngestor } from "./durable-event-store.ts";
@@ -20,7 +22,8 @@ const DEFAULT_COMMAND_ACK_TIMEOUT_MS = 10_000;
 const DEFAULT_COMMAND_RESULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_PENDING_COMMANDS = 1_000;
 
-export type SupervisorRemoteCommand = ExecuteTurnCommandMessage | CancelTurnCommandMessage;
+export type SupervisorRemoteCommand =
+  ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage;
 type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
 export type SupervisorCommandConnection = {
@@ -130,8 +133,12 @@ function sameCommandIdentity(
   );
 }
 
-function commandKind(command: SupervisorRemoteCommand): "turn.execute" | "turn.cancel" {
-  return command.type === "command.turn.execute" ? "turn.execute" : "turn.cancel";
+function commandKind(
+  command: SupervisorRemoteCommand,
+): "turn.execute" | "turn.cancel" | "turn.steer" {
+  if (command.type === "command.turn.execute") return "turn.execute";
+  if (command.type === "command.turn.cancel") return "turn.cancel";
+  return "turn.steer";
 }
 
 function pendingCount(state: ConnectionState): number {
@@ -298,14 +305,25 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
 
   async prepare(sandboxId: string, value: SupervisorRemoteCommand): Promise<CommandAckMessage> {
     const parsed = parseControlToSupervisorMessage(value);
-    if (parsed.type !== "command.turn.execute" && parsed.type !== "command.turn.cancel") {
+    if (
+      parsed.type !== "command.turn.execute" &&
+      parsed.type !== "command.turn.cancel" &&
+      parsed.type !== "command.turn.steer"
+    ) {
       throw transportError(
         "invalid_command",
-        "Remote transport only prepares execute or cancellation commands",
+        "Remote transport only prepares execute, cancellation, or steer commands",
         false,
       );
     }
     const state = this.#connection(sandboxId, false);
+    if (parsed.type === "command.turn.steer" && !state.capabilities.has(PI_STEER_CAPABILITY)) {
+      throw transportError(
+        "supervisor_capability_missing",
+        "Supervisor does not support Pi steer",
+        false,
+      );
+    }
     const commandId = parsed.payload.commandId;
     if (
       state.pendingAcknowledgements.has(commandId) ||
@@ -502,7 +520,11 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
 
   #parseCommand(value: SupervisorRemoteCommand): SupervisorRemoteCommand {
     const parsed = parseControlToSupervisorMessage(value);
-    if (parsed.type !== "command.turn.execute" && parsed.type !== "command.turn.cancel") {
+    if (
+      parsed.type !== "command.turn.execute" &&
+      parsed.type !== "command.turn.cancel" &&
+      parsed.type !== "command.turn.steer"
+    ) {
       throw transportError("invalid_command", "Remote command was invalid", false);
     }
     return parsed;

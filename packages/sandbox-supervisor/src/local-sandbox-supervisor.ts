@@ -7,6 +7,7 @@ import {
   type EventPublishBatchMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
+  type SteerTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
 } from "@agent-dock/protocol";
@@ -36,6 +37,7 @@ export interface SupervisorTurnRunner {
     publishEvent: PiEventPublisher,
     signal: AbortSignal,
   ): Promise<PiTurnResult>;
+  steer?(targetCommandId: string, text: string): Promise<void>;
 }
 
 export type PreparedTurnExecution = {
@@ -68,9 +70,16 @@ export type PreparedTurnCancellation = {
   releaseBeforeStart(): void;
 };
 
+export type PreparedTurnSteer = {
+  ack: CommandAckMessage;
+  run(): Promise<void>;
+  releaseBeforeStart(): void;
+};
+
 export type RevokedSupervisorAssignments = {
   releasedPreparations: number;
   releasedCancellations: number;
+  releasedSteers: number;
   revokedExecutions: number;
 };
 
@@ -103,6 +112,15 @@ type Cancellation = {
   assignment: Assignment;
   state: CancellationState;
   runPromise?: Promise<SupervisorTurnCancellationResult>;
+};
+
+type SteerState = "prepared" | "running" | "completed" | "failed";
+
+type Steer = {
+  command: SteerTurnCommandMessage;
+  assignment: Assignment;
+  state: SteerState;
+  runPromise?: Promise<void>;
 };
 
 export class LocalSandboxSupervisorError extends Error {
@@ -141,6 +159,10 @@ function sameCancellationIdentity(
   return isDeepStrictEqual(left.payload, right.payload);
 }
 
+function sameSteerIdentity(left: SteerTurnCommandMessage, right: SteerTurnCommandMessage): boolean {
+  return isDeepStrictEqual(left.payload, right.payload);
+}
+
 export class LocalSandboxSupervisor {
   readonly #runner: SupervisorTurnRunner;
   readonly #eventSpoolFactory: SupervisorEventSpoolFactory;
@@ -151,6 +173,7 @@ export class LocalSandboxSupervisor {
   readonly #currentBySession = new Map<string, Assignment>();
   readonly #byCommand = new Map<string, Assignment>();
   readonly #cancellationsByCommand = new Map<string, Cancellation>();
+  readonly #steersByCommand = new Map<string, Steer>();
   readonly #highestFenceBySession = new Map<string, number>();
   #recoveringPendingEvents = false;
 
@@ -190,7 +213,13 @@ export class LocalSandboxSupervisor {
   revokeAllAssignments(): RevokedSupervisorAssignments {
     let releasedPreparations = 0;
     let releasedCancellations = 0;
+    let releasedSteers = 0;
     let revokedExecutions = 0;
+    for (const steer of this.#steersByCommand.values()) {
+      if (steer.state !== "prepared") continue;
+      this.#releaseSteerBeforeStart(steer);
+      releasedSteers += 1;
+    }
     for (const cancellation of this.#cancellationsByCommand.values()) {
       if (cancellation.state !== "prepared") continue;
       this.#releaseCancellationBeforeStart(cancellation);
@@ -207,7 +236,7 @@ export class LocalSandboxSupervisor {
         revokedExecutions += 1;
       }
     }
-    return { releasedPreparations, releasedCancellations, revokedExecutions };
+    return { releasedPreparations, releasedCancellations, releasedSteers, revokedExecutions };
   }
 
   createHeartbeat(
@@ -446,6 +475,70 @@ export class LocalSandboxSupervisor {
     return this.#preparedCancellation(cancellation, "accepted");
   }
 
+  prepareSteer(value: unknown): PreparedTurnSteer {
+    const parsed = parseControlToSupervisorMessage(value);
+    if (parsed.type !== "command.turn.steer") {
+      throw new LocalSandboxSupervisorError(
+        "unsupported",
+        "Local supervisor only prepares turn.steer commands on this path",
+      );
+    }
+    const command = parsed;
+    const duplicate = this.#steersByCommand.get(command.payload.commandId);
+    if (duplicate !== undefined) {
+      if (!sameSteerIdentity(duplicate.command, command)) {
+        return this.#rejectedSteer(
+          command,
+          "invalid_command",
+          "Steer command identity changed",
+          false,
+        );
+      }
+      return this.#preparedSteer(duplicate, "duplicate");
+    }
+
+    const assignment = this.#byCommand.get(command.payload.targetCommandId);
+    const current = this.#currentBySession.get(command.payload.sessionId);
+    if (
+      assignment === undefined ||
+      current !== assignment ||
+      assignment.state !== "running" ||
+      assignment.runPromise === undefined
+    ) {
+      return this.#rejectedSteer(
+        command,
+        "invalid_state",
+        "Target execution is not running",
+        false,
+      );
+    }
+    const target = assignment.command.payload;
+    if (
+      command.payload.commandId === command.payload.targetCommandId ||
+      command.payload.tenantId !== target.tenantId ||
+      command.payload.projectId !== target.projectId ||
+      command.payload.workspaceId !== target.workspaceId ||
+      command.payload.sessionId !== target.sessionId ||
+      command.payload.runId !== target.runId ||
+      command.payload.turnId !== target.turnId ||
+      command.payload.attemptId !== target.attemptId ||
+      command.payload.agentId !== target.agentId ||
+      command.payload.leaseId !== target.leaseId ||
+      command.payload.fencingToken !== target.fencingToken
+    ) {
+      return this.#rejectedSteer(
+        command,
+        "invalid_command",
+        "Steer identity does not match its target assignment",
+        false,
+      );
+    }
+
+    const steer: Steer = { command, assignment, state: "prepared" };
+    this.#steersByCommand.set(command.payload.commandId, steer);
+    return this.#preparedSteer(steer, "accepted");
+  }
+
   #prepared(assignment: Assignment, status: "accepted" | "duplicate"): PreparedTurnExecution {
     return {
       ack: this.#ack(assignment.command, { status }),
@@ -495,8 +588,29 @@ export class LocalSandboxSupervisor {
     };
   }
 
+  #preparedSteer(steer: Steer, status: "accepted" | "duplicate"): PreparedTurnSteer {
+    return {
+      ack: this.#ack(steer.command, { status }),
+      run: () => this.#runSteer(steer),
+      releaseBeforeStart: () => this.#releaseSteerBeforeStart(steer),
+    };
+  }
+
+  #rejectedSteer(
+    command: SteerTurnCommandMessage,
+    code: "stale_fence" | "invalid_state" | "capacity" | "invalid_command" | "unsupported",
+    message: string,
+    retryable: boolean,
+  ): PreparedTurnSteer {
+    return {
+      ack: this.#ack(command, { status: "rejected", code, message, retryable }),
+      run: () => Promise.reject(new LocalSandboxSupervisorError(code, "Rejected steer cannot run")),
+      releaseBeforeStart: () => undefined,
+    };
+  }
+
   #ack(
-    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage,
+    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
     result:
       | { status: "accepted" | "duplicate" }
       | {
@@ -753,6 +867,44 @@ export class LocalSandboxSupervisor {
     return cancellation.runPromise;
   }
 
+  #runSteer(steer: Steer): Promise<void> {
+    if (steer.runPromise !== undefined) return steer.runPromise;
+    const assignment = steer.assignment;
+    if (
+      steer.state !== "prepared" ||
+      assignment.state !== "running" ||
+      assignment.runPromise === undefined ||
+      this.#currentBySession.get(assignment.command.payload.sessionId) !== assignment
+    ) {
+      return Promise.reject(
+        new LocalSandboxSupervisorError("invalid_state", "Steer target is no longer running"),
+      );
+    }
+    steer.state = "running";
+    const deliver = this.#runner.steer;
+    if (deliver === undefined) {
+      steer.state = "failed";
+      return Promise.reject(
+        new LocalSandboxSupervisorError(
+          "unsupported",
+          "Supervisor Runner does not support Pi steer",
+        ),
+      );
+    }
+    steer.runPromise = deliver
+      .call(this.#runner, steer.command.payload.targetCommandId, steer.command.payload.text)
+      .then(
+        () => {
+          steer.state = "completed";
+        },
+        (error: unknown) => {
+          steer.state = "failed";
+          throw error;
+        },
+      );
+    return steer.runPromise;
+  }
+
   #releaseBeforeStart(assignment: Assignment): void {
     if (assignment.state !== "prepared") return;
     if (this.#currentBySession.get(assignment.command.payload.sessionId) === assignment) {
@@ -766,5 +918,11 @@ export class LocalSandboxSupervisor {
     if (cancellation.state !== "prepared") return;
     this.#cancellationsByCommand.delete(cancellation.command.payload.commandId);
     cancellation.state = "failed";
+  }
+
+  #releaseSteerBeforeStart(steer: Steer): void {
+    if (steer.state !== "prepared") return;
+    this.#steersByCommand.delete(steer.command.payload.commandId);
+    steer.state = "failed";
   }
 }

@@ -1,5 +1,6 @@
 import {
   TWO_PHASE_COMMAND_CAPABILITY,
+  PI_STEER_CAPABILITY,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type CancelTurnCommandMessage,
@@ -12,6 +13,7 @@ import {
   type EventPublishMessage,
   type EventRejectedMessage,
   type ExecuteTurnCommandMessage,
+  type SteerTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
   type SupervisorRegisteredMessage,
@@ -20,6 +22,7 @@ import WebSocket, { type RawData } from "ws";
 import type {
   PreparedTurnCancellation,
   PreparedTurnExecution,
+  PreparedTurnSteer,
 } from "./local-sandbox-supervisor.ts";
 import { LocalSandboxSupervisorError } from "./local-sandbox-supervisor.ts";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
@@ -55,6 +58,7 @@ export interface SupervisorCommandRuntime extends SupervisorHeartbeatRuntime {
     ) => Promise<EventAckMessage>,
   ): PreparedTurnExecution;
   prepareCancellation(value: unknown): PreparedTurnCancellation;
+  prepareSteer?(value: unknown): PreparedTurnSteer;
   revokeAllAssignments(): unknown;
   recoverPendingEvents?(
     publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
@@ -138,7 +142,16 @@ type RemotePreparedCancellation = {
   committed: boolean;
 };
 
-type RemotePreparedCommand = RemotePreparedExecution | RemotePreparedCancellation;
+type RemotePreparedSteer = {
+  kind: "turn.steer";
+  command: SteerTurnCommandMessage;
+  acknowledgement: CommandAckMessage;
+  prepared: PreparedTurnSteer;
+  committed: boolean;
+};
+
+type RemotePreparedCommand =
+  RemotePreparedExecution | RemotePreparedCancellation | RemotePreparedSteer;
 
 type SafeCommandFailure = {
   code: string;
@@ -202,7 +215,7 @@ function retryableWebSocketClose(code: number): boolean {
 }
 
 function sameCommandIdentity(
-  command: ExecuteTurnCommandMessage | CancelTurnCommandMessage,
+  command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
   value: {
     commandId: string;
     sessionId: string;
@@ -318,6 +331,7 @@ export class SupervisorWebSocketClient {
         ...(options.registration.capabilities ?? [
           "event.replay",
           "pi.rpc",
+          PI_STEER_CAPABILITY,
           TWO_PHASE_COMMAND_CAPABILITY,
         ]),
       ],
@@ -648,7 +662,11 @@ export class SupervisorWebSocketClient {
       this.#acceptEventRejection(message);
       return;
     }
-    if (message.type === "command.turn.execute" || message.type === "command.turn.cancel") {
+    if (
+      message.type === "command.turn.execute" ||
+      message.type === "command.turn.cancel" ||
+      message.type === "command.turn.steer"
+    ) {
       await this.#prepareCommand(message);
       return;
     }
@@ -696,7 +714,7 @@ export class SupervisorWebSocketClient {
   }
 
   async #prepareCommand(
-    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage,
+    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
   ): Promise<void> {
     if (this.#preparedCommands.has(command.payload.commandId)) {
       throw new SupervisorWebSocketClientError(
@@ -705,7 +723,7 @@ export class SupervisorWebSocketClient {
         false,
       );
     }
-    let prepared: PreparedTurnExecution | PreparedTurnCancellation;
+    let prepared: PreparedTurnExecution | PreparedTurnCancellation | PreparedTurnSteer;
     let entry: RemotePreparedCommand;
     if (command.type === "command.turn.execute") {
       prepared = this.#runtime.prepare(command, (message) => this.#publishEvent(message));
@@ -717,11 +735,28 @@ export class SupervisorWebSocketClient {
         prepared,
         committed: false,
       };
-    } else {
+    } else if (command.type === "command.turn.cancel") {
       prepared = this.#runtime.prepareCancellation(command);
       const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
       entry = {
         kind: "turn.cancel",
+        command,
+        acknowledgement,
+        prepared,
+        committed: false,
+      };
+    } else {
+      if (this.#runtime.prepareSteer === undefined) {
+        throw new SupervisorWebSocketClientError(
+          "supervisor_capability_missing",
+          "Supervisor Runtime does not support Pi steer",
+          false,
+        );
+      }
+      prepared = this.#runtime.prepareSteer(command);
+      const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
+      entry = {
+        kind: "turn.steer",
         command,
         acknowledgement,
         prepared,
@@ -743,7 +778,7 @@ export class SupervisorWebSocketClient {
   }
 
   #validateCommandAcknowledgement(
-    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage,
+    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
     value: unknown,
   ): CommandAckMessage {
     const acknowledgement = parseSupervisorToControlMessage(value);
@@ -806,13 +841,16 @@ export class SupervisorWebSocketClient {
             ? {}
             : { workspacePatch: execution.workspacePatch }),
         });
-      } else {
+      } else if (entry.kind === "turn.cancel") {
         const cancellation = await entry.prepared.run();
         result = this.#commandResult(entry, commit, {
           status: "completed",
           reason: cancellation.reason,
           forced: cancellation.forced,
         });
+      } else {
+        await entry.prepared.run();
+        result = this.#commandResult(entry, commit, { status: "completed" });
       }
     } catch (error: unknown) {
       if (
@@ -848,6 +886,9 @@ export class SupervisorWebSocketClient {
           status: "completed";
           reason: CancelTurnCommandMessage["payload"]["reason"];
           forced: boolean;
+        }
+      | {
+          status: "completed";
         }
       | {
           status: "cancelled";

@@ -1041,7 +1041,8 @@ button:disabled {
   color: #888;
 }
 .product-send-button,
-.product-stop-button {
+.product-stop-button,
+.product-steer-button {
   display: grid;
   width: 34px;
   height: 34px;
@@ -1054,12 +1055,24 @@ button:disabled {
   font-size: 18px;
   font-weight: 700;
 }
+.product-steer-button {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 17px;
+  font-size: 12px;
+  font-weight: 600;
+}
 .product-send-button:hover:not(:disabled),
-.product-stop-button:hover:not(:disabled) {
+.product-stop-button:hover:not(:disabled),
+.product-steer-button:hover:not(:disabled) {
   border: 0;
   background: white;
 }
 .product-send-button:disabled {
+  background: #4b4b4b;
+  color: #777;
+}
+.product-steer-button:disabled {
   background: #4b4b4b;
   color: #777;
 }
@@ -1072,6 +1085,9 @@ button:disabled {
   color: #6f6f6f;
   font-size: 10px;
   text-align: center;
+}
+.product-composer-area > .product-steer-notice {
+  color: #9fc9a9;
 }
 
 .product-modal-backdrop {

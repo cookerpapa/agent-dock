@@ -27,6 +27,7 @@ import {
   parseCreateRunRewindRequest,
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
+  parseCreateTurnSteerRequest,
   parseIdempotencyKey,
   parseForkSessionRequest,
   parseLastEventIdHeader,
@@ -43,6 +44,7 @@ import {
   type AcceptedTurnResource,
   type AuthSessionResource,
   type AcceptedTurnCancellationResource,
+  type TurnSteerResource,
   type CandidateRaceListResource,
   type CandidateRaceResource,
   type ConversationDetailResource,
@@ -90,6 +92,7 @@ import { readWebSessionCookie, WebAuthenticationService } from "./web-authentica
 import { ProjectEnvironmentService } from "./project-environment-service.ts";
 import { CandidateRaceService } from "./candidate-race-service.ts";
 import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
+import { TurnSteeringService } from "./turn-steering-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -117,6 +120,8 @@ export class ControlPlaneController {
     private readonly candidateRaces: CandidateRaceService,
     @Inject(PlatformRuntimeSettingsService)
     private readonly platformRuntimeSettings: PlatformRuntimeSettingsService,
+    @Inject(TurnSteeringService)
+    private readonly turnSteering: TurnSteeringService,
   ) {}
 
   @Post("auth/register")
@@ -741,6 +746,23 @@ export class ControlPlaneController {
     return this.controlPlaneStores
       .forIdentity(identity)
       .acceptTurnCancellation(sessionId, turnId, idempotencyKey, request);
+  }
+
+  @Post("sessions/:sessionId/turns/:turnId/steers")
+  @HttpCode(200)
+  async steerTurn(
+    @Req() httpRequest: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Param("turnId") turnIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<TurnSteerResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const turnId = parseUuidPathParameter(turnIdValue, "turnId");
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyValue);
+    const request = parseCreateTurnSteerRequest(body);
+    const identity = this.tenantRequestContext.requireMutation(httpRequest);
+    return this.turnSteering.deliver(identity, sessionId, turnId, idempotencyKey, request);
   }
 
   @Get("sessions/:sessionId/events")

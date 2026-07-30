@@ -34,9 +34,9 @@ behavior and must not share an implicit interpretation.
    creates a new turn and later starts from the most recent successful settled
    Pi/workspace checkpoint. It never modifies or injects text into the current
    model request.
-5. **Steer** remains a separate, unimplemented operation. It will require an
+5. **Steer** remains a separate operation. ADR-0077 implements it through an
    explicit public request/command type and capability check against the active
-   runtime; the prompt endpoint must not silently become steer.
+   runtime; the prompt endpoint does not silently become steer.
 6. Cancellation remains a targeted control path for the current acknowledged
    turn. It does not consume an execute mailbox position or wait behind future
    prompts. Approval resolution follows the same control-command principle.

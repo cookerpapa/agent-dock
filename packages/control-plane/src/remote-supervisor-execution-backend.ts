@@ -8,6 +8,7 @@ import {
   type CommandReleaseMessage,
   type CommandResultMessage,
   type ExecuteTurnCommandMessage,
+  type SteerTurnCommandMessage,
 } from "@agent-dock/protocol";
 import {
   TurnCancellationBackendError,
@@ -32,8 +33,14 @@ import {
   SupervisorCommandTransportError,
   type RemoteSupervisorCommandTransport,
 } from "./supervisor-command-router.ts";
+import {
+  TurnSteerBackendError,
+  type TurnSteerBackend,
+  type TurnSteerRequest,
+} from "./turn-steer.ts";
 
-type SupervisorCommand = ExecuteTurnCommandMessage | CancelTurnCommandMessage;
+type SupervisorCommand =
+  ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage;
 
 type RemoteSupervisorExecutionBackendCommonOptions = {
   sandboxId: string;
@@ -204,8 +211,37 @@ function normalizeCancellationError(
   );
 }
 
+function normalizeSteerError(error: unknown, durableStarted: boolean): TurnSteerBackendError {
+  if (error instanceof TurnSteerBackendError) return error;
+  if (error instanceof SessionLeaseCoordinatorError) {
+    return new TurnSteerBackendError(error.code, error.message, error.retryable);
+  }
+  if (error instanceof SupervisorCommandTransportError) {
+    return new TurnSteerBackendError(
+      error.code,
+      error.message,
+      !durableStarted && error.retryable,
+      durableStarted && error.ambiguous,
+    );
+  }
+  if (error instanceof AgentDockWireProtocolError) {
+    return new TurnSteerBackendError(
+      "backend_protocol_violation",
+      "Remote supervisor steer protocol validation failed",
+      false,
+      durableStarted,
+    );
+  }
+  return new TurnSteerBackendError(
+    "remote_supervisor_error",
+    "Remote supervisor steer failed",
+    !durableStarted,
+    durableStarted,
+  );
+}
+
 export class RemoteSupervisorExecutionBackend
-  implements TurnExecutionBackend, TurnCancellationBackend
+  implements TurnExecutionBackend, TurnCancellationBackend, TurnSteerBackend
 {
   readonly #sandboxId: string;
   readonly #transport: RemoteSupervisorCommandTransport;
@@ -388,6 +424,95 @@ export class RemoteSupervisorExecutionBackend
     }
   }
 
+  async steer(request: TurnSteerRequest): Promise<void> {
+    let command: SteerTurnCommandMessage | undefined;
+    let acknowledgement: CommandAckMessage | undefined;
+    let durableStarted = false;
+    try {
+      const leaseCoordinator = await this.#leaseCoordinatorProvider();
+      const lease = await leaseCoordinator.currentAssignment(request.target);
+      command = this.#steerCommand(request, lease);
+      acknowledgement = acceptedAcknowledgement(
+        command,
+        await this.#transport.prepare(this.#sandboxId, command),
+      );
+      if (acknowledgement.payload.status === "rejected") {
+        throw new TurnSteerBackendError(
+          acknowledgement.payload.code,
+          acknowledgement.payload.message,
+          acknowledgement.payload.retryable,
+        );
+      }
+      durableStarted = true;
+      const commit = disposition(
+        "command.commit",
+        command,
+        acknowledgement,
+        this.#clock,
+        this.#idGenerator,
+      );
+      if (commit.type !== "command.commit") {
+        throw new TurnSteerBackendError(
+          "backend_protocol_violation",
+          "Constructed steer commit was invalid",
+          false,
+        );
+      }
+      const result = parseSupervisorToControlMessage(
+        await this.#transport.commit(this.#sandboxId, command, acknowledgement, commit),
+      );
+      if (
+        result.type !== "command.result" ||
+        !sameCommandIdentity(command, result.payload) ||
+        result.payload.commitMessageId !== commit.messageId ||
+        result.payload.commandKind !== "turn.steer"
+      ) {
+        throw new TurnSteerBackendError(
+          "backend_protocol_violation",
+          "Remote steer result identity did not match",
+          false,
+          true,
+        );
+      }
+      if (result.payload.status === "failed") {
+        throw new TurnSteerBackendError(
+          result.payload.code,
+          result.payload.message,
+          result.payload.retryable,
+        );
+      }
+      if (result.payload.status !== "completed") {
+        throw new TurnSteerBackendError(
+          "backend_protocol_violation",
+          "Remote steer returned an invalid result",
+          false,
+          true,
+        );
+      }
+    } catch (error: unknown) {
+      if (
+        !durableStarted &&
+        command !== undefined &&
+        acknowledgement !== undefined &&
+        acknowledgement.payload.status !== "rejected"
+      ) {
+        const release = disposition(
+          "command.release",
+          command,
+          acknowledgement,
+          this.#clock,
+          this.#idGenerator,
+        );
+        if (release.type === "command.release") {
+          await this.#transport
+            .release(this.#sandboxId, command, acknowledgement, release)
+            .catch(() => undefined);
+        }
+      }
+      throw normalizeSteerError(error, durableStarted);
+    }
+  }
+
   #executeCommand(
     request: TurnExecutionRequest,
     lease: { leaseId: string; fencingToken: number },
@@ -469,6 +594,42 @@ export class RemoteSupervisorExecutionBackend
       throw new TurnCancellationBackendError(
         "backend_protocol_violation",
         "Constructed remote cancellation command was invalid",
+        false,
+      );
+    }
+    return parsed;
+  }
+
+  #steerCommand(
+    request: TurnSteerRequest,
+    lease: { leaseId: string; fencingToken: number },
+  ): SteerTurnCommandMessage {
+    const parsed = parseControlToSupervisorMessage({
+      protocolVersion: 1,
+      messageId: this.#idGenerator(),
+      sentAt: validDate(this.#clock).toISOString(),
+      type: "command.turn.steer",
+      payload: {
+        commandId: request.commandId,
+        targetCommandId: request.target.commandId,
+        idempotencyKey: request.idempotencyKey,
+        tenantId: request.target.tenantId,
+        projectId: request.target.projectId,
+        workspaceId: request.target.workspaceId,
+        sessionId: request.target.sessionId,
+        runId: request.target.runId,
+        turnId: request.target.turnId,
+        attemptId: request.target.attemptId,
+        agentId: this.#agentId,
+        leaseId: lease.leaseId,
+        fencingToken: lease.fencingToken,
+        text: request.text,
+      },
+    });
+    if (parsed.type !== "command.turn.steer") {
+      throw new TurnSteerBackendError(
+        "backend_protocol_violation",
+        "Constructed remote steer command was invalid",
         false,
       );
     }

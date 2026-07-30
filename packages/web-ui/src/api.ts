@@ -1,6 +1,7 @@
 import {
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
+  parseTurnSteerResource,
   parseAuthSessionResource,
   parseArchiveSessionRequest,
   parseCandidateRaceListResource,
@@ -44,6 +45,7 @@ import {
   type ConversationListResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
+  type TurnSteerResource,
   type CandidateRaceListResource,
   type CandidateRaceResource,
   type CreateCandidateRaceRequest,
@@ -838,12 +840,29 @@ export class AgentDockApi {
       ),
     );
   }
+
+  async steerTurn(
+    sessionId: string,
+    turnId: string,
+    text: string,
+    idempotencyKey: string,
+  ): Promise<TurnSteerResource> {
+    return parseTurnSteerResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/steers`,
+        jsonRequest({ text }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
 }
 
 export function newIdempotencyKey(
   prefix:
     | "turn"
     | "cancel"
+    | "steer"
     | "fork"
     | "rollback"
     | "archive"

@@ -1662,6 +1662,27 @@ export const AcceptedTurnCancellationResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const CreateTurnSteerRequestSchema = Type.Object(
+  {
+    text: Type.String({ minLength: 1, maxLength: 100_000 }),
+  },
+  { additionalProperties: false },
+);
+
+export const TurnSteerResourceSchema = Type.Object(
+  {
+    commandId: UuidSchema,
+    targetCommandId: UuidSchema,
+    turnId: UuidSchema,
+    sessionId: UuidSchema,
+    state: Type.Literal("delivered"),
+    acceptedAt: UtcTimestampSchema,
+    deliveredAt: UtcTimestampSchema,
+    replayed: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 export const ControlPlaneApiErrorSchema = Type.Object(
   {
     error: Type.Object(
@@ -1774,6 +1795,8 @@ export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellation
 export type AcceptedTurnCancellationResource = Static<
   typeof AcceptedTurnCancellationResourceSchema
 >;
+export type CreateTurnSteerRequest = Static<typeof CreateTurnSteerRequestSchema>;
+export type TurnSteerResource = Static<typeof TurnSteerResourceSchema>;
 export type ControlPlaneApiError = Static<typeof ControlPlaneApiErrorSchema>;
 
 export class ControlPlaneApiValidationError extends Error {
@@ -2158,6 +2181,14 @@ export function parseCreateTurnCancellationRequest(value: unknown): CreateTurnCa
   );
 }
 
+export function parseCreateTurnSteerRequest(value: unknown): CreateTurnSteerRequest {
+  const request = parseSchema(CreateTurnSteerRequestSchema, value, "create-turn-steer request");
+  if (request.text.trim().length === 0) {
+    throw new ControlPlaneApiValidationError("Steer text must contain a non-whitespace character");
+  }
+  return request;
+}
+
 export function parseProjectResource(value: unknown): ProjectResource {
   return parseSchema(ProjectResourceSchema, value, "project resource");
 }
@@ -2387,6 +2418,10 @@ export function parseAcceptedTurnCancellationResource(
     value,
     "accepted-turn-cancellation resource",
   );
+}
+
+export function parseTurnSteerResource(value: unknown): TurnSteerResource {
+  return parseSchema(TurnSteerResourceSchema, value, "turn-steer resource");
 }
 
 export function parseControlPlaneApiError(value: unknown): ControlPlaneApiError {

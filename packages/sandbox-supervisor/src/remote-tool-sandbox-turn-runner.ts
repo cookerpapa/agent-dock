@@ -153,6 +153,14 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #metrics: AgentDockMetrics | undefined;
   readonly #onPiSdkIsolationFailure:
     ((error: PiSdkIsolationFailure) => Promise<void> | void) | undefined;
+  readonly #activePiRunners = new Map<
+    string,
+    {
+      ready: Promise<PiSdkTurnRunner>;
+      resolve: (runner: PiSdkTurnRunner) => void;
+      reject: (error: Error) => void;
+    }
+  >();
 
   constructor(options: RemoteToolSandboxTurnRunnerOptions) {
     this.#manager = options.manager;
@@ -175,6 +183,22 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     publishEvent: PiEventPublisher,
     signal: AbortSignal,
   ): Promise<PiTurnResult> {
+    if (this.#activePiRunners.has(command.payload.commandId)) {
+      throw new PiTurnError(
+        "pi_runtime_overlap",
+        "Pi Runtime is already active for this command",
+        false,
+      );
+    }
+    let resolveRunner!: (runner: PiSdkTurnRunner) => void;
+    let rejectRunner!: (error: Error) => void;
+    const ready = new Promise<PiSdkTurnRunner>((resolvePromise, rejectPromise) => {
+      resolveRunner = resolvePromise;
+      rejectRunner = rejectPromise;
+    });
+    void ready.catch(() => undefined);
+    const slot = { ready, resolve: resolveRunner, reject: rejectRunner };
+    this.#activePiRunners.set(command.payload.commandId, slot);
     this.#metrics?.activeRuns.inc();
     const startedAt = performance.now();
     try {
@@ -189,7 +213,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           "agent_dock.attempt.id": command.payload.attemptId,
           "agent_dock.session.id": command.payload.sessionId,
         },
-        run: () => this.#run(command, publishEvent, signal),
+        run: () => this.#run(command, publishEvent, signal, slot.resolve),
       });
       this.#metrics?.runDuration.observe(
         { outcome: "completed" },
@@ -203,14 +227,45 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       );
       throw error;
     } finally {
+      if (this.#activePiRunners.get(command.payload.commandId) === slot) {
+        this.#activePiRunners.delete(command.payload.commandId);
+      }
+      slot.reject(
+        new PiTurnError(
+          "steer_target_unavailable",
+          "Pi Run ended before the steer could be delivered",
+          false,
+        ),
+      );
       this.#metrics?.activeRuns.dec();
     }
+  }
+
+  async steer(targetCommandId: string, text: string): Promise<void> {
+    const slot = this.#activePiRunners.get(targetCommandId);
+    if (slot === undefined) {
+      throw new PiTurnError(
+        "steer_target_unavailable",
+        "Pi Run is not active on this Worker",
+        false,
+      );
+    }
+    const runner = await slot.ready;
+    if (this.#activePiRunners.get(targetCommandId) !== slot) {
+      throw new PiTurnError(
+        "steer_target_unavailable",
+        "Pi Run ended before the steer could be delivered",
+        false,
+      );
+    }
+    await runner.steer(text);
   }
 
   async #run(
     command: ExecuteTurnCommandMessage,
     publishEvent: PiEventPublisher,
     signal: AbortSignal,
+    onPiRunnerReady: (runner: PiSdkTurnRunner) => void,
   ): Promise<PiTurnResult> {
     const downstreamTrace = activeTraceCarrier() ?? command.payload.traceContext;
     const trustedWorkspace = await stat(this.#trustedWorkspaceDirectory).catch(() => undefined);
@@ -573,6 +628,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           ? {}
           : { onIsolationFailure: this.#onPiSdkIsolationFailure }),
       });
+      onPiRunnerReady(runner);
       const result = await runner.run(command, publishEvent, signal);
       completedSuccessfully = true;
       return result;

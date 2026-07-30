@@ -17,6 +17,7 @@ import {
 import { EnvironmentRuntimeSnapshotSchema } from "./environment.ts";
 
 export const TWO_PHASE_COMMAND_CAPABILITY = "command.two_phase.v1";
+export const PI_STEER_CAPABILITY = "pi.steer.v1";
 
 const WireEnvelopeProperties = {
   protocolVersion: Type.Literal(1),
@@ -226,6 +227,22 @@ export const CancelTurnCommandMessageSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const SteerTurnCommandMessageSchema = Type.Object(
+  {
+    ...WireEnvelopeProperties,
+    type: Type.Literal("command.turn.steer"),
+    payload: Type.Object(
+      {
+        ...CommandIdentityProperties,
+        targetCommandId: UuidSchema,
+        text: Type.String({ minLength: 1, maxLength: 100_000 }),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const ResolveApprovalCommandMessageSchema = Type.Object(
   {
     ...WireEnvelopeProperties,
@@ -336,6 +353,15 @@ const CompletedCancellationCommandResultPayloadSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const CompletedSteerCommandResultPayloadSchema = Type.Object(
+  {
+    ...CommandResultIdentityProperties,
+    commandKind: Type.Literal("turn.steer"),
+    status: Type.Literal("completed"),
+  },
+  { additionalProperties: false },
+);
+
 const CancelledExecuteCommandResultPayloadSchema = Type.Object(
   {
     ...CommandResultIdentityProperties,
@@ -350,7 +376,11 @@ const CancelledExecuteCommandResultPayloadSchema = Type.Object(
 const FailedCommandResultPayloadSchema = Type.Object(
   {
     ...CommandResultIdentityProperties,
-    commandKind: Type.Union([Type.Literal("turn.execute"), Type.Literal("turn.cancel")]),
+    commandKind: Type.Union([
+      Type.Literal("turn.execute"),
+      Type.Literal("turn.cancel"),
+      Type.Literal("turn.steer"),
+    ]),
     status: Type.Literal("failed"),
     code: Type.String({
       minLength: 1,
@@ -370,6 +400,7 @@ export const CommandResultMessageSchema = Type.Object(
     payload: Type.Union([
       CompletedExecuteCommandResultPayloadSchema,
       CompletedCancellationCommandResultPayloadSchema,
+      CompletedSteerCommandResultPayloadSchema,
       CancelledExecuteCommandResultPayloadSchema,
       FailedCommandResultPayloadSchema,
     ]),
@@ -512,6 +543,7 @@ export const ControlToSupervisorMessageSchema = Type.Union([
   SupervisorRegisteredMessageSchema,
   ExecuteTurnCommandMessageSchema,
   CancelTurnCommandMessageSchema,
+  SteerTurnCommandMessageSchema,
   ResolveApprovalCommandMessageSchema,
   CommandCommitMessageSchema,
   CommandReleaseMessageSchema,
@@ -524,6 +556,7 @@ export type SupervisorRegisterMessage = Static<typeof SupervisorRegisterMessageS
 export type SupervisorRegisteredMessage = Static<typeof SupervisorRegisteredMessageSchema>;
 export type ExecuteTurnCommandMessage = Static<typeof ExecuteTurnCommandMessageSchema>;
 export type CancelTurnCommandMessage = Static<typeof CancelTurnCommandMessageSchema>;
+export type SteerTurnCommandMessage = Static<typeof SteerTurnCommandMessageSchema>;
 export type ResolveApprovalCommandMessage = Static<typeof ResolveApprovalCommandMessageSchema>;
 export type CommandAckMessage = Static<typeof CommandAckMessageSchema>;
 export type CommandCommitMessage = Static<typeof CommandCommitMessageSchema>;
@@ -548,6 +581,7 @@ export type ControlToSupervisorMessage =
   | SupervisorRegisteredMessage
   | ExecuteTurnCommandMessage
   | CancelTurnCommandMessage
+  | SteerTurnCommandMessage
   | ResolveApprovalCommandMessage
   | CommandCommitMessage
   | CommandReleaseMessage
