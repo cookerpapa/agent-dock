@@ -47,7 +47,7 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - explicit Tool `UNKNOWN` UX for ambiguous side effects;
 - multi-node failure injection for Worker/node loss;
 - object/checkpoint orphan garbage collection dashboards;
-- measured Session-affinity hit rate and queue-delay tuning;
+- shared-queue Worker saturation and tenant-fairness measurements;
 - sustained load evidence at the target Worker/Cube capacity.
 
 ## Next product milestone

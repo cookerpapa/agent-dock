@@ -6,10 +6,8 @@ import {
   type DispatchNextResult,
   OutboxDispatcher,
 } from "@agent-dock/control-plane/outbox-dispatcher";
-import { PostgresTemporalWorkerAffinity } from "@agent-dock/control-plane/temporal-worker-affinity";
 import type { Database } from "@agent-dock/database";
 import {
-  temporalWorkerAffinityTaskQueue,
   type TemporalRunActivityResult,
   type TemporalRunWorkflowInput,
   validateTemporalRunWorkflowInput,
@@ -29,8 +27,6 @@ export type TemporalPiWorkerOptions = {
   namespace: string;
   taskQueue: string;
   identity: string;
-  sandboxId: string;
-  affinityTtlMs: number;
   maximumConcurrentRuns: number;
   workerDeployment?: {
     deploymentName: string;
@@ -68,9 +64,6 @@ export class TemporalPiWorker {
   readonly #namespace: string;
   readonly #taskQueue: string;
   readonly #identity: string;
-  readonly #sandboxId: string;
-  readonly #affinityTaskQueue: string;
-  readonly #affinityTtlMs: number;
   readonly #maximumConcurrentRuns: number;
   readonly #workerDeployment:
     | {
@@ -80,12 +73,9 @@ export class TemporalPiWorker {
     | undefined;
   readonly #executionDispatcher: OutboxDispatcher;
   readonly #cancellationDispatcher: CancellationDispatcher;
-  readonly #workerAffinity: PostgresTemporalWorkerAffinity;
   #state: TemporalPiWorkerState = "idle";
   #connection: NativeConnection | undefined;
   #sharedWorker: Worker | undefined;
-  #affinityWorker: Worker | undefined;
-  #activeExecutions = 0;
   #run: Promise<void> | undefined;
 
   constructor(options: TemporalPiWorkerOptions) {
@@ -94,9 +84,6 @@ export class TemporalPiWorker {
     this.#namespace = bounded(options.namespace, "namespace", 255);
     this.#taskQueue = bounded(options.taskQueue, "taskQueue", 255);
     this.#identity = bounded(options.identity, "identity", 255);
-    this.#sandboxId = bounded(options.sandboxId, "sandboxId", 36);
-    this.#affinityTaskQueue = temporalWorkerAffinityTaskQueue(this.#sandboxId);
-    this.#affinityTtlMs = positiveInteger(options.affinityTtlMs, "affinityTtlMs");
     this.#maximumConcurrentRuns = positiveInteger(
       options.maximumConcurrentRuns,
       "maximumConcurrentRuns",
@@ -114,9 +101,6 @@ export class TemporalPiWorker {
           };
     this.#executionDispatcher = options.executionDispatcher;
     this.#cancellationDispatcher = options.cancellationDispatcher;
-    this.#workerAffinity = new PostgresTemporalWorkerAffinity({
-      database: this.#database,
-    });
   }
 
   get state(): TemporalPiWorkerState {
@@ -146,7 +130,7 @@ export class TemporalPiWorker {
           import.meta.resolve("@agent-dock/temporal-orchestration/workflows"),
         ),
         activities: {
-          executeRunCommand: (input: TemporalRunWorkflowInput) => this.#execute(input, "shared"),
+          executeRunCommand: (input: TemporalRunWorkflowInput) => this.#execute(input),
         },
         identity: this.#identity,
         ...versioningOptions,
@@ -154,24 +138,10 @@ export class TemporalPiWorker {
         maxConcurrentWorkflowTaskExecutions: Math.max(8, this.#maximumConcurrentRuns * 4),
         shutdownGraceTime: "30 seconds",
       });
-      this.#affinityWorker = await Worker.create({
-        connection: this.#connection,
-        namespace: this.#namespace,
-        taskQueue: this.#affinityTaskQueue,
-        activities: {
-          executeRunCommand: (input: TemporalRunWorkflowInput) => this.#execute(input, "affinity"),
-        },
-        identity: this.#identity,
-        ...versioningOptions,
-        maxConcurrentActivityTaskExecutions: this.#maximumConcurrentRuns,
-        shutdownGraceTime: "30 seconds",
-      });
       this.#state = "running";
-      this.#run = Promise.all([this.#sharedWorker.run(), this.#affinityWorker.run()])
-        .then(() => undefined)
-        .finally(() => {
-          if (this.#state !== "stopping") this.#state = "stopped";
-        });
+      this.#run = this.#sharedWorker.run().finally(() => {
+        if (this.#state !== "stopping") this.#state = "stopped";
+      });
     } catch (error: unknown) {
       await this.#connection?.close().catch(() => undefined);
       this.#state = "stopped";
@@ -187,36 +157,13 @@ export class TemporalPiWorker {
     if (this.#state === "stopped") return;
     this.#state = "stopping";
     this.#sharedWorker?.shutdown();
-    this.#affinityWorker?.shutdown();
     await this.#run;
     await this.#connection?.close().catch(() => undefined);
     this.#state = "stopped";
   }
 
-  async #execute(
-    rawInput: TemporalRunWorkflowInput,
-    route: "shared" | "affinity",
-  ): Promise<TemporalRunActivityResult> {
+  async #execute(rawInput: TemporalRunWorkflowInput): Promise<TemporalRunActivityResult> {
     const input = validateTemporalRunWorkflowInput(rawInput);
-    if (route === "affinity") {
-      if (this.#activeExecutions >= this.#maximumConcurrentRuns) {
-        await this.#releaseAffinity(input);
-        return this.#affinityMiss(input, "busy");
-      }
-      const claim = await this.#workerAffinity.claim(input, this.#sandboxId);
-      if (claim !== "claimed") return this.#affinityMiss(input, claim);
-    }
-    if (this.#activeExecutions >= this.#maximumConcurrentRuns) {
-      return route === "affinity"
-        ? this.#affinityMiss(input, "busy")
-        : {
-            status: "deferred",
-            runId: input.runId,
-            commandId: input.commandId,
-            retryAfterMs: DEFAULT_DEFERRED_RETRY_MS,
-          };
-    }
-    this.#activeExecutions += 1;
     const context = Context.current();
     let cancellation: Promise<CancellationDispatchNextResult> | undefined;
     const beginCancellation = (): void => {
@@ -244,34 +191,11 @@ export class TemporalPiWorker {
         await cancellation;
       }
       const activityResult = await this.#activityResult(input, result);
-      if (activityResult.status === "completed") {
-        await this.#workerAffinity
-          .remember(input, this.#sandboxId, this.#affinityTtlMs)
-          .catch(() => undefined);
-      }
       return activityResult;
     } finally {
-      this.#activeExecutions -= 1;
       clearInterval(heartbeatTimer);
       context.cancellationSignal.removeEventListener("abort", beginCancellation);
     }
-  }
-
-  #affinityMiss(
-    input: TemporalRunWorkflowInput,
-    reason: "busy" | "stale" | "wrong_worker",
-  ): TemporalRunActivityResult {
-    return {
-      status: "affinity_miss",
-      runId: input.runId,
-      commandId: input.commandId,
-      reason,
-    };
-  }
-
-  async #releaseAffinity(input: TemporalRunWorkflowInput): Promise<void> {
-    if (input.affinity === undefined) return;
-    await this.#workerAffinity.release(input.affinity.reservationId).catch(() => undefined);
   }
 
   async #cancelTarget(targetCommandId: string): Promise<CancellationDispatchNextResult> {

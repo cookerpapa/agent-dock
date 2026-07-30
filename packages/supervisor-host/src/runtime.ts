@@ -410,8 +410,6 @@ export class SupervisorHostRuntime {
         namespace: this.#config.temporalNamespace,
         taskQueue: this.#config.temporalTaskQueue,
         identity: `${identity.supervisorId}/${identity.bootId}`,
-        sandboxId: identity.sandboxId,
-        affinityTtlMs: this.#config.checkpointReadCacheTtlMs,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
         ...(this.#config.temporalWorkerDeploymentName === undefined ||
         this.#config.temporalWorkerBuildId === undefined

@@ -57,13 +57,12 @@ mutation are Activities.
 
 The Worker pool uses:
 
-- a common Activity Task Queue for fairness/fallback;
-- capacity-one Worker-specific queues for soft Session affinity;
+- one common Activity Task Queue with tenant fairness;
 - durable timers and retry policy;
 - explicit cancellation.
 
-Affinity is an optimization. Any Worker can restore a Session and produce the
-correct result.
+Any Worker can restore a Session and produce the correct result. The measured
+checkpoint size does not justify a second Worker-specific routing layer.
 
 ### Trusted Pi Worker
 

@@ -298,10 +298,6 @@ export {
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
 export {
-  PostgresTemporalWorkerAffinity,
-  type PostgresTemporalWorkerAffinityOptions,
-} from "./temporal-worker-affinity.ts";
-export {
   SessionEventHub,
   SessionEventSubscription,
   type SessionEventWake,
