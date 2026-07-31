@@ -56,21 +56,19 @@ The following capabilities must remain working throughout the optimization:
 - explicit handling for interrupted/failed model output;
 - Workspace checkpoint, fork, rollback and recovery behavior.
 
-### Advanced capabilities
+### Optional research capabilities
 
-These are intentional capabilities, even where the main UI still needs a
-clearer product entry point:
+Candidate Race, Attempt rewind, immutable Review Bundles, model governance,
+usage/context inspection and Project Environment history remain available only
+when `AGENT_DOCK_ADVANCED_MODULES_ENABLED=true`. The default Control Plane does
+not instantiate their services or register their routes. GitHub Gateway is a
+separate Compose profile.
 
-- Candidate Race and parallel candidate evaluation;
-- Attempt rewind/supersession;
-- immutable Review Bundles;
-- Artifact and test evidence;
-- GitHub App/Gateway delivery;
-- Workspace version comparison, fork and rollback.
-
-They may be moved behind an explicit optional feature/profile, but their code,
-API and data model must not be deleted merely because the current main chat UI
-does not expose the entire workflow.
+The unfinished Web/API product surfaces for Preview, structured Diff, Artifact
+download, test-result navigation, Fork/Rollback, GitHub App/PR delivery and
+organization/RBAC/audit search were explicitly removed from the core product.
+Their underlying correctness metadata may still be used internally by
+checkpointing, Candidate Race and evaluation code.
 
 ## Explicit product choices not to reverse
 
@@ -85,8 +83,8 @@ removed or declined:
 - no per-tool approval system unless the product decision changes later;
 - no arbitrary user-controlled Pod, VM or Cube specification.
 
-Backend Patch data may still exist for recovery, Review Bundles and GitHub
-delivery. Removing a UI panel does not imply deleting correctness metadata.
+Backend Patch and test data may still exist for recovery, Review Bundles and
+evaluation. Removing a UI surface does not imply deleting correctness metadata.
 
 ## Refactors that may proceed without removing behavior
 
@@ -176,7 +174,7 @@ same-host benchmark. See
 The following are not authorized by this document:
 
 - removing Worker affinity;
-- removing Candidate Race, Rewind, Review Bundle, Artifact or GitHub APIs;
+- removing Candidate Race, Rewind or Review Bundle from the optional module;
 - deleting database tables for an existing capability;
 - removing a package or service rather than making it optional;
 - changing the `full` Sandbox public-egress product choice;

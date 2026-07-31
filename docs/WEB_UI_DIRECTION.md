@@ -47,12 +47,13 @@ The product page adds:
 Raw Pi runtime events, lease secrets, credential references, and provider tokens
 must never appear in the DOM or browser developer logs.
 
-## Deferred behavior
+## Deliberately omitted behavior
 
-Automatic next-question loops, arbitrary provider/model URLs, branch deletion,
-live execution previews, and advanced session-tree editing remain deferred.
-Fork, rollback, archive, bounded model selection, and GitHub PR delivery now
-exist through explicit product operations.
+The current product does not expose Web Preview, structured Diff, Artifact or
+test-result navigation, Fork/Rollback, GitHub App/PR delivery, or organization,
+RBAC and audit-search pages. Their unfinished routes and browser client methods
+were removed rather than presented as a partial product. Conversation archive,
+delete, Workspace browsing and active Pi steer remain supported.
 
 ## Phase 1 visual acceptance
 

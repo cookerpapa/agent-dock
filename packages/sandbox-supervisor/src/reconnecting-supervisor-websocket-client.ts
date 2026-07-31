@@ -3,7 +3,7 @@ import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool
 import {
   SupervisorWebSocketClient,
   SupervisorWebSocketClientError,
-  type SupervisorCommandRuntime,
+  type SupervisorControlRuntime,
   type SupervisorWebSocketClientClose,
   type SupervisorWebSocketClientOptions,
 } from "./supervisor-websocket-client.ts";
@@ -14,10 +14,10 @@ const DEFAULT_RECONNECT_BACKOFF_MULTIPLIER = 2;
 const DEFAULT_STABLE_CONNECTION_MS = 30_000;
 const DEFAULT_ASSIGNMENT_TEARDOWN_TIMEOUT_MS = 30_000;
 
-export interface ReconnectingSupervisorCommandRuntime extends SupervisorCommandRuntime {
+export interface ReconnectingSupervisorControlRuntime extends SupervisorControlRuntime {
   waitUntilAssignmentsSettled(): Promise<void>;
   recoverPendingEvents(
-    publishEvent: Parameters<NonNullable<SupervisorCommandRuntime["recoverPendingEvents"]>>[0],
+    publishEvent: Parameters<NonNullable<SupervisorControlRuntime["recoverPendingEvents"]>>[0],
   ): Promise<SupervisorEventSpoolRecoveryResult>;
 }
 
@@ -38,7 +38,7 @@ export type ReconnectingSupervisorWebSocketClientOptions = Omit<
   SupervisorWebSocketClientOptions,
   "runtime"
 > & {
-  runtime: ReconnectingSupervisorCommandRuntime;
+  runtime: ReconnectingSupervisorControlRuntime;
   initialReconnectDelayMs?: number;
   maxReconnectDelayMs?: number;
   reconnectBackoffMultiplier?: number;
@@ -110,7 +110,7 @@ function safeFailure(error: unknown): { code: string; message: string; retryable
 
 export class ReconnectingSupervisorWebSocketClient {
   readonly #clientOptions: SupervisorWebSocketClientOptions;
-  readonly #runtime: ReconnectingSupervisorCommandRuntime;
+  readonly #runtime: ReconnectingSupervisorControlRuntime;
   readonly #initialReconnectDelayMs: number;
   readonly #maxReconnectDelayMs: number;
   readonly #reconnectBackoffMultiplier: number;

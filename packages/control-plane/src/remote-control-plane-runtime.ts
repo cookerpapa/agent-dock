@@ -15,9 +15,9 @@ import {
 } from "./supervisor-maintenance-runtime.ts";
 import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import {
-  SupervisorCommandRouter,
-  type SupervisorCommandRouterOptions,
-} from "./supervisor-command-router.ts";
+  WorkerControlChannelRouter,
+  type WorkerControlChannelRouterOptions,
+} from "./worker-control-channel.ts";
 import {
   SupervisorConnectionManager,
   type SupervisorBootIdentity,
@@ -37,11 +37,11 @@ type ConnectionManagerConfiguration = Omit<
   "database" | "controlPlaneInstanceId" | "ownerBoundary" | "assignmentRetirerFactory"
 >;
 
-type CommandRouterConfiguration = Omit<SupervisorCommandRouterOptions, "eventIngestor">;
+type ControlChannelConfiguration = Omit<WorkerControlChannelRouterOptions, "eventIngestor">;
 
 type GatewayConfiguration = Omit<
   SupervisorWebSocketGatewayOptions,
-  "manager" | "authorizer" | "commandRouter"
+  "manager" | "authorizer" | "controlChannelRouter"
 >;
 
 type MaintenanceConfiguration = Omit<SupervisorMaintenanceRuntimeOptions, "maintenanceRunner">;
@@ -58,7 +58,7 @@ export type RemoteControlPlaneRuntimeOptions = Omit<
   supervisorProvisioningGateway?: SupervisorProvisioningGateway;
   productionHttpGateway?: ProductionHttpGateway;
   connectionManager?: ConnectionManagerConfiguration;
-  commandRouter?: CommandRouterConfiguration;
+  controlChannelRouter?: ControlChannelConfiguration;
   gateway?: GatewayConfiguration;
   maintenance?: MaintenanceConfiguration;
 };
@@ -69,7 +69,7 @@ export class RemoteControlPlaneRuntime {
   readonly application: NestFastifyApplication;
   readonly eventHub: SessionEventHub;
   readonly eventStore: DurableEventStore;
-  readonly commandRouter: SupervisorCommandRouter;
+  readonly controlChannelRouter: WorkerControlChannelRouter;
   readonly connectionManager: SupervisorConnectionManager;
   readonly gateway: SupervisorWebSocketGateway;
   readonly maintenance: SupervisorMaintenanceRuntime;
@@ -80,7 +80,7 @@ export class RemoteControlPlaneRuntime {
     application: NestFastifyApplication;
     eventHub: SessionEventHub;
     eventStore: DurableEventStore;
-    commandRouter: SupervisorCommandRouter;
+    controlChannelRouter: WorkerControlChannelRouter;
     connectionManager: SupervisorConnectionManager;
     gateway: SupervisorWebSocketGateway;
     maintenance: SupervisorMaintenanceRuntime;
@@ -88,7 +88,7 @@ export class RemoteControlPlaneRuntime {
     this.application = options.application;
     this.eventHub = options.eventHub;
     this.eventStore = options.eventStore;
-    this.commandRouter = options.commandRouter;
+    this.controlChannelRouter = options.controlChannelRouter;
     this.connectionManager = options.connectionManager;
     this.gateway = options.gateway;
     this.maintenance = options.maintenance;
@@ -150,8 +150,8 @@ export async function createRemoteControlPlaneRuntime(
       ? {}
       : { eventNotificationPublisher: options.sessionEventNotifications }),
   });
-  const commandRouter = new SupervisorCommandRouter({
-    ...options.commandRouter,
+  const controlChannelRouter = new WorkerControlChannelRouter({
+    ...options.controlChannelRouter,
     eventIngestor: eventStore,
   });
   const connectionManager = new SupervisorConnectionManager({
@@ -173,7 +173,7 @@ export async function createRemoteControlPlaneRuntime(
     ...options.gateway,
     manager: connectionManager,
     authorizer: options.supervisorAuthorizer,
-    commandRouter,
+    controlChannelRouter,
   });
   const maintenance = new SupervisorMaintenanceRuntime({
     ...options.maintenance,
@@ -199,9 +199,6 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.productionHttpGateway === undefined
         ? {}
         : { productionHttpGateway: options.productionHttpGateway }),
-      ...(options.githubWebhookGateway === undefined
-        ? {}
-        : { githubWebhookGateway: options.githubWebhookGateway }),
       ...(options.publicRegistration === undefined
         ? {}
         : { publicRegistration: options.publicRegistration }),
@@ -231,7 +228,9 @@ export async function createRemoteControlPlaneRuntime(
       ...(options.providerSnapshotReader === undefined
         ? {}
         : { providerSnapshotReader: options.providerSnapshotReader }),
-      ...(options.githubGateway === undefined ? {} : { githubGateway: options.githubGateway }),
+      ...(options.advancedModulesEnabled === undefined
+        ? {}
+        : { advancedModulesEnabled: options.advancedModulesEnabled }),
     });
   } catch (error: unknown) {
     gateway.shutdown();
@@ -242,7 +241,7 @@ export async function createRemoteControlPlaneRuntime(
     application,
     eventHub,
     eventStore,
-    commandRouter,
+    controlChannelRouter,
     connectionManager,
     gateway,
     maintenance,

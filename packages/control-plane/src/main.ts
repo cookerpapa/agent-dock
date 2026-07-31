@@ -1,5 +1,4 @@
 import { createDatabase } from "@agent-dock/database";
-import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import { operationalLog, startServiceObservability } from "@agent-dock/observability";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
@@ -22,7 +21,6 @@ import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
 import { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
-import { GitHubWebhookIngestGateway } from "./github-webhook-gateway.ts";
 import {
   createRemoteControlPlaneRuntime,
   type RemoteControlPlaneRuntime,
@@ -130,14 +128,6 @@ export async function startControlPlane(): Promise<void> {
       }
       return client;
     };
-    const githubGateway =
-      config.githubGatewayBaseUrl === undefined || config.githubGatewayServiceToken === undefined
-        ? undefined
-        : new GitHubGatewayClient({
-            baseUrl: config.githubGatewayBaseUrl,
-            serviceToken: config.githubGatewayServiceToken,
-            allowInsecureHttp: config.allowInsecureInternalHttp,
-          });
     const snapshotMaterializer = new SandboxManagerClient({
       baseUrl: config.sandboxManagerBaseUrl,
       serviceToken: config.sandboxMaterializerToken,
@@ -202,15 +192,7 @@ export async function startControlPlane(): Promise<void> {
           };
         },
       },
-      ...(githubGateway === undefined ? {} : { githubGateway }),
-      ...(config.githubGatewayServiceToken === undefined
-        ? {}
-        : {
-            githubWebhookGateway: new GitHubWebhookIngestGateway({
-              database,
-              serviceToken: config.githubGatewayServiceToken,
-            }),
-          }),
+      advancedModulesEnabled: config.advancedModulesEnabled,
       maintenance: {
         onActivity: (activity) =>
           operationalLog({

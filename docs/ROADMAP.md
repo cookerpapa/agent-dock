@@ -39,6 +39,14 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   `/workspace` while preserving one Kopia checkpoint envelope.
 - [x] Move AgentDock's synthetic Git baseline and Patch calculation into the
   trusted Volume envelope so `/workspace` contains only user data.
+- [x] Preserve one useful Bash preview plus a recoverable full-output Artifact.
+- [x] Extract shared execution primitives into `@agent-dock/runtime-core`.
+- [x] Narrow the Supervisor WebSocket to the Worker Control Channel; Temporal
+  Activities now own Run execution and cancellation.
+- [x] Add bounded large-file ranged reads and optimistic-digest, atomic-replace
+  edits.
+- [x] Keep research APIs behind an explicit optional module and remove the
+  unfinished product routes/client workflows.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
@@ -49,15 +57,6 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - object/checkpoint orphan garbage collection dashboards;
 - measured Session-affinity hit rate and queue-delay tuning;
 - sustained load evidence at the target Worker/Cube capacity.
-
-## Next product milestone
-
-- structured Git diff/file edit view;
-- artifact downloads and test-result navigation;
-- explicit Workspace fork/rollback UX;
-- Preview lifecycle for Web applications;
-- GitHub App delivery through a trusted adapter;
-- organization/RBAC administration and audit search.
 
 ## Release quality
 

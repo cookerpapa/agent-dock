@@ -521,6 +521,7 @@ beforeAll(async () => {
     database,
     tenantId: IDS.tenant,
     defaultModelProfileId: IDS.profile,
+    advancedModulesEnabled: true,
     ...(sessionEventNotifications === undefined ? {} : { sessionEventNotifications }),
   });
   await application.listen(0, "127.0.0.1");
@@ -537,6 +538,27 @@ afterAll(async () => {
 });
 
 describe.sequential("single-user durable turn intake API", () => {
+  it("keeps research APIs outside the default core product", async () => {
+    const coreApplication = await createControlPlaneApplication({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+    });
+    try {
+      const coreHttp = coreApplication.getHttpAdapter().getInstance() as FastifyInstance;
+      const response = await coreHttp.inject({ method: "GET", url: "/v1/usage" });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({
+        error: {
+          code: "route_not_found",
+          message: "The requested API route was not found",
+        },
+      });
+    } finally {
+      await coreApplication.close();
+    }
+  });
+
   it("creates a project and workspace atomically, then creates a cold session", async () => {
     const projectResponse = await http.inject({
       method: "POST",

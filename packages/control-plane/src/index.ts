@@ -167,9 +167,9 @@ export {
   type LocalSupervisorExecutionBackendOptions,
 } from "@agent-dock/runtime-core/local-supervisor-execution-backend";
 export {
-  RemoteSupervisorExecutionBackend,
-  type RemoteSupervisorExecutionBackendOptions,
-} from "./remote-supervisor-execution-backend.ts";
+  RemoteSupervisorSteerBackend,
+  type RemoteSupervisorSteerBackendOptions,
+} from "./remote-supervisor-steer-backend.ts";
 
 export {
   TurnSteerBackendError,
@@ -239,13 +239,13 @@ export {
 } from "./supervisor-connection-manager.ts";
 export {
   TWO_PHASE_COMMAND_CAPABILITY,
-  SupervisorCommandRouter,
-  SupervisorCommandTransportError,
-  type RemoteSupervisorCommandTransport,
-  type SupervisorCommandConnection,
-  type SupervisorCommandRouterOptions,
-  type SupervisorRemoteCommand,
-} from "./supervisor-command-router.ts";
+  WorkerControlChannelRouter,
+  WorkerControlChannelError,
+  type RemoteWorkerControlTransport,
+  type WorkerControlConnection,
+  type WorkerControlChannelRouterOptions,
+  type WorkerControlCommand,
+} from "./worker-control-channel.ts";
 export {
   HashedBearerSupervisorAuthorizer,
   SUPERVISOR_SOCKET_CLOSE,
@@ -253,7 +253,6 @@ export {
   SupervisorUpgradeAuthorizationError,
   SupervisorWebSocketGateway,
   type HashedBearerSupervisorAuthorizerOptions,
-  type RemoteSupervisorDispatchBinding,
   type SupervisorUpgradeAuthorizer,
   type SupervisorUpgradeRequest,
   type SupervisorWebSocketGatewayOptions,

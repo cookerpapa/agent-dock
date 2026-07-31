@@ -7,13 +7,10 @@ provider credential.
 
 ## Behavior
 
-- creates the sample project/session and durably submits Java repair turns;
+- creates or selects a named Workspace and durably submits Pi turns;
 - streams ordered assistant/tool/approval/terminal events;
 - reconnects with explicit `Last-Event-ID` and suppresses replay duplicates;
 - exposes cancellation only after the execution start event;
-- renders the bounded final unified diff;
-- displays session, turn, connection, sandbox, and sequence state in text as
-  well as color;
 - provides a keyboard-resizable desktop tree and mobile sidebar overlay.
 - verifies a pasted tenant credential through `/v1/identity`, displays the
   tenant/user/role, keeps the token only in memory, clears session state on
@@ -24,14 +21,10 @@ provider credential.
 - lists only the authenticated tenant's recent conversations, loads bounded
   prompt history, and resumes the matching durable SSE suffix when a user
   switches sessions;
-- exposes a Session inspector for immutable Workspace history, escaped file and
-  Artifact previews, structured compare, Run/Attempt transitions, tests,
-  usage/context, and owner-only operational activity;
-- supports fork, rollback, archive, and retry-as-new-Run through idempotent
-  public API operations;
-- supports exact-commit GitHub App repository selection and explicit
-  branch/commit/Check/Pull Request delivery when an operator configures the
-  trusted GitHub Gateway.
+- exposes an expandable committed Workspace directory and inert source-file
+  preview;
+- supports conversation archive/delete and active Pi steer through idempotent
+  public API operations.
 
 All API resources and events are validated with `@agent-dock/protocol`. Markdown
 raw HTML is disabled by default, remote images are replaced with inert labels,
@@ -66,7 +59,8 @@ npm run test --workspace @agent-dock/web-ui
 ```
 
 Settled checkpoints permit later turns on the same Session and restore Pi JSONL
-plus the bounded Workspace into a new disposable Sandbox. Recent discovery
+plus the Workspace into the Session's Cube activation. Recent discovery
 survives a page reload after the user presents the token again. Arbitrary Git
-URLs, executable live previews, project extensions, public identity recovery,
-and Internet-facing anonymous SaaS remain excluded.
+URLs, executable live previews, Diff/Artifact/test navigation, Fork/Rollback,
+GitHub PR delivery, organization/RBAC administration, public identity recovery,
+and Internet-facing anonymous SaaS remain excluded from the Web product.

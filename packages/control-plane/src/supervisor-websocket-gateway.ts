@@ -11,10 +11,10 @@ import type { TLSSocket } from "node:tls";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import {
-  SupervisorCommandTransportError,
-  type SupervisorCommandConnection,
-  type SupervisorCommandRouter,
-} from "./supervisor-command-router.ts";
+  WorkerControlChannelError,
+  type WorkerControlConnection,
+  type WorkerControlChannelRouter,
+} from "./worker-control-channel.ts";
 import {
   SupervisorConnectionManagerError,
   type SupervisorBootIdentity,
@@ -22,8 +22,7 @@ import {
 } from "./supervisor-connection-manager.ts";
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
 import type { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
-import { RemoteSupervisorExecutionBackend } from "./remote-supervisor-execution-backend.ts";
-import type { SupervisorDispatchAffinity } from "./supervisor-dispatch-affinity.ts";
+import { RemoteSupervisorSteerBackend } from "./remote-supervisor-steer-backend.ts";
 
 export const SUPERVISOR_WEBSOCKET_PATH = "/internal/v1/supervisor";
 export const SUPERVISOR_SOCKET_CLOSE = {
@@ -57,16 +56,7 @@ export type SupervisorWebSocketGatewayOptions = {
   maxPendingFrames?: number;
   maxBufferedSendBytes?: number;
   registrationTimeoutMs?: number;
-  commandRouter?: SupervisorCommandRouter;
-};
-
-export type RemoteSupervisorDispatchBinding = {
-  sandboxId: string;
-  connectionId: string;
-  maxConcurrentSessions: number;
-  supervisorAffinity: SupervisorDispatchAffinity;
-  backend: RemoteSupervisorExecutionBackend;
-  leaseCoordinator: SessionLeaseCoordinator;
+  controlChannelRouter?: WorkerControlChannelRouter;
 };
 
 export class SupervisorUpgradeAuthorizationError extends Error {
@@ -195,8 +185,7 @@ type SocketContext = {
   closed: boolean;
   processing: Promise<void>;
   registrationTimer: NodeJS.Timeout | undefined;
-  commandConnection: SupervisorCommandConnection | undefined;
-  maxConcurrentSessions: number | undefined;
+  controlConnection: WorkerControlConnection | undefined;
 };
 
 function closeSocket(socket: WebSocket, code: number, reason: string): void {
@@ -217,7 +206,7 @@ export class SupervisorWebSocketGateway {
   readonly #maxPendingFrames: number;
   readonly #maxBufferedSendBytes: number;
   readonly #registrationTimeoutMs: number;
-  readonly #commandRouter: SupervisorCommandRouter | undefined;
+  readonly #controlChannelRouter: WorkerControlChannelRouter | undefined;
   readonly #authorizedRequests = new WeakMap<FastifyRequest, SupervisorBootIdentity>();
   readonly #activeBySandbox = new Map<string, SocketContext>();
   readonly #contexts = new Set<SocketContext>();
@@ -246,7 +235,7 @@ export class SupervisorWebSocketGateway {
       options.registrationTimeoutMs ?? DEFAULT_REGISTRATION_TIMEOUT_MS,
       "registrationTimeoutMs",
     );
-    this.#commandRouter = options.commandRouter;
+    this.#controlChannelRouter = options.controlChannelRouter;
   }
 
   get activeConnectionCount(): number {
@@ -269,81 +258,19 @@ export class SupervisorWebSocketGateway {
     return this.#manager.leaseCoordinator(context.registeredConnectionId, context.authority);
   }
 
-  createRemoteExecutionBackend(sandboxId: string): RemoteSupervisorExecutionBackend {
-    if (this.#commandRouter === undefined) {
+  createRemoteSteerBackend(sandboxId: string): RemoteSupervisorSteerBackend {
+    if (this.#controlChannelRouter === undefined) {
       throw new SupervisorConnectionManagerError(
         "supervisor_command_router_unavailable",
-        "Supervisor command router is unavailable",
+        "Worker control channel router is unavailable",
         false,
       );
     }
-    return new RemoteSupervisorExecutionBackend({
+    return new RemoteSupervisorSteerBackend({
       sandboxId,
-      transport: this.#commandRouter,
+      transport: this.#controlChannelRouter,
       leaseCoordinatorProvider: () => this.currentLeaseCoordinator(sandboxId),
     });
-  }
-
-  async createRemoteDispatchBinding(sandboxId: string): Promise<RemoteSupervisorDispatchBinding> {
-    const context = this.#activeBySandbox.get(sandboxId);
-    if (
-      context === undefined ||
-      context.closed ||
-      context.registeredConnectionId === undefined ||
-      context.maxConcurrentSessions === undefined
-    ) {
-      throw new SupervisorConnectionManagerError(
-        "supervisor_connection_unavailable",
-        "Supervisor connection is unavailable",
-        true,
-      );
-    }
-    const leaseCoordinator = await this.#manager.leaseCoordinator(
-      context.registeredConnectionId,
-      context.authority,
-    );
-    if (
-      context.closed ||
-      this.#activeBySandbox.get(sandboxId) !== context ||
-      context.registeredConnectionId === undefined ||
-      context.maxConcurrentSessions === undefined
-    ) {
-      throw new SupervisorConnectionManagerError(
-        "supervisor_connection_unavailable",
-        "Supervisor connection is unavailable",
-        true,
-      );
-    }
-    return {
-      sandboxId,
-      connectionId: context.registeredConnectionId,
-      maxConcurrentSessions: context.maxConcurrentSessions,
-      supervisorAffinity: {
-        sandboxId,
-        controlPlaneInstanceId: this.#manager.controlPlaneInstanceId,
-      },
-      backend: this.createRemoteExecutionBackend(sandboxId),
-      leaseCoordinator,
-    };
-  }
-
-  async listRemoteDispatchBindings(): Promise<readonly RemoteSupervisorDispatchBinding[]> {
-    if (this.#shuttingDown) return [];
-    const bindings: RemoteSupervisorDispatchBinding[] = [];
-    for (const sandboxId of [...this.#activeBySandbox.keys()].sort()) {
-      try {
-        bindings.push(await this.createRemoteDispatchBinding(sandboxId));
-      } catch (error: unknown) {
-        if (
-          error instanceof SupervisorConnectionManagerError &&
-          (error.code === "stale_connection" || error.code === "supervisor_connection_unavailable")
-        ) {
-          continue;
-        }
-        throw error;
-      }
-    }
-    return bindings;
   }
 
   shutdown(): void {
@@ -413,8 +340,7 @@ export class SupervisorWebSocketGateway {
       closed: false,
       processing: Promise.resolve(),
       registrationTimer: undefined,
-      commandConnection: undefined,
-      maxConcurrentSessions: undefined,
+      controlConnection: undefined,
     };
     this.#contexts.add(context);
     context.registrationTimer = setTimeout(() => {
@@ -479,7 +405,6 @@ export class SupervisorWebSocketGateway {
         return;
       }
       context.registeredConnectionId = acknowledgement.payload.connectionId;
-      context.maxConcurrentSessions = message.payload.maxConcurrentSessions;
       if (context.registrationTimer !== undefined) {
         clearTimeout(context.registrationTimer);
         context.registrationTimer = undefined;
@@ -489,8 +414,8 @@ export class SupervisorWebSocketGateway {
       if (previous !== undefined && previous !== context) {
         this.#close(previous, SUPERVISOR_SOCKET_CLOSE.SUPERSEDED, "connection superseded");
       }
-      if (this.#commandRouter !== undefined && context.commandConnection === undefined) {
-        const connection: SupervisorCommandConnection = {
+      if (this.#controlChannelRouter !== undefined && context.controlConnection === undefined) {
+        const connection: WorkerControlConnection = {
           supervisorId: context.authority.supervisorId,
           bootId: context.authority.bootId,
           sandboxId: context.authority.sandboxId,
@@ -504,8 +429,8 @@ export class SupervisorWebSocketGateway {
               event,
             ),
         };
-        context.commandConnection = connection;
-        this.#commandRouter.attach(connection);
+        context.controlConnection = connection;
+        this.#controlChannelRouter.attach(connection);
       }
       await this.#send(context, acknowledgement);
       return;
@@ -524,13 +449,13 @@ export class SupervisorWebSocketGateway {
       await this.#send(context, acknowledgement);
       return;
     }
-    if (this.#commandRouter !== undefined && context.commandConnection !== undefined) {
+    if (this.#controlChannelRouter !== undefined && context.controlConnection !== undefined) {
       await this.#manager.assertCurrentConnection(
         context.registeredConnectionId,
         context.authority,
       );
       try {
-        if (await this.#commandRouter.receive(context.commandConnection, message)) return;
+        if (await this.#controlChannelRouter.receive(context.controlConnection, message)) return;
       } catch (error: unknown) {
         if (
           (message.type === "event.publish" || message.type === "event.publish_batch") &&
@@ -609,7 +534,7 @@ export class SupervisorWebSocketGateway {
       );
       return;
     }
-    if (error instanceof SupervisorCommandTransportError) {
+    if (error instanceof WorkerControlChannelError) {
       this.#close(
         context,
         error.retryable ? 1_011 : 1_008,
@@ -637,9 +562,9 @@ export class SupervisorWebSocketGateway {
     if (this.#activeBySandbox.get(context.authority.sandboxId) === context) {
       this.#activeBySandbox.delete(context.authority.sandboxId);
     }
-    if (context.commandConnection !== undefined) {
-      this.#commandRouter?.detach(context.commandConnection);
-      context.commandConnection = undefined;
+    if (context.controlConnection !== undefined) {
+      this.#controlChannelRouter?.detach(context.controlConnection);
+      context.controlConnection = undefined;
     }
   }
 }

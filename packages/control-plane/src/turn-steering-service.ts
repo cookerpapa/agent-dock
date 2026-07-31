@@ -157,7 +157,7 @@ export class TurnSteeringService {
       );
     }
     await this.#markDispatched(stored);
-    const backend = this.#gateway.createRemoteExecutionBackend(stored.sandboxId);
+    const backend = this.#gateway.createRemoteSteerBackend(stored.sandboxId);
     const delivery: TurnSteerRequest = {
       commandId: stored.commandId,
       idempotencyKey: stored.idempotencyKey,

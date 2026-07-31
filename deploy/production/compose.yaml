@@ -44,6 +44,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
   AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
   AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
+  AGENT_DOCK_ADVANCED_MODULES_ENABLED: ${AGENT_DOCK_ADVANCED_MODULES_ENABLED:-false}
   AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
   AWS_EC2_METADATA_DISABLED: "true"
   AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
@@ -53,8 +54,6 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
   AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
   AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
-  AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
-  AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: ${AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED:-true}
   AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
@@ -106,10 +105,6 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
     target: /run/agent-dock-secrets/sandbox-materializer-token
-    read_only: true
-  - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
-    target: /run/agent-dock-secrets/github-gateway-token
     read_only: true
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
@@ -396,7 +391,6 @@ services:
       - management
       - object-storage
       - sandbox-control
-      - github-control
       - observability
       - temporal
     healthcheck:
@@ -859,6 +853,7 @@ services:
     logging: *bounded-logging
 
   github-gateway:
+    profiles: [github]
     image: agent-dock/github-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
@@ -932,7 +927,6 @@ services:
     networks:
       - edge
       - api
-      - github-control
     healthcheck:
       test: [CMD, wget, --quiet, --spider, http://127.0.0.1:8080/healthz]
       interval: 5s

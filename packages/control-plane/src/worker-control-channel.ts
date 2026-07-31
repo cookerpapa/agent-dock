@@ -3,14 +3,12 @@ import {
   parseSupervisorToControlMessage,
   TWO_PHASE_COMMAND_CAPABILITY,
   PI_STEER_CAPABILITY,
-  type CancelTurnCommandMessage,
   type CommandAckMessage,
   type CommandCommitMessage,
   type CommandReleaseMessage,
   type CommandResultMessage,
   type EventPublishMessage,
   type EventPublishBatchMessage,
-  type ExecuteTurnCommandMessage,
   type SteerTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@agent-dock/protocol";
@@ -22,11 +20,10 @@ const DEFAULT_COMMAND_ACK_TIMEOUT_MS = 10_000;
 const DEFAULT_COMMAND_RESULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_PENDING_COMMANDS = 1_000;
 
-export type SupervisorRemoteCommand =
-  ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage;
+export type WorkerControlCommand = SteerTurnCommandMessage;
 type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
-export type SupervisorCommandConnection = {
+export type WorkerControlConnection = {
   supervisorId: string;
   bootId: string;
   sandboxId: string;
@@ -36,41 +33,41 @@ export type SupervisorCommandConnection = {
   assertEventAuthority(message: EventPublishMessage): Promise<void>;
 };
 
-export interface RemoteSupervisorCommandTransport {
-  prepare(sandboxId: string, command: SupervisorRemoteCommand): Promise<CommandAckMessage>;
+export interface RemoteWorkerControlTransport {
+  prepare(sandboxId: string, command: WorkerControlCommand): Promise<CommandAckMessage>;
   commit(
     sandboxId: string,
-    command: SupervisorRemoteCommand,
+    command: WorkerControlCommand,
     acknowledgement: CommandAckMessage,
     commit: CommandCommitMessage,
   ): Promise<CommandResultMessage>;
   release(
     sandboxId: string,
-    command: SupervisorRemoteCommand,
+    command: WorkerControlCommand,
     acknowledgement: CommandAckMessage,
     release: CommandReleaseMessage,
   ): Promise<void>;
 }
 
-export type SupervisorCommandRouterOptions = {
+export type WorkerControlChannelRouterOptions = {
   eventIngestor: DurableEventIngestor;
   onEvent?: (
     message: EventPublishMessage,
-    connection: SupervisorCommandConnection,
+    connection: WorkerControlConnection,
   ) => Promise<void> | void;
   commandAckTimeoutMs?: number;
   commandResultTimeoutMs?: number;
   maxPendingCommands?: number;
 };
 
-export class SupervisorCommandTransportError extends Error {
+export class WorkerControlChannelError extends Error {
   readonly code: string;
   readonly retryable: boolean;
   readonly ambiguous: boolean;
 
   constructor(code: string, safeMessage: string, retryable: boolean, ambiguous = false) {
     super(safeMessage);
-    this.name = "SupervisorCommandTransportError";
+    this.name = "WorkerControlChannelError";
     this.code = code;
     this.retryable = retryable;
     this.ambiguous = ambiguous;
@@ -78,28 +75,28 @@ export class SupervisorCommandTransportError extends Error {
 }
 
 type PendingAcknowledgement = {
-  command: SupervisorRemoteCommand;
+  command: WorkerControlCommand;
   resolve: (message: CommandAckMessage) => void;
-  reject: (error: SupervisorCommandTransportError) => void;
+  reject: (error: WorkerControlChannelError) => void;
   timer: NodeJS.Timeout;
 };
 
 type PreparedCommand = {
-  command: SupervisorRemoteCommand;
+  command: WorkerControlCommand;
   acknowledgement: CommandAckMessage;
 };
 
 type PendingResult = {
-  command: SupervisorRemoteCommand;
+  command: WorkerControlCommand;
   acknowledgement: CommandAckMessage;
   commit: CommandCommitMessage;
   resolve: (message: CommandResultMessage) => void;
-  reject: (error: SupervisorCommandTransportError) => void;
+  reject: (error: WorkerControlChannelError) => void;
   timer: NodeJS.Timeout;
 };
 
 type ConnectionState = {
-  connection: SupervisorCommandConnection;
+  connection: WorkerControlConnection;
   capabilities: ReadonlySet<string>;
   pendingAcknowledgements: Map<string, PendingAcknowledgement>;
   preparedCommands: Map<string, PreparedCommand>;
@@ -115,7 +112,7 @@ function positiveInteger(value: number, name: string): number {
 }
 
 function sameCommandIdentity(
-  command: SupervisorRemoteCommand,
+  command: WorkerControlCommand,
   value: {
     commandId: string;
     sessionId: string;
@@ -133,11 +130,7 @@ function sameCommandIdentity(
   );
 }
 
-function commandKind(
-  command: SupervisorRemoteCommand,
-): "turn.execute" | "turn.cancel" | "turn.steer" {
-  if (command.type === "command.turn.execute") return "turn.execute";
-  if (command.type === "command.turn.cancel") return "turn.cancel";
+function commandKind(_command: WorkerControlCommand): "turn.steer" {
   return "turn.steer";
 }
 
@@ -152,25 +145,22 @@ function transportError(
   message: string,
   retryable: boolean,
   ambiguous = false,
-): SupervisorCommandTransportError {
-  return new SupervisorCommandTransportError(code, message, retryable, ambiguous);
+): WorkerControlChannelError {
+  return new WorkerControlChannelError(code, message, retryable, ambiguous);
 }
 
-export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport {
+export class WorkerControlChannelRouter implements RemoteWorkerControlTransport {
   readonly #eventIngestor: DurableEventIngestor;
   readonly #onEvent:
-    | ((
-        message: EventPublishMessage,
-        connection: SupervisorCommandConnection,
-      ) => Promise<void> | void)
+    | ((message: EventPublishMessage, connection: WorkerControlConnection) => Promise<void> | void)
     | undefined;
   readonly #commandAckTimeoutMs: number;
   readonly #commandResultTimeoutMs: number;
   readonly #maxPendingCommands: number;
   readonly #bySandbox = new Map<string, ConnectionState>();
-  readonly #byConnection = new WeakMap<SupervisorCommandConnection, ConnectionState>();
+  readonly #byConnection = new WeakMap<WorkerControlConnection, ConnectionState>();
 
-  constructor(options: SupervisorCommandRouterOptions) {
+  constructor(options: WorkerControlChannelRouterOptions) {
     this.#eventIngestor = options.eventIngestor;
     this.#onEvent = options.onEvent;
     this.#commandAckTimeoutMs = positiveInteger(
@@ -191,11 +181,11 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     return this.#bySandbox.size;
   }
 
-  attach(connection: SupervisorCommandConnection): void {
+  attach(connection: WorkerControlConnection): void {
     if (this.#byConnection.has(connection)) {
-      throw new SupervisorCommandTransportError(
+      throw new WorkerControlChannelError(
         "connection_already_attached",
-        "Supervisor command connection was already attached",
+        "Worker control connection was already attached",
         false,
       );
     }
@@ -205,7 +195,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
         prior,
         transportError(
           "connection_superseded",
-          "Supervisor command connection was superseded",
+          "Worker control connection was superseded",
           true,
           true,
         ),
@@ -223,17 +213,17 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     this.#byConnection.set(connection, state);
   }
 
-  detach(connection: SupervisorCommandConnection): void {
+  detach(connection: WorkerControlConnection): void {
     const state = this.#byConnection.get(connection);
     if (state === undefined || state.detached) return;
     this.#detachState(
       state,
-      transportError("connection_closed", "Supervisor command connection closed", true, true),
+      transportError("connection_closed", "Worker control connection closed", true, true),
     );
   }
 
   async receive(
-    connection: SupervisorCommandConnection,
+    connection: WorkerControlConnection,
     message: SupervisorToControlMessage,
   ): Promise<boolean> {
     const state = this.#byConnection.get(connection);
@@ -244,7 +234,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     ) {
       throw transportError(
         "stale_connection",
-        "Supervisor command message came from a stale connection",
+        "Worker control message came from a stale connection",
         false,
         true,
       );
@@ -303,21 +293,17 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     return false;
   }
 
-  async prepare(sandboxId: string, value: SupervisorRemoteCommand): Promise<CommandAckMessage> {
+  async prepare(sandboxId: string, value: WorkerControlCommand): Promise<CommandAckMessage> {
     const parsed = parseControlToSupervisorMessage(value);
-    if (
-      parsed.type !== "command.turn.execute" &&
-      parsed.type !== "command.turn.cancel" &&
-      parsed.type !== "command.turn.steer"
-    ) {
+    if (parsed.type !== "command.turn.steer") {
       throw transportError(
         "invalid_command",
-        "Remote transport only prepares execute, cancellation, or steer commands",
+        "Worker control transport only prepares steer commands",
         false,
       );
     }
     const state = this.#connection(sandboxId, false);
-    if (parsed.type === "command.turn.steer" && !state.capabilities.has(PI_STEER_CAPABILITY)) {
+    if (!state.capabilities.has(PI_STEER_CAPABILITY)) {
       throw transportError(
         "supervisor_capability_missing",
         "Supervisor does not support Pi steer",
@@ -339,7 +325,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     if (pendingCount(state) >= this.#maxPendingCommands) {
       throw transportError(
         "command_transport_capacity",
-        "Supervisor command transport is at capacity",
+        "Worker control channel is at capacity",
         true,
       );
     }
@@ -383,7 +369,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
 
   async commit(
     sandboxId: string,
-    commandValue: SupervisorRemoteCommand,
+    commandValue: WorkerControlCommand,
     acknowledgementValue: CommandAckMessage,
     commitValue: CommandCommitMessage,
   ): Promise<CommandResultMessage> {
@@ -467,7 +453,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
 
   async release(
     sandboxId: string,
-    commandValue: SupervisorRemoteCommand,
+    commandValue: WorkerControlCommand,
     acknowledgementValue: CommandAckMessage,
     releaseValue: CommandReleaseMessage,
   ): Promise<void> {
@@ -502,7 +488,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     if (state === undefined || state.detached) {
       throw transportError(
         "supervisor_connection_unavailable",
-        "Supervisor command connection is unavailable",
+        "Worker control connection is unavailable",
         !ambiguous,
         ambiguous,
       );
@@ -518,14 +504,10 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     return state;
   }
 
-  #parseCommand(value: SupervisorRemoteCommand): SupervisorRemoteCommand {
+  #parseCommand(value: WorkerControlCommand): WorkerControlCommand {
     const parsed = parseControlToSupervisorMessage(value);
-    if (
-      parsed.type !== "command.turn.execute" &&
-      parsed.type !== "command.turn.cancel" &&
-      parsed.type !== "command.turn.steer"
-    ) {
-      throw transportError("invalid_command", "Remote command was invalid", false);
+    if (parsed.type !== "command.turn.steer") {
+      throw transportError("invalid_command", "Worker control command was invalid", false);
     }
     return parsed;
   }
@@ -596,7 +578,7 @@ export class SupervisorCommandRouter implements RemoteSupervisorCommandTransport
     pending.resolve(message);
   }
 
-  #detachState(state: ConnectionState, error: SupervisorCommandTransportError): void {
+  #detachState(state: ConnectionState, error: WorkerControlChannelError): void {
     if (state.detached) return;
     state.detached = true;
     if (this.#bySandbox.get(state.connection.sandboxId) === state) {

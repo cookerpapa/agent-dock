@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   ReconnectingSupervisorWebSocketClient,
   SupervisorWebSocketClientError,
-  type ReconnectingSupervisorCommandRuntime,
+  type ReconnectingSupervisorControlRuntime,
   type SupervisorWebSocketClientClose,
   type SupervisorWebSocketConnection,
 } from "../src/index.ts";
@@ -146,7 +146,7 @@ class FakeConnection implements SupervisorWebSocketConnection {
 
 function runtime(
   waitUntilAssignmentsSettled: () => Promise<void> = async () => undefined,
-): ReconnectingSupervisorCommandRuntime {
+): ReconnectingSupervisorControlRuntime {
   return {
     createHeartbeat() {
       throw new Error("Fake connection does not request heartbeats");
@@ -154,11 +154,8 @@ function runtime(
     applyHeartbeatAcknowledgement() {
       return undefined;
     },
-    prepare() {
-      throw new Error("Fake connection does not deliver commands");
-    },
-    prepareCancellation() {
-      throw new Error("Fake connection does not deliver cancellations");
+    prepareSteer() {
+      throw new Error("Fake connection does not deliver steer commands");
     },
     revokeAllAssignments() {
       return undefined;
@@ -179,7 +176,7 @@ function runtime(
 }
 
 function reconnecting(options: {
-  runtime?: ReconnectingSupervisorCommandRuntime;
+  runtime?: ReconnectingSupervisorControlRuntime;
   assignmentTeardownTimeoutMs?: number;
 }) {
   const connections: FakeConnection[] = [];

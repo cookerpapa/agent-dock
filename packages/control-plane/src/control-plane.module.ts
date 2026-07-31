@@ -1,5 +1,5 @@
 import { Module, type DynamicModule } from "@nestjs/common";
-import type { GitHubGatewayClient } from "@agent-dock/github-gateway";
+import { AdvancedControlPlaneController } from "./advanced-control-plane.controller.ts";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -16,7 +16,6 @@ import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
-import { GitHubIntegrationService } from "./github-integration-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";
 import { OperationalInsightsService } from "./operational-insights-service.ts";
 import {
@@ -43,7 +42,7 @@ export type ControlPlaneModuleOptions = Omit<
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
   providerSnapshotReader?: TrustedProviderSnapshotReader;
-  githubGateway?: GitHubGatewayClient;
+  advancedModulesEnabled?: boolean;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;
@@ -88,21 +87,45 @@ export class ControlPlaneModule {
         : { environmentImageRevision: options.environmentImageRevision }),
       ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     });
+    const advancedProviders =
+      options.advancedModulesEnabled === true
+        ? [
+            {
+              provide: CandidateRaceService,
+              useValue: new CandidateRaceService({
+                database: options.database,
+                controlPlaneStores,
+                ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+              }),
+            },
+            {
+              provide: ModelGovernanceService,
+              useValue: new ModelGovernanceService({ database: options.database }),
+            },
+            {
+              provide: OperationalInsightsService,
+              useValue: new OperationalInsightsService({ database: options.database }),
+            },
+            {
+              provide: ProjectEnvironmentService,
+              useValue: new ProjectEnvironmentService({
+                database: options.database,
+                imageRevision: options.environmentImageRevision ?? "development",
+                ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+              }),
+            },
+          ]
+        : [];
     return {
       module: ControlPlaneModule,
-      controllers: [ControlPlaneController],
+      controllers: [
+        ControlPlaneController,
+        ...(options.advancedModulesEnabled === true ? [AdvancedControlPlaneController] : []),
+      ],
       providers: [
         {
           provide: ControlPlaneStoreFactory,
           useValue: controlPlaneStores,
-        },
-        {
-          provide: CandidateRaceService,
-          useValue: new CandidateRaceService({
-            database: options.database,
-            controlPlaneStores,
-            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
-          }),
         },
         {
           provide: PublicTenantRegistrationService,
@@ -182,34 +205,10 @@ export class ControlPlaneModule {
           }),
         },
         {
-          provide: ModelGovernanceService,
-          useValue: new ModelGovernanceService({ database: options.database }),
-        },
-        {
-          provide: OperationalInsightsService,
-          useValue: new OperationalInsightsService({ database: options.database }),
-        },
-        {
           provide: WorkspaceVersionService,
           useValue: workspaceVersions,
         },
-        {
-          provide: ProjectEnvironmentService,
-          useValue: new ProjectEnvironmentService({
-            database: options.database,
-            imageRevision: options.environmentImageRevision ?? "development",
-            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
-          }),
-        },
-        {
-          provide: GitHubIntegrationService,
-          useValue: new GitHubIntegrationService({
-            database: options.database,
-            workspaceVersions,
-            ...(options.githubGateway === undefined ? {} : { gateway: options.githubGateway }),
-            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
-          }),
-        },
+        ...advancedProviders,
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
         {
@@ -230,9 +229,9 @@ export class ControlPlaneModule {
         SessionEventHub,
         SessionEventStream,
         WorkspaceVersionService,
-        ProjectEnvironmentService,
-        GitHubIntegrationService,
-        CandidateRaceService,
+        ...(options.advancedModulesEnabled === true
+          ? [ProjectEnvironmentService, CandidateRaceService]
+          : []),
       ],
     };
   }

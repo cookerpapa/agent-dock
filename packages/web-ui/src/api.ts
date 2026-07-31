@@ -4,40 +4,21 @@ import {
   parseTurnSteerResource,
   parseAuthSessionResource,
   parseArchiveSessionRequest,
-  parseCandidateRaceListResource,
-  parseCandidateRaceResource,
   parseConversationDetailResource,
   parseConversationListResource,
-  parseCreateCandidateRaceRequest,
   parseControlPlaneApiError,
-  parseForkSessionRequest,
-  parseGitHubInstallationResource,
-  parseGitHubPullRequestDeliveryResource,
   parseModelConfigurationResource,
   parseCubeProxyConfigurationResource,
-  parseModelGovernanceResource,
   parseLogoutResource,
-  parseOperationalAuditLogResource,
-  parseOperationalInsightsResource,
-  parseProjectEnvironmentHistoryResource,
   parseProjectResource,
-  parsePromoteCandidateRequest,
-  parseRollbackWorkspaceRequest,
   parseRunListResource,
   parseRunResource,
-  parseRunRewindResource,
-  parseReviewBundleResource,
-  parseRunUsageResource,
   parseSessionResource,
-  parseSessionContextResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
-  parseTestResultListResource,
-  parseUsageSummaryResource,
   parseWorkspaceFileListResource,
   parseWorkspaceListResource,
   parseWorkspaceOperationResource,
-  parseWorkspaceVersionCompareResource,
   parseWorkspaceVersionListResource,
   parseWorkspaceVersionResource,
   type ConversationDetailResource,
@@ -46,38 +27,21 @@ import {
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type TurnSteerResource,
-  type CandidateRaceListResource,
-  type CandidateRaceResource,
-  type CreateCandidateRaceRequest,
   type ProjectResource,
-  type EnvironmentRecipe,
-  type ProjectEnvironmentHistoryResource,
   type DeepSeekModelId,
-  type GitHubInstallationResource,
-  type GitHubPullRequestDeliveryResource,
   type ModelConfigurationResource,
   type CubeProxyConfigurationResource,
-  type ModelGovernanceResource,
   type LogoutResource,
-  type OperationalAuditLogResource,
-  type OperationalInsightsResource,
   type RunListResource,
   type RunResource,
-  type RunRewindResource,
-  type ReviewBundleResource,
-  type RunUsageResource,
   type SessionResource,
-  type SessionContextResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
-  type TestResultListResource,
   type TurnThinkingLevel,
-  type UsageSummaryResource,
   type WorkspaceFileListResource,
   type WorkspaceListResource,
   type WorkspaceOperationResource,
   type WorkspaceSourceRequest,
-  type WorkspaceVersionCompareResource,
   type WorkspaceVersionListResource,
   type WorkspaceVersionResource,
 } from "@agent-dock/protocol";
@@ -297,102 +261,6 @@ export class AgentDockApi {
     );
   }
 
-  async getModelGovernance(): Promise<ModelGovernanceResource> {
-    return parseModelGovernanceResource(
-      await request(
-        this.#fetch,
-        "/v1/model-governance",
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getUsage(): Promise<UsageSummaryResource> {
-    return parseUsageSummaryResource(
-      await request(this.#fetch, "/v1/usage", { method: "GET" }, this.#authorizationToken),
-    );
-  }
-
-  async getOperationalInsights(): Promise<OperationalInsightsResource> {
-    return parseOperationalInsightsResource(
-      await request(
-        this.#fetch,
-        "/v1/operations/summary",
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getOperationalAudit(): Promise<OperationalAuditLogResource> {
-    return parseOperationalAuditLogResource(
-      await request(
-        this.#fetch,
-        "/v1/operations/audit",
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getProjectEnvironments(projectId: string): Promise<ProjectEnvironmentHistoryResource> {
-    return parseProjectEnvironmentHistoryResource(
-      await request(
-        this.#fetch,
-        `/v1/projects/${encodeURIComponent(projectId)}/environments`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async createProjectEnvironment(
-    projectId: string,
-    recipe: EnvironmentRecipe,
-    idempotencyKey: string,
-  ): Promise<ProjectEnvironmentHistoryResource> {
-    return parseProjectEnvironmentHistoryResource(
-      await request(
-        this.#fetch,
-        `/v1/projects/${encodeURIComponent(projectId)}/environments`,
-        jsonRequest({ recipe }, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async activateProjectEnvironment(
-    projectId: string,
-    environmentVersionId: string,
-    expectedActiveEnvironmentVersionId: string,
-    idempotencyKey: string,
-  ): Promise<ProjectEnvironmentHistoryResource> {
-    return parseProjectEnvironmentHistoryResource(
-      await request(
-        this.#fetch,
-        `/v1/projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(environmentVersionId)}/activate`,
-        jsonRequest({ expectedActiveEnvironmentVersionId }, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async validateProjectEnvironment(
-    sessionId: string,
-    environmentVersionId: string,
-    idempotencyKey: string,
-  ): Promise<AcceptedTurnResource> {
-    return parseAcceptedTurnResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/environments/${encodeURIComponent(environmentVersionId)}/validate`,
-        jsonRequest({}, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
   async registerTenant(
     tenantSlug: string,
     displayName: string,
@@ -453,146 +321,11 @@ export class AgentDockApi {
     );
   }
 
-  async listCandidateRaces(sessionId: string): Promise<CandidateRaceListResource> {
-    return parseCandidateRaceListResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/candidate-races`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async createCandidateRace(
-    sessionId: string,
-    input: CreateCandidateRaceRequest,
-    idempotencyKey: string,
-  ): Promise<CandidateRaceResource> {
-    const body = parseCreateCandidateRaceRequest(input);
-    return parseCandidateRaceResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/candidate-races`,
-        jsonRequest(body, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getCandidateRace(orchestrationId: string): Promise<CandidateRaceResource> {
-    return parseCandidateRaceResource(
-      await request(
-        this.#fetch,
-        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async cancelCandidateRace(
-    orchestrationId: string,
-    idempotencyKey: string,
-  ): Promise<CandidateRaceResource> {
-    return parseCandidateRaceResource(
-      await request(
-        this.#fetch,
-        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}/cancellation`,
-        jsonRequest({}, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async promoteCandidate(
-    orchestrationId: string,
-    candidateId: string,
-    expectedParentWorkspaceVersionId: string,
-    idempotencyKey: string,
-  ): Promise<CandidateRaceResource> {
-    const body = parsePromoteCandidateRequest({
-      candidateId,
-      expectedParentWorkspaceVersionId,
-    });
-    return parseCandidateRaceResource(
-      await request(
-        this.#fetch,
-        `/v1/candidate-races/${encodeURIComponent(orchestrationId)}/promotion`,
-        jsonRequest(body, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
   async getRun(runId: string): Promise<RunResource> {
     return parseRunResource(
       await request(
         this.#fetch,
         `/v1/runs/${encodeURIComponent(runId)}`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async rewindRun(
-    runId: string,
-    sourceAttemptId: string,
-    idempotencyKey: string,
-  ): Promise<RunRewindResource> {
-    return parseRunRewindResource(
-      await request(
-        this.#fetch,
-        `/v1/runs/${encodeURIComponent(runId)}/rewinds`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
-          body: JSON.stringify({ sourceAttemptId }),
-        },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getRunReviewBundle(runId: string): Promise<ReviewBundleResource> {
-    return parseReviewBundleResource(
-      await request(
-        this.#fetch,
-        `/v1/runs/${encodeURIComponent(runId)}/review-bundle`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getRunUsage(runId: string): Promise<RunUsageResource> {
-    return parseRunUsageResource(
-      await request(
-        this.#fetch,
-        `/v1/runs/${encodeURIComponent(runId)}/usage`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async listRunTestResults(runId: string): Promise<TestResultListResource> {
-    return parseTestResultListResource(
-      await request(
-        this.#fetch,
-        `/v1/runs/${encodeURIComponent(runId)}/test-results`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getSessionContext(sessionId: string): Promise<SessionContextResource> {
-    return parseSessionContextResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/context`,
         { method: "GET" },
         this.#authorizationToken,
       ),
@@ -644,61 +377,6 @@ export class AgentDockApi {
     );
   }
 
-  async compareWorkspaceVersions(
-    baseVersionId: string,
-    targetVersionId: string,
-  ): Promise<WorkspaceVersionCompareResource> {
-    return parseWorkspaceVersionCompareResource(
-      await request(
-        this.#fetch,
-        `/v1/workspace-versions/${encodeURIComponent(baseVersionId)}/compare/${encodeURIComponent(targetVersionId)}`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  readArtifact(artifactId: string): Promise<{ bytes: Uint8Array; contentType: string }> {
-    return requestBytes(
-      this.#fetch,
-      `/v1/artifacts/${encodeURIComponent(artifactId)}/content`,
-      this.#authorizationToken,
-    );
-  }
-
-  async forkSession(
-    sessionId: string,
-    versionId: string,
-    idempotencyKey: string,
-  ): Promise<WorkspaceOperationResource> {
-    const body = parseForkSessionRequest({ versionId });
-    return parseWorkspaceOperationResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/forks`,
-        jsonRequest(body, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async rollbackWorkspace(
-    sessionId: string,
-    versionId: string,
-    expectedCurrentVersionId: string,
-    idempotencyKey: string,
-  ): Promise<WorkspaceOperationResource> {
-    const body = parseRollbackWorkspaceRequest({ versionId, expectedCurrentVersionId });
-    return parseWorkspaceOperationResource(
-      await request(
-        this.#fetch,
-        `/v1/sessions/${encodeURIComponent(sessionId)}/workspace-rollback`,
-        jsonRequest(body, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
   async archiveSession(
     sessionId: string,
     archived: boolean,
@@ -710,65 +388,6 @@ export class AgentDockApi {
         this.#fetch,
         `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
         jsonRequest(body, idempotencyKey),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async registerGitHubInstallation(installationId: number): Promise<GitHubInstallationResource> {
-    return parseGitHubInstallationResource(
-      await request(
-        this.#fetch,
-        "/v1/github/installations",
-        jsonRequest({ installationId }),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async getGitHubInstallation(installationId: number): Promise<GitHubInstallationResource> {
-    return parseGitHubInstallationResource(
-      await request(
-        this.#fetch,
-        `/v1/github/installations/${String(installationId)}`,
-        { method: "GET" },
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async setGitHubRepositoryEnabled(
-    installationId: number,
-    repositoryId: number,
-    enabled: boolean,
-  ): Promise<GitHubInstallationResource> {
-    return parseGitHubInstallationResource(
-      await request(
-        this.#fetch,
-        `/v1/github/installations/${String(installationId)}/repositories/${String(repositoryId)}`,
-        jsonRequest({ enabled }, undefined, "PUT"),
-        this.#authorizationToken,
-      ),
-    );
-  }
-
-  async createGitHubPullRequest(
-    versionId: string,
-    input: {
-      repositoryId: number;
-      baseBranch: string;
-      baseCommitSha: string;
-      headBranch: string;
-      title: string;
-      body: string;
-    },
-    idempotencyKey: string,
-  ): Promise<GitHubPullRequestDeliveryResource> {
-    return parseGitHubPullRequestDeliveryResource(
-      await request(
-        this.#fetch,
-        `/v1/workspace-versions/${encodeURIComponent(versionId)}/pull-requests`,
-        jsonRequest(input, idempotencyKey),
         this.#authorizationToken,
       ),
     );
@@ -859,22 +478,7 @@ export class AgentDockApi {
 }
 
 export function newIdempotencyKey(
-  prefix:
-    | "turn"
-    | "cancel"
-    | "steer"
-    | "fork"
-    | "rollback"
-    | "archive"
-    | "delete"
-    | "retry"
-    | "pr"
-    | "environment-create"
-    | "environment-activate"
-    | "environment-validate"
-    | "race"
-    | "race-cancel"
-    | "race-promote",
+  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

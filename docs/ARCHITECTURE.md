@@ -92,6 +92,15 @@ A Worker slot executes one active Run:
 The Worker does not run user Bash locally. It has no Cube control credential,
 container runtime socket or writable shared tenant filesystem.
 
+### Worker Control Channel
+
+The authenticated Supervisor WebSocket is a narrow control channel. It carries
+registration, heartbeat, durable event batches/ACKs and fenced active Pi steer.
+It does not dispatch Run execution or cancellation. Temporal Activity task
+matching starts exact-command execution on a Pi Worker, while cancellation
+travels through Temporal and the exact cancellation executor. Keeping those
+paths out of WebSocket removes the former duplicate execution authority.
+
 ### Model Gateway
 
 The trusted model gateway resolves the deployment-owned model configuration,
@@ -249,6 +258,16 @@ Pi emits Tool Call
   → commit final Pi checkpoint and Run
 ```
 
+Text reads use bounded line ranges, so a large source file does not have to
+cross Tool RPC in full. Edits first read a content digest and then submit that
+expected digest; the guest writes and fsyncs a same-directory temporary file,
+checks for a stale revision and atomically renames it over the destination.
+Readers therefore observe the old or new file, never a partially written file.
+
+Large Bash output is truncated once into a head/tail preview for Pi. The full
+raw stdout/stderr is stored as a trusted Artifact and the preview includes the
+Artifact identity plus a concrete recovery instruction.
+
 The first Tool call pays cold activation cost. An eligible warm activation can
 serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
 
@@ -324,6 +343,10 @@ Worker that owns its Pi Runtime. Commit invokes Pi's public
 `session.steer(text)` API. The current Tool batch finishes first; Pi consumes
 the steer before its next model call. A settled Run rejects steer instead of
 turning it into another Turn.
+
+Steer is the only Control Plane initiated command on the Worker Control
+Channel. The two-phase prepare/commit exchange binds it to the current lease
+and fence; reconnecting or stale Workers cannot apply it to another Attempt.
 
 ## 8. Event delivery
 

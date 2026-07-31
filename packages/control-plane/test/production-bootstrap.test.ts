@@ -228,6 +228,7 @@ describe.sequential("production bootstrap and configuration", () => {
       temporalAddress: "temporal:7233",
       temporalNamespace: "agent-dock",
       temporalTaskQueue: "agent-dock-pi-runs-v1",
+      advancedModulesEnabled: false,
       platformModelSourceTenantId: CONFIG.tenantId,
       platformOperatorTenantId: CONFIG.tenantId,
       webSessionCookieSecure: false,

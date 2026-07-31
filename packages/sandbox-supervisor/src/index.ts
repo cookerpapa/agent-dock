@@ -134,7 +134,7 @@ export {
 export {
   SupervisorWebSocketClient,
   SupervisorWebSocketClientError,
-  type SupervisorCommandRuntime,
+  type SupervisorControlRuntime,
   type SupervisorHeartbeatRuntime,
   type SupervisorWebSocketClientClose,
   type SupervisorWebSocketClientOptions,
@@ -143,7 +143,7 @@ export {
 
 export {
   ReconnectingSupervisorWebSocketClient,
-  type ReconnectingSupervisorCommandRuntime,
+  type ReconnectingSupervisorControlRuntime,
   type ReconnectingSupervisorWebSocketClientOptions,
   type ReconnectingSupervisorWebSocketClientState,
   type ReconnectingSupervisorWebSocketClientStop,

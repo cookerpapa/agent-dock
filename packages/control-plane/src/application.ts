@@ -1,6 +1,4 @@
 import "reflect-metadata";
-import type { GitHubGatewayClient } from "@agent-dock/github-gateway";
-import type { GitHubWebhookIngestGateway } from "./github-webhook-gateway.ts";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { ApiExceptionFilter } from "./api-exception.filter.ts";
@@ -35,8 +33,7 @@ export type ControlPlaneApplicationOptions = Omit<
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
   providerSnapshotReader?: TrustedProviderSnapshotReader;
-  githubGateway?: GitHubGatewayClient;
-  githubWebhookGateway?: GitHubWebhookIngestGateway;
+  advancedModulesEnabled?: boolean;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;
@@ -48,7 +45,6 @@ export async function createControlPlaneApplication(
 ): Promise<NestFastifyApplication> {
   const adapter = new FastifyAdapter({ logger: false });
   options.productionHttpGateway?.install(adapter.getInstance());
-  options.githubWebhookGateway?.install(adapter.getInstance());
   options.supervisorProvisioningGateway?.install(adapter.getInstance());
   options.supervisorWebSocketGateway?.install(adapter.getInstance());
   let staticRequestIdentity;

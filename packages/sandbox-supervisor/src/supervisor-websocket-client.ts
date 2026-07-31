@@ -3,7 +3,6 @@ import {
   PI_STEER_CAPABILITY,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
-  type CancelTurnCommandMessage,
   type CommandAckMessage,
   type CommandCommitMessage,
   type CommandReleaseMessage,
@@ -12,26 +11,16 @@ import {
   type EventPublishBatchMessage,
   type EventPublishMessage,
   type EventRejectedMessage,
-  type ExecuteTurnCommandMessage,
   type SteerTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
   type SupervisorRegisteredMessage,
 } from "@agent-dock/protocol";
 import WebSocket, { type RawData } from "ws";
-import type {
-  PreparedTurnCancellation,
-  PreparedTurnExecution,
-  PreparedTurnSteer,
-} from "./local-sandbox-supervisor.ts";
-import { LocalSandboxSupervisorError } from "./local-sandbox-supervisor.ts";
+import type { PreparedTurnSteer } from "./local-sandbox-supervisor.ts";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import { EventDeliveryRejectedError } from "./in-memory-event-spool.ts";
-import {
-  PINNED_PI_CODING_AGENT_VERSION,
-  PiTurnCancelledError,
-  PiTurnError,
-} from "./pi-turn-runtime.ts";
+import { PINNED_PI_CODING_AGENT_VERSION } from "./pi-turn-runtime.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 1_000;
@@ -50,15 +39,8 @@ export interface SupervisorHeartbeatRuntime {
   ): unknown;
 }
 
-export interface SupervisorCommandRuntime extends SupervisorHeartbeatRuntime {
-  prepare(
-    value: unknown,
-    publishEvent: (
-      message: EventPublishMessage | EventPublishBatchMessage,
-    ) => Promise<EventAckMessage>,
-  ): PreparedTurnExecution;
-  prepareCancellation(value: unknown): PreparedTurnCancellation;
-  prepareSteer?(value: unknown): PreparedTurnSteer;
+export interface SupervisorControlRuntime extends SupervisorHeartbeatRuntime {
+  prepareSteer(value: unknown): PreparedTurnSteer;
   revokeAllAssignments(): unknown;
   recoverPendingEvents?(
     publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
@@ -81,7 +63,7 @@ export type SupervisorWebSocketClientOptions = {
   url: string;
   authorizationHeader: string;
   registration: SupervisorWebSocketRegistration;
-  runtime: SupervisorCommandRuntime;
+  runtime: SupervisorControlRuntime;
   clock?: () => Date;
   idGenerator?: () => string;
   connectTimeoutMs?: number;
@@ -126,22 +108,6 @@ type PendingEventAcknowledgement = {
   timeout: NodeJS.Timeout;
 };
 
-type RemotePreparedExecution = {
-  kind: "turn.execute";
-  command: ExecuteTurnCommandMessage;
-  acknowledgement: CommandAckMessage;
-  prepared: PreparedTurnExecution;
-  committed: boolean;
-};
-
-type RemotePreparedCancellation = {
-  kind: "turn.cancel";
-  command: CancelTurnCommandMessage;
-  acknowledgement: CommandAckMessage;
-  prepared: PreparedTurnCancellation;
-  committed: boolean;
-};
-
 type RemotePreparedSteer = {
   kind: "turn.steer";
   command: SteerTurnCommandMessage;
@@ -150,8 +116,7 @@ type RemotePreparedSteer = {
   committed: boolean;
 };
 
-type RemotePreparedCommand =
-  RemotePreparedExecution | RemotePreparedCancellation | RemotePreparedSteer;
+type RemotePreparedCommand = RemotePreparedSteer;
 
 type SafeCommandFailure = {
   code: string;
@@ -215,7 +180,7 @@ function retryableWebSocketClose(code: number): boolean {
 }
 
 function sameCommandIdentity(
-  command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
+  command: SteerTurnCommandMessage,
   value: {
     commandId: string;
     sessionId: string;
@@ -234,32 +199,25 @@ function sameCommandIdentity(
 }
 
 function normalizedFailure(error: unknown): SafeCommandFailure {
-  if (error instanceof PiTurnCancelledError && error.reason === "lease_revoked") {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(error.code)
+  ) {
     return {
-      code: "lease_revoked",
-      message: "Execution lease was revoked and the runtime stopped",
-      retryable: false,
-    };
-  }
-  if (error instanceof PiTurnError) {
-    return {
-      code: /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(error.code) ? error.code : "pi_execution_failed",
-      message: error.message.slice(0, 4_096) || "Pi execution failed",
-      retryable: error.retryable,
-    };
-  }
-  if (error instanceof LocalSandboxSupervisorError) {
-    return {
-      code: /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(error.code)
-        ? error.code
-        : "supervisor_execution_failed",
-      message: error.message.slice(0, 4_096) || "Supervisor execution failed",
+      code: error.code,
+      message:
+        error instanceof Error
+          ? error.message.slice(0, 4_096) || "Supervisor steer failed"
+          : "Supervisor steer failed",
       retryable: false,
     };
   }
   return {
-    code: "supervisor_execution_failed",
-    message: "Supervisor execution failed",
+    code: "supervisor_steer_failed",
+    message: "Supervisor steer failed",
     retryable: true,
   };
 }
@@ -268,7 +226,7 @@ export class SupervisorWebSocketClient {
   readonly #url: string;
   readonly #authorizationHeader: string;
   readonly #registration: Required<SupervisorWebSocketRegistration>;
-  readonly #runtime: SupervisorCommandRuntime;
+  readonly #runtime: SupervisorControlRuntime;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
   readonly #connectTimeoutMs: number;
@@ -662,11 +620,7 @@ export class SupervisorWebSocketClient {
       this.#acceptEventRejection(message);
       return;
     }
-    if (
-      message.type === "command.turn.execute" ||
-      message.type === "command.turn.cancel" ||
-      message.type === "command.turn.steer"
-    ) {
+    if (message.type === "command.turn.steer") {
       await this.#prepareCommand(message);
       return;
     }
@@ -713,9 +667,7 @@ export class SupervisorWebSocketClient {
     this.#scheduleHeartbeat(refreshImmediately ? 0 : this.#registered!.payload.heartbeatIntervalMs);
   }
 
-  async #prepareCommand(
-    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
-  ): Promise<void> {
+  async #prepareCommand(command: SteerTurnCommandMessage): Promise<void> {
     if (this.#preparedCommands.has(command.payload.commandId)) {
       throw new SupervisorWebSocketClientError(
         "command_exchange_conflict",
@@ -723,46 +675,15 @@ export class SupervisorWebSocketClient {
         false,
       );
     }
-    let prepared: PreparedTurnExecution | PreparedTurnCancellation | PreparedTurnSteer;
-    let entry: RemotePreparedCommand;
-    if (command.type === "command.turn.execute") {
-      prepared = this.#runtime.prepare(command, (message) => this.#publishEvent(message));
-      const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
-      entry = {
-        kind: "turn.execute",
-        command,
-        acknowledgement,
-        prepared,
-        committed: false,
-      };
-    } else if (command.type === "command.turn.cancel") {
-      prepared = this.#runtime.prepareCancellation(command);
-      const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
-      entry = {
-        kind: "turn.cancel",
-        command,
-        acknowledgement,
-        prepared,
-        committed: false,
-      };
-    } else {
-      if (this.#runtime.prepareSteer === undefined) {
-        throw new SupervisorWebSocketClientError(
-          "supervisor_capability_missing",
-          "Supervisor Runtime does not support Pi steer",
-          false,
-        );
-      }
-      prepared = this.#runtime.prepareSteer(command);
-      const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
-      entry = {
-        kind: "turn.steer",
-        command,
-        acknowledgement,
-        prepared,
-        committed: false,
-      };
-    }
+    const prepared = this.#runtime.prepareSteer(command);
+    const acknowledgement = this.#validateCommandAcknowledgement(command, prepared.ack);
+    const entry: RemotePreparedCommand = {
+      kind: "turn.steer",
+      command,
+      acknowledgement,
+      prepared,
+      committed: false,
+    };
     if (entry.acknowledgement.payload.status !== "rejected") {
       this.#preparedCommands.set(command.payload.commandId, entry);
     }
@@ -778,7 +699,7 @@ export class SupervisorWebSocketClient {
   }
 
   #validateCommandAcknowledgement(
-    command: ExecuteTurnCommandMessage | CancelTurnCommandMessage | SteerTurnCommandMessage,
+    command: SteerTurnCommandMessage,
     value: unknown,
   ): CommandAckMessage {
     const acknowledgement = parseSupervisorToControlMessage(value);
@@ -832,43 +753,13 @@ export class SupervisorWebSocketClient {
   ): Promise<void> {
     let result: CommandResultMessage;
     try {
-      if (entry.kind === "turn.execute") {
-        const execution = await entry.prepared.run();
-        result = this.#commandResult(entry, commit, {
-          status: "completed",
-          stopReason: execution.stopReason,
-          ...(execution.workspacePatch === undefined
-            ? {}
-            : { workspacePatch: execution.workspacePatch }),
-        });
-      } else if (entry.kind === "turn.cancel") {
-        const cancellation = await entry.prepared.run();
-        result = this.#commandResult(entry, commit, {
-          status: "completed",
-          reason: cancellation.reason,
-          forced: cancellation.forced,
-        });
-      } else {
-        await entry.prepared.run();
-        result = this.#commandResult(entry, commit, { status: "completed" });
-      }
+      await entry.prepared.run();
+      result = this.#commandResult(entry, commit, { status: "completed" });
     } catch (error: unknown) {
-      if (
-        entry.kind === "turn.execute" &&
-        error instanceof PiTurnCancelledError &&
-        error.reason !== "lease_revoked"
-      ) {
-        result = this.#commandResult(entry, commit, {
-          status: "cancelled",
-          reason: error.reason,
-          forced: error.forced,
-        });
-      } else {
-        result = this.#commandResult(entry, commit, {
-          status: "failed",
-          ...normalizedFailure(error),
-        });
-      }
+      result = this.#commandResult(entry, commit, {
+        status: "failed",
+        ...normalizedFailure(error),
+      });
     }
     await this.#send(result);
   }
@@ -876,26 +767,7 @@ export class SupervisorWebSocketClient {
   #commandResult(
     entry: RemotePreparedCommand,
     commit: CommandCommitMessage,
-    outcome:
-      | {
-          status: "completed";
-          stopReason: string;
-          workspacePatch?: import("@agent-dock/protocol").WorkspacePatch;
-        }
-      | {
-          status: "completed";
-          reason: CancelTurnCommandMessage["payload"]["reason"];
-          forced: boolean;
-        }
-      | {
-          status: "completed";
-        }
-      | {
-          status: "cancelled";
-          reason: CancelTurnCommandMessage["payload"]["reason"];
-          forced: boolean;
-        }
-      | ({ status: "failed" } & SafeCommandFailure),
+    outcome: { status: "completed" } | ({ status: "failed" } & SafeCommandFailure),
   ): CommandResultMessage {
     const identity = {
       commandId: entry.command.payload.commandId,

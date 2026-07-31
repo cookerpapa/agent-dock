@@ -111,184 +111,6 @@ describe("tenant-aware browser API", () => {
     });
   });
 
-  it("manages environment candidates through versioned, idempotent APIs", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
-    const projectId = "20000000-0000-4000-8000-000000000001";
-    const sessionId = "30000000-0000-4000-8000-000000000001";
-    const history = {
-      projectId,
-      activeEnvironmentVersionId: environment.environmentVersionId,
-      versions: [environment],
-      operations: [],
-      truncated: false,
-    };
-    const accepted = {
-      turnId: "40000000-0000-4000-8000-000000000001",
-      sessionId,
-      runId: "50000000-0000-4000-8000-000000000001",
-      commandId: "60000000-0000-4000-8000-000000000001",
-      mailboxPosition: 1,
-      state: "queued",
-      acceptedAt: "2026-07-19T00:00:00.000Z",
-      replayed: false,
-    } as const;
-    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
-      if (init === undefined) throw new Error("Expected request options");
-      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
-      const path = String(input);
-      if (path.includes(`/v1/sessions/${sessionId}/environments/`)) {
-        expect(init?.method).toBe("POST");
-        expect(new Headers(init?.headers).get("idempotency-key")).toBe("validate-environment");
-        return new Response(JSON.stringify(accepted), {
-          status: 202,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (path.endsWith("/activate")) {
-        expect(JSON.parse(String(init?.body))).toEqual({
-          expectedActiveEnvironmentVersionId: environment.environmentVersionId,
-        });
-        expect(new Headers(init?.headers).get("idempotency-key")).toBe("activate-environment");
-      } else if (init?.method === "POST") {
-        expect(JSON.parse(String(init.body))).toEqual({
-          recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
-        });
-        expect(new Headers(init.headers).get("idempotency-key")).toBe("create-environment");
-      }
-      return new Response(JSON.stringify(history), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    });
-    const api = new AgentDockApi(fetchImplementation, token);
-    await expect(api.getProjectEnvironments(projectId)).resolves.toEqual(history);
-    await expect(
-      api.createProjectEnvironment(
-        projectId,
-        DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
-        "create-environment",
-      ),
-    ).resolves.toEqual(history);
-    await expect(
-      api.activateProjectEnvironment(
-        projectId,
-        environment.environmentVersionId,
-        environment.environmentVersionId,
-        "activate-environment",
-      ),
-    ).resolves.toEqual(history);
-    await expect(
-      api.validateProjectEnvironment(
-        sessionId,
-        environment.environmentVersionId,
-        "validate-environment",
-      ),
-    ).resolves.toEqual(accepted);
-  });
-
-  it("creates and promotes a bounded candidate race through idempotent APIs", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
-    const sessionId = "31000000-0000-4000-8000-000000000001";
-    const orchestrationId = "32000000-0000-4000-8000-000000000001";
-    const baseWorkspaceVersionId = "33000000-0000-4000-8000-000000000001";
-    const firstCandidateId = "34000000-0000-4000-8000-000000000001";
-    const createBody = {
-      baseWorkspaceVersionId,
-      prompt: "Repair the failing tests.",
-      candidates: [
-        { label: "Minimal", strategy: "Prefer the smallest safe patch." },
-        { label: "Robust", strategy: "Prefer explicit validation and regression tests." },
-      ],
-      maximumConcurrentCandidates: 2,
-      acceptance: {
-        requirePatch: true,
-        requireTests: true,
-        maximumChangedPaths: 12,
-        protectedPathPrefixes: [".github/"],
-      },
-    };
-    const race = {
-      orchestrationId,
-      kind: "candidate_race",
-      state: "running",
-      projectId: "35000000-0000-4000-8000-000000000001",
-      workspaceId: "36000000-0000-4000-8000-000000000001",
-      parentSessionId: sessionId,
-      baseWorkspaceVersionId,
-      prompt: createBody.prompt,
-      maximumConcurrentCandidates: 2,
-      acceptancePolicy: createBody.acceptance,
-      candidates: [
-        {
-          candidateId: firstCandidateId,
-          ordinal: 1,
-          label: "Minimal",
-          strategy: "Prefer the smallest safe patch.",
-          sessionId: "37000000-0000-4000-8000-000000000001",
-          runId: "38000000-0000-4000-8000-000000000001",
-          dispatchId: "39000000-0000-4000-8000-000000000001",
-          dispatchGeneration: 1,
-          dispatchState: "accepted",
-          runState: "queued",
-          createdAt: "2026-07-23T00:00:00.000Z",
-        },
-        {
-          candidateId: "34000000-0000-4000-8000-000000000002",
-          ordinal: 2,
-          label: "Robust",
-          strategy: "Prefer explicit validation and regression tests.",
-          sessionId: "37000000-0000-4000-8000-000000000002",
-          runId: "38000000-0000-4000-8000-000000000002",
-          dispatchId: "39000000-0000-4000-8000-000000000002",
-          dispatchGeneration: 1,
-          dispatchState: "accepted",
-          runState: "queued",
-          createdAt: "2026-07-23T00:00:00.000Z",
-        },
-      ],
-      decisionGate: {
-        gateId: "3a000000-0000-4000-8000-000000000001",
-        state: "pending",
-      },
-      createdAt: "2026-07-23T00:00:00.000Z",
-      updatedAt: "2026-07-23T00:00:00.000Z",
-    } as const;
-    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
-      if (init === undefined) throw new Error("Expected candidate-race request options");
-      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
-      const path = String(input);
-      if (path.endsWith("/promotion")) {
-        expect(init?.method).toBe("POST");
-        expect(new Headers(init.headers).get("idempotency-key")).toBe("promote-race");
-        expect(JSON.parse(String(init.body))).toEqual({
-          candidateId: firstCandidateId,
-          expectedParentWorkspaceVersionId: baseWorkspaceVersionId,
-        });
-      } else {
-        expect(path).toBe(`/v1/sessions/${sessionId}/candidate-races`);
-        expect(init?.method).toBe("POST");
-        expect(new Headers(init.headers).get("idempotency-key")).toBe("create-race");
-        expect(JSON.parse(String(init.body))).toEqual(createBody);
-      }
-      return new Response(JSON.stringify(race), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    });
-    const api = new AgentDockApi(fetchImplementation, token);
-    await expect(api.createCandidateRace(sessionId, createBody, "create-race")).resolves.toEqual(
-      race,
-    );
-    await expect(
-      api.promoteCandidate(
-        orchestrationId,
-        firstCandidateId,
-        baseWorkspaceVersionId,
-        "promote-race",
-      ),
-    ).resolves.toEqual(race);
-  });
-
   it("reads safe model metadata and submits a write-only provider credential", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const providerKey = `sk-${"p".repeat(48)}`;
@@ -506,18 +328,11 @@ describe("tenant-aware browser API", () => {
     ).resolves.toMatchObject({ session: { state: "idle" } });
   });
 
-  it("loads tenant-scoped operational audit and binary Workspace content", async () => {
-    const tenantId = "10000000-0000-4000-8000-000000000002";
+  it("loads binary Workspace content", async () => {
     const versionId = "20000000-0000-4000-8000-000000000001";
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
-      if (String(input) === "/v1/operations/audit") {
-        return new Response(JSON.stringify({ tenantId, events: [], truncated: false }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
       expect(String(input)).toBe(`/v1/workspace-versions/${versionId}/file?path=src%2FMain.java`);
       return new Response("class Main {}\n", {
         status: 200,
@@ -526,11 +341,6 @@ describe("tenant-aware browser API", () => {
     });
     const api = new AgentDockApi(fetchImplementation, token);
 
-    await expect(api.getOperationalAudit()).resolves.toEqual({
-      tenantId,
-      events: [],
-      truncated: false,
-    });
     const file = await api.readWorkspaceFile(versionId, "src/Main.java");
     expect(new TextDecoder().decode(file.bytes)).toBe("class Main {}\n");
   });

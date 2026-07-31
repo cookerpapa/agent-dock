@@ -125,6 +125,7 @@ beforeAll(async () => {
 
   application = await createControlPlaneApplication({
     database,
+    advancedModulesEnabled: true,
     productionHttpGateway: new ProductionHttpGateway({
       authenticator: new PostgresTenantApiAuthenticator({ database, clock: () => NOW }),
       readiness: () => true,
