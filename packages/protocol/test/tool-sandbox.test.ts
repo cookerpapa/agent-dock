@@ -88,6 +88,7 @@ describe("Tool Sandbox protocol", () => {
           operationId: "10000000-0000-4000-8000-000000000009",
           operation: "file.read",
           content: Buffer.from("isolated\n").toString("base64"),
+          sha256: "b56cd21cdde6e2f4df2a1d34322d092ede320284fb273345ee0de579b1d32dce",
         },
       }),
     ).toMatchObject({

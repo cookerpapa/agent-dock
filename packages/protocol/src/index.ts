@@ -93,7 +93,11 @@ export {
 export {
   MAX_TOOL_COMMAND_BYTES,
   MAX_TOOL_FILE_BYTES,
+  MAX_TOOL_MUTATION_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
+  MAX_TOOL_RANGE_FILE_BYTES,
+  MAX_TOOL_READ_RANGE_BYTES,
+  MAX_TOOL_READ_RANGE_LINES,
   DependencyProxyBootstrapSchema,
   ToolWebProxyBootstrapSchema,
   ToolWorkerEnvironmentStageSchema,

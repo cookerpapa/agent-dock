@@ -3,7 +3,10 @@ import {
   isExpectedDefaultToolchain,
   MAX_TOOL_COMMAND_BYTES,
   MAX_TOOL_FILE_BYTES,
+  MAX_TOOL_MUTATION_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
+  MAX_TOOL_RANGE_FILE_BYTES,
+  MAX_TOOL_READ_RANGE_BYTES,
   parseToolWorkerInput,
   type EnvironmentRuntimeSnapshot,
   type EnvironmentRecipeCommand,
@@ -24,9 +27,19 @@ import {
   restoreWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, cp, lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
+import {
+  access,
+  cp,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { request as httpRequest } from "node:http";
 import { createInterface } from "node:readline";
@@ -588,15 +601,18 @@ function byteLengthWithin(value: string, maximum: number): boolean {
   return Buffer.byteLength(value, "utf8") <= maximum;
 }
 
-function isInsideWorkspace(path: string): boolean {
-  const fromRoot = relative(TOOL_WORKSPACE_DIRECTORY, path);
+function isInsideWorkspace(path: string, workspaceDirectory = TOOL_WORKSPACE_DIRECTORY): boolean {
+  const fromRoot = relative(resolve(workspaceDirectory), path);
   return (
     fromRoot === "" ||
     (!fromRoot.startsWith(`..${sep}`) && fromRoot !== ".." && !isAbsolute(fromRoot))
   );
 }
 
-export function resolveToolWorkspacePath(input: string): string {
+export function resolveToolWorkspacePath(
+  input: string,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): string {
   if (
     input.length < 1 ||
     input.length > 4_096 ||
@@ -605,8 +621,9 @@ export function resolveToolWorkspacePath(input: string): string {
   ) {
     throw new ToolWorkerError("invalid_tool_path", "Tool path is invalid");
   }
-  const resolved = resolve(TOOL_WORKSPACE_DIRECTORY, input);
-  if (!isInsideWorkspace(resolved)) {
+  const workspaceRoot = resolve(workspaceDirectory);
+  const resolved = resolve(workspaceRoot, input);
+  if (!isInsideWorkspace(resolved, workspaceRoot)) {
     throw new ToolWorkerError("tool_path_escape", "Tool path escaped the workspace");
   }
   return resolved;
@@ -621,13 +638,16 @@ function isMissing(error: unknown): boolean {
   );
 }
 
-async function assertRealPathInsideWorkspace(path: string): Promise<void> {
+async function assertRealPathInsideWorkspace(
+  path: string,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): Promise<void> {
   const canonical = await realpath(path).catch((error: unknown) => {
     throw isMissing(error)
       ? new ToolWorkerError("tool_path_missing", "Tool path does not exist")
       : error;
   });
-  if (!isInsideWorkspace(canonical)) {
+  if (!isInsideWorkspace(canonical, workspaceDirectory)) {
     throw new ToolWorkerError("tool_path_escape", "Tool path escaped the workspace");
   }
 }
@@ -685,47 +705,181 @@ async function ensureWorkspaceDirectory(path: string): Promise<void> {
   }
 }
 
-async function readWorkspaceFile(path: string): Promise<Buffer> {
-  const target = resolveToolWorkspacePath(path);
+export async function readWorkspaceFile(
+  path: string,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): Promise<{ content: Buffer; sha256: string }> {
+  const target = resolveToolWorkspacePath(path, workspaceDirectory);
   await assertNoFinalSymlink(target);
-  await assertRealPathInsideWorkspace(dirname(target));
+  await assertRealPathInsideWorkspace(dirname(target), workspaceDirectory);
   const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
     throw new ToolWorkerError("tool_file_unavailable", "Tool file could not be read");
   });
   try {
     const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size > MAX_TOOL_FILE_BYTES) {
+    if (!metadata.isFile() || metadata.size > MAX_TOOL_MUTATION_FILE_BYTES) {
       throw new ToolWorkerError("tool_file_limit", "Tool file is outside its byte limit");
     }
     const content = await handle.readFile();
-    if (content.byteLength > MAX_TOOL_FILE_BYTES) {
+    if (content.byteLength > MAX_TOOL_MUTATION_FILE_BYTES) {
       throw new ToolWorkerError("tool_file_limit", "Tool file is outside its byte limit");
     }
-    return content;
+    return {
+      content,
+      sha256: createHash("sha256").update(content).digest("hex"),
+    };
   } finally {
     await handle.close();
   }
 }
 
-async function writeWorkspaceFile(path: string, content: string): Promise<void> {
-  if (!byteLengthWithin(content, MAX_TOOL_FILE_BYTES)) {
-    throw new ToolWorkerError("tool_file_limit", "Tool file is outside its byte limit");
-  }
-  const target = resolveToolWorkspacePath(path);
+type WorkspaceFileRange = {
+  content: Buffer;
+  startLine: number;
+  endLine: number;
+  nextOffsetLine?: number;
+  firstLineBytes?: number;
+};
+
+export async function readWorkspaceFileRange(
+  path: string,
+  offsetLine: number,
+  limitLines: number,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): Promise<WorkspaceFileRange> {
+  const target = resolveToolWorkspacePath(path, workspaceDirectory);
   await assertNoFinalSymlink(target);
-  await assertRealPathInsideWorkspace(dirname(target));
-  const handle = await open(
-    target,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
-    0o644,
-  ).catch(() => {
-    throw new ToolWorkerError("tool_file_unavailable", "Tool file could not be written");
+  await assertRealPathInsideWorkspace(dirname(target), workspaceDirectory);
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
+    throw new ToolWorkerError("tool_file_unavailable", "Tool file could not be read");
   });
   try {
-    await handle.writeFile(content, "utf8");
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > MAX_TOOL_RANGE_FILE_BYTES) {
+      throw new ToolWorkerError("tool_file_limit", "Tool file is outside its ranged-read limit");
+    }
+    if (metadata.size === 0 && offsetLine === 1) {
+      return { content: Buffer.alloc(0), startLine: 1, endLine: 1 };
+    }
+    const stream = handle.createReadStream({ autoClose: false, encoding: "utf8" });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    const selected: string[] = [];
+    let currentLine = 0;
+    let selectedBytes = 0;
+    let nextOffsetLine: number | undefined;
+    let firstLineBytes: number | undefined;
+    try {
+      for await (const line of lines) {
+        currentLine += 1;
+        if (currentLine < offsetLine) continue;
+        const lineBytes = Buffer.byteLength(line, "utf8");
+        const separatorBytes = selected.length === 0 ? 0 : 1;
+        if (selected.length === 0 && lineBytes > MAX_TOOL_READ_RANGE_BYTES) {
+          firstLineBytes = lineBytes;
+          break;
+        }
+        if (
+          selected.length >= limitLines ||
+          selectedBytes + separatorBytes + lineBytes > MAX_TOOL_READ_RANGE_BYTES
+        ) {
+          nextOffsetLine = currentLine;
+          break;
+        }
+        selected.push(line);
+        selectedBytes += separatorBytes + lineBytes;
+      }
+    } finally {
+      lines.close();
+      stream.destroy();
+    }
+    if (currentLine < offsetLine) {
+      throw new ToolWorkerError(
+        "tool_read_offset_out_of_range",
+        `Read offset ${offsetLine} is beyond the end of the file`,
+      );
+    }
+    return {
+      content: Buffer.from(selected.join("\n"), "utf8"),
+      startLine: offsetLine,
+      endLine: firstLineBytes === undefined ? offsetLine + selected.length - 1 : offsetLine,
+      ...(nextOffsetLine === undefined ? {} : { nextOffsetLine }),
+      ...(firstLineBytes === undefined ? {} : { firstLineBytes }),
+    };
   } finally {
     await handle.close();
   }
+}
+
+async function currentWorkspaceFileSha256(target: string): Promise<string> {
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => {
+    throw new ToolWorkerError("tool_edit_conflict", "Tool file changed before it was written");
+  });
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > MAX_TOOL_MUTATION_FILE_BYTES) {
+      throw new ToolWorkerError("tool_file_limit", "Tool file is outside its byte limit");
+    }
+    return createHash("sha256")
+      .update(await handle.readFile())
+      .digest("hex");
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function writeWorkspaceFile(
+  path: string,
+  content: string,
+  expectedSha256?: string,
+  workspaceDirectory = TOOL_WORKSPACE_DIRECTORY,
+): Promise<string> {
+  if (!byteLengthWithin(content, MAX_TOOL_MUTATION_FILE_BYTES)) {
+    throw new ToolWorkerError("tool_file_limit", "Tool file is outside its byte limit");
+  }
+  const target = resolveToolWorkspacePath(path, workspaceDirectory);
+  await assertNoFinalSymlink(target);
+  const parent = dirname(target);
+  await assertRealPathInsideWorkspace(parent, workspaceDirectory);
+  if (expectedSha256 !== undefined) {
+    const actualSha256 = await currentWorkspaceFileSha256(target);
+    if (actualSha256 !== expectedSha256) {
+      throw new ToolWorkerError("tool_edit_conflict", "Tool file changed before it was written");
+    }
+  }
+  const existing = await lstat(target).catch((error: unknown) => {
+    if (isMissing(error)) return undefined;
+    throw error;
+  });
+  const temporary = join(parent, `.agent-dock-${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      existing === undefined ? 0o644 : existing.mode & 0o777,
+    );
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    if (expectedSha256 !== undefined) {
+      const actualSha256 = await currentWorkspaceFileSha256(target);
+      if (actualSha256 !== expectedSha256) {
+        throw new ToolWorkerError("tool_edit_conflict", "Tool file changed before it was written");
+      }
+    }
+    await rename(temporary, target);
+    const directory = await open(parent, constants.O_RDONLY);
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+  }
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 async function accessWorkspaceFile(path: string): Promise<void> {
@@ -831,16 +985,47 @@ async function executeOperation(
 ): Promise<ToolSandboxOperationResponse> {
   if (request.operation === "bash.exec") return executeBash(request, signal, webProxy);
   if (request.operation === "file.read") {
+    const file = await readWorkspaceFile(request.path);
     return {
       managerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
       activationId: request.activationId,
       operationId: request.operationId,
       operation: "file.read",
-      content: (await readWorkspaceFile(request.path)).toString("base64"),
+      content: file.content.toString("base64"),
+      sha256: file.sha256,
     };
   }
-  if (request.operation === "file.write") await writeWorkspaceFile(request.path, request.content);
+  if (request.operation === "file.read_range") {
+    const range = await readWorkspaceFileRange(
+      request.path,
+      request.offsetLine,
+      request.limitLines,
+    );
+    return {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.operation_result",
+      activationId: request.activationId,
+      operationId: request.operationId,
+      operation: "file.read_range",
+      content: range.content.toString("base64"),
+      startLine: range.startLine,
+      endLine: range.endLine,
+      ...(range.nextOffsetLine === undefined ? {} : { nextOffsetLine: range.nextOffsetLine }),
+      ...(range.firstLineBytes === undefined ? {} : { firstLineBytes: range.firstLineBytes }),
+    };
+  }
+  if (request.operation === "file.write") {
+    const sha256 = await writeWorkspaceFile(request.path, request.content, request.expectedSha256);
+    return {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.operation_result",
+      activationId: request.activationId,
+      operationId: request.operationId,
+      operation: "file.write",
+      sha256,
+    };
+  }
   if (request.operation === "file.mkdir") {
     await ensureWorkspaceDirectory(resolveToolWorkspacePath(request.path));
   }

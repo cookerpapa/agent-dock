@@ -7,18 +7,30 @@ import {
   type EnvironmentRuntimeSnapshot,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   dependencyRecipeWebProxy,
   executeEnvironmentRecipe,
+  readWorkspaceFile,
+  readWorkspaceFileRange,
   resolveToolWorkspacePath,
   safeToolEnvironment,
   ToolWorkerError,
   validateAttachedWorkspaceRoot,
   validateToolEnvironment,
+  writeWorkspaceFile,
 } from "../src/tool-worker.ts";
 
 function recipeEnvironment(recipe: EnvironmentRecipe): EnvironmentRuntimeSnapshot {
@@ -129,6 +141,64 @@ describe("credential-free Tool Sandbox worker", () => {
     expect(resolveToolWorkspacePath(".agent-dock-runtime/user-file")).toBe(
       "/workspace/.agent-dock-runtime/user-file",
     );
+  });
+
+  it("reads bounded line ranges without loading a large source file into Tool RPC", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-ranged-read-"));
+    try {
+      await writeFile(
+        resolve(workspace, "large.txt"),
+        Array.from({ length: 5_000 }, (_, index) => `line-${String(index + 1)}`).join("\n"),
+      );
+      await expect(readWorkspaceFileRange("large.txt", 2_501, 3, workspace)).resolves.toMatchObject(
+        {
+          content: Buffer.from("line-2501\nline-2502\nline-2503"),
+          startLine: 2_501,
+          endLine: 2_503,
+          nextOffsetLine: 2_504,
+        },
+      );
+
+      await writeFile(resolve(workspace, "wide.txt"), `${"x".repeat(60 * 1_024)}\nnext`);
+      await expect(readWorkspaceFileRange("wide.txt", 1, 10, workspace)).resolves.toMatchObject({
+        content: Buffer.alloc(0),
+        startLine: 1,
+        endLine: 1,
+        firstLineBytes: 60 * 1_024,
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("atomically replaces an expected file revision and rejects stale edits", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-atomic-edit-"));
+    try {
+      await writeFile(resolve(workspace, "source.ts"), "export const value = 1;\n");
+      const original = await readWorkspaceFile("source.ts", workspace);
+      const writtenSha256 = await writeWorkspaceFile(
+        "source.ts",
+        "export const value = 2;\n",
+        original.sha256,
+        workspace,
+      );
+      await expect(readFile(resolve(workspace, "source.ts"), "utf8")).resolves.toBe(
+        "export const value = 2;\n",
+      );
+      expect((await readWorkspaceFile("source.ts", workspace)).sha256).toBe(writtenSha256);
+      expect((await readdir(workspace)).some((entry) => entry.endsWith(".tmp"))).toBe(false);
+
+      await writeFile(resolve(workspace, "source.ts"), "external change\n");
+      await expect(
+        writeWorkspaceFile("source.ts", "stale replacement\n", writtenSha256, workspace),
+      ).rejects.toMatchObject({ code: "tool_edit_conflict", retryable: false });
+      await expect(readFile(resolve(workspace, "source.ts"), "utf8")).resolves.toBe(
+        "external change\n",
+      );
+      expect((await readdir(workspace)).some((entry) => entry.endsWith(".tmp"))).toBe(false);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("accepts a restored non-Git workspace root and rejects a linked mount root", async () => {

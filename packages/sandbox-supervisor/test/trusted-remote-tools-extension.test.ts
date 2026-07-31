@@ -108,10 +108,12 @@ describe("trusted remote tools extension governance", () => {
           operation: request.operation,
         };
         const body =
-          request.operation === "file.read"
+          request.operation === "file.read_range"
             ? {
                 ...common,
                 content: Buffer.from("x".repeat(2_048)).toString("base64"),
+                startLine: 1,
+                endLine: 1,
               }
             : common;
         return new Response(JSON.stringify(body), {
@@ -216,7 +218,10 @@ describe("trusted remote tools extension governance", () => {
           new AbortController().signal,
           () => undefined,
           undefined as never,
-        )) as { content: Array<{ type: string; text: string }>; details?: { truncation?: unknown } };
+        )) as {
+        content: Array<{ type: string; text: string }>;
+        details?: { truncation?: unknown };
+      };
 
       const preview = result.content[0]?.text ?? "";
       expect(Buffer.byteLength(preview, "utf8")).toBeLessThanOrEqual(1_024);
@@ -232,5 +237,81 @@ describe("trusted remote tools extension governance", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("binds edit writes to the file revision that Pi actually read", async () => {
+    const registered: ToolDefinition[] = [];
+    const original = Buffer.from("before\n", "utf8");
+    const originalSha256 = createHash("sha256").update(original).digest("hex");
+    let written: string | undefined;
+    const pi = {
+      registerTool(tool: ToolDefinition) {
+        registered.push(tool);
+      },
+      on() {},
+    } as unknown as ExtensionAPI;
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body)) as {
+        activationId: string;
+        operationId: string;
+        operation: string;
+        content?: string;
+        expectedSha256?: string;
+      };
+      const common = {
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.operation_result",
+        activationId: request.activationId,
+        operationId: request.operationId,
+        operation: request.operation,
+      };
+      if (request.operation === "file.read") {
+        return new Response(
+          JSON.stringify({
+            ...common,
+            content: original.toString("base64"),
+            sha256: originalSha256,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (request.operation === "file.write") {
+        expect(request.expectedSha256).toBe(originalSha256);
+        written = request.content;
+        return new Response(
+          JSON.stringify({
+            ...common,
+            sha256: createHash("sha256").update(request.content!, "utf8").digest("hex"),
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify(common), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    installInlineExtension(
+      createTrustedRemoteToolsExtension({
+        ...BASE_CONFIGURATION,
+        remainingToolCalls: 1,
+      }),
+      pi,
+    );
+
+    await expect(
+      registered
+        .find((tool) => tool.name === "edit")!
+        .execute(
+          "tool-call-atomic-edit",
+          { path: "example.txt", edits: [{ oldText: "before", newText: "after" }] },
+          new AbortController().signal,
+          () => undefined,
+          undefined as never,
+        ),
+    ).resolves.toMatchObject({
+      content: [{ type: "text", text: "Successfully replaced 1 block(s) in example.txt." }],
+    });
+    expect(written).toBe("after\n");
   });
 });

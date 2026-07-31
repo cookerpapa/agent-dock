@@ -11,8 +11,10 @@ import {
   createReadTool,
   createWriteTool,
   DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
   type BashOperations,
   type EditOperations,
+  type ReadToolInput,
   type ReadOperations,
   type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
@@ -21,7 +23,7 @@ import { writeFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve, sep } from "node:path";
 
 const WORKSPACE_ROOT = "/workspace";
-const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024;
+const MAX_RESPONSE_BYTES = 5 * 1_024 * 1_024;
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
@@ -333,6 +335,7 @@ function registerTrustedRemoteTools(
       try {
         const response = await operation({ operation: "file.write", path, content });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+        if (response.operation !== "file.write") throw new Error("Tool response kind changed");
       } catch (error: unknown) {
         throw errorForPi(error);
       }
@@ -346,9 +349,55 @@ function registerTrustedRemoteTools(
       }
     },
   };
+  const editDigests = new Map<string, string>();
   const editOperations: EditOperations = {
-    readFile: readOperations().readFile,
-    writeFile: writeOperations.writeFile,
+    readFile: async (path) => {
+      try {
+        const response = await operation({ operation: "file.read", path });
+        if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+        if (response.operation !== "file.read") throw new Error("Tool response kind changed");
+        const content = canonicalBase64(response.content);
+        const actual = createHash("sha256").update(content).digest("hex");
+        if (actual !== response.sha256) {
+          throw new RemoteToolError(
+            "tool_protocol_error",
+            "Tool Sandbox returned an invalid file digest",
+            false,
+          );
+        }
+        editDigests.set(path, response.sha256);
+        return content;
+      } catch (error: unknown) {
+        throw errorForPi(error);
+      }
+    },
+    writeFile: async (path, content) => {
+      const expectedSha256 = editDigests.get(path);
+      editDigests.delete(path);
+      if (expectedSha256 === undefined) {
+        throw new Error("tool_edit_conflict: Edit did not read the current file revision");
+      }
+      try {
+        const response = await operation({
+          operation: "file.write",
+          path,
+          content,
+          expectedSha256,
+        });
+        if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+        if (response.operation !== "file.write") throw new Error("Tool response kind changed");
+        const writtenSha256 = createHash("sha256").update(content, "utf8").digest("hex");
+        if (writtenSha256 !== response.sha256) {
+          throw new RemoteToolError(
+            "tool_protocol_error",
+            "Tool Sandbox returned an invalid written-file digest",
+            false,
+          );
+        }
+      } catch (error: unknown) {
+        throw errorForPi(error);
+      }
+    },
     access: readOperations().access,
   };
   const bashOperations = (toolCallId: string): BashOperations => ({
@@ -418,12 +467,61 @@ function registerTrustedRemoteTools(
     executionMode: "sequential",
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
-      return createReadTool(WORKSPACE_ROOT, { operations: readOperations(id) }).execute(
-        id,
-        params,
-        signal,
-        onUpdate,
-      );
+      const input = params as ReadToolInput;
+      if (/\.(?:png|jpe?g|gif|webp|bmp)$/i.test(input.path)) {
+        return createReadTool(WORKSPACE_ROOT, { operations: readOperations(id) }).execute(
+          id,
+          params,
+          signal,
+          onUpdate,
+        );
+      }
+      const offsetLine = input.offset ?? 1;
+      const requestedLimit = input.limit ?? DEFAULT_MAX_LINES;
+      if (
+        !Number.isSafeInteger(offsetLine) ||
+        offsetLine < 1 ||
+        !Number.isSafeInteger(requestedLimit) ||
+        requestedLimit < 1
+      ) {
+        throw new Error("tool_read_range_invalid: offset and limit must be positive integers");
+      }
+      try {
+        const response = await operation(
+          {
+            operation: "file.read_range",
+            path: input.path,
+            offsetLine,
+            limitLines: Math.min(DEFAULT_MAX_LINES, requestedLimit),
+          },
+          signal,
+        );
+        if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+        if (response.operation !== "file.read_range") {
+          throw new Error("Tool response kind changed");
+        }
+        if (response.firstLineBytes !== undefined) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `[Line ${response.startLine} is ${response.firstLineBytes} bytes, exceeds ${DEFAULT_MAX_BYTES} byte limit. Use bash with sed/head to inspect a bounded slice.]`,
+              },
+            ],
+            details: undefined,
+          };
+        }
+        const range = canonicalBase64(response.content);
+        const maximumInlineBytes = Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES);
+        await preserveLargeOutput(id, range, maximumInlineBytes);
+        let output = modelOutputPreview(range, maximumInlineBytes, id).toString("utf8");
+        if (response.nextOffsetLine !== undefined) {
+          output += `\n\n[Showing lines ${response.startLine}-${response.endLine}. Use offset=${response.nextOffsetLine} to continue.]`;
+        }
+        return { content: [{ type: "text", text: output }], details: undefined };
+      } catch (error: unknown) {
+        throw errorForPi(error);
+      }
     },
   });
   pi.registerTool({
