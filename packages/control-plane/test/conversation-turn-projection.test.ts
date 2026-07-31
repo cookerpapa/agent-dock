@@ -1,6 +1,6 @@
 import { createAgentDockEventFactory, type AgentDockEventBody } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
-import { projectConversationTurnTranscript } from "../src/conversation-turn-projection.ts";
+import { projectConversationTurnTranscript } from "@agent-dock/runtime-core/conversation-turn-projection";
 
 const CREATED_AT = "2026-07-23T00:00:00.000Z";
 

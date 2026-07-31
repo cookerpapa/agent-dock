@@ -7,7 +7,7 @@ import {
 import {
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
-} from "@agent-dock/control-plane/checkpoint-runtime";
+} from "@agent-dock/runtime-core/checkpoint-runtime";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import {

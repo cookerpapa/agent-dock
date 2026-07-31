@@ -8,7 +8,7 @@ import {
   restorePiSessionManifest,
   type PiSessionManifest,
   type PiSessionSegment,
-} from "../src/pi-session-manifest.ts";
+} from "@agent-dock/runtime-core/pi-session-manifest";
 
 function session(...labels: string[]): Uint8Array {
   return Buffer.from(

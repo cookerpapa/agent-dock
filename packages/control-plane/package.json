@@ -4,17 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./run-cancellation-executor": "./src/run-cancellation-executor.ts",
-    "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
-    "./durable-event-store": "./src/durable-event-store.ts",
-    "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
-    "./model-credential-runtime": "./src/model-credential-runtime.ts",
-    "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
-    "./run-command-executor": "./src/run-command-executor.ts",
-    "./run-attempt-runtime": "./src/run-attempt-runtime.ts",
-    "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
-    "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "bootstrap": "tsx src/bootstrap-main.ts",
@@ -29,6 +19,7 @@
     "@agent-dock/github-gateway": "0.1.0",
     "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
+    "@agent-dock/runtime-core": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
     "@agent-dock/sandbox-manager": "0.1.0",
     "@agent-dock/temporal-orchestration": "0.1.0",

@@ -26,7 +26,7 @@ import {
   decodePiSessionManifest,
   type S3CheckpointObjectStoreOptions,
 } from "../src/index.ts";
-import { transitionCurrentRunAttempt } from "../src/run-attempt-state.ts";
+import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",

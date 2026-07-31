@@ -4,7 +4,7 @@ import {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./run-command-executor.ts";
+} from "@agent-dock/runtime-core/run-command-executor";
 
 export type DeterministicExecutionOutcome =
   | { kind: "complete"; stopReason?: string }

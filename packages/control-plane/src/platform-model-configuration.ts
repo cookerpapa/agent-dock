@@ -3,7 +3,7 @@ import type { Kysely } from "kysely";
 import {
   PostgresTenantModelCredentialResolver,
   type TenantModelCredentialVault,
-} from "./model-credential-runtime.ts";
+} from "@agent-dock/runtime-core/model-credential-runtime";
 import type { PrivateTenantInitialModel } from "./tenant-administration.ts";
 
 export class PlatformModelConfigurationError extends Error {

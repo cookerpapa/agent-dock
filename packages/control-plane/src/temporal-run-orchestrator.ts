@@ -9,7 +9,7 @@ import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agen
 import { Client, Connection } from "@temporalio/client";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
-import { PostgresTemporalWorkerAffinity } from "./temporal-worker-affinity.ts";
+import { PostgresTemporalWorkerAffinity } from "@agent-dock/runtime-core/temporal-worker-affinity";
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_BATCH_SIZE = 100;

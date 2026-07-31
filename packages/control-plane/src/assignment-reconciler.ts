@@ -16,9 +16,9 @@ import type {
 } from "@agent-dock/sandbox-supervisor";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
-import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
-import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
-import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
+import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
+import type { SessionEventNotificationPublisher } from "@agent-dock/runtime-core/session-event-notifications";
+import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =

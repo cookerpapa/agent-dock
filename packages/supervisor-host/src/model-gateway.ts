@@ -1,7 +1,7 @@
 import {
   PostgresTenantModelCredentialResolver,
   type TenantModelCredentialIdentity,
-} from "@agent-dock/control-plane/model-credential-runtime";
+} from "@agent-dock/runtime-core/model-credential-runtime";
 import type { Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
 import type { TrustedModelRuntimeLease } from "@agent-dock/sandbox-supervisor";

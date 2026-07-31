@@ -14,7 +14,7 @@ import {
   type SteerTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@agent-dock/protocol";
-import type { DurableEventIngestor } from "./durable-event-store.ts";
+import type { DurableEventIngestor } from "@agent-dock/runtime-core/durable-event-store";
 
 export { TWO_PHASE_COMMAND_CAPABILITY };
 

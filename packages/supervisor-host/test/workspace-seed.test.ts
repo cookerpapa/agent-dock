@@ -3,7 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
   SandboxCheckpointStoreError,
   type CheckpointObjectStore,
-} from "@agent-dock/control-plane/checkpoint-runtime";
+} from "@agent-dock/runtime-core/checkpoint-runtime";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,

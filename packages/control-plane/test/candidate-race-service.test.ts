@@ -20,7 +20,7 @@ import {
   type TenantRequestIdentity,
   type TurnExecutionBackend,
 } from "../src/index.ts";
-import { createCompletedRunReviewBundle } from "../src/review-bundle.ts";
+import { createCompletedRunReviewBundle } from "@agent-dock/runtime-core/review-bundle";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 const IDS = {

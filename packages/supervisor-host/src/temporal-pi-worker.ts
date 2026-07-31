@@ -1,12 +1,12 @@
 import {
   type RunCancellationExecutionResult,
   RunCancellationExecutor,
-} from "@agent-dock/control-plane/run-cancellation-executor";
+} from "@agent-dock/runtime-core/run-cancellation-executor";
 import {
   type RunCommandExecutionResult,
   RunCommandExecutor,
-} from "@agent-dock/control-plane/run-command-executor";
-import { PostgresTemporalWorkerAffinity } from "@agent-dock/control-plane/temporal-worker-affinity";
+} from "@agent-dock/runtime-core/run-command-executor";
+import { PostgresTemporalWorkerAffinity } from "@agent-dock/runtime-core/temporal-worker-affinity";
 import type { Database } from "@agent-dock/database";
 import {
   temporalWorkerAffinityTaskQueue,

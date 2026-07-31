@@ -6,13 +6,13 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import { ApiExceptionFilter } from "./api-exception.filter.ts";
 import { ControlPlaneModule, type ControlPlaneEventRuntime } from "./control-plane.module.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
-import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
+import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import type { SessionEventStreamOptions } from "./session-event-stream.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
 import type { PublicTenantRegistrationConfiguration } from "./public-tenant-registration.ts";
-import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import type {
   TrustedArtifactReader,
   TrustedProviderSnapshotReader,

@@ -128,14 +128,14 @@ function validateRuntimeConfiguration(
 function utf8Head(value: Buffer, maximumBytes: number): Buffer {
   if (value.byteLength <= maximumBytes) return value;
   let end = maximumBytes;
-  while (end > 0 && (value[end] & 0xc0) === 0x80) end -= 1;
+  while (end > 0 && (value[end]! & 0xc0) === 0x80) end -= 1;
   return value.subarray(0, end);
 }
 
 function utf8Tail(value: Buffer, maximumBytes: number): Buffer {
   if (value.byteLength <= maximumBytes) return value;
   let start = value.byteLength - maximumBytes;
-  while (start < value.byteLength && (value[start] & 0xc0) === 0x80) start += 1;
+  while (start < value.byteLength && (value[start]! & 0xc0) === 0x80) start += 1;
   return value.subarray(start);
 }
 

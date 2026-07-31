@@ -2,7 +2,7 @@ import {
   SandboxCheckpointStoreError,
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
-} from "@agent-dock/control-plane/checkpoint-runtime";
+} from "@agent-dock/runtime-core/checkpoint-runtime";
 import type { Database } from "@agent-dock/database";
 import { GitHubGatewayClient, GitHubGatewayError } from "@agent-dock/github-gateway";
 import {

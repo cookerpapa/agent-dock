@@ -12,11 +12,11 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/control-plane": "0.1.0",
     "@agent-dock/database": "0.1.0",
     "@agent-dock/github-gateway": "0.1.0",
     "@agent-dock/observability": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
+    "@agent-dock/runtime-core": "0.1.0",
     "@agent-dock/sandbox-manager": "0.1.0",
     "@agent-dock/sandbox-supervisor": "0.1.0",
     "@agent-dock/temporal-orchestration": "0.1.0",
@@ -28,6 +28,7 @@
     "tsx": "4.23.1"
   },
   "devDependencies": {
+    "@agent-dock/control-plane": "0.1.0",
     "@electric-sql/pglite": "0.5.4",
     "@electric-sql/pglite-socket": "0.2.7"
   }

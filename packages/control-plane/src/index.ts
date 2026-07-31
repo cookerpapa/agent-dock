@@ -36,7 +36,7 @@ export {
   type ResolvedTenantModelCredential,
   type SealedTenantModelCredential,
   type TenantModelCredentialIdentity,
-} from "./model-credential-runtime.ts";
+} from "@agent-dock/runtime-core/model-credential-runtime";
 export {
   TenantModelConfigurationError,
   TenantModelConfigurationService,
@@ -96,13 +96,13 @@ export {
   type CheckpointObjectStore,
   type FileCheckpointObjectStoreOptions,
   type PostgresSandboxCheckpointStoreOptions,
-} from "./checkpoint-store.ts";
+} from "@agent-dock/runtime-core/checkpoint-store";
 export {
   TtlCheckpointObjectStore,
   type TtlCheckpointObjectStoreEvent,
   type TtlCheckpointObjectStoreOptions,
   type TtlCheckpointObjectStoreSnapshot,
-} from "./checkpoint-object-cache.ts";
+} from "@agent-dock/runtime-core/checkpoint-object-cache";
 export {
   PI_SESSION_MANIFEST_FORMAT,
   PI_SESSION_MANIFEST_MAX_SEGMENTS,
@@ -117,13 +117,13 @@ export {
   type PiSessionSegmentDescriptor,
   type PreparedPiSessionManifest,
   type PreviousPiSessionManifest,
-} from "./pi-session-manifest.ts";
+} from "@agent-dock/runtime-core/pi-session-manifest";
 export {
   createS3CheckpointObjectStoreFromEnvironment,
   S3CheckpointObjectStore,
   type S3CheckpointEnvironment,
   type S3CheckpointObjectStoreOptions,
-} from "./s3-checkpoint-object-store.ts";
+} from "@agent-dock/runtime-core/s3-checkpoint-object-store";
 export {
   RunCancellationExecutor,
   RunCancellationExecutorInvariantError,
@@ -136,7 +136,7 @@ export {
   type TurnCancellationReason,
   type TurnCancellationRequest,
   type TurnCancellationResult,
-} from "./run-cancellation-executor.ts";
+} from "@agent-dock/runtime-core/run-cancellation-executor";
 export {
   ControlPlaneModule,
   type ControlPlaneEventRuntime,
@@ -149,14 +149,14 @@ export {
   type DurableEventStoreErrorCode,
   type DurableEventStoreOptions,
   type EventReplayWindow,
-} from "./durable-event-store.ts";
+} from "@agent-dock/runtime-core/durable-event-store";
 export {
   materializeConversationTurnProjection,
   materializeConversationTurnProjections,
   projectConversationTurnTranscript,
   type MaterializeConversationTurnProjectionInput,
   type MaterializeConversationTurnProjectionsInput,
-} from "./conversation-turn-projection.ts";
+} from "@agent-dock/runtime-core/conversation-turn-projection";
 export {
   DeterministicExecutionBackend,
   type DeterministicExecutionOutcome,
@@ -165,7 +165,7 @@ export {
 export {
   LocalSupervisorExecutionBackend,
   type LocalSupervisorExecutionBackendOptions,
-} from "./local-supervisor-execution-backend.ts";
+} from "@agent-dock/runtime-core/local-supervisor-execution-backend";
 export {
   RemoteSupervisorExecutionBackend,
   type RemoteSupervisorExecutionBackendOptions,
@@ -210,7 +210,7 @@ export {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./run-command-executor.ts";
+} from "@agent-dock/runtime-core/run-command-executor";
 export {
   TemporalRunOrchestrator,
   type TemporalRunOrchestratorActivity,
@@ -223,7 +223,7 @@ export {
   type SessionLeaseCoordinatorOptions,
   type SupervisorConnectionGuard,
   type SupervisorHeartbeatIdentity,
-} from "./session-lease-coordinator.ts";
+} from "@agent-dock/runtime-core/session-lease-coordinator";
 export {
   SupervisorConnectionManager,
   SupervisorConnectionManagerError,
@@ -315,19 +315,19 @@ export {
 export {
   PostgresTemporalWorkerAffinity,
   type PostgresTemporalWorkerAffinityOptions,
-} from "./temporal-worker-affinity.ts";
+} from "@agent-dock/runtime-core/temporal-worker-affinity";
 export {
   SessionEventHub,
   SessionEventSubscription,
   type SessionEventWake,
-} from "./session-event-hub.ts";
+} from "@agent-dock/runtime-core/session-event-hub";
 export { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
 export {
   type SessionEventNotification,
   type SessionEventNotificationHandlers,
   type SessionEventNotificationPublisher,
   type SessionEventNotificationTransport,
-} from "./session-event-notifications.ts";
+} from "@agent-dock/runtime-core/session-event-notifications";
 export {
   PostgresSessionEventNotifications,
   PostgresSessionEventNotificationsError,
@@ -335,7 +335,7 @@ export {
   parseSessionEventNotificationPayload,
   type PostgresSessionEventNotificationsOptions,
   type PostgresSessionEventNotificationsState,
-} from "./postgres-session-event-notifications.ts";
+} from "@agent-dock/runtime-core/postgres-session-event-notifications";
 export {
   OpenSessionEventStream,
   SessionEventStream,
@@ -350,7 +350,7 @@ export {
 export {
   PostgresRunAttemptPhaseObserver,
   type PostgresRunAttemptPhaseObserverOptions,
-} from "./run-attempt-runtime.ts";
+} from "@agent-dock/runtime-core/run-attempt-runtime";
 export {
   WorkspaceVersionError,
   WorkspaceVersionService,

@@ -8,7 +8,7 @@ import {
   type GeneratedTenantApiCredential,
 } from "./tenant-identity.ts";
 import type { DeepSeekModelId } from "@agent-dock/protocol";
-import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 
 export type TenantQuotaConfiguration = Readonly<{
   maximumProjects: number;

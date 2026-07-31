@@ -1,0 +1,49 @@
+{
+  "name": "@agent-dock/runtime-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./checkpoint-object-cache": "./src/checkpoint-object-cache.ts",
+    "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
+    "./checkpoint-store": "./src/checkpoint-store.ts",
+    "./conversation-turn-projection": "./src/conversation-turn-projection.ts",
+    "./durable-event-store": "./src/durable-event-store.ts",
+    "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
+    "./model-credential-runtime": "./src/model-credential-runtime.ts",
+    "./pi-session-manifest": "./src/pi-session-manifest.ts",
+    "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
+    "./review-bundle": "./src/review-bundle.ts",
+    "./run-attempt-runtime": "./src/run-attempt-runtime.ts",
+    "./run-attempt-state": "./src/run-attempt-state.ts",
+    "./run-cancellation-executor": "./src/run-cancellation-executor.ts",
+    "./run-command-executor": "./src/run-command-executor.ts",
+    "./s3-checkpoint-object-store": "./src/s3-checkpoint-object-store.ts",
+    "./session-event-hub": "./src/session-event-hub.ts",
+    "./session-event-notifications": "./src/session-event-notifications.ts",
+    "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
+    "./structured-test-command": "./src/structured-test-command.ts",
+    "./terminal-turn-event": "./src/terminal-turn-event.ts",
+    "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run --passWithNoTests"
+  },
+  "dependencies": {
+    "@agent-dock/database": "0.1.0",
+    "@agent-dock/domain": "0.1.0",
+    "@agent-dock/observability": "0.1.0",
+    "@agent-dock/protocol": "0.1.0",
+    "@agent-dock/sandbox-supervisor": "0.1.0",
+    "@agent-dock/temporal-orchestration": "0.1.0",
+    "@agent-dock/workspace-runtime": "0.1.0",
+    "@aws-sdk/client-s3": "3.1090.0",
+    "kysely": "0.29.4",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0"
+  }
+}

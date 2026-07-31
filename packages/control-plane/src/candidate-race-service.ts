@@ -28,7 +28,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
-import { classifyStructuredTestCommand } from "./structured-test-command.ts";
+import { classifyStructuredTestCommand } from "@agent-dock/runtime-core/structured-test-command";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
 const TERMINAL_RUN_STATES = new Set<RunState>([

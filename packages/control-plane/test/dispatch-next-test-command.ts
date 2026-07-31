@@ -2,7 +2,10 @@ import type { Database } from "@agent-dock/database";
 import { TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
 import { sql, type Kysely } from "kysely";
 
-import { RunCommandExecutor, type RunCommandExecutionResult } from "../src/run-command-executor.ts";
+import {
+  RunCommandExecutor,
+  type RunCommandExecutionResult,
+} from "@agent-dock/runtime-core/run-command-executor";
 
 /**
  * Test-only convenience for suites that create several accepted commands.

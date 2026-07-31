@@ -3,18 +3,18 @@ import type { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
-import { DurableEventStore } from "./durable-event-store.ts";
+import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
 import {
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,
 } from "./public-tenant-registration.ts";
-import { SessionEventHub } from "./session-event-hub.ts";
+import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
-import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
+import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import { SessionEventStream, type SessionEventStreamOptions } from "./session-event-stream.ts";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
-import type { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import { GitHubIntegrationService } from "./github-integration-service.ts";
 import { ModelGovernanceService } from "./model-governance-service.ts";

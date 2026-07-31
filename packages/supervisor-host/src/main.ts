@@ -1,4 +1,4 @@
-import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/control-plane/checkpoint-runtime";
+import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/checkpoint-runtime";
 import { startServiceObservability } from "@agent-dock/observability";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";

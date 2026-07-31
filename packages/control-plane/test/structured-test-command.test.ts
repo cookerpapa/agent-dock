@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyStructuredTestCommand } from "../src/structured-test-command.ts";
+import { classifyStructuredTestCommand } from "@agent-dock/runtime-core/structured-test-command";
 
 describe("structured test command classification", () => {
   it("canonicalizes setup variants that execute the same Workspace test", () => {

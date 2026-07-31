@@ -9,8 +9,8 @@ import {
   RoutedHttpSandboxAssignmentInventory,
   RoutedHttpSupervisorOwnerBoundary,
 } from "./http-supervisor-management.ts";
-import { createS3CheckpointObjectStoreFromEnvironment } from "./s3-checkpoint-object-store.ts";
-import { PostgresSessionEventNotifications } from "./postgres-session-event-notifications.ts";
+import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
+import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -19,7 +19,7 @@ import {
 import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
 import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
-import { TenantModelCredentialVault } from "./model-credential-runtime.ts";
+import { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { GitHubWebhookIngestGateway } from "./github-webhook-gateway.ts";

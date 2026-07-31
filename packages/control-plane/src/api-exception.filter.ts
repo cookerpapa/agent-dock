@@ -2,7 +2,7 @@ import { Catch, type ArgumentsHost, type ExceptionFilter, HttpException } from "
 import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@agent-dock/protocol";
 import type { FastifyReply } from "fastify";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
-import { DurableEventStoreError } from "./durable-event-store.ts";
+import { DurableEventStoreError } from "@agent-dock/runtime-core/durable-event-store";
 import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
 import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";

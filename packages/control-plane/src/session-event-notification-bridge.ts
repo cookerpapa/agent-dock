@@ -1,6 +1,6 @@
 import type { OnApplicationShutdown, OnModuleInit } from "@nestjs/common";
-import { SessionEventHub } from "./session-event-hub.ts";
-import type { SessionEventNotificationTransport } from "./session-event-notifications.ts";
+import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
+import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 
 export class SessionEventNotificationBridge implements OnModuleInit, OnApplicationShutdown {
   readonly #transport: SessionEventNotificationTransport;

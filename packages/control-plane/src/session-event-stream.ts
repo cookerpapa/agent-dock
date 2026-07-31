@@ -4,12 +4,12 @@ import {
   DurableEventStore,
   DurableEventStoreError,
   type EventReplayWindow,
-} from "./durable-event-store.ts";
+} from "@agent-dock/runtime-core/durable-event-store";
 import {
   SessionEventHub,
   type SessionEventSubscription,
   type SessionEventWake,
-} from "./session-event-hub.ts";
+} from "@agent-dock/runtime-core/session-event-hub";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REPLAY_PAGE_SIZE = 500;

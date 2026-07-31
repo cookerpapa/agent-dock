@@ -7,7 +7,7 @@ import type { Kysely, Transaction } from "kysely";
 import {
   TenantModelCredentialVault,
   tenantModelCredentialDigest,
-} from "./model-credential-runtime.ts";
+} from "@agent-dock/runtime-core/model-credential-runtime";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
 export class TenantModelConfigurationError extends Error {

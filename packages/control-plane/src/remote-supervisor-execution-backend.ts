@@ -16,7 +16,7 @@ import {
   type TurnCancellationLifecycle,
   type TurnCancellationRequest,
   type TurnCancellationResult,
-} from "./run-cancellation-executor.ts";
+} from "@agent-dock/runtime-core/run-cancellation-executor";
 import {
   TurnExecutionBackendError,
   TurnExecutionCancelledError,
@@ -24,11 +24,11 @@ import {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "./run-command-executor.ts";
+} from "@agent-dock/runtime-core/run-command-executor";
 import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
-} from "./session-lease-coordinator.ts";
+} from "@agent-dock/runtime-core/session-lease-coordinator";
 import {
   SupervisorCommandTransportError,
   type RemoteSupervisorCommandTransport,

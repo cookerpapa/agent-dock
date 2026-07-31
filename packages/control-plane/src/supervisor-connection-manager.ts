@@ -20,7 +20,7 @@ import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SupervisorConnectionGuard,
-} from "./session-lease-coordinator.ts";
+} from "@agent-dock/runtime-core/session-lease-coordinator";
 
 const DEFAULT_SUPERVISOR_VERSION = "0.1.0";
 const DEFAULT_PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";

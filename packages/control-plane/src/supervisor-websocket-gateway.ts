@@ -21,7 +21,7 @@ import {
   type SupervisorTransportAuthority,
 } from "./supervisor-connection-manager.ts";
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
-import type { SessionLeaseCoordinator } from "./session-lease-coordinator.ts";
+import type { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
 import { RemoteSupervisorExecutionBackend } from "./remote-supervisor-execution-backend.ts";
 import type { SupervisorDispatchAffinity } from "./supervisor-dispatch-affinity.ts";
 

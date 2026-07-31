@@ -8,12 +8,12 @@ import {
   type ControlPlaneApplicationOptions,
 } from "./application.ts";
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
-import { DurableEventStore } from "./durable-event-store.ts";
+import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
 import {
   SupervisorMaintenanceRuntime,
   type SupervisorMaintenanceRuntimeOptions,
 } from "./supervisor-maintenance-runtime.ts";
-import { SessionEventHub } from "./session-event-hub.ts";
+import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import {
   SupervisorCommandRouter,
   type SupervisorCommandRouterOptions,

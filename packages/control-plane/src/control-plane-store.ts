@@ -47,7 +47,7 @@ import {
   TURN_COMMAND_OUTBOX_TOPIC,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { materializeConversationTurnProjections } from "./conversation-turn-projection.ts";
+import { materializeConversationTurnProjections } from "@agent-dock/runtime-core/conversation-turn-projection";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
