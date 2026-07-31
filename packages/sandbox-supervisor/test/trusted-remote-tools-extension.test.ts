@@ -165,4 +165,72 @@ describe("trusted remote tools extension governance", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("selects one recoverable head-tail Bash preview from the original output", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "agent-dock-bash-preview-test-"));
+    try {
+      const registered: ToolDefinition[] = [];
+      const original = Buffer.from(
+        `BEGIN-${"a".repeat(2_000)}-MIDDLE-${"b".repeat(2_000)}-FINAL-COMPILER-ERROR`,
+        "utf8",
+      );
+      const pi = {
+        registerTool(tool: ToolDefinition) {
+          registered.push(tool);
+        },
+        on() {},
+      } as unknown as ExtensionAPI;
+      vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        const request = JSON.parse(String(init.body)) as {
+          activationId: string;
+          operationId: string;
+          operation: string;
+        };
+        return new Response(
+          JSON.stringify({
+            managerProtocolVersion: 1,
+            type: "tool_sandbox.operation_result",
+            activationId: request.activationId,
+            operationId: request.operationId,
+            operation: "bash.exec",
+            exitCode: 0,
+            output: original.toString("base64"),
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      });
+      installInlineExtension(
+        createTrustedRemoteToolsExtension({
+          ...BASE_CONFIGURATION,
+          remainingToolCalls: 1,
+          toolOutputDirectory: directory,
+        }),
+        pi,
+      );
+
+      const result = (await registered
+        .find((tool) => tool.name === "bash")!
+        .execute(
+          "tool-call-large-bash",
+          { command: "compile", timeout: 10 },
+          new AbortController().signal,
+          () => undefined,
+          undefined as never,
+        )) as { content: Array<{ type: string; text: string }>; details?: { truncation?: unknown } };
+
+      const preview = result.content[0]?.text ?? "";
+      expect(Buffer.byteLength(preview, "utf8")).toBeLessThanOrEqual(1_024);
+      expect(preview).toContain("BEGIN-");
+      expect(preview).toContain("FINAL-COMPILER-ERROR");
+      expect(preview).toContain("complete output is preserved as the tool-output artifact");
+      expect(result.details?.truncation).toBeUndefined();
+      const artifact = resolve(
+        directory,
+        `${createHash("sha256").update("tool-call-large-bash").digest("hex")}.output`,
+      );
+      expect(await readFile(artifact)).toEqual(original);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

@@ -10,6 +10,7 @@ import {
   createEditTool,
   createReadTool,
   createWriteTool,
+  DEFAULT_MAX_BYTES,
   type BashOperations,
   type EditOperations,
   type ReadOperations,
@@ -124,11 +125,30 @@ function validateRuntimeConfiguration(
   };
 }
 
-function boundedOutput(value: Buffer, maximumBytes: number): Buffer {
+function utf8Head(value: Buffer, maximumBytes: number): Buffer {
   if (value.byteLength <= maximumBytes) return value;
-  const marker = Buffer.from("\n[AgentDock truncated command output]\n", "utf8");
+  let end = maximumBytes;
+  while (end > 0 && (value[end] & 0xc0) === 0x80) end -= 1;
+  return value.subarray(0, end);
+}
+
+function utf8Tail(value: Buffer, maximumBytes: number): Buffer {
+  if (value.byteLength <= maximumBytes) return value;
+  let start = value.byteLength - maximumBytes;
+  while (start < value.byteLength && (value[start] & 0xc0) === 0x80) start += 1;
+  return value.subarray(start);
+}
+
+function modelOutputPreview(value: Buffer, maximumBytes: number, toolCallId: string): Buffer {
+  if (value.byteLength <= maximumBytes) return value;
+  const marker = Buffer.from(
+    `\n\n[AgentDock omitted the middle of this output from model context. The complete output is preserved as the tool-output artifact for tool call ${toolCallId}. Rerun a focused command with tail, grep, or sed to inspect omitted sections.]\n\n`,
+    "utf8",
+  );
   const bodyBytes = Math.max(0, maximumBytes - marker.byteLength);
-  return Buffer.concat([value.subarray(0, bodyBytes), marker]);
+  const headBytes = Math.min(8 * 1_024, Math.floor(bodyBytes / 5));
+  const tailBytes = Math.max(0, bodyBytes - headBytes);
+  return Buffer.concat([utf8Head(value, headBytes), marker, utf8Tail(value, tailBytes)]);
 }
 
 function canonicalBase64(value: string): Buffer {
@@ -251,8 +271,12 @@ function registerTrustedRemoteTools(
     return parsed;
   };
 
-  const preserveLargeOutput = async (toolCallId: string, value: Buffer): Promise<void> => {
-    if (value.byteLength <= runtime.maximumToolOutputBytes) return;
+  const preserveLargeOutput = async (
+    toolCallId: string,
+    value: Buffer,
+    maximumInlineBytes = runtime.maximumToolOutputBytes,
+  ): Promise<void> => {
+    if (value.byteLength <= maximumInlineBytes) return;
     const fileName = `${createHash("sha256").update(toolCallId, "utf8").digest("hex")}.output`;
     const target = resolve(runtime.toolOutputDirectory, fileName);
     if (!target.startsWith(`${runtime.toolOutputDirectory}${sep}`)) {
@@ -268,7 +292,13 @@ function registerTrustedRemoteTools(
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "file.read") throw new Error("Tool response kind changed");
         const content = canonicalBase64(response.content);
-        if (toolCallId !== undefined) await preserveLargeOutput(toolCallId, content);
+        if (toolCallId !== undefined) {
+          await preserveLargeOutput(
+            toolCallId,
+            content,
+            Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES),
+          );
+        }
         return content;
       } catch (error: unknown) {
         throw errorForPi(error);
@@ -339,8 +369,13 @@ function registerTrustedRemoteTools(
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "bash.exec") throw new Error("Tool response kind changed");
         const fullOutput = canonicalBase64(response.output);
-        await preserveLargeOutput(toolCallId, fullOutput);
-        const output = boundedOutput(fullOutput, runtime.maximumToolOutputBytes);
+        const maximumModelBytes = Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES);
+        await preserveLargeOutput(toolCallId, fullOutput, maximumModelBytes);
+        // Pi's Bash tool applies its own tail truncation at DEFAULT_MAX_BYTES.
+        // Keeping this preview at or below that boundary ensures Pi receives
+        // the head/tail preview selected from the original output instead of
+        // truncating an already-truncated prefix a second time.
+        const output = modelOutputPreview(fullOutput, maximumModelBytes, toolCallId);
         if (output.byteLength > 0) onData(output);
         return { exitCode: response.exitCode };
       } catch (error: unknown) {
