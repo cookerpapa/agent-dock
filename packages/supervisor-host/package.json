@@ -9,7 +9,7 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest --run"
+    "test": "vitest --run --maxWorkers=1"
   },
   "dependencies": {
     "@agent-dock/database": "0.1.0",
