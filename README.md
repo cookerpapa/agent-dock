@@ -164,15 +164,27 @@ See [Threat model](docs/THREAT_MODEL.md) and
 
 ## Local production deployment
 
-Prerequisites are a Linux/WSL2 host with Docker, KVM, the local Cube cluster
-installed by the repository scripts, and the private production environment
-file initialized.
+On a Debian/Ubuntu x86_64 Linux host or WSL2 distribution with systemd and KVM
+enabled, run the idempotent installer:
+
+```bash
+./install.sh
+```
+
+It prepares the pinned host toolchain, Docker/K3s, Cube execution plane,
+AgentDock services and Kubernetes Pi Worker Pool. It does not accept a model
+key or account password; configure those from the administrator page after the
+deployment is healthy. Use `./install.sh --check-only` for a read-only host
+diagnosis and see [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for
+options and the manual prepared-host path.
+
+The underlying prepared-host commands remain available:
 
 ```bash
 npm ci --ignore-scripts
 npm run dependencies:harden
-npm run cubesandbox:cluster-install
 npm run cubesandbox:init
+npm run cubesandbox:cluster-install
 npm run production:deploy
 ```
 

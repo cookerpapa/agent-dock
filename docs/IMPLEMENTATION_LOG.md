@@ -7,6 +7,17 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-01 — 一键自托管部署
+
+- 增加 `./install.sh`，面向启用了 systemd/KVM 的 Debian/Ubuntu Linux 与
+  WSL2，补齐从宿主机到 Cube/K3s、AgentDock 和 Pi Worker Pool 的完整安装。
+- 支持纯只读 `--check-only`、无副作用 `--print-plan`、Compose/Kubernetes
+  Worker 选择、失败后原命令续跑；Node.js、Helm 和 K3s 安装器均固定版本并
+  校验 SHA-256，Cube 源码固定到已验收 commit。
+- 继续复用既有 Cube cluster installer 和 production deployer 作为唯一部署
+  权威，不把模型密钥或管理员密码放入脚本、参数或 shell history。
+- 增加 installer contract test 与 Bash 语法检查。
+
 ## 2026-07-18 — Pi RPC extension 兼容性实验
 
 - 目标：在开发云端控制面之前，先证明一个独立的 TypeScript 监督器可以

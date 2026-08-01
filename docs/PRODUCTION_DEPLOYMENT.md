@@ -33,11 +33,40 @@ test -r /dev/kvm -a -w /dev/kvm
 
 ## First deployment
 
+On a fresh Debian/Ubuntu x86_64 Linux host or WSL2 distribution with systemd
+and KVM enabled, use the idempotent installer:
+
+```bash
+./install.sh
+```
+
+It checksum-verifies pinned Node.js, Helm and K3s installer artifacts,
+installs/reuses Docker and single-node K3s, checks out the pinned CubeSandbox
+source, reconciles Cube, registers the Tool template and deploys the product.
+It asks once before host changes; use `--yes` for unattended execution. It
+does not accept model credentials or account passwords.
+
+Useful modes:
+
+```bash
+./install.sh --print-plan
+./install.sh --check-only
+./install.sh --pi-workers compose
+./install.sh --pi-workers kubernetes
+```
+
+`--check-only` is strictly read-only. Resume a failed installation by running
+the same command: private runtime material, tool caches, K3s resources, Cube
+Helm resources and Compose services are reconciled instead of blindly
+recreated.
+
+For an already prepared host, the individual commands remain available:
+
 ```bash
 npm ci --ignore-scripts
 npm run dependencies:harden
-npm run cubesandbox:cluster-install
 npm run cubesandbox:init
+npm run cubesandbox:cluster-install
 npm run production:deploy
 ```
 

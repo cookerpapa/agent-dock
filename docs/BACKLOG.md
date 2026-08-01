@@ -4,6 +4,12 @@ This file tracks work that is still relevant to the current Cube + Temporal +
 Pi SDK product. Completed migration plans and retired runtime experiments belong
 in the implementation log or Git history, not in the active backlog.
 
+## Deployment ergonomics
+
+- [x] Provide an idempotent, checksum-pinned one-command self-hosted installer
+      with read-only preflight, resumable phases, Cube/K3s bootstrap and
+      post-deployment health verification.
+
 ## Release verification
 
 - [ ] Keep the zero-token CI gate green: formatting, strict TypeScript,
