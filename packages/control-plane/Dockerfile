@@ -13,6 +13,7 @@ COPY packages/fake-model-server/package.json packages/fake-model-server/package.
 COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
+COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
@@ -52,6 +53,8 @@ COPY packages/observability/package.json packages/observability/package.json
 COPY packages/observability/src packages/observability/src
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
+COPY packages/runtime-core/package.json packages/runtime-core/package.json
+COPY packages/runtime-core/src packages/runtime-core/src
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
 COPY packages/sandbox-manager/src/client.ts packages/sandbox-manager/src/client.ts
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
