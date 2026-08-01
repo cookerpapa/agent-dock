@@ -171,6 +171,33 @@ async function psql(query) {
   ]);
 }
 
+async function runUsageEvidence(runId) {
+  const value = await psql(
+    `select count(*) || '|' ||
+            coalesce(sum(input_tokens), 0) || '|' ||
+            coalesce(sum(output_tokens), 0) || '|' ||
+            coalesce(sum(cache_read_tokens), 0) || '|' ||
+            coalesce(sum(cache_write_tokens), 0) || '|' ||
+            coalesce(sum(coalesce(cost_microusd, round(cost_amount * 1000000)::bigint)), 0)
+       from usage_ledger
+      where tenant_id = ${sqlLiteral(tenantId)}
+        and run_id = ${sqlLiteral(runId)}`,
+  );
+  const [requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costMicrousd] =
+    value.split("|").map(Number);
+  for (const number of [
+    requests,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    costMicrousd,
+  ]) {
+    assert(Number.isSafeInteger(number) && number >= 0, "Run usage evidence is invalid");
+  }
+  return { requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costMicrousd };
+}
+
 function decodeTemporalPayloads(value, decoded = []) {
   if (Array.isArray(value)) {
     for (const item of value) decodeTemporalPayloads(item, decoded);
@@ -697,8 +724,8 @@ try {
     false,
   );
   assert.equal(chat.activations.length, 0, "Pure chat created a Cube microVM");
-  const chatUsage = await api.getRunUsage(chat.accepted.runId);
-  assert(chatUsage.totals.requests > 0 && chatUsage.totals.outputTokens > 0);
+  const chatUsage = await runUsageEvidence(chat.accepted.runId);
+  assert(chatUsage.requests > 0 && chatUsage.outputTokens > 0);
 
   const firstCoding = await runTurn(
     session.sessionId,
@@ -718,8 +745,8 @@ try {
     1,
     "First coding Run did not use exactly one Cube VM",
   );
-  const firstUsage = await api.getRunUsage(firstCoding.accepted.runId);
-  assert(firstUsage.totals.requests > 0 && firstUsage.totals.outputTokens > 0);
+  const firstUsage = await runUsageEvidence(firstCoding.accepted.runId);
+  assert(firstUsage.requests > 0 && firstUsage.outputTokens > 0);
   const firstVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(firstVersions.currentVersionId !== undefined, "First coding Run did not commit Workspace");
   const firstVersionId = firstVersions.currentVersionId;
@@ -750,8 +777,8 @@ try {
     firstCoding.activations[0].sandboxId,
     "Two coding Runs did not reuse the same Cube native sandbox",
   );
-  const followUpUsage = await api.getRunUsage(followUp.accepted.runId);
-  assert(followUpUsage.totals.requests > 0 && followUpUsage.totals.outputTokens > 0);
+  const followUpUsage = await runUsageEvidence(followUp.accepted.runId);
+  assert(followUpUsage.requests > 0 && followUpUsage.outputTokens > 0);
   const finalVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(finalVersions.currentVersionId !== undefined);
   assert.notEqual(finalVersions.currentVersionId, firstVersionId);
@@ -829,7 +856,7 @@ try {
     0,
     true,
   );
-  const largeFirstUsage = await api.getRunUsage(largeFirst.accepted.runId);
+  const largeFirstUsage = await runUsageEvidence(largeFirst.accepted.runId);
   const largeFirstWorkspace = await workspaceVersionEvidence(largeFirst.accepted.runId);
   assert(
     largeFirstWorkspace.fileCount > 512,
@@ -860,7 +887,7 @@ try {
     largeFirst.cursor,
     true,
   );
-  const largeFollowUpUsage = await api.getRunUsage(largeFollowUp.accepted.runId);
+  const largeFollowUpUsage = await runUsageEvidence(largeFollowUp.accepted.runId);
   const largeFollowUpWorkspace = await workspaceVersionEvidence(largeFollowUp.accepted.runId);
   assert(largeFollowUpWorkspace.fileCount > 512);
   assert.equal(largeFirst.activations.length, 1);
@@ -888,11 +915,11 @@ try {
     ].map((accepted) => temporalWorkflowEvidence(accepted)),
   );
   const usage = totalUsage(
-    chatUsage.totals,
-    firstUsage.totals,
-    followUpUsage.totals,
-    largeFirstUsage.totals,
-    largeFollowUpUsage.totals,
+    chatUsage,
+    firstUsage,
+    followUpUsage,
+    largeFirstUsage,
+    largeFollowUpUsage,
   );
   const report = {
     accepted: true,
@@ -904,7 +931,7 @@ try {
       settledMs: chat.settledMs,
       toolCalls: chat.toolCalls,
       cubeActivations: chat.activations.length,
-      usage: chatUsage.totals,
+      usage: chatUsage,
     },
     firstCoding: {
       firstTextMs: firstCoding.firstTextMs,
@@ -912,7 +939,7 @@ try {
       toolCalls: firstCoding.toolCalls,
       cubeActivations: firstCoding.activations.length,
       patchBytes: Buffer.byteLength(firstCoding.terminal.payload.workspacePatch.patch, "utf8"),
-      usage: firstUsage.totals,
+      usage: firstUsage,
     },
     followUpCoding: {
       firstTextMs: followUp.firstTextMs,
@@ -920,7 +947,7 @@ try {
       toolCalls: followUp.toolCalls,
       cubeActivations: followUp.activations.length,
       patchBytes: Buffer.byteLength(followUp.terminal.payload.workspacePatch.patch, "utf8"),
-      usage: followUpUsage.totals,
+      usage: followUpUsage,
     },
     multiRound: {
       sameCubeMicroVm: true,
@@ -948,8 +975,8 @@ try {
       restoredFromKopia: true,
       freshCubeMicroVm: true,
       higherFenceActivation: true,
-      firstUsage: largeFirstUsage.totals,
-      followUpUsage: largeFollowUpUsage.totals,
+      firstUsage: largeFirstUsage,
+      followUpUsage: largeFollowUpUsage,
     },
     semanticConversation: {
       projectionCount,
