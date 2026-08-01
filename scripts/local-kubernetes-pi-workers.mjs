@@ -80,12 +80,6 @@ const bridgeTargets = [
     port: 4300,
   },
   {
-    name: "github-gateway",
-    composeService: "github-gateway",
-    network: composeNetworks.githubControl,
-    port: 4400,
-  },
-  {
     name: "provider-egress-relay",
     composeService: "provider-egress-relay",
     network: composeNetworks.modelEgress,
@@ -111,6 +105,12 @@ const bridgeTargets = [
   },
 ];
 const optionalBridgeTargets = [
+  {
+    name: "github-gateway",
+    composeService: "github-gateway",
+    network: composeNetworks.githubControl,
+    port: 4400,
+  },
   {
     name: "jaeger",
     composeService: "jaeger",
@@ -590,7 +590,17 @@ async function bridgeComposeServices() {
   }
   for (const target of optionalBridgeTargets) {
     const container = await optionalComposeContainer(target.composeService);
-    if (container === undefined) continue;
+    if (container === undefined) {
+      await kubectlRun([
+        "--namespace",
+        systemNamespace,
+        "delete",
+        `service/${target.name}`,
+        `endpointslice/compose-${target.name}`,
+        "--ignore-not-found",
+      ]);
+      continue;
+    }
     resolved.push({
       ...target,
       address: await networkIp(container, target.network),
@@ -638,7 +648,7 @@ async function bridgeComposeServices() {
   return resolved;
 }
 
-async function applyWorkerSecret() {
+async function applyWorkerSecret(githubGatewayEnabled) {
   const secretDirectory = join(runtimeDirectory, "secrets");
   const source = async (name) => (await readFile(join(secretDirectory, name))).toString("base64");
   const databaseUrl = new URL(
@@ -653,9 +663,11 @@ async function applyWorkerSecret() {
     "supervisor-management-token": await source("supervisor-management-token"),
     "sandbox-manager-token": await source("sandbox-manager-token"),
     "model-credential-master-key": await source("model-credential-master-key"),
-    "github-gateway-token": await source("github-gateway-token"),
     "metrics-token": await source("metrics-token"),
   };
+  if (githubGatewayEnabled) {
+    data["github-gateway-token"] = await source("github-gateway-token");
+  }
   await applyManifest([
     {
       apiVersion: "v1",
@@ -864,7 +876,8 @@ async function waitForWorkerPodInventory(timeoutMs = 120_000) {
 }
 
 async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvironment) {
-  await applyWorkerSecret();
+  const githubGatewayEnabled = resolvedTargets.some((target) => target.name === "github-gateway");
+  await applyWorkerSecret(githubGatewayEnabled);
   const externalCidrs = [...new Set(resolvedTargets.map((target) => `${target.address}/32`))];
   const localJaegerAvailable = resolvedTargets.some((target) => target.name === "jaeger");
   const otlpTracesEndpoint =
@@ -915,9 +928,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "services.sandboxManagerUrl=http://sandbox-manager.agent-dock-system.svc.cluster.local:4300",
     "--set",
-    "services.githubGateway.enabled=true",
-    "--set",
-    "services.githubGateway.url=http://github-gateway.agent-dock-system.svc.cluster.local:4400",
+    `services.githubGateway.enabled=${String(githubGatewayEnabled)}`,
     "--set",
     "services.providerProxyUrl=http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129",
     "--set-string",
