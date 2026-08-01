@@ -26,14 +26,14 @@
     {
       "id": "event-ack-loss",
       "workspace": "@agent-dock/sandbox-supervisor",
-      "file": "test/file-event-spool.test.ts",
+      "file": "test/wal-event-spool.test.ts",
       "test": "replays the exact event after a simulated commit-with-lost-ACK window",
       "invariant": "A lost acknowledgement causes safe replay rather than event loss."
     },
     {
       "id": "corrupt-event-spool",
       "workspace": "@agent-dock/sandbox-supervisor",
-      "file": "test/file-event-spool.test.ts",
+      "file": "test/wal-event-spool.test.ts",
       "test": "fails closed when a persisted event is corrupted or a sequence file is missing",
       "invariant": "Corrupt durable events are rejected rather than silently skipped."
     },

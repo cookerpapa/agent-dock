@@ -1,85 +1,85 @@
 {
   "format": "agent-dock.fault-eval-report.v1",
-  "generatedAt": "2026-07-22T19:13:18.776Z",
+  "generatedAt": "2026-08-01T05:14:38.264Z",
   "methodology": "deterministic_targeted_fault_injection",
   "liveChaosExperiment": false,
   "caseCount": 12,
   "successful": 12,
   "successRate": 1,
-  "p50DurationMs": 3693,
-  "p95DurationMs": 6185,
+  "p50DurationMs": 3695,
+  "p95DurationMs": 8442,
   "results": [
     {
       "id": "checkpoint-commit-failure",
       "success": true,
       "invariant": "A Run cannot become completed before its settled checkpoint commits.",
-      "durationMs": 3693
+      "durationMs": 3204
     },
     {
       "id": "duplicate-command",
       "success": true,
       "invariant": "At-least-once delivery does not execute the same command twice.",
-      "durationMs": 2307
+      "durationMs": 2999
     },
     {
       "id": "stale-fencing-token",
       "success": true,
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence.",
-      "durationMs": 2282
+      "durationMs": 3074
     },
     {
       "id": "event-ack-loss",
       "success": true,
       "invariant": "A lost acknowledgement causes safe replay rather than event loss.",
-      "durationMs": 2326
+      "durationMs": 3015
     },
     {
       "id": "corrupt-event-spool",
       "success": true,
       "invariant": "Corrupt durable events are rejected rather than silently skipped.",
-      "durationMs": 2411
+      "durationMs": 3153
     },
     {
       "id": "object-store-outage",
       "success": true,
       "invariant": "A temporary object-store outage remains retryable and does not expose credentials.",
-      "durationMs": 2740
+      "durationMs": 3695
     },
     {
       "id": "checkpoint-corruption-and-cas",
       "success": true,
       "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery.",
-      "durationMs": 5915
+      "durationMs": 7288
     },
     {
       "id": "cancel-complete-race",
       "success": true,
       "invariant": "Exactly one terminal Run outcome wins a cancel/complete race.",
-      "durationMs": 6169
+      "durationMs": 8442
     },
     {
       "id": "stale-dispatch-claim",
       "success": true,
       "invariant": "A superseded dispatcher cannot start external work.",
-      "durationMs": 6125
+      "durationMs": 8199
     },
     {
       "id": "orphan-runtime-cleanup",
       "success": true,
       "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated.",
-      "durationMs": 6174
+      "durationMs": 7404
     },
     {
       "id": "attempt-rewind-boundary",
       "success": true,
       "invariant": "Rewind restores the explicit committed bases, supersedes the old projection, and creates one idempotent replacement Run.",
-      "durationMs": 6185
+      "durationMs": 8039
     },
     {
       "id": "immutable-review-bundle",
       "success": true,
       "invariant": "A completed Run's content-verified Review Bundle cannot be updated or deleted.",
-      "durationMs": 3816
+      "durationMs": 4372
     }
   ]
 }
