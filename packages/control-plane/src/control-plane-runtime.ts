@@ -46,7 +46,7 @@ type GatewayConfiguration = Omit<
 
 type MaintenanceConfiguration = Omit<SupervisorMaintenanceRuntimeOptions, "maintenanceRunner">;
 
-export type RemoteControlPlaneRuntimeOptions = Omit<
+export type ControlPlaneRuntimeOptions = Omit<
   ControlPlaneApplicationOptions,
   "supervisorWebSocketGateway" | "eventRuntime"
 > & {
@@ -63,9 +63,9 @@ export type RemoteControlPlaneRuntimeOptions = Omit<
   maintenance?: MaintenanceConfiguration;
 };
 
-export type RemoteControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
+export type ControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
 
-export class RemoteControlPlaneRuntime {
+export class ControlPlaneRuntime {
   readonly application: NestFastifyApplication;
   readonly eventHub: SessionEventHub;
   readonly eventStore: DurableEventStore;
@@ -73,7 +73,7 @@ export class RemoteControlPlaneRuntime {
   readonly connectionManager: SupervisorConnectionManager;
   readonly gateway: SupervisorWebSocketGateway;
   readonly maintenance: SupervisorMaintenanceRuntime;
-  #state: RemoteControlPlaneRuntimeState = "ready";
+  #state: ControlPlaneRuntimeState = "ready";
   #closing: Promise<void> | undefined;
 
   constructor(options: {
@@ -94,7 +94,7 @@ export class RemoteControlPlaneRuntime {
     this.maintenance = options.maintenance;
   }
 
-  get state(): RemoteControlPlaneRuntimeState {
+  get state(): ControlPlaneRuntimeState {
     return this.#state;
   }
 
@@ -139,9 +139,9 @@ export class RemoteControlPlaneRuntime {
   }
 }
 
-export async function createRemoteControlPlaneRuntime(
-  options: RemoteControlPlaneRuntimeOptions,
-): Promise<RemoteControlPlaneRuntime> {
+export async function createControlPlaneRuntime(
+  options: ControlPlaneRuntimeOptions,
+): Promise<ControlPlaneRuntime> {
   const eventHub = new SessionEventHub();
   const eventStore = new DurableEventStore({
     database: options.database,
@@ -237,7 +237,7 @@ export async function createRemoteControlPlaneRuntime(
     await options.sessionEventNotifications?.stop().catch(() => undefined);
     throw error;
   }
-  return new RemoteControlPlaneRuntime({
+  return new ControlPlaneRuntime({
     application,
     eventHub,
     eventStore,

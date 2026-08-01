@@ -1,6 +1,6 @@
 # Pi embedded rehydrate spike
 
-This spike tests the lowest-cost execution tier proposed by ADR-0005. It embeds
+This spike tests the production Pi SDK activation contract. It embeds
 the pinned Pi SDK inside an execution-side worker, creates a short-lived
 `AgentSession` for one activation, and disposes the complete runtime at the end.
 The default spike never calls an LLM and never starts a Pi child process. A

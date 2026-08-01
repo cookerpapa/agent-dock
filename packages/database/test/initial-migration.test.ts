@@ -410,7 +410,7 @@ describe("initial PostgreSQL migration", () => {
             registered_at, last_heartbeat_at, expires_at)
          values ($1, $2, $3, $4, $5, 'supervisor-health', $6, $7,
                  repeat('a', 64), '0.1.0', '@earendil-works/pi-coding-agent', '0.80.10',
-                 array[1], array['pi.rpc'], 1, 10000, 30000,
+                 array[1], array['pi.sdk'], 1, 10000, 30000,
                  now(), now(), now() + interval '30 seconds')`,
         [
           ids.connection,

@@ -37,12 +37,10 @@ import {
   AssignmentReconciler,
   DeterministicExecutionBackend,
   DurableEventStore,
-  FileCheckpointObjectStore,
   LocalSupervisorExecutionBackend,
   RunCommandExecutor,
   RunCommandExecutorStaleClaimError,
   PostgresSessionEventNotifications,
-  PostgresSandboxCheckpointStore,
   PostgresRunAttemptPhaseObserver,
   SessionEventHub,
   SessionLeaseCoordinator,
@@ -94,6 +92,12 @@ let project: ProjectResource;
 let session: SessionResource;
 let firstAccepted: AcceptedTurnResource;
 let sessionEventNotifications: PostgresSessionEventNotifications | undefined;
+
+// Heartbeat, settlement and assertion queries intentionally overlap. Keeping
+// only two PGLite socket slots intermittently interleaves PostgreSQL protocol
+// frames under this load, so the fixture must admit the same bounded
+// concurrency that the test exercises.
+const PGLITE_CONNECTION_LIMIT = 8;
 
 const rejectOutboxInsertPlugin: KyselyPlugin = {
   transformQuery({ node }) {
@@ -497,7 +501,7 @@ beforeAll(async () => {
       db: pglite,
       host: "127.0.0.1",
       port: 0,
-      maxConnections: 2,
+      maxConnections: PGLITE_CONNECTION_LIMIT,
     });
     await socketServer.start();
     connectionString = `postgresql://postgres@${socketServer.getServerConn()}/postgres?sslmode=disable`;
@@ -505,7 +509,7 @@ beforeAll(async () => {
   databaseConnectionString = connectionString;
   database = createDatabase({
     connectionString,
-    maxConnections: 2,
+    maxConnections: PGLITE_CONNECTION_LIMIT,
   });
   await runMigrations(database, "up");
   await seedSingleUserProfile();

@@ -269,7 +269,6 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
   readonly #apiUrl: string;
   readonly #apiKey: string;
   readonly #proxyScheme: "http" | "https";
-  readonly #proxyPort: number;
   readonly #sandboxDomain: string;
   readonly #requestTimeoutMs: number;
   readonly #egressProxyIp: string;
@@ -279,7 +278,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     this.#apiUrl = validateApiUrl(options.apiUrl);
     this.#apiKey = bounded(options.apiKey, "CubeSandbox API key", 4_096);
     this.#proxyScheme = options.proxyScheme;
-    this.#proxyPort = positiveInteger(options.proxyPort, 80, 1, 65_535);
+    const proxyPort = positiveInteger(options.proxyPort, 80, 1, 65_535);
     this.#sandboxDomain = validateHost(options.sandboxDomain, "CubeSandbox domain");
     this.#requestTimeoutMs = positiveInteger(options.requestTimeoutMs, 30_000, 1_000, 300_000);
     this.#egressProxyIp = validateHost(options.egressProxyIp, "CubeSandbox egress proxy IP");
@@ -294,7 +293,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
           {
             ...connection,
             hostname: proxyNodeIp,
-            port: String(options.proxyPort),
+            port: String(proxyPort),
             ...(servername === undefined ? {} : { servername }),
           },
           callback,

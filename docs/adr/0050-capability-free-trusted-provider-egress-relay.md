@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-23
-- Extends: ADR-0028, ADR-0039, ADR-0044, ADR-0049
+- Extends: ADR-0027, ADR-0029, ADR-0049
 
 ## Context
 
@@ -62,7 +62,7 @@ capabilities, bounded CPU/memory/PIDs and no Docker/containerd socket or
 platform credential.
 
 This relay is not a Tool capability and is never described to Pi. Tool and
-importer Pods cannot join Compose networks and remain governed by their
+Cube Tool guests cannot join Compose networks and remain governed by their
 separate deny-all or Ed25519 capability-scoped Kubernetes egress policies.
 
 ## Correctness and security

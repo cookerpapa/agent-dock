@@ -81,7 +81,7 @@ and then replaying can deliver the same commit twice.
 - Session sequence allocation survives turns, Pi processes, browser reconnects,
   and control-plane restarts.
 - Exact duplicates are safe, while a stale runner cannot add or alter history.
-- A browser can resume a precise suffix without consuming raw Pi RPC objects.
+- A browser can resume a precise suffix without consuming raw Pi SDK objects.
 - `agent_id` and `agent_node_id` preserve distinct public and internal concepts.
 - The first implementation is restart-safe but not yet multi-replica-live,
   durable on the supervisor side, or authenticated for multiple users.
@@ -109,7 +109,7 @@ If the durable commit succeeds and its ACK packet is lost immediately before
 settlement releases the lease, the supervisor can never drain its retained
 copy. Exact persisted redelivery is a read-only proof and is safe to re-ACK.
 
-### Stream raw Pi RPC output
+### Stream raw Pi SDK output
 
 It would couple the browser and durable schema to Pi internals, bypass redaction,
 and make Pi upgrades a public API migration.

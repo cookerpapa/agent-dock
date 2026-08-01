@@ -103,7 +103,7 @@ function registration() {
         version: "0.80.10",
       },
       supportedProtocolVersions: [1],
-      capabilities: ["pi.rpc", "event.replay", "extension_ui.confirm"],
+      capabilities: ["pi.sdk", "event.replay", "extension_ui.confirm"],
       acceptingAssignments: true,
       maxConcurrentSessions: 4,
     },

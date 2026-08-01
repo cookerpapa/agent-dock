@@ -5,8 +5,8 @@
 
 ## Context
 
-AgentDock currently executes every untrusted Tool Call in the same operator-built
-gVisor image. The image is hardened and isolated, but its identity is implicit:
+AgentDock currently executes every untrusted Tool Call in an operator-managed
+Cube environment template. The guest image is isolated, but its identity is implicit:
 projects do not own a durable environment version, Runs do not snapshot the
 environment they were accepted against, warm Sandbox reuse only considers the
 Workspace revision, and the platform does not retain evidence that the expected
@@ -39,8 +39,8 @@ must not be confused with running project code in a restricted Tool Sandbox.
    specification hash that does not exactly match its operator configuration.
    The model and browser never provide an image name, RuntimeClass, namespace,
    Pod name, mount, ServiceAccount or network policy.
-5. Physical gVisor activation remains lazy. Pure chat stores the environment
-   snapshot but does not create a Pod. On the first real Tool Call, the Tool
+5. Physical Cube activation remains lazy. Pure chat stores the environment
+   snapshot but does not create a microVM. On the first real Tool Call, the Tool
    Worker compares the Run expectation with revision evidence baked into the
    physical image and performs bounded probes for the expected toolchain before
    becoming ready. A mismatch fails closed before project commands run.
@@ -50,10 +50,10 @@ must not be confused with running project code in a restricted Tool Sandbox.
    only from this trusted report.
 7. Warm Sandbox reuse requires an exact Workspace revision and exact
    environment identity. A different environment version, profile or image
-   revision always receives a new Pod.
-8. Kubernetes Pod annotations carry only non-secret environment identity for
-   operations and audit. Tool Sandboxes remain credential-free, non-root,
-   read-only, default-deny and gVisor-only.
+   revision always receives a new Cube activation.
+8. Provider metadata carries only non-secret environment identity for
+   operations and audit. Tool Sandboxes remain credential-free and subject to
+   the fixed Cube template, resource and network policy.
 9. The public API and Web UI expose the project environment identity and latest
    validation evidence. This ADR's original slice did not expose mutation;
    ADR-0043 later adds bounded recipe candidates and owner-controlled activation
@@ -91,10 +91,10 @@ attacks and bypasses the platform's reviewed Pod template.
 ### Run environment probes in the trusted Runner
 
 That only verifies the Runner container. The evidence must come from the actual
-gVisor Tool Sandbox that executes untrusted project commands.
+Cube Tool Sandbox that executes untrusted project commands.
 
 ### Provision a Sandbox for every chat message
 
 Environment identity is durable metadata and does not require physical
-activation. Eager provisioning would reintroduce avoidable Kubernetes cold
+activation. Eager provisioning would reintroduce avoidable Sandbox cold
 start latency for requests that never use tools.

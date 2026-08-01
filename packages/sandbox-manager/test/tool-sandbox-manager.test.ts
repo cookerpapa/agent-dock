@@ -17,7 +17,6 @@ import {
   ToolSandboxManager,
   loadSandboxManagerConfig,
   type SandboxCreateSpec,
-  type SandboxHandle,
   type SandboxProvider,
 } from "../src/index.ts";
 

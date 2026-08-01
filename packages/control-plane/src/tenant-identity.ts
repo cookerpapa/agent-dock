@@ -56,19 +56,6 @@ export function tenantRequestIdentity(request: FastifyRequest): TenantRequestIde
   return requestIdentities.get(request);
 }
 
-type CredentialRow = {
-  credentialId: string;
-  tenantId: string;
-  tenantSlug: string;
-  userId: string;
-  displayName: string;
-  role: TenantApiCredentialRole;
-  secretSha256: string;
-  expiresAt: Date | string | null;
-  revokedAt: Date | string | null;
-  defaultModelProfileId: string;
-};
-
 function validUuid(value: string, name: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     throw new TypeError(`${name} must be a UUID`);

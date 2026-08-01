@@ -6,11 +6,11 @@ Date: 2026-07-26
 
 ## Context
 
-ADR-0064 made a Cube native snapshot the fallback for Workspaces that do not fit
-the bounded portable checkpoint format. That preserves a full Workspace across
-Run boundaries, but Cube v0.6 stores the snapshot bytes in the Cube execution
-plane. A committed PostgreSQL Workspace version can therefore point at bytes
-that disappear with the only Cube node.
+An earlier design made a Cube native snapshot the fallback for Workspaces that
+did not fit the bounded portable checkpoint format. That preserved a full
+Workspace across Run boundaries, but Cube v0.6 stored the snapshot bytes in the
+Cube execution plane. A committed PostgreSQL Workspace version could therefore
+point at bytes that disappeared with the only Cube node.
 
 AgentDock already has the correctness boundary needed for a replacement:
 

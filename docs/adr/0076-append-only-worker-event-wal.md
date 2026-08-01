@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. Supersedes ADR-0012's file-per-event storage layout while preserving
-its delivery semantics.
+Accepted. Supersedes the original file-per-event storage layout while
+preserving its delivery semantics.
 
 ## Context
 

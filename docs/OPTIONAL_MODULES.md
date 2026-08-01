@@ -47,6 +47,13 @@ controlled repository-import experiments. The product's GitHub App/PR routes
 and browser workflow are removed; enabling this service alone does not expose
 them.
 
+```bash
+npm run production:config:github
+npm run production:up:github
+```
+
+The default production build does not build or start this profile.
+
 ## Removed product surfaces
 
 The following unfinished product workflows are not part of either core or the

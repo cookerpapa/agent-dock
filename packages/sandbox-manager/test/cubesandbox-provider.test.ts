@@ -6,9 +6,7 @@ import {
   type ToolSandboxOperationRequest,
 } from "@agent-dock/protocol";
 import {
-  createWorkspaceSnapshot,
   decodeWorkspaceSnapshotBlob,
-  encodeWorkspaceSnapshotBlob,
   parseKopiaWorkspaceCheckpoint,
 } from "@agent-dock/workspace-runtime";
 import { createHash } from "node:crypto";
@@ -66,12 +64,6 @@ const toolchain = {
   ],
   recipeCommands: [],
 };
-
-const snapshot = encodeWorkspaceSnapshotBlob(
-  createWorkspaceSnapshot([
-    { path: "result.txt", executable: false, content: Buffer.from("cube\n") },
-  ]),
-);
 
 function fakeWorkspaceDataMover(): WorkspaceDataMover {
   return {

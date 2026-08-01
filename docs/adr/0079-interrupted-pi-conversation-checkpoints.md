@@ -1,4 +1,4 @@
-# ADR-0070: Interrupted Pi conversation checkpoints
+# ADR-0079: Interrupted Pi conversation checkpoints
 
 - Status: Accepted
 - Date: 2026-07-28

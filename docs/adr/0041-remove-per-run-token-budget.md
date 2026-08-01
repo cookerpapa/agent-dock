@@ -17,7 +17,7 @@ A production counting-sort Run demonstrated the problem. Five successful model
 requests and five successful Tool Calls accumulated 173,623 reported tokens,
 mostly repeated cache-read context. The sixth request was rejected before
 provider egress because its reservation would exceed the 200,000-token Run cap.
-The provider, network and gVisor Sandbox were healthy, but the user saw the
+The provider, network and isolated Tool runtime were healthy, but the user saw the
 generic terminal failure `Model request failed` and the uncommitted Workspace
 changes were discarded.
 

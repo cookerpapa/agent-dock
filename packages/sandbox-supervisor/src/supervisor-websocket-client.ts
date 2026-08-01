@@ -288,7 +288,7 @@ export class SupervisorWebSocketClient {
       capabilities: [
         ...(options.registration.capabilities ?? [
           "event.replay",
-          "pi.rpc",
+          "pi.sdk",
           PI_STEER_CAPABILITY,
           TWO_PHASE_COMMAND_CAPABILITY,
         ]),

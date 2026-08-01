@@ -95,7 +95,7 @@ function registration(
         version: options.piVersion ?? "0.80.10",
       },
       supportedProtocolVersions: [1],
-      capabilities: [...(options.capabilities ?? ["event.replay", "pi.rpc"])],
+      capabilities: [...(options.capabilities ?? ["event.replay", "pi.sdk"])],
       acceptingAssignments: options.acceptingAssignments ?? true,
       maxConcurrentSessions: options.maxConcurrentSessions ?? 1,
     },
@@ -460,7 +460,7 @@ describe.sequential("durable supervisor registration and health management", () 
       connectionManager.register(
         {
           ...message,
-          payload: { ...message.payload, capabilities: ["event.replay", "pi.rpc", "tool.ui"] },
+          payload: { ...message.payload, capabilities: ["event.replay", "pi.sdk", "tool.ui"] },
         },
         transportAuthority,
       ),

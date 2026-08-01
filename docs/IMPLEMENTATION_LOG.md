@@ -1,5 +1,9 @@
 # 实施记录
 
+> 本文是历史实施日志。已退役的 ADR 正文不再保留在当前文档集；日志中的
+> 旧 ADR 编号和旧 runtime 名称仅用于说明当时的演进过程，完整内容可从 Git
+> 历史中查看，不能视为当前受支持的技术路径。
+
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
@@ -2980,3 +2984,26 @@
   profile documented by ADR-0075. Core deployments no longer create a dead
   Jaeger bridge or inject an OTLP endpoint; an active local Jaeger container or
   explicit endpoint enables tracing without changing the Worker image.
+
+# 2026-08-01 — Active ADR and residual-code cleanup
+
+- Removed 22 implementation ADRs for retired Docker/gVisor runtimes, the old
+  WebSocket execution scheduler, file-per-event spool and superseded Cube
+  snapshot/pause designs. Renumbered the duplicated interrupted-conversation
+  decision to ADR-0079 and added a current ADR index.
+- Rewrote retained trust, execution, cancellation, model, Cube and optional
+  product ADRs so they describe the current Cube + Temporal + embedded Pi SDK
+  path. Replaced the historical backlog with current release, reliability,
+  deployment and security work.
+- Enabled strict unused-local/parameter checking and removed verified dead
+  imports, fields and obsolete Sandbox helpers. Renamed the misleading
+  `RemoteControlPlaneRuntime` assembly root to `ControlPlaneRuntime`; the Worker
+  WebSocket remains a Control Channel rather than a second Run scheduler.
+- Changed the Worker capability advertisement from obsolete `pi.rpc` to
+  `pi.sdk`. Kept Pi's internal SDK `rpc` extension source tags because those are
+  upstream Pi semantics, not subprocess compatibility.
+- Kept advanced backend modules explicit and disabled by default. The optional
+  GitHub Gateway now builds/starts only under the `github` Compose profile.
+- Increased the PGlite socket fixture connection ceiling for the concurrency
+  integration test after reproducing intermittent PostgreSQL protocol damage
+  under heartbeat and settlement overlap.

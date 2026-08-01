@@ -113,7 +113,7 @@ not establish runtime absence or safe replay.
 
 ### Adopt old containers after a supervisor restart
 
-The new process lacks the authenticated stream, in-memory Pi RPC state,
+The new process lacks the authenticated stream, in-memory Pi SDK state,
 checkpoint handshake, event publisher, and cancellation handle. Container
 liveness is insufficient to reconstruct those responsibilities safely.
 

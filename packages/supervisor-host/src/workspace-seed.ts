@@ -509,6 +509,13 @@ export class PostgresWorkspaceSeedResolver {
   ): Promise<Uint8Array> {
     try {
       const bytes = await importWorkspace();
+      if (signal.aborted) {
+        throw new WorkspaceSeedError(
+          "workspace_import_cancelled",
+          "Workspace import was cancelled",
+          true,
+        );
+      }
       validateWorkspaceSnapshot(bytes);
       const digest = sha256(bytes);
       const objectKey = validateCheckpointObjectKey(

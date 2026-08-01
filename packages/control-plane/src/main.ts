@@ -21,10 +21,7 @@ import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
 import { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
-import {
-  createRemoteControlPlaneRuntime,
-  type RemoteControlPlaneRuntime,
-} from "./remote-control-plane-runtime.ts";
+import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
 import { SandboxManagerClient } from "@agent-dock/sandbox-manager/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
@@ -57,7 +54,7 @@ export async function startControlPlane(): Promise<void> {
     connectionString: config.databaseUrl,
   });
   const objectStore = createS3CheckpointObjectStoreFromEnvironment();
-  let runtime: RemoteControlPlaneRuntime | undefined;
+  let runtime: ControlPlaneRuntime | undefined;
   let temporalOrchestrator: TemporalRunOrchestrator | undefined;
   let closing = false;
   try {
@@ -156,7 +153,7 @@ export async function startControlPlane(): Promise<void> {
         return true;
       },
     });
-    runtime = await createRemoteControlPlaneRuntime({
+    runtime = await createControlPlaneRuntime({
       database,
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,

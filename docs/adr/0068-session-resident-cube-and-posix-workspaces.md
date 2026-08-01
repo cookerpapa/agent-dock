@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-27
-- Supersedes: ADR-0060 warm pause behavior, ADR-0064, ADR-0065, ADR-0066
+- Supersedes: the original per-Run pause and Cube-native
+  snapshot/materialization designs
 - Refines: ADR-0067
 
 ## Context

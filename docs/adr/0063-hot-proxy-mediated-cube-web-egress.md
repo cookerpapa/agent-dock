@@ -2,8 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-26
-- Supersedes: ADR-0062's requirement for direct CubeVS public NAT
-- Extends: ADR-0030, ADR-0042, ADR-0053, ADR-0060
+- Supersedes: the original direct CubeVS public-NAT design
+- Extends: ADR-0030, ADR-0042, ADR-0053
 
 ## Context
 

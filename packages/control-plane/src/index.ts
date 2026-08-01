@@ -184,11 +184,11 @@ export {
   type TurnSteeringErrorCode,
 } from "./turn-steering-service.ts";
 export {
-  createRemoteControlPlaneRuntime,
-  RemoteControlPlaneRuntime,
-  type RemoteControlPlaneRuntimeOptions,
-  type RemoteControlPlaneRuntimeState,
-} from "./remote-control-plane-runtime.ts";
+  createControlPlaneRuntime,
+  ControlPlaneRuntime,
+  type ControlPlaneRuntimeOptions,
+  type ControlPlaneRuntimeState,
+} from "./control-plane-runtime.ts";
 export {
   SupervisorMaintenanceRuntime,
   type SupervisorMaintenanceActivity,

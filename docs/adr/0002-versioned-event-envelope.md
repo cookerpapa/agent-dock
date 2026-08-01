@@ -5,8 +5,8 @@
 
 ## Context
 
-Pi RPC emits useful runtime events, responses, and extension UI requests, but
-those messages are an upstream process protocol. They do not carry all of the
+The Pi SDK emits useful runtime events, responses, and extension UI requests,
+but those messages are an upstream runtime contract. They do not carry all of the
 tenant/session/turn/agent identity, durable ordering, replay, and compatibility
 metadata required by AgentDock's control plane and browser clients.
 
@@ -25,7 +25,7 @@ new fields before AgentDock has reviewed their security and tenancy semantics.
    allocation, leases, fencing, and ACK semantics are deferred to ADR-0004.
 5. Event and payload objects reject additional properties. New public data
    requires a deliberate schema change rather than accidental passthrough.
-6. Only the sandbox-supervisor Pi adapter may inspect raw Pi RPC shapes. It maps
+6. Only the sandbox-supervisor Pi adapter may inspect raw Pi SDK event shapes. It maps
    reviewed fields into AgentDock events and keeps the Pi UI request ID private.
 7. Unknown or malformed Pi events are ignored or reported as adapter outcomes;
    they are never published as an untyped raw-event escape hatch.

@@ -42,7 +42,7 @@ const piWorkerDeployment =
 if (piWorkerDeployment !== "compose" && piWorkerDeployment !== "kubernetes") {
   throw new Error("AGENT_DOCK_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
 }
-const supportedOptionalProfiles = new Set(["observability"]);
+const supportedOptionalProfiles = new Set(["observability", "github"]);
 const requestedOptionalProfiles = (
   process.env.AGENT_DOCK_PRODUCTION_PROFILES ??
   runtimeEnvironment.AGENT_DOCK_PRODUCTION_PROFILES ??
@@ -237,7 +237,9 @@ const profileArguments = [
   ...[
     ...new Set([
       ...requestedOptionalProfiles,
-      ...(new Set(["down", "stop", "kill", "rm"]).has(command) ? ["observability"] : []),
+      ...(new Set(["down", "stop", "kill", "rm"]).has(command)
+        ? [...supportedOptionalProfiles]
+        : []),
     ]),
   ].flatMap((profile) => ["--profile", profile]),
 ];
@@ -247,9 +249,9 @@ const serviceArguments =
         "control-plane",
         "supervisor-host",
         "sandbox-manager",
-        "github-gateway",
         "web",
         "provider-egress-relay-image",
+        ...(requestedOptionalProfiles.includes("github") ? ["github-gateway"] : []),
       ]
     : commandArguments;
 const args = [

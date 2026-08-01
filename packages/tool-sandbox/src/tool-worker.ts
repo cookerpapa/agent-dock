@@ -2,7 +2,6 @@ import {
   canonicalEnvironmentRecipeJson,
   isExpectedDefaultToolchain,
   MAX_TOOL_COMMAND_BYTES,
-  MAX_TOOL_FILE_BYTES,
   MAX_TOOL_MUTATION_FILE_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
   MAX_TOOL_RANGE_FILE_BYTES,
@@ -60,25 +59,6 @@ export class ToolWorkerError extends Error {
     this.code = code;
     this.retryable = retryable;
   }
-}
-
-function execute(file: string, args: readonly string[], cwd: string): Promise<string> {
-  return new Promise<string>((resolvePromise, rejectPromise) => {
-    execFile(
-      file,
-      [...args],
-      {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 512 * 1_024,
-        env: safeToolEnvironment(),
-      },
-      (error, stdout) => {
-        if (error) rejectPromise(error);
-        else resolvePromise(stdout);
-      },
-    );
-  });
 }
 
 function probeVersion(file: string, args: readonly string[]): Promise<string> {

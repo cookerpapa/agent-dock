@@ -460,7 +460,7 @@ export class DurableEventStore implements DurableEventIngestor {
       })
       .executeTakeFirstOrThrow();
 
-    await this.#recordStructuredTestResult(transaction, tenantId, message, now);
+    await this.#recordStructuredTestResult(transaction, tenantId, message);
     await this.#recordContextCompaction(transaction, tenantId, message);
     if (
       event.turnId !== null &&
@@ -510,7 +510,6 @@ export class DurableEventStore implements DurableEventIngestor {
     transaction: Transaction<Database>,
     tenantId: string,
     message: EventPublishMessage,
-    now: Date,
   ): Promise<void> {
     const event = message.payload.event;
     if (event.type !== "tool.completed" || event.turnId === null) return;

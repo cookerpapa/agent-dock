@@ -10,7 +10,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
-import { sql, type Kysely, type Transaction } from "kysely";
+import { sql, type Kysely } from "kysely";
 
 const GATEWAY_PATH = "/v1/chat/completions";
 const DEEPSEEK_CHAT_COMPLETIONS_URL = "https://api.deepseek.com/chat/completions";

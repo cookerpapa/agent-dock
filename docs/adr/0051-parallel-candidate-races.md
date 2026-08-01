@@ -17,7 +17,7 @@ AgentDock already has the required lower-level mechanisms:
 - an immutable `WorkspaceVersion` and cold Session fork;
 - per-Session serialization and globally fair tenant dispatch;
 - independent Run, Attempt, lease and fencing identities;
-- one gVisor Tool Sandbox per active candidate Session;
+- one Cube Tool Sandbox per active candidate Session;
 - immutable Review Bundles containing changes, tests, usage and artifacts.
 
 The missing boundary is an AgentDock-owned orchestration object above ordinary
@@ -121,7 +121,6 @@ serialization. It deliberately precedes general task-DAG decomposition: a DAG
 also requires integration ordering, conflict gates and full regression tests
 after every merge.
 
-The current Kubernetes/gVisor provider remains sufficient. A future
-CubeSandbox provider may optimize clean-base cloning, but its microVM snapshots
-are not the durable Workspace authority and cannot be a prerequisite for the
-orchestration protocol.
+The current Cube provider is sufficient. Cube microVM snapshots are not the
+durable Workspace authority and cannot be a prerequisite for the orchestration
+protocol.

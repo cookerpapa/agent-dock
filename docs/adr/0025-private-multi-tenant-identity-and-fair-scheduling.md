@@ -8,7 +8,7 @@
 
 ## Context
 
-ADR-0023 completed a production-operable single-host deployment for one
+The first production topology completed a production-operable single-host deployment for one
 operator and one tenant. The durable schema already carries `tenant_id` through
 projects, workspaces, model profiles, sessions, commands, events, artifacts,
 and the outbox, and most relationships use tenant-consistent composite foreign

@@ -2,8 +2,8 @@
 
 - Status: accepted
 - Date: 2026-07-25
-- Supersedes: ADR-0023's single fixed Supervisor identity and fixed management
-  URL
+- Supersedes: the original single fixed Supervisor identity and fixed
+  management URL
 
 ## Context
 
@@ -53,8 +53,8 @@ knows how to rebuild the active model context from it.
    advances checkpoint metadata together with the Run settlement protocol.
 9. A later Run may be assigned to any Worker. That Worker downloads the latest
    committed Pi JSONL checkpoint, writes it to a private temporary session file,
-   starts pinned Pi RPC with `--session <file>`, and lets Pi rebuild its active
-   context.
+   opens it with Pi's Session manager, creates the embedded Pi SDK runtime and
+   lets Pi rebuild its active context.
 10. Pi compaction remains native. The full pre-compaction history and the
     appended `compaction` entry stay in JSONL; Pi uses the summary,
     `firstKeptEntryId`, and recent entries to construct the next model
@@ -86,4 +86,4 @@ knows how to rebuild the active model context from it.
 - production Compose starts two Workers with separate boot/spool volumes;
 - Pi integration tests force native threshold compaction, verify the
   `compaction` entry and public compaction events, then restore the JSONL into a
-  fresh Pi RPC process and continue the conversation.
+  fresh Pi SDK runtime and continue the conversation.

@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-20
-- Extends: ADR-0013, ADR-0014, ADR-0017, ADR-0030
+- Extends: ADR-0013, ADR-0014, ADR-0030
 
 ## Context
 

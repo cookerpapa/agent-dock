@@ -233,7 +233,7 @@ documentation should be based on these reproducible measurements.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Architecture decisions](docs/adr/)
+- [Architecture decisions](docs/adr/README.md)
 - [Optimization boundary](docs/OPTIMIZATION_BOUNDARY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Sandbox Provider](docs/SANDBOX_PROVIDER.md)
@@ -253,6 +253,7 @@ contains horizontal Pi Worker manifests, Session-affinity scheduling,
 administrator-owned hot configuration, fault/load evaluation and deployment
 automation.
 
-Historical ADRs, migration files and research reports remain as immutable
-engineering history. They do not represent selectable runtimes in the current
-product.
+The active ADR set is intentionally pruned to decisions that still constrain
+the current product or maintained optional modules. Retired designs remain
+available through Git history and the implementation log; they are not
+selectable runtimes.

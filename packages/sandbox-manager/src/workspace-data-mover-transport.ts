@@ -5,9 +5,7 @@ import { fetch } from "undici";
 import {
   MAXIMUM_REQUEST_BYTES,
   MAXIMUM_RESPONSE_BYTES,
-  SHA256_PATTERN,
   TOKEN_PATTERN,
-  UUID_PATTERN,
   WORKSPACE_DATA_MOVER_INITIALIZE_BASELINE_PATH,
   WORKSPACE_DATA_MOVER_MATERIALIZE_PATH,
   WORKSPACE_DATA_MOVER_PREPARE_PATH,
@@ -16,7 +14,6 @@ import {
   digest,
   isRecord,
   validatedGitBaselineCommit,
-  validatedIdentity,
   validatedSnapshotId,
   type WorkspaceDataMover,
   type WorkspaceDataMoverInitializeBaselineInput,

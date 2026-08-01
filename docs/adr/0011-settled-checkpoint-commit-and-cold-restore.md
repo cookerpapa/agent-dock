@@ -14,7 +14,7 @@ stored session would preserve that state only by coupling durable identity to
 idle compute.
 
 ADR-0003 makes object storage authoritative for settled Pi and workspace
-snapshots, and ADR-0005 defines semantic rehydration as the baseline recovery
+snapshots, and semantic rehydration is the baseline recovery
 tier. The missing detail is the commit boundary. Pi currently publishes
 `turn.completed` before its caller regains control. Uploading a snapshot only
 after that event is durably acknowledged creates a contradictory failure mode:

@@ -22,7 +22,8 @@ failure. A routine control-plane restart could consequently force a new
 Supervisor boot even though the trusted host and all revoked workers had
 settled.
 
-Silently deleting the stale event would weaken ADR-0012's audit boundary.
+Silently deleting the stale event would weaken the durable Worker event audit
+boundary now implemented by ADR-0076.
 Persisting it as a current session event would be worse: the lease has been
 released and the control plane has already chosen the durable ambiguous-failure
 outcome. Transparent continuation of the old command would contradict ADR-0018.

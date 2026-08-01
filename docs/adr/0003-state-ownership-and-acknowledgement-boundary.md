@@ -5,8 +5,8 @@
 
 ## Context
 
-AgentDock spans a trusted control plane, an isolated sandbox supervisor, a Pi
-RPC process, a live workspace, and cold object storage. Several of these
+AgentDock spans a trusted control plane, a trusted Pi Worker, an isolated Cube
+Tool environment, a live Workspace, and cold object storage. Several of these
 components temporarily hold related data, but treating more than one copy as
 authoritative would make reconnect and crash recovery ambiguous.
 
@@ -34,7 +34,7 @@ discarded.
    not mean merely received, parsed, or buffered.
 7. If the ACK is lost, the supervisor resends events. PostgreSQL uniqueness on
    `(session_id, seq)` and `event_id` makes this at-least-once delivery safe.
-8. Raw Pi RPC messages are ephemeral adapter input. They are neither stored as
+8. Raw Pi SDK events are ephemeral adapter input. They are neither stored as
    domain events nor exposed as an alternative source of truth.
 9. Initial crash recovery returns to the last settled turn snapshot. Arbitrary
    mid-tool-call recovery is not claimed.

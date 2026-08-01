@@ -1,93 +1,37 @@
-# ADR-0007: Supervisor execution handshake and model snapshot
+# ADR-0007: Execution handshake and immutable model snapshot
 
-- Status: Accepted
+- Status: accepted, refined by ADR-0074
 - Date: 2026-07-18
 
 ## Context
 
-The durable turn-intake path stores an immutable provider, model, thinking
-level, and credential-binding version on every turn. The existing
-`command.turn.execute` wire message does not carry that snapshot, so a
-supervisor cannot reproduce the accepted turn without consulting control-plane
-state or guessing from deployment defaults.
-
-Command delivery also needs a precise side-effect boundary. Pi accepting a
-prompt can immediately call a model or tool. If the supervisor starts Pi before
-the control plane durably records the command ACK, a crash can make the same
-outbox command look safe to retry after its side effects have already begun.
-
-The outbox attempt number protects one control-plane claimant from another, but
-it does not fence an old supervisor after a session is reassigned. The durable
-session lease and its monotonically increasing fencing token remain a separate
-required boundary.
+A Run must execute the model policy accepted with the user message, even if an
+administrator rotates the platform model before the Activity starts. Model or
+Tool side effects also must not begin until durable RunAttempt authority exists.
 
 ## Decision
 
-1. `command.turn.execute` carries the immutable model execution snapshot stored
-   on the turn: model profile ID, provider, model ID, thinking level, opaque
-   credential-binding ID, and binding version. It never carries an access token,
-   refresh token, API key, secret reference, or arbitrary base URL.
-2. The control plane acquires one durable session lease before delivery. Lease
-   acquisition locks the session and selected sandbox, increments the session's
-   `last_fencing_token`, and reserves one sandbox capacity slot.
-3. A supervisor first performs a side-effect-free `prepare` step. It validates
-   the closed wire command, lease ID, fencing token, session state, duplicate
-   command ID, and local capacity, then returns an accepted, duplicate, or
-   rejected `command.ack`.
-4. For an accepted ACK, the control plane validates the exact command, session,
-   turn, lease, and fence and durably changes the command/turn/session to their
-   running states in the same transaction that revalidates the current lease.
-5. Only after that transaction succeeds may the supervisor's `run` step submit
-   the prompt to Pi. A failure before durable ACK can release the reservation
-   and be retried; a failure after durable ACK is terminal or reconciled and is
-   never blindly redelivered.
-6. Every public event produced by that run is wrapped in the versioned
-   `event.publish` message with the same command ID, lease ID, and fencing token.
-   Raw Pi RPC values remain inside the sandbox-supervisor adapter.
-7. Successful completion or terminal post-ACK failure releases the current
-   lease and sandbox capacity in the same control-plane settlement transaction.
-   A release with a different lease or fence is stale and changes nothing.
-8. The first integration uses an in-process transport only to exercise the
-   boundary deterministically. Pi process ownership stays in
-   `@agent-dock/sandbox-supervisor`, the production control-plane entry point
-   does not auto-start it, and this does not claim a production network
-   transport or per-workspace sandbox.
-9. Default tests use the loopback deterministic fake model. Real subscription
-   credentials are neither required nor read by this path.
+1. The exact execute command carries the accepted model profile, provider,
+   model, thinking level and opaque credential version. It never carries a
+   provider key, refresh token, secret reference or caller-controlled base URL.
+2. Temporal schedules that exact command ID. PostgreSQL transactionally checks
+   Session/Workspace ordering and tenant capacity, creates the RunAttempt and
+   grants a lease with a new fencing token.
+3. The trusted Pi Worker validates command identity, current Attempt and local
+   capacity before acknowledging execution authority. Only then may the embedded
+   Pi SDK receive the prompt.
+4. Events and terminal/checkpoint commits carry the exact Run, Attempt, lease
+   and fence. Stale authority cannot advance canonical conversation or
+   Workspace state.
+5. A failure before side effects may follow Temporal's bounded retry policy. An
+   ambiguous Tool side effect is not replayed as though execution were exactly
+   once.
+6. Default tests use the deterministic loopback model. Real-provider checks are
+   explicit and bounded.
 
 ## Consequences
 
-- A delivered command is self-contained enough for a supervisor to reproduce
-  the accepted model policy without reading control-plane tables.
-- The durable ACK is the last safe point before model/tool side effects begin.
-- Outbox claimant attempts and session fencing tokens have distinct, testable
-  responsibilities.
-- A stale supervisor cannot publish events or settle a newly reassigned
-  session, even if its old Pi process is still alive.
-- Event persistence, cumulative event ACK, reconnect, lease renewal, and the
-  production supervisor transport remain later vertical slices; the wire
-  envelope already preserves the information they require.
-
-## Rejected alternatives
-
-### Let the supervisor read model profiles from PostgreSQL
-
-This couples the execution plane to control-plane storage and makes retries
-depend on mutable profile data instead of the snapshot accepted with the turn.
-
-### Start Pi and persist the command ACK afterwards
-
-The prompt may already have caused external side effects when ACK persistence
-fails, so retrying the apparently unpublished outbox command would be unsafe.
-
-### Treat the outbox attempt as the session fencing token
-
-Attempts are local to one outbox record. They cannot fence an older supervisor
-across another command, process reconnect, sandbox replacement, or session
-reassignment.
-
-### Put provider credentials in the execute command
-
-Wire messages, logs, replay buffers, and error reports are broader exposure
-surfaces than a request-scoped credential broker. Only an opaque binding and
-version belong in the durable command contract.
+- Model rotation does not mutate in-flight work.
+- Temporal schedules work but does not replace durable authorization/fencing.
+- A Worker cannot infer mutable policy from deployment defaults.
+- Arbitrary shell side effects retain honest at-most-once-start semantics.

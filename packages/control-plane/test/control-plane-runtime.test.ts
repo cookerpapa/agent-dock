@@ -9,7 +9,7 @@ import {
   HashedBearerSupervisorAuthorizer,
   SessionEventHub,
   SupervisorMaintenanceRuntime,
-  createRemoteControlPlaneRuntime,
+  createControlPlaneRuntime,
   type SupervisorMaintenanceActivity,
 } from "../src/index.ts";
 
@@ -126,7 +126,7 @@ describe.sequential("remote control-plane runtime composition", () => {
 
   it("starts maintenance with the HTTP/WebSocket control plane and drains idempotently", async () => {
     const activities: SupervisorMaintenanceActivity[] = [];
-    const runtime = await createRemoteControlPlaneRuntime({
+    const runtime = await createControlPlaneRuntime({
       database,
       tenantId: IDS.tenant,
       defaultModelProfileId: IDS.profile,

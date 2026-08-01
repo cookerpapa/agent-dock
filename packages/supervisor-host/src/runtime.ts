@@ -142,7 +142,6 @@ export class SupervisorHostRuntime {
   readonly #resolveTerminal: (reason: SupervisorHostTerminalReason) => void;
   #state: SupervisorHostRuntimeState = "idle";
   #identity: SupervisorHostBootIdentity | undefined;
-  #ledger: SupervisorBootLedger | undefined;
   #localSupervisor: LocalSandboxSupervisor | undefined;
   #client: ReconnectingSupervisorWebSocketClient | undefined;
   #managementServer: SupervisorManagementServer | undefined;
@@ -230,7 +229,6 @@ export class SupervisorHostRuntime {
       supervisorId: identity.supervisorId,
       idGenerator: this.#idGenerator,
     });
-    this.#ledger = ledger;
     await ledger.beginBoot(identity);
 
     let client: ReconnectingSupervisorWebSocketClient | undefined;

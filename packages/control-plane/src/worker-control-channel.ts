@@ -8,7 +8,6 @@ import {
   type CommandReleaseMessage,
   type CommandResultMessage,
   type EventPublishMessage,
-  type EventPublishBatchMessage,
   type SteerTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@agent-dock/protocol";
@@ -21,7 +20,6 @@ const DEFAULT_COMMAND_RESULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_PENDING_COMMANDS = 1_000;
 
 export type WorkerControlCommand = SteerTurnCommandMessage;
-type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
 export type WorkerControlConnection = {
   supervisorId: string;

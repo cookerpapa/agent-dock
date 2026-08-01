@@ -16,7 +16,6 @@ import {
   MAX_TOOL_OUTPUT_BYTES,
   parseSupervisorToControlMessage,
   type AgentDockEvent,
-  type CancelTurnCommandMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
   type WorkspacePatch,

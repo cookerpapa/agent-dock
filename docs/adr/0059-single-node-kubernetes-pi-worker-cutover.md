@@ -9,7 +9,7 @@
 ADR-0058 makes the trusted Pi Worker pool deployable across Kubernetes nodes,
 but the current interactive product still runs its Workers as Docker Compose
 services. The retained host K3s is an execution-plane cluster administered by
-root and used by Cube/gVisor. Its Sandbox Manager credential is intentionally
+root and used by Cube. Its Sandbox Manager credential is intentionally
 limited to untrusted execution resources and must not be expanded or abused to
 install trusted application workloads.
 

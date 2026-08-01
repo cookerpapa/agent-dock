@@ -14,7 +14,7 @@ import {
   type ToolSandboxOperationResponse,
   type ToolWebProxyBootstrap,
 } from "@agent-dock/protocol";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isIPv4 } from "node:net";
 import {
   createKopiaWorkspaceCheckpoint,
@@ -1466,32 +1466,6 @@ export class CubeSandboxProvider implements SandboxProvider {
     throw new SandboxManagerError(
       "cubesandbox_data_plane_unavailable",
       "CubeSandbox Tool data plane did not become ready",
-      true,
-    );
-  }
-
-  async #waitForService(
-    instance: CubeSandboxInstance,
-    authority: NonNullable<Parameters<CubeSandboxRuntimeClient["request"]>[1]["authority"]>,
-  ): Promise<void> {
-    const deadline = Date.now() + this.#readyTimeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        await this.#client.request(instance, {
-          method: "GET",
-          path: "/health",
-          timeoutMs: Math.min(5_000, this.#readyTimeoutMs),
-          maximumResponseBytes: 1_024,
-          authority,
-        });
-        return;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-    }
-    throw new SandboxManagerError(
-      "cubesandbox_data_plane_unavailable",
-      "CubeSandbox sealed Tool data plane did not become ready",
       true,
     );
   }
