@@ -23,6 +23,9 @@ in the implementation log or Git history, not in the active backlog.
 
 ## Reliability and recovery
 
+- [x] Lock the cloud recovery contract with deterministic tests covering an
+      interrupted Pi Session across native Compaction/fresh-Worker restore and
+      proving that post-ACK or ambiguous Tool failures are not replayed.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,

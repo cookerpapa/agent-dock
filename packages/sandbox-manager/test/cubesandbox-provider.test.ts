@@ -738,8 +738,12 @@ describe("CubeSandbox Provider contract", () => {
   it("destroys an uncertain VM instead of replaying an arbitrary command", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const originalRequest = runtime.request.bind(runtime);
+    let operationRequests = 0;
     runtime.request = async (instance, input) => {
-      if (input.path === "/v1/operation") throw new Error("connection lost");
+      if (input.path === "/v1/operation") {
+        operationRequests += 1;
+        throw new Error("connection lost");
+      }
       return originalRequest(instance, input);
     };
     const provider = new CubeSandboxProvider({
@@ -759,6 +763,7 @@ describe("CubeSandbox Provider contract", () => {
     await expect(provider.exec(handle, operation(ACTIVATION_ID))).rejects.toMatchObject({
       code: "cubesandbox_tool_result_unknown",
     });
+    expect(operationRequests).toBe(1);
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
     await expect(provider.inspect(handle)).resolves.toMatchObject({ state: "absent" });
     await provider.close();

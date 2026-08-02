@@ -1782,6 +1782,15 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(durable.commandCompletedAt).not.toBeNull();
     expect(durable.settledAt).not.toBeNull();
     expect(durable.publishedAt).not.toBeNull();
+    expect(backend.records).toHaveLength(1);
+
+    // A repeated Temporal Activity delivery observes the committed terminal
+    // state. It must not create another Attempt or invoke the backend again.
+    await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toEqual({
+      status: "idle",
+    });
+    expect(backend.records).toHaveLength(1);
+    expect(await readTurnExecution(accepted)).toMatchObject({ attempts: 1 });
   });
 
   it("persists trusted Runner phases and the committed checkpoint revision", async () => {

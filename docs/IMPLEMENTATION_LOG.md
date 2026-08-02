@@ -3055,3 +3055,21 @@
 - Added focused coverage for marker deduplication, warm reuse, repeated cold
   pure-chat Runs, later Cube replacement and the separation between trusted
   metadata and LLM-visible context.
+
+# 2026-08-02 — Cloud recovery and effect-aware retry contracts
+
+- Added a deterministic Pi-native recovery contract that installs a Compaction
+  checkpoint, transfers its JSONL to a fresh Worker directory and proves that
+  exactly one `<turn_aborted>` and one `<sandbox_reset>` remain in effective
+  model context without operational Run, Attempt or activation identities.
+- Extended the Control Plane lifecycle suite to redeliver a terminal post-ACK
+  command as Temporal may do after an Activity response is lost. PostgreSQL
+  returns the committed terminal state without creating a second Attempt or
+  invoking the execution backend again.
+- Strengthened the Cube Provider ambiguity test to prove a disconnected
+  arbitrary command reaches the guest exactly once, returns
+  `cubesandbox_tool_result_unknown` and destroys the uncertain VM instead of
+  replaying the operation.
+- Verified all Sandbox Supervisor and Sandbox Manager suites, the complete
+  Control Plane API lifecycle suite, and strict type checks for all three
+  packages.
