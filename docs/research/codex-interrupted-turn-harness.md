@@ -1,5 +1,9 @@
 # Codex interrupted-turn harness
 
+This focused note is complemented by the broader
+[Codex Agent Harness lessons](codex-agent-harness-lessons.md), which covers
+Turn lifecycle, Step context, Tool execution, retry, Compaction and recovery.
+
 - Date: 2026-08-02
 - Upstream inspected: `openai/codex` commit
   `2b5bdcf67547860f2e5c5a605009a70026796b2b`
