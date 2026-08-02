@@ -314,9 +314,14 @@ last committed Pi branch
   → next user prompt
 ```
 
-The marker warns the Agent to inspect the Workspace because Tool side effects
-may be partial. Pre-execution dispatch failures do not create this checkpoint
-and may be retried without changing the conversation head.
+The marker is the model-visible interrupted-Turn boundary. It records that Tool
+side effects and background-process state may be partial or still active. If a
+later prompt depends on that work, the Agent is instructed to proactively use
+the least-invasive relevant checks to establish the current Workspace and
+process state before making more changes, and never to blindly repeat an
+uncertain side effect. A newer unrelated user request supersedes the old work.
+Pre-execution dispatch failures do not create this checkpoint and may be
+retried without changing the conversation head.
 
 Catchable provider failures preserve Pi's native aborted/error assistant
 message. An integration test disconnects the provider after publishing
@@ -330,9 +335,10 @@ Pi checkpoint and appends one hidden, model-visible semantic recovery suffix
 derived from canonical PostgreSQL Turn projections newer than the checkpoint.
 The suffix contains the accepted prompt, public assistant text, Tool
 boundaries/results and canonical failure/cancellation state. An in-flight Tool
-is marked `unknown`; raw thinking is never reconstructed. The next Pi
-checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
-authority.
+is marked `unknown`; raw thinking is never reconstructed. It carries the same
+model-visible verify-before-continuing policy as a catchable interrupt. The
+next Pi checkpoint absorbs this one-time bridge, so Pi JSONL remains the
+conversation authority.
 
 ### Active steer
 

@@ -33,8 +33,10 @@ compaction entries, provider metadata or Tool-result structure.
 3. Before committing that artifact, the trusted Pi Worker appends a hidden,
    model-visible `agent-dock.run_interrupted` custom message. The marker states
    that the previous Run did not commit successfully, that commands may have
-   partially executed, and that the Workspace must be inspected before
-   continuing.
+   partially executed or remain active in the background, and that a later
+   prompt which depends on the interrupted work must first inspect current
+   Workspace/process state. It also forbids blindly replaying a side effect
+   whose completion is uncertain.
 4. If Pi failed before it appended the accepted user prompt, the Worker appends
    that prompt to the native Session tree before the interruption marker. It
    never reconstructs an assistant message from streamed text deltas.
@@ -59,7 +61,8 @@ compaction entries, provider metadata or Tool-result structure.
 - Browser transcript and model-visible conversation no longer silently diverge
   at interruption boundaries.
 - Workspace bytes, processes and external side effects are not claimed to have
-  rolled back. The marker requires the next Agent to inspect reality.
+  rolled back. The marker makes that uncertainty model-visible and requires the
+  next Agent to inspect reality before continuing dependent work.
 - Interrupted snapshots add object-storage writes to terminal failure and
   cancellation handling.
 - ADR-0011 remains unchanged for successful Workspace commit ordering and cold

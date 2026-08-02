@@ -72,8 +72,24 @@ describe("Pi durable crash recovery", () => {
         throw new Error("Expected a durable recovery custom message");
       }
       const content = JSON.parse(entry.content) as {
+        schemaVersion: number;
+        recoveryGuidance: {
+          stateUncertain: boolean;
+          verificationRequiredBeforeContinuation: boolean;
+          nextTurn: string;
+          replay: string;
+        };
         turns: Array<{ visibleItems: Array<{ kind: string; status?: string }> }>;
       };
+      expect(content.schemaVersion).toBe(2);
+      expect(content.recoveryGuidance).toMatchObject({
+        stateUncertain: true,
+        verificationRequiredBeforeContinuation: true,
+      });
+      expect(content.recoveryGuidance.nextTurn).toContain(
+        "proactively establish the current Workspace and process state",
+      );
+      expect(content.recoveryGuidance.replay).toContain("Do not blindly repeat");
       expect(content.turns[0]?.visibleItems).toContainEqual(
         expect.objectContaining({ kind: "tool", status: "unknown" }),
       );

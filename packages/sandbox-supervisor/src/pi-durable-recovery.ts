@@ -1,5 +1,10 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
+import {
+  PI_INTERRUPTION_REPLAY_GUIDANCE,
+  PI_INTERRUPTION_STATE_GUIDANCE,
+  PI_INTERRUPTION_VERIFICATION_GUIDANCE,
+} from "./pi-interrupted-session.ts";
 
 export const PI_DURABLE_RECOVERY_CUSTOM_TYPE = "agent-dock.durable_crash_recovery";
 const MAX_RECOVERY_MESSAGE_BYTES = 512 * 1_024;
@@ -111,12 +116,18 @@ function recoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
 
 function recoveryEnvelope(suffix: PiDurableRecoverySuffix, turns: unknown[]) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     warning:
       "These durable public events were produced after the latest Pi checkpoint. " +
       "The previous Worker ended before it could persist native Pi state. " +
-      "Treat running or preparing Tool calls as UNKNOWN, do not replay side effects blindly, " +
-      "and inspect the Workspace before continuing.",
+      "Treat running or preparing Tool calls as UNKNOWN.",
+    recoveryGuidance: {
+      stateUncertain: true,
+      verificationRequiredBeforeContinuation: true,
+      state: PI_INTERRUPTION_STATE_GUIDANCE,
+      nextTurn: PI_INTERRUPTION_VERIFICATION_GUIDANCE,
+      replay: PI_INTERRUPTION_REPLAY_GUIDANCE,
+    },
     checkpointThroughSequence: suffix.checkpointThroughSequence,
     recoveredThroughSequence: suffix.recoveredThroughSequence,
     turns,
@@ -132,8 +143,14 @@ export function appendPiDurableRecovery(
     serializedWithinLimit(recoveryEnvelope(suffix, turns)) ??
     serializedWithinLimit(recoveryEnvelope(suffix, compactRecoveryTurns(suffix))) ??
     JSON.stringify({
-      schemaVersion: 1,
-      warning: "Durable crash recovery metadata was truncated; inspect the Workspace.",
+      schemaVersion: 2,
+      warning: "Durable crash recovery metadata was truncated.",
+      recoveryGuidance: {
+        stateUncertain: true,
+        verificationRequiredBeforeContinuation: true,
+        nextTurn: PI_INTERRUPTION_VERIFICATION_GUIDANCE,
+        replay: PI_INTERRUPTION_REPLAY_GUIDANCE,
+      },
       checkpointThroughSequence: suffix.checkpointThroughSequence,
       recoveredThroughSequence: suffix.recoveredThroughSequence,
       turns: suffix.turns.map((turn) => ({

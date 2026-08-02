@@ -3018,3 +3018,22 @@
 - Increased the PGlite socket fixture connection ceiling for the concurrency
   integration test after reproducing intermittent PostgreSQL protocol damage
   under heartbeat and settlement overlap.
+
+# 2026-08-02 — Codex-style interrupted-Turn recovery harness
+
+- Inspected the official Codex Core/TUI interruption path at upstream commit
+  `2b5bdcf67547860f2e5c5a605009a70026796b2b`: `Esc` submits an interrupt,
+  Core cancels the active Task, appends a hidden model-visible
+  `<turn_aborted>` item and flushes it before publishing terminal abort state.
+- Strengthened AgentDock's existing `agent-dock.run_interrupted` Pi custom
+  message with explicit process uncertainty, conditional proactive inspection
+  and no-blind-replay guidance. The marker remains hidden from the transcript
+  while participating in Pi's compaction-aware model context.
+- Applied the same policy to the hard-crash semantic bridge used after
+  `SIGKILL`, OOM or Worker/node loss. Running/preparing Tool calls remain
+  `unknown`, and the next committed Pi checkpoint absorbs the bridge.
+- Added focused tests proving the marker is deduplicated, reason text is
+  bounded/escaped, both recovery paths are model-visible and the hard-crash
+  envelope carries the same verification policy.
+- Recorded the source comparison in
+  `docs/research/codex-interrupted-turn-harness.md`.

@@ -31,6 +31,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Remove the browser repository-import workflow.
 - [x] Preserve Pi-native failed/cancelled conversation branches without
   promoting unsuccessful Workspace state.
+- [x] Make catchable interruption and hard Worker loss model-visible with a
+  verify-before-continuing boundary that survives cold restore.
 - [x] Commit public terminal events atomically with Run/checkpoint state and
   recover hard-crash durable semantics without inventing a second transcript.
 - [x] Keep Temporal Activity deadlines above bounded Pi/Sandbox settlement and
