@@ -479,6 +479,7 @@ describe("CubeSandbox Provider contract", () => {
       workspaceRevision: "a".repeat(64),
     });
     expect(next.activationId).toBe(reserved.activationId);
+    expect(next.continuity).toBe("warm_reuse");
     await manager.execute(next.capability, {
       ...operation(next.activationId),
       operationId: "10000000-0000-4000-8000-000000000033",

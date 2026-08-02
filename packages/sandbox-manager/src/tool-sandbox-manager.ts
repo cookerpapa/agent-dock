@@ -357,6 +357,7 @@ export class ToolSandboxManager {
       activationId,
       capability,
       workspaceRoot: "/workspace",
+      continuity: inherited === undefined ? "cold_restore" : "warm_reuse",
     };
   }
 

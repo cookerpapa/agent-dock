@@ -3037,3 +3037,21 @@
   envelope carries the same verification policy.
 - Recorded the source comparison in
   `docs/research/codex-interrupted-turn-harness.md`.
+
+# 2026-08-02 — Minimal model-visible interruption and Sandbox continuity
+
+- Re-read Codex's exact model-visible marker and removed AgentDock's
+  prescriptive verification/replay policy, internal reason codes and
+  Run/Attempt identity from model input. Trusted checkpoint metadata retains
+  those operational details.
+- Reduced catchable interruption to a short `<turn_aborted>` fact. Kept the
+  hard-crash semantic bridge because it is required to reconcile already
+  durable user-visible events with an older Pi checkpoint, but removed control
+  sequence/Turn IDs and recovery instructions from its model payload.
+- Added a required `cold_restore | warm_reuse` reservation result to the narrow
+  Sandbox Manager protocol. Pi records the last active activation in a native
+  non-model custom entry and emits one `<sandbox_reset>` only when an active
+  Session Cube was actually lost.
+- Added focused coverage for marker deduplication, warm reuse, repeated cold
+  pure-chat Runs, later Cube replacement and the separation between trusted
+  metadata and LLM-visible context.

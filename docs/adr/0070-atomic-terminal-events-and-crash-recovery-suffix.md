@@ -63,6 +63,11 @@ message before the next prompt. Raw thinking is not recovered into model
 context. The next successful or interrupted Pi checkpoint absorbs the recovery
 entry, so ordinary restore continues to use only native Pi JSONL.
 
+The suffix contains only the durable user-visible semantics needed for
+continuity plus a factual notice that in-flight Tool completion is unknown. It
+does not expose database sequence numbers, Turn IDs or a prescribed recovery
+strategy to the model; those remain trusted metadata.
+
 This suffix is a recovery bridge, not a competing transcript authority.
 
 ### Timeouts

@@ -200,7 +200,11 @@ describe("provider-backed Tool Sandbox Manager", () => {
     });
 
     const created = await manager.create(createRequest);
-    expect(created).toMatchObject({ activationId: ACTIVATION_ID, capability: CAPABILITY });
+    expect(created).toMatchObject({
+      activationId: ACTIVATION_ID,
+      capability: CAPABILITY,
+      continuity: "cold_restore",
+    });
     expect(fixture.createSpec).toBeUndefined();
     await expect(
       manager.capture(ACTIVATION_ID, assignment, "10000000-0000-4000-8000-000000000017"),
@@ -365,6 +369,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       workspaceRevision: "a".repeat(64),
     });
     expect(second.activationId).toBe(first.activationId);
+    expect(second.continuity).toBe("warm_reuse");
     await manager.execute(second.capability, {
       ...operation("10000000-0000-4000-8000-000000000022"),
       activationId: second.activationId,

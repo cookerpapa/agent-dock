@@ -26,6 +26,11 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { appendPiInterruption } from "./pi-interrupted-session.ts";
 import { appendPiDurableRecovery } from "./pi-durable-recovery.ts";
+import {
+  preparePiSandboxContinuity,
+  recordPiSandboxActive,
+  recordPiSandboxUnavailable,
+} from "./pi-sandbox-continuity.ts";
 import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
 import {
@@ -58,6 +63,10 @@ export type PiSdkTurnRunnerOptions = {
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   recoverySuffix?: PiDurableRecoverySuffix;
+  sandboxContinuity?: {
+    activationId: string;
+    continuity: "cold_restore" | "warm_reuse";
+  };
   onSettled?: (checkpoint: PiSettledCheckpoint) => Promise<void> | void;
   onInterrupted?: (checkpoint: PiInterruptedCheckpoint) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiToolOutputCapture) => Promise<PiToolOutputArtifact>;
@@ -341,6 +350,7 @@ export class PiSdkTurnRunner {
     let sessionManager: SessionManager | undefined;
     let baseEntryIds = new Set<string>();
     let interruptedCheckpointCaptured = false;
+    let sandboxToolStarted = false;
     const terminal = deferred<PiTurnResult>();
     void terminal.promise.catch(() => undefined);
 
@@ -382,6 +392,9 @@ export class PiSdkTurnRunner {
         attemptId: command.payload.attemptId,
         timestamp: validDate(this.#clock).valueOf(),
       });
+      if (sandboxToolStarted && this.#options.sandboxContinuity !== undefined) {
+        recordPiSandboxUnavailable(sessionManager, this.#options.sandboxContinuity.activationId);
+      }
       const persistedSessionFile = sessionManager.getSessionFile();
       const piSession =
         persistedSessionFile === undefined
@@ -440,6 +453,13 @@ export class PiSdkTurnRunner {
       if (outcome.kind === "settled") {
         if (outcome.result.status === "completed") {
           if (this.#options.onSettled !== undefined) {
+            if (
+              sandboxToolStarted &&
+              sessionManager !== undefined &&
+              this.#options.sandboxContinuity !== undefined
+            ) {
+              recordPiSandboxActive(sessionManager, this.#options.sandboxContinuity.activationId);
+            }
             const persistedSessionFile = runtime?.session.sessionFile;
             const piSession =
               persistedSessionFile === undefined
@@ -475,6 +495,9 @@ export class PiSdkTurnRunner {
         return;
       }
       let publicEvent = outcome.event;
+      if (publicEvent.type === "tool.started" || publicEvent.type === "tool.completed") {
+        sandboxToolStarted = true;
+      }
       if (
         publicEvent.type === "tool.completed" &&
         this.#options.persistToolOutputArtifact !== undefined
@@ -624,6 +647,9 @@ export class PiSdkTurnRunner {
           : SessionManager.open(sessionFile, sessionDirectory, workspaceDirectory);
       if (this.#options.recoverySuffix !== undefined) {
         appendPiDurableRecovery(sessionManager, this.#options.recoverySuffix);
+      }
+      if (this.#options.sandboxContinuity !== undefined) {
+        preparePiSandboxContinuity(sessionManager, this.#options.sandboxContinuity);
       }
       baseEntryIds = new Set(sessionManager.getEntries().map((entry) => entry.id));
       runtime = await createAgentSessionRuntime(createRuntime, {

@@ -48,15 +48,20 @@ AgentDock already had two durable interruption paths:
 - `SIGKILL`, OOM or node loss uses PostgreSQL's durable public events to append
   one bounded semantic recovery item after the last committed Pi checkpoint.
 
-The adopted change makes both paths carry the same next-Turn policy:
+The first implementation made both paths carry a detailed next-Turn policy.
+That was rejected after comparing the exact upstream model-visible payload:
+Codex records uncertainty but does not tell the model how to recover. AgentDock
+therefore adopts the same separation:
 
-- execution and process state are uncertain;
-- if the new request depends on interrupted work, inspect the Workspace and
-  process state before changing it further;
-- never blindly repeat an uncertain side effect;
-- a newer unrelated user request supersedes the interrupted task.
+- trusted metadata retains exact reason, Run/Attempt and durable sequence data;
+- model context receives a short `<turn_aborted>` factual boundary;
+- the hard-crash bridge retains only user-visible durable semantics and marks
+  in-flight Tool completion as unknown;
+- no fixed inspection or replay procedure is injected into the next prompt.
 
-This is deliberately stronger than a local-only harness: AgentDock can carry
-the warning across Worker and node replacement. It still does not claim to
-restore process memory or prove an arbitrary shell command executed exactly
-once.
+AgentDock adds one cloud-specific distinction. The Sandbox Manager reports
+whether the exact Session Cube is warm-reused or cold-restored. Pi stores the
+last active activation in a non-model custom entry; a confirmed loss emits one
+short `<sandbox_reset>` fact and records an unavailable state so pure-chat Runs
+do not repeat it. This does not claim to restore process memory or prove an
+arbitrary shell command executed exactly once.

@@ -47,10 +47,19 @@ export {
 export {
   appendPiInterruption,
   PI_INTERRUPTION_CUSTOM_TYPE,
+  PI_INTERRUPTION_MESSAGE,
   piInterruptionMessage,
   piSessionEntryIds,
 } from "./pi-interrupted-session.ts";
 export { appendPiDurableRecovery, PI_DURABLE_RECOVERY_CUSTOM_TYPE } from "./pi-durable-recovery.ts";
+export {
+  PI_SANDBOX_RESET_CUSTOM_TYPE,
+  PI_SANDBOX_RESET_MESSAGE,
+  PI_SANDBOX_STATE_CUSTOM_TYPE,
+  preparePiSandboxContinuity,
+  recordPiSandboxActive,
+  recordPiSandboxUnavailable,
+} from "./pi-sandbox-continuity.ts";
 
 export {
   PiSdkIsolationFailure,

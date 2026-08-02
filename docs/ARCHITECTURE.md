@@ -315,13 +315,11 @@ last committed Pi branch
 ```
 
 The marker is the model-visible interrupted-Turn boundary. It records that Tool
-side effects and background-process state may be partial or still active. If a
-later prompt depends on that work, the Agent is instructed to proactively use
-the least-invasive relevant checks to establish the current Workspace and
-process state before making more changes, and never to blindly repeat an
-uncertain side effect. A newer unrelated user request supersedes the old work.
-Pre-execution dispatch failures do not create this checkpoint and may be
-retried without changing the conversation head.
+side effects may be partial and background processes may still be active. It
+does not expose failure codes, Run/Attempt identity or a prescribed recovery
+procedure to the model. The next model call decides how to respond from that
+fact and the user's new prompt. Pre-execution dispatch failures do not create
+this checkpoint and may be retried without changing the conversation head.
 
 Catchable provider failures preserve Pi's native aborted/error assistant
 message. An integration test disconnects the provider after publishing
@@ -335,10 +333,26 @@ Pi checkpoint and appends one hidden, model-visible semantic recovery suffix
 derived from canonical PostgreSQL Turn projections newer than the checkpoint.
 The suffix contains the accepted prompt, public assistant text, Tool
 boundaries/results and canonical failure/cancellation state. An in-flight Tool
-is marked `unknown`; raw thinking is never reconstructed. It carries the same
-model-visible verify-before-continuing policy as a catchable interrupt. The
-next Pi checkpoint absorbs this one-time bridge, so Pi JSONL remains the
-conversation authority.
+is marked `unknown`; raw thinking is never reconstructed. The bridge describes
+what was durably observed but does not prescribe a recovery strategy. The next
+Pi checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
+authority.
+
+Pi JSONL also keeps a hidden `agent-dock.sandbox_state` custom entry that does
+not participate in model context. The Sandbox Manager reservation reports only
+whether the exact Session runtime is a `warm_reuse` or a `cold_restore`. If a
+previously active Cube is no longer available, the Worker appends one short
+model-visible `<sandbox_reset>` fact before the next prompt:
+
+```text
+The committed Workspace is preserved, but running processes and in-memory
+environment state were not carried forward.
+```
+
+The hidden state entry prevents the same loss from being announced on every
+pure-chat Run. A later Tool-using Run records the newly active Cube, allowing a
+future real replacement to produce a new one-time marker. Activation IDs and
+lifecycle reason codes remain outside model context.
 
 ### Active steer
 

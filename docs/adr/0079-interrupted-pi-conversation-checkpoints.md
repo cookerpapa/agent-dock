@@ -31,12 +31,11 @@ compaction entries, provider metadata or Tool-result structure.
    `pi_interrupted_session_snapshot` artifact when a valid native Pi Session
    file can be materialized.
 3. Before committing that artifact, the trusted Pi Worker appends a hidden,
-   model-visible `agent-dock.run_interrupted` custom message. The marker states
-   that the previous Run did not commit successfully, that commands may have
-   partially executed or remain active in the background, and that a later
-   prompt which depends on the interrupted work must first inspect current
-   Workspace/process state. It also forbids blindly replaying a side effect
-   whose completion is uncertain.
+   model-visible `agent-dock.run_interrupted` custom message. Following Codex's
+   interrupted-Turn harness, the marker states only that the previous Turn was
+   interrupted, commands may have partially executed and background processes
+   may still be active. Internal reason codes and recovery instructions remain
+   outside model context.
 4. If Pi failed before it appended the accepted user prompt, the Worker appends
    that prompt to the native Session tree before the interruption marker. It
    never reconstructs an assistant message from streamed text deltas.
@@ -52,6 +51,14 @@ compaction entries, provider metadata or Tool-result structure.
 8. Cold restore accepts completed Pi snapshots and interrupted Pi snapshots.
    Pi's own SessionManager remains responsible for building compaction-aware
    model context.
+9. Pi stores the last known Cube activation as an `agent-dock.sandbox_state`
+   custom entry, which does not participate in model context. The Sandbox
+   Manager reports `warm_reuse` or `cold_restore` when reserving an activation.
+   A cold restore after a previously active Cube appends one hidden,
+   model-visible `<sandbox_reset>` message stating only that committed files
+   remain while process and in-memory state did not carry forward. A hidden
+   unavailable state deduplicates the marker until another Cube actually runs
+   a Tool.
 
 ## Consequences
 
@@ -61,8 +68,11 @@ compaction entries, provider metadata or Tool-result structure.
 - Browser transcript and model-visible conversation no longer silently diverge
   at interruption boundaries.
 - Workspace bytes, processes and external side effects are not claimed to have
-  rolled back. The marker makes that uncertainty model-visible and requires the
-  next Agent to inspect reality before continuing dependent work.
+  rolled back. The marker makes that uncertainty model-visible without forcing
+  a fixed recovery procedure onto an unrelated next request.
+- A confirmed loss of a previously used Cube is distinct from Turn
+  interruption: `<turn_aborted>` says work may be partial, while
+  `<sandbox_reset>` says the prior process environment is unavailable.
 - Interrupted snapshots add object-storage writes to terminal failure and
   cancellation handling.
 - ADR-0011 remains unchanged for successful Workspace commit ordering and cold

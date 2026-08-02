@@ -1,10 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
-import {
-  PI_INTERRUPTION_REPLAY_GUIDANCE,
-  PI_INTERRUPTION_STATE_GUIDANCE,
-  PI_INTERRUPTION_VERIFICATION_GUIDANCE,
-} from "./pi-interrupted-session.ts";
 
 export const PI_DURABLE_RECOVERY_CUSTOM_TYPE = "agent-dock.durable_crash_recovery";
 const MAX_RECOVERY_MESSAGE_BYTES = 512 * 1_024;
@@ -29,9 +24,19 @@ function compactJson(value: unknown): string {
   return truncateText(serialized ?? String(value), MAX_COMPACT_ITEM_CHARACTERS);
 }
 
+function terminalSummary(turn: PiDurableRecoverySuffix["turns"][number]): unknown {
+  if (turn.transcript.failure !== null) {
+    return {
+      status: "failed",
+      message: truncateText(turn.transcript.failure.message, MAX_COMPACT_ITEM_CHARACTERS),
+    };
+  }
+  if (turn.transcript.cancellation !== null) return { status: "cancelled" };
+  return { status: turn.transcript.stopReason ?? "interrupted" };
+}
+
 function compactRecoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
   return suffix.turns.map((turn) => ({
-    turnId: turn.turnId,
     userPrompt: truncateText(turn.input, MAX_COMPACT_PROMPT_CHARACTERS),
     visibleItems: turn.transcript.items.slice(0, MAX_COMPACT_VISIBLE_ITEMS).map((item): unknown => {
       if (item.kind === "text") {
@@ -43,7 +48,6 @@ function compactRecoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
       if (item.kind === "tool") {
         return {
           kind: "tool",
-          toolCallId: item.toolCallId,
           toolName: item.toolName,
           input: compactJson(item.input),
           ...(item.output === undefined ? {} : { output: compactJson(item.output) }),
@@ -64,23 +68,12 @@ function compactRecoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
         ...(item.outcome === undefined ? {} : { outcome: item.outcome }),
       };
     }),
-    terminal: {
-      stopReason: turn.transcript.stopReason,
-      failure:
-        turn.transcript.failure === null
-          ? null
-          : {
-              ...turn.transcript.failure,
-              message: truncateText(turn.transcript.failure.message, MAX_COMPACT_ITEM_CHARACTERS),
-            },
-      cancellation: turn.transcript.cancellation,
-    },
+    terminal: terminalSummary(turn),
   }));
 }
 
 function recoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
   return suffix.turns.map((turn) => ({
-    turnId: turn.turnId,
     userPrompt: turn.input,
     visibleItems: turn.transcript.items.map((item) => {
       if (item.kind === "text") {
@@ -89,7 +82,6 @@ function recoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
       if (item.kind === "tool") {
         return {
           kind: "tool",
-          toolCallId: item.toolCallId,
           toolName: item.toolName,
           input: item.input,
           ...(item.output === undefined ? {} : { output: item.output }),
@@ -106,30 +98,16 @@ function recoveryTurns(suffix: PiDurableRecoverySuffix): unknown[] {
         ...(item.outcome === undefined ? {} : { outcome: item.outcome }),
       };
     }),
-    terminal: {
-      stopReason: turn.transcript.stopReason,
-      failure: turn.transcript.failure,
-      cancellation: turn.transcript.cancellation,
-    },
+    terminal: terminalSummary(turn),
   }));
 }
 
-function recoveryEnvelope(suffix: PiDurableRecoverySuffix, turns: unknown[]) {
+function recoveryEnvelope(turns: unknown[]) {
   return {
-    schemaVersion: 2,
-    warning:
-      "These durable public events were produced after the latest Pi checkpoint. " +
-      "The previous Worker ended before it could persist native Pi state. " +
-      "Treat running or preparing Tool calls as UNKNOWN.",
-    recoveryGuidance: {
-      stateUncertain: true,
-      verificationRequiredBeforeContinuation: true,
-      state: PI_INTERRUPTION_STATE_GUIDANCE,
-      nextTurn: PI_INTERRUPTION_VERIFICATION_GUIDANCE,
-      replay: PI_INTERRUPTION_REPLAY_GUIDANCE,
-    },
-    checkpointThroughSequence: suffix.checkpointThroughSequence,
-    recoveredThroughSequence: suffix.recoveredThroughSequence,
+    notice:
+      "The previous turn ended unexpectedly before Pi persisted its native session. " +
+      "The following user-visible events were durably recorded. " +
+      "Tool calls marked unknown may or may not have completed.",
     turns,
   };
 }
@@ -140,21 +118,11 @@ export function appendPiDurableRecovery(
 ): void {
   const turns = recoveryTurns(suffix);
   const content =
-    serializedWithinLimit(recoveryEnvelope(suffix, turns)) ??
-    serializedWithinLimit(recoveryEnvelope(suffix, compactRecoveryTurns(suffix))) ??
+    serializedWithinLimit(recoveryEnvelope(turns)) ??
+    serializedWithinLimit(recoveryEnvelope(compactRecoveryTurns(suffix))) ??
     JSON.stringify({
-      schemaVersion: 2,
-      warning: "Durable crash recovery metadata was truncated.",
-      recoveryGuidance: {
-        stateUncertain: true,
-        verificationRequiredBeforeContinuation: true,
-        nextTurn: PI_INTERRUPTION_VERIFICATION_GUIDANCE,
-        replay: PI_INTERRUPTION_REPLAY_GUIDANCE,
-      },
-      checkpointThroughSequence: suffix.checkpointThroughSequence,
-      recoveredThroughSequence: suffix.recoveredThroughSequence,
+      notice: "The previous turn ended unexpectedly. Some durably recorded context was truncated.",
       turns: suffix.turns.map((turn) => ({
-        turnId: turn.turnId,
         userPrompt: truncateText(turn.input, 512),
       })),
     });

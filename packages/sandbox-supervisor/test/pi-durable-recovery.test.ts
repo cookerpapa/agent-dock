@@ -72,30 +72,21 @@ describe("Pi durable crash recovery", () => {
         throw new Error("Expected a durable recovery custom message");
       }
       const content = JSON.parse(entry.content) as {
-        schemaVersion: number;
-        recoveryGuidance: {
-          stateUncertain: boolean;
-          verificationRequiredBeforeContinuation: boolean;
-          nextTurn: string;
-          replay: string;
-        };
+        notice: string;
         turns: Array<{ visibleItems: Array<{ kind: string; status?: string }> }>;
       };
-      expect(content.schemaVersion).toBe(2);
-      expect(content.recoveryGuidance).toMatchObject({
-        stateUncertain: true,
-        verificationRequiredBeforeContinuation: true,
-      });
-      expect(content.recoveryGuidance.nextTurn).toContain(
-        "proactively establish the current Workspace and process state",
-      );
-      expect(content.recoveryGuidance.replay).toContain("Do not blindly repeat");
+      expect(content.notice).toContain("previous turn ended unexpectedly");
       expect(content.turns[0]?.visibleItems).toContainEqual(
         expect.objectContaining({ kind: "tool", status: "unknown" }),
       );
       expect(entry.content).not.toContain("raw thinking");
+      expect(entry.content).not.toContain(TURN_ID);
+      expect(entry.content).not.toContain("assignment_lost");
+      expect(entry.content).not.toContain("checkpointThroughSequence");
+      expect(entry.content).not.toContain("proactively establish");
+      expect(entry.content).not.toContain("Do not blindly repeat");
       expect(JSON.stringify(manager.buildSessionContext().messages)).toContain(
-        "durable public events",
+        "user-visible events",
       );
     } finally {
       await rm(root, { recursive: true, force: true });

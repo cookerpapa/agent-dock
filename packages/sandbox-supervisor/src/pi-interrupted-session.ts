@@ -1,30 +1,14 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 export const PI_INTERRUPTION_CUSTOM_TYPE = "agent-dock.run_interrupted";
-export const PI_INTERRUPTION_STATE_GUIDANCE =
-  "Tool calls or commands may have partially executed, and background processes may still be running.";
-export const PI_INTERRUPTION_VERIFICATION_GUIDANCE =
-  "If the next request continues or depends on the interrupted work, proactively establish the current Workspace and process state with the least-invasive relevant checks before making more changes.";
-export const PI_INTERRUPTION_REPLAY_GUIDANCE =
-  "Do not blindly repeat a side-effecting command whose completion is uncertain; verify its effects first.";
+export const PI_INTERRUPTION_MESSAGE = [
+  "<turn_aborted>",
+  "The previous turn was interrupted. Any commands that were stopped may have partially executed, and background processes may still be running.",
+  "</turn_aborted>",
+].join("\n");
 
-const MAX_REASON_CHARACTERS = 160;
-
-function safeReason(reason: string): string {
-  const bounded = reason.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, MAX_REASON_CHARACTERS);
-  return bounded.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-export function piInterruptionMessage(reason: string): string {
-  return [
-    "<run_interrupted>",
-    `The previous Agent Run was interrupted before a successful commit (reason: ${safeReason(reason)}).`,
-    PI_INTERRUPTION_STATE_GUIDANCE,
-    PI_INTERRUPTION_VERIFICATION_GUIDANCE,
-    PI_INTERRUPTION_REPLAY_GUIDANCE,
-    "Do not treat incomplete streamed text as a final answer. Follow the user's newest request if it supersedes the interrupted work.",
-    "</run_interrupted>",
-  ].join("\n");
+export function piInterruptionMessage(): string {
+  return PI_INTERRUPTION_MESSAGE;
 }
 
 export function piSessionEntryIds(bytes: Uint8Array | undefined): ReadonlySet<string> {
@@ -79,15 +63,12 @@ export function appendPiInterruption(
   if (markerPresent) return;
   sessionManager.appendCustomMessageEntry(
     PI_INTERRUPTION_CUSTOM_TYPE,
-    piInterruptionMessage(input.reason),
+    piInterruptionMessage(),
     false,
     {
-      schemaVersion: 2,
       runId: input.runId,
       attemptId: input.attemptId,
       reason: input.reason,
-      stateUncertain: true,
-      verificationRequiredBeforeContinuation: true,
     },
   );
 }

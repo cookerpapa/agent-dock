@@ -1,4 +1,4 @@
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -10,7 +10,7 @@ import {
 } from "../src/index.ts";
 
 describe("Pi interrupted-turn harness", () => {
-  it("records one hidden, model-visible interruption boundary with verification guidance", async () => {
+  it("records one hidden, model-visible Codex-style interruption boundary", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-interruption-"));
     try {
       const manager = SessionManager.create("/workspace", root);
@@ -43,28 +43,34 @@ describe("Pi interrupted-turn harness", () => {
         customType: PI_INTERRUPTION_CUSTOM_TYPE,
         display: false,
         details: {
-          schemaVersion: 2,
-          stateUncertain: true,
-          verificationRequiredBeforeContinuation: true,
+          runId: "run-1",
+          attemptId: "attempt-1",
+          reason: "cancelled:user_request",
         },
       });
 
-      const modelContext = JSON.stringify(manager.buildSessionContext().messages);
-      expect(modelContext).toContain("was interrupted before a successful commit");
+      const modelContext = JSON.stringify(convertToLlm(manager.buildSessionContext().messages));
+      expect(modelContext).toContain("<turn_aborted>");
+      expect(modelContext).toContain("The previous turn was interrupted");
       expect(modelContext).toContain("background processes may still be running");
-      expect(modelContext).toContain(
-        "proactively establish the current Workspace and process state",
-      );
-      expect(modelContext).toContain("Do not blindly repeat a side-effecting command");
+      expect(modelContext).not.toContain("cancelled:user_request");
+      expect(modelContext).not.toContain("run-1");
+      expect(modelContext).not.toContain("proactively establish");
+      expect(modelContext).not.toContain("Do not blindly repeat");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("bounds and escapes the internal reason before placing it in model context", () => {
-    const message = piInterruptionMessage(`<unsafe>&${"x".repeat(300)}`);
-    expect(message).not.toContain("<unsafe>");
-    expect(message).toContain("&lt;unsafe&gt;&amp;");
-    expect(message.length).toBeLessThan(1_500);
+  it("does not place internal reason codes in the model message", () => {
+    const message = piInterruptionMessage();
+    expect(message).toBe(
+      [
+        "<turn_aborted>",
+        "The previous turn was interrupted. Any commands that were stopped may have partially executed, and background processes may still be running.",
+        "</turn_aborted>",
+      ].join("\n"),
+    );
+    expect(message).not.toContain("reason");
   });
 });

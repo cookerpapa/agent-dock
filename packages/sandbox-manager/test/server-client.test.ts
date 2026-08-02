@@ -86,6 +86,7 @@ function backend(): SandboxManagerBackend {
         activationId: ACTIVATION_ID,
         capability: CAPABILITY,
         workspaceRoot: "/workspace",
+        continuity: "cold_restore",
       };
     },
     async capture() {

@@ -123,6 +123,7 @@ export const ToolSandboxCreateResponseSchema = Type.Object(
     activationId: UuidSchema,
     capability: Type.String({ pattern: "^adts_[A-Za-z0-9_-]{43}$" }),
     workspaceRoot: Type.Literal("/workspace"),
+    continuity: Type.Union([Type.Literal("cold_restore"), Type.Literal("warm_reuse")]),
   },
   { additionalProperties: false },
 );

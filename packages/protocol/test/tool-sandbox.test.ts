@@ -6,6 +6,7 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
   parseSandboxManagerRequest,
+  parseSandboxManagerResponse,
   parseToolSandboxOperationRequest,
   parseToolWorkerOutput,
   ToolSandboxProtocolError,
@@ -49,6 +50,32 @@ describe("Tool Sandbox protocol", () => {
         workspaceSeed: { kind: "sample_java" },
       }),
     ).toMatchObject({ type: "tool_sandbox.create", assignment });
+  });
+
+  it("makes physical runtime continuity explicit in create responses", () => {
+    const response = {
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.reserved",
+      requestId: "10000000-0000-4000-8000-000000000004",
+      activationId: "10000000-0000-4000-8000-000000000005",
+      capability: `adts_${"x".repeat(43)}`,
+      workspaceRoot: "/workspace",
+      continuity: "cold_restore",
+    } as const;
+    expect(parseSandboxManagerResponse(response)).toMatchObject({
+      type: "tool_sandbox.reserved",
+      continuity: "cold_restore",
+    });
+    expect(() =>
+      parseSandboxManagerResponse({
+        managerProtocolVersion: 1,
+        type: "tool_sandbox.reserved",
+        requestId: response.requestId,
+        activationId: response.activationId,
+        capability: response.capability,
+        workspaceRoot: "/workspace",
+      }),
+    ).toThrow(ToolSandboxProtocolError);
   });
 
   it("rejects unknown fields and out-of-bound operation parameters", () => {

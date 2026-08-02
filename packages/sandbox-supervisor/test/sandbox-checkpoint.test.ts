@@ -93,7 +93,7 @@ describe("settled sandbox checkpoint envelope", () => {
           parentId: "user-entry",
           timestamp: "2026-07-28T00:00:01.000Z",
           customType: "agent-dock.run_interrupted",
-          content: "<run_interrupted>Run failed.</run_interrupted>",
+          content: "<turn_aborted>The previous turn was interrupted.</turn_aborted>",
           display: false,
         }),
         "",

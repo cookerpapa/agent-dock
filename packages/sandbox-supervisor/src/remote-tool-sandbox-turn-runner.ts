@@ -563,6 +563,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           );
         }
       };
+      const activeSandbox = activation;
       const commonRunnerOptions = {
         resolveWorkspaceDirectory: () => this.#trustedWorkspaceDirectory,
         resolveModelRuntime,
@@ -579,6 +580,10 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         ...(loadedCheckpoint?.recoverySuffix === undefined
           ? {}
           : { recoverySuffix: loadedCheckpoint.recoverySuffix }),
+        sandboxContinuity: {
+          activationId: activeSandbox.activationId,
+          continuity: activeSandbox.continuity,
+        },
         onSettled,
         onInterrupted,
         ...(this.#requestTimeoutMs === undefined
@@ -602,7 +607,6 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               ),
             }),
       };
-      const activeSandbox = activation;
       const runner = new PiSdkTurnRunner({
         ...commonRunnerOptions,
         createInlineExtensions: ({ toolOutputDirectory }) => [
