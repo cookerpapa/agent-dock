@@ -19,8 +19,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     installed=0; \
     attempt=1; \
     while [ "$attempt" -le 5 ]; do \
-      apt-get -o Acquire::Retries=10 update; \
-      if apt-get -o Acquire::Retries=10 install --yes --no-install-recommends $packages; then \
+      if apt-get -o Acquire::Retries=10 update \
+        && apt-get -o Acquire::Retries=10 install --yes --no-install-recommends $packages; then \
         installed=1; \
         break; \
       fi; \
