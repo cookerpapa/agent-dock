@@ -70,15 +70,26 @@ COPY scripts/retry-npm-command.sh scripts/retry-npm-command.sh
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/tool-sandbox/package.json packages/tool-sandbox/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
-RUN sh scripts/retry-npm-command.sh install --global npm@12.0.1 \
-    && sh scripts/retry-npm-command.sh pack --pack-destination /tmp brace-expansion@5.0.8 \
-    && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+RUN sh scripts/retry-npm-command.sh install --global npm@12.0.2 \
+    && sh scripts/retry-npm-command.sh pack --pack-destination /tmp \
+         brace-expansion@5.0.9 \
+         ip-address@10.4.0 \
+    && rm -rf \
+         /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+         /usr/local/lib/node_modules/npm/node_modules/ip-address \
     && install -d /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
-    && tar -xzf /tmp/brace-expansion-5.0.8.tgz \
+    && install -d /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && tar -xzf /tmp/brace-expansion-5.0.9.tgz \
         --strip-components=1 \
         -C /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
-    && rm /tmp/brace-expansion-5.0.8.tgz \
-    && node -e 'if (require("/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json").version !== "5.0.8") process.exit(1)' \
+    && tar -xzf /tmp/ip-address-10.4.0.tgz \
+        --strip-components=1 \
+        -C /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && rm \
+         /tmp/brace-expansion-5.0.9.tgz \
+         /tmp/ip-address-10.4.0.tgz \
+    && node -e 'if (require("/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json").version !== "5.0.9") process.exit(1)' \
+    && node -e 'if (require("/usr/local/lib/node_modules/npm/node_modules/ip-address/package.json").version !== "10.4.0") process.exit(1)' \
     && sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 
