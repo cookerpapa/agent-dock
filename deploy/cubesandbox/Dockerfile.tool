@@ -11,14 +11,24 @@ FROM ${CUBE_BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get -o Acquire::Retries=5 update \
-    && apt-get install --fix-missing --yes --no-install-recommends \
-        bash \
-        ca-certificates \
-        git \
-        openjdk-17-jdk-headless \
-        util-linux \
-    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eu; \
+    rm -f /etc/apt/apt.conf.d/docker-clean; \
+    packages="bash ca-certificates git openjdk-17-jdk-headless util-linux"; \
+    installed=0; \
+    attempt=1; \
+    while [ "$attempt" -le 5 ]; do \
+      apt-get -o Acquire::Retries=10 update; \
+      if apt-get -o Acquire::Retries=10 install --yes --no-install-recommends $packages; then \
+        installed=1; \
+        break; \
+      fi; \
+      dpkg --configure -a || true; \
+      sleep "$((attempt * 2))"; \
+      attempt="$((attempt + 1))"; \
+    done; \
+    test "$installed" = 1
 
 COPY --from=python-runtime /usr/local /usr/local
 COPY --from=node-runtime /usr/local /usr/local
