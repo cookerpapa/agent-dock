@@ -46,6 +46,7 @@ import {
 
 const READY_TIMEOUT_MS = 60_000;
 const TOOL_RESPONSE_LIMIT_BYTES = 8 * 1_024 * 1_024;
+const INTERNAL_STEP_CONTEXT_SHA256 = "0".repeat(64);
 
 export const CUBESANDBOX_PROVIDER_ID = "cubesandbox";
 export const CUBESANDBOX_RUNTIME_NAME = "cubesandbox-kvm";
@@ -975,15 +976,25 @@ export class CubeSandboxProvider implements SandboxProvider {
     try {
       const timeoutMs =
         request.operation === "bash.exec" ? request.timeoutMs + 5_000 : this.#readyTimeoutMs;
-      const result = await this.#client.request(activation.instance, {
-        method: "POST",
-        path: "/v1/operation",
-        body: request,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs,
-        maximumResponseBytes: TOOL_RESPONSE_LIMIT_BYTES,
-        authority: this.#authority(activation),
-      });
+      const attach = (): Promise<unknown> =>
+        this.#client.request(activation.instance, {
+          method: "POST",
+          path: "/v1/operation",
+          body: request,
+          ...(signal === undefined ? {} : { signal }),
+          timeoutMs,
+          maximumResponseBytes: TOOL_RESPONSE_LIMIT_BYTES,
+          authority: this.#authority(activation),
+        });
+      let result: unknown;
+      try {
+        result = await attach();
+      } catch (error: unknown) {
+        if (signal?.aborted) throw error;
+        // Reattach to the same operation ledger entry. The Cube Tool service
+        // never starts a second command for this operationId.
+        result = await attach();
+      }
       return parseToolSandboxOperationResponse(result);
     } catch (error: unknown) {
       // A disconnected remote command has an unknowable execution result.
@@ -1015,6 +1026,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         type: "tool_sandbox.operation",
         activationId: handle.activationId,
         operationId: input.operationId,
+        stepContextSha256: INTERNAL_STEP_CONTEXT_SHA256,
         operation: "file.read",
         path: input.path,
       },
@@ -1045,6 +1057,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         type: "tool_sandbox.operation",
         activationId: handle.activationId,
         operationId: input.operationId,
+        stepContextSha256: INTERNAL_STEP_CONTEXT_SHA256,
         operation: "file.write",
         path: input.path,
         content: input.content,

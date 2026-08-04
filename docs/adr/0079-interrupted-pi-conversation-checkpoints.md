@@ -51,14 +51,15 @@ compaction entries, provider metadata or Tool-result structure.
 8. Cold restore accepts completed Pi snapshots and interrupted Pi snapshots.
    Pi's own SessionManager remains responsible for building compaction-aware
    model context.
-9. Pi stores the last known Cube activation as an `agent-dock.sandbox_state`
-   custom entry, which does not participate in model context. The Sandbox
-   Manager reports `warm_reuse` or `cold_restore` when reserving an activation.
-   A cold restore after a previously active Cube appends one hidden,
-   model-visible `<sandbox_reset>` message stating only that committed files
-   remain while process and in-memory state did not carry forward. A hidden
-   unavailable state deduplicates the marker until another Cube actually runs
-   a Tool.
+9. Pi stores a typed `agent-dock.runtime_world_state` custom entry, which does
+   not participate in model context. It records Sandbox continuity alongside
+   the environment, Workspace and Tool-policy fingerprints defined by
+   ADR-0080. The Sandbox Manager reports `warm_reuse` or `cold_restore` when
+   reserving an activation. A cold restore after a previously active Cube
+   appends one hidden, model-visible `<sandbox_reset>` message stating only
+   that committed files remain while process and in-memory state did not carry
+   forward. A hidden unavailable state deduplicates the marker until another
+   Cube actually runs a Tool.
 
 ## Consequences
 

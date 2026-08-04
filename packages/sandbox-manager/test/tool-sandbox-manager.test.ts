@@ -8,6 +8,7 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const SECOND_ACTIVATION_ID = "20000000-0000-4000-8000-000000000020";
 const SECOND_CAPABILITY = `adts_${"d".repeat(43)}`;
+const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-provider-test",
   projectId: "project-provider-test",
@@ -73,6 +75,7 @@ const createRequest: ToolSandboxCreateRequest = {
   type: "tool_sandbox.create",
   requestId: "10000000-0000-4000-8000-000000000011",
   assignment,
+  stepContextSha256: STEP_CONTEXT_SHA256,
   environment,
   workspaceSeed: { kind: "sample_java" },
 };
@@ -88,7 +91,8 @@ function providerFixture() {
     operationId: request.operationId,
     operation: "bash.exec",
     exitCode: 0,
-    output: Buffer.from("ok\n").toString("base64"),
+    outputChunks: [{ seq: 1, stream: "stdout", data: Buffer.from("ok\n").toString("base64") }],
+    outputSha256: createHash("sha256").update("ok\n").digest("hex"),
   }));
   const rebind = vi.fn<SandboxProvider["rebind"]>(async (handle, nextAssignment) => ({
     ...handle,
@@ -177,12 +181,15 @@ function providerFixture() {
   };
 }
 
-function operation(operationId: string): ToolSandboxOperationRequest {
+function operation(
+  operationId: string,
+): Extract<ToolSandboxOperationRequest, { operation: "bash.exec" }> {
   return {
     managerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId: ACTIVATION_ID,
     operationId,
+    stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
     command: "pwd",
     cwd: "/workspace",
@@ -211,6 +218,14 @@ describe("provider-backed Tool Sandbox Manager", () => {
     ).resolves.toMatchObject({ type: "tool_sandbox.unused" });
 
     await expect(
+      manager.execute(CAPABILITY, {
+        ...operation("10000000-0000-4000-8000-000000000011"),
+        stepContextSha256: "b".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "step_context_mismatch" });
+    expect(fixture.createSpec).toBeUndefined();
+
+    await expect(
       manager.execute(`adts_${"x".repeat(43)}`, operation("10000000-0000-4000-8000-000000000012")),
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
     const request = operation("10000000-0000-4000-8000-000000000013");
@@ -226,9 +241,10 @@ describe("provider-backed Tool Sandbox Manager", () => {
       policy: { network: { mode: "deny_all" } },
     });
     expect(fixture.createSpec).not.toHaveProperty("capability");
-    await expect(manager.execute(CAPABILITY, request)).rejects.toMatchObject({
-      code: "tool_operation_replay",
-    });
+    await expect(manager.execute(CAPABILITY, request)).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      manager.execute(CAPABILITY, { ...request, command: "whoami" }),
+    ).rejects.toMatchObject({ code: "tool_operation_identity_conflict" });
     expect(fixture.exec).toHaveBeenCalledTimes(1);
 
     await expect(manager.inspect(ACTIVATION_ID, assignment)).resolves.toMatchObject({

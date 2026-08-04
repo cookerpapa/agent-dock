@@ -33,6 +33,8 @@ const SafeCodeSchema = Type.String({
   pattern: "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
 });
 
+const Sha256Schema = Type.String({ pattern: "^[0-9a-f]{64}$" });
+
 const Base64Schema = Type.String({
   maxLength: Math.ceil(MAX_TOOL_OUTPUT_BYTES / 3) * 4 + 4,
   pattern: "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
@@ -42,6 +44,15 @@ const MutationFileBase64Schema = Type.String({
   maxLength: Math.ceil(MAX_TOOL_MUTATION_FILE_BYTES / 3) * 4 + 4,
   pattern: "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
 });
+
+const ToolOutputChunkSchema = Type.Object(
+  {
+    seq: PositiveSafeIntegerSchema,
+    stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]),
+    data: Base64Schema,
+  },
+  { additionalProperties: false },
+);
 
 export const DependencyProxyBootstrapSchema = Type.Object(
   {
@@ -107,6 +118,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     type: Type.Literal("tool_sandbox.create"),
     requestId: UuidSchema,
     assignment: ToolSandboxAssignmentSchema,
+    stepContextSha256: Sha256Schema,
     environment: EnvironmentRuntimeSnapshotSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
@@ -291,6 +303,7 @@ const OperationEnvelope = {
   type: Type.Literal("tool_sandbox.operation"),
   activationId: UuidSchema,
   operationId: UuidSchema,
+  stepContextSha256: Sha256Schema,
 };
 
 const ToolPathSchema = Type.String({ minLength: 1, maxLength: 4_096 });
@@ -361,7 +374,8 @@ export const ToolSandboxOperationResponseSchema = Type.Union([
       operationId: UuidSchema,
       operation: Type.Literal("bash.exec"),
       exitCode: Type.Union([Type.Integer({ minimum: 0, maximum: 255 }), Type.Null()]),
-      output: Base64Schema,
+      outputChunks: Type.Array(ToolOutputChunkSchema, { maxItems: 16_384 }),
+      outputSha256: Sha256Schema,
     },
     { additionalProperties: false },
   ),

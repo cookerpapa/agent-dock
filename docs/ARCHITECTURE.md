@@ -113,9 +113,10 @@ The Manager is the only application component that controls Cube. Its API is
 narrow and authenticated. It:
 
 - validates Tool leases and fencing tokens;
+- binds every reservation and operation to one frozen Cloud Step digest;
 - maps a logical activation to one exact Cube microVM;
 - creates, rebinds, inspects, stops and destroys that runtime;
-- forwards bounded Tool requests;
+- forwards bounded, identity-recoverable Tool requests;
 - coordinates trusted Workspace checkpoints;
 - reconciles orphan runtime inventory.
 
@@ -233,6 +234,7 @@ Browser POST prompt
   → transactional relay starts deterministic Temporal Workflow
   → eligible Pi Worker
   → exact-command transactional admission creates RunAttempt/fence
+  → freeze model/environment/Workspace/policy as one Cloud Step
   → Pi checkpoint restore
   → model stream
   → batched durable events + SSE
@@ -247,8 +249,8 @@ Cube is never contacted.
 
 ```text
 Pi emits Tool Call
-  → Worker requests a Tool lease
-  → Sandbox Manager validates Attempt/fence
+  → Worker requests a Tool lease bound to the Cloud Step digest
+  → Sandbox Manager validates Attempt/fence/Step
   → ensure exact Session Cube activation
   → restore current Workspace if activation is cold
   → execute Tool in guest
@@ -264,9 +266,18 @@ expected digest; the guest writes and fsyncs a same-directory temporary file,
 checks for a stale revision and atomically renames it over the destination.
 Readers therefore observe the old or new file, never a partially written file.
 
-Large Bash output is truncated once into a head/tail preview for Pi. The full
-raw stdout/stderr is stored as a trusted Artifact and the preview includes the
-Artifact identity plus a concrete recovery instruction.
+The Cube Tool service returns stdout and stderr as one monotonically sequenced
+observation stream with a digest over the reconstructed bytes. The trusted
+adapter rejects gaps or corruption before output enters Pi context. Large Bash
+output is then truncated once into a head/tail preview for Pi. The full raw
+output is stored as a trusted Artifact and the preview includes the Artifact
+identity plus a concrete recovery instruction.
+
+`operationId` identifies an execution rather than an HTTP request. A brief
+Worker-to-Manager or Manager-to-Cube transport break can reattach to the same
+bounded operation ledger entry and obtain the original result. A changed
+request under the same ID is rejected. Loss of the Manager ledger, Tool service
+or VM still yields `UNKNOWN`; arbitrary Bash is never started again.
 
 The first Tool call pays cold activation cost. An eligible warm activation can
 serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
@@ -338,11 +349,14 @@ what was durably observed but does not prescribe a recovery strategy. The next
 Pi checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
 authority.
 
-Pi JSONL also keeps a hidden `agent-dock.sandbox_state` custom entry that does
-not participate in model context. The Sandbox Manager reservation reports only
-whether the exact Session runtime is a `warm_reuse` or a `cold_restore`. If a
-previously active Cube is no longer available, the Worker appends one short
-model-visible `<sandbox_reset>` fact before the next prompt:
+Pi JSONL also keeps a typed, versioned and hidden
+`agent-dock.runtime_world_state` custom entry that does not participate in
+model context. It records only facts that can affect later reasoning: Sandbox
+availability/continuity, environment fingerprint, committed Workspace revision
+and Tool-policy fingerprint. The Sandbox Manager reservation reports whether
+the exact Session runtime is a `warm_reuse` or a `cold_restore`. If a previously
+active Cube is no longer available, the Worker appends one short model-visible
+`<sandbox_reset>` fact before the next prompt:
 
 ```text
 The committed Workspace is preserved, but running processes and in-memory
@@ -375,6 +389,11 @@ coalesced and published in ordered batches. PostgreSQL commits each batch with
 a unique `(run_id, attempt_no, seq)` identity and returns a cumulative ACK.
 The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
 its private `command.result` is only a prepared result.
+
+Before returning that prepared result, the Worker crosses an explicit durable
+barrier: the local spool must have no pending event and its cumulative ACK must
+equal the highest sequence produced by the Run. Terminal settlement therefore
+cannot overtake a non-terminal event still buffered at the Worker.
 
 The Control Plane creates the public terminal event in the same PostgreSQL
 transaction that settles Run/Attempt/command/turn/session state, advances
@@ -435,6 +454,10 @@ immutable start snapshot.
 - Worker crash before Tool execution: Temporal retries on another Worker.
 - Worker crash with possible Tool side effect: old fence is revoked and the
   runtime is destroyed unless exact execution state is known.
+- Short Tool transport disconnect: reattach to the same operation ID and
+  recover the original running/result promise without replay.
+- Tool operation ledger, Tool service or Cube loss: expose `UNKNOWN`, destroy
+  uncertain runtime state and do not replay the command.
 - Worker hard crash after durable output but before Pi JSONL persistence:
   restore the prior Pi checkpoint plus the bounded semantic recovery suffix;
   do not synthesize raw thinking or replay unknown Tool side effects.
@@ -487,6 +510,7 @@ not require changing the Worker execution contract.
 - [ADR-0077: Active Pi steer](adr/0077-explicit-active-pi-steer.md)
 - [ADR-0078: Worker Control Channel and optional modules](adr/0078-worker-control-channel-and-optional-product-modules.md)
 - [ADR-0079: Interrupted Pi conversation checkpoints](adr/0079-interrupted-pi-conversation-checkpoints.md)
+- [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.

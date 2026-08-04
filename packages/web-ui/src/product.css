@@ -843,6 +843,10 @@ button:disabled {
 .product-tool-failed .product-tool-icon {
   color: #e48e8e;
 }
+.product-tool-unknown .product-tool-icon,
+.product-tool-unknown .product-tool-state {
+  color: #a16207;
+}
 .product-tool-failed .product-tool-state {
   color: #d98c8c;
 }

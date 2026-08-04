@@ -48,6 +48,7 @@ Every activation binds:
 - Supervisor boot;
 - command, lease and fencing token;
 - environment image/specification hash.
+- frozen Cloud Step digest.
 
 The Manager derives runtime identity. The model, browser and Pi Tool arguments
 cannot supply a runtime ID or weaken policy.
@@ -100,8 +101,10 @@ tests
 ```
 
 The Tool adapter converts each call into an authenticated Manager request
-containing the server-owned activation binding. Lazy activation, proxy
-configuration and Cube lifecycle remain invisible to Pi.
+containing the server-owned activation binding, frozen Step digest and unique
+operation ID. Identical reconnects attach to one bounded execution ledger;
+conflicting reuse fails closed. Lazy activation, proxy configuration and Cube
+lifecycle remain invisible to Pi.
 
 ## Checkpoints
 

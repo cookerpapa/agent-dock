@@ -23,6 +23,7 @@ import type { WorkspaceDataMover } from "../src/workspace-data-mover.ts";
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
+const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const WEB_PROXY = Object.freeze({ host: "10.255.255.254", port: 3_128 });
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-cube-test",
@@ -226,7 +227,10 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
         operationId: operation.operationId,
         operation: "bash.exec",
         exitCode: 0,
-        output: Buffer.from("inside cube\n").toString("base64"),
+        outputChunks: [
+          { seq: 1, stream: "stdout", data: Buffer.from("inside cube\n").toString("base64") },
+        ],
+        outputSha256: createHash("sha256").update("inside cube\n").digest("hex"),
       };
     }
     throw new Error(`unexpected path ${input.path}`);
@@ -243,6 +247,7 @@ function operation(activationId: string): ToolSandboxOperationRequest {
     type: "tool_sandbox.operation",
     activationId,
     operationId: "10000000-0000-4000-8000-000000000020",
+    stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
     command: "printf 'inside cube\\n'",
     cwd: "/workspace",
@@ -326,6 +331,7 @@ describe("CubeSandbox Provider contract", () => {
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000011",
       assignment,
+      stepContextSha256: STEP_CONTEXT_SHA256,
       environment,
       workspaceSeed: { kind: "sample_java" },
     });
@@ -474,6 +480,7 @@ describe("CubeSandbox Provider contract", () => {
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000032",
       assignment: nextAssignment,
+      stepContextSha256: STEP_CONTEXT_SHA256,
       environment,
       workspaceSeed: { kind: "sample_java" },
       workspaceRevision: "a".repeat(64),
@@ -735,7 +742,7 @@ describe("CubeSandbox Provider contract", () => {
     await upgradedProvider.close();
   });
 
-  it("destroys an uncertain VM instead of replaying an arbitrary command", async () => {
+  it("destroys an uncertain VM after bounded reattachment fails", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const originalRequest = runtime.request.bind(runtime);
     let operationRequests = 0;
@@ -763,9 +770,48 @@ describe("CubeSandbox Provider contract", () => {
     await expect(provider.exec(handle, operation(ACTIVATION_ID))).rejects.toMatchObject({
       code: "cubesandbox_tool_result_unknown",
     });
-    expect(operationRequests).toBe(1);
+    expect(operationRequests).toBe(2);
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
     await expect(provider.inspect(handle)).resolves.toMatchObject({ state: "absent" });
+    await provider.close();
+  });
+
+  it("reattaches once to the same Cube operation after a transport disconnect", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const originalRequest = runtime.request.bind(runtime);
+    const operationBodies: unknown[] = [];
+    let operationRequests = 0;
+    runtime.request = async (instance, input) => {
+      if (input.path === "/v1/operation") {
+        operationBodies.push(input.body);
+        operationRequests += 1;
+        if (operationRequests === 1) throw new Error("connection lost after dispatch");
+      }
+      return originalRequest(instance, input);
+    };
+    const provider = new CubeSandboxProvider({
+      templateId: "agent-dock-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      workspaceDataMover: fakeWorkspaceDataMover(),
+    });
+    const handle = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    await expect(provider.exec(handle, operation(ACTIVATION_ID))).resolves.toMatchObject({
+      type: "tool_sandbox.operation_result",
+      operationId: "10000000-0000-4000-8000-000000000020",
+      exitCode: 0,
+    });
+    expect(operationRequests).toBe(2);
+    expect(operationBodies[1]).toEqual(operationBodies[0]);
+    expect(runtime.destroyed).toEqual([]);
+    await provider.destroy(handle);
     await provider.close();
   });
 

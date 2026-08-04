@@ -57,6 +57,7 @@ export {
   downVersionedWorkspacesAndGitHubDelivery,
   downHotPlatformRuntimeSettings,
   downWorkspaceFirstConversations,
+  downTypedToolOutcomes,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -82,6 +83,7 @@ export {
   upVersionedWorkspacesAndGitHubDelivery,
   upHotPlatformRuntimeSettings,
   upWorkspaceFirstConversations,
+  upTypedToolOutcomes,
 } from "./migrations/index.ts";
 
 export {

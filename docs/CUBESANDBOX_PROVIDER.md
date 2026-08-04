@@ -9,7 +9,7 @@ run inside one KVM microVM bound to a tenant/Workspace/Session.
 ```text
 Pi SDK Tool call
   → Tool adapter
-  → Sandbox Manager
+  → Sandbox Manager (Step digest + operation ledger)
   → Cube API
   → Cube microVM Tool service
   → bounded result
@@ -52,10 +52,16 @@ to the trusted Manager and guest Tool service. Every request carries:
 
 - current handoff secret;
 - current fencing token;
-- physical binding hash.
+- physical binding hash;
+- frozen Cloud Step digest and one immutable operation ID.
 
 Warm reuse rotates authority before another Run can execute. A stale Worker may
 still exist, but its old capability and fence are rejected.
+
+The Manager and guest Tool service retain bounded process-local operation
+ledgers. A short transport disconnect can reattach to the same exact request;
+it cannot create a second command. If either ledger or the VM disappears, the
+result is `UNKNOWN` and the activation is destroyed rather than replayed.
 
 ## Workspace
 

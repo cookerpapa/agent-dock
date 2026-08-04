@@ -30,6 +30,7 @@ import {
   preparePiSandboxContinuity,
   recordPiSandboxActive,
   recordPiSandboxUnavailable,
+  type PiSandboxContinuity,
 } from "./pi-sandbox-continuity.ts";
 import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
@@ -63,10 +64,7 @@ export type PiSdkTurnRunnerOptions = {
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   restorePiSession?: Uint8Array;
   recoverySuffix?: PiDurableRecoverySuffix;
-  sandboxContinuity?: {
-    activationId: string;
-    continuity: "cold_restore" | "warm_reuse";
-  };
+  sandboxContinuity?: PiSandboxContinuity;
   onSettled?: (checkpoint: PiSettledCheckpoint) => Promise<void> | void;
   onInterrupted?: (checkpoint: PiInterruptedCheckpoint) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiToolOutputCapture) => Promise<PiToolOutputArtifact>;
@@ -393,7 +391,7 @@ export class PiSdkTurnRunner {
         timestamp: validDate(this.#clock).valueOf(),
       });
       if (sandboxToolStarted && this.#options.sandboxContinuity !== undefined) {
-        recordPiSandboxUnavailable(sessionManager, this.#options.sandboxContinuity.activationId);
+        recordPiSandboxUnavailable(sessionManager, this.#options.sandboxContinuity);
       }
       const persistedSessionFile = sessionManager.getSessionFile();
       const piSession =
@@ -458,7 +456,7 @@ export class PiSdkTurnRunner {
               sessionManager !== undefined &&
               this.#options.sandboxContinuity !== undefined
             ) {
-              recordPiSandboxActive(sessionManager, this.#options.sandboxContinuity.activationId);
+              recordPiSandboxActive(sessionManager, this.#options.sandboxContinuity);
             }
             const persistedSessionFile = runtime?.session.sessionFile;
             const piSession =

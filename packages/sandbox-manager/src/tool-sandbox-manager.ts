@@ -41,12 +41,16 @@ export type ToolSandboxManagerOptions = {
 
 type ManagedActivation = {
   assignment: ToolSandboxAssignment;
+  stepContextSha256: string;
   capabilityDigest: Buffer;
   spec: Parameters<SandboxProvider["create"]>[0];
   handle?: SandboxHandle;
   materializing?: Promise<SandboxHandle>;
   materializedForCurrentAssignment: boolean;
-  seenOperationIds: Set<string>;
+  operations: Map<
+    string,
+    Readonly<{ requestSha256: string; result: Promise<ToolSandboxOperationResponse> }>
+  >;
   seenCaptureIds: Set<string>;
 };
 
@@ -343,11 +347,12 @@ export class ToolSandboxManager {
     } as const;
     this.#activations.set(activationId, {
       assignment: request.assignment,
+      stepContextSha256: request.stepContextSha256,
       capabilityDigest: capabilityDigest(capability),
       spec,
       ...(inherited === undefined ? {} : { handle: inherited.handle }),
       materializedForCurrentAssignment: false,
-      seenOperationIds: new Set(),
+      operations: new Map(),
       seenCaptureIds: new Set(),
     });
     return {
@@ -367,16 +372,30 @@ export class ToolSandboxManager {
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
-    if (activation.seenOperationIds.has(request.operationId)) {
+    if (request.stepContextSha256 !== activation.stepContextSha256) {
       throw new SandboxManagerError(
-        "tool_operation_replay",
-        "Tool operation ID was already used",
+        "step_context_mismatch",
+        "Tool operation did not match the frozen Cloud Step",
         false,
       );
     }
-    activation.seenOperationIds.add(request.operationId);
-    const handle = await this.#materialize(request.activationId, activation, signal);
-    return this.#provider.exec(handle, request, signal);
+    const requestSha256 = createHash("sha256")
+      .update(JSON.stringify(request), "utf8")
+      .digest("hex");
+    const existing = activation.operations.get(request.operationId);
+    if (existing !== undefined) {
+      if (existing.requestSha256 === requestSha256) return existing.result;
+      throw new SandboxManagerError(
+        "tool_operation_identity_conflict",
+        "Tool operation ID was reused for a different request",
+        false,
+      );
+    }
+    const result = this.#materialize(request.activationId, activation, signal).then((handle) =>
+      this.#provider.exec(handle, request, signal),
+    );
+    activation.operations.set(request.operationId, { requestSha256, result });
+    return result;
   }
 
   async capture(

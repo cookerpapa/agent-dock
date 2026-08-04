@@ -10,7 +10,7 @@ import {
   decodeWorkspaceSnapshotBlob,
   parseKopiaWorkspaceCheckpoint,
 } from "@agent-dock/workspace-runtime";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { get as httpsGet } from "node:https";
@@ -26,6 +26,7 @@ import {
 } from "../src/index.ts";
 
 const enabled = process.env.AGENT_DOCK_CUBESANDBOX_TEST === "1";
+const STEP_CONTEXT_SHA256 = "a".repeat(64);
 
 type LiveConfiguration = Readonly<{
   templateId: string;
@@ -167,6 +168,7 @@ function createRequest(
     type: "tool_sandbox.create",
     requestId: randomUUID(),
     assignment: assigned,
+    stepContextSha256: STEP_CONTEXT_SHA256,
     environment: {
       environmentVersionId: randomUUID(),
       versionNumber: 1,
@@ -191,6 +193,7 @@ function operation(
     type: "tool_sandbox.operation",
     activationId,
     operationId: randomUUID(),
+    stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
     command,
     cwd: "/workspace",
@@ -210,7 +213,11 @@ function output(response: ToolSandboxOperationResponse): string {
             type: response.type,
             operation: response.operation,
             exitCode: response.exitCode,
-            output: Buffer.from(response.output, "base64").toString("utf8").slice(0, 2_048),
+            output: Buffer.concat(
+              response.outputChunks.map((chunk) => Buffer.from(chunk.data, "base64")),
+            )
+              .toString("utf8")
+              .slice(0, 2_048),
           }
         : response.type === "tool_sandbox.operation_result"
           ? {
@@ -225,7 +232,13 @@ function output(response: ToolSandboxOperationResponse): string {
             };
     throw new Error(`CubeSandbox live command did not succeed: ${JSON.stringify(diagnostic)}`);
   }
-  return Buffer.from(response.output, "base64").toString("utf8");
+  const bytes = Buffer.concat(
+    response.outputChunks.map((chunk) => Buffer.from(chunk.data, "base64")),
+  );
+  if (createHash("sha256").update(bytes).digest("hex") !== response.outputSha256) {
+    throw new Error("CubeSandbox live command output digest did not match");
+  }
+  return bytes.toString("utf8");
 }
 
 async function assertReachableFromTrustedHost(

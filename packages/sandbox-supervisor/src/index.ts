@@ -1,6 +1,7 @@
 export {
   BatchedEventPublisher,
   type BatchedEventPublisherOptions,
+  type DurableEventBarrierReceipt,
   type SupervisorEventPublication,
 } from "./batched-event-publisher.ts";
 
@@ -55,10 +56,12 @@ export { appendPiDurableRecovery, PI_DURABLE_RECOVERY_CUSTOM_TYPE } from "./pi-d
 export {
   PI_SANDBOX_RESET_CUSTOM_TYPE,
   PI_SANDBOX_RESET_MESSAGE,
-  PI_SANDBOX_STATE_CUSTOM_TYPE,
+  PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE,
   preparePiSandboxContinuity,
   recordPiSandboxActive,
   recordPiSandboxUnavailable,
+  type PiRuntimeWorldState,
+  type PiSandboxContinuity,
 } from "./pi-sandbox-continuity.ts";
 
 export {
@@ -71,6 +74,15 @@ export {
   createTrustedRemoteToolsExtension,
   type TrustedRemoteToolsRuntimeConfiguration,
 } from "./trusted-remote-tools-extension.ts";
+
+export {
+  CLOUD_STEP_CONTEXT_SCHEMA_VERSION,
+  REMOTE_TOOL_REGISTRY_VERSION,
+  TOOL_NETWORK_POLICY_VERSION,
+  createCloudStepContext,
+  type CloudStepContext,
+  type FrozenCloudStep,
+} from "./cloud-step-context.ts";
 
 export {
   LocalSandboxSupervisor,

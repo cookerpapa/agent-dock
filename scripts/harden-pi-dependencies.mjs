@@ -10,8 +10,14 @@ const securityPatches = [
   {
     name: "brace-expansion",
     sourcePackage: "pi-security-brace-expansion",
-    version: "5.0.8",
+    version: "5.0.9",
     targetRoot: join(piRoot, "node_modules", "brace-expansion"),
+  },
+  {
+    name: "undici",
+    sourcePackage: "pi-security-undici",
+    version: "8.10.0",
+    targetRoot: join(piRoot, "node_modules", "undici"),
   },
   {
     name: "protobufjs",

@@ -74,7 +74,10 @@ describe("BatchedEventPublisher", () => {
       await publisher.enqueue(message);
     }
     expect(spool.highestProducedSeq).toBe(100);
-    await publisher.drain();
+    await expect(publisher.drainToDurableBarrier()).resolves.toEqual({
+      sessionId: SESSION_ID,
+      acknowledgedThroughSeq: 100,
+    });
 
     expect(batches.map((batch) => batch.payload.events.length)).toEqual([64, 36]);
     expect(batches.flatMap((batch) => batch.payload.events.map((event) => event.seq))).toEqual(

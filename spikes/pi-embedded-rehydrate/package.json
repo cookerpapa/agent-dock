@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
-    "undici": "8.5.0"
+    "undici": "8.10.0"
   }
 }

@@ -141,7 +141,11 @@ const ToolCompletedEventSchema = Type.Object(
     payload: Type.Object(
       {
         toolCallId: OpaqueIdSchema,
-        isError: Type.Boolean(),
+        outcome: Type.Union([
+          Type.Literal("completed"),
+          Type.Literal("failed"),
+          Type.Literal("unknown"),
+        ]),
         output: Type.Optional(Type.Unknown()),
         outputArtifact: Type.Optional(
           Type.Object(

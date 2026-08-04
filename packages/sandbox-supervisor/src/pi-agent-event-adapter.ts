@@ -66,6 +66,15 @@ function boundedToolOutput(value: unknown, maximumBytes: number): unknown {
   };
 }
 
+function toolResultIsUnknown(value: unknown): boolean {
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === "string" && serialized.includes("cubesandbox_tool_result_unknown");
+  } catch {
+    return false;
+  }
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -329,7 +338,11 @@ export class PiAgentEventAdapter {
           type: "tool.completed",
           payload: {
             toolCallId: value.toolCallId,
-            isError: value.isError,
+            outcome: value.isError
+              ? toolResultIsUnknown(value.result)
+                ? "unknown"
+                : "failed"
+              : "completed",
             ...(value.result === undefined
               ? {}
               : { output: boundedToolOutput(value.result, this.#maximumToolOutputBytes) }),

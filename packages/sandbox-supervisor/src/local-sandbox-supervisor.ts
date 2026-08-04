@@ -756,7 +756,7 @@ export class LocalSandboxSupervisor {
         );
       } finally {
         try {
-          await publisher.drain();
+          await publisher.drainToDurableBarrier();
         } catch {
           throw new LocalSandboxSupervisorError(
             "invalid_event_delivery",

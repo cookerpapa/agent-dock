@@ -55,8 +55,23 @@ const lockMetadataRemediations = new Map([
       advisoryUrls: new Set([
         "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
         "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+        "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
       ]),
-      installedVersion: "5.0.8",
+      installedVersion: "5.0.9",
+    },
+  ],
+  [
+    "undici",
+    {
+      node: "node_modules/@earendil-works/pi-coding-agent/node_modules/undici",
+      advisoryUrls: new Set([
+        "https://github.com/advisories/GHSA-8xcm-r25x-g524",
+        "https://github.com/advisories/GHSA-4cwx-7wf7-3272",
+        "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5",
+        "https://github.com/advisories/GHSA-jr45-8vmc-qm54",
+        "https://github.com/advisories/GHSA-v3r7-h72x-cjcm",
+      ]),
+      installedVersion: "8.10.0",
     },
   ],
   [
@@ -115,6 +130,20 @@ for (const [name, vulnerability] of Object.entries(auditReport.vulnerabilities ?
       installedVersion: "11.1.28",
       reason:
         "The aggregate finding is caused only by find-my-way, whose installed nested package is replaced and verified after npm ci",
+    });
+  } else if (
+    name === "@earendil-works/pi-coding-agent" &&
+    Array.isArray(vulnerability.via) &&
+    vulnerability.via.length === 1 &&
+    vulnerability.via[0] === "undici" &&
+    lockMetadataRemediations.has("undici")
+  ) {
+    remediated.push({
+      name,
+      advisoryUrls: [...lockMetadataRemediations.get("undici").advisoryUrls],
+      installedVersion: "0.80.10",
+      reason:
+        "The aggregate finding is caused only by undici, whose installed nested package is replaced and verified after npm ci",
     });
   } else {
     remaining.push({ name, ...vulnerability });

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PI_SANDBOX_RESET_CUSTOM_TYPE,
-  PI_SANDBOX_STATE_CUSTOM_TYPE,
+  PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE,
   preparePiSandboxContinuity,
   recordPiSandboxActive,
 } from "../src/index.ts";
@@ -13,6 +13,18 @@ import {
 const FIRST_ACTIVATION = "10000000-0000-4000-8000-000000000001";
 const SECOND_ACTIVATION = "20000000-0000-4000-8000-000000000002";
 const THIRD_ACTIVATION = "30000000-0000-4000-8000-000000000003";
+const ENVIRONMENT_SHA256 = "a".repeat(64);
+const TOOL_POLICY_SHA256 = "b".repeat(64);
+
+function continuity(activationId: string, kind: "cold_restore" | "warm_reuse") {
+  return {
+    activationId,
+    continuity: kind,
+    environmentSha256: ENVIRONMENT_SHA256,
+    committedWorkspaceRevision: null,
+    toolPolicySha256: TOOL_POLICY_SHA256,
+  } as const;
+}
 
 describe("Pi sandbox continuity harness", () => {
   it("emits one minimal reset marker per lost active sandbox", async () => {
@@ -20,21 +32,15 @@ describe("Pi sandbox continuity harness", () => {
     try {
       const manager = SessionManager.create("/workspace", root);
 
-      preparePiSandboxContinuity(manager, {
-        activationId: FIRST_ACTIVATION,
-        continuity: "cold_restore",
-      });
+      preparePiSandboxContinuity(manager, continuity(FIRST_ACTIVATION, "cold_restore"));
       expect(manager.getEntries()).toHaveLength(0);
 
-      recordPiSandboxActive(manager, FIRST_ACTIVATION);
+      recordPiSandboxActive(manager, continuity(FIRST_ACTIVATION, "warm_reuse"));
       expect(JSON.stringify(manager.buildSessionContext().messages)).not.toContain(
         FIRST_ACTIVATION,
       );
 
-      preparePiSandboxContinuity(manager, {
-        activationId: FIRST_ACTIVATION,
-        continuity: "warm_reuse",
-      });
+      preparePiSandboxContinuity(manager, continuity(FIRST_ACTIVATION, "warm_reuse"));
       expect(
         manager
           .getEntries()
@@ -44,14 +50,8 @@ describe("Pi sandbox continuity harness", () => {
           ),
       ).toHaveLength(0);
 
-      preparePiSandboxContinuity(manager, {
-        activationId: SECOND_ACTIVATION,
-        continuity: "cold_restore",
-      });
-      preparePiSandboxContinuity(manager, {
-        activationId: THIRD_ACTIVATION,
-        continuity: "cold_restore",
-      });
+      preparePiSandboxContinuity(manager, continuity(SECOND_ACTIVATION, "cold_restore"));
+      preparePiSandboxContinuity(manager, continuity(THIRD_ACTIVATION, "cold_restore"));
 
       expect(
         manager
@@ -65,7 +65,8 @@ describe("Pi sandbox continuity harness", () => {
         manager
           .getEntries()
           .filter(
-            (entry) => entry.type === "custom" && entry.customType === PI_SANDBOX_STATE_CUSTOM_TYPE,
+            (entry) =>
+              entry.type === "custom" && entry.customType === PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE,
           ),
       ).toHaveLength(2);
 
@@ -86,16 +87,10 @@ describe("Pi sandbox continuity harness", () => {
     const root = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-sandbox-generation-"));
     try {
       const manager = SessionManager.create("/workspace", root);
-      recordPiSandboxActive(manager, FIRST_ACTIVATION);
-      preparePiSandboxContinuity(manager, {
-        activationId: SECOND_ACTIVATION,
-        continuity: "cold_restore",
-      });
-      recordPiSandboxActive(manager, SECOND_ACTIVATION);
-      preparePiSandboxContinuity(manager, {
-        activationId: THIRD_ACTIVATION,
-        continuity: "cold_restore",
-      });
+      recordPiSandboxActive(manager, continuity(FIRST_ACTIVATION, "warm_reuse"));
+      preparePiSandboxContinuity(manager, continuity(SECOND_ACTIVATION, "cold_restore"));
+      recordPiSandboxActive(manager, continuity(SECOND_ACTIVATION, "warm_reuse"));
+      preparePiSandboxContinuity(manager, continuity(THIRD_ACTIVATION, "cold_restore"));
 
       expect(
         manager

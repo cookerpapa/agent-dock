@@ -48,7 +48,7 @@ describe("conversation turn projection", () => {
         },
         {
           type: "tool.completed",
-          payload: { toolCallId: "call-1", isError: false, output: "all green" },
+          payload: { toolCallId: "call-1", outcome: "completed", output: "all green" },
         },
         { type: "assistant.text.delta", payload: { text: "Done." } },
         {

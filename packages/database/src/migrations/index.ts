@@ -29,6 +29,7 @@ import * as sharedWorkspaceHeads from "./027_shared_workspace_heads.ts";
 import * as interruptedPiConversations from "./028_interrupted_pi_conversations.ts";
 import * as externalPlatformGitMetadata from "./029_external_platform_git_metadata.ts";
 import * as activePiSteer from "./030_active_pi_steer.ts";
+import * as typedToolOutcomes from "./031_typed_tool_outcomes.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -63,6 +64,7 @@ export const migrationProvider: MigrationProvider = {
       "028_interrupted_pi_conversations": interruptedPiConversations,
       "029_external_platform_git_metadata": externalPlatformGitMetadata,
       "030_active_pi_steer": activePiSteer,
+      "031_typed_tool_outcomes": typedToolOutcomes,
     };
   },
 };
@@ -211,3 +213,8 @@ export {
   down as downExternalPlatformGitMetadata,
   up as upExternalPlatformGitMetadata,
 } from "./029_external_platform_git_metadata.ts";
+
+export {
+  down as downTypedToolOutcomes,
+  up as upTypedToolOutcomes,
+} from "./031_typed_tool_outcomes.ts";

@@ -906,19 +906,24 @@ async function executeBash(
     env: safeToolEnvironment(undefined, webProxy),
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = Buffer.alloc(0);
+  const outputChunks: Array<{ stream: "stdout" | "stderr"; data: Buffer }> = [];
+  let outputBytes = 0;
   let overflow = false;
   let timedOut = false;
-  const append = (chunk: Buffer): void => {
+  const append = (stream: "stdout" | "stderr", chunk: Buffer): void => {
     if (overflow) return;
-    output = Buffer.concat([output, chunk]);
-    if (output.byteLength > MAX_TOOL_OUTPUT_BYTES) {
+    outputBytes += chunk.byteLength;
+    if (outputBytes > MAX_TOOL_OUTPUT_BYTES || outputChunks.length >= 16_384) {
       overflow = true;
       terminateProcessGroup(child, "SIGKILL");
+      return;
     }
+    const previous = outputChunks.at(-1);
+    if (previous?.stream === stream) previous.data = Buffer.concat([previous.data, chunk]);
+    else outputChunks.push({ stream, data: Buffer.from(chunk) });
   };
-  child.stdout?.on("data", append);
-  child.stderr?.on("data", append);
+  child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
+  child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
   const timer = setTimeout(() => {
     timedOut = true;
     terminateProcessGroup(child, "SIGTERM");
@@ -943,6 +948,7 @@ async function executeBash(
     if (timedOut) throw new ToolWorkerError("tool_timeout", "Tool command timed out", true);
     if (signal.aborted)
       throw new ToolWorkerError("tool_cancelled", "Tool command was cancelled", true);
+    const output = Buffer.concat(outputChunks.map((chunk) => chunk.data));
     return {
       managerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
@@ -950,7 +956,12 @@ async function executeBash(
       operationId: request.operationId,
       operation: "bash.exec",
       exitCode: result.code,
-      output: output.toString("base64"),
+      outputChunks: outputChunks.map((chunk, index) => ({
+        seq: index + 1,
+        stream: chunk.stream,
+        data: chunk.data.toString("base64"),
+      })),
+      outputSha256: createHash("sha256").update(output).digest("hex"),
     };
   } finally {
     clearTimeout(timer);

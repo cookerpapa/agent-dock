@@ -29,6 +29,7 @@ import {
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
 const MATERIALIZER_TOKEN = `materializer-${"m".repeat(48)}`;
 const CAPABILITY = `adts_${"c".repeat(43)}`;
+const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-manager-test",
@@ -116,7 +117,10 @@ function backend(): SandboxManagerBackend {
         operationId: request.operationId,
         operation: "bash.exec",
         exitCode: 0,
-        output: Buffer.from("isolated\n").toString("base64"),
+        outputChunks: [
+          { seq: 1, stream: "stdout", data: Buffer.from("isolated\n").toString("base64") },
+        ],
+        outputSha256: createHash("sha256").update("isolated\n").digest("hex"),
       };
     },
     async importGitHub() {
@@ -171,6 +175,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000011",
       assignment,
+      stepContextSha256: STEP_CONTEXT_SHA256,
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
@@ -201,6 +206,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       type: "tool_sandbox.operation",
       activationId: ACTIVATION_ID,
       operationId: "10000000-0000-4000-8000-000000000012",
+      stepContextSha256: STEP_CONTEXT_SHA256,
       operation: "bash.exec",
       command: "pwd",
       cwd: "/workspace",

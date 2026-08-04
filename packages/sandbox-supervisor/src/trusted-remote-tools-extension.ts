@@ -27,7 +27,10 @@ const MAX_RESPONSE_BYTES = 5 * 1_024 * 1_024;
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
-  ? Omit<T, "managerProtocolVersion" | "type" | "activationId" | "operationId">
+  ? Omit<
+      T,
+      "managerProtocolVersion" | "type" | "activationId" | "operationId" | "stepContextSha256"
+    >
   : never;
 
 class RemoteToolError extends Error {
@@ -46,6 +49,7 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   operationUrl: string;
   activationId: string;
   capability: string;
+  stepContextSha256: string;
   remainingToolCalls: number;
   maximumToolOutputBytes: number;
   toolOutputDirectory: string;
@@ -70,6 +74,7 @@ function validateRuntimeConfiguration(
   }
   const activationId = candidate.activationId;
   const capability = candidate.capability;
+  const stepContextSha256 = candidate.stepContextSha256;
   const remainingToolCalls = candidate.remainingToolCalls;
   const maximumToolOutputBytes = candidate.maximumToolOutputBytes;
   const configuredToolOutputDirectory = candidate.toolOutputDirectory;
@@ -82,6 +87,7 @@ function validateRuntimeConfiguration(
       activationId,
     ) ||
     !/^adts_[A-Za-z0-9_-]{43}$/.test(capability) ||
+    !/^[0-9a-f]{64}$/.test(stepContextSha256) ||
     !Number.isSafeInteger(remainingToolCalls) ||
     remainingToolCalls < 0 ||
     remainingToolCalls > 10_000 ||
@@ -118,6 +124,7 @@ function validateRuntimeConfiguration(
     operationUrl: parsed.toString(),
     activationId,
     capability,
+    stepContextSha256,
     remainingToolCalls,
     maximumToolOutputBytes,
     toolOutputDirectory,
@@ -163,6 +170,44 @@ function canonicalBase64(value: string): Buffer {
     );
   }
   return decoded;
+}
+
+function orderedBashOutput(
+  response: Extract<
+    ToolSandboxOperationResponse,
+    { type: "tool_sandbox.operation_result"; operation: "bash.exec" }
+  >,
+): Buffer {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for (const [index, chunk] of response.outputChunks.entries()) {
+    if (chunk.seq !== index + 1) {
+      throw new RemoteToolError(
+        "tool_output_sequence_invalid",
+        "Tool Sandbox returned non-contiguous command output",
+        false,
+      );
+    }
+    const bytes = canonicalBase64(chunk.data);
+    totalBytes += bytes.byteLength;
+    if (totalBytes > MAX_RESPONSE_BYTES) {
+      throw new RemoteToolError(
+        "tool_protocol_error",
+        "Tool Sandbox command output exceeded its trusted byte limit",
+        false,
+      );
+    }
+    chunks.push(bytes);
+  }
+  const output = Buffer.concat(chunks);
+  if (createHash("sha256").update(output).digest("hex") !== response.outputSha256) {
+    throw new RemoteToolError(
+      "tool_output_digest_mismatch",
+      "Tool Sandbox returned corrupt command output",
+      false,
+    );
+  }
+  return output;
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -218,11 +263,11 @@ function registerTrustedRemoteTools(
       type: "tool_sandbox.operation",
       activationId: runtime.activationId,
       operationId: randomUUID(),
+      stepContextSha256: runtime.stepContextSha256,
       ...request,
     } as ToolSandboxOperationRequest;
-    let response: Response;
-    try {
-      response = await fetch(runtime.operationUrl, {
+    const requestOnce = async (): Promise<{ response: Response; value: unknown }> => {
+      const response = await fetch(runtime.operationUrl, {
         method: "POST",
         headers: {
           authorization: `Bearer ${runtime.capability}`,
@@ -233,11 +278,21 @@ function registerTrustedRemoteTools(
         body: JSON.stringify(candidate),
         ...(signal === undefined ? {} : { signal }),
       });
-    } catch (error: unknown) {
-      if (signal?.aborted) throw new Error("aborted");
-      throw errorForPi(error);
+      return { response, value: await responseJson(response) };
+    };
+    let received: { response: Response; value: unknown } | undefined;
+    let transportFailure: unknown;
+    for (let attempt = 0; attempt < 2 && received === undefined; attempt += 1) {
+      try {
+        received = await requestOnce();
+      } catch (error: unknown) {
+        if (signal?.aborted) throw new Error("aborted");
+        if (error instanceof RemoteToolError) throw errorForPi(error);
+        transportFailure = error;
+      }
     }
-    const value = await responseJson(response);
+    if (received === undefined) throw errorForPi(transportFailure);
+    const { response, value } = received;
     if (!response.ok) {
       try {
         const failure = parseInternalServiceError(value).error;
@@ -417,7 +472,7 @@ function registerTrustedRemoteTools(
         );
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "bash.exec") throw new Error("Tool response kind changed");
-        const fullOutput = canonicalBase64(response.output);
+        const fullOutput = orderedBashOutput(response);
         const maximumModelBytes = Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES);
         await preserveLargeOutput(toolCallId, fullOutput, maximumModelBytes);
         // Pi's Bash tool applies its own tail truncation at DEFAULT_MAX_BYTES.

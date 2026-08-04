@@ -812,6 +812,7 @@ export const ConversationTranscriptItemResourceSchema = Type.Union([
         Type.Literal("running"),
         Type.Literal("completed"),
         Type.Literal("failed"),
+        Type.Literal("unknown"),
       ]),
       firstSequence: PositiveSafeIntegerSchema,
       lastSequence: Type.Optional(PositiveSafeIntegerSchema),

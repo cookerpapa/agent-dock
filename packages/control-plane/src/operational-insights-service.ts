@@ -115,7 +115,7 @@ export class OperationalInsightsService {
           select
             count(*) filter (where type = 'tool.started') as calls,
             count(*) filter (
-              where type = 'tool.completed' and payload ->> 'isError' = 'true'
+              where type = 'tool.completed' and payload ->> 'outcome' <> 'completed'
             ) as failures
           from session_events
           where tenant_id = ${identity.tenantId} and occurred_at >= ${since}

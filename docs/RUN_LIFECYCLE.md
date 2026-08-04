@@ -56,8 +56,10 @@ instead of blindly replaying commands.
    `deferred`; the Workflow waits on a durable timer.
 4. The selected Supervisor acquires the lease/fence and commits
    `ACKNOWLEDGED/RUNNING` before starting Pi.
-5. Trusted Runner durably advances the Attempt through restore/run/checkpoint
-   phases while resolving model and workspace state.
+5. Trusted Runner freezes one credential-free Cloud Step containing accepted
+   identity, model, environment, budget, Workspace revision and Tool/network
+   policy, then durably advances the Attempt through restore/run/checkpoint
+   phases.
 6. `ToolSandboxManager` reserves one logical activation and rotating capability;
    it does not create a microVM.
 7. Trusted Runner creates a pinned embedded Pi SDK session with only the fixed
@@ -94,8 +96,12 @@ falling back to the active version.
 
 Pi's Agent Loop and conversation state remain trusted. `read/write/edit/bash`
 cross Tool RPC. The Manager validates the activation capability and unique
-operation ID before the Provider sends a closed worker request. Tool output is
-bounded before returning to Pi. If a read/bash result crosses the context
+operation ID plus frozen Cloud Step digest before the Provider sends a closed
+worker request. An operation ID names one execution. A reconnect with the same
+request attaches to its running or retained result; changed reuse is rejected.
+The guest sequences stdout/stderr observations and signs the reconstructed
+bytes with SHA-256. The trusted adapter verifies sequence and digest before
+bounded output returns to Pi. If a read/bash result crosses the context
 allowance, its full Provider-bounded bytes are persisted as a fenced Tool
 Artifact before the `tool.completed` event exposes the Artifact ID.
 
@@ -117,9 +123,10 @@ same content block are coalesced for at most 50 ms or 2 KiB. Every public event
 is fsynced to the bounded local spool before an asynchronous publisher sends up
 to 64 contiguous events in one envelope. The Control Plane commits a batch in
 one PostgreSQL transaction and returns one cumulative ACK. Pi therefore does
-not wait for a database transaction after every provider token, while terminal
-Run completion still waits for the durable ACK cursor to reach its final
-sequence.
+not wait for a database transaction after every provider token. The Supervisor
+asserts an explicit barrier receipt with no pending events and
+`acknowledgedThroughSeq == highestProducedSeq` before it returns a private
+prepared result for terminal settlement.
 
 ## Checkpoint commit
 
@@ -217,6 +224,8 @@ reconciliation.
 | Supervisor management socket loss | same boot reconnects for liveness; it is not the Run-matching channel |
 | Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
 | Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay; canonical public events newer than the last Pi checkpoint become a bounded semantic recovery suffix |
+| Short Tool HTTP disconnect while Manager/guest remain alive | reattach to the identical operation ID/request and return the original execution result |
+| Tool operation ledger or Cube loss | mark the Tool result `UNKNOWN`, destroy uncertain runtime state and never replay arbitrary Bash |
 | Manager/Provider loss | host retirement inventories exact labels and confirms absence |
 | Source Cube VM or local POSIX copy destroyed after checkpoint | Data Mover restores the committed Kopia snapshot, then the next higher-fence Attempt creates a fresh base-template VM |
 | Cube execution node/disk loss | recover on a node that mounts the shared POSIX path; the Kopia repository, not the node copy, is authoritative |

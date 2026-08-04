@@ -102,9 +102,12 @@ The Data Mover never accepts an arbitrary host path from the model or browser.
 ### Duplicate/ambiguous side effects
 
 HTTP admission and checkpoint commits are idempotent. Arbitrary Bash is not
-automatically treated as retry-safe. If execution outcome is ambiguous, the
-operation is marked unknown or the activation is destroyed and restored from
-the last committed Workspace.
+automatically treated as retry-safe. A Tool operation ID is bound to one frozen
+Cloud Step and exact request. Short transport reconnects attach to the same
+in-memory execution ledger rather than start another command. Conflicting
+request reuse fails closed. If the Manager ledger, Tool service or Cube is
+lost, the operation is marked unknown and the activation is destroyed and
+restored from the last committed Workspace.
 
 ### Forged or prematurely visible terminal state
 

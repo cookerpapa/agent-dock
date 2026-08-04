@@ -245,7 +245,7 @@ describe("session transcript reducer", () => {
       }),
       envelope(5, {
         type: "tool.completed",
-        payload: { toolCallId: "call-1", isError: false, output: "1 test failed" },
+        payload: { toolCallId: "call-1", outcome: "completed", output: "1 test failed" },
       }),
       envelope(6, {
         type: "turn.completed",
@@ -291,6 +291,27 @@ describe("session transcript reducer", () => {
     expect(
       sessionViewReducer(state, { type: "stream.event", event: events[5] as AgentDockEvent }),
     ).toBe(state);
+  });
+
+  it("marks an in-flight Tool unknown when its Run fails", () => {
+    const events: AgentDockEvent[] = [
+      envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
+      envelope(2, {
+        type: "tool.started",
+        payload: { toolCallId: "call-unknown", toolName: "bash", input: { command: "deploy" } },
+      }),
+      envelope(3, {
+        type: "turn.failed",
+        payload: { code: "worker_lost", message: "Worker connection was lost", retryable: true },
+      }),
+    ];
+    const state = events.reduce(
+      (current, value) => sessionViewReducer(current, { type: "stream.event", event: value }),
+      preparedState(),
+    );
+    expect(state.turns[0]?.items).toEqual([
+      expect.objectContaining({ kind: "tool", toolCallId: "call-unknown", status: "unknown" }),
+    ]);
   });
 
   it("assembles streamed tool input before execution and reconciles it with tool.started", () => {

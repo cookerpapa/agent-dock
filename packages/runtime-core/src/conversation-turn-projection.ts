@@ -190,7 +190,7 @@ export function projectConversationTurnTranscript(
           toolName: "unknown",
           input: null,
           ...(event.payload.output === undefined ? {} : { output: event.payload.output }),
-          status: event.payload.isError ? "failed" : "completed",
+          status: event.payload.outcome,
           firstSequence: event.seq,
           lastSequence: event.seq,
           startedAt: event.occurredAt,
@@ -202,7 +202,7 @@ export function projectConversationTurnTranscript(
         items[index] = {
           ...existing,
           ...(event.payload.output === undefined ? {} : { output: event.payload.output }),
-          status: event.payload.isError ? "failed" : "completed",
+          status: event.payload.outcome,
           lastSequence: event.seq,
           completedAt: event.occurredAt,
         };
@@ -251,11 +251,33 @@ export function projectConversationTurnTranscript(
       continue;
     }
     if (event.type === "turn.failed") {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        if (item.kind === "tool" && (item.status === "preparing" || item.status === "running")) {
+          items[index] = {
+            ...item,
+            status: "unknown",
+            lastSequence: event.seq,
+            completedAt: event.occurredAt,
+          };
+        }
+      }
       terminalSequence = event.seq;
       failure = event.payload;
       continue;
     }
     if (event.type === "turn.cancelled") {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        if (item.kind === "tool" && (item.status === "preparing" || item.status === "running")) {
+          items[index] = {
+            ...item,
+            status: "unknown",
+            lastSequence: event.seq,
+            completedAt: event.occurredAt,
+          };
+        }
+      }
       terminalSequence = event.seq;
       stopReason = "cancelled";
       cancellation = event.payload;

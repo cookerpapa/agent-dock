@@ -49,12 +49,20 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   edits.
 - [x] Keep research APIs behind an explicit optional module and remove the
   unfinished product routes/client workflows.
+- [x] Freeze a credential-free Cloud Step view and bind Sandbox reservation,
+  environment, Workspace revision and Tool policy to its digest.
+- [x] Reattach short Tool transport disconnects to one execution identity,
+  preserve ordered stdout/stderr and expose irrecoverable ambiguity as
+  `UNKNOWN` without replay.
+- [x] Require the Worker event spool to cross an acknowledged durable barrier
+  before the Control Plane may commit terminal state.
+- [x] Persist typed runtime world state while keeping only material Sandbox
+  resets model-visible.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
 
 - retained-data policy and hard deletion worker;
-- explicit Tool `UNKNOWN` UX for ambiguous side effects;
 - multi-node failure injection for Worker/node loss;
 - object/checkpoint orphan garbage collection dashboards;
 - measured Session-affinity hit rate and queue-delay tuning;

@@ -13,6 +13,18 @@ import {
 
 const FIRST_ACTIVATION = "10000000-0000-4000-8000-000000000001";
 const SECOND_ACTIVATION = "20000000-0000-4000-8000-000000000002";
+const ENVIRONMENT_SHA256 = "a".repeat(64);
+const TOOL_POLICY_SHA256 = "b".repeat(64);
+
+function continuity(activationId: string, kind: "cold_restore" | "warm_reuse") {
+  return {
+    activationId,
+    continuity: kind,
+    environmentSha256: ENVIRONMENT_SHA256,
+    committedWorkspaceRevision: null,
+    toolPolicySha256: TOOL_POLICY_SHA256,
+  } as const;
+}
 
 function occurrences(value: string, needle: string): number {
   return value.split(needle).length - 1;
@@ -38,11 +50,8 @@ describe("Pi cloud recovery contract", () => {
         attemptId: "internal-attempt-id",
         timestamp: Date.now(),
       });
-      recordPiSandboxActive(source, FIRST_ACTIVATION);
-      preparePiSandboxContinuity(source, {
-        activationId: SECOND_ACTIVATION,
-        continuity: "cold_restore",
-      });
+      recordPiSandboxActive(source, continuity(FIRST_ACTIVATION, "warm_reuse"));
+      preparePiSandboxContinuity(source, continuity(SECOND_ACTIVATION, "cold_restore"));
       source.appendMessage({
         role: "user",
         content: [{ type: "text", text: "Continue on the replacement Worker." }],
@@ -83,15 +92,9 @@ describe("Pi cloud recovery contract", () => {
       expect(context).not.toContain(FIRST_ACTIVATION);
       expect(context).not.toContain(SECOND_ACTIVATION);
 
-      preparePiSandboxContinuity(restored, {
-        activationId: SECOND_ACTIVATION,
-        continuity: "cold_restore",
-      });
-      recordPiSandboxActive(restored, SECOND_ACTIVATION);
-      preparePiSandboxContinuity(restored, {
-        activationId: SECOND_ACTIVATION,
-        continuity: "warm_reuse",
-      });
+      preparePiSandboxContinuity(restored, continuity(SECOND_ACTIVATION, "cold_restore"));
+      recordPiSandboxActive(restored, continuity(SECOND_ACTIVATION, "warm_reuse"));
+      preparePiSandboxContinuity(restored, continuity(SECOND_ACTIVATION, "warm_reuse"));
       const repeatedContext = JSON.stringify(convertToLlm(restored.buildSessionContext().messages));
       expect(occurrences(repeatedContext, "<turn_aborted>")).toBe(1);
       expect(occurrences(repeatedContext, "<sandbox_reset>")).toBe(1);

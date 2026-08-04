@@ -168,15 +168,19 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
       ? "正在生成"
       : item.status === "running"
         ? "执行中"
-        : item.status === "failed"
-          ? "执行失败"
-          : "执行完成";
+        : item.status === "unknown"
+          ? "结果未知"
+          : item.status === "failed"
+            ? "执行失败"
+            : "执行完成";
   const icon =
     item.status === "preparing" || item.status === "running"
       ? "◌"
-      : item.status === "failed"
-        ? "!"
-        : "✓";
+      : item.status === "unknown"
+        ? "?"
+        : item.status === "failed"
+          ? "!"
+          : "✓";
   const heading =
     item.toolName === "bash" && command !== null ? (
       <div className="product-tool-command">

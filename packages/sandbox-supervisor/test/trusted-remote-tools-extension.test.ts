@@ -10,6 +10,7 @@ const BASE_CONFIGURATION = {
   operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
   activationId: "10000000-0000-4000-8000-000000000001",
   capability: `adts_${"a".repeat(43)}`,
+  stepContextSha256: "b".repeat(64),
   remainingToolCalls: 0,
   maximumToolOutputBytes: 1_024,
   toolOutputDirectory: "/tmp/agent-dock-tool-output-test",
@@ -36,6 +37,7 @@ describe("trusted remote tools extension governance", () => {
       operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
       activationId: "10000000-0000-4000-8000-000000000099",
       capability: `adts_${"z".repeat(43)}`,
+      stepContextSha256: "b".repeat(64),
       remainingToolCalls: 0,
       maximumToolOutputBytes: 1_024,
       toolOutputDirectory: "/tmp/agent-dock-sdk-tool-output-test",
@@ -196,7 +198,16 @@ describe("trusted remote tools extension governance", () => {
             operationId: request.operationId,
             operation: "bash.exec",
             exitCode: 0,
-            output: original.toString("base64"),
+            outputChunks: [
+              { seq: 1, stream: "stdout", data: original.subarray(0, 700).toString("base64") },
+              {
+                seq: 2,
+                stream: "stderr",
+                data: original.subarray(700, 1_400).toString("base64"),
+              },
+              { seq: 3, stream: "stdout", data: original.subarray(1_400).toString("base64") },
+            ],
+            outputSha256: createHash("sha256").update(original).digest("hex"),
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -237,6 +248,57 @@ describe("trusted remote tools extension governance", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("rejects non-contiguous Bash output before exposing it to Pi", async () => {
+    const registered: ToolDefinition[] = [];
+    const pi = {
+      registerTool(tool: ToolDefinition) {
+        registered.push(tool);
+      },
+      on() {},
+    } as unknown as ExtensionAPI;
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body)) as {
+        activationId: string;
+        operationId: string;
+      };
+      return new Response(
+        JSON.stringify({
+          managerProtocolVersion: 1,
+          type: "tool_sandbox.operation_result",
+          activationId: request.activationId,
+          operationId: request.operationId,
+          operation: "bash.exec",
+          exitCode: 0,
+          outputChunks: [
+            { seq: 1, stream: "stdout", data: Buffer.from("first").toString("base64") },
+            { seq: 3, stream: "stderr", data: Buffer.from("lost").toString("base64") },
+          ],
+          outputSha256: createHash("sha256").update("firstlost").digest("hex"),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    installInlineExtension(
+      createTrustedRemoteToolsExtension({
+        ...BASE_CONFIGURATION,
+        remainingToolCalls: 1,
+      }),
+      pi,
+    );
+
+    await expect(
+      registered
+        .find((tool) => tool.name === "bash")!
+        .execute(
+          "tool-call-invalid-output",
+          { command: "compile", timeout: 10 },
+          new AbortController().signal,
+          () => undefined,
+          undefined as never,
+        ),
+    ).rejects.toThrow("tool_output_sequence_invalid");
   });
 
   it("binds edit writes to the file revision that Pi actually read", async () => {

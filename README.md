@@ -80,6 +80,12 @@ Session reuse it while its idle lease remains valid. Eviction preserves the
 Workspace through the trusted Volume/Data-Mover checkpoint path, not through
 the Worker filesystem.
 
+Every accepted Run also freezes a credential-free execution view covering the
+model, environment, Workspace base revision and Tool/network policy. Tool
+operations are bound to that digest and to one execution identity. A short
+transport disconnect reattaches to the same execution; loss of the execution
+ledger or VM is shown as `UNKNOWN` and never causes an automatic shell replay.
+
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 ## Durable state
@@ -144,6 +150,8 @@ Workspace data.
 7. One tenant cannot list, read or mutate another tenant's conversations or
    Workspaces.
 8. Tool side effects are never blindly retried as exactly-once execution.
+9. Terminal Run settlement cannot overtake events that have not crossed the
+   Worker's cumulative durable ACK barrier.
 
 See [Threat model](docs/THREAT_MODEL.md) and
 [Network matrix](docs/NETWORK_MATRIX.md).

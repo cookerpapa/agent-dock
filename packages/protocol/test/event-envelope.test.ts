@@ -53,7 +53,10 @@ describe("AgentDockEventSchema", () => {
         type: "tool.started",
         payload: { toolCallId: "call-1", toolName: "read", input: { path: "a" } },
       },
-      { type: "tool.completed", payload: { toolCallId: "call-1", isError: false, output: "ok" } },
+      {
+        type: "tool.completed",
+        payload: { toolCallId: "call-1", outcome: "completed", output: "ok" },
+      },
       {
         type: "approval.requested",
         payload: {

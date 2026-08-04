@@ -17,6 +17,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { RecoverableOperationLedger } from "./recoverable-operation-ledger.ts";
 
 const SERVICE_PORT = 49_984;
 const MAXIMUM_REQUEST_BYTES = 8 * 1_024 * 1_024;
@@ -274,7 +275,11 @@ class ToolWorkerBridge {
   readonly #child: ChildProcessWithoutNullStreams;
   #activationId: string | undefined;
   #ready: Pending<EnvironmentToolchainReport> | undefined;
-  readonly #operations = new Map<string, Pending<ToolSandboxOperationResponse>>();
+  readonly #operationWaiters = new Map<string, Pending<ToolSandboxOperationResponse>>();
+  readonly #operationLedger = new RecoverableOperationLedger<
+    ReturnType<typeof parseToolSandboxOperationRequest>,
+    ToolSandboxOperationResponse
+  >();
   readonly #captures = new Map<string, Pending<CubeCapturedWorkspace>>();
   #failed: Error | undefined;
 
@@ -298,7 +303,7 @@ class ToolWorkerBridge {
   }
 
   get busy(): boolean {
-    return this.#ready !== undefined || this.#operations.size > 0 || this.#captures.size > 0;
+    return this.#ready !== undefined || this.#operationWaiters.size > 0 || this.#captures.size > 0;
   }
 
   async initialize(message: ToolWorkerInput): Promise<EnvironmentToolchainReport> {
@@ -319,21 +324,27 @@ class ToolWorkerBridge {
     request: ReturnType<typeof parseToolSandboxOperationRequest>,
   ): Promise<ToolSandboxOperationResponse> {
     this.#assertActivation(request.activationId);
-    if (this.#operations.has(request.operationId)) {
-      throw new CubeToolServiceError(409, "Tool operation ID was already active");
-    }
-    const result = deferred<ToolSandboxOperationResponse>("Tool operation");
-    this.#operations.set(request.operationId, result.pending);
-    try {
-      await this.#write({
-        toolWorkerProtocolVersion: 1,
-        type: "worker.operation",
-        request,
-      });
-      return await result.promise;
-    } finally {
-      this.#operations.delete(request.operationId);
-    }
+    return this.#operationLedger.attach(request.operationId, request, async () => {
+      const result = deferred<ToolSandboxOperationResponse>("Tool operation");
+      this.#operationWaiters.set(request.operationId, result.pending);
+      const release = (): void => {
+        this.#operationWaiters.delete(request.operationId);
+      };
+      void result.promise.then(release, release);
+      try {
+        await this.#write({
+          toolWorkerProtocolVersion: 1,
+          type: "worker.operation",
+          request,
+        });
+        return await result.promise;
+      } catch (error: unknown) {
+        result.pending.reject(
+          error instanceof Error ? error : new CubeToolServiceError(503, "Tool operation failed"),
+        );
+        throw error;
+      }
+    });
   }
 
   async cancel(activationId: string, operationId: string): Promise<void> {
@@ -429,7 +440,7 @@ class ToolWorkerBridge {
       return;
     }
     if (output.type === "worker.operation_result") {
-      this.#operations.get(output.response.operationId)?.resolve(output.response);
+      this.#operationWaiters.get(output.response.operationId)?.resolve(output.response);
       return;
     }
     if (output.type === "worker.captured") {
@@ -445,7 +456,7 @@ class ToolWorkerBridge {
     }
     const error = new CubeToolServiceError(output.retryable ? 503 : 400, output.message);
     if (output.operationId !== undefined) {
-      this.#operations.get(output.operationId)?.reject(error);
+      this.#operationWaiters.get(output.operationId)?.reject(error);
       return;
     }
     if (output.requestId !== undefined) {
@@ -460,9 +471,10 @@ class ToolWorkerBridge {
     this.#failed = error;
     this.#ready?.reject(error);
     this.#ready = undefined;
-    for (const pending of this.#operations.values()) pending.reject(error);
+    for (const pending of this.#operationWaiters.values()) pending.reject(error);
     for (const pending of this.#captures.values()) pending.reject(error);
-    this.#operations.clear();
+    this.#operationWaiters.clear();
+    this.#operationLedger.close();
     this.#captures.clear();
   }
 }
@@ -684,21 +696,9 @@ const server = createServer((request, response) => {
     if (url.pathname === "/v1/operation") {
       requireAuthority(request);
       const operation = parseToolSandboxOperationRequest(await readJson(request));
-      const disconnected = (): void => {
-        try {
-          void readyBridge()
-            .cancel(operation.activationId, operation.operationId)
-            .catch(() => undefined);
-        } catch {
-          // A concurrent seal/rebind already revoked this execution channel.
-        }
-      };
-      request.once("aborted", disconnected);
-      try {
-        sendJson(response, 200, await readyBridge().operation(operation));
-      } finally {
-        request.removeListener("aborted", disconnected);
-      }
+      // The execution is owned by operationId and the active handoff fence.
+      // Losing this HTTP response leaves it attachable for a bounded window.
+      sendJson(response, 200, await readyBridge().operation(operation));
       return;
     }
     if (url.pathname === "/v1/cancel") {

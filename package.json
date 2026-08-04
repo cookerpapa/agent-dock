@@ -12,8 +12,9 @@
     "spikes/*"
   ],
   "dependencies": {
-    "pi-security-brace-expansion": "npm:brace-expansion@5.0.8",
+    "pi-security-brace-expansion": "npm:brace-expansion@5.0.9",
     "pi-security-protobufjs": "npm:protobufjs@7.6.5",
+    "pi-security-undici": "npm:undici@8.10.0",
     "platform-security-find-my-way": "npm:find-my-way@9.7.0"
   },
   "scripts": {

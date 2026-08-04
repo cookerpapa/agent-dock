@@ -26,11 +26,14 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Lock the cloud recovery contract with deterministic tests covering an
       interrupted Pi Session across native Compaction/fresh-Worker restore and
       proving that post-ACK or ambiguous Tool failures are not replayed.
+- [x] Freeze each accepted execution view, bind Tool RPC to its digest, recover
+      short transport disconnects by operation identity, order Bash output and
+      require an explicit durable event barrier before terminal settlement.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,
       POSIX volumes, Kopia snapshots, Pi checkpoints and quarantined Worker WALs.
-- [ ] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
+- [x] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
       operator diagnostics; never offer an automatic shell replay.
 - [ ] Measure Session affinity under load and keep it only while it improves
       restore latency without starving other task queues.

@@ -33,7 +33,7 @@ export type TranscriptItem =
       input: unknown;
       inputJson?: string;
       output?: unknown;
-      status: "preparing" | "running" | "completed" | "failed";
+      status: "preparing" | "running" | "completed" | "failed" | "unknown";
       firstSequence: number;
       lastSequence?: number;
       startedAt: string;
@@ -294,7 +294,7 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
         return {
           ...item,
           ...(event.payload.output === undefined ? {} : { output: event.payload.output }),
-          status: event.payload.isError ? "failed" : "completed",
+          status: event.payload.outcome,
           lastSequence: event.seq,
           completedAt: event.occurredAt,
         };
@@ -307,7 +307,7 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
           toolName: "unknown",
           input: null,
           ...(event.payload.output === undefined ? {} : { output: event.payload.output }),
-          status: event.payload.isError ? "failed" : "completed",
+          status: event.payload.outcome,
           firstSequence: event.seq,
           lastSequence: event.seq,
           startedAt: event.occurredAt,
@@ -372,6 +372,11 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
     if (event.type === "turn.failed") {
       return {
         ...turn,
+        items: turn.items.map((item): TranscriptItem =>
+          item.kind === "tool" && (item.status === "preparing" || item.status === "running")
+            ? { ...item, status: "unknown", lastSequence: event.seq, completedAt: event.occurredAt }
+            : item,
+        ),
         status: "failed",
         terminalSequence: event.seq,
         failure: event.payload,
@@ -380,6 +385,11 @@ function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionView
     if (event.type === "turn.cancelled") {
       return {
         ...turn,
+        items: turn.items.map((item): TranscriptItem =>
+          item.kind === "tool" && (item.status === "preparing" || item.status === "running")
+            ? { ...item, status: "unknown", lastSequence: event.seq, completedAt: event.occurredAt }
+            : item,
+        ),
         status: "cancelled",
         terminalSequence: event.seq,
         stopReason: "cancelled",

@@ -263,6 +263,29 @@ describe("PiAgentEventAdapter", () => {
     });
   });
 
+  it("classifies an ambiguous Cube result as unknown instead of failed", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+    adapter.adapt({
+      type: "tool_execution_start",
+      toolCallId: "call-unknown",
+      toolName: "bash",
+      args: { command: "deploy" },
+    });
+    expect(
+      adapter.adapt({
+        type: "tool_execution_end",
+        toolCallId: "call-unknown",
+        toolName: "bash",
+        result: { error: "cubesandbox_tool_result_unknown: connection was lost" },
+        isError: true,
+      }),
+    ).toMatchObject({
+      kind: "mapped",
+      event: { type: "tool.completed", payload: { outcome: "unknown" } },
+    });
+  });
+
   it("maps native Pi compaction without exposing its summary", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });

@@ -8,6 +8,11 @@ import type { SupervisorEventSpool } from "./in-memory-event-spool.ts";
 
 export type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;
 
+export type DurableEventBarrierReceipt = Readonly<{
+  sessionId: string;
+  acknowledgedThroughSeq: number;
+}>;
+
 export type BatchedEventPublisherOptions = {
   publish(message: SupervisorEventPublication): Promise<EventAckMessage> | EventAckMessage;
   spool: SupervisorEventSpool;
@@ -130,6 +135,24 @@ export class BatchedEventPublisher {
     } finally {
       this.#draining = false;
     }
+  }
+
+  /**
+   * The Supervisor must cross this barrier before resolving the Run to the
+   * Control Plane, which is then allowed to commit the public terminal event.
+   */
+  async drainToDurableBarrier(): Promise<DurableEventBarrierReceipt> {
+    await this.drain();
+    if (
+      this.#spool.pendingCount !== 0 ||
+      this.#spool.acknowledgedThroughSeq !== this.#spool.highestProducedSeq
+    ) {
+      throw new Error("Durable event barrier was not contiguous");
+    }
+    return Object.freeze({
+      sessionId: this.#spool.sessionId,
+      acknowledgedThroughSeq: this.#spool.acknowledgedThroughSeq,
+    });
   }
 
   #schedule(): void {

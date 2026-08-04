@@ -559,7 +559,7 @@ export class DurableEventStore implements DurableEventIngestor {
         tool_call_id: event.payload.toolCallId,
         command,
         suite: testInvocation.suite,
-        status: event.payload.isError ? "failed" : "passed",
+        status: event.payload.outcome === "completed" ? "passed" : "failed",
         exit_code: null,
         duration_ms: Math.min(durationMs, 86_400_000),
         summary,

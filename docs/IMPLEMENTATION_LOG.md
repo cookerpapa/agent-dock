@@ -7,6 +7,29 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-04 — Cloud Step 与可恢复 Tool 执行合同
+
+- 将每个 RunAttempt 接受的模型、环境、预算、Workspace 基线和 Tool/网络
+  策略冻结成无凭据 `CloudStepContext`，以规范化 SHA-256 同时约束 Sandbox
+  reservation 和每次 Tool 调用；Step 漂移在创建 VM 前失败。
+- 将 `operationId` 从一次 HTTP 请求提升为一次 Tool 执行身份。Manager 与
+  Cube Tool service 保存容量有界、短时驻留的 operation ledger；链路断开只
+  能用相同 ID 和相同请求重附着，不会再次启动 Bash。若执行账本或 VM 丢失，
+  则显式产生 `UNKNOWN` 并销毁不确定环境。
+- Bash 将 stdout/stderr 按观察顺序编号并对重建字节计算摘要；可信适配器在
+  输出进入 Pi 上下文前验证连续序号和 SHA-256。前端将不确定 Tool 与普通失败
+  分开展示，且不提供自动 Shell 重试。
+- Supervisor 在返回 prepared result 前必须取得 durable event barrier receipt，
+  证明本地 spool 已清空且累计 ACK 到达最高已产生序号；公共终态仍由 Control
+  Plane 在 Run、Checkpoint、Workspace head 的同一 PostgreSQL 事务中写入。
+- 用类型化、版本化 `agent-dock.runtime_world_state` 替代旧的松散 Sandbox
+  marker，保存 Sandbox 连续性、环境、Workspace revision 和 Tool policy 等
+  模型判断相关事实；只有真实丢失活跃进程环境时才写入最小
+  `<sandbox_reset>`。
+- 定向验证覆盖 Step 摘要稳定性/无凭据、Step mismatch、同操作并发附着、
+  断线后成功重附着、重附着失败后的 UNKNOWN/销毁、有序输出、终态 barrier、
+  Pi Compaction/跨 Worker continuity 和前端 UNKNOWN 投影。
+
 ## 2026-08-01 — 一键自托管部署
 
 - 增加 `./install.sh`，面向启用了 systemd/KVM 的 Debian/Ubuntu Linux 与

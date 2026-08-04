@@ -41,6 +41,7 @@ import type {
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extension.ts";
+import { createCloudStepContext } from "./cloud-step-context.ts";
 
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -325,6 +326,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     const projectInstructions = projectInstructionsFromSnapshot(
       loadedCheckpoint?.workspace ?? workspaceSeed,
     );
+    const cloudStep = createCloudStepContext(command, loadedCheckpoint?.workspaceRevision);
 
     const usesEmbeddedFake =
       command.payload.model.provider === "agent-dock-fake" &&
@@ -395,6 +397,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         type: "tool_sandbox.create",
         requestId: this.#idGenerator(),
         assignment: toolAssignment,
+        stepContextSha256: cloudStep.sha256,
         environment: command.payload.environment,
         workspaceSeed:
           workspaceSeed === undefined
@@ -583,6 +586,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         sandboxContinuity: {
           activationId: activeSandbox.activationId,
           continuity: activeSandbox.continuity,
+          environmentSha256: cloudStep.environmentSha256,
+          committedWorkspaceRevision: loadedCheckpoint?.workspaceRevision ?? null,
+          toolPolicySha256: cloudStep.toolPolicySha256,
         },
         onSettled,
         onInterrupted,
@@ -614,6 +620,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             operationUrl: this.#manager.operationUrl,
             activationId: activeSandbox.activationId,
             capability: activeSandbox.capability,
+            stepContextSha256: cloudStep.sha256,
             remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
             maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
             toolOutputDirectory,

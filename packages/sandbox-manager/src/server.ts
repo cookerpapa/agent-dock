@@ -436,8 +436,6 @@ export class SandboxManagerServer {
         } satisfies InternalServiceError);
         return;
       }
-      const controller = new AbortController();
-      request.raw.once("aborted", () => controller.abort());
       try {
         const message = parseToolSandboxOperationRequest(request.body);
         const response = await this.#observed({
@@ -445,7 +443,9 @@ export class SandboxManagerServer {
           spanName: `tool.${message.operation}`,
           operation: message.operation,
           kind: "tool",
-          run: () => this.#manager.execute(capability, message, controller.signal),
+          // Tool execution is owned by operationId and the Run lease, not by
+          // this particular HTTP connection. Explicit stop/cancel revokes it.
+          run: () => this.#manager.execute(capability, message),
         });
         this.#metrics?.sandboxActive.set(
           { provider: this.#manager.providerId },

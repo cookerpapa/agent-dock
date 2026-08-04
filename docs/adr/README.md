@@ -38,6 +38,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
   trusted Workspace/Git metadata, exact-command Activities, optional
   observability, the Worker WAL, steer, the Control Channel and interrupted Pi
   checkpoints.
+- [ADR-0080](0080-cloud-step-and-recoverable-tool-execution.md) freezes the
+  accepted execution view, makes Tool operations reconnectable by identity,
+  orders command output and makes the terminal delivery barrier explicit.
 
 ## Maintained optional modules
 
