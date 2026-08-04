@@ -10,17 +10,31 @@ FROM ${NODE_BASE_IMAGE} AS node-runtime
 FROM ${CUBE_BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
+# Cube's base image uses the global Ubuntu archive, which is pathologically
+# slow from GitHub-hosted Azure runners. This official mirror serves the same
+# signed Ubuntu repository metadata and remains overrideable for self-hosters.
+ARG AGENT_DOCK_UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     set -eu; \
     rm -f /etc/apt/apt.conf.d/docker-clean; \
+    sed -i \
+      -e "s|http://archive.ubuntu.com/ubuntu|${AGENT_DOCK_UBUNTU_MIRROR}|g" \
+      -e "s|http://security.ubuntu.com/ubuntu|${AGENT_DOCK_UBUNTU_MIRROR}|g" \
+      /etc/apt/sources.list; \
     packages="bash ca-certificates git openjdk-17-jdk-headless util-linux"; \
     installed=0; \
     attempt=1; \
-    while [ "$attempt" -le 5 ]; do \
-      if apt-get -o Acquire::Retries=10 update \
-        && apt-get -o Acquire::Retries=10 install --yes --no-install-recommends $packages; then \
+    while [ "$attempt" -le 3 ]; do \
+      if apt-get \
+          -o Acquire::Retries=3 \
+          -o Acquire::http::Timeout=30 \
+          update \
+        && apt-get \
+          -o Acquire::Retries=3 \
+          -o Acquire::http::Timeout=30 \
+          install --yes --no-install-recommends $packages; then \
         installed=1; \
         break; \
       fi; \
