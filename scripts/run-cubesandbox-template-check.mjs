@@ -114,14 +114,28 @@ async function waitUntilReady(baseUrl) {
   throw new Error(`Cube Tool service did not become ready: ${String(lastError)}`);
 }
 
+const templateStepContextSha256 = createHash("sha256")
+  .update("agent-dock-template-check-step-context", "utf8")
+  .digest("hex");
+
 function operationEnvelope(activationId, operationId, operation) {
   return {
     managerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId,
     operationId,
+    stepContextSha256: templateStepContextSha256,
     ...operation,
   };
+}
+
+function bashOutput(response) {
+  if (response.type !== "tool_sandbox.operation_result" || response.operation !== "bash.exec") {
+    return "";
+  }
+  return Buffer.concat(
+    response.outputChunks.map((chunk) => Buffer.from(chunk.data, "base64")),
+  ).toString("utf8");
 }
 
 let started = false;
@@ -243,10 +257,7 @@ try {
       timeoutMs: 10_000,
     }),
   );
-  const pythonTlsOutput =
-    pythonTls.type === "tool_sandbox.operation_result" && pythonTls.operation === "bash.exec"
-      ? Buffer.from(pythonTls.output, "base64").toString("utf8")
-      : "";
+  const pythonTlsOutput = bashOutput(pythonTls);
   assert(
     pythonTls.exitCode === 0 && /^OpenSSL 3\./.test(pythonTlsOutput),
     "Python TLS support was not usable inside the Cube template",
@@ -288,10 +299,7 @@ try {
       timeoutMs: 10_000,
     }),
   );
-  const output =
-    executed.type === "tool_sandbox.operation_result" && executed.operation === "bash.exec"
-      ? Buffer.from(executed.output, "base64").toString("utf8")
-      : "";
+  const output = bashOutput(executed);
   assert(executed.exitCode === 0 && output === "counting-sort-ok\n", "Python test failed");
 
   const envdProbeProgram =
@@ -311,10 +319,7 @@ try {
       timeoutMs: 5_000,
     }),
   );
-  const envdProbeOutput =
-    envdProbe.type === "tool_sandbox.operation_result" && envdProbe.operation === "bash.exec"
-      ? Buffer.from(envdProbe.output, "base64").toString("utf8")
-      : "";
+  const envdProbeOutput = bashOutput(envdProbe);
   assert(
     envdProbe.exitCode === 0 && envdProbeOutput === "envd-absent",
     "An unmediated envd service was reachable",
@@ -370,7 +375,7 @@ try {
     }),
   );
   assert(background.exitCode === 0, "Background-process fixture did not start");
-  const backgroundPid = Number(Buffer.from(background.output, "base64").toString("utf8").trim());
+  const backgroundPid = Number(bashOutput(background).trim());
   assert(Number.isSafeInteger(backgroundPid) && backgroundPid > 1, "Background PID was invalid");
   const previousAuthority = currentAuthority;
   const recoveryAuthority = {
@@ -462,8 +467,7 @@ try {
     }),
   );
   assert(
-    backgroundPreserved.exitCode === 0 &&
-      Buffer.from(backgroundPreserved.output, "base64").toString("utf8") === "background-alive",
+    backgroundPreserved.exitCode === 0 && bashOutput(backgroundPreserved) === "background-alive",
     "Session background process did not survive checkpoint and rebind",
   );
 
