@@ -118,7 +118,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     type: Type.Literal("tool_sandbox.create"),
     requestId: UuidSchema,
     assignment: ToolSandboxAssignmentSchema,
-    stepContextSha256: Sha256Schema,
+    executionContextSha256: Sha256Schema,
     environment: EnvironmentRuntimeSnapshotSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
@@ -303,6 +303,8 @@ const OperationEnvelope = {
   type: Type.Literal("tool_sandbox.operation"),
   activationId: UuidSchema,
   operationId: UuidSchema,
+  executionContextSha256: Sha256Schema,
+  stepContextSequence: PositiveSafeIntegerSchema,
   stepContextSha256: Sha256Schema,
 };
 

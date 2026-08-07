@@ -41,7 +41,8 @@ export type ToolSandboxManagerOptions = {
 
 type ManagedActivation = {
   assignment: ToolSandboxAssignment;
-  stepContextSha256: string;
+  executionContextSha256: string;
+  currentStep?: Readonly<{ sequence: number; sha256: string }>;
   capabilityDigest: Buffer;
   spec: Parameters<SandboxProvider["create"]>[0];
   handle?: SandboxHandle;
@@ -347,7 +348,7 @@ export class ToolSandboxManager {
     } as const;
     this.#activations.set(activationId, {
       assignment: request.assignment,
-      stepContextSha256: request.stepContextSha256,
+      executionContextSha256: request.executionContextSha256,
       capabilityDigest: capabilityDigest(capability),
       spec,
       ...(inherited === undefined ? {} : { handle: inherited.handle }),
@@ -372,10 +373,10 @@ export class ToolSandboxManager {
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
-    if (request.stepContextSha256 !== activation.stepContextSha256) {
+    if (request.executionContextSha256 !== activation.executionContextSha256) {
       throw new SandboxManagerError(
-        "step_context_mismatch",
-        "Tool operation did not match the frozen Cloud Step",
+        "execution_context_mismatch",
+        "Tool operation did not match the frozen Cloud execution context",
         false,
       );
     }
@@ -388,6 +389,22 @@ export class ToolSandboxManager {
       throw new SandboxManagerError(
         "tool_operation_identity_conflict",
         "Tool operation ID was reused for a different request",
+        false,
+      );
+    }
+    const currentStep = activation.currentStep;
+    if (currentStep === undefined || request.stepContextSequence > currentStep.sequence) {
+      activation.currentStep = {
+        sequence: request.stepContextSequence,
+        sha256: request.stepContextSha256,
+      };
+    } else if (
+      request.stepContextSequence < currentStep.sequence ||
+      request.stepContextSha256 !== currentStep.sha256
+    ) {
+      throw new SandboxManagerError(
+        "step_context_mismatch",
+        "Tool operation used a stale or conflicting Cloud Step",
         false,
       );
     }

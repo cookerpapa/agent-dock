@@ -48,7 +48,7 @@ Every activation binds:
 - Supervisor boot;
 - command, lease and fencing token;
 - environment image/specification hash.
-- frozen Cloud Step digest.
+- frozen RunAttempt execution digest and current per-sampling Step digest.
 
 The Manager derives runtime identity. The model, browser and Pi Tool arguments
 cannot supply a runtime ID or weaken policy.

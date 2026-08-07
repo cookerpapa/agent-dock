@@ -75,7 +75,7 @@ const createRequest: ToolSandboxCreateRequest = {
   type: "tool_sandbox.create",
   requestId: "10000000-0000-4000-8000-000000000011",
   assignment,
-  stepContextSha256: STEP_CONTEXT_SHA256,
+  executionContextSha256: STEP_CONTEXT_SHA256,
   environment,
   workspaceSeed: { kind: "sample_java" },
 };
@@ -189,6 +189,8 @@ function operation(
     type: "tool_sandbox.operation",
     activationId: ACTIVATION_ID,
     operationId,
+    executionContextSha256: STEP_CONTEXT_SHA256,
+    stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
     command: "pwd",
@@ -220,9 +222,9 @@ describe("provider-backed Tool Sandbox Manager", () => {
     await expect(
       manager.execute(CAPABILITY, {
         ...operation("10000000-0000-4000-8000-000000000011"),
-        stepContextSha256: "b".repeat(64),
+        executionContextSha256: "b".repeat(64),
       }),
-    ).rejects.toMatchObject({ code: "step_context_mismatch" });
+    ).rejects.toMatchObject({ code: "execution_context_mismatch" });
     expect(fixture.createSpec).toBeUndefined();
 
     await expect(
@@ -246,6 +248,25 @@ describe("provider-backed Tool Sandbox Manager", () => {
       manager.execute(CAPABILITY, { ...request, command: "whoami" }),
     ).rejects.toMatchObject({ code: "tool_operation_identity_conflict" });
     expect(fixture.exec).toHaveBeenCalledTimes(1);
+
+    const secondStep = {
+      ...operation("10000000-0000-4000-8000-000000000018"),
+      stepContextSequence: 2,
+      stepContextSha256: "b".repeat(64),
+    };
+    await expect(manager.execute(CAPABILITY, secondStep)).resolves.toMatchObject({ exitCode: 0 });
+    await expect(manager.execute(CAPABILITY, request)).resolves.toMatchObject({ exitCode: 0 });
+    await expect(
+      manager.execute(CAPABILITY, operation("10000000-0000-4000-8000-000000000019")),
+    ).rejects.toMatchObject({ code: "step_context_mismatch" });
+    await expect(
+      manager.execute(CAPABILITY, {
+        ...secondStep,
+        operationId: "10000000-0000-4000-8000-000000000020",
+        stepContextSha256: "c".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "step_context_mismatch" });
+    expect(fixture.exec).toHaveBeenCalledTimes(2);
 
     await expect(manager.inspect(ACTIVATION_ID, assignment)).resolves.toMatchObject({
       state: "running",

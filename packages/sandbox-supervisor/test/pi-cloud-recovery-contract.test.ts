@@ -7,8 +7,7 @@ import {
   appendPiInterruption,
   PI_INTERRUPTION_CUSTOM_TYPE,
   PI_SANDBOX_RESET_CUSTOM_TYPE,
-  preparePiSandboxContinuity,
-  recordPiSandboxActive,
+  PiStepWorldStateController,
 } from "../src/index.ts";
 
 const FIRST_ACTIVATION = "10000000-0000-4000-8000-000000000001";
@@ -50,8 +49,14 @@ describe("Pi cloud recovery contract", () => {
         attemptId: "internal-attempt-id",
         timestamp: Date.now(),
       });
-      recordPiSandboxActive(source, continuity(FIRST_ACTIVATION, "warm_reuse"));
-      preparePiSandboxContinuity(source, continuity(SECOND_ACTIVATION, "cold_restore"));
+      new PiStepWorldStateController(
+        source,
+        continuity(FIRST_ACTIVATION, "cold_restore"),
+      ).recordActive();
+      new PiStepWorldStateController(
+        source,
+        continuity(SECOND_ACTIVATION, "cold_restore"),
+      ).capture();
       source.appendMessage({
         role: "user",
         content: [{ type: "text", text: "Continue on the replacement Worker." }],
@@ -92,9 +97,18 @@ describe("Pi cloud recovery contract", () => {
       expect(context).not.toContain(FIRST_ACTIVATION);
       expect(context).not.toContain(SECOND_ACTIVATION);
 
-      preparePiSandboxContinuity(restored, continuity(SECOND_ACTIVATION, "cold_restore"));
-      recordPiSandboxActive(restored, continuity(SECOND_ACTIVATION, "warm_reuse"));
-      preparePiSandboxContinuity(restored, continuity(SECOND_ACTIVATION, "warm_reuse"));
+      new PiStepWorldStateController(
+        restored,
+        continuity(SECOND_ACTIVATION, "cold_restore"),
+      ).capture();
+      new PiStepWorldStateController(
+        restored,
+        continuity(SECOND_ACTIVATION, "cold_restore"),
+      ).recordActive();
+      new PiStepWorldStateController(
+        restored,
+        continuity(SECOND_ACTIVATION, "warm_reuse"),
+      ).capture();
       const repeatedContext = JSON.stringify(convertToLlm(restored.buildSessionContext().messages));
       expect(occurrences(repeatedContext, "<turn_aborted>")).toBe(1);
       expect(occurrences(repeatedContext, "<sandbox_reset>")).toBe(1);

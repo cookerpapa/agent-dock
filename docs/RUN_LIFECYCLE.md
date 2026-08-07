@@ -56,7 +56,7 @@ instead of blindly replaying commands.
    `deferred`; the Workflow waits on a durable timer.
 4. The selected Supervisor acquires the lease/fence and commits
    `ACKNOWLEDGED/RUNNING` before starting Pi.
-5. Trusted Runner freezes one credential-free Cloud Step containing accepted
+5. Trusted Runner freezes one credential-free execution context containing accepted
    identity, model, environment, budget, Workspace revision and Tool/network
    policy, then durably advances the Attempt through restore/run/checkpoint
    phases.
@@ -64,7 +64,10 @@ instead of blindly replaying commands.
    it does not create a microVM.
 7. Trusted Runner creates a pinned embedded Pi SDK session with only the fixed
    remote-tool implementation.
-8. The first actual Tool operation makes the Provider create/restore/attest the
+8. Pi's public `context` hook captures a fresh Cloud Step before every provider
+   request. All Tools emitted by that response carry its sequence and digest;
+   the Manager rejects stale or conflicting Step bindings.
+9. The first actual Tool operation makes the Provider create/restore/attest the
    Cube KVM microVM. Before the first repository command, the worker verifies the
    accepted image revision and expected Node.js/Java/Python/Git toolchain, then
    executes the accepted environment version's bounded setup and verification
@@ -96,7 +99,8 @@ falling back to the active version.
 
 Pi's Agent Loop and conversation state remain trusted. `read/write/edit/bash`
 cross Tool RPC. The Manager validates the activation capability and unique
-operation ID plus frozen Cloud Step digest before the Provider sends a closed
+operation ID plus the frozen execution digest and current sampling-Step digest
+before the Provider sends a closed
 worker request. An operation ID names one execution. A reconnect with the same
 request attaches to its running or retained result; changed reuse is rejected.
 The guest sequences stdout/stderr observations and signs the reconstructed

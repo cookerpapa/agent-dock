@@ -4,7 +4,7 @@ import {
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import { describe, expect, it } from "vitest";
-import { createCloudStepContext } from "../src/index.ts";
+import { createCloudExecutionContext, createCloudStepContext } from "../src/index.ts";
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -47,11 +47,11 @@ const command: ExecuteTurnCommandMessage = {
   },
 };
 
-describe("CloudStepContext", () => {
+describe("Cloud execution and sampling Step contexts", () => {
   it("freezes and hashes the exact accepted execution view without credentials", () => {
-    const first = createCloudStepContext(command, "c".repeat(64));
-    const repeated = createCloudStepContext(command, "c".repeat(64));
-    const changedWorkspace = createCloudStepContext(command, "d".repeat(64));
+    const first = createCloudExecutionContext(command, "c".repeat(64));
+    const repeated = createCloudExecutionContext(command, "c".repeat(64));
+    const changedWorkspace = createCloudExecutionContext(command, "d".repeat(64));
 
     expect(first.sha256).toBe(repeated.sha256);
     expect(first.sha256).not.toBe(changedWorkspace.sha256);
@@ -60,5 +60,32 @@ describe("CloudStepContext", () => {
     expect(first.context.tools.names).toEqual(["read", "write", "edit", "bash"]);
     expect(JSON.stringify(first.context)).not.toContain("apiKey");
     expect(JSON.stringify(first.context)).not.toContain("capability");
+  });
+
+  it("captures a distinct immutable Step for every provider request", () => {
+    const execution = createCloudExecutionContext(command, "c".repeat(64));
+    const worldState = {
+      sandbox: { status: "active" as const, continuitySha256: "e".repeat(64) },
+      environmentSha256: execution.environmentSha256,
+      committedWorkspaceRevision: "c".repeat(64),
+      toolPolicySha256: execution.toolPolicySha256,
+    };
+    const first = createCloudStepContext({
+      sequence: 1,
+      executionContextSha256: execution.sha256,
+      activeTools: ["read", "write", "edit", "bash"],
+      worldState,
+    });
+    const second = createCloudStepContext({
+      sequence: 2,
+      executionContextSha256: execution.sha256,
+      activeTools: ["read", "write", "edit", "bash"],
+      worldState,
+    });
+
+    expect(first.sha256).not.toBe(second.sha256);
+    expect(first.context.executionContextSha256).toBe(execution.sha256);
+    expect(first.context.activeTools).toEqual(["bash", "edit", "read", "write"]);
+    expect(Object.isFrozen(first.context.worldState)).toBe(true);
   });
 });

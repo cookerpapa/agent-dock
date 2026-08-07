@@ -175,7 +175,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000011",
       assignment,
-      stepContextSha256: STEP_CONTEXT_SHA256,
+      executionContextSha256: STEP_CONTEXT_SHA256,
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
@@ -206,6 +206,8 @@ describe("Sandbox Manager authenticated RPC", () => {
       type: "tool_sandbox.operation",
       activationId: ACTIVATION_ID,
       operationId: "10000000-0000-4000-8000-000000000012",
+      executionContextSha256: STEP_CONTEXT_SHA256,
+      stepContextSequence: 1,
       stepContextSha256: STEP_CONTEXT_SHA256,
       operation: "bash.exec",
       command: "pwd",

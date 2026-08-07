@@ -29,6 +29,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Freeze each accepted execution view, bind Tool RPC to its digest, recover
       short transport disconnects by operation identity, order Bash output and
       require an explicit durable event barrier before terminal settlement.
+- [x] Capture a fresh Step before every Pi provider request, reject stale Tool
+      Steps and preserve minimal environment/Sandbox/policy deltas through Pi
+      Compaction and fresh-Worker restore.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,

@@ -7,10 +7,29 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-07 — 逐模型请求的 Cloud Step 与 WorldState
+
+- 将 RunAttempt 级冻结对象明确为 `CloudExecutionContext`；它继续承载租约、
+  Fence、模型、预算、环境、Workspace 基线和 Tool/网络策略，是 Sandbox
+  reservation 的稳定执行合同。
+- 利用 Pi 公开的 `context` extension hook，在每次 provider request 前捕获
+  一个新的 `CloudStepContext`。同一模型响应产生的所有 Tool Call 共享该
+  Step 的递增序号和摘要；Manager 拒绝旧序号或同序号不同摘要。
+- 将 `agent-dock.runtime_world_state` 升级为逐 Step 比较的类型化基线。只在
+  Cube 活跃进程环境丢失、执行环境变化或 Tool/网络策略变化时写入最小的
+  model-visible custom message；Worker/Attempt/Activation/Fence 等内部身份不
+  进入模型上下文。
+- Cube 无法证明 Tool 结果并返回 `cubesandbox_tool_result_unknown` 时，先把
+  当前 WorldState 标为 unavailable；若 Pi 继续采样，下一次模型请求会立即
+  得到同一条最小 reset 事实。
+- 合同测试覆盖每次 context 重新捕获、Tool 绑定最新 Step、无 Step 先行失败、
+  stale/conflicting Step 拒绝、重复 context 不重复注入、Compaction 和全新
+  Worker 冷恢复。
+
 ## 2026-08-04 — Cloud Step 与可恢复 Tool 执行合同
 
 - 将每个 RunAttempt 接受的模型、环境、预算、Workspace 基线和 Tool/网络
-  策略冻结成无凭据 `CloudStepContext`，以规范化 SHA-256 同时约束 Sandbox
+  策略冻结成无凭据执行上下文，以规范化 SHA-256 同时约束 Sandbox
   reservation 和每次 Tool 调用；Step 漂移在创建 VM 前失败。
 - 将 `operationId` 从一次 HTTP 请求提升为一次 Tool 执行身份。Manager 与
   Cube Tool service 保存容量有界、短时驻留的 operation ledger；链路断开只

@@ -26,12 +26,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { appendPiInterruption } from "./pi-interrupted-session.ts";
 import { appendPiDurableRecovery } from "./pi-durable-recovery.ts";
-import {
-  preparePiSandboxContinuity,
-  recordPiSandboxActive,
-  recordPiSandboxUnavailable,
-  type PiSandboxContinuity,
-} from "./pi-sandbox-continuity.ts";
+import { PiStepWorldStateController, type PiSandboxContinuity } from "./pi-sandbox-continuity.ts";
 import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
 import {
@@ -55,7 +50,10 @@ export type PiSdkTurnRunnerOptions = {
   ) => Promise<PiModelRuntimeConfig> | PiModelRuntimeConfig;
   resolveWorkspaceDirectory: (command: ExecuteTurnCommandMessage) => Promise<string> | string;
   inlineExtensions?: readonly InlineExtension[];
-  createInlineExtensions?: (context: { toolOutputDirectory: string }) => readonly InlineExtension[];
+  createInlineExtensions?: (context: {
+    toolOutputDirectory: string;
+    stepWorldState: PiStepWorldStateController | undefined;
+  }) => readonly InlineExtension[];
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -349,6 +347,7 @@ export class PiSdkTurnRunner {
     let baseEntryIds = new Set<string>();
     let interruptedCheckpointCaptured = false;
     let sandboxToolStarted = false;
+    let stepWorldState: PiStepWorldStateController | undefined;
     const terminal = deferred<PiTurnResult>();
     void terminal.promise.catch(() => undefined);
 
@@ -390,9 +389,7 @@ export class PiSdkTurnRunner {
         attemptId: command.payload.attemptId,
         timestamp: validDate(this.#clock).valueOf(),
       });
-      if (sandboxToolStarted && this.#options.sandboxContinuity !== undefined) {
-        recordPiSandboxUnavailable(sessionManager, this.#options.sandboxContinuity);
-      }
+      if (sandboxToolStarted) stepWorldState?.recordUnavailable();
       const persistedSessionFile = sessionManager.getSessionFile();
       const piSession =
         persistedSessionFile === undefined
@@ -451,13 +448,7 @@ export class PiSdkTurnRunner {
       if (outcome.kind === "settled") {
         if (outcome.result.status === "completed") {
           if (this.#options.onSettled !== undefined) {
-            if (
-              sandboxToolStarted &&
-              sessionManager !== undefined &&
-              this.#options.sandboxContinuity !== undefined
-            ) {
-              recordPiSandboxActive(sessionManager, this.#options.sandboxContinuity);
-            }
+            if (sandboxToolStarted) stepWorldState?.recordActive();
             const persistedSessionFile = runtime?.session.sessionFile;
             const piSession =
               persistedSessionFile === undefined
@@ -613,7 +604,10 @@ export class PiSdkTurnRunner {
           resourceLoaderOptions: {
             extensionFactories: [
               ...(this.#options.inlineExtensions ??
-                this.#options.createInlineExtensions?.({ toolOutputDirectory }) ??
+                this.#options.createInlineExtensions?.({
+                  toolOutputDirectory,
+                  stepWorldState,
+                }) ??
                 []),
             ],
             noExtensions: true,
@@ -647,7 +641,10 @@ export class PiSdkTurnRunner {
         appendPiDurableRecovery(sessionManager, this.#options.recoverySuffix);
       }
       if (this.#options.sandboxContinuity !== undefined) {
-        preparePiSandboxContinuity(sessionManager, this.#options.sandboxContinuity);
+        stepWorldState = new PiStepWorldStateController(
+          sessionManager,
+          this.#options.sandboxContinuity,
+        );
       }
       baseEntryIds = new Set(sessionManager.getEntries().map((entry) => entry.id));
       runtime = await createAgentSessionRuntime(createRuntime, {

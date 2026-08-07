@@ -8,8 +8,14 @@ import {
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { PiSdkTurnRunner, PiTurnError } from "../src/index.ts";
+import {
+  createCloudExecutionContext,
+  createCloudStepContext,
+  PiSdkTurnRunner,
+  PiTurnError,
+} from "../src/index.ts";
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -127,6 +133,66 @@ describe("PiSdkTurnRunner integration", () => {
       expect(JSON.stringify(events)).not.toContain(FAKE_MODEL_API_KEY);
       expect(JSON.stringify(events)).not.toContain("Return the deterministic fake response.");
       expect(fakeModel.observations).toHaveLength(1);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("captures a distinct Cloud Step at each real Pi provider-request boundary", async () => {
+    const fakeModel = new FakeModelServer({ defaultScenario: "tool_call" });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-step-boundary-test-"));
+    const execution = createCloudExecutionContext(command, undefined);
+    const steps: string[] = [];
+    let sequence = 0;
+    const extension: InlineExtension = (pi) => {
+      pi.on("context", () => {
+        steps.push(
+          createCloudStepContext({
+            sequence: (sequence += 1),
+            executionContextSha256: execution.sha256,
+            activeTools: ["read", "write", "edit", "bash"],
+            worldState: {
+              sandbox: { status: "inactive", continuitySha256: null },
+              environmentSha256: execution.environmentSha256,
+              committedWorkspaceRevision: null,
+              toolPolicySha256: execution.toolPolicySha256,
+            },
+          }).sha256,
+        );
+      });
+      pi.registerTool({
+        name: "inspect_workspace",
+        label: "Inspect workspace",
+        description: "Deterministic provider-boundary test Tool",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+          additionalProperties: false,
+        } as never,
+        async execute() {
+          return { content: [{ type: "text", text: "workspace inspected" }], details: {} };
+        },
+      });
+    };
+    try {
+      await fakeModel.start();
+      await new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        inlineExtensions: [extension],
+      }).run(command, () => undefined);
+
+      expect(fakeModel.observations).toHaveLength(2);
+      expect(steps).toHaveLength(2);
+      expect(new Set(steps)).toHaveLength(2);
     } finally {
       await fakeModel.stop();
       await rm(workspace, { recursive: true, force: true });

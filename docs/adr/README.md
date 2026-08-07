@@ -41,6 +41,10 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0080](0080-cloud-step-and-recoverable-tool-execution.md) freezes the
   accepted execution view, makes Tool operations reconnectable by identity,
   orders command output and makes the terminal delivery barrier explicit.
+- [ADR-0081](0081-per-sampling-cloud-step-world-state.md) captures a fresh
+  credential-free Step before every Pi provider request, binds remote Tools to
+  that Step and projects only material execution-world deltas into model
+  context.
 
 ## Maintained optional modules
 

@@ -41,7 +41,7 @@ import type {
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extension.ts";
-import { createCloudStepContext } from "./cloud-step-context.ts";
+import { createCloudExecutionContext, createCloudStepContext } from "./cloud-step-context.ts";
 
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -326,7 +326,10 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     const projectInstructions = projectInstructionsFromSnapshot(
       loadedCheckpoint?.workspace ?? workspaceSeed,
     );
-    const cloudStep = createCloudStepContext(command, loadedCheckpoint?.workspaceRevision);
+    const cloudExecution = createCloudExecutionContext(
+      command,
+      loadedCheckpoint?.workspaceRevision,
+    );
 
     const usesEmbeddedFake =
       command.payload.model.provider === "agent-dock-fake" &&
@@ -397,7 +400,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         type: "tool_sandbox.create",
         requestId: this.#idGenerator(),
         assignment: toolAssignment,
-        stepContextSha256: cloudStep.sha256,
+        executionContextSha256: cloudExecution.sha256,
         environment: command.payload.environment,
         workspaceSeed:
           workspaceSeed === undefined
@@ -586,9 +589,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         sandboxContinuity: {
           activationId: activeSandbox.activationId,
           continuity: activeSandbox.continuity,
-          environmentSha256: cloudStep.environmentSha256,
+          environmentSha256: cloudExecution.environmentSha256,
           committedWorkspaceRevision: loadedCheckpoint?.workspaceRevision ?? null,
-          toolPolicySha256: cloudStep.toolPolicySha256,
+          toolPolicySha256: cloudExecution.toolPolicySha256,
         },
         onSettled,
         onInterrupted,
@@ -615,26 +618,48 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       };
       const runner = new PiSdkTurnRunner({
         ...commonRunnerOptions,
-        createInlineExtensions: ({ toolOutputDirectory }) => [
-          createTrustedRemoteToolsExtension({
-            operationUrl: this.#manager.operationUrl,
-            activationId: activeSandbox.activationId,
-            capability: activeSandbox.capability,
-            stepContextSha256: cloudStep.sha256,
-            remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
-            maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
-            toolOutputDirectory,
-            ...(projectInstructions === undefined ? {} : { projectInstructions }),
-            ...(downstreamTrace === undefined
-              ? {}
-              : {
-                  traceparent: downstreamTrace.traceparent,
-                  ...(downstreamTrace.tracestate === undefined
-                    ? {}
-                    : { tracestate: downstreamTrace.tracestate }),
-                }),
-          }),
-        ],
+        createInlineExtensions: ({ toolOutputDirectory, stepWorldState }) => {
+          if (stepWorldState === undefined) {
+            throw new PiTurnError(
+              "step_world_state_unavailable",
+              "Pi Step world state was not initialized",
+              false,
+            );
+          }
+          let stepSequence = 0;
+          return [
+            createTrustedRemoteToolsExtension({
+              operationUrl: this.#manager.operationUrl,
+              activationId: activeSandbox.activationId,
+              capability: activeSandbox.capability,
+              executionContextSha256: cloudExecution.sha256,
+              captureStepContext: (activeTools) => {
+                const captured = stepWorldState.capture();
+                const step = createCloudStepContext({
+                  sequence: (stepSequence += 1),
+                  executionContextSha256: cloudExecution.sha256,
+                  activeTools,
+                  worldState: captured.worldState,
+                });
+                return { step, modelMessages: captured.modelMessages };
+              },
+              onToolOperationStarted: () => stepWorldState.recordActive(),
+              onToolOperationUnavailable: () => stepWorldState.recordUnavailable(),
+              remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
+              maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+              toolOutputDirectory,
+              ...(projectInstructions === undefined ? {} : { projectInstructions }),
+              ...(downstreamTrace === undefined
+                ? {}
+                : {
+                    traceparent: downstreamTrace.traceparent,
+                    ...(downstreamTrace.tracestate === undefined
+                      ? {}
+                      : { tracestate: downstreamTrace.tracestate }),
+                  }),
+            }),
+          ];
+        },
         ...(this.#onPiSdkIsolationFailure === undefined
           ? {}
           : { onIsolationFailure: this.#onPiSdkIsolationFailure }),

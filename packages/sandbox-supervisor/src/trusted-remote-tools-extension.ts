@@ -21,6 +21,8 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve, sep } from "node:path";
+import type { FrozenCloudStep } from "./cloud-step-context.ts";
+import type { PiWorldStateModelMessage } from "./pi-sandbox-continuity.ts";
 
 const WORKSPACE_ROOT = "/workspace";
 const MAX_RESPONSE_BYTES = 5 * 1_024 * 1_024;
@@ -29,7 +31,13 @@ const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
   ? Omit<
       T,
-      "managerProtocolVersion" | "type" | "activationId" | "operationId" | "stepContextSha256"
+      | "managerProtocolVersion"
+      | "type"
+      | "activationId"
+      | "operationId"
+      | "executionContextSha256"
+      | "stepContextSequence"
+      | "stepContextSha256"
     >
   : never;
 
@@ -49,7 +57,13 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   operationUrl: string;
   activationId: string;
   capability: string;
-  stepContextSha256: string;
+  executionContextSha256: string;
+  captureStepContext: (activeTools: readonly string[]) => Readonly<{
+    step: FrozenCloudStep;
+    modelMessages: readonly PiWorldStateModelMessage[];
+  }>;
+  onToolOperationStarted?: () => void;
+  onToolOperationUnavailable?: () => void;
   remainingToolCalls: number;
   maximumToolOutputBytes: number;
   toolOutputDirectory: string;
@@ -74,7 +88,7 @@ function validateRuntimeConfiguration(
   }
   const activationId = candidate.activationId;
   const capability = candidate.capability;
-  const stepContextSha256 = candidate.stepContextSha256;
+  const executionContextSha256 = candidate.executionContextSha256;
   const remainingToolCalls = candidate.remainingToolCalls;
   const maximumToolOutputBytes = candidate.maximumToolOutputBytes;
   const configuredToolOutputDirectory = candidate.toolOutputDirectory;
@@ -87,7 +101,12 @@ function validateRuntimeConfiguration(
       activationId,
     ) ||
     !/^adts_[A-Za-z0-9_-]{43}$/.test(capability) ||
-    !/^[0-9a-f]{64}$/.test(stepContextSha256) ||
+    !/^[0-9a-f]{64}$/.test(executionContextSha256) ||
+    typeof candidate.captureStepContext !== "function" ||
+    (candidate.onToolOperationStarted !== undefined &&
+      typeof candidate.onToolOperationStarted !== "function") ||
+    (candidate.onToolOperationUnavailable !== undefined &&
+      typeof candidate.onToolOperationUnavailable !== "function") ||
     !Number.isSafeInteger(remainingToolCalls) ||
     remainingToolCalls < 0 ||
     remainingToolCalls > 10_000 ||
@@ -124,7 +143,14 @@ function validateRuntimeConfiguration(
     operationUrl: parsed.toString(),
     activationId,
     capability,
-    stepContextSha256,
+    executionContextSha256,
+    captureStepContext: candidate.captureStepContext,
+    ...(candidate.onToolOperationStarted === undefined
+      ? {}
+      : { onToolOperationStarted: candidate.onToolOperationStarted }),
+    ...(candidate.onToolOperationUnavailable === undefined
+      ? {}
+      : { onToolOperationUnavailable: candidate.onToolOperationUnavailable }),
     remainingToolCalls,
     maximumToolOutputBytes,
     toolOutputDirectory,
@@ -246,6 +272,42 @@ function registerTrustedRemoteTools(
   runtime: TrustedRemoteToolsRuntimeConfiguration,
 ): void {
   let remainingToolCalls = runtime.remainingToolCalls;
+  let currentStep: FrozenCloudStep | undefined;
+
+  pi.on("context", (event) => {
+    currentStep = undefined;
+    const captured = runtime.captureStepContext(pi.getActiveTools());
+    if (
+      captured.step.context.executionContextSha256 !== runtime.executionContextSha256 ||
+      !/^[0-9a-f]{64}$/.test(captured.step.sha256)
+    ) {
+      throw new Error("Captured Cloud Step did not match the accepted execution context");
+    }
+    currentStep = captured.step;
+    const messages = [...event.messages];
+    for (const message of captured.modelMessages) {
+      const alreadyPresent = messages.some(
+        (candidate) =>
+          candidate.role === "custom" &&
+          candidate.customType === message.customType &&
+          typeof candidate.details === "object" &&
+          candidate.details !== null &&
+          (candidate.details as { changeSha256?: unknown }).changeSha256 ===
+            message.details.changeSha256,
+      );
+      if (!alreadyPresent) {
+        messages.push({
+          role: "custom",
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    return { messages };
+  });
 
   const consumeToolCall = (): void => {
     if (remainingToolCalls < 1) {
@@ -258,12 +320,22 @@ function registerTrustedRemoteTools(
     request: RemoteOperationInput,
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> => {
+    if (currentStep === undefined) {
+      throw new RemoteToolError(
+        "step_context_unavailable",
+        "Tool call preceded its Pi context boundary",
+        false,
+      );
+    }
+    runtime.onToolOperationStarted?.();
     const candidate = {
       managerProtocolVersion: 1,
       type: "tool_sandbox.operation",
       activationId: runtime.activationId,
       operationId: randomUUID(),
-      stepContextSha256: runtime.stepContextSha256,
+      executionContextSha256: runtime.executionContextSha256,
+      stepContextSequence: currentStep.context.sequence,
+      stepContextSha256: currentStep.sha256,
       ...request,
     } as ToolSandboxOperationRequest;
     const requestOnce = async (): Promise<{ response: Response; value: unknown }> => {
@@ -296,6 +368,9 @@ function registerTrustedRemoteTools(
     if (!response.ok) {
       try {
         const failure = parseInternalServiceError(value).error;
+        if (failure.code === "cubesandbox_tool_result_unknown") {
+          runtime.onToolOperationUnavailable?.();
+        }
         throw new RemoteToolError(failure.code, failure.message, failure.retryable);
       } catch (error: unknown) {
         if (error instanceof RemoteToolError) throw error;
@@ -317,7 +392,12 @@ function registerTrustedRemoteTools(
         false,
       );
     }
-    if (parsed.type === "tool_sandbox.operation_failed") throwFailure(parsed);
+    if (parsed.type === "tool_sandbox.operation_failed") {
+      if (parsed.code === "cubesandbox_tool_result_unknown") {
+        runtime.onToolOperationUnavailable?.();
+      }
+      throwFailure(parsed);
+    }
     if (parsed.operation !== candidate.operation) {
       throw new RemoteToolError(
         "tool_protocol_error",

@@ -113,7 +113,8 @@ The Manager is the only application component that controls Cube. Its API is
 narrow and authenticated. It:
 
 - validates Tool leases and fencing tokens;
-- binds every reservation and operation to one frozen Cloud Step digest;
+- binds every reservation and operation to one frozen RunAttempt execution
+  digest, then admits monotonically advancing per-sampling Step digests;
 - maps a logical activation to one exact Cube microVM;
 - creates, rebinds, inspects, stops and destroys that runtime;
 - forwards bounded, identity-recoverable Tool requests;
@@ -234,8 +235,9 @@ Browser POST prompt
   → transactional relay starts deterministic Temporal Workflow
   → eligible Pi Worker
   → exact-command transactional admission creates RunAttempt/fence
-  → freeze model/environment/Workspace/policy as one Cloud Step
+  → freeze model/environment/Workspace/policy as one execution contract
   → Pi checkpoint restore
+  → capture a fresh Cloud Step before each model request
   → model stream
   → batched durable events + SSE
   → Pi native checkpoint commit
@@ -248,9 +250,10 @@ Cube is never contacted.
 ### Tool-using Run
 
 ```text
-Pi emits Tool Call
-  → Worker requests a Tool lease bound to the Cloud Step digest
-  → Sandbox Manager validates Attempt/fence/Step
+Pi context hook captures Step N and its semantic WorldState
+  → model emits Tool Call from Step N
+  → Worker sends execution digest + Step N sequence/digest
+  → Sandbox Manager validates Attempt/fence/execution contract and rejects stale Steps
   → ensure exact Session Cube activation
   → restore current Workspace if activation is cold
   → execute Tool in guest
@@ -367,6 +370,14 @@ The hidden state entry prevents the same loss from being announced on every
 pure-chat Run. A later Tool-using Run records the newly active Cube, allowing a
 future real replacement to produce a new one-time marker. Activation IDs and
 lifecycle reason codes remain outside model context.
+
+The Pi `context` extension hook runs immediately before every provider request.
+At that boundary AgentDock captures a new immutable Step containing the exact
+active remote Tool registry and current typed runtime world state. Consecutive
+identical states do not add Session entries. In addition to a lost active Cube,
+an environment-image change or Tool/network-policy change produces one short
+hidden custom message. Worker handoff alone is not model-visible when the same
+warm Cube remains continuous.
 
 ### Active steer
 

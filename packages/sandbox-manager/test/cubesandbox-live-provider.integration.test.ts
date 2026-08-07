@@ -168,7 +168,7 @@ function createRequest(
     type: "tool_sandbox.create",
     requestId: randomUUID(),
     assignment: assigned,
-    stepContextSha256: STEP_CONTEXT_SHA256,
+    executionContextSha256: STEP_CONTEXT_SHA256,
     environment: {
       environmentVersionId: randomUUID(),
       versionNumber: 1,
@@ -193,6 +193,8 @@ function operation(
     type: "tool_sandbox.operation",
     activationId,
     operationId: randomUUID(),
+    executionContextSha256: STEP_CONTEXT_SHA256,
+    stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
     command,

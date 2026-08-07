@@ -54,14 +54,17 @@ export {
 } from "./pi-interrupted-session.ts";
 export { appendPiDurableRecovery, PI_DURABLE_RECOVERY_CUSTOM_TYPE } from "./pi-durable-recovery.ts";
 export {
+  PI_ENVIRONMENT_CHANGED_CUSTOM_TYPE,
+  PI_ENVIRONMENT_CHANGED_MESSAGE,
   PI_SANDBOX_RESET_CUSTOM_TYPE,
   PI_SANDBOX_RESET_MESSAGE,
   PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE,
-  preparePiSandboxContinuity,
-  recordPiSandboxActive,
-  recordPiSandboxUnavailable,
+  PI_TOOL_POLICY_CHANGED_CUSTOM_TYPE,
+  PI_TOOL_POLICY_CHANGED_MESSAGE,
+  PiStepWorldStateController,
   type PiRuntimeWorldState,
   type PiSandboxContinuity,
+  type PiWorldStateModelMessage,
 } from "./pi-sandbox-continuity.ts";
 
 export {
@@ -76,11 +79,16 @@ export {
 } from "./trusted-remote-tools-extension.ts";
 
 export {
+  CLOUD_EXECUTION_CONTEXT_SCHEMA_VERSION,
   CLOUD_STEP_CONTEXT_SCHEMA_VERSION,
   REMOTE_TOOL_REGISTRY_VERSION,
   TOOL_NETWORK_POLICY_VERSION,
+  createCloudExecutionContext,
   createCloudStepContext,
+  type CloudExecutionContext,
   type CloudStepContext,
+  type CloudStepWorldState,
+  type FrozenCloudExecution,
   type FrozenCloudStep,
 } from "./cloud-step-context.ts";
 

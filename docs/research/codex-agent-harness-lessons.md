@@ -174,8 +174,8 @@ AgentDock 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Ag
 | Steer | 幂等 API、Worker Control Channel、Pi `steer()` | 已具备；需要继续验证跨重连顺序 |
 | Tool 身份与执行权限 | Tool Lease、Fencing Token、Cube KVM | 已具备，适合多 Worker 场景 |
 | 不确定 Tool 结果 | 后端可标记 `unknown` 并销毁不确定 Cube | 语义已具备，浏览器表达仍待补齐 |
-| Step 级一致请求快照 | RunAttempt/Fence 已有，尚无明确的模型-Step 配置快照 | 值得补齐，但不应侵入 Pi Agent Loop |
-| Typed World State diff | 目前只有中断和 Sandbox continuity 的定向实现 | 值得抽象为很小的运行时事实层 |
+| Step 级一致请求快照 | Pi `context` hook 逐 provider request 捕获，Tool RPC 携带递增 Step 序号/摘要 | 已具备，未修改 Pi Agent Loop |
+| Typed World State diff | Pi custom entry 保存类型化基线，仅渲染 Sandbox、环境和 Tool/网络策略的实质差量 | 已具备，内部身份不进入模型上下文 |
 | 效果感知的重试规则 | 多处分散约束“Shell 不可盲重放” | 应整理成统一矩阵与契约测试 |
 | Harness conformance test | 已有中断、恢复和 Tool 隔离测试 | 应补 Compaction、跨 Worker 与重试组合测试 |
 
@@ -197,7 +197,7 @@ AgentDock 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Ag
 `UNKNOWN` 不是普通失败。它表示“系统无法证明命令是否产生过副作用”。UI 应显示
 这一事实，并允许用户让 Agent 检查状态；不应提供自动 Retry 按钮。
 
-### P1：增加小型 Runtime World State 层
+### 已完成：小型 Runtime World State 层
 
 不要另造 Conversation Store。继续以 Pi custom entry 为持久化载体，只把少量会影响
 模型判断的运行事实做成有类型、有限、仅变化时注入的 fragment：
