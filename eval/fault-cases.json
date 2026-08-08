@@ -31,6 +31,27 @@
       "invariant": "A lost acknowledgement causes safe replay rather than event loss."
     },
     {
+      "id": "worker-process-sigkill-after-wal-sync",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/worker-process-fault.test.ts",
+      "test": "recovers a browser-visible event whose producing Worker was SIGKILLed after WAL fsync",
+      "invariant": "A real Worker process death after local WAL sync cannot erase the durable delivery suffix."
+    },
+    {
+      "id": "control-plane-process-sigkill",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/control-channel-process-fault.test.ts",
+      "test": "keeps an active assignment alive while the Control Plane process is killed and replaced",
+      "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop."
+    },
+    {
+      "id": "control-plane-recovery-ack-loss",
+      "workspace": "@agent-dock/sandbox-supervisor",
+      "file": "test/control-channel-process-fault.test.ts",
+      "test": "reconnects when an event recovery ACK is lost with the Control Plane process",
+      "invariant": "A Control Plane death with an in-flight recovery ACK cannot wedge Worker reconnection or discard the WAL suffix."
+    },
+    {
       "id": "corrupt-event-spool",
       "workspace": "@agent-dock/sandbox-supervisor",
       "file": "test/wal-event-spool.test.ts",

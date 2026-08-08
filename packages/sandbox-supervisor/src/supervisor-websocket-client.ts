@@ -72,6 +72,13 @@ export type SupervisorWebSocketClientOptions = {
   maxPayloadBytes?: number;
   maxPendingFrames?: number;
   maxBufferedSendBytes?: number;
+  /**
+   * A retryable Control Channel break is not an execution-ownership loss when
+   * the Run renews its PostgreSQL lease through the Temporal execution path.
+   * Standalone clients keep the historical fail-closed default; the
+   * reconnecting production client explicitly suspends transport revocation.
+   */
+  revokeRuntimeOnRetryableDisconnect?: boolean;
 };
 
 export type SupervisorWebSocketClientClose = {
@@ -235,6 +242,7 @@ export class SupervisorWebSocketClient {
   readonly #maxPayloadBytes: number;
   readonly #maxPendingFrames: number;
   readonly #maxBufferedSendBytes: number;
+  readonly #revokeRuntimeOnRetryableDisconnect: boolean;
   readonly #closedPromise: Promise<SupervisorWebSocketClientClose>;
   readonly #resolveClosed: (value: SupervisorWebSocketClientClose) => void;
   readonly #preparedCommands = new Map<string, RemotePreparedCommand>();
@@ -256,6 +264,7 @@ export class SupervisorWebSocketClient {
   #failureCode: string | undefined;
   #failureRetryable: boolean | undefined;
   #closedSettled = false;
+  #transportInvalidated = false;
   #runtimeRevoked = false;
 
   constructor(options: SupervisorWebSocketClientOptions) {
@@ -325,6 +334,7 @@ export class SupervisorWebSocketClient {
       options.maxBufferedSendBytes ?? this.#maxPayloadBytes,
       "maxBufferedSendBytes",
     );
+    this.#revokeRuntimeOnRetryableDisconnect = options.revokeRuntimeOnRetryableDisconnect ?? true;
     let resolveClosed!: (value: SupervisorWebSocketClientClose) => void;
     this.#closedPromise = new Promise((resolvePromise) => {
       resolveClosed = resolvePromise;
@@ -1034,7 +1044,10 @@ export class SupervisorWebSocketClient {
     this.#startReject = undefined;
     this.#state = "failing";
     this.#clearTimers();
-    this.#revokeRuntime(safeMessage);
+    this.#invalidateTransport(safeMessage);
+    if (!retryable || this.#revokeRuntimeOnRetryableDisconnect) {
+      this.#revokeRuntime(safeMessage);
+    }
     const socket = this.#socket;
     if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
       socket.close(retryable ? 1_011 : 1_002, "supervisor client failed");
@@ -1061,7 +1074,10 @@ export class SupervisorWebSocketClient {
       this.#startReject = undefined;
     }
     this.#clearTimers();
-    this.#revokeRuntime("Supervisor connection closed");
+    this.#invalidateTransport("Supervisor connection closed");
+    if (this.#initiatedClose || !retryable || this.#revokeRuntimeOnRetryableDisconnect) {
+      this.#revokeRuntime("Supervisor connection closed");
+    }
     this.#state = "closed";
     this.#settleClosed({
       initiatedByClient: this.#initiatedClose,
@@ -1075,6 +1091,13 @@ export class SupervisorWebSocketClient {
   #revokeRuntime(message: string): void {
     if (this.#runtimeRevoked) return;
     this.#runtimeRevoked = true;
+    this.#invalidateTransport(message);
+    this.#runtime.revokeAllAssignments();
+  }
+
+  #invalidateTransport(message: string): void {
+    if (this.#transportInvalidated) return;
+    this.#transportInvalidated = true;
     const error = new SupervisorWebSocketClientError(
       "event_transport_closed",
       message.slice(0, 4_096) || "Supervisor event transport closed",
@@ -1085,7 +1108,9 @@ export class SupervisorWebSocketClient {
       pending.reject(error);
     }
     this.#pendingEventAcknowledgements.clear();
-    this.#runtime.revokeAllAssignments();
+    for (const entry of this.#preparedCommands.values()) {
+      if (!entry.committed) entry.prepared.releaseBeforeStart();
+    }
     this.#preparedCommands.clear();
   }
 

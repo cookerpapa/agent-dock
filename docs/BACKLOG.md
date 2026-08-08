@@ -47,6 +47,9 @@ in the implementation log or Git history, not in the active backlog.
       multi-operation guest protocol proves a real benefit.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
+- [x] Add real process-level `SIGKILL` tests for Control Plane replacement and
+      Worker-WAL recovery; a retryable Control Channel gap no longer revokes a
+      healthy PostgreSQL-leased Agent Loop.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,
       POSIX volumes, Kopia snapshots, Pi checkpoints and quarantined Worker WALs.
 - [x] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
@@ -55,6 +58,9 @@ in the implementation log or Git history, not in the active backlog.
       restore latency without starving other task queues.
 - [ ] Publish a repeatable capacity report for Worker, Cube, PostgreSQL,
       Temporal and object-storage saturation.
+- [ ] Measure active concurrent streaming Sessions against PostgreSQL commit
+      rate, WAL bytes, connection-pool wait and SSE delivery lag before adding
+      an external event broker or terminal-delta retention compaction.
 
 ## Deployment
 

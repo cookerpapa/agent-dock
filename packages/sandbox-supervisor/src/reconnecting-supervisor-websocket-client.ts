@@ -81,6 +81,10 @@ function clientOptions(
     authorizationHeader: options.authorizationHeader,
     registration: options.registration,
     runtime: options.runtime,
+    // A retryable WebSocket break suspends only the management transport. The
+    // active Temporal execution independently renews its fenced PostgreSQL
+    // lease and may continue while this wrapper reconnects.
+    revokeRuntimeOnRetryableDisconnect: false,
   };
   if (options.clock !== undefined) result.clock = options.clock;
   if (options.idGenerator !== undefined) result.idGenerator = options.idGenerator;
@@ -240,6 +244,7 @@ export class ReconnectingSupervisorWebSocketClient {
     }
     this.#stopRequested = true;
     this.#state = "stopping";
+    this.#runtime.revokeAllAssignments();
     this.#cancelBackoff?.();
     await this.#current?.stop().catch(() => undefined);
     await this.#loopPromise;
@@ -273,21 +278,28 @@ export class ReconnectingSupervisorWebSocketClient {
       this.#lastClose = close;
       if (this.#current === connection) this.#current = undefined;
 
-      try {
-        await this.#waitForAssignmentTeardown();
-      } catch (error: unknown) {
-        const failure = safeFailure(error);
-        this.#terminalFailure(failure.code, failure.message);
-        return;
-      }
-
       if (this.#stopRequested) {
+        try {
+          await this.#waitForAssignmentTeardown();
+        } catch (error: unknown) {
+          const failure = safeFailure(error);
+          this.#terminalFailure(failure.code, failure.message);
+          return;
+        }
         this.#requestedStop();
         return;
       }
 
       const retryable = (startFailure?.retryable ?? true) && close.retryable;
       if (!retryable) {
+        this.#runtime.revokeAllAssignments();
+        try {
+          await this.#waitForAssignmentTeardown();
+        } catch (error: unknown) {
+          const failure = safeFailure(error);
+          this.#terminalFailure(failure.code, failure.message);
+          return;
+        }
         this.#terminalFailure(
           startFailure?.code ?? close.failureCode ?? "supervisor_connection_closed",
           startFailure?.message ?? "Supervisor connection closed permanently",

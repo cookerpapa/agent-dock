@@ -7,6 +7,7 @@ import type {
   AcceptedTurnCancellationResource,
   ConversationDetailResource,
   ControlPlaneApiError,
+  EventPublishBatchMessage,
   EventPublishMessage,
   ProjectResource,
   RunResource,
@@ -31,7 +32,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sql, type Kysely, type KyselyPlugin } from "kysely";
+import { sql, TableNode, type Kysely, type KyselyPlugin } from "kysely";
 import {
   RunCancellationExecutor,
   AssignmentReconciler,
@@ -78,6 +79,8 @@ const IDS = {
   notificationFallbackSandboxBoot: "60000000-0000-4000-8000-000000000010",
   notificationSandbox: "50000000-0000-4000-8000-000000000011",
   notificationSandboxBoot: "60000000-0000-4000-8000-000000000011",
+  batchSandbox: "50000000-0000-4000-8000-000000000013",
+  batchSandboxBoot: "60000000-0000-4000-8000-000000000013",
 };
 
 let pglite: PGlite | undefined;
@@ -2630,6 +2633,86 @@ describe.sequential("single-user durable turn intake API", () => {
       abort.abort();
       await secondApplication.close();
     }
+  });
+
+  it("persists a mixed redelivery and new streaming suffix with one set-based write", async () => {
+    const assigned = await createAssignedTurn({
+      sandboxId: IDS.batchSandbox,
+      sandboxBootId: IDS.batchSandboxBoot,
+      supervisorId: "batch-ingest-supervisor",
+      phase: "acknowledged",
+      expired: false,
+    });
+    const lease = assigned.runtime;
+    const occurredAt = new Date().toISOString();
+    const events = Array.from({ length: 48 }, (_, index) => ({
+      schemaVersion: 1 as const,
+      eventId: globalThis.crypto.randomUUID(),
+      sessionId: assigned.assignedSession.sessionId,
+      turnId: assigned.accepted.turnId,
+      agentId: "root",
+      seq: index + 1,
+      occurredAt,
+      type: "assistant.text.delta" as const,
+      payload: { text: `chunk-${String(index + 1)} ` },
+    }));
+    const batch = (selected: typeof events): EventPublishBatchMessage => ({
+      protocolVersion: 1,
+      messageId: globalThis.crypto.randomUUID(),
+      sentAt: occurredAt,
+      type: "event.publish_batch",
+      payload: {
+        commandId: assigned.accepted.commandId,
+        leaseId: lease.leaseId,
+        fencingToken: lease.fencingToken,
+        events: selected,
+      },
+    });
+    await expect(durableEventStore.ingest(batch(events.slice(0, 32)))).resolves.toMatchObject({
+      payload: { acknowledgedThroughSeq: 32 },
+    });
+
+    const writes = { events: 0, cursor: 0, session: 0 };
+    const countedDatabase = database.withPlugin({
+      transformQuery({ node }) {
+        if (
+          node.kind === "InsertQueryNode" &&
+          node.into?.kind === "TableNode" &&
+          node.into.table.identifier.name === "session_events"
+        ) {
+          writes.events += 1;
+        }
+        const updateTable = node.kind === "UpdateQueryNode" ? node.table : undefined;
+        if (updateTable !== undefined && TableNode.is(updateTable)) {
+          if (updateTable.table.identifier.name === "session_event_cursors") writes.cursor += 1;
+          if (updateTable.table.identifier.name === "sessions") writes.session += 1;
+        }
+        return node;
+      },
+      async transformResult({ result }) {
+        return result;
+      },
+    });
+    const countedStore = new DurableEventStore({ database: countedDatabase });
+    await expect(countedStore.ingest(batch(events.slice(16)))).resolves.toMatchObject({
+      payload: { acknowledgedThroughSeq: 48 },
+    });
+
+    expect(writes).toEqual({ events: 1, cursor: 1, session: 1 });
+    expect(
+      await database
+        .selectFrom("session_events")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("session_id", "=", assigned.assignedSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "48" });
+    expect(
+      await database
+        .selectFrom("session_event_cursors")
+        .select(["last_persisted_seq", "acknowledged_through_seq"])
+        .where("session_id", "=", assigned.assignedSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ last_persisted_seq: "48", acknowledged_through_seq: "48" });
   });
 
   it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(

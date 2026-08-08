@@ -3179,3 +3179,22 @@
   can emit parallel calls, but one Cube activation deliberately admits one
   cancellable operation; the production Tool registry therefore keeps explicit
   model-order serialization and records the contract in ADR-0085.
+
+# 2026-08-08 — Control Plane process continuity and committed stream batching
+
+- Separated retryable Worker Control Channel transport loss from durable Run
+  ownership. A healthy exact-command Temporal Activity now survives Control
+  Plane process replacement while direct PostgreSQL Lease renewal and Fencing
+  remain valid; explicit stop and terminal protocol/auth failures still revoke.
+- Added real child-process `SIGKILL` tests for Control Channel replacement and
+  Worker WAL recovery rather than relying only on mocked disconnects.
+- Reworked durable event batch ingestion into one set-based insert plus one
+  event-cursor and Session advance. Exact redelivery prefixes are validated in
+  bulk before only the new contiguous suffix is written.
+- Locked the public/context contract with tests: SSE-visible data originates
+  only from committed PostgreSQL rows, and hard-crash recovery places the exact
+  committed assistant text and Tool facts into Pi's effective next model
+  context without creating an application-owned `messages[]`.
+- Recorded the PostgreSQL group-commit, bounded Worker batching and event-broker
+  adoption decision in ADR-0087. Kafka/NATS remain deferred until a measured
+  PostgreSQL capacity limit justifies moving the single event authority.

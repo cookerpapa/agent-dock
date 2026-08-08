@@ -1,85 +1,103 @@
 {
   "format": "agent-dock.fault-eval-report.v1",
-  "generatedAt": "2026-08-01T05:14:38.264Z",
+  "generatedAt": "2026-08-08T08:40:32.207Z",
   "methodology": "deterministic_targeted_fault_injection",
   "liveChaosExperiment": false,
-  "caseCount": 12,
-  "successful": 12,
+  "caseCount": 15,
+  "successful": 15,
   "successRate": 1,
-  "p50DurationMs": 3695,
-  "p95DurationMs": 8442,
+  "p50DurationMs": 2653,
+  "p95DurationMs": 7231,
   "results": [
     {
       "id": "checkpoint-commit-failure",
       "success": true,
       "invariant": "A Run cannot become completed before its settled checkpoint commits.",
-      "durationMs": 3204
+      "durationMs": 2612
     },
     {
       "id": "duplicate-command",
       "success": true,
       "invariant": "At-least-once delivery does not execute the same command twice.",
-      "durationMs": 2999
+      "durationMs": 2454
     },
     {
       "id": "stale-fencing-token",
       "success": true,
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence.",
-      "durationMs": 3074
+      "durationMs": 2472
     },
     {
       "id": "event-ack-loss",
       "success": true,
       "invariant": "A lost acknowledgement causes safe replay rather than event loss.",
-      "durationMs": 3015
+      "durationMs": 2510
+    },
+    {
+      "id": "worker-process-sigkill-after-wal-sync",
+      "success": true,
+      "invariant": "A real Worker process death after local WAL sync cannot erase the durable delivery suffix.",
+      "durationMs": 1663
+    },
+    {
+      "id": "control-plane-process-sigkill",
+      "success": true,
+      "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop.",
+      "durationMs": 2369
+    },
+    {
+      "id": "control-plane-recovery-ack-loss",
+      "success": true,
+      "invariant": "A Control Plane death with an in-flight recovery ACK cannot wedge Worker reconnection or discard the WAL suffix.",
+      "durationMs": 2653
     },
     {
       "id": "corrupt-event-spool",
       "success": true,
       "invariant": "Corrupt durable events are rejected rather than silently skipped.",
-      "durationMs": 3153
+      "durationMs": 2577
     },
     {
       "id": "object-store-outage",
       "success": true,
       "invariant": "A temporary object-store outage remains retryable and does not expose credentials.",
-      "durationMs": 3695
+      "durationMs": 3539
     },
     {
       "id": "checkpoint-corruption-and-cas",
       "success": true,
       "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery.",
-      "durationMs": 7288
+      "durationMs": 6721
     },
     {
       "id": "cancel-complete-race",
       "success": true,
       "invariant": "Exactly one terminal Run outcome wins a cancel/complete race.",
-      "durationMs": 8442
+      "durationMs": 6572
     },
     {
       "id": "stale-dispatch-claim",
       "success": true,
       "invariant": "A superseded dispatcher cannot start external work.",
-      "durationMs": 8199
+      "durationMs": 6737
     },
     {
       "id": "orphan-runtime-cleanup",
       "success": true,
       "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated.",
-      "durationMs": 7404
+      "durationMs": 6530
     },
     {
       "id": "attempt-rewind-boundary",
       "success": true,
       "invariant": "Rewind restores the explicit committed bases, supersedes the old projection, and creates one idempotent replacement Run.",
-      "durationMs": 8039
+      "durationMs": 7231
     },
     {
       "id": "immutable-review-bundle",
       "success": true,
       "invariant": "A completed Run's content-verified Review Bundle cannot be updated or deleted.",
-      "durationMs": 4372
+      "durationMs": 3447
     }
   ]
 }

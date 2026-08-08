@@ -56,6 +56,11 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0085](0085-single-active-cube-tool-execution.md) preserves model order
   before Tool RPC because one Cube activation deliberately admits one
   cancellable operation at a time.
+- [ADR-0086](0086-reconnectable-worker-control-channel.md) lets healthy fenced
+  Runs survive a retryable Control Plane process replacement.
+- [ADR-0087](0087-committed-stream-batching-and-model-context.md) defines the
+  committed-before-visible stream, set-based batching and Pi-context recovery
+  contract.
 
 ## Maintained optional modules
 

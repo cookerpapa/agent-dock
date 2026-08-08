@@ -1,5 +1,5 @@
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { mkdtemp, rm } from "node:fs/promises";
+import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -48,6 +48,17 @@ function recoverySuffix(): PiDurableRecoverySuffix {
               firstSequence: 13,
               startedAt: "2026-07-29T10:00:00.000Z",
             },
+            {
+              kind: "tool",
+              toolCallId: "call-2",
+              toolName: "read",
+              input: { path: "/workspace/package.json" },
+              output: { content: '{"name":"agent-dock"}' },
+              status: "completed",
+              firstSequence: 14,
+              startedAt: "2026-07-29T10:00:01.000Z",
+              completedAt: "2026-07-29T10:00:01.100Z",
+            },
           ],
         },
       },
@@ -85,9 +96,15 @@ describe("Pi durable crash recovery", () => {
       expect(entry.content).not.toContain("checkpointThroughSequence");
       expect(entry.content).not.toContain("proactively establish");
       expect(entry.content).not.toContain("Do not blindly repeat");
-      expect(JSON.stringify(manager.buildSessionContext().messages)).toContain(
-        "user-visible events",
-      );
+      const modelContext = JSON.stringify(manager.buildSessionContext().messages);
+      expect(modelContext).toContain("user-visible events");
+      expect(modelContext).toContain("Continue the interrupted refactor.");
+      expect(modelContext).toContain("I started the refactor.");
+      expect(modelContext).toContain("npm test");
+      expect(modelContext).toContain("unknown");
+      expect(modelContext).toContain("/workspace/package.json");
+      expect(modelContext).toContain("agent-dock");
+      expect(modelContext.match(/I started the refactor\./g)).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -124,6 +141,52 @@ describe("Pi durable crash recovery", () => {
       expect(() => JSON.parse(content)).not.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the exact committed public suffix through Pi compaction and a fresh Worker", async () => {
+    const workerA = await mkdtemp(resolve(tmpdir(), "agent-dock-recovery-worker-a-"));
+    const workerB = await mkdtemp(resolve(tmpdir(), "agent-dock-recovery-worker-b-"));
+    try {
+      const source = SessionManager.create("/workspace", workerA);
+      source.appendMessage({
+        role: "user",
+        content: [{ type: "text", text: "Old context replaced by compaction." }],
+        timestamp: Date.now(),
+      });
+      appendPiDurableRecovery(source, recoverySuffix());
+      const recoveryEntry = source.getEntries().at(-1);
+      if (recoveryEntry?.type !== "custom_message") {
+        throw new Error("Durable recovery entry was not recorded");
+      }
+      source.appendMessage({
+        role: "user",
+        content: [{ type: "text", text: "Continue after failover." }],
+        timestamp: Date.now(),
+      });
+      source.appendCompaction("Earlier history was compacted.", recoveryEntry.id, 100_000, {
+        source: "durable-visible-context-contract",
+      });
+
+      const header = source.getHeader();
+      if (header === null) throw new Error("Pi Session header is missing");
+      const restoredFile = resolve(workerB, "session.jsonl");
+      await writeFile(
+        restoredFile,
+        `${[header, ...source.getEntries()].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      );
+      const restored = SessionManager.open(restoredFile, workerB, "/workspace");
+      const context = JSON.stringify(convertToLlm(restored.buildSessionContext().messages));
+      expect(context).not.toContain("Old context replaced by compaction.");
+      expect(context).toContain("Earlier history was compacted.");
+      expect(context).toContain("Continue the interrupted refactor.");
+      expect(context).toContain("I started the refactor.");
+      expect(context).toContain("npm test");
+      expect(context).toContain("agent-dock");
+      expect(context.match(/I started the refactor\./g)).toHaveLength(1);
+    } finally {
+      await rm(workerA, { recursive: true, force: true });
+      await rm(workerB, { recursive: true, force: true });
     }
   });
 });

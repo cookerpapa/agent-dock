@@ -101,6 +101,13 @@ matching starts exact-command execution on a Pi Worker, while cancellation
 travels through Temporal and the exact cancellation executor. Keeping those
 paths out of WebSocket removes the former duplicate execution authority.
 
+A retryable Control Channel break does not revoke an already running Temporal
+Activity. The Worker reconnects and re-registers while the active execution
+continues only under its direct PostgreSQL Lease heartbeat and existing fence.
+An explicit Worker shutdown, non-retryable protocol/authentication failure or
+lost durable Lease still fails closed. Active steer is unavailable during the
+transport gap.
+
 ### Model Gateway
 
 The trusted model gateway resolves the deployment-owned model configuration,
@@ -174,7 +181,10 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | streamed event log/high-water mark | PostgreSQL |
 | UI transcript projection | PostgreSQL-derived read model |
 
-The rendered browser transcript is not used to reconstruct Pi context.
+The rendered browser transcript is not used to reconstruct Pi context during
+normal execution. After an uncatchable Worker death, canonical PostgreSQL
+public semantics newer than the Pi checkpoint form one hidden Pi recovery
+entry; the browser's local rendering is never an authority.
 
 ## 4. Workspace and conversation model
 
@@ -349,8 +359,9 @@ A started Run that fails or is cancelled does not advance the Workspace head.
 The Worker does preserve Pi's native Session branch and appends a hidden,
 model-visible `agent-dock.run_interrupted` marker before storing an
 `pi_interrupted_session_snapshot`. If Pi failed before recording the accepted
-prompt, the Worker appends that user message first. It never converts streamed
-browser deltas into an assistant message.
+prompt, the Worker appends that user message first. In this catchable path it
+uses Pi-native assistant and Tool entries rather than converting browser deltas
+into a second assistant message.
 
 The next Run therefore restores:
 
@@ -431,9 +442,18 @@ and fence; reconnecting or stale Workers cannot apply it to another Attempt.
 
 ## 8. Event delivery
 
-Pi non-terminal events enter a bounded local queue. Adjacent text deltas are
-coalesced and published in ordered batches. PostgreSQL commits each batch with
-a unique `(run_id, attempt_no, seq)` identity and returns a cumulative ACK.
+Pi non-terminal events first enter a private append-only Worker WAL. The first
+text delta is flushed promptly; later adjacent deltas from the same content
+block are coalesced for at most 50 ms or 2 KiB. Tool/message/terminal boundaries
+flush pending text immediately. A bounded asynchronous publisher sends a
+contiguous batch after at most 20 ms, 64 events or 512 KiB.
+
+PostgreSQL validates an exact redelivery prefix in bulk, inserts the new suffix
+with one multi-row statement and advances the event cursor and Session once in
+the same synchronous transaction. It returns one cumulative ACK. Concurrent
+Session transactions benefit from PostgreSQL's native WAL group commit without
+an application-level cross-tenant coordinator. A unique event/sequence identity
+provides deduplication.
 The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
 its private `command.result` is only a prepared result.
 
@@ -455,9 +475,12 @@ SSE uses the same durable event table:
 - database notification is a wake-up hint only;
 - the table remains the truth if notification is lost.
 
-Final messages, Tool results and terminal state are strong-durability events.
-Intermediate streaming deltas can be reconstructed from the final semantic
-projection if a Worker node is lost before remote ACK.
+Only PostgreSQL-committed events reach SSE. A Worker-WAL-only event is not yet
+visible; after Worker replacement it is either replayed and committed or never
+shown. Public text and Tool facts that were already shown survive in the event
+log and semantic projection. Successful/catchable Runs preserve them in Pi's
+native Session; an uncatchable crash uses the bounded one-time recovery bridge
+described above so they also affect Pi's next effective model context.
 
 ## 9. Lease and fencing
 
@@ -563,6 +586,8 @@ not require changing the Worker execution contract.
 - [ADR-0083: Model sampling-attempt identity](adr/0083-model-sampling-attempt-identity.md)
 - [ADR-0084: Explicit bounded settlement gate](adr/0084-explicit-bounded-settlement-gate.md)
 - [ADR-0085: Single-active Cube Tool execution](adr/0085-single-active-cube-tool-execution.md)
+- [ADR-0086: Reconnectable Worker Control Channel](adr/0086-reconnectable-worker-control-channel.md)
+- [ADR-0087: Committed stream batching and Pi context](adr/0087-committed-stream-batching-and-model-context.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.

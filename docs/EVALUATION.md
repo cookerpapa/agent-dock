@@ -26,9 +26,37 @@ npm run eval:faults
 The manifest in `eval/fault-cases.json` targets checkpoint commit failure,
 duplicate delivery, stale fencing, ACK loss, corrupt spool, object-store
 outage, checkpoint corruption/CAS, cancel-complete race, stale dispatch claim,
-and orphan-runtime cleanup. Each case names the protected invariant. This is a
-deterministic fault suite; `npm run production:check` adds live container
+orphan-runtime cleanup, a real Worker `SIGKILL` after WAL sync and replacement
+of a `SIGKILL`ed Control Channel server. Each case names the protected
+invariant. The suite distinguishes process-level faults from simulated
+dependency failures; `npm run production:check` adds live container
 restart/reconnect evidence.
+
+## Streaming durability
+
+Streaming text is coalesced before it enters the Worker WAL, then delivered as
+contiguous batches with cumulative ACK. The Control Plane integration suite
+includes a mixed redelivery/new-suffix case and proves that one batch performs
+one event-table insert and one cursor/Session advance. SSE still reads only
+committed PostgreSQL rows, and Pi recovery tests prove that committed text and
+Tool facts appear in Pi's effective next model context after hard-crash
+recovery.
+
+This removes per-token transactions and per-event cursor updates. It is not yet
+a PostgreSQL saturation claim; the active-stream capacity experiment remains in
+the backlog and must measure transaction rate, WAL, pool wait and SSE lag on the
+deployment being described.
+
+For the end-to-end Control Plane boundary, deploy the current revision and run:
+
+```bash
+AGENT_DOCK_LIVE_CONTROL_PLANE_RESTART_CHECK=1 \
+  npm run production:control-plane-restart-check
+```
+
+The check starts one real-model streaming Run, sends `SIGKILL` to the Control
+Plane container after the first committed text event, starts a replacement and
+requires SSE replay plus terminal completion with the original single Attempt.
 
 ## Sandbox security
 
@@ -57,12 +85,12 @@ tenant policy, Supervisor capacity, memory, provider quota, and latency.
 
 ## Current reproduced result
 
-On 2026-07-20, the checked-in reports recorded:
+The checked-in reports currently record:
 
 - deterministic coding loop: 10/10 successful, concurrency 2, p50 9.168 s,
   p95 10.224 s;
-- targeted fault injection: 10/10 invariants preserved, p50 2.529 s, p95
-  5.762 s;
+- targeted fault injection (2026-08-08): 15/15 invariants preserved, including
+  real Worker and Control Plane process `SIGKILL` boundaries;
 - Control Plane load: 320/320 successful requests; at 100 simultaneous requests,
   Session creation was 114.20 requests/s with 831 ms p95, and reads were 236.81
   requests/s with 408 ms p95;

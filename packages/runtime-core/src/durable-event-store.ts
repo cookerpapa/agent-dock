@@ -12,7 +12,6 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
-import { materializeConversationTurnProjection } from "./conversation-turn-projection.ts";
 import { classifyStructuredTestCommand } from "./structured-test-command.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
@@ -210,13 +209,7 @@ export class DurableEventStore implements DurableEventIngestor {
     }
     const now = validDate(this.#clock);
     const result = await this.#database.transaction().execute(async (transaction) => {
-      let ingested: { tenantId: string; acknowledgedThroughSeq: number } | undefined;
-      for (const publication of publications) {
-        ingested = await this.#ingestTransaction(transaction, publication, now);
-      }
-      if (ingested === undefined) {
-        throw new DurableEventStoreError("invalid_event", "Event batch was empty");
-      }
+      const ingested = await this.#ingestBatchTransaction(transaction, publications, now);
       await this.#eventNotificationPublisher?.publish(transaction, {
         schemaVersion: 1,
         tenantId: ingested.tenantId,
@@ -339,16 +332,22 @@ export class DurableEventStore implements DurableEventIngestor {
     return rows.map((row) => eventFromRow(row));
   }
 
-  async #ingestTransaction(
+  async #ingestBatchTransaction(
     transaction: Transaction<Database>,
-    message: EventPublishMessage,
+    messages: readonly EventPublishMessage[],
     now: Date,
   ): Promise<{ tenantId: string; acknowledgedThroughSeq: number }> {
-    const event = message.payload.event;
+    const firstMessage = messages[0];
+    const lastMessage = messages.at(-1);
+    if (firstMessage === undefined || lastMessage === undefined) {
+      throw new DurableEventStoreError("invalid_event", "Event batch was empty");
+    }
+    const firstEvent = firstMessage.payload.event;
+    const lastEvent = lastMessage.payload.event;
     const session = await transaction
       .selectFrom("sessions")
       .select(["tenant_id", "next_event_seq", "last_fencing_token"])
-      .where("id", "=", event.sessionId)
+      .where("id", "=", firstEvent.sessionId)
       .forUpdate()
       .executeTakeFirst();
     if (session === undefined) {
@@ -358,7 +357,7 @@ export class DurableEventStore implements DurableEventIngestor {
     const cursor = await transaction
       .selectFrom("session_event_cursors")
       .select(["last_persisted_seq", "acknowledged_through_seq"])
-      .where("session_id", "=", event.sessionId)
+      .where("session_id", "=", firstEvent.sessionId)
       .forUpdate()
       .executeTakeFirst();
     if (cursor === undefined) {
@@ -377,60 +376,83 @@ export class DurableEventStore implements DurableEventIngestor {
       );
     }
 
-    if (event.seq <= lastPersisted) {
-      const existing = await transaction
+    const redeliveries = messages.filter((message) => message.payload.event.seq <= lastPersisted);
+    if (redeliveries.length > 0) {
+      const existingRows = await transaction
         .selectFrom("session_events")
         .select(eventSelect())
         .where("tenant_id", "=", tenantId)
-        .where("session_id", "=", event.sessionId)
-        .where("seq", "=", String(event.seq))
-        .executeTakeFirst();
-      if (existing === undefined) {
-        throw new DurableEventStoreError(
-          "event_store_invariant",
-          "Durable event prefix contains a missing sequence",
-        );
+        .where("session_id", "=", firstEvent.sessionId)
+        .where(
+          "seq",
+          "in",
+          redeliveries.map((message) => String(message.payload.event.seq)),
+        )
+        .execute();
+      const existingBySequence = new Map(
+        existingRows.map((row) => [safeInteger(row.seq, "persisted event sequence"), row]),
+      );
+      for (const message of redeliveries) {
+        const event = message.payload.event;
+        const existing = existingBySequence.get(event.seq);
+        if (existing === undefined) {
+          throw new DurableEventStoreError(
+            "event_store_invariant",
+            "Durable event prefix contains a missing sequence",
+          );
+        }
+        if (!isExactRedelivery(existing, message)) {
+          throw new DurableEventStoreError(
+            "event_conflict",
+            `Conflicting event publication at sequence ${event.seq}`,
+          );
+        }
       }
-      if (!isExactRedelivery(existing, message)) {
-        throw new DurableEventStoreError(
-          "event_conflict",
-          `Conflicting event publication at sequence ${event.seq}`,
-        );
-      }
-      return { tenantId, acknowledgedThroughSeq: event.seq };
     }
 
+    const newMessages = messages.filter((message) => message.payload.event.seq > lastPersisted);
+    if (newMessages.length === 0) {
+      return { tenantId, acknowledgedThroughSeq: lastEvent.seq };
+    }
+    const firstNewEvent = newMessages[0]!.payload.event;
     const expectedSequence = lastPersisted + 1;
     const sessionNextSequence = safeInteger(session.next_event_seq, "session next event sequence");
-    if (event.seq !== expectedSequence || event.seq !== sessionNextSequence) {
+    if (firstNewEvent.seq !== expectedSequence || firstNewEvent.seq !== sessionNextSequence) {
       throw new DurableEventStoreError(
         "sequence_gap",
-        `Expected contiguous event sequence ${expectedSequence}, received ${event.seq}`,
+        `Expected contiguous event sequence ${expectedSequence}, received ${firstNewEvent.seq}`,
       );
     }
 
-    await this.#validateEventOwnership(transaction, tenantId, message);
+    // One batch has one Session/Turn/command identity. Validate that ownership
+    // once, then persist the contiguous suffix as one set operation.
+    await this.#validateEventOwnership(transaction, tenantId, firstMessage);
     const lease = await transaction
       .selectFrom("session_leases")
       .select(["lease_id", "fencing_token", "valid_until"])
-      .where("session_id", "=", event.sessionId)
+      .where("session_id", "=", firstEvent.sessionId)
       .forUpdate()
       .executeTakeFirst();
     if (
       lease === undefined ||
-      normalizedUuid(lease.lease_id) !== normalizedUuid(message.payload.leaseId) ||
-      safeInteger(lease.fencing_token, "lease fencing token") !== message.payload.fencingToken ||
+      normalizedUuid(lease.lease_id) !== normalizedUuid(firstMessage.payload.leaseId) ||
+      safeInteger(lease.fencing_token, "lease fencing token") !==
+        firstMessage.payload.fencingToken ||
       safeInteger(session.last_fencing_token, "session fencing token") !==
-        message.payload.fencingToken ||
+        firstMessage.payload.fencingToken ||
       new Date(lease.valid_until).valueOf() <= now.valueOf()
     ) {
       throw new DurableEventStoreError("stale_fence", "Event publication lease is stale");
     }
 
+    const eventIds = newMessages.map((message) => message.payload.event.eventId);
+    if (new Set(eventIds.map((eventId) => eventId.toLowerCase())).size !== eventIds.length) {
+      throw new DurableEventStoreError("event_conflict", "Event ID was reused inside one batch");
+    }
     const reusedEventId = await transaction
       .selectFrom("session_events")
       .select(["session_id", "seq"])
-      .where("event_id", "=", event.eventId)
+      .where("event_id", "in", eventIds)
       .executeTakeFirst();
     if (reusedEventId !== undefined) {
       throw new DurableEventStoreError(
@@ -441,49 +463,44 @@ export class DurableEventStore implements DurableEventIngestor {
 
     await transaction
       .insertInto("session_events")
-      .values({
-        event_id: event.eventId,
-        tenant_id: tenantId,
-        session_id: event.sessionId,
-        turn_id: event.turnId,
-        agent_node_id: null,
-        agent_id: event.agentId,
-        command_id: message.payload.commandId ?? null,
-        seq: event.seq,
-        schema_version: event.schemaVersion,
-        type: event.type,
-        payload: event.payload,
-        lease_id: message.payload.leaseId,
-        fencing_token: message.payload.fencingToken,
-        occurred_at: new Date(event.occurredAt),
-        persisted_at: now,
-      })
+      .values(
+        newMessages.map((message) => {
+          const event = message.payload.event;
+          return {
+            event_id: event.eventId,
+            tenant_id: tenantId,
+            session_id: event.sessionId,
+            turn_id: event.turnId,
+            agent_node_id: null,
+            agent_id: event.agentId,
+            command_id: message.payload.commandId ?? null,
+            seq: event.seq,
+            schema_version: event.schemaVersion,
+            type: event.type,
+            payload: event.payload,
+            lease_id: message.payload.leaseId,
+            fencing_token: message.payload.fencingToken,
+            occurred_at: new Date(event.occurredAt),
+            persisted_at: now,
+          };
+        }),
+      )
       .executeTakeFirstOrThrow();
 
-    await this.#recordStructuredTestResult(transaction, tenantId, message);
-    await this.#recordContextCompaction(transaction, tenantId, message);
-    if (
-      event.turnId !== null &&
-      (event.type === "turn.completed" ||
-        event.type === "turn.failed" ||
-        event.type === "turn.cancelled")
-    ) {
-      await materializeConversationTurnProjection(transaction, {
-        tenantId,
-        sessionId: event.sessionId,
-        turnId: event.turnId,
-        projectedAt: now,
-      });
+    for (const message of newMessages) {
+      await this.#recordStructuredTestResult(transaction, tenantId, message);
+      await this.#recordContextCompaction(transaction, tenantId, message);
     }
 
+    const acknowledgedThroughSeq = newMessages.at(-1)!.payload.event.seq;
     const cursorUpdate = await transaction
       .updateTable("session_event_cursors")
       .set({
-        last_persisted_seq: event.seq,
-        acknowledged_through_seq: event.seq,
+        last_persisted_seq: acknowledgedThroughSeq,
+        acknowledged_through_seq: acknowledgedThroughSeq,
         updated_at: now,
       })
-      .where("session_id", "=", event.sessionId)
+      .where("session_id", "=", firstEvent.sessionId)
       .where("last_persisted_seq", "=", cursor.last_persisted_seq)
       .where("acknowledged_through_seq", "=", cursor.acknowledged_through_seq)
       .executeTakeFirst();
@@ -492,18 +509,18 @@ export class DurableEventStore implements DurableEventIngestor {
     const sessionUpdate = await transaction
       .updateTable("sessions")
       .set({
-        next_event_seq: event.seq + 1,
+        next_event_seq: acknowledgedThroughSeq + 1,
         row_version: sql<string>`${sql.ref("row_version")} + 1`,
         updated_at: now,
         last_active_at: now,
       })
       .where("tenant_id", "=", tenantId)
-      .where("id", "=", event.sessionId)
+      .where("id", "=", firstEvent.sessionId)
       .where("next_event_seq", "=", session.next_event_seq)
       .executeTakeFirst();
     expectOne(sessionUpdate.numUpdatedRows, "advancing the session event sequence");
 
-    return { tenantId, acknowledgedThroughSeq: event.seq };
+    return { tenantId, acknowledgedThroughSeq };
   }
 
   async #recordStructuredTestResult(

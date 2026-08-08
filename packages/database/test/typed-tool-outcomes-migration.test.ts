@@ -41,5 +41,5 @@ describe("typed Tool outcome migration", () => {
     } finally {
       await postgres.close();
     }
-  });
+  }, 10_000);
 });

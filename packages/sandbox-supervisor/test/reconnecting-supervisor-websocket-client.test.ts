@@ -145,7 +145,10 @@ class FakeConnection implements SupervisorWebSocketConnection {
 }
 
 function runtime(
-  waitUntilAssignmentsSettled: () => Promise<void> = async () => undefined,
+  options: {
+    waitUntilAssignmentsSettled?: () => Promise<void>;
+    revokeAllAssignments?: () => void;
+  } = {},
 ): ReconnectingSupervisorControlRuntime {
   return {
     createHeartbeat() {
@@ -158,7 +161,7 @@ function runtime(
       throw new Error("Fake connection does not deliver steer commands");
     },
     revokeAllAssignments() {
-      return undefined;
+      options.revokeAllAssignments?.();
     },
     async recoverPendingEvents(
       _publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
@@ -171,7 +174,7 @@ function runtime(
         quarantinedEvents: 0,
       };
     },
-    waitUntilAssignmentsSettled,
+    waitUntilAssignmentsSettled: options.waitUntilAssignmentsSettled ?? (async () => undefined),
   };
 }
 
@@ -209,13 +212,13 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
 }
 
 describe("ReconnectingSupervisorWebSocketClient", () => {
-  it("waits for revoked assignments, reconnects, and preserves drain state", async () => {
-    const teardown = deferred<void>();
-    let teardownCalls = 0;
+  it("keeps active assignments running across a retryable reconnect", async () => {
+    let revocations = 0;
     const harness = reconnecting({
-      runtime: runtime(() => {
-        teardownCalls += 1;
-        return teardownCalls === 1 ? teardown.promise : Promise.resolve();
+      runtime: runtime({
+        revokeAllAssignments() {
+          revocations += 1;
+        },
       }),
     });
     harness.client.setAcceptingAssignments(false);
@@ -230,12 +233,8 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
 
     harness.connections[0]!.disconnect(close(true));
-    await waitFor(() => teardownCalls === 1);
-    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 5));
-    expect(harness.connections).toHaveLength(1);
-
-    teardown.resolve();
     await waitFor(() => harness.connections.length === 2);
+    expect(revocations).toBe(0);
     expect(harness.connections[1]!.assignmentStates).toEqual([false]);
     const secondId = globalThis.crypto.randomUUID();
     harness.connections[1]!.connect(secondId);
@@ -249,6 +248,7 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
       connectionAttempts: 2,
       successfulConnections: 2,
     });
+    expect(revocations).toBe(1);
   });
 
   it("does not retry rejected authentication", async () => {
@@ -296,7 +296,9 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
 
   it("fails closed when revoked assignments do not settle", async () => {
     const harness = reconnecting({
-      runtime: runtime(() => new Promise<void>(() => undefined)),
+      runtime: runtime({
+        waitUntilAssignmentsSettled: () => new Promise<void>(() => undefined),
+      }),
       assignmentTeardownTimeoutMs: 10,
     });
     const started = harness.client.start();
@@ -304,7 +306,7 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
     harness.connections[0]!.finishRecovery();
     await started;
-    harness.connections[0]!.disconnect(close(true));
+    harness.connections[0]!.disconnect(close(false));
 
     await expect(harness.client.waitUntilStopped()).resolves.toMatchObject({
       reason: "terminal_failure",
