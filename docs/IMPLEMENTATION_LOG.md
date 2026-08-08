@@ -3201,3 +3201,13 @@
 - Hardened the Sandbox Manager image's Debian package installation with bounded
   repository retries after a transient host-proxy 502 interrupted a production
   rebuild before application startup.
+- Rebuilt the production topology and ran the real-process acceptance against
+  DeepSeek: `SIGKILL`ing the Control Plane after committed text sequence 3 did
+  not create a new Attempt; SSE reconnected and delivered terminal sequence
+  126. A separate six-tenant/twelve-Run live check completed without failure or
+  cross-tenant marker leakage and persisted 255 semantic events (207 assistant
+  text events) across the two capacity-one Kubernetes Pi Workers.
+- Repaired the live multi-tenant evidence collector after the optional advanced
+  usage HTTP endpoint was removed from the default product surface. The harness
+  now reads trusted usage evidence directly from PostgreSQL and records exact
+  event-row/payload counts for the accepted Runs.

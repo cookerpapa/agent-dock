@@ -116,6 +116,51 @@ async function psql(query) {
   ]);
 }
 
+async function readRunUsage(runId) {
+  const row = await psql(
+    `select count(*)::text || '|' ||
+            coalesce(sum(input_tokens), 0)::text || '|' ||
+            coalesce(sum(output_tokens), 0)::text || '|' ||
+            coalesce(sum(cache_read_tokens), 0)::text || '|' ||
+            coalesce(sum(cache_write_tokens), 0)::text
+       from usage_ledger
+      where run_id = ${sqlLiteral(runId)}`,
+  );
+  const [requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens] = row
+    .trim()
+    .split("|")
+    .map((value) => Number(value));
+  for (const value of [requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens]) {
+    assert(Number.isSafeInteger(value) && value >= 0, "Run usage evidence is invalid");
+  }
+  return { requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
+}
+
+async function readStreamEvidence(runIds) {
+  assert(runIds.length > 0, "Stream evidence requires at least one Run");
+  const row = await psql(
+    `select count(*)::text || '|' ||
+            count(*) filter (where e.type = 'assistant.text.delta')::text || '|' ||
+            coalesce(sum(octet_length(e.payload::text)), 0)::text
+       from session_events e
+       join runs r on r.turn_id = e.turn_id
+      where r.id in (${runIds.map(sqlLiteral).join(", ")})`,
+  );
+  const [persistedEvents, assistantTextEvents, persistedPayloadBytes] = row
+    .trim()
+    .split("|")
+    .map((value) => Number(value));
+  for (const value of [persistedEvents, assistantTextEvents, persistedPayloadBytes]) {
+    assert(Number.isSafeInteger(value) && value >= 0, "Stream evidence is invalid");
+  }
+  return {
+    persistedEvents,
+    assistantTextEvents,
+    persistedPayloadBytes,
+    eventsPerRun: Number((persistedEvents / runIds.length).toFixed(2)),
+  };
+}
+
 function wait(delayMs, signal) {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolvePromise) => {
@@ -236,10 +281,10 @@ async function runTurn(lane, prompt, round) {
     assert(terminal, "Turn did not publish a terminal event");
     assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal.payload));
     const run = await waitForRun(lane.api, accepted.runId);
-    const usage = await lane.api.getRunUsage(accepted.runId);
-    assert(usage.totals.requests > 0);
-    assert(usage.totals.inputTokens > 0);
-    assert(usage.totals.outputTokens > 0);
+    const usage = await readRunUsage(accepted.runId);
+    assert(usage.requests > 0);
+    assert(usage.inputTokens > 0);
+    assert(usage.outputTokens > 0);
     assert.equal(toolEvents, 0, "Pure-chat load unexpectedly invoked a Tool");
     lane.cursor = cursor;
     return {
@@ -252,7 +297,7 @@ async function runTurn(lane, prompt, round) {
       acceptedMs: Math.round(acceptedAt - submittedAt),
       firstTextMs,
       settledMs: Math.round(performance.now() - submittedAt),
-      usage: usage.totals,
+      usage,
       attemptCount: run.attempts.length,
     };
   } finally {
@@ -367,6 +412,7 @@ for (const [index, result] of secondRound.entries()) {
 const allResults = [...firstRound, ...secondRound];
 const evidence = await Promise.all(allResults.map(({ runId }) => runEvidence(runId)));
 const totalUsage = sumUsage(allResults);
+const streaming = await readStreamEvidence(allResults.map(({ runId }) => runId));
 const report = {
   accepted: true,
   checkedAt: new Date().toISOString(),
@@ -405,6 +451,7 @@ const report = {
       ]),
     ),
   },
+  streaming,
   usage: totalUsage,
 };
 
@@ -437,6 +484,8 @@ await writeFile(
     `- First text p50/p95: ${String(report.latencyMs.firstText.p50)} / ${String(report.latencyMs.firstText.p95)} ms`,
     `- Settled p50/p95: ${String(report.latencyMs.settled.p50)} / ${String(report.latencyMs.settled.p95)} ms`,
     `- Queue wait p50/p95: ${String(report.latencyMs.queueWait.p50)} / ${String(report.latencyMs.queueWait.p95)} ms`,
+    `- Persisted events / assistant text events / events per Run: ${String(report.streaming.persistedEvents)} / ${String(report.streaming.assistantTextEvents)} / ${String(report.streaming.eventsPerRun)}`,
+    `- Persisted event payload bytes: ${String(report.streaming.persistedPayloadBytes)}`,
     `- Real requests/input/output/cache-read tokens: ${String(report.usage.requests)} / ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)} / ${String(report.usage.cacheReadTokens)}`,
     "",
     "Every tenant used an independent API credential, Project, Workspace, Session and Pi checkpoint. All first and follow-up Runs were submitted concurrently through the same Temporal Task Queue and two capacity-one Pi Workers. The follow-up restored only its own marker, foreign Session reads returned 404, no Tool Sandbox was activated, and every Run completed with one Attempt.",

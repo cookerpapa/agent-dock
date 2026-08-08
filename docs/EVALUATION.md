@@ -57,6 +57,23 @@ AGENT_DOCK_LIVE_CONTROL_PLANE_RESTART_CHECK=1 \
 The check starts one real-model streaming Run, sends `SIGKILL` to the Control
 Plane container after the first committed text event, starts a replacement and
 requires SSE replay plus terminal completion with the original single Attempt.
+The latest run resumed through 12 SSE reconnect attempts, reached terminal
+sequence 126 and completed the original Attempt in 16.199 seconds.
+
+The multi-tenant functional stream check is separate from a saturation test:
+
+```bash
+AGENT_DOCK_LIVE_MULTI_TENANT_LOAD=1 \
+  AGENT_DOCK_LIVE_MULTI_TENANT_COUNT=6 \
+  npm run production:multi-tenant-model-load
+```
+
+It submits two real-model Runs concurrently for each isolated tenant. The
+second round must recover only that tenant's first-round marker through Pi's
+native Session context. The latest run completed all 12 Runs on two Workers
+with one Attempt each and persisted 255 semantic events, including 207
+coalesced assistant text events. This is functional concurrency evidence, not
+a claim that six tenants saturate PostgreSQL.
 
 ## Sandbox security
 
@@ -91,6 +108,12 @@ The checked-in reports currently record:
   p95 10.224 s;
 - targeted fault injection (2026-08-08): 15/15 invariants preserved, including
   real Worker and Control Plane process `SIGKILL` boundaries;
+- real Control Plane replacement: one streaming DeepSeek Run completed with its
+  original Attempt after the container was `SIGKILL`ed; SSE resumed through
+  sequence 126;
+- real multi-tenant stream recovery: 12/12 Runs completed across six isolated
+  tenants, all six follow-up Runs restored the correct private marker, and no
+  cross-tenant marker appeared;
 - Control Plane load: 320/320 successful requests; at 100 simultaneous requests,
   Session creation was 114.20 requests/s with 831 ms p95, and reads were 236.81
   requests/s with 408 ms p95;
