@@ -42,6 +42,8 @@ export type FakeModelServerOptions = {
   port?: number;
   apiKey?: string;
   defaultScenario?: FakeModelScenario;
+  /** Deterministic per-request scenarios; later requests fall back to defaultScenario. */
+  scenarioSequence?: readonly FakeModelScenario[];
   maxRequestBytes?: number;
   promptTokens?: number;
 };
@@ -364,6 +366,7 @@ export class FakeModelServer {
   readonly #port: number;
   readonly #apiKey: string;
   readonly #defaultScenario: FakeModelScenario;
+  readonly #scenarioSequence: readonly FakeModelScenario[];
   readonly #maxRequestBytes: number;
   readonly #promptTokens: number;
   readonly #server: Server;
@@ -382,6 +385,7 @@ export class FakeModelServer {
       throw new Error("apiKey must not be empty");
     }
     this.#defaultScenario = options.defaultScenario ?? "text";
+    this.#scenarioSequence = Object.freeze([...(options.scenarioSequence ?? [])]);
     this.#maxRequestBytes = parsePositiveSafeInteger(
       options.maxRequestBytes ?? 1_048_576,
       "maxRequestBytes",
@@ -514,7 +518,9 @@ export class FakeModelServer {
       throw new SafeHttpError(400, "x-agent-dock-scenario must have one value");
     }
     const scenario =
-      scenarioHeader === undefined ? this.#defaultScenario : parseScenario(scenarioHeader);
+      scenarioHeader === undefined
+        ? (this.#scenarioSequence[this.#requestSequence] ?? this.#defaultScenario)
+        : parseScenario(scenarioHeader);
     if (!scenario) {
       throw new SafeHttpError(400, "Unknown fake model scenario");
     }

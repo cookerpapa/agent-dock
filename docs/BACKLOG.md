@@ -36,6 +36,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Persist Step/sampling-attempt identity across model request accounting,
       durable events, Tool boundaries and traces without exposing provider
       failure payloads.
+- [x] Enable Pi-native bounded transient-model retry within one frozen Step;
+      independently budget attempts, interrupt backoff on cancellation and
+      prove that the resulting Tool executes only once.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,

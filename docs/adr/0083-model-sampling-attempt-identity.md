@@ -38,6 +38,11 @@ boundaries without the sampling identity that connected them.
 6. Arbitrary Tool execution remains outside this retry mechanism. A Tool that
    started is recovered only by its existing operation identity; ambiguity is
    `UNKNOWN` and never creates a new execution.
+7. Production enables Pi's public agent-level retry with at most two retries
+   and 500 ms exponential-backoff base delay. Provider/SDK-level retry remains
+   disabled because it would be invisible to Step identity, budgets and
+   cancellation. Pi alone decides whether an assistant error is transient;
+   context overflow continues through native compaction instead.
 
 ## Consequences
 
@@ -46,6 +51,9 @@ boundaries without the sampling identity that connected them.
   multiplying Step/world-state entries.
 - Cancellation can stop retry backoff without changing the Tool replay
   contract.
+- A Run can contain multiple native Pi subturns. AgentDock emits one public
+  `turn.started` boundary and accepts later non-overlapping `agent_start` /
+  `agent_end` pairs until `agent_settled`.
 - Historical model-request rows remain readable with a null sampling identity;
   all new Gateway requests require the complete identity.
 

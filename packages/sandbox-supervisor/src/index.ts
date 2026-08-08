@@ -68,6 +68,7 @@ export {
 } from "./pi-sandbox-continuity.ts";
 
 export {
+  CLOUD_MODEL_RETRY_POLICY,
   PiSdkIsolationFailure,
   PiSdkTurnRunner,
   type PiSdkTurnRunnerOptions,

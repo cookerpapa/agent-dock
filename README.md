@@ -89,6 +89,11 @@ disconnect reattaches to the same execution; loss
 of the execution ledger or VM is shown as `UNKNOWN` and never causes an
 automatic shell replay.
 
+Transient 429/5xx model failures use Pi's bounded native retry inside the same
+frozen Cloud Step. Every sampling attempt is separately budgeted and audited;
+provider-level hidden retries remain disabled, cancellation interrupts
+backoff, and Tool executions are never replayed by this mechanism.
+
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 ## Durable state

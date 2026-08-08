@@ -58,6 +58,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Correlate every model request and Tool boundary with its Cloud Step, while
   representing transient provider retries as separately budgeted attempts
   beneath the same Step.
+- [x] Adopt Pi's bounded agent-level retry for transient model failures while
+  disabling invisible provider retries and preserving no-replay Tool semantics.
 - [x] Reattach short Tool transport disconnects to one execution identity,
   preserve ordered stdout/stderr and expose irrecoverable ambiguity as
   `UNKNOWN` without replay.

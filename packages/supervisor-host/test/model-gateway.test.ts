@@ -435,7 +435,56 @@ describe.sequential("tenant model gateway", () => {
     await lease.release();
   });
 
+  it("budgets and audits two Pi sampling attempts within the same Cloud Step", async () => {
+    const callsBefore = upstreamFetch.mock.calls.length;
+    const lease = await gateway.issue(command);
+    const stepSequence = 900;
+    const stepSha256 = "a".repeat(64);
+    for (const samplingAttempt of [1, 2]) {
+      const response = await fetch(
+        `http://127.0.0.1:${String(gateway.listeningPort)}/v1/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${lease.runtime.capability}`,
+            ...modelSamplingHeaders({ stepSequence, stepSha256, samplingAttempt }),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "deepseek-v4-flash",
+            stream: true,
+            messages: [{ role: "user", content: "retry boundary" }],
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+
+    expect(upstreamFetch).toHaveBeenCalledTimes(callsBefore + 2);
+    expect(
+      await database
+        .selectFrom("model_requests")
+        .select([
+          "step_context_sequence as stepSequence",
+          "step_context_sha256 as stepSha256",
+          "sampling_attempt as samplingAttempt",
+          "state",
+        ])
+        .where("run_id", "=", command.payload.runId)
+        .where("attempt_id", "=", command.payload.attemptId)
+        .where("step_context_sequence", "=", stepSequence)
+        .orderBy("sampling_attempt", "asc")
+        .execute(),
+    ).toEqual([
+      { stepSequence, stepSha256, samplingAttempt: 1, state: "completed" },
+      { stepSequence, stepSha256, samplingAttempt: 2, state: "completed" },
+    ]);
+    await lease.release();
+  });
+
   it("denies an exhausted model-request limit before provider egress and audits it", async () => {
+    const callsBefore = upstreamFetch.mock.calls.length;
     await database
       .updateTable("tenant_runtime_policies")
       .set({ maximum_model_requests_per_run: 1 })
@@ -460,7 +509,7 @@ describe.sequential("tenant model gateway", () => {
     );
     expect(response.status).toBe(429);
     expect(await response.json()).toMatchObject({ error: { code: "model_request_limit" } });
-    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    expect(upstreamFetch).toHaveBeenCalledTimes(callsBefore);
     expect(
       await database
         .selectFrom("model_requests")

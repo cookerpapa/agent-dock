@@ -129,6 +129,7 @@ export class PiAgentEventAdapter {
   readonly #eventFactory: AgentDockEventFactory;
   readonly #inputKind: "prompt" | "continue";
   #agentStarted = false;
+  #piTurnActive = false;
   #settled = false;
   #lastAssistantStopReason: AssistantStopReason | undefined;
   #cancellationReason: TurnCancellationReason | undefined;
@@ -245,12 +246,18 @@ export class PiAgentEventAdapter {
     }
 
     if (value.type === "agent_start") {
-      if (this.#agentStarted || this.#settled) {
+      if (this.#piTurnActive || this.#settled) {
         return {
           kind: "invalid",
           sourceType: value.type,
-          reason: "Pi emitted agent_start outside the initial run boundary",
+          reason: "Pi emitted overlapping agent_start boundaries",
         };
+      }
+      this.#piTurnActive = true;
+      if (this.#agentStarted) {
+        // A Run can contain multiple native Pi turns: transient retry,
+        // compaction recovery, Tool continuation, or a bounded follow-up.
+        return { kind: "ignored", sourceType: value.type };
       }
       this.#agentStarted = true;
       return {
@@ -533,6 +540,14 @@ export class PiAgentEventAdapter {
     }
 
     if (value.type === "agent_end" && Array.isArray(value.messages)) {
+      if (!this.#piTurnActive) {
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi emitted agent_end without an active Pi turn",
+        };
+      }
+      this.#piTurnActive = false;
       for (let index = value.messages.length - 1; index >= 0; index -= 1) {
         const stopReason = assistantStopReason(value.messages[index]);
         if (stopReason !== undefined) {
@@ -551,6 +566,7 @@ export class PiAgentEventAdapter {
           reason: "Pi emitted agent_settled without one active run",
         };
       }
+      this.#piTurnActive = false;
       this.#settled = true;
       if (this.#cancellationReason !== undefined) {
         return this.#cancelled(this.#cancellationReason, false);

@@ -58,6 +58,12 @@ export type PiSdkTurnRunnerOptions = {
       createFresh: () => Omit<PiSamplingStepCapture, "samplingAttempt">,
     ) => PiSamplingStepCapture;
   }) => readonly InlineExtension[];
+  /** Pi-native retries for transient provider failures. Provider/SDK retries remain disabled. */
+  modelRetry?: Readonly<{
+    enabled: boolean;
+    maxRetries: number;
+    baseDelayMs: number;
+  }>;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -87,6 +93,33 @@ const DEFAULT_TURN_TIMEOUT_MS = 30_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TEXT_DELTA_COALESCE_WINDOW_MS = 50;
 const TEXT_DELTA_COALESCE_BYTES = 2 * 1_024;
+
+export const CLOUD_MODEL_RETRY_POLICY = Object.freeze({
+  enabled: true,
+  maxRetries: 2,
+  baseDelayMs: 500,
+});
+
+function validateModelRetryPolicy(
+  value: PiSdkTurnRunnerOptions["modelRetry"],
+): NonNullable<PiSdkTurnRunnerOptions["modelRetry"]> {
+  const policy = value ?? { enabled: false, maxRetries: 0, baseDelayMs: 500 };
+  if (
+    typeof policy.enabled !== "boolean" ||
+    !Number.isSafeInteger(policy.maxRetries) ||
+    policy.maxRetries < 0 ||
+    policy.maxRetries > 3 ||
+    !Number.isSafeInteger(policy.baseDelayMs) ||
+    policy.baseDelayMs < 100 ||
+    policy.baseDelayMs > 10_000
+  ) {
+    throw new TypeError("Pi model retry policy is invalid");
+  }
+  if (policy.enabled && policy.maxRetries < 1) {
+    throw new TypeError("Enabled Pi model retry policy requires at least one retry");
+  }
+  return Object.freeze({ ...policy });
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -253,6 +286,7 @@ async function createModelRuntime(
 
 export class PiSdkTurnRunner {
   readonly #options: PiSdkTurnRunnerOptions;
+  readonly #modelRetry: NonNullable<PiSdkTurnRunnerOptions["modelRetry"]>;
   readonly #requestTimeoutMs: number;
   readonly #turnTimeoutMs: number;
   readonly #shutdownTimeoutMs: number;
@@ -270,6 +304,7 @@ export class PiSdkTurnRunner {
       throw new TypeError("Pi SDK extensions must use one configuration source");
     }
     this.#options = options;
+    this.#modelRetry = validateModelRetryPolicy(options.modelRetry);
     this.#requestTimeoutMs = positiveInteger(
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       "requestTimeoutMs",
@@ -600,7 +635,12 @@ export class PiSdkTurnRunner {
             reserveTokens: command.payload.budgets?.compactionReserveTokens ?? 16_384,
             keepRecentTokens: command.payload.budgets?.compactionKeepRecentTokens ?? 20_000,
           },
-          retry: { enabled: false },
+          retry: {
+            ...this.#modelRetry,
+            // Provider retries are invisible to Cloud Step identity and the
+            // model request ledger. Pi's governed agent-level retry owns them.
+            provider: { maxRetries: 0 },
+          },
           enableInstallTelemetry: false,
           enableAnalytics: false,
         });

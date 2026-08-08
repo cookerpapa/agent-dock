@@ -118,6 +118,12 @@ describe("PiAgentEventAdapter", () => {
     });
     expect(
       adapter.adapt({
+        type: "agent_end",
+        messages: [{ role: "assistant", stopReason: "error" }],
+      }),
+    ).toEqual({ kind: "ignored", sourceType: "agent_end" });
+    expect(
+      adapter.adapt({
         type: "auto_retry_start",
         attempt: 1,
         maxAttempts: 2,
@@ -135,6 +141,10 @@ describe("PiAgentEventAdapter", () => {
           maximumSamplingAttempts: 3,
         },
       },
+    });
+    expect(adapter.adapt({ type: "agent_start" })).toEqual({
+      kind: "ignored",
+      sourceType: "agent_start",
     });
     adapter.samplingStarted({ ...step, samplingAttempt: 2 });
     adapter.adapt({

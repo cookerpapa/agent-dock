@@ -19,6 +19,7 @@ import { resolve } from "node:path";
 import type { SupervisorTurnRunner } from "./local-sandbox-supervisor.ts";
 import { PiTurnError, type PiEventPublisher, type PiTurnResult } from "./pi-turn-runtime.ts";
 import {
+  CLOUD_MODEL_RETRY_POLICY,
   PiSdkTurnRunner,
   type PiSdkIsolationFailure,
   type PiSdkTurnRunnerOptions,
@@ -602,6 +603,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         },
         onSettled,
         onInterrupted,
+        modelRetry: CLOUD_MODEL_RETRY_POLICY,
         ...(this.#requestTimeoutMs === undefined
           ? {
               requestTimeoutMs: usesEmbeddedFake

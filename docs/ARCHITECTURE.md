@@ -293,6 +293,14 @@ identity in its request ledger and trace, while durable sampling events bind
 the resulting Tool boundaries to the same Step. Provider error text is not
 copied into public events.
 
+Production uses Pi's native agent-level transient retry with two retries and a
+500 ms exponential-backoff base delay. The provider SDK itself receives
+`maxRetries: 0`, so no hidden HTTP retry can bypass the Model Gateway ledger.
+Cancellation interrupts Pi's backoff. A failed sampling attempt cannot have
+started a Tool; if a later successful attempt emits a Tool call, that operation
+still follows the normal operation-ID and `UNKNOWN` rules and is never replayed
+by the model retry mechanism.
+
 The first Tool call pays cold activation cost. An eligible warm activation can
 serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
 

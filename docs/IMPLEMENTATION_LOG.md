@@ -7,6 +7,17 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-08 — 同一 Cloud Step 内的有界模型重试
+
+- 采用 Pi SDK 原生 agent-level retry：生产环境最多重试两次、500ms 指数退避；
+  provider/SDK retry 固定为 0，避免绕过 Model Gateway 的请求账本和预算。
+- 瞬时 429/5xx 失败继续使用同一冻结 Step，只递增 `samplingAttempt`；每次尝试
+  独立预留预算、记录审计和 trace，取消可以直接打断退避等待。
+- AgentDock Run 现在正确接纳 Pi retry/compaction/follow-up 产生的多个原生
+  subturn，但只向产品层发布一次 `turn.started`。
+- 确定性集成测试覆盖“429 → retry → Tool → final answer”、Tool 仅执行一次、
+  退避期间取消不再发请求，以及 Gateway 对同 Step 多次采样的独立账本记录。
+
 ## 2026-08-08 — Step 级模型请求链路
 
 - 在 `CloudStepContext` 下增加独立 `samplingAttempt`：正常 Agent Loop 前进才

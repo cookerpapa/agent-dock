@@ -2,6 +2,7 @@ import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-serv
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+  modelSamplingHeaders,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
@@ -17,6 +18,71 @@ import {
   PiSdkTurnRunner,
   PiTurnError,
 } from "../src/index.ts";
+
+function samplingIdentityExtension(
+  commandValue: ExecuteTurnCommandMessage,
+  captureSamplingStep: Parameters<
+    NonNullable<ConstructorParameters<typeof PiSdkTurnRunner>[0]["createInlineExtensions"]>
+  >[0]["captureSamplingStep"],
+  onToolExecute?: () => void,
+): InlineExtension {
+  const turn = createCloudTurnContext(commandValue, undefined);
+  const attempt = createCloudAttemptContext({
+    command: commandValue,
+    runtimeIdentity: {
+      supervisorId: "supervisor-retry-test",
+      bootId: "77777777-7777-4777-8777-777777777778",
+      sandboxId: "sandbox-retry-test",
+    },
+    turnContextSha256: turn.sha256,
+  });
+  let stepSequence = 0;
+  let sampling:
+    Readonly<{ stepSequence: number; stepSha256: string; samplingAttempt: number }> | undefined;
+  return (pi) => {
+    pi.on("context", () => {
+      const captured = captureSamplingStep(() => ({
+        step: createCloudStepContext({
+          sequence: (stepSequence += 1),
+          turnContextSha256: turn.sha256,
+          attemptContextSha256: attempt.sha256,
+          activeTools: ["read", "write", "edit", "bash"],
+          worldState: {
+            sandbox: { status: "inactive", continuitySha256: null },
+            environmentSha256: turn.environmentSha256,
+            committedWorkspaceRevision: null,
+            toolPolicySha256: turn.toolPolicySha256,
+          },
+        }),
+        modelMessages: [],
+      }));
+      sampling = {
+        stepSequence: captured.step.context.sequence,
+        stepSha256: captured.step.sha256,
+        samplingAttempt: captured.samplingAttempt,
+      };
+    });
+    pi.on("before_provider_headers", (event) => {
+      if (sampling === undefined) throw new Error("sampling identity was not captured");
+      Object.assign(event.headers, modelSamplingHeaders(sampling));
+    });
+    pi.registerTool({
+      name: "inspect_workspace",
+      label: "Inspect workspace",
+      description: "Deterministic retry boundary Tool",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      } as never,
+      async execute() {
+        onToolExecute?.();
+        return { content: [{ type: "text", text: "workspace inspected" }], details: {} };
+      },
+    });
+  };
+}
 
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
@@ -71,6 +137,115 @@ async function waitFor(
 }
 
 describe("PiSdkTurnRunner integration", () => {
+  it("retries a transient model failure inside one Cloud Step without replaying its Tool", async () => {
+    const fakeModel = new FakeModelServer({
+      scenarioSequence: ["rate_limit", "tool_call", "text"],
+    });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-model-retry-test-"));
+    const events: EventPublishMessage[] = [];
+    let toolExecutions = 0;
+    try {
+      await fakeModel.start();
+      const result = await new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        modelRetry: { enabled: true, maxRetries: 2, baseDelayMs: 100 },
+        createInlineExtensions: ({ captureSamplingStep }) => [
+          samplingIdentityExtension(command, captureSamplingStep, () => {
+            toolExecutions += 1;
+          }),
+        ],
+      }).run(command, (event) => {
+        events.push(event);
+      });
+
+      expect(result).toEqual({ stopReason: "stop" });
+      expect(fakeModel.observations.map((entry) => entry.scenario)).toEqual([
+        "rate_limit",
+        "tool_call",
+        "text",
+      ]);
+      expect(toolExecutions).toBe(1);
+      const samplingStarts = events
+        .map((event) => event.payload.event)
+        .filter((event) => event.type === "model.sampling.started");
+      expect(samplingStarts.map((event) => event.payload)).toEqual([
+        expect.objectContaining({ stepSequence: 1, samplingAttempt: 1 }),
+        expect.objectContaining({ stepSequence: 1, samplingAttempt: 2 }),
+        expect.objectContaining({ stepSequence: 2, samplingAttempt: 1 }),
+      ]);
+      expect(
+        events
+          .map((event) => event.payload.event)
+          .filter((event) => event.type === "model.sampling.retry.scheduled")
+          .map((event) => event.payload),
+      ).toEqual([
+        expect.objectContaining({
+          completedSamplingAttempt: 1,
+          nextSamplingAttempt: 2,
+          maximumSamplingAttempts: 3,
+        }),
+      ]);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("cancels Pi retry backoff before another model request is sent", async () => {
+    const fakeModel = new FakeModelServer({ scenarioSequence: ["rate_limit", "text"] });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-retry-cancel-test-"));
+    const events: EventPublishMessage[] = [];
+    const controller = new AbortController();
+    try {
+      await fakeModel.start();
+      const running = new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        modelRetry: { enabled: true, maxRetries: 2, baseDelayMs: 2_000 },
+        createInlineExtensions: ({ captureSamplingStep }) => [
+          samplingIdentityExtension(command, captureSamplingStep),
+        ],
+      }).run(
+        command,
+        (event) => {
+          events.push(event);
+        },
+        controller.signal,
+      );
+      void running.catch(() => undefined);
+      await waitFor(() =>
+        events.some((event) => event.payload.event.type === "model.sampling.retry.scheduled"),
+      );
+      controller.abort({
+        kind: "agent-dock.turn-cancellation",
+        reason: "user_request",
+        gracePeriodMs: 2_000,
+      });
+
+      await expect(running).rejects.toMatchObject({
+        name: "PiTurnCancelledError",
+        reason: "user_request",
+      });
+      expect(fakeModel.observations).toHaveLength(1);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("does not publish completion when settled checkpoint commit fails", async () => {
     const fakeModel = new FakeModelServer();
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-checkpoint-fail-test-"));
