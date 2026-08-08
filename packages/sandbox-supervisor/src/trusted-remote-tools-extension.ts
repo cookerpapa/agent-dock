@@ -29,6 +29,15 @@ const WORKSPACE_ROOT = "/workspace";
 const MAX_RESPONSE_BYTES = 5 * 1_024 * 1_024;
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
+/**
+ * The Cube guest admits one cancellable Tool operation per activation. Pi must
+ * therefore preserve model order before requests cross Tool RPC. Changing this
+ * requires a coordinated guest-protocol and Workspace-consistency redesign;
+ * marking only read as parallel is not safe because one sequential Tool makes
+ * Pi serialize the complete sibling batch anyway.
+ */
+export const CLOUD_TOOL_EXECUTION_MODE = "sequential" as const;
+
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
   ? Omit<
       T,
@@ -622,7 +631,7 @@ function registerTrustedRemoteTools(
 
   pi.registerTool({
     ...readTool,
-    executionMode: "sequential",
+    executionMode: CLOUD_TOOL_EXECUTION_MODE,
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       const input = params as ReadToolInput;
@@ -684,7 +693,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...writeTool,
-    executionMode: "sequential",
+    executionMode: CLOUD_TOOL_EXECUTION_MODE,
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createWriteTool(WORKSPACE_ROOT, { operations: writeOperations }).execute(
@@ -697,7 +706,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...editTool,
-    executionMode: "sequential",
+    executionMode: CLOUD_TOOL_EXECUTION_MODE,
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createEditTool(WORKSPACE_ROOT, { operations: editOperations }).execute(
@@ -710,7 +719,7 @@ function registerTrustedRemoteTools(
   });
   pi.registerTool({
     ...bashTool,
-    executionMode: "sequential",
+    executionMode: CLOUD_TOOL_EXECUTION_MODE,
     async execute(id, params, signal, onUpdate) {
       consumeToolCall();
       return createBashTool(WORKSPACE_ROOT, { operations: bashOperations(id) }).execute(

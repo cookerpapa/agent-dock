@@ -3163,3 +3163,19 @@
 - Verified all Sandbox Supervisor and Sandbox Manager suites, the complete
   Control Plane API lifecycle suite, and strict type checks for all three
   packages.
+
+# 2026-08-08 — Codex-loop boundary hardening
+
+- Correlated every provider request with a durable Cloud Step and sampling
+  attempt, while keeping transient Pi-native model retries beneath the same
+  frozen Step and separately budgeted/audited.
+- Enabled a bounded transient-model retry policy with provider-level hidden
+  retries disabled; cancellation interrupts backoff and Tool effects are not
+  replayed.
+- Added an opt-in project settlement gate that can queue one Pi-native
+  verification follow-up after Workspace mutation without executing repository
+  code in the trusted Worker.
+- Revalidated sibling-Tool concurrency against prior production evidence. Pi
+  can emit parallel calls, but one Cube activation deliberately admits one
+  cancellable operation; the production Tool registry therefore keeps explicit
+  model-order serialization and records the contract in ADR-0085.

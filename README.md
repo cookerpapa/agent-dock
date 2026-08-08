@@ -99,6 +99,10 @@ naming one offline command `settlement-gate`. The gate is default-off, runs
 repository code only through the Cube Tool Sandbox, and can never loop beyond
 one additional Pi continuation.
 
+Pi preserves model order for sibling remote Tools because one Cube activation
+admits one cancellable operation at a time. Cross-Session Runs and isolated
+candidate activations remain parallel; shared Workspace/process effects do not.
+
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 ## Durable state

@@ -42,6 +42,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Add an explicit project settlement gate that queues at most one Pi-native
       verification follow-up after mutating Tools and remains disabled by
       default.
+- [x] Measure Pi sibling-Tool concurrency against the Cube guest admission
+      contract and retain explicit model-order serialization until a
+      multi-operation guest protocol proves a real benefit.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,

@@ -53,6 +53,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
   Tool boundaries, request accounting and traces.
 - [ADR-0084](0084-explicit-bounded-settlement-gate.md) adds an opt-in,
   project-defined verification stop hook with at most one Pi-native follow-up.
+- [ADR-0085](0085-single-active-cube-tool-execution.md) preserves model order
+  before Tool RPC because one Cube activation deliberately admits one
+  cancellable operation at a time.
 
 ## Maintained optional modules
 

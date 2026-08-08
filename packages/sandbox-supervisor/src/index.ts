@@ -75,6 +75,7 @@ export {
 } from "./pi-sdk-turn-runner.ts";
 
 export {
+  CLOUD_TOOL_EXECUTION_MODE,
   createTrustedRemoteToolsExtension,
   type TrustedRemoteToolsRuntimeConfiguration,
 } from "./trusted-remote-tools-extension.ts";

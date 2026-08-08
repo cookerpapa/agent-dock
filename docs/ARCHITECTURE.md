@@ -255,6 +255,7 @@ Cube is never contacted.
 ```text
 Pi context hook captures Step N and its semantic WorldState
   → model emits Tool Call from Step N
+  → Pi serializes sibling remote Tools in model order
   → Worker sends Turn + Attempt digests and Step N sequence/digest
   → Sandbox Manager validates Turn contract, Attempt/fence ownership and rejects stale Steps
   → ensure exact Session Cube activation
@@ -278,6 +279,12 @@ adapter rejects gaps or corruption before output enters Pi context. Large Bash
 output is then truncated once into a head/tail preview for Pi. The full raw
 output is stored as a trusted Artifact and the preview includes the Artifact
 identity plus a concrete recovery instruction.
+
+One Cube activation admits one cancellable Tool operation at a time. All four
+remote Tools therefore declare Pi's public sequential execution mode. This
+does not prevent different Runs or isolated candidate activations from running
+in parallel; it prevents sibling Tools from racing one shared process and
+Workspace state. See ADR-0085.
 
 `operationId` identifies an execution rather than an HTTP request. A brief
 Worker-to-Manager or Manager-to-Cube transport break can reattach to the same
@@ -553,8 +560,9 @@ not require changing the Worker execution contract.
 - [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
 - [ADR-0081: Per-sampling Step world state](adr/0081-per-sampling-cloud-step-world-state.md)
 - [ADR-0082: Cloud Turn, Attempt and Step contexts](adr/0082-cloud-turn-attempt-and-step-contexts.md)
-- [ADR-0083: Model sampling attempts within one Cloud Step](adr/0083-model-sampling-attempt-identity.md)
-- [ADR-0084: Explicit bounded project settlement gate](adr/0084-explicit-bounded-settlement-gate.md)
+- [ADR-0083: Model sampling-attempt identity](adr/0083-model-sampling-attempt-identity.md)
+- [ADR-0084: Explicit bounded settlement gate](adr/0084-explicit-bounded-settlement-gate.md)
+- [ADR-0085: Single-active Cube Tool execution](adr/0085-single-active-cube-tool-execution.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.
