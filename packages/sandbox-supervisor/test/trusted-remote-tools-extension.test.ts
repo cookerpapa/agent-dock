@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTrustedRemoteToolsExtension } from "../src/trusted-remote-tools-extension.ts";
 
 const ACTIVE_TOOLS = ["read", "write", "edit", "bash"] as const;
-const EXECUTION_CONTEXT_SHA256 = "b".repeat(64);
+const TURN_CONTEXT_SHA256 = "b".repeat(64);
+const ATTEMPT_CONTEXT_SHA256 = "e".repeat(64);
 
 function createStepCapture() {
   let sequence = 0;
@@ -16,7 +17,8 @@ function createStepCapture() {
     const context = {
       schemaVersion: 1 as const,
       sequence,
-      executionContextSha256: EXECUTION_CONTEXT_SHA256,
+      turnContextSha256: TURN_CONTEXT_SHA256,
+      attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
       activeTools: [...activeTools].sort(),
       worldState: {
         sandbox: { status: "inactive" as const, continuitySha256: null },
@@ -45,7 +47,8 @@ const BASE_CONFIGURATION = {
   operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
   activationId: "10000000-0000-4000-8000-000000000001",
   capability: `adts_${"a".repeat(43)}`,
-  executionContextSha256: EXECUTION_CONTEXT_SHA256,
+  turnContextSha256: TURN_CONTEXT_SHA256,
+  attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
   captureStepContext: createStepCapture(),
   remainingToolCalls: 0,
   maximumToolOutputBytes: 1_024,
@@ -73,7 +76,8 @@ describe("trusted remote tools extension governance", () => {
       operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
       activationId: "10000000-0000-4000-8000-000000000099",
       capability: `adts_${"z".repeat(43)}`,
-      executionContextSha256: EXECUTION_CONTEXT_SHA256,
+      turnContextSha256: TURN_CONTEXT_SHA256,
+      attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
       captureStepContext: createStepCapture(),
       remainingToolCalls: 0,
       maximumToolOutputBytes: 1_024,
@@ -194,7 +198,8 @@ describe("trusted remote tools extension governance", () => {
 
     expect(capturedSteps.map((entry) => entry.step.context.sequence)).toEqual([1, 2]);
     expect(requestBody).toMatchObject({
-      executionContextSha256: EXECUTION_CONTEXT_SHA256,
+      turnContextSha256: TURN_CONTEXT_SHA256,
+      attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
       stepContextSequence: 2,
       stepContextSha256: capturedSteps[1]!.step.sha256,
     });

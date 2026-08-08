@@ -41,7 +41,8 @@ export type ToolSandboxManagerOptions = {
 
 type ManagedActivation = {
   assignment: ToolSandboxAssignment;
-  executionContextSha256: string;
+  turnContextSha256: string;
+  attemptContextSha256: string;
   currentStep?: Readonly<{ sequence: number; sha256: string }>;
   capabilityDigest: Buffer;
   spec: Parameters<SandboxProvider["create"]>[0];
@@ -348,7 +349,8 @@ export class ToolSandboxManager {
     } as const;
     this.#activations.set(activationId, {
       assignment: request.assignment,
-      executionContextSha256: request.executionContextSha256,
+      turnContextSha256: request.turnContextSha256,
+      attemptContextSha256: request.attemptContextSha256,
       capabilityDigest: capabilityDigest(capability),
       spec,
       ...(inherited === undefined ? {} : { handle: inherited.handle }),
@@ -373,10 +375,17 @@ export class ToolSandboxManager {
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
-    if (request.executionContextSha256 !== activation.executionContextSha256) {
+    if (request.turnContextSha256 !== activation.turnContextSha256) {
       throw new SandboxManagerError(
-        "execution_context_mismatch",
-        "Tool operation did not match the frozen Cloud execution context",
+        "turn_context_mismatch",
+        "Tool operation did not match the frozen Cloud Turn context",
+        false,
+      );
+    }
+    if (request.attemptContextSha256 !== activation.attemptContextSha256) {
+      throw new SandboxManagerError(
+        "attempt_context_mismatch",
+        "Tool operation did not match the current Cloud Attempt context",
         false,
       );
     }

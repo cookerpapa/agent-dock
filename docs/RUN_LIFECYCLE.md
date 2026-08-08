@@ -56,10 +56,11 @@ instead of blindly replaying commands.
    `deferred`; the Workflow waits on a durable timer.
 4. The selected Supervisor acquires the lease/fence and commits
    `ACKNOWLEDGED/RUNNING` before starting Pi.
-5. Trusted Runner freezes one credential-free execution context containing accepted
-   identity, model, environment, budget, Workspace revision and Tool/network
-   policy, then durably advances the Attempt through restore/run/checkpoint
-   phases.
+5. Trusted Runner freezes one credential-free logical Turn context containing
+   accepted identity, model, environment, budget, Workspace revision and
+   Tool/network policy. It separately freezes the exact command, Worker,
+   Attempt, lease and fence into a physical Attempt context, then durably
+   advances that Attempt through restore/run/checkpoint phases.
 6. `ToolSandboxManager` reserves one logical activation and rotating capability;
    it does not create a microVM.
 7. Trusted Runner creates a pinned embedded Pi SDK session with only the fixed
@@ -99,8 +100,8 @@ falling back to the active version.
 
 Pi's Agent Loop and conversation state remain trusted. `read/write/edit/bash`
 cross Tool RPC. The Manager validates the activation capability and unique
-operation ID plus the frozen execution digest and current sampling-Step digest
-before the Provider sends a closed
+operation ID plus the frozen logical Turn digest, current Attempt digest and
+sampling-Step digest before the Provider sends a closed
 worker request. An operation ID names one execution. A reconnect with the same
 request attaches to its running or retained result; changed reuse is rejected.
 The guest sequences stdout/stderr observations and signs the reconstructed

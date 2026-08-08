@@ -49,8 +49,9 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   edits.
 - [x] Keep research APIs behind an explicit optional module and remove the
   unfinished product routes/client workflows.
-- [x] Freeze a credential-free RunAttempt execution view and bind Sandbox reservation,
-  environment, Workspace revision and Tool policy to its digest.
+- [x] Freeze a credential-free logical Turn contract, rotate a separate
+  Worker/lease/fence Attempt contract and bind Sandbox reservation,
+  environment, Workspace revision and Tool policy to both digests.
 - [x] Recapture a per-sampling Cloud Step through Pi's public `context` hook,
   bind remote Tools to its monotonic sequence/digest and persist only material
   model-visible WorldState deltas.

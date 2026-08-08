@@ -79,18 +79,22 @@ export {
 } from "./trusted-remote-tools-extension.ts";
 
 export {
-  CLOUD_EXECUTION_CONTEXT_SCHEMA_VERSION,
+  CLOUD_ATTEMPT_CONTEXT_SCHEMA_VERSION,
   CLOUD_STEP_CONTEXT_SCHEMA_VERSION,
+  CLOUD_TURN_CONTEXT_SCHEMA_VERSION,
   REMOTE_TOOL_REGISTRY_VERSION,
   TOOL_NETWORK_POLICY_VERSION,
-  createCloudExecutionContext,
+  createCloudAttemptContext,
   createCloudStepContext,
-  type CloudExecutionContext,
+  createCloudTurnContext,
+  type CloudAttemptContext,
   type CloudStepContext,
   type CloudStepWorldState,
-  type FrozenCloudExecution,
+  type CloudTurnContext,
+  type FrozenCloudAttempt,
   type FrozenCloudStep,
-} from "./cloud-step-context.ts";
+  type FrozenCloudTurn,
+} from "./cloud-context.ts";
 
 export {
   LocalSandboxSupervisor,

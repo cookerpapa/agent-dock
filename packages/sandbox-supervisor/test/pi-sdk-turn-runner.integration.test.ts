@@ -11,8 +11,9 @@ import { resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
-  createCloudExecutionContext,
+  createCloudAttemptContext,
   createCloudStepContext,
+  createCloudTurnContext,
   PiSdkTurnRunner,
   PiTurnError,
 } from "../src/index.ts";
@@ -142,7 +143,16 @@ describe("PiSdkTurnRunner integration", () => {
   it("captures a distinct Cloud Step at each real Pi provider-request boundary", async () => {
     const fakeModel = new FakeModelServer({ defaultScenario: "tool_call" });
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-step-boundary-test-"));
-    const execution = createCloudExecutionContext(command, undefined);
+    const turn = createCloudTurnContext(command, undefined);
+    const attempt = createCloudAttemptContext({
+      command,
+      runtimeIdentity: {
+        supervisorId: "supervisor-step-test",
+        bootId: "77777777-7777-4777-8777-777777777777",
+        sandboxId: "sandbox-step-test",
+      },
+      turnContextSha256: turn.sha256,
+    });
     const steps: string[] = [];
     let sequence = 0;
     const extension: InlineExtension = (pi) => {
@@ -150,13 +160,14 @@ describe("PiSdkTurnRunner integration", () => {
         steps.push(
           createCloudStepContext({
             sequence: (sequence += 1),
-            executionContextSha256: execution.sha256,
+            turnContextSha256: turn.sha256,
+            attemptContextSha256: attempt.sha256,
             activeTools: ["read", "write", "edit", "bash"],
             worldState: {
               sandbox: { status: "inactive", continuitySha256: null },
-              environmentSha256: execution.environmentSha256,
+              environmentSha256: turn.environmentSha256,
               committedWorkspaceRevision: null,
-              toolPolicySha256: execution.toolPolicySha256,
+              toolPolicySha256: turn.toolPolicySha256,
             },
           }).sha256,
         );

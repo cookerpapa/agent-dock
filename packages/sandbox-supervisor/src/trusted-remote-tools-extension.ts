@@ -21,7 +21,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve, sep } from "node:path";
-import type { FrozenCloudStep } from "./cloud-step-context.ts";
+import type { FrozenCloudStep } from "./cloud-context.ts";
 import type { PiWorldStateModelMessage } from "./pi-sandbox-continuity.ts";
 
 const WORKSPACE_ROOT = "/workspace";
@@ -35,7 +35,8 @@ type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
       | "type"
       | "activationId"
       | "operationId"
-      | "executionContextSha256"
+      | "turnContextSha256"
+      | "attemptContextSha256"
       | "stepContextSequence"
       | "stepContextSha256"
     >
@@ -57,7 +58,8 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   operationUrl: string;
   activationId: string;
   capability: string;
-  executionContextSha256: string;
+  turnContextSha256: string;
+  attemptContextSha256: string;
   captureStepContext: (activeTools: readonly string[]) => Readonly<{
     step: FrozenCloudStep;
     modelMessages: readonly PiWorldStateModelMessage[];
@@ -88,7 +90,8 @@ function validateRuntimeConfiguration(
   }
   const activationId = candidate.activationId;
   const capability = candidate.capability;
-  const executionContextSha256 = candidate.executionContextSha256;
+  const turnContextSha256 = candidate.turnContextSha256;
+  const attemptContextSha256 = candidate.attemptContextSha256;
   const remainingToolCalls = candidate.remainingToolCalls;
   const maximumToolOutputBytes = candidate.maximumToolOutputBytes;
   const configuredToolOutputDirectory = candidate.toolOutputDirectory;
@@ -101,7 +104,8 @@ function validateRuntimeConfiguration(
       activationId,
     ) ||
     !/^adts_[A-Za-z0-9_-]{43}$/.test(capability) ||
-    !/^[0-9a-f]{64}$/.test(executionContextSha256) ||
+    !/^[0-9a-f]{64}$/.test(turnContextSha256) ||
+    !/^[0-9a-f]{64}$/.test(attemptContextSha256) ||
     typeof candidate.captureStepContext !== "function" ||
     (candidate.onToolOperationStarted !== undefined &&
       typeof candidate.onToolOperationStarted !== "function") ||
@@ -143,7 +147,8 @@ function validateRuntimeConfiguration(
     operationUrl: parsed.toString(),
     activationId,
     capability,
-    executionContextSha256,
+    turnContextSha256,
+    attemptContextSha256,
     captureStepContext: candidate.captureStepContext,
     ...(candidate.onToolOperationStarted === undefined
       ? {}
@@ -278,10 +283,11 @@ function registerTrustedRemoteTools(
     currentStep = undefined;
     const captured = runtime.captureStepContext(pi.getActiveTools());
     if (
-      captured.step.context.executionContextSha256 !== runtime.executionContextSha256 ||
+      captured.step.context.turnContextSha256 !== runtime.turnContextSha256 ||
+      captured.step.context.attemptContextSha256 !== runtime.attemptContextSha256 ||
       !/^[0-9a-f]{64}$/.test(captured.step.sha256)
     ) {
-      throw new Error("Captured Cloud Step did not match the accepted execution context");
+      throw new Error("Captured Cloud Step did not match the accepted Turn and Attempt contexts");
     }
     currentStep = captured.step;
     const messages = [...event.messages];
@@ -333,7 +339,8 @@ function registerTrustedRemoteTools(
       type: "tool_sandbox.operation",
       activationId: runtime.activationId,
       operationId: randomUUID(),
-      executionContextSha256: runtime.executionContextSha256,
+      turnContextSha256: runtime.turnContextSha256,
+      attemptContextSha256: runtime.attemptContextSha256,
       stepContextSequence: currentStep.context.sequence,
       stepContextSha256: currentStep.sha256,
       ...request,

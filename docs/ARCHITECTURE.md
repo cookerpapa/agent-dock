@@ -113,8 +113,9 @@ The Manager is the only application component that controls Cube. Its API is
 narrow and authenticated. It:
 
 - validates Tool leases and fencing tokens;
-- binds every reservation and operation to one frozen RunAttempt execution
-  digest, then admits monotonically advancing per-sampling Step digests;
+- binds every reservation and operation to one stable logical Turn digest and
+  one rotating Attempt digest, then admits monotonically advancing
+  per-sampling Step digests;
 - maps a logical activation to one exact Cube microVM;
 - creates, rebinds, inspects, stops and destroys that runtime;
 - forwards bounded, identity-recoverable Tool requests;
@@ -235,7 +236,8 @@ Browser POST prompt
   → transactional relay starts deterministic Temporal Workflow
   → eligible Pi Worker
   → exact-command transactional admission creates RunAttempt/fence
-  → freeze model/environment/Workspace/policy as one execution contract
+  → freeze model/environment/Workspace/policy as one logical Turn contract
+  → bind command/Worker/lease/fence as one Attempt contract
   → Pi checkpoint restore
   → capture a fresh Cloud Step before each model request
   → model stream
@@ -252,8 +254,8 @@ Cube is never contacted.
 ```text
 Pi context hook captures Step N and its semantic WorldState
   → model emits Tool Call from Step N
-  → Worker sends execution digest + Step N sequence/digest
-  → Sandbox Manager validates Attempt/fence/execution contract and rejects stale Steps
+  → Worker sends Turn + Attempt digests and Step N sequence/digest
+  → Sandbox Manager validates Turn contract, Attempt/fence ownership and rejects stale Steps
   → ensure exact Session Cube activation
   → restore current Workspace if activation is cold
   → execute Tool in guest

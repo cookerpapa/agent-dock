@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-04
 - Refines: ADR-0029, ADR-0031, ADR-0070 and ADR-0079
+- Refined by: ADR-0081 and ADR-0082
 
 ## Context
 
@@ -25,13 +26,13 @@ untyped hidden sandbox marker. These invariants should be explicit contracts.
 
 ## Decision
 
-1. Every RunAttempt creates one immutable `CloudExecutionContext`. It freezes the
-   accepted identity, model, environment, budgets, Workspace base revision and
+1. Every accepted execution freezes one immutable credential-free view of its
+   identity, model, environment, budgets, Workspace base revision and
    Tool/network policy. A canonical SHA-256 digest binds the Sandbox reservation
    and every Tool operation to that exact accepted view. ADR-0081 adds a
-   per-provider-request `CloudStepContext` beneath this stable execution
-   contract. The context contains references
-   and hashes, never model or platform credentials.
+   per-provider-request `CloudStepContext`; ADR-0082 separates the original
+   execution view into stable logical Turn and rotating Attempt contracts. The
+   contexts contain references and hashes, never model or platform credentials.
 2. A Tool `operationId` names one execution, not one HTTP request. The Sandbox
    Manager and Cube Tool service retain a bounded operation ledger. Reattaching
    with the same operation ID and identical request returns the existing running

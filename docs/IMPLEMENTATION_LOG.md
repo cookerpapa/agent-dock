@@ -7,6 +7,21 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-08 — Cloud Turn、Attempt 与 Step 分层
+
+- 将原先混合逻辑配置和物理接管权的 `CloudExecutionContext` 拆为三层：
+  `CloudTurnContext` 冻结模型、环境、Workspace 基线、Tool/网络策略和预算；
+  `CloudAttemptContext` 绑定 command、Worker boot、Attempt、Lease 和 Fence；
+  `CloudStepContext` 继续在每次 provider request 前捕获 WorldState。
+- 同一 Run 只改变 command/Attempt/Worker/Lease/Fence 时，Turn 摘要保持不变，
+  Attempt 摘要必须变化。Sandbox reservation 和 Tool RPC 同时携带并校验两者，
+  旧 Worker 无法利用相同的逻辑 Turn 绕过已轮换的执行权。
+- 删除旧单一 execution digest 协议字段和兼容分支；Manager 分别返回
+  `turn_context_mismatch` 与 `attempt_context_mismatch`，便于区分逻辑漂移和
+  陈旧接管权。
+- 合同测试覆盖跨 Attempt 稳定 Turn、变化 Attempt、每请求变化 Step，以及
+  Manager 对 Turn/Attempt/Step 三层冲突的独立拒绝。
+
 ## 2026-08-07 — 逐模型请求的 Cloud Step 与 WorldState
 
 - 将 RunAttempt 级冻结对象明确为 `CloudExecutionContext`；它继续承载租约、

@@ -26,6 +26,8 @@ const CAPABILITY = `adts_${"c".repeat(43)}`;
 const SECOND_ACTIVATION_ID = "20000000-0000-4000-8000-000000000020";
 const SECOND_CAPABILITY = `adts_${"d".repeat(43)}`;
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
+const TURN_CONTEXT_SHA256 = "b".repeat(64);
+const ATTEMPT_CONTEXT_SHA256 = "c".repeat(64);
 const assignment: ToolSandboxAssignment = {
   tenantId: "tenant-provider-test",
   projectId: "project-provider-test",
@@ -75,7 +77,8 @@ const createRequest: ToolSandboxCreateRequest = {
   type: "tool_sandbox.create",
   requestId: "10000000-0000-4000-8000-000000000011",
   assignment,
-  executionContextSha256: STEP_CONTEXT_SHA256,
+  turnContextSha256: TURN_CONTEXT_SHA256,
+  attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
   environment,
   workspaceSeed: { kind: "sample_java" },
 };
@@ -189,7 +192,8 @@ function operation(
     type: "tool_sandbox.operation",
     activationId: ACTIVATION_ID,
     operationId,
-    executionContextSha256: STEP_CONTEXT_SHA256,
+    turnContextSha256: TURN_CONTEXT_SHA256,
+    attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
     stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
     operation: "bash.exec",
@@ -222,9 +226,15 @@ describe("provider-backed Tool Sandbox Manager", () => {
     await expect(
       manager.execute(CAPABILITY, {
         ...operation("10000000-0000-4000-8000-000000000011"),
-        executionContextSha256: "b".repeat(64),
+        turnContextSha256: "d".repeat(64),
       }),
-    ).rejects.toMatchObject({ code: "execution_context_mismatch" });
+    ).rejects.toMatchObject({ code: "turn_context_mismatch" });
+    await expect(
+      manager.execute(CAPABILITY, {
+        ...operation("10000000-0000-4000-8000-000000000021"),
+        attemptContextSha256: "d".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "attempt_context_mismatch" });
     expect(fixture.createSpec).toBeUndefined();
 
     await expect(

@@ -26,9 +26,10 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Lock the cloud recovery contract with deterministic tests covering an
       interrupted Pi Session across native Compaction/fresh-Worker restore and
       proving that post-ACK or ambiguous Tool failures are not replayed.
-- [x] Freeze each accepted execution view, bind Tool RPC to its digest, recover
-      short transport disconnects by operation identity, order Bash output and
-      require an explicit durable event barrier before terminal settlement.
+- [x] Separate stable logical Turn state from rotating Attempt ownership, bind
+      Tool RPC to both digests, recover short transport disconnects by
+      operation identity, order Bash output and require an explicit durable
+      event barrier before terminal settlement.
 - [x] Capture a fresh Step before every Pi provider request, reject stale Tool
       Steps and preserve minimal environment/Sandbox/policy deltas through Pi
       Compaction and fresh-Worker restore.

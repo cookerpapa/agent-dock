@@ -114,9 +114,13 @@ async function waitUntilReady(baseUrl) {
   throw new Error(`Cube Tool service did not become ready: ${String(lastError)}`);
 }
 
-const templateStepContextSha256 = createHash("sha256")
-  .update("agent-dock-template-check-step-context", "utf8")
-  .digest("hex");
+function templateContextSha256(name) {
+  return createHash("sha256").update(`agent-dock-template-check-${name}`, "utf8").digest("hex");
+}
+
+const templateTurnContextSha256 = templateContextSha256("turn-context");
+const templateAttemptContextSha256 = templateContextSha256("attempt-context");
+const templateStepContextSha256 = templateContextSha256("step-context");
 
 function operationEnvelope(activationId, operationId, operation) {
   return {
@@ -124,6 +128,9 @@ function operationEnvelope(activationId, operationId, operation) {
     type: "tool_sandbox.operation",
     activationId,
     operationId,
+    turnContextSha256: templateTurnContextSha256,
+    attemptContextSha256: templateAttemptContextSha256,
+    stepContextSequence: 1,
     stepContextSha256: templateStepContextSha256,
     ...operation,
   };

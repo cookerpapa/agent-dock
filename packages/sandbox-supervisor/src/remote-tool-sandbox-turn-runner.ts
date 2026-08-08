@@ -41,7 +41,11 @@ import type {
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
 import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extension.ts";
-import { createCloudExecutionContext, createCloudStepContext } from "./cloud-step-context.ts";
+import {
+  createCloudAttemptContext,
+  createCloudStepContext,
+  createCloudTurnContext,
+} from "./cloud-context.ts";
 
 const MAX_PROJECT_INSTRUCTIONS_BYTES = 16 * 1_024;
 
@@ -326,10 +330,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     const projectInstructions = projectInstructionsFromSnapshot(
       loadedCheckpoint?.workspace ?? workspaceSeed,
     );
-    const cloudExecution = createCloudExecutionContext(
-      command,
-      loadedCheckpoint?.workspaceRevision,
-    );
+    const cloudTurn = createCloudTurnContext(command, loadedCheckpoint?.workspaceRevision);
 
     const usesEmbeddedFake =
       command.payload.model.provider === "agent-dock-fake" &&
@@ -362,6 +363,11 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         ? this.#scenario({ command, restoring: loadedCheckpoint !== undefined })
         : this.#scenario;
     const toolAssignment = assignment(command, this.#runtimeIdentity);
+    const cloudAttempt = createCloudAttemptContext({
+      command,
+      runtimeIdentity: this.#runtimeIdentity,
+      turnContextSha256: cloudTurn.sha256,
+    });
     let activation: ToolSandboxCreateResponse | undefined;
     let fakeModel: FakeModelServer | undefined;
     let capturedPatch: WorkspacePatch | undefined;
@@ -400,7 +406,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         type: "tool_sandbox.create",
         requestId: this.#idGenerator(),
         assignment: toolAssignment,
-        executionContextSha256: cloudExecution.sha256,
+        turnContextSha256: cloudTurn.sha256,
+        attemptContextSha256: cloudAttempt.sha256,
         environment: command.payload.environment,
         workspaceSeed:
           workspaceSeed === undefined
@@ -589,9 +596,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         sandboxContinuity: {
           activationId: activeSandbox.activationId,
           continuity: activeSandbox.continuity,
-          environmentSha256: cloudExecution.environmentSha256,
+          environmentSha256: cloudTurn.environmentSha256,
           committedWorkspaceRevision: loadedCheckpoint?.workspaceRevision ?? null,
-          toolPolicySha256: cloudExecution.toolPolicySha256,
+          toolPolicySha256: cloudTurn.toolPolicySha256,
         },
         onSettled,
         onInterrupted,
@@ -632,12 +639,14 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               operationUrl: this.#manager.operationUrl,
               activationId: activeSandbox.activationId,
               capability: activeSandbox.capability,
-              executionContextSha256: cloudExecution.sha256,
+              turnContextSha256: cloudTurn.sha256,
+              attemptContextSha256: cloudAttempt.sha256,
               captureStepContext: (activeTools) => {
                 const captured = stepWorldState.capture();
                 const step = createCloudStepContext({
                   sequence: (stepSequence += 1),
-                  executionContextSha256: cloudExecution.sha256,
+                  turnContextSha256: cloudTurn.sha256,
+                  attemptContextSha256: cloudAttempt.sha256,
                   activeTools,
                   worldState: captured.worldState,
                 });

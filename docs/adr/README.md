@@ -45,6 +45,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
   credential-free Step before every Pi provider request, binds remote Tools to
   that Step and projects only material execution-world deltas into model
   context.
+- [ADR-0082](0082-cloud-turn-attempt-and-step-contexts.md) separates the stable
+  accepted Turn contract from rotating Attempt ownership and binds every
+  sampling Step and remote Tool operation to both.
 
 ## Maintained optional modules
 

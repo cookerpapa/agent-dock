@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { CloudStepWorldState } from "./cloud-step-context.ts";
+import type { CloudStepWorldState } from "./cloud-context.ts";
 
 export const PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE = "agent-dock.runtime_world_state";
 export const PI_SANDBOX_RESET_CUSTOM_TYPE = "agent-dock.sandbox_reset";

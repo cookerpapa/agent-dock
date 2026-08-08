@@ -53,8 +53,8 @@ to the trusted Manager and guest Tool service. Every request carries:
 - current handoff secret;
 - current fencing token;
 - physical binding hash;
-- frozen RunAttempt execution digest, current per-sampling Step digest and one
-  immutable operation ID.
+- frozen logical Turn digest, current Attempt digest, current per-sampling Step
+  digest and one immutable operation ID.
 
 Warm reuse rotates authority before another Run can execute. A stale Worker may
 still exist, but its old capability and fence are rejected.

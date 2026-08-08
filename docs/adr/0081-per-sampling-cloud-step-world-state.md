@@ -3,14 +3,15 @@
 - Status: Accepted
 - Date: 2026-08-07
 - Refines: ADR-0079 and ADR-0080
+- Refined by: ADR-0082
 
 ## Context
 
-ADR-0080 freezes one accepted execution view for an entire RunAttempt. That is
-the correct authority boundary for leases, fencing, model selection, budgets,
-environment versions and Tool policy, but it is wider than one model sampling
-step. Pi can make several provider requests in one Run: an assistant response
-may request Tools, their results are appended, and Pi then samples again.
+ADR-0080 freezes one accepted execution view for an entire RunAttempt. ADR-0082
+later separates its stable logical Turn fields from rotating lease, fence and
+Worker ownership. Both lifetimes are wider than one model sampling step. Pi can
+make several provider requests in one Run: an assistant response may request
+Tools, their results are appended, and Pi then samples again.
 
 The trusted Pi Worker and the Cube Tool executor are separate failure domains.
 A later sampling request may therefore run after a Worker handoff, a cold Cube
@@ -24,12 +25,13 @@ call. This provides the required safe point without modifying Pi's Agent Loop.
 
 ## Decision
 
-1. Rename the RunAttempt-wide snapshot concept to `CloudExecutionContext`. It
-   remains immutable and credential-free. Its digest binds the Sandbox
-   reservation and is validated by the Sandbox Manager for every Tool call.
+1. Keep the parent execution contract immutable and credential-free. ADR-0082
+   subsequently separates it into a stable logical `CloudTurnContext` and a
+   rotating physical `CloudAttemptContext`; both digests bind Sandbox
+   reservation and every Tool call.
 2. Capture a new immutable `CloudStepContext` from Pi's public `context` hook
    before every provider request. It contains a monotonic step sequence, the
-   parent execution-context digest, the exact active remote Tool registry and a
+   parent Turn and Attempt digests, the exact active remote Tool registry and a
    typed runtime world-state snapshot.
 3. All Tool calls emitted by one assistant response use the most recently
    captured step sequence and digest. Tool execution is rejected before RPC if
@@ -64,8 +66,8 @@ call. This provides the required safe point without modifying Pi's Agent Loop.
   by the Sandbox Manager.
 - Worker migration alone is invisible when the Cube and Tool world are
   unchanged; only facts that can affect model reasoning consume context.
-- The RunAttempt execution contract remains stable, so dynamic administration
-  cannot mutate policy mid-Run.
+- The logical Turn contract remains stable, so dynamic administration cannot
+  mutate policy mid-Run; Attempt ownership can still rotate safely.
 - Session JSONL grows only when semantic world state changes, not once per
   token or once per model request.
 
