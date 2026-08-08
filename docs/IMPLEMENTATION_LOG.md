@@ -3198,3 +3198,6 @@
 - Recorded the PostgreSQL group-commit, bounded Worker batching and event-broker
   adoption decision in ADR-0087. Kafka/NATS remain deferred until a measured
   PostgreSQL capacity limit justifies moving the single event authority.
+- Hardened the Sandbox Manager image's Debian package installation with bounded
+  repository retries after a transient host-proxy 502 interrupted a production
+  rebuild before application startup.

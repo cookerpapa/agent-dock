@@ -54,9 +54,28 @@ LABEL org.opencontainers.image.title="AgentDock Sandbox Manager" \
       org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
       org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
 ENV NODE_ENV=production
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    installed=0; \
+    attempt=1; \
+    while [ "$attempt" -le 3 ]; do \
+      rm -rf /var/lib/apt/lists/*; \
+      if apt-get \
+          -o Acquire::Retries=3 \
+          -o Acquire::http::Timeout=30 \
+          update \
+        && apt-get \
+          -o Acquire::Retries=3 \
+          -o Acquire::http::Timeout=30 \
+          install --yes --no-install-recommends git; then \
+        installed=1; \
+        break; \
+      fi; \
+      dpkg --configure -a || true; \
+      sleep "$((attempt * 2))"; \
+      attempt="$((attempt + 1))"; \
+    done; \
+    test "$installed" = 1; \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=kopia-builder /out/kopia /usr/local/bin/kopia
 COPY --from=dependencies /app/node_modules /app/node_modules
