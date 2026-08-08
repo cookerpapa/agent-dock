@@ -240,6 +240,7 @@ Browser POST prompt
   → bind command/Worker/lease/fence as one Attempt contract
   → Pi checkpoint restore
   → capture a fresh Cloud Step before each model request
+  → bind each provider transport attempt beneath that Step
   → model stream
   → batched durable events + SSE
   → Pi native checkpoint commit
@@ -283,6 +284,14 @@ Worker-to-Manager or Manager-to-Cube transport break can reattach to the same
 bounded operation ledger entry and obtain the original result. A changed
 request under the same ID is rejected. Loss of the Manager ledger, Tool service
 or VM still yields `UNKNOWN`; arbitrary Bash is never started again.
+
+Every model request carries the current Cloud Step sequence/digest and a
+separate sampling-attempt number. A transient provider retry reuses the frozen
+Step because no Tool or world-state transition occurred; normal post-Tool and
+post-compaction requests advance to a new Step. The Model Gateway records the
+identity in its request ledger and trace, while durable sampling events bind
+the resulting Tool boundaries to the same Step. Provider error text is not
+copied into public events.
 
 The first Tool call pays cold activation cost. An eligible warm activation can
 serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
@@ -374,9 +383,11 @@ future real replacement to produce a new one-time marker. Activation IDs and
 lifecycle reason codes remain outside model context.
 
 The Pi `context` extension hook runs immediately before every provider request.
-At that boundary AgentDock captures a new immutable Step containing the exact
-active remote Tool registry and current typed runtime world state. Consecutive
-identical states do not add Session entries. In addition to a lost active Cube,
+At a new logical sampling boundary AgentDock captures an immutable Step
+containing the exact active remote Tool registry and current typed runtime world
+state; a scheduled provider retry reuses that Step with another sampling
+attempt. Consecutive identical states do not add Session entries. In addition
+to a lost active Cube,
 an environment-image change or Tool/network-policy change produces one short
 hidden custom message. Worker handoff alone is not model-visible when the same
 warm Cube remains continuous.
@@ -524,6 +535,7 @@ not require changing the Worker execution contract.
 - [ADR-0078: Worker Control Channel and optional modules](adr/0078-worker-control-channel-and-optional-product-modules.md)
 - [ADR-0079: Interrupted Pi conversation checkpoints](adr/0079-interrupted-pi-conversation-checkpoints.md)
 - [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
+- [ADR-0083: Model sampling attempts within one Cloud Step](adr/0083-model-sampling-attempt-identity.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.

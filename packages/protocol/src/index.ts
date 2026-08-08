@@ -19,6 +19,15 @@ export {
 } from "./event-envelope.ts";
 
 export {
+  MODEL_SAMPLING_ATTEMPT_HEADER,
+  MODEL_STEP_SEQUENCE_HEADER,
+  MODEL_STEP_SHA256_HEADER,
+  modelSamplingHeaders,
+  parseModelSamplingIdentity,
+  type ModelSamplingIdentity,
+} from "./model-sampling.ts";
+
+export {
   AgentModelRuntimeSchema,
   AgentWorkspaceSeedSchema,
   MAX_PI_SESSION_SNAPSHOT_BYTES,

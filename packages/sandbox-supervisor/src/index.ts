@@ -95,6 +95,7 @@ export {
   type FrozenCloudStep,
   type FrozenCloudTurn,
 } from "./cloud-context.ts";
+export { PiSamplingStepController, type PiSamplingStepCapture } from "./pi-sampling-step.ts";
 
 export {
   LocalSandboxSupervisor,

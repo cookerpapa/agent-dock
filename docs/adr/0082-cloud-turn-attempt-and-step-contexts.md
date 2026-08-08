@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-08
 - Refines: ADR-0031, ADR-0080 and ADR-0081
+- Refined by: ADR-0083
 
 ## Context
 
@@ -31,9 +32,10 @@ Step and the two parent lifetimes implicit.
 2. Capture one immutable `CloudAttemptContext` for each physical execution
    ownership period. It contains the parent Turn digest, command/idempotency
    identity, Attempt, lease, fence and exact Worker runtime identity.
-3. Capture `CloudStepContext` before every provider request as already required
+3. Capture `CloudStepContext` at every logical sampling boundary as required
    by ADR-0081. Every Step names both its parent Turn and Attempt digests, its
-   monotonic sequence, active Tool registry and typed world state.
+   monotonic sequence, active Tool registry and typed world state. ADR-0083
+   distinguishes bounded provider attempts within that Step.
 4. Sandbox reservation and every Tool operation carry both Turn and Attempt
    digests. The Sandbox Manager validates both before admitting the Step.
    Attempt rotation therefore invalidates old Tool authority without changing

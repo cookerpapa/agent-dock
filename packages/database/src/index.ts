@@ -58,6 +58,7 @@ export {
   downHotPlatformRuntimeSettings,
   downWorkspaceFirstConversations,
   downTypedToolOutcomes,
+  downModelSamplingStepIdentity,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -84,6 +85,7 @@ export {
   upHotPlatformRuntimeSettings,
   upWorkspaceFirstConversations,
   upTypedToolOutcomes,
+  upModelSamplingStepIdentity,
 } from "./migrations/index.ts";
 
 export {

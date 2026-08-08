@@ -7,6 +7,17 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-08 — Step 级模型请求链路
+
+- 在 `CloudStepContext` 下增加独立 `samplingAttempt`：正常 Agent Loop 前进才
+  创建新 Step，瞬时 provider retry 复用原 Step 并增加 attempt。
+- Pi trusted extension 为 Model Gateway 请求附带 Step 序号、摘要和 sampling
+  attempt；Gateway 强校验后写入 `model_requests` 并加入 OTel span 属性。
+- 新增持久化 sampling start/completion/retry-scheduled 事件，Tool 边界继承产生
+  它的 sampling 身份；provider 原始错误文本不进入公开事件。
+- 数据库唯一约束防止同一 RunAttempt 下重复记录同一个 Step attempt；定向测试
+  覆盖协议、迁移、Step 复用、事件映射、Gateway 拒绝缺失身份和 Tool 关联。
+
 ## 2026-08-08 — Cloud Turn、Attempt 与 Step 分层
 
 - 将原先混合逻辑配置和物理接管权的 `CloudExecutionContext` 拆为三层：

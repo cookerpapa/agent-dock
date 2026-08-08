@@ -904,6 +904,9 @@ export interface ModelRequestTable {
   attempt_id: string;
   model_profile_id: string;
   request_sequence: number;
+  step_context_sequence: number | null;
+  step_context_sha256: string | null;
+  sampling_attempt: number | null;
   requested_provider: string;
   requested_model_id: string;
   actual_provider: string | null;

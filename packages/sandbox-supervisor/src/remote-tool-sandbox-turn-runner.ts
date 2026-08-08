@@ -625,7 +625,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       };
       const runner = new PiSdkTurnRunner({
         ...commonRunnerOptions,
-        createInlineExtensions: ({ toolOutputDirectory, stepWorldState }) => {
+        createInlineExtensions: ({ toolOutputDirectory, stepWorldState, captureSamplingStep }) => {
           if (stepWorldState === undefined) {
             throw new PiTurnError(
               "step_world_state_unavailable",
@@ -641,17 +641,18 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               capability: activeSandbox.capability,
               turnContextSha256: cloudTurn.sha256,
               attemptContextSha256: cloudAttempt.sha256,
-              captureStepContext: (activeTools) => {
-                const captured = stepWorldState.capture();
-                const step = createCloudStepContext({
-                  sequence: (stepSequence += 1),
-                  turnContextSha256: cloudTurn.sha256,
-                  attemptContextSha256: cloudAttempt.sha256,
-                  activeTools,
-                  worldState: captured.worldState,
-                });
-                return { step, modelMessages: captured.modelMessages };
-              },
+              captureStepContext: (activeTools) =>
+                captureSamplingStep(() => {
+                  const captured = stepWorldState.capture();
+                  const step = createCloudStepContext({
+                    sequence: (stepSequence += 1),
+                    turnContextSha256: cloudTurn.sha256,
+                    attemptContextSha256: cloudAttempt.sha256,
+                    activeTools,
+                    worldState: captured.worldState,
+                  });
+                  return { step, modelMessages: captured.modelMessages };
+                }),
               onToolOperationStarted: () => stepWorldState.recordActive(),
               onToolOperationUnavailable: () => stepWorldState.recordUnavailable(),
               remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,

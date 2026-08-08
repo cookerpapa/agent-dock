@@ -83,8 +83,9 @@ the Worker filesystem.
 Every accepted Run freezes a credential-free logical Turn contract covering
 the model, environment, Workspace base revision and Tool/network policy. Each
 physical Attempt separately binds its Worker, lease and fence, while every
-model request captures a fresh Step. Tool operations are bound to all three
-contexts. A short transport disconnect reattaches to the same execution; loss
+logical sampling boundary captures a Step and transient provider attempts stay
+beneath it. Tool operations are bound to all three contexts. A short transport
+disconnect reattaches to the same execution; loss
 of the execution ledger or VM is shown as `UNKNOWN` and never causes an
 automatic shell replay.
 

@@ -102,6 +102,66 @@ const AssistantTextDeltaEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ModelSamplingIdentityProperties = {
+  stepSequence: PositiveSafeIntegerSchema,
+  stepSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  samplingAttempt: PositiveSafeIntegerSchema,
+};
+
+const ModelSamplingStartedEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("model.sampling.started"),
+    payload: Type.Object(ModelSamplingIdentityProperties, { additionalProperties: false }),
+  },
+  { additionalProperties: false },
+);
+
+const ModelSamplingCompletedEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("model.sampling.completed"),
+    payload: Type.Object(
+      {
+        ...ModelSamplingIdentityProperties,
+        outcome: Type.Union([
+          Type.Literal("completed"),
+          Type.Literal("failed"),
+          Type.Literal("aborted"),
+        ]),
+        stopReason: Type.Union([
+          Type.Literal("stop"),
+          Type.Literal("length"),
+          Type.Literal("toolUse"),
+          Type.Literal("error"),
+          Type.Literal("aborted"),
+        ]),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const ModelSamplingRetryScheduledEventSchema = Type.Object(
+  {
+    ...TurnEnvelopeProperties,
+    type: Type.Literal("model.sampling.retry.scheduled"),
+    payload: Type.Object(
+      {
+        stepSequence: PositiveSafeIntegerSchema,
+        stepSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+        completedSamplingAttempt: PositiveSafeIntegerSchema,
+        nextSamplingAttempt: PositiveSafeIntegerSchema,
+        maximumSamplingAttempts: PositiveSafeIntegerSchema,
+        delayMs: Type.Integer({ minimum: 0, maximum: 300_000 }),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const ToolInputDeltaEventSchema = Type.Object(
   {
     ...TurnEnvelopeProperties,
@@ -111,6 +171,9 @@ const ToolInputDeltaEventSchema = Type.Object(
         toolCallId: OpaqueIdSchema,
         toolName: OpaqueIdSchema,
         delta: Type.String(),
+        stepSequence: Type.Optional(PositiveSafeIntegerSchema),
+        stepSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        samplingAttempt: Type.Optional(PositiveSafeIntegerSchema),
       },
       { additionalProperties: false },
     ),
@@ -127,6 +190,9 @@ const ToolStartedEventSchema = Type.Object(
         toolCallId: OpaqueIdSchema,
         toolName: OpaqueIdSchema,
         input: Type.Unknown(),
+        stepSequence: Type.Optional(PositiveSafeIntegerSchema),
+        stepSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        samplingAttempt: Type.Optional(PositiveSafeIntegerSchema),
       },
       { additionalProperties: false },
     ),
@@ -147,6 +213,9 @@ const ToolCompletedEventSchema = Type.Object(
           Type.Literal("unknown"),
         ]),
         output: Type.Optional(Type.Unknown()),
+        stepSequence: Type.Optional(PositiveSafeIntegerSchema),
+        stepSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+        samplingAttempt: Type.Optional(PositiveSafeIntegerSchema),
         outputArtifact: Type.Optional(
           Type.Object(
             {
@@ -354,6 +423,9 @@ const TurnCancelledEventSchema = Type.Object(
 export const AgentDockEventSchema = Type.Union([
   TurnStartedEventSchema,
   SessionStateChangedEventSchema,
+  ModelSamplingStartedEventSchema,
+  ModelSamplingCompletedEventSchema,
+  ModelSamplingRetryScheduledEventSchema,
   AssistantTextDeltaEventSchema,
   ToolInputDeltaEventSchema,
   ToolStartedEventSchema,
@@ -371,6 +443,9 @@ export const AgentDockEventSchema = Type.Union([
 export type AgentDockEvent =
   | Static<typeof TurnStartedEventSchema>
   | Static<typeof SessionStateChangedEventSchema>
+  | Static<typeof ModelSamplingStartedEventSchema>
+  | Static<typeof ModelSamplingCompletedEventSchema>
+  | Static<typeof ModelSamplingRetryScheduledEventSchema>
   | Static<typeof AssistantTextDeltaEventSchema>
   | Static<typeof ToolInputDeltaEventSchema>
   | Static<typeof ToolStartedEventSchema>

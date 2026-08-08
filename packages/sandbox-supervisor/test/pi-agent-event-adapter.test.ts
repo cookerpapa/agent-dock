@@ -87,6 +87,73 @@ describe("PiAgentEventAdapter", () => {
     expect(JSON.stringify(settled)).not.toContain("must-not-pass");
   });
 
+  it("correlates one logical Step across a bounded provider retry and Tool result", () => {
+    let eventId = 0;
+    const adapter = new PiAgentEventAdapter(
+      createAgentDockEventFactory(
+        { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
+        {
+          idGenerator: () => `${String(++eventId).padStart(8, "0")}-0000-4000-8000-000000000000`,
+        },
+      ),
+      { inputKind: "prompt", requireSamplingIdentity: true },
+    );
+    const step = { stepSequence: 3, stepSha256: "a".repeat(64) } as const;
+    adapter.adapt({ type: "agent_start" });
+    expect(adapter.samplingStarted({ ...step, samplingAttempt: 1 })).toMatchObject({
+      type: "model.sampling.started",
+      payload: { ...step, samplingAttempt: 1 },
+    });
+    expect(
+      adapter.adapt({
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "private" },
+      }),
+    ).toMatchObject({
+      kind: "mapped",
+      event: {
+        type: "model.sampling.completed",
+        payload: { ...step, samplingAttempt: 1, outcome: "failed" },
+      },
+    });
+    expect(
+      adapter.adapt({
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 2,
+        delayMs: 10,
+        errorMessage: "private provider payload",
+      }),
+    ).toMatchObject({
+      kind: "mapped",
+      event: {
+        type: "model.sampling.retry.scheduled",
+        payload: {
+          ...step,
+          completedSamplingAttempt: 1,
+          nextSamplingAttempt: 2,
+          maximumSamplingAttempts: 3,
+        },
+      },
+    });
+    adapter.samplingStarted({ ...step, samplingAttempt: 2 });
+    adapter.adapt({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "toolUse" },
+    });
+    expect(
+      adapter.adapt({
+        type: "tool_execution_start",
+        toolCallId: "call-retry",
+        toolName: "read",
+        args: { path: "README.md" },
+      }),
+    ).toMatchObject({
+      kind: "mapped",
+      event: { payload: { ...step, samplingAttempt: 2 } },
+    });
+  });
+
   it("maps an expected Pi abort to a private cancellation result", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });

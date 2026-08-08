@@ -11,6 +11,7 @@ import { createDatabase, runMigrations, type Database } from "@agent-dock/databa
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+  modelSamplingHeaders,
   type ExecuteTurnCommandMessage,
 } from "@agent-dock/protocol";
 import type { Kysely } from "kysely";
@@ -29,6 +30,15 @@ const IDS = {
 } as const;
 const PROVIDER_SECRET = `sk-${"p".repeat(48)}`;
 const MASTER_KEY = Buffer.alloc(32, 21).toString("base64url");
+let samplingStepSequence = 0;
+function nextSamplingHeaders(): Record<string, string> {
+  samplingStepSequence += 1;
+  return modelSamplingHeaders({
+    stepSequence: samplingStepSequence,
+    stepSha256: samplingStepSequence.toString(16).padStart(64, "0"),
+    samplingAttempt: 1,
+  });
+}
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -307,6 +317,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -348,6 +359,9 @@ describe.sequential("tenant model gateway", () => {
         "actual_model_id as actualModelId",
         "actual_input_microusd_per_million as actualInputRate",
         "actual_cost_microusd as costMicrousd",
+        "step_context_sequence as stepSequence",
+        "step_context_sha256 as stepSha256",
+        "sampling_attempt as samplingAttempt",
       ])
       .where("turn_id", "=", IDS.turn)
       .orderBy("request_sequence", "asc")
@@ -358,6 +372,9 @@ describe.sequential("tenant model gateway", () => {
       actualModelId: "deepseek-v4-flash",
       actualInputRate: "1000000",
       costMicrousd: "17",
+      stepSequence: 1,
+      stepSha256: "1".padStart(64, "0"),
+      samplingAttempt: 1,
     });
 
     await lease.release();
@@ -367,6 +384,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({ model: "deepseek-v4-flash", stream: true, messages: [] }),
@@ -384,6 +402,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({ model: "deepseek-v4-pro", stream: true, messages: [] }),
@@ -391,6 +410,28 @@ describe.sequential("tenant model gateway", () => {
     );
     expect(response.status).toBe(403);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    await lease.release();
+  });
+
+  it("rejects a model request without its frozen Cloud Step identity", async () => {
+    const callsBefore = upstreamFetch.mock.calls.length;
+    const lease = await gateway.issue(command);
+    const response = await fetch(
+      `http://127.0.0.1:${String(gateway.listeningPort)}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${lease.runtime.capability}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ model: "deepseek-v4-flash", stream: true, messages: [] }),
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "model_sampling_identity_invalid" },
+    });
+    expect(upstreamFetch).toHaveBeenCalledTimes(callsBefore);
     await lease.release();
   });
 
@@ -407,6 +448,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -484,6 +526,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -521,6 +564,7 @@ describe.sequential("tenant model gateway", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${lease.runtime.capability}`,
+          ...nextSamplingHeaders(),
           "content-type": "application/json",
         },
         body: JSON.stringify({

@@ -30,6 +30,7 @@ import * as interruptedPiConversations from "./028_interrupted_pi_conversations.
 import * as externalPlatformGitMetadata from "./029_external_platform_git_metadata.ts";
 import * as activePiSteer from "./030_active_pi_steer.ts";
 import * as typedToolOutcomes from "./031_typed_tool_outcomes.ts";
+import * as modelSamplingStepIdentity from "./032_model_sampling_step_identity.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -65,6 +66,7 @@ export const migrationProvider: MigrationProvider = {
       "029_external_platform_git_metadata": externalPlatformGitMetadata,
       "030_active_pi_steer": activePiSteer,
       "031_typed_tool_outcomes": typedToolOutcomes,
+      "032_model_sampling_step_identity": modelSamplingStepIdentity,
     };
   },
 };
@@ -218,3 +220,8 @@ export {
   down as downTypedToolOutcomes,
   up as upTypedToolOutcomes,
 } from "./031_typed_tool_outcomes.ts";
+
+export {
+  down as downModelSamplingStepIdentity,
+  up as upModelSamplingStepIdentity,
+} from "./032_model_sampling_step_identity.ts";

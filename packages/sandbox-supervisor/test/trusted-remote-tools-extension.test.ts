@@ -33,6 +33,7 @@ function createStepCapture() {
         sha256: createHash("sha256").update(JSON.stringify(context)).digest("hex"),
       },
       modelMessages: [],
+      samplingAttempt: 1,
     };
   };
 }
@@ -371,12 +372,14 @@ describe("trusted remote tools extension governance", () => {
       const beforeProviderHeaders = handlers.get("before_provider_headers");
       expect(beforeProviderHeaders).toBeDefined();
       const providerHeaders: Record<string, string | null> = {};
+      await captureContext(handlers);
       await beforeProviderHeaders!({
         type: "before_provider_headers",
         headers: providerHeaders,
       } as never);
       expect(providerHeaders.traceparent).toBe(BASE_CONFIGURATION.traceparent);
-      await captureContext(handlers);
+      expect(providerHeaders["x-agent-dock-step-sequence"]).toMatch(/^[1-9][0-9]*$/);
+      expect(providerHeaders["x-agent-dock-sampling-attempt"]).toBe("1");
 
       await registered
         .find((tool) => tool.name === "read")!

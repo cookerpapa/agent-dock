@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-07
 - Refines: ADR-0079 and ADR-0080
-- Refined by: ADR-0082
+- Refined by: ADR-0082 and ADR-0083
 
 ## Context
 
@@ -30,9 +30,10 @@ call. This provides the required safe point without modifying Pi's Agent Loop.
    rotating physical `CloudAttemptContext`; both digests bind Sandbox
    reservation and every Tool call.
 2. Capture a new immutable `CloudStepContext` from Pi's public `context` hook
-   before every provider request. It contains a monotonic step sequence, the
-   parent Turn and Attempt digests, the exact active remote Tool registry and a
-   typed runtime world-state snapshot.
+   at every logical sampling boundary. It contains a monotonic step sequence,
+   the parent Turn and Attempt digests, the exact active remote Tool registry
+   and a typed runtime world-state snapshot. ADR-0083 keeps transient provider
+   retry attempts beneath the same frozen Step.
 3. All Tool calls emitted by one assistant response use the most recently
    captured step sequence and digest. Tool execution is rejected before RPC if
    no Step has been captured. The Sandbox Manager accepts monotonically

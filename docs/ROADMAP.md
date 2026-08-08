@@ -55,6 +55,9 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Recapture a per-sampling Cloud Step through Pi's public `context` hook,
   bind remote Tools to its monotonic sequence/digest and persist only material
   model-visible WorldState deltas.
+- [x] Correlate every model request and Tool boundary with its Cloud Step, while
+  representing transient provider retries as separately budgeted attempts
+  beneath the same Step.
 - [x] Reattach short Tool transport disconnects to one execution identity,
   preserve ordered stdout/stderr and expose irrecoverable ambiguity as
   `UNKNOWN` without replay.

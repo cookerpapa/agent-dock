@@ -28,6 +28,7 @@ import { appendPiInterruption } from "./pi-interrupted-session.ts";
 import { appendPiDurableRecovery } from "./pi-durable-recovery.ts";
 import { PiStepWorldStateController, type PiSandboxContinuity } from "./pi-sandbox-continuity.ts";
 import { PiAgentEventAdapter } from "./pi-agent-event-adapter.ts";
+import { PiSamplingStepController, type PiSamplingStepCapture } from "./pi-sampling-step.ts";
 import type { PiDurableRecoverySuffix } from "./sandbox-checkpoint.ts";
 import {
   PiTurnCancelledError,
@@ -53,6 +54,9 @@ export type PiSdkTurnRunnerOptions = {
   createInlineExtensions?: (context: {
     toolOutputDirectory: string;
     stepWorldState: PiStepWorldStateController | undefined;
+    captureSamplingStep: (
+      createFresh: () => Omit<PiSamplingStepCapture, "samplingAttempt">,
+    ) => PiSamplingStepCapture;
   }) => readonly InlineExtension[];
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
@@ -348,29 +352,29 @@ export class PiSdkTurnRunner {
     let interruptedCheckpointCaptured = false;
     let sandboxToolStarted = false;
     let stepWorldState: PiStepWorldStateController | undefined;
+    const samplingSteps = new PiSamplingStepController();
     const terminal = deferred<PiTurnResult>();
     void terminal.promise.catch(() => undefined);
 
-    const eventAdapter = new PiAgentEventAdapter(
-      createAgentDockEventFactory(
-        {
-          sessionId: command.payload.sessionId,
-          turnId: command.payload.turnId,
-          agentId: command.payload.agentId,
-        },
-        {
-          initialSequence: command.payload.nextEventSeq - 1,
-          clock: this.#clock,
-          idGenerator: this.#idGenerator,
-        },
-      ),
+    const eventFactory = createAgentDockEventFactory(
       {
-        inputKind: command.payload.input.kind,
-        ...(command.payload.budgets === undefined
-          ? {}
-          : { maximumToolOutputBytes: command.payload.budgets.maximumToolOutputBytes }),
+        sessionId: command.payload.sessionId,
+        turnId: command.payload.turnId,
+        agentId: command.payload.agentId,
+      },
+      {
+        initialSequence: command.payload.nextEventSeq - 1,
+        clock: this.#clock,
+        idGenerator: this.#idGenerator,
       },
     );
+    const eventAdapter = new PiAgentEventAdapter(eventFactory, {
+      inputKind: command.payload.input.kind,
+      requireSamplingIdentity: this.#options.createInlineExtensions !== undefined,
+      ...(command.payload.budgets === undefined
+        ? {}
+        : { maximumToolOutputBytes: command.payload.budgets.maximumToolOutputBytes }),
+    });
 
     const captureInterruptedConversation = async (reason: string): Promise<void> => {
       if (interruptedCheckpointCaptured || this.#options.onInterrupted === undefined) return;
@@ -547,6 +551,10 @@ export class PiSdkTurnRunner {
       enqueue(event);
     };
     const queueEvent = (event: AgentSessionEvent): void => {
+      if (event.type === "auto_retry_start") samplingSteps.scheduleRetry(event.attempt);
+      if (event.type === "auto_retry_end" && !event.success) {
+        samplingSteps.cancelScheduledRetry();
+      }
       const text = streamedTextDelta(event);
       if (text === undefined) {
         flushPendingText();
@@ -607,6 +615,22 @@ export class PiSdkTurnRunner {
                 this.#options.createInlineExtensions?.({
                   toolOutputDirectory,
                   stepWorldState,
+                  captureSamplingStep: (createFresh) => {
+                    const captured = samplingSteps.capture(createFresh);
+                    const identity = {
+                      stepSequence: captured.step.context.sequence,
+                      stepSha256: captured.step.sha256,
+                      samplingAttempt: captured.samplingAttempt,
+                    } as const;
+                    eventChain = eventChain
+                      .then(() =>
+                        publishEvent(eventMessage(eventAdapter.samplingStarted(identity))),
+                      )
+                      .catch((error: unknown) => {
+                        fail(error instanceof Error ? error : new Error(String(error)));
+                      });
+                    return captured;
+                  },
                 }) ??
                 []),
             ],

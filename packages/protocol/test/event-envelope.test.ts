@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AgentDockProtocolError,
   createAgentDockEventFactory,
+  modelSamplingHeaders,
   parseAgentDockEvent,
+  parseModelSamplingIdentity,
   type AgentDockEventBody,
 } from "../src/index.ts";
 
@@ -40,6 +42,31 @@ describe("AgentDockEventSchema", () => {
     const bodies: AgentDockEventBody[] = [
       { type: "turn.started", payload: { inputKind: "continue" } },
       { type: "session.state.changed", payload: { from: "idle", to: "running" } },
+      {
+        type: "model.sampling.started",
+        payload: { stepSequence: 1, stepSha256: "a".repeat(64), samplingAttempt: 1 },
+      },
+      {
+        type: "model.sampling.completed",
+        payload: {
+          stepSequence: 1,
+          stepSha256: "a".repeat(64),
+          samplingAttempt: 1,
+          outcome: "completed",
+          stopReason: "toolUse",
+        },
+      },
+      {
+        type: "model.sampling.retry.scheduled",
+        payload: {
+          stepSequence: 1,
+          stepSha256: "a".repeat(64),
+          completedSamplingAttempt: 1,
+          nextSamplingAttempt: 2,
+          maximumSamplingAttempts: 3,
+          delayMs: 100,
+        },
+      },
       { type: "assistant.text.delta", payload: { text: "partial" } },
       {
         type: "tool.input.delta",
@@ -149,6 +176,29 @@ describe("AgentDockEventSchema", () => {
 
   it("rejects an invalid initial sequence", () => {
     expect(() => createFactory(-1)).toThrow("initialSequence must be a non-negative safe integer");
+  });
+
+  it("round-trips bounded model sampling headers", () => {
+    const identity = {
+      stepSequence: 7,
+      stepSha256: "f".repeat(64),
+      samplingAttempt: 2,
+    } as const;
+    const headers = modelSamplingHeaders(identity);
+    expect(
+      parseModelSamplingIdentity({
+        stepSequence: headers["x-agent-dock-step-sequence"],
+        stepSha256: headers["x-agent-dock-step-sha256"],
+        samplingAttempt: headers["x-agent-dock-sampling-attempt"],
+      }),
+    ).toEqual(identity);
+    expect(() =>
+      parseModelSamplingIdentity({
+        stepSequence: "0",
+        stepSha256: "f".repeat(64),
+        samplingAttempt: "1",
+      }),
+    ).toThrow("positive safe integer");
   });
 
   it("allows null turn IDs only for session-level events", () => {

@@ -2,6 +2,7 @@ import type {
   AgentDockEvent,
   AgentDockEventFactory,
   CancelTurnCommandMessage,
+  ModelSamplingIdentity,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 
@@ -35,7 +36,6 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
   // The public v1 protocol publishes durable tool boundaries and the final
   // result. Pi's partial tool output is intentionally not persisted yet.
   "tool_execution_update",
-  "auto_retry_start",
   "auto_retry_end",
 ]);
 
@@ -133,12 +133,19 @@ export class PiAgentEventAdapter {
   #lastAssistantStopReason: AssistantStopReason | undefined;
   #cancellationReason: TurnCancellationReason | undefined;
   #compactionActive = false;
+  #activeSampling: ModelSamplingIdentity | undefined;
+  #lastCompletedSampling: ModelSamplingIdentity | undefined;
   readonly #pendingToolInputDeltas = new Map<string, { toolName: string; delta: string }>();
   readonly #maximumToolOutputBytes: number;
+  readonly #requireSamplingIdentity: boolean;
 
   constructor(
     eventFactory: AgentDockEventFactory,
-    options: { inputKind: "prompt" | "continue"; maximumToolOutputBytes?: number },
+    options: {
+      inputKind: "prompt" | "continue";
+      maximumToolOutputBytes?: number;
+      requireSamplingIdentity?: boolean;
+    },
   ) {
     this.#eventFactory = eventFactory;
     this.#inputKind = options.inputKind;
@@ -147,6 +154,7 @@ export class PiAgentEventAdapter {
       throw new TypeError("maximumToolOutputBytes must be between 1024 and 1048576");
     }
     this.#maximumToolOutputBytes = maximum;
+    this.#requireSamplingIdentity = options.requireSamplingIdentity ?? false;
   }
 
   requestCancellation(reason: TurnCancellationReason): void {
@@ -163,6 +171,25 @@ export class PiAgentEventAdapter {
     this.requestCancellation(reason);
     this.#settled = true;
     return this.#cancelled(reason, true);
+  }
+
+  samplingStarted(identity: ModelSamplingIdentity): AgentDockEvent {
+    if (this.#settled || !this.#agentStarted || this.#activeSampling !== undefined) {
+      throw new Error("Model sampling started outside an idle active Run boundary");
+    }
+    if (
+      this.#lastCompletedSampling !== undefined &&
+      (identity.stepSequence < this.#lastCompletedSampling.stepSequence ||
+        (identity.stepSequence === this.#lastCompletedSampling.stepSequence &&
+          identity.samplingAttempt !== this.#lastCompletedSampling.samplingAttempt + 1))
+    ) {
+      throw new Error("Model sampling identity did not advance monotonically");
+    }
+    this.#activeSampling = identity;
+    return this.#eventFactory.next({
+      type: "model.sampling.started",
+      payload: identity,
+    });
   }
 
   #toolInputDelta(
@@ -195,7 +222,11 @@ export class PiAgentEventAdapter {
       terminal: false,
       event: this.#eventFactory.next({
         type: "tool.input.delta",
-        payload: { ...identity, delta: combined },
+        payload: {
+          ...identity,
+          delta: combined,
+          ...(this.#activeSampling ?? this.#lastCompletedSampling ?? {}),
+        },
       }),
     };
   }
@@ -311,6 +342,7 @@ export class PiAgentEventAdapter {
             toolCallId: value.toolCallId,
             toolName: value.toolName,
             input: value.args ?? null,
+            ...(this.#lastCompletedSampling ?? {}),
           },
         }),
       };
@@ -338,6 +370,7 @@ export class PiAgentEventAdapter {
           type: "tool.completed",
           payload: {
             toolCallId: value.toolCallId,
+            ...(this.#lastCompletedSampling ?? {}),
             outcome: value.isError
               ? toolResultIsUnknown(value.result)
                 ? "unknown"
@@ -418,9 +451,79 @@ export class PiAgentEventAdapter {
     }
 
     if (value.type === "message_end") {
-      this.#lastAssistantStopReason =
-        assistantStopReason(value.message) ?? this.#lastAssistantStopReason;
-      return { kind: "ignored", sourceType: value.type };
+      const stopReason = assistantStopReason(value.message);
+      this.#lastAssistantStopReason = stopReason ?? this.#lastAssistantStopReason;
+      if (stopReason === undefined) return { kind: "ignored", sourceType: value.type };
+      if (this.#activeSampling === undefined) {
+        if (!this.#requireSamplingIdentity) {
+          return { kind: "ignored", sourceType: value.type };
+        }
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi completed an assistant sampling without an active Cloud Step",
+        };
+      }
+      const sampling = this.#activeSampling;
+      this.#activeSampling = undefined;
+      this.#lastCompletedSampling = sampling;
+      return {
+        kind: "mapped",
+        terminal: false,
+        event: this.#eventFactory.next({
+          type: "model.sampling.completed",
+          payload: {
+            ...sampling,
+            outcome:
+              stopReason === "error"
+                ? "failed"
+                : stopReason === "aborted"
+                  ? "aborted"
+                  : "completed",
+            stopReason,
+          },
+        }),
+      };
+    }
+
+    if (value.type === "auto_retry_start") {
+      if (!this.#requireSamplingIdentity && this.#lastCompletedSampling === undefined) {
+        return { kind: "ignored", sourceType: value.type };
+      }
+      const attempt = nonNegativeInteger(value.attempt);
+      const maxAttempts = nonNegativeInteger(value.maxAttempts);
+      const delayMs = nonNegativeInteger(value.delayMs);
+      if (
+        attempt === undefined ||
+        attempt < 1 ||
+        maxAttempts === undefined ||
+        maxAttempts < attempt ||
+        delayMs === undefined ||
+        delayMs > 300_000 ||
+        this.#lastCompletedSampling === undefined ||
+        this.#lastCompletedSampling.samplingAttempt !== attempt
+      ) {
+        return {
+          kind: "invalid",
+          sourceType: value.type,
+          reason: "Pi model retry scheduling did not match the completed Cloud Step attempt",
+        };
+      }
+      return {
+        kind: "mapped",
+        terminal: false,
+        event: this.#eventFactory.next({
+          type: "model.sampling.retry.scheduled",
+          payload: {
+            stepSequence: this.#lastCompletedSampling.stepSequence,
+            stepSha256: this.#lastCompletedSampling.stepSha256,
+            completedSamplingAttempt: attempt,
+            nextSamplingAttempt: attempt + 1,
+            maximumSamplingAttempts: maxAttempts + 1,
+            delayMs,
+          },
+        }),
+      };
     }
 
     if (value.type === "turn_end") {

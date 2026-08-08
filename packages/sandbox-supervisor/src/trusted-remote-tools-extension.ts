@@ -1,4 +1,5 @@
 import {
+  modelSamplingHeaders,
   parseInternalServiceError,
   parseToolSandboxOperationResponse,
   type ToolSandboxOperationRequest,
@@ -63,6 +64,7 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   captureStepContext: (activeTools: readonly string[]) => Readonly<{
     step: FrozenCloudStep;
     modelMessages: readonly PiWorldStateModelMessage[];
+    samplingAttempt: number;
   }>;
   onToolOperationStarted?: () => void;
   onToolOperationUnavailable?: () => void;
@@ -278,9 +280,11 @@ function registerTrustedRemoteTools(
 ): void {
   let remainingToolCalls = runtime.remainingToolCalls;
   let currentStep: FrozenCloudStep | undefined;
+  let currentSamplingAttempt: number | undefined;
 
   pi.on("context", (event) => {
     currentStep = undefined;
+    currentSamplingAttempt = undefined;
     const captured = runtime.captureStepContext(pi.getActiveTools());
     if (
       captured.step.context.turnContextSha256 !== runtime.turnContextSha256 ||
@@ -290,6 +294,7 @@ function registerTrustedRemoteTools(
       throw new Error("Captured Cloud Step did not match the accepted Turn and Attempt contexts");
     }
     currentStep = captured.step;
+    currentSamplingAttempt = captured.samplingAttempt;
     const messages = [...event.messages];
     for (const message of captured.modelMessages) {
       const alreadyPresent = messages.some(
@@ -597,6 +602,17 @@ function registerTrustedRemoteTools(
   pi.on("before_provider_headers", async (event) => {
     if (runtime.traceparent !== undefined) event.headers.traceparent = runtime.traceparent;
     if (runtime.tracestate !== undefined) event.headers.tracestate = runtime.tracestate;
+    if (currentStep === undefined || currentSamplingAttempt === undefined) {
+      throw new Error("Model request preceded its Cloud Step capture");
+    }
+    Object.assign(
+      event.headers,
+      modelSamplingHeaders({
+        stepSequence: currentStep.context.sequence,
+        stepSha256: currentStep.sha256,
+        samplingAttempt: currentSamplingAttempt,
+      }),
+    );
   });
 
   const readTool = createReadTool(WORKSPACE_ROOT);

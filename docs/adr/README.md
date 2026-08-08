@@ -48,6 +48,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0082](0082-cloud-turn-attempt-and-step-contexts.md) separates the stable
   accepted Turn contract from rotating Attempt ownership and binds every
   sampling Step and remote Tool operation to both.
+- [ADR-0083](0083-model-sampling-attempt-identity.md) keeps transient provider
+  retries inside one logical Step while durably correlating model attempts,
+  Tool boundaries, request accounting and traces.
 
 ## Maintained optional modules
 

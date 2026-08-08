@@ -3,7 +3,14 @@ import {
   type TenantModelCredentialIdentity,
 } from "@agent-dock/runtime-core/model-credential-runtime";
 import type { Database } from "@agent-dock/database";
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import {
+  MODEL_SAMPLING_ATTEMPT_HEADER,
+  MODEL_STEP_SEQUENCE_HEADER,
+  MODEL_STEP_SHA256_HEADER,
+  parseModelSamplingIdentity,
+  type ExecuteTurnCommandMessage,
+  type ModelSamplingIdentity,
+} from "@agent-dock/protocol";
 import type { TrustedModelRuntimeLease } from "@agent-dock/sandbox-supervisor";
 import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -153,6 +160,30 @@ function validDate(clock: () => Date): Date {
 
 function bearerCapability(value: string | undefined): string | undefined {
   return value === undefined ? undefined : /^Bearer (admg_[A-Za-z0-9_-]{43})$/.exec(value)?.[1];
+}
+
+function samplingIdentity(request: IncomingMessage): ModelSamplingIdentity {
+  try {
+    return parseModelSamplingIdentity({
+      stepSequence: request.headers[MODEL_STEP_SEQUENCE_HEADER],
+      stepSha256: request.headers[MODEL_STEP_SHA256_HEADER],
+      samplingAttempt: request.headers[MODEL_SAMPLING_ATTEMPT_HEADER],
+    });
+  } catch {
+    throw new SafeGatewayHttpError(
+      400,
+      "model_sampling_identity_invalid",
+      "Model request is missing its Cloud Step identity",
+    );
+  }
+}
+
+function observableSamplingIdentity(request: IncomingMessage): ModelSamplingIdentity | undefined {
+  try {
+    return samplingIdentity(request);
+  } catch {
+    return undefined;
+  }
 }
 
 function capabilityDigest(value: string): string {
@@ -397,6 +428,7 @@ export class TenantModelGateway {
       const token = bearerCapability(request.headers.authorization);
       const active =
         token === undefined ? undefined : this.#capabilities.get(capabilityDigest(token));
+      const sampling = observableSamplingIdentity(request);
       const parent = parseTraceCarrier({
         traceparent: request.headers.traceparent,
         tracestate: request.headers.tracestate,
@@ -411,6 +443,13 @@ export class TenantModelGateway {
             : {
                 "agent_dock.run.id": active.runId,
                 "agent_dock.attempt.id": active.attemptId,
+                ...(sampling === undefined
+                  ? {}
+                  : {
+                      "agent_dock.step.sequence": sampling.stepSequence,
+                      "agent_dock.step.sha256": sampling.stepSha256,
+                      "agent_dock.sampling.attempt": sampling.samplingAttempt,
+                    }),
                 "gen_ai.system": active.provider,
                 "gen_ai.request.model": active.modelId,
               }),
@@ -598,6 +637,7 @@ export class TenantModelGateway {
         "Model gateway requires a streaming request",
       );
     }
+    const sampling = samplingIdentity(request);
     const upstreamBody: Record<string, unknown> = {
       ...body,
       model: active.modelId,
@@ -619,7 +659,7 @@ export class TenantModelGateway {
       delete upstreamBody.max_completion_tokens;
     }
 
-    const reservation = await this.#reserve(active, upstreamBody);
+    const reservation = await this.#reserve(active, upstreamBody, sampling);
     let selectedModel = reservation.requestedModelId;
     let selectedRate = reservation.primaryRate;
     let fallbackReason: string | undefined;
@@ -811,6 +851,7 @@ export class TenantModelGateway {
   async #reserve(
     active: ActiveCapability,
     body: Record<string, unknown>,
+    sampling: ModelSamplingIdentity,
   ): Promise<ModelReservation> {
     const now = validDate(this.#clock);
     const inputTokens = estimatedInputTokens(body);
@@ -1015,6 +1056,9 @@ export class TenantModelGateway {
           attempt_id: active.attemptId,
           model_profile_id: active.modelProfileId,
           request_sequence: sequence,
+          step_context_sequence: sampling.stepSequence,
+          step_context_sha256: sampling.stepSha256,
+          sampling_attempt: sampling.samplingAttempt,
           requested_provider: active.provider,
           requested_model_id: active.modelId,
           actual_provider: null,
