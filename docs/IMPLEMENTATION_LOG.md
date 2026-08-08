@@ -7,6 +7,17 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-08 — 显式且有界的项目完成门禁
+
+- 复用冻结的项目环境 recipe：只有存在 ID 为 `settlement-gate` 的 verification
+  command 才启用，普通项目和纯聊天没有额外开销。
+- Pi 扩展观察 `write/edit/bash` 与验证命令结果；可能修改 Workspace 但尚未完成
+  验证时，追加一次隐藏的 Pi 原生 follow-up，模型仍通过远程 Tool 在 Cube 中执行。
+- follow-up 上限固定为 1；失败/abort subturn 不触发，扩展自身不执行命令、不绕过
+  Tool 预算/Lease/Step/网络策略，也不构造第二套 Agent Loop。
+- 单元与真实 Pi/Fake Model 集成测试覆盖默认关闭、已验证直接结束、失败不触发、
+  单次 follow-up，以及 `write → final → bash verify → final` 的完整生命周期。
+
 ## 2026-08-08 — 同一 Cloud Step 内的有界模型重试
 
 - 采用 Pi SDK 原生 agent-level retry：生产环境最多重试两次、500ms 指数退避；

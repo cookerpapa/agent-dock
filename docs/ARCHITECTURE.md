@@ -301,6 +301,14 @@ started a Tool; if a later successful attempt emits a Tool call, that operation
 still follows the normal operation-ID and `UNKNOWN` rules and is never replayed
 by the model retry mechanism.
 
+Projects can opt into one bounded settlement gate by naming an offline
+environment verification command `settlement-gate`. If `write`, `edit` or
+`bash` may have changed the Workspace and that exact verification was not
+observed succeeding, a trusted Pi extension queues one hidden native follow-up.
+The model then runs and interprets the command through normal remote Tools; the
+platform never executes project code in the Worker and never repeats the gate.
+Projects without the named command pay no gate latency or model cost.
+
 The first Tool call pays cold activation cost. An eligible warm activation can
 serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
 
@@ -543,7 +551,10 @@ not require changing the Worker execution contract.
 - [ADR-0078: Worker Control Channel and optional modules](adr/0078-worker-control-channel-and-optional-product-modules.md)
 - [ADR-0079: Interrupted Pi conversation checkpoints](adr/0079-interrupted-pi-conversation-checkpoints.md)
 - [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
+- [ADR-0081: Per-sampling Step world state](adr/0081-per-sampling-cloud-step-world-state.md)
+- [ADR-0082: Cloud Turn, Attempt and Step contexts](adr/0082-cloud-turn-attempt-and-step-contexts.md)
 - [ADR-0083: Model sampling attempts within one Cloud Step](adr/0083-model-sampling-attempt-identity.md)
+- [ADR-0084: Explicit bounded project settlement gate](adr/0084-explicit-bounded-settlement-gate.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.

@@ -97,6 +97,13 @@ export {
   type FrozenCloudTurn,
 } from "./cloud-context.ts";
 export { PiSamplingStepController, type PiSamplingStepCapture } from "./pi-sampling-step.ts";
+export {
+  PI_SETTLEMENT_GATE_CUSTOM_TYPE,
+  SETTLEMENT_GATE_COMMAND_ID,
+  createPiSettlementGateExtension,
+  settlementGatePolicyFromCommand,
+  type PiSettlementGatePolicy,
+} from "./pi-settlement-gate.ts";
 
 export {
   LocalSandboxSupervisor,

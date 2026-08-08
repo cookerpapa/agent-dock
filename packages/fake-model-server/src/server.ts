@@ -12,6 +12,7 @@ export const fakeModelScenarios = [
   "java_repair",
   "java_followup",
   "coding_eval",
+  "settlement_gate",
   "tool_hold",
   "rate_limit",
   "timeout",
@@ -702,6 +703,44 @@ export class FakeModelServer {
         sequence,
         payload.model,
         `Coding evaluation task ${task.id} repaired and verified.`,
+      );
+      return;
+    }
+    if (scenario === "settlement_gate") {
+      const gateFollowUp = (latestUserText(payload.messages) ?? "").includes(
+        "project-defined verification step",
+      );
+      const completedTools = currentTurnToolResultCount(payload.messages);
+      if (!gateFollowUp && completedTools === 0) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_settlement_write",
+          "write",
+          { path: "settlement.txt", content: "changed\n" },
+        );
+        return;
+      }
+      if (gateFollowUp && completedTools === 0) {
+        await this.#streamNamedToolCall(
+          response,
+          requestId,
+          sequence,
+          payload.model,
+          "call_agentdock_settlement_verify",
+          "bash",
+          { command: "npm test" },
+        );
+        return;
+      }
+      await this.#streamText(
+        response,
+        requestId,
+        sequence,
+        payload.model,
+        gateFollowUp ? "Project verification completed." : "Workspace change completed.",
       );
       return;
     }

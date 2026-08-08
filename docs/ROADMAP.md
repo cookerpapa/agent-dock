@@ -60,6 +60,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   beneath the same Step.
 - [x] Adopt Pi's bounded agent-level retry for transient model failures while
   disabling invisible provider retries and preserving no-replay Tool semantics.
+- [x] Add a default-off project settlement gate with one bounded Pi follow-up
+  and no trusted-side execution of repository code.
 - [x] Reattach short Tool transport disconnects to one execution identity,
   preserve ordered stdout/stderr and expose irrecoverable ambiguity as
   `UNKNOWN` without replay.

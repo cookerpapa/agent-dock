@@ -51,6 +51,8 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0083](0083-model-sampling-attempt-identity.md) keeps transient provider
   retries inside one logical Step while durably correlating model attempts,
   Tool boundaries, request accounting and traces.
+- [ADR-0084](0084-explicit-bounded-settlement-gate.md) adds an opt-in,
+  project-defined verification stop hook with at most one Pi-native follow-up.
 
 ## Maintained optional modules
 

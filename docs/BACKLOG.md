@@ -39,6 +39,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Enable Pi-native bounded transient-model retry within one frozen Step;
       independently budget attempts, interrupt backoff on cancellation and
       prove that the resulting Tool executes only once.
+- [x] Add an explicit project settlement gate that queues at most one Pi-native
+      verification follow-up after mutating Tools and remains disabled by
+      default.
 - [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
       retry, Control Channel reconnect, Cube node loss and object-store outage.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,

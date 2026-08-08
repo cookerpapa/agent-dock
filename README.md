@@ -94,6 +94,11 @@ frozen Cloud Step. Every sampling attempt is separately budgeted and audited;
 provider-level hidden retries remain disabled, cancellation interrupts
 backoff, and Tool executions are never replayed by this mechanism.
 
+An environment recipe may opt into a single project verification follow-up by
+naming one offline command `settlement-gate`. The gate is default-off, runs
+repository code only through the Cube Tool Sandbox, and can never loop beyond
+one additional Pi continuation.
+
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 ## Durable state

@@ -25,6 +25,10 @@ import {
   type PiSdkTurnRunnerOptions,
 } from "./pi-sdk-turn-runner.ts";
 import {
+  createPiSettlementGateExtension,
+  settlementGatePolicyFromCommand,
+} from "./pi-settlement-gate.ts";
+import {
   validateLoadedCheckpoint,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -636,6 +640,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             );
           }
           let stepSequence = 0;
+          const settlementGate = settlementGatePolicyFromCommand(command);
           return [
             createTrustedRemoteToolsExtension({
               operationUrl: this.#manager.operationUrl,
@@ -670,6 +675,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                       : { tracestate: downstreamTrace.tracestate }),
                   }),
             }),
+            ...(settlementGate === undefined
+              ? []
+              : [createPiSettlementGateExtension(settlementGate)]),
           ];
         },
         ...(this.#onPiSdkIsolationFailure === undefined

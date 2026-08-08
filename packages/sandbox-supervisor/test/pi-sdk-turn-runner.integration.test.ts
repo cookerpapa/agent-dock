@@ -15,6 +15,7 @@ import {
   createCloudAttemptContext,
   createCloudStepContext,
   createCloudTurnContext,
+  createPiSettlementGateExtension,
   PiSdkTurnRunner,
   PiTurnError,
 } from "../src/index.ts";
@@ -84,6 +85,31 @@ function samplingIdentityExtension(
   };
 }
 
+function settlementGateTools(onExecute: (toolName: string) => void): InlineExtension {
+  return (pi) => {
+    for (const toolName of ["write", "bash"] as const) {
+      pi.registerTool({
+        name: toolName,
+        label: toolName,
+        description: `Deterministic settlement ${toolName} Tool`,
+        parameters: {
+          type: "object",
+          properties:
+            toolName === "write"
+              ? { path: { type: "string" }, content: { type: "string" } }
+              : { command: { type: "string" } },
+          required: toolName === "write" ? ["path", "content"] : ["command"],
+          additionalProperties: false,
+        } as never,
+        async execute() {
+          onExecute(toolName);
+          return { content: [{ type: "text", text: `${toolName} completed` }], details: {} };
+        },
+      });
+    }
+  };
+}
+
 const command: ExecuteTurnCommandMessage = {
   protocolVersion: 1,
   messageId: "11111111-1111-4111-8111-111111111111",
@@ -137,6 +163,51 @@ async function waitFor(
 }
 
 describe("PiSdkTurnRunner integration", () => {
+  it("runs one bounded Pi follow-up for an explicit project settlement gate", async () => {
+    const fakeModel = new FakeModelServer({ defaultScenario: "settlement_gate" });
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-settlement-gate-test-"));
+    const toolExecutions: string[] = [];
+    let checkpoint: Uint8Array | undefined;
+    try {
+      await fakeModel.start();
+      const result = await new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: (model) => ({
+          provider: model.provider,
+          modelId: model.modelId,
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+        }),
+        createInlineExtensions: ({ captureSamplingStep }) => [
+          samplingIdentityExtension(command, captureSamplingStep),
+          settlementGateTools((toolName) => toolExecutions.push(toolName)),
+          createPiSettlementGateExtension({
+            command: "npm test",
+            cwd: ".",
+            timeoutMs: 120_000,
+            maximumFollowUps: 1,
+          }),
+        ],
+        onSettled: ({ piSession }) => {
+          checkpoint = piSession;
+        },
+      }).run(command, () => undefined);
+
+      expect(result).toEqual({ stopReason: "stop" });
+      expect(toolExecutions).toEqual(["write", "bash"]);
+      expect(fakeModel.observations).toHaveLength(4);
+      expect(
+        Buffer.from(checkpoint!)
+          .toString("utf8")
+          .match(/agent-dock\.settlement_gate/gu),
+      ).toHaveLength(1);
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("retries a transient model failure inside one Cloud Step without replaying its Tool", async () => {
     const fakeModel = new FakeModelServer({
       scenarioSequence: ["rate_limit", "tool_call", "text"],
