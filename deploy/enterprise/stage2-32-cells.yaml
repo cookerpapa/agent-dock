@@ -9,6 +9,9 @@ spec:
   cellNamespacePrefix: agent-dock-cell-
   cellReleasePrefix: agent-dock-cell-
   clusterDomain: cluster.local
+  cubeApiUrlTemplate: https://cube-api-{cellId}.example.com
+  cubeProxyNodeIpTemplate: cube-proxy-{cellId}.example.com
+  cubeDomainTemplate: "{cellId}.cube.example.com"
   cellCount: 32
   workerCapacity: 4
   minimumWorkersPerCell: 2

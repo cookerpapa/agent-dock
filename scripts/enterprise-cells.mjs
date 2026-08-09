@@ -66,6 +66,14 @@ function integer(value, name, minimum, maximum) {
   return value;
 }
 
+function cellTemplate(value, name, pattern) {
+  const template = boundedString(value, name, pattern);
+  if (template.split("{cellId}").length !== 2) {
+    fail(`${name} must contain {cellId} exactly once`);
+  }
+  return template;
+}
+
 function loadYaml(path, name) {
   if (!existsSync(path)) fail(`${name} does not exist: ${path}`);
   return mapping(parse(readFileSync(path, "utf8")), name);
@@ -134,6 +142,21 @@ function loadProfile(path) {
     cellNamespacePrefix,
     cellReleasePrefix,
     clusterDomain,
+    cubeApiUrlTemplate: cellTemplate(
+      spec.cubeApiUrlTemplate,
+      "spec.cubeApiUrlTemplate",
+      /^https:\/\/[^\s]+$/u,
+    ),
+    cubeProxyNodeIpTemplate: cellTemplate(
+      spec.cubeProxyNodeIpTemplate,
+      "spec.cubeProxyNodeIpTemplate",
+      /^[A-Za-z0-9.{}-]+$/u,
+    ),
+    cubeDomainTemplate: cellTemplate(
+      spec.cubeDomainTemplate,
+      "spec.cubeDomainTemplate",
+      /^[A-Za-z0-9.{}-]+$/u,
+    ),
     cellCount: integer(spec.cellCount, "spec.cellCount", 1, 64),
     workerCapacity: integer(spec.workerCapacity, "spec.workerCapacity", 1, 64),
     minimumWorkersPerCell: integer(
@@ -253,6 +276,12 @@ function cellValues(base, profile, topology, cell, workersEnabled) {
   values.global.clusterDomain = profile.clusterDomain;
   values.sandboxPlane.replicas = profile.sandboxManagerReplicasPerCell;
   values.sandboxPlane.executionCellId = cell.id;
+  values.sandboxPlane.cube.apiUrl = profile.cubeApiUrlTemplate.replace("{cellId}", cell.id);
+  values.sandboxPlane.cube.proxyNodeIp = profile.cubeProxyNodeIpTemplate.replace(
+    "{cellId}",
+    cell.id,
+  );
+  values.sandboxPlane.cube.domain = profile.cubeDomainTemplate.replace("{cellId}", cell.id);
   values.sandboxPlane.maximumActivePerReplica = profile.sandboxManagerMaximumActivePerReplica;
   values["pi-workers"].workerPool.name = cell.workerPoolName;
   values["pi-workers"].workerPool.replicas = profile.minimumWorkersPerCell;
