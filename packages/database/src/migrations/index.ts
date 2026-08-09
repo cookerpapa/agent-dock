@@ -34,6 +34,7 @@ import * as modelSamplingStepIdentity from "./032_model_sampling_step_identity.t
 import * as enterpriseExecutionCells from "./033_enterprise_execution_cells.ts";
 import * as sandboxManagerOwnership from "./034_sandbox_manager_ownership.ts";
 import * as partitionedSessionEventLog from "./035_partitioned_session_event_log.ts";
+import * as fasterEventIdentityRegistration from "./036_faster_event_identity_registration.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -73,6 +74,7 @@ export const migrationProvider: MigrationProvider = {
       "033_enterprise_execution_cells": enterpriseExecutionCells,
       "034_sandbox_manager_ownership": sandboxManagerOwnership,
       "035_partitioned_session_event_log": partitionedSessionEventLog,
+      "036_faster_event_identity_registration": fasterEventIdentityRegistration,
     };
   },
 };
@@ -246,3 +248,8 @@ export {
   down as downPartitionedSessionEventLog,
   up as upPartitionedSessionEventLog,
 } from "./035_partitioned_session_event_log.ts";
+
+export {
+  down as downFasterEventIdentityRegistration,
+  up as upFasterEventIdentityRegistration,
+} from "./036_faster_event_identity_registration.ts";

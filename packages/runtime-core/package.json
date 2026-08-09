@@ -10,6 +10,7 @@
     "./checkpoint-store": "./src/checkpoint-store.ts",
     "./conversation-turn-projection": "./src/conversation-turn-projection.ts",
     "./durable-event-store": "./src/durable-event-store.ts",
+    "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./pi-session-manifest": "./src/pi-session-manifest.ts",

@@ -9,6 +9,7 @@ import {
 } from "./application.ts";
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
 import {
   SupervisorMaintenanceRuntime,
   type SupervisorMaintenanceRuntimeOptions,
@@ -69,6 +70,7 @@ export class ControlPlaneRuntime {
   readonly application: NestFastifyApplication;
   readonly eventHub: SessionEventHub;
   readonly eventStore: DurableEventStore;
+  readonly eventIngestor: GroupedDurableEventIngestor;
   readonly controlChannelRouter: WorkerControlChannelRouter;
   readonly connectionManager: SupervisorConnectionManager;
   readonly gateway: SupervisorWebSocketGateway;
@@ -80,6 +82,7 @@ export class ControlPlaneRuntime {
     application: NestFastifyApplication;
     eventHub: SessionEventHub;
     eventStore: DurableEventStore;
+    eventIngestor: GroupedDurableEventIngestor;
     controlChannelRouter: WorkerControlChannelRouter;
     connectionManager: SupervisorConnectionManager;
     gateway: SupervisorWebSocketGateway;
@@ -88,6 +91,7 @@ export class ControlPlaneRuntime {
     this.application = options.application;
     this.eventHub = options.eventHub;
     this.eventStore = options.eventStore;
+    this.eventIngestor = options.eventIngestor;
     this.controlChannelRouter = options.controlChannelRouter;
     this.connectionManager = options.connectionManager;
     this.gateway = options.gateway;
@@ -128,6 +132,7 @@ export class ControlPlaneRuntime {
     this.maintenance.beginDrain();
     this.gateway.shutdown();
     try {
+      await this.eventIngestor.flush();
       await this.maintenance.stop();
     } finally {
       try {
@@ -150,9 +155,10 @@ export async function createControlPlaneRuntime(
       ? {}
       : { eventNotificationPublisher: options.sessionEventNotifications }),
   });
+  const eventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
   const controlChannelRouter = new WorkerControlChannelRouter({
     ...options.controlChannelRouter,
-    eventIngestor: eventStore,
+    eventIngestor,
   });
   const connectionManager = new SupervisorConnectionManager({
     ...options.connectionManager,
@@ -241,6 +247,7 @@ export async function createControlPlaneRuntime(
     application,
     eventHub,
     eventStore,
+    eventIngestor,
     controlChannelRouter,
     connectionManager,
     gateway,

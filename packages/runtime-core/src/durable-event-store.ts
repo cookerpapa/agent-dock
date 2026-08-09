@@ -54,6 +54,10 @@ export interface DurableEventIngestor {
   ingest(value: unknown): Promise<EventAckMessage>;
 }
 
+export interface DurableEventGroupIngestor extends DurableEventIngestor {
+  ingestGroup(values: readonly unknown[]): Promise<readonly EventAckMessage[]>;
+}
+
 export interface DurableEventLog extends DurableEventIngestor {
   openReplayWindow(
     tenantId: string,
@@ -185,7 +189,12 @@ function eventSelect() {
   ] as const;
 }
 
-export class DurableEventStore implements DurableEventLog {
+type PreparedPublication = {
+  publications: readonly EventPublishMessage[];
+  last: EventPublishMessage;
+};
+
+export class DurableEventStore implements DurableEventLog, DurableEventGroupIngestor {
   readonly #database: Kysely<Database>;
   readonly #eventHub: SessionEventHub | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
@@ -201,6 +210,57 @@ export class DurableEventStore implements DurableEventLog {
   }
 
   async ingest(value: unknown): Promise<EventAckMessage> {
+    const acknowledgement = (await this.ingestGroup([value]))[0];
+    if (acknowledgement === undefined) {
+      throw new DurableEventStoreError("event_store_invariant", "Event acknowledgement is missing");
+    }
+    return acknowledgement;
+  }
+
+  async ingestGroup(values: readonly unknown[]): Promise<readonly EventAckMessage[]> {
+    if (values.length < 1) {
+      throw new DurableEventStoreError("invalid_event", "Event publication group was empty");
+    }
+    const prepared = values.map((value) => this.#prepare(value));
+    const now = validDate(this.#clock);
+    const results = await this.#database.transaction().execute(async (transaction) => {
+      const ingested = await this.#ingestPreparedGroupTransaction(transaction, prepared, now);
+      const notifications = ingested.map((result, index) => {
+        const publication = prepared[index]!;
+        return {
+          schemaVersion: 1,
+          tenantId: result.tenantId,
+          sessionId: publication.last.payload.event.sessionId,
+          throughSequence: result.acknowledgedThroughSeq,
+        } as const;
+      });
+      if (this.#eventNotificationPublisher?.publishGroup !== undefined) {
+        await this.#eventNotificationPublisher.publishGroup(transaction, notifications);
+      } else {
+        for (const notification of notifications) {
+          await this.#eventNotificationPublisher?.publish(transaction, notification);
+        }
+      }
+      return ingested;
+    });
+    return prepared.map((publication, index) => {
+      const result = results[index];
+      if (result === undefined) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Grouped event acknowledgement is missing",
+        );
+      }
+      this.#eventHub?.notifyThrough(
+        result.tenantId,
+        publication.last.payload.event.sessionId,
+        result.acknowledgedThroughSeq,
+      );
+      return this.#acknowledgement(publication.last, result.acknowledgedThroughSeq, now);
+    });
+  }
+
+  #prepare(value: unknown): PreparedPublication {
     const parsed = parseSupervisorToControlMessage(value);
     if (parsed.type !== "event.publish" && parsed.type !== "event.publish_batch") {
       throw new DurableEventStoreError("invalid_event", "Expected an event publication");
@@ -219,28 +279,11 @@ export class DurableEventStore implements DurableEventLog {
         "Terminal Turn events are committed only by the Control Plane",
       );
     }
-    const first = publications[0];
     const last = publications.at(-1);
-    if (first === undefined || last === undefined) {
+    if (publications[0] === undefined || last === undefined) {
       throw new DurableEventStoreError("invalid_event", "Event batch was empty");
     }
-    const now = validDate(this.#clock);
-    const result = await this.#database.transaction().execute(async (transaction) => {
-      const ingested = await this.#ingestBatchTransaction(transaction, publications, now);
-      await this.#eventNotificationPublisher?.publish(transaction, {
-        schemaVersion: 1,
-        tenantId: ingested.tenantId,
-        sessionId: last.payload.event.sessionId,
-        throughSequence: ingested.acknowledgedThroughSeq,
-      });
-      return ingested;
-    });
-    this.#eventHub?.notifyThrough(
-      result.tenantId,
-      last.payload.event.sessionId,
-      result.acknowledgedThroughSeq,
-    );
-    return this.#acknowledgement(last, result.acknowledgedThroughSeq, now);
+    return { publications, last };
   }
 
   #publications(
@@ -279,6 +322,335 @@ export class DurableEventStore implements DurableEventLog {
         event,
       },
     }));
+  }
+
+  async #ingestPreparedGroupTransaction(
+    transaction: Transaction<Database>,
+    prepared: readonly PreparedPublication[],
+    now: Date,
+  ): Promise<readonly { tenantId: string; acknowledgedThroughSeq: number }[]> {
+    if (prepared.length === 1) {
+      return [await this.#ingestBatchTransaction(transaction, prepared[0]!.publications, now)];
+    }
+    const sessionIds = prepared.map(
+      (publication) => publication.publications[0]!.payload.event.sessionId,
+    );
+    if (new Set(sessionIds).size !== sessionIds.length) {
+      const results = [];
+      for (const publication of prepared) {
+        results.push(
+          await this.#ingestBatchTransaction(transaction, publication.publications, now),
+        );
+      }
+      return results;
+    }
+    const sortedSessionIds = [...sessionIds].sort();
+    const sessions = await transaction
+      .selectFrom("sessions")
+      .select(["id", "tenant_id", "next_event_seq", "last_fencing_token"])
+      .where("id", "in", sortedSessionIds)
+      .orderBy("id", "asc")
+      .forUpdate()
+      .execute();
+    const cursors = await transaction
+      .selectFrom("session_event_cursors")
+      .select(["session_id", "last_persisted_seq", "acknowledged_through_seq"])
+      .where("session_id", "in", sortedSessionIds)
+      .orderBy("session_id", "asc")
+      .forUpdate()
+      .execute();
+    const leases = await transaction
+      .selectFrom("session_leases")
+      .select(["session_id", "lease_id", "fencing_token", "valid_until"])
+      .where("session_id", "in", sortedSessionIds)
+      .orderBy("session_id", "asc")
+      .forUpdate()
+      .execute();
+    const sessionById = new Map(sessions.map((session) => [session.id, session]));
+    const cursorBySession = new Map(cursors.map((cursor) => [cursor.session_id, cursor]));
+    const leaseBySession = new Map(leases.map((lease) => [lease.session_id, lease]));
+
+    const turnIds = [
+      ...new Set(
+        prepared
+          .map((publication) => publication.publications[0]!.payload.event.turnId)
+          .filter((turnId): turnId is string => turnId !== null),
+      ),
+    ];
+    const turns =
+      turnIds.length === 0
+        ? []
+        : await transaction
+            .selectFrom("turns")
+            .select(["id", "tenant_id", "session_id", "state"])
+            .where("id", "in", turnIds)
+            .execute();
+    const turnById = new Map(turns.map((turn) => [turn.id, turn]));
+    const commandIds = [
+      ...new Set(
+        prepared
+          .map((publication) => publication.publications[0]!.payload.commandId)
+          .filter((commandId): commandId is string => commandId !== undefined),
+      ),
+    ];
+    const commands =
+      commandIds.length === 0
+        ? []
+        : await transaction
+            .selectFrom("commands")
+            .select(["id", "tenant_id", "session_id", "turn_id", "state"])
+            .where("id", "in", commandIds)
+            .execute();
+    const commandById = new Map(commands.map((command) => [command.id, command]));
+
+    const advances: Array<{
+      sessionId: string;
+      expectedLast: number;
+      expectedNext: number;
+      acknowledgedThrough: number;
+    }> = [];
+    const newPublications: EventPublishMessage[] = [];
+    const results: Array<{ tenantId: string; acknowledgedThroughSeq: number }> = [];
+    for (const publication of prepared) {
+      const messages = publication.publications;
+      const first = messages[0]!;
+      const firstEvent = first.payload.event;
+      const session = sessionById.get(firstEvent.sessionId);
+      const cursor = cursorBySession.get(firstEvent.sessionId);
+      const lease = leaseBySession.get(firstEvent.sessionId);
+      if (session === undefined) {
+        throw new DurableEventStoreError("not_found", "Event session was not found");
+      }
+      if (cursor === undefined) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Session event cursor is missing",
+        );
+      }
+      const lastPersisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
+      const acknowledged = safeInteger(
+        cursor.acknowledged_through_seq,
+        "acknowledged event sequence",
+      );
+      if (acknowledged !== lastPersisted) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Durable event cursor is not a fully ACK-eligible prefix",
+        );
+      }
+      if (
+        lease === undefined ||
+        normalizedUuid(lease.lease_id) !== normalizedUuid(first.payload.leaseId) ||
+        safeInteger(lease.fencing_token, "lease fencing token") !== first.payload.fencingToken ||
+        safeInteger(session.last_fencing_token, "session fencing token") !==
+          first.payload.fencingToken ||
+        new Date(lease.valid_until).valueOf() <= now.valueOf()
+      ) {
+        throw new DurableEventStoreError("stale_fence", "Event publication lease is stale");
+      }
+      const turnId = firstEvent.turnId;
+      if (turnId === null) {
+        if (first.payload.commandId !== undefined) {
+          throw new DurableEventStoreError(
+            "invalid_event",
+            "A session-level event cannot reference a turn command",
+          );
+        }
+      } else {
+        const turn = turnById.get(turnId);
+        if (
+          turn === undefined ||
+          turn.tenant_id !== session.tenant_id ||
+          turn.session_id !== firstEvent.sessionId
+        ) {
+          throw new DurableEventStoreError(
+            "invalid_event",
+            "Event turn does not belong to session",
+          );
+        }
+        if (first.payload.commandId !== undefined) {
+          const command = commandById.get(first.payload.commandId);
+          if (
+            command === undefined ||
+            command.tenant_id !== session.tenant_id ||
+            command.session_id !== firstEvent.sessionId ||
+            command.turn_id !== turnId ||
+            command.state !== "acknowledged"
+          ) {
+            throw new DurableEventStoreError(
+              "invalid_event",
+              "Event command is not the acknowledged command for this turn",
+            );
+          }
+        }
+      }
+
+      const redeliveries = messages.filter((message) => message.payload.event.seq <= lastPersisted);
+      if (redeliveries.length > 0) {
+        const existingRows = await transaction
+          .selectFrom("session_events")
+          .select(eventSelect())
+          .where("tenant_id", "=", session.tenant_id)
+          .where("session_id", "=", firstEvent.sessionId)
+          .where(
+            "seq",
+            "in",
+            redeliveries.map((message) => String(message.payload.event.seq)),
+          )
+          .execute();
+        const existingBySequence = new Map(
+          existingRows.map((row) => [safeInteger(row.seq, "persisted event sequence"), row]),
+        );
+        for (const message of redeliveries) {
+          const existing = existingBySequence.get(message.payload.event.seq);
+          if (existing === undefined || !isExactRedelivery(existing, message)) {
+            throw new DurableEventStoreError(
+              existing === undefined ? "event_store_invariant" : "event_conflict",
+              existing === undefined
+                ? "Durable event prefix contains a missing sequence"
+                : `Conflicting event publication at sequence ${message.payload.event.seq}`,
+            );
+          }
+        }
+      }
+      const newMessages = messages.filter((message) => message.payload.event.seq > lastPersisted);
+      if (newMessages.length > 0) {
+        const firstNewSequence = newMessages[0]!.payload.event.seq;
+        const expectedSequence = lastPersisted + 1;
+        const sessionNextSequence = safeInteger(
+          session.next_event_seq,
+          "session next event sequence",
+        );
+        if (firstNewSequence !== expectedSequence || firstNewSequence !== sessionNextSequence) {
+          throw new DurableEventStoreError(
+            "sequence_gap",
+            `Expected contiguous event sequence ${expectedSequence}, received ${firstNewSequence}`,
+          );
+        }
+        const throughSequence = newMessages.at(-1)!.payload.event.seq;
+        advances.push({
+          sessionId: firstEvent.sessionId,
+          expectedLast: lastPersisted,
+          expectedNext: sessionNextSequence,
+          acknowledgedThrough: throughSequence,
+        });
+        newPublications.push(...newMessages);
+      }
+      results.push({
+        tenantId: session.tenant_id,
+        acknowledgedThroughSeq: publication.last.payload.event.seq,
+      });
+    }
+
+    const eventIds = newPublications.map((message) => message.payload.event.eventId);
+    if (new Set(eventIds.map((eventId) => eventId.toLowerCase())).size !== eventIds.length) {
+      throw new DurableEventStoreError("event_conflict", "Event ID was reused inside one group");
+    }
+    if (eventIds.length > 0) {
+      const reusedEventId = await transaction
+        .selectFrom("session_event_ids")
+        .select("event_id")
+        .where("event_id", "in", eventIds)
+        .executeTakeFirst();
+      if (reusedEventId !== undefined) {
+        throw new DurableEventStoreError(
+          "event_conflict",
+          "Event ID was already used by another sequence",
+        );
+      }
+      await transaction
+        .insertInto("session_events")
+        .values(
+          newPublications.map((message) => {
+            const event = message.payload.event;
+            return {
+              event_id: event.eventId,
+              tenant_id: sessionById.get(event.sessionId)!.tenant_id,
+              session_id: event.sessionId,
+              turn_id: event.turnId,
+              agent_node_id: null,
+              agent_id: event.agentId,
+              command_id: message.payload.commandId ?? null,
+              seq: event.seq,
+              schema_version: event.schemaVersion,
+              type: event.type,
+              payload: event.payload,
+              lease_id: message.payload.leaseId,
+              fencing_token: message.payload.fencingToken,
+              occurred_at: new Date(event.occurredAt),
+              persisted_at: now,
+            };
+          }),
+        )
+        .executeTakeFirstOrThrow();
+      for (const message of newPublications) {
+        await this.#recordStructuredTestResult(
+          transaction,
+          sessionById.get(message.payload.event.sessionId)!.tenant_id,
+          message,
+        );
+        await this.#recordContextCompaction(
+          transaction,
+          sessionById.get(message.payload.event.sessionId)!.tenant_id,
+          message,
+        );
+      }
+    }
+
+    if (advances.length > 0) {
+      const advanceJson = JSON.stringify(advances);
+      const cursorUpdates = await sql<{ session_id: string }>`
+        with advances as (
+          select * from jsonb_to_recordset(${advanceJson}::jsonb) as value(
+            "sessionId" uuid,
+            "expectedLast" bigint,
+            "expectedNext" bigint,
+            "acknowledgedThrough" bigint
+          )
+        )
+        update session_event_cursors as cursor
+           set last_persisted_seq = advances."acknowledgedThrough",
+               acknowledged_through_seq = advances."acknowledgedThrough",
+               updated_at = ${now}
+          from advances
+         where cursor.session_id = advances."sessionId"
+           and cursor.last_persisted_seq = advances."expectedLast"
+           and cursor.acknowledged_through_seq = advances."expectedLast"
+        returning cursor.session_id
+      `.execute(transaction);
+      if (cursorUpdates.rows.length !== advances.length) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Grouped event cursor advance lost a compare-and-swap race",
+        );
+      }
+      const sessionUpdates = await sql<{ id: string }>`
+        with advances as (
+          select * from jsonb_to_recordset(${advanceJson}::jsonb) as value(
+            "sessionId" uuid,
+            "expectedLast" bigint,
+            "expectedNext" bigint,
+            "acknowledgedThrough" bigint
+          )
+        )
+        update sessions as session_row
+           set next_event_seq = advances."acknowledgedThrough" + 1,
+               row_version = session_row.row_version + 1,
+               updated_at = ${now},
+               last_active_at = ${now}
+          from advances
+         where session_row.id = advances."sessionId"
+           and session_row.next_event_seq = advances."expectedNext"
+        returning session_row.id
+      `.execute(transaction);
+      if (sessionUpdates.rows.length !== advances.length) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Grouped Session sequence advance lost a compare-and-swap race",
+        );
+      }
+    }
+    return results;
   }
 
   async openReplayWindow(
@@ -467,7 +839,7 @@ export class DurableEventStore implements DurableEventLog {
       throw new DurableEventStoreError("event_conflict", "Event ID was reused inside one batch");
     }
     const reusedEventId = await transaction
-      .selectFrom("session_events")
+      .selectFrom("session_event_ids")
       .select(["session_id", "seq"])
       .where("event_id", "in", eventIds)
       .executeTakeFirst();

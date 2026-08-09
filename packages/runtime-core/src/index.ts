@@ -2,6 +2,7 @@ export * from "./checkpoint-object-cache.ts";
 export * from "./checkpoint-store.ts";
 export * from "./conversation-turn-projection.ts";
 export * from "./durable-event-store.ts";
+export * from "./grouped-durable-event-ingestor.ts";
 export * from "./local-supervisor-execution-backend.ts";
 export * from "./model-credential-runtime.ts";
 export * from "./pi-session-manifest.ts";

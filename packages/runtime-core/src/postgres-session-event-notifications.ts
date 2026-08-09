@@ -186,6 +186,25 @@ export class PostgresSessionEventNotifications implements SessionEventNotificati
     );
   }
 
+  async publishGroup(
+    transaction: Transaction<Database>,
+    notifications: readonly SessionEventNotification[],
+  ): Promise<void> {
+    if (notifications.length < 1) return;
+    const payloads = notifications.map((notification) => {
+      const parsed = validatedNotification(notification);
+      const payload = JSON.stringify(parsed);
+      if (Buffer.byteLength(payload, "utf8") > MAX_NOTIFICATION_PAYLOAD_BYTES) {
+        throw new TypeError("session event notification payload is too large");
+      }
+      return payload;
+    });
+    await sql`
+      select pg_notify(${SESSION_EVENT_NOTIFICATION_CHANNEL}, payload)
+        from jsonb_array_elements_text(${JSON.stringify(payloads)}::jsonb) as payload
+    `.execute(transaction);
+  }
+
   start(handlers: SessionEventNotificationHandlers): Promise<void> {
     if (this.#state !== "idle") {
       return Promise.reject(

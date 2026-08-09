@@ -18,6 +18,11 @@ export interface SessionEventNotificationPublisher {
     transaction: Transaction<Database>,
     notification: SessionEventNotification,
   ): Promise<void>;
+
+  publishGroup?(
+    transaction: Transaction<Database>,
+    notifications: readonly SessionEventNotification[],
+  ): Promise<void>;
 }
 
 export interface SessionEventNotificationTransport extends SessionEventNotificationPublisher {
