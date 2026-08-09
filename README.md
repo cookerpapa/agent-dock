@@ -277,6 +277,7 @@ documentation should be based on these reproducible measurements.
 - [CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
 - [Network matrix](docs/NETWORK_MATRIX.md)
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
+- [Configuration reference](docs/CONFIGURATION.md)
 - [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
 - [Backlog](docs/BACKLOG.md)

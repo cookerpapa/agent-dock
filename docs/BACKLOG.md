@@ -9,6 +9,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Provide an idempotent, checksum-pinned one-command self-hosted installer
       with read-only preflight, resumable phases, Cube/K3s bootstrap and
       post-deployment health verification.
+- [x] Publish one configuration reference that separates administrator hot
+      settings, supported operator settings, fixed production policy,
+      generated identity and secrets.
 
 ## Release verification
 

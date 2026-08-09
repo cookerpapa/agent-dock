@@ -87,6 +87,10 @@ http://127.0.0.1:8080
 
 ## Runtime configuration
 
+See the [configuration reference](CONFIGURATION.md) for the complete supported
+administrator/operator settings, defaults, activation behavior, generated
+identity and secret boundaries.
+
 Private runtime configuration is stored under:
 
 ```text
