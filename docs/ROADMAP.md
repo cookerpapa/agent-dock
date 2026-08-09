@@ -80,6 +80,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Cross the measured PostgreSQL event-capacity gate and add the enterprise
       transactional Outbox -> Kafka -> idempotent PostgreSQL projection path,
       including a terminal projection barrier and Strimzi deployment baseline.
+- [x] Add a Session-level automatic/persistent Cube retention choice with lazy
+      activation, dedicated-Workspace ownership and archive-driven cleanup.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

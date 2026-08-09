@@ -314,6 +314,7 @@ describe.sequential("versioned Workspace service", () => {
       IDS.project,
       IDS.workspace,
       "Second conversation",
+      "ephemeral",
     );
     const persisted = await database
       .selectFrom("sessions")

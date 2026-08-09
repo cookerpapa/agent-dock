@@ -130,6 +130,7 @@ const command: ExecuteTurnCommandMessage = {
     fencingToken: 7,
     nextEventSeq: 5,
     input: { kind: "prompt", text: "Return the deterministic fake response." },
+    sandboxRetention: "ephemeral",
     model: {
       profileId: "profile-1",
       provider: "agent-dock-fake",

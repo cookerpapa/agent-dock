@@ -343,7 +343,14 @@ platform never executes project code in the Worker and never repeats the gate.
 Projects without the named command pay no gate latency or model cost.
 
 The first Tool call pays cold activation cost. An eligible warm activation can
-serve later Tools/Run follow-ups for the same tenant/Workspace/Session.
+serve later Tools/Run follow-ups for the same tenant/Workspace/Session. The
+Session's durable retention policy controls the idle boundary: `ephemeral`
+activations use the bounded fifteen-minute/LRU cache, while `persistent`
+activations are excluded from ordinary TTL and LRU reclamation until the
+conversation is archived. Persistent mode still uses lazy activation, rotates
+Tool capability and fencing on every Run, and is destroyed on ambiguous
+execution, failed checkpoint or execution-plane loss. It preserves process
+continuity during normal idle time, not VM-state durability across failure.
 
 ## 7. Pi compaction and restore
 

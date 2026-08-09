@@ -218,18 +218,21 @@ export class SandboxManagerClient {
   async release(
     activationId: string,
     assignment: ToolSandboxAssignment,
-    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+    disposition:
+      | { kind: "keep_warm"; workspaceRevision: string }
+      | { kind: "keep_persistent"; workspaceRevision: string }
+      | { kind: "destroy" },
   ): Promise<ToolSandboxReleaseResponse> {
     const requestId = this.#idGenerator();
     const response = await this.#service(
-      disposition.kind === "keep_warm"
+      disposition.kind !== "destroy"
         ? {
             managerProtocolVersion: 1,
             type: "tool_sandbox.release",
             requestId,
             activationId,
             assignment,
-            disposition: "keep_warm",
+            disposition: disposition.kind,
             workspaceRevision: disposition.workspaceRevision,
           }
         : {
@@ -538,7 +541,10 @@ export class ReplicatedSandboxManagerClient {
   async release(
     activationId: string,
     assignment: ToolSandboxAssignment,
-    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+    disposition:
+      | { kind: "keep_warm"; workspaceRevision: string }
+      | { kind: "keep_persistent"; workspaceRevision: string }
+      | { kind: "destroy" },
   ): Promise<ToolSandboxReleaseResponse> {
     try {
       return await this.#ownedClient(activationId).release(activationId, assignment, disposition);

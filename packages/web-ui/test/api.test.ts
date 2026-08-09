@@ -111,6 +111,39 @@ describe("tenant-aware browser API", () => {
     });
   });
 
+  it("sends the selected Sandbox retention policy when creating a conversation", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe("/v1/projects/20000000-0000-4000-8000-000000000001/sessions");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        workspaceId: "30000000-0000-4000-8000-000000000001",
+        title: "Persistent development environment",
+        sandboxRetention: "persistent",
+      });
+      return new Response(
+        JSON.stringify({
+          sessionId: "40000000-0000-4000-8000-000000000001",
+          title: "Persistent development environment",
+          projectId: "20000000-0000-4000-8000-000000000001",
+          workspaceId: "30000000-0000-4000-8000-000000000001",
+          state: "cold",
+          sandboxRetention: "persistent",
+          modelProfileId: "50000000-0000-4000-8000-000000000001",
+          createdAt: "2026-07-19T00:00:00.000Z",
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation);
+    await expect(
+      api.createSession(
+        "20000000-0000-4000-8000-000000000001",
+        "30000000-0000-4000-8000-000000000001",
+        "Persistent development environment",
+        "persistent",
+      ),
+    ).resolves.toMatchObject({ sandboxRetention: "persistent" });
+  });
+
   it("reads safe model metadata and submits a write-only provider credential", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const providerKey = `sk-${"p".repeat(48)}`;
@@ -282,6 +315,7 @@ describe("tenant-aware browser API", () => {
                     title: "Repair checkout",
                     workspaceName: "Alpha repair",
                     state: "idle",
+                    sandboxRetention: "ephemeral",
                     turnCount: 1,
                     createdAt,
                     updatedAt: createdAt,
@@ -305,6 +339,7 @@ describe("tenant-aware browser API", () => {
                   workspaceId: "40000000-0000-4000-8000-000000000001",
                   title: "Repair checkout",
                   state: "idle",
+                  sandboxRetention: "ephemeral",
                   modelProfileId: "50000000-0000-4000-8000-000000000001",
                   createdAt,
                   updatedAt: createdAt,

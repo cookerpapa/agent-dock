@@ -113,7 +113,11 @@ must use a domain allowlist policy.
 The Provider bounds CPU, memory, processes, open files, Workspace size,
 temporary storage, command time, Run wall-clock time and output. Tenant quotas
 and global Tool admission protect shared capacity. Orphan reconciliation and
-idle expiry reclaim runtimes.
+idle expiry reclaim ordinary runtimes. A user-selected persistent Cube is
+excluded from idle/LRU reclamation and therefore consumes an admission slot
+until its conversation is archived or the execution plane explicitly destroys
+it; when all slots are pinned, later Tool Runs wait rather than evicting another
+tenant's persistent process world.
 
 ### Path and archive attacks
 

@@ -68,6 +68,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0089](0089-enterprise-cells-and-durable-event-log.md) assigns each
   Workspace to an immutable execution Cell and defines the measured cutover
   boundary for a pluggable high-frequency durable event log.
+- [ADR-0090](0090-session-selected-sandbox-retention.md) makes Cube retention a
+  durable Session choice while preserving lazy activation, fencing and the
+  one-live-process-world-per-Workspace invariant.
 
 ## Maintained optional modules
 

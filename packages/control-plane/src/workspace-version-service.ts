@@ -805,7 +805,13 @@ export class WorkspaceVersionService {
         if (replay !== undefined) return replay;
         const session = await transaction
           .selectFrom("sessions")
-          .select(["state", "archived_at", "current_workspace_version_id"])
+          .select([
+            "state",
+            "workspace_id",
+            "sandbox_retention_policy",
+            "archived_at",
+            "current_workspace_version_id",
+          ])
           .where("tenant_id", "=", tenantId)
           .where("id", "=", sessionId)
           .forUpdate()
@@ -819,6 +825,35 @@ export class WorkspaceVersionService {
           throw new WorkspaceVersionError("conflict", "Session archive state already matches");
         }
         await this.#assertNoUnsettledTurns(transaction, tenantId, sessionId);
+        if (!request.archived) {
+          await transaction
+            .selectFrom("workspaces")
+            .select("id")
+            .where("tenant_id", "=", tenantId)
+            .where("id", "=", session.workspace_id)
+            .forUpdate()
+            .executeTakeFirstOrThrow();
+          const liveWorkspaceSessions = await transaction
+            .selectFrom("sessions")
+            .select(["id", "sandbox_retention_policy"])
+            .where("tenant_id", "=", tenantId)
+            .where("workspace_id", "=", session.workspace_id)
+            .where("archived_at", "is", null)
+            .where("id", "!=", sessionId)
+            .execute();
+          if (
+            (session.sandbox_retention_policy === "persistent" &&
+              liveWorkspaceSessions.length > 0) ||
+            liveWorkspaceSessions.some(
+              (existing) => existing.sandbox_retention_policy === "persistent",
+            )
+          ) {
+            throw new WorkspaceVersionError(
+              "conflict",
+              "A persistent Sandbox conversation requires an otherwise unused Workspace",
+            );
+          }
+        }
         await transaction
           .updateTable("sessions")
           .set({

@@ -34,6 +34,7 @@ import {
   type LogoutResource,
   type RunListResource,
   type RunResource,
+  type SandboxRetentionPolicy,
   type SessionResource,
   type TenantIdentityResource,
   type TenantRegistrationResource,
@@ -411,12 +412,13 @@ export class AgentDockApi {
     projectId: string,
     workspaceId: string,
     title: string,
+    sandboxRetention: SandboxRetentionPolicy,
   ): Promise<SessionResource> {
     return parseSessionResource(
       await request(
         this.#fetch,
         `/v1/projects/${encodeURIComponent(projectId)}/sessions`,
-        jsonRequest({ workspaceId, title }),
+        jsonRequest({ workspaceId, title, sandboxRetention }),
         this.#authorizationToken,
       ),
     );

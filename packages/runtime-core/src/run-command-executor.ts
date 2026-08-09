@@ -65,6 +65,7 @@ export type TurnExecutionRequest = {
     kind: "prompt";
     prompt: string;
   };
+  sandboxRetention: import("@agent-dock/protocol").SandboxRetentionPolicy;
   model: {
     profileId: string;
     provider: string;
@@ -614,6 +615,7 @@ export class RunCommandExecutor {
           "turn.credential_binding_version as credentialBindingVersion",
           "session_row.id as sessionId",
           "session_row.state as sessionState",
+          "session_row.sandbox_retention_policy as sandboxRetention",
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
           "session_row.next_event_seq as nextEventSeq",
@@ -993,6 +995,7 @@ export class RunCommandExecutor {
           idempotencyKey: row.idempotencyKey,
           nextEventSeq: row.nextEventSeq,
           input: { kind: "prompt", prompt: row.inputText },
+          sandboxRetention: row.sandboxRetention,
           model: {
             profileId: row.modelProfileId,
             provider: row.provider,

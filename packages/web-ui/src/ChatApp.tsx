@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConversationSummaryResource,
+  SandboxRetentionPolicy,
   TenantIdentityResource,
   WorkspaceSummaryResource,
 } from "@agent-dock/protocol";
@@ -59,6 +60,7 @@ export default function ChatApp() {
   const [workspaceChoice, setWorkspaceChoice] = useState<"existing" | "new">("new");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [sandboxRetention, setSandboxRetention] = useState<SandboxRetentionPolicy>("ephemeral");
   const [pendingInitialPrompt, setPendingInitialPrompt] = useState<string | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
   const lastSequenceRef = useRef(0);
@@ -261,6 +263,7 @@ export default function ChatApp() {
     setWorkspaceChoice(workspaces.length === 0 ? "new" : "existing");
     setSelectedWorkspaceId(workspaces[0]?.workspaceId ?? "");
     setNewWorkspaceName("");
+    setSandboxRetention("ephemeral");
     setWorkspacePanelOpen(true);
   }
 
@@ -289,7 +292,7 @@ export default function ChatApp() {
         projectId = selected.projectId;
         workspaceId = selected.workspaceId;
       }
-      const session = await api.createSession(projectId, workspaceId, title);
+      const session = await api.createSession(projectId, workspaceId, title, sandboxRetention);
       const detail = await api.getConversation(session.sessionId);
       lastSequenceRef.current = detail.replayAfterSequence;
       update({ type: "conversation.loaded", conversation: detail });
@@ -513,7 +516,12 @@ export default function ChatApp() {
           </button>
           <div className="product-topbar-title">
             <strong>{state.session?.title ?? "新对话"}</strong>
-            {state.project ? <span>/workspace · {state.project.name}</span> : null}
+            {state.project ? (
+              <span>
+                /workspace · {state.project.name}
+                {state.session?.sandboxRetention === "persistent" ? " · 持久沙箱" : ""}
+              </span>
+            ) : null}
             {state.session ? (
               <span className={state.connection.phase === "live" ? "online" : ""}>
                 {state.connection.phase === "live" ? "已连接" : "连接中"}
@@ -625,6 +633,40 @@ export default function ChatApp() {
                   </label>
                 ) : null}
               </fieldset>
+              <fieldset className="product-workspace-choice">
+                <legend>沙箱生命周期</legend>
+                <label className="product-choice-card">
+                  <input
+                    checked={sandboxRetention === "ephemeral"}
+                    onChange={() => setSandboxRetention("ephemeral")}
+                    type="radio"
+                  />
+                  <span>
+                    <strong>自动回收（推荐）</strong>
+                    <small>代码任务结束后短暂保温，空闲 15 分钟或资源紧张时回收</small>
+                  </span>
+                </label>
+                <label className="product-choice-card">
+                  <input
+                    checked={sandboxRetention === "persistent"}
+                    onChange={() => setSandboxRetention("persistent")}
+                    type="radio"
+                  />
+                  <span>
+                    <strong>持续运行</strong>
+                    <small>跨多轮保留进程和服务，直到删除对话或执行环境发生故障</small>
+                  </span>
+                </label>
+                {sandboxRetention === "persistent" &&
+                workspaceChoice === "existing" &&
+                (workspaces.find((workspace) => workspace.workspaceId === selectedWorkspaceId)
+                  ?.sessionCount ?? 0) > 0 ? (
+                  <p className="product-choice-warning">
+                    持久沙箱需要独占 Workspace；请选择没有现有对话的 Workspace，或创建新的
+                    Workspace。
+                  </p>
+                ) : null}
+              </fieldset>
               <footer>
                 <button
                   onClick={() => {
@@ -637,7 +679,13 @@ export default function ChatApp() {
                 </button>
                 <button
                   className="product-primary-button"
-                  disabled={operation !== null}
+                  disabled={
+                    operation !== null ||
+                    (sandboxRetention === "persistent" &&
+                      workspaceChoice === "existing" &&
+                      (workspaces.find((workspace) => workspace.workspaceId === selectedWorkspaceId)
+                        ?.sessionCount ?? 0) > 0)
+                  }
                   type="submit"
                 >
                   {operation === "creating" ? "创建中…" : "创建对话"}

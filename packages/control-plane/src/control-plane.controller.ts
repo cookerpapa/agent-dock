@@ -321,7 +321,7 @@ export class ControlPlaneController {
     const identity = this.tenantRequestContext.requireMutation(httpRequest);
     return this.controlPlaneStores
       .forIdentity(identity)
-      .createSession(projectId, request.workspaceId, request.title);
+      .createSession(projectId, request.workspaceId, request.title, request.sandboxRetention);
   }
 
   @Post("sessions/:sessionId/turns")

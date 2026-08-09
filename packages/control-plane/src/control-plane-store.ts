@@ -23,6 +23,7 @@ import type {
   RunRewindResource,
   RunResource,
   ReviewBundleResource,
+  SandboxRetentionPolicy,
   SessionResource,
   TestResultListResource,
   WorkspaceSourceResource,
@@ -889,7 +890,8 @@ export class ControlPlaneStore {
   async createSession(
     projectId: string,
     workspaceId: string,
-    title = "新对话",
+    title: string,
+    sandboxRetention: SandboxRetentionPolicy,
   ): Promise<SessionResource> {
     const sessionId = this.#idGenerator();
     return this.#database.transaction().execute(async (transaction) => {
@@ -915,6 +917,7 @@ export class ControlPlaneStore {
         .where("workspace.tenant_id", "=", this.#tenantId)
         .where("workspace.project_id", "=", projectId)
         .where("workspace.id", "=", workspaceId)
+        .forUpdate("workspace")
         .executeTakeFirst();
       if (!workspace) {
         throw new ControlPlaneStoreError("not_found", "Project workspace was not found");
@@ -933,6 +936,23 @@ export class ControlPlaneStore {
         );
       }
 
+      const liveWorkspaceSessions = await transaction
+        .selectFrom("sessions")
+        .select(["id", "sandbox_retention_policy"])
+        .where("tenant_id", "=", this.#tenantId)
+        .where("workspace_id", "=", workspace.id)
+        .where("archived_at", "is", null)
+        .execute();
+      if (
+        (sandboxRetention === "persistent" && liveWorkspaceSessions.length > 0) ||
+        liveWorkspaceSessions.some((existing) => existing.sandbox_retention_policy === "persistent")
+      ) {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          "A persistent Sandbox conversation requires an otherwise unused Workspace",
+        );
+      }
+
       await this.#resolveModelSnapshot(transaction);
       const session = await transaction
         .insertInto("sessions")
@@ -944,11 +964,20 @@ export class ControlPlaneStore {
           workspace_id: workspace.id,
           desired_model_profile_id: policy.defaultModelProfileId,
           state: "cold",
+          sandbox_retention_policy: sandboxRetention,
           pi_session_snapshot_key: null,
           workspace_snapshot_key: workspace.workspaceSnapshotKey,
           current_workspace_version_id: workspace.currentVersionId,
         })
-        .returning(["id", "title", "project_id", "workspace_id", "state", "created_at"])
+        .returning([
+          "id",
+          "title",
+          "project_id",
+          "workspace_id",
+          "state",
+          "sandbox_retention_policy",
+          "created_at",
+        ])
         .executeTakeFirstOrThrow();
       await transaction
         .insertInto("session_event_cursors")
@@ -960,6 +989,7 @@ export class ControlPlaneStore {
         projectId: session.project_id,
         workspaceId: session.workspace_id,
         state: "cold",
+        sandboxRetention: session.sandbox_retention_policy,
         modelProfileId: policy.defaultModelProfileId,
         createdAt: isoTimestamp(session.created_at),
       };
@@ -1030,6 +1060,7 @@ export class ControlPlaneStore {
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
         "session_row.state as state",
+        "session_row.sandbox_retention_policy as sandboxRetention",
         "session_row.created_at as createdAt",
         "session_row.updated_at as updatedAt",
         "session_row.last_active_at as lastActiveAt",
@@ -1052,6 +1083,7 @@ export class ControlPlaneStore {
         "session_row.project_id",
         "session_row.workspace_id",
         "session_row.state",
+        "session_row.sandbox_retention_policy",
         "session_row.created_at",
         "session_row.updated_at",
         "session_row.last_active_at",
@@ -1069,6 +1101,7 @@ export class ControlPlaneStore {
         workspaceId: row.workspaceId,
         workspaceName: row.workspaceName,
         state: row.state,
+        sandboxRetention: row.sandboxRetention,
         turnCount: nonNegativeSafeInteger(row.turnCount, "Conversation turn count"),
         createdAt: isoTimestamp(row.createdAt),
         updatedAt: isoTimestamp(row.updatedAt),
@@ -1104,6 +1137,7 @@ export class ControlPlaneStore {
         "session_row.workspace_id as workspaceId",
         "session_row.desired_model_profile_id as modelProfileId",
         "session_row.state as sessionState",
+        "session_row.sandbox_retention_policy as sandboxRetention",
         "session_row.created_at as sessionCreatedAt",
         "session_row.updated_at as sessionUpdatedAt",
         "session_row.last_active_at as lastActiveAt",
@@ -1307,6 +1341,7 @@ export class ControlPlaneStore {
         projectId: conversation.projectId,
         workspaceId: conversation.workspaceId,
         state: conversation.sessionState,
+        sandboxRetention: conversation.sandboxRetention,
         modelProfileId: conversation.modelProfileId,
         createdAt: isoTimestamp(conversation.sessionCreatedAt),
         updatedAt: isoTimestamp(conversation.sessionUpdatedAt),

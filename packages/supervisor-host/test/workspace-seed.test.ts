@@ -98,6 +98,7 @@ function command(tenantId: string = IDS.tenant): ExecuteTurnCommandMessage {
       fencingToken: 1,
       nextEventSeq: 1,
       input: { kind: "prompt", text: "Inspect the imported repository" },
+      sandboxRetention: "ephemeral",
       model: {
         profileId: IDS.profile,
         provider: "agent-dock-fake",

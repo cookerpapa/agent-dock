@@ -42,7 +42,12 @@ function workflowInput(
 
 async function createAcceptedRun(name: string): Promise<TemporalRunWorkflowInput> {
   const project = await store.createProject(`affinity-${name}`);
-  const session = await store.createSession(project.projectId, project.workspaceId);
+  const session = await store.createSession(
+    project.projectId,
+    project.workspaceId,
+    "New conversation",
+    "ephemeral",
+  );
   return workflowInput(
     await store.acceptTurn(session.sessionId, `affinity-${name}`, {
       prompt: `affinity ${name}`,

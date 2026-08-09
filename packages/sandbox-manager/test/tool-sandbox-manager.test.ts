@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   SandboxManagerError,
+  InMemorySandboxActivationStateRepository,
   ToolSandboxManager,
   loadSandboxManagerConfig,
   type SandboxCreateSpec,
@@ -426,6 +427,227 @@ describe("provider-backed Tool Sandbox Manager", () => {
     expect(fixture.rebind).toHaveBeenCalledTimes(1);
     expect(fixture.exec).toHaveBeenCalledTimes(2);
     await manager.stop(second.activationId, nextAssignment);
+  });
+
+  it("keeps a persistent runtime across the idle TTL and reuses it for the same Session", async () => {
+    const fixture = providerFixture();
+    let now = 1_000;
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+      warmTtlMs: 1_000,
+      clock: () => now,
+    });
+    const first = await manager.create(createRequest);
+    await manager.execute(first.capability, operation("71000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "71000000-0000-4000-8000-000000000002",
+      activationId: first.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "e".repeat(64),
+    });
+
+    now += 60_000;
+    await manager.reapWarm();
+    expect(manager.warmCount).toBe(1);
+    expect(fixture.stopped).toBe(false);
+
+    const nextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-persistent-next",
+      turnId: "turn-provider-test-persistent-next",
+      attemptId: "71000000-0000-4000-8000-000000000003",
+      leaseId: "71000000-0000-4000-8000-000000000003",
+      fencingToken: 6,
+    };
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "71000000-0000-4000-8000-000000000004",
+      assignment: nextAssignment,
+      workspaceRevision: "e".repeat(64),
+    });
+    expect(second.continuity).toBe("warm_reuse");
+    expect(second.activationId).toBe(first.activationId);
+    await manager.stop(second.activationId, nextAssignment);
+  });
+
+  it("reaps a retained runtime after its conversation is archived", async () => {
+    class RetiredStateRepository extends InMemorySandboxActivationStateRepository {
+      retired = false;
+
+      override async listRetiredWarmActivationIds(): Promise<readonly string[]> {
+        return this.retired ? [ACTIVATION_ID] : [];
+      }
+    }
+    const fixture = providerFixture();
+    const stateRepository = new RetiredStateRepository();
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      stateRepository,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create(createRequest);
+    await manager.execute(created.capability, operation("72000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "72000000-0000-4000-8000-000000000002",
+      activationId: created.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "f".repeat(64),
+    });
+
+    stateRepository.retired = true;
+    await manager.reapRetiredWarm();
+    expect(manager.warmCount).toBe(0);
+    expect(manager.admittedCount).toBe(0);
+    expect(fixture.stopped).toBe(true);
+  });
+
+  it("does not let another Session displace a persistent process world", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const first = await manager.create(createRequest);
+    await manager.execute(first.capability, operation("73000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "73000000-0000-4000-8000-000000000002",
+      activationId: first.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "1".repeat(64),
+    });
+
+    await expect(
+      manager.create({
+        ...createRequest,
+        requestId: "73000000-0000-4000-8000-000000000003",
+        assignment: {
+          ...assignment,
+          sessionId: "session-provider-test-sibling",
+          commandId: "command-provider-test-sibling",
+          turnId: "turn-provider-test-sibling",
+          attemptId: "73000000-0000-4000-8000-000000000004",
+          leaseId: "73000000-0000-4000-8000-000000000004",
+          fencingToken: 6,
+        },
+        workspaceRevision: "1".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "tool_sandbox_workspace_pinned", retryable: false });
+    expect(fixture.stopped).toBe(false);
+  });
+
+  it("evicts ordinary warm capacity before a persistent process world", async () => {
+    const fixture = providerFixture();
+    const activationIds = [
+      ACTIVATION_ID,
+      SECOND_ACTIVATION_ID,
+      "30000000-0000-4000-8000-000000000030",
+    ];
+    const capabilities = [
+      CAPABILITY,
+      SECOND_CAPABILITY,
+      `adts_${"e".repeat(43)}`,
+      `adts_${"f".repeat(43)}`,
+    ];
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => activationIds.shift()!,
+      capabilityGenerator: () => capabilities.shift()!,
+      maximumActiveSandboxes: 2,
+      maximumWarmActivations: 1,
+    });
+    const persistent = await manager.create(createRequest);
+    await manager.execute(persistent.capability, operation("74000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "74000000-0000-4000-8000-000000000002",
+      activationId: persistent.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "2".repeat(64),
+    });
+
+    const ordinaryAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      workspaceId: "workspace-provider-test-ordinary",
+      sessionId: "session-provider-test-ordinary",
+      commandId: "command-provider-test-ordinary",
+      turnId: "turn-provider-test-ordinary",
+      attemptId: "74000000-0000-4000-8000-000000000003",
+      leaseId: "74000000-0000-4000-8000-000000000003",
+      fencingToken: 6,
+    };
+    const ordinary = await manager.create({
+      ...createRequest,
+      requestId: "74000000-0000-4000-8000-000000000004",
+      assignment: ordinaryAssignment,
+    });
+    await manager.execute(ordinary.capability, {
+      ...operation("74000000-0000-4000-8000-000000000005"),
+      activationId: ordinary.activationId,
+    });
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "74000000-0000-4000-8000-000000000006",
+      activationId: ordinary.activationId,
+      assignment: ordinaryAssignment,
+      disposition: "keep_warm",
+      workspaceRevision: "3".repeat(64),
+    });
+    expect(manager.warmCount).toBe(2);
+
+    const demandAssignment: ToolSandboxAssignment = {
+      ...ordinaryAssignment,
+      workspaceId: "workspace-provider-test-new-demand",
+      sessionId: "session-provider-test-new-demand",
+      commandId: "command-provider-test-new-demand",
+      turnId: "turn-provider-test-new-demand",
+      attemptId: "74000000-0000-4000-8000-000000000007",
+      leaseId: "74000000-0000-4000-8000-000000000007",
+      fencingToken: 7,
+    };
+    const demand = await manager.create({
+      ...createRequest,
+      requestId: "74000000-0000-4000-8000-000000000008",
+      assignment: demandAssignment,
+    });
+    await manager.execute(demand.capability, {
+      ...operation("74000000-0000-4000-8000-000000000009"),
+      activationId: demand.activationId,
+    });
+    expect(manager.warmCount).toBe(1);
+
+    const persistentNextAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-provider-test-persistent-after-pressure",
+      turnId: "turn-provider-test-persistent-after-pressure",
+      attemptId: "74000000-0000-4000-8000-000000000010",
+      leaseId: "74000000-0000-4000-8000-000000000010",
+      fencingToken: 8,
+    };
+    const persistentAgain = await manager.create({
+      ...createRequest,
+      requestId: "74000000-0000-4000-8000-000000000011",
+      assignment: persistentNextAssignment,
+      workspaceRevision: "2".repeat(64),
+    });
+    expect(persistentAgain.continuity).toBe("warm_reuse");
+    await manager.stop(persistentAgain.activationId, persistentNextAssignment);
+    await manager.stop(demand.activationId, demandAssignment);
   });
 
   it("destroys a warm process world before another Session uses the same Workspace", async () => {

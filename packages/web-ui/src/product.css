@@ -1201,6 +1201,14 @@ button:disabled {
   color: #7c7c7c;
   font-size: 11px;
 }
+
+.product-choice-warning {
+  margin: 0;
+  color: #c68158;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .product-settings-section {
   display: grid;
   gap: 12px;

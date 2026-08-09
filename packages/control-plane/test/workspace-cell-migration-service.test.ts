@@ -150,7 +150,12 @@ describe.sequential("drained Workspace Cell migration", () => {
 
   it("records a retryable refusal while a Run is queued", async () => {
     const project = await store.createProject("cell-migration-busy");
-    const session = await store.createSession(project.projectId, project.workspaceId);
+    const session = await store.createSession(
+      project.projectId,
+      project.workspaceId,
+      "New conversation",
+      "ephemeral",
+    );
     await store.acceptTurn(session.sessionId, "cell-migration-busy", { prompt: "hold" });
     await expect(
       migrations.migrate({

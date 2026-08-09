@@ -196,6 +196,7 @@ describe("control-plane public API schemas", () => {
         projectId: "10000000-0000-4000-8000-000000000001",
         workspaceId: "20000000-0000-4000-8000-000000000001",
         state: "cold",
+        sandboxRetention: "persistent",
         modelProfileId: "40000000-0000-4000-8000-000000000001",
         createdAt,
       }),
@@ -258,6 +259,7 @@ describe("control-plane public API schemas", () => {
             workspaceId: "20000000-0000-4000-8000-000000000001",
             workspaceName: "Java repair demo",
             state: "idle",
+            sandboxRetention: "ephemeral",
             turnCount: 1,
             createdAt,
             updatedAt: createdAt,
@@ -288,6 +290,7 @@ describe("control-plane public API schemas", () => {
           projectId: "10000000-0000-4000-8000-000000000001",
           workspaceId: "20000000-0000-4000-8000-000000000001",
           state: "running",
+          sandboxRetention: "persistent",
           modelProfileId: "40000000-0000-4000-8000-000000000001",
           createdAt,
           updatedAt: createdAt,
@@ -653,6 +656,7 @@ describe("control-plane public API schemas", () => {
     expect(parseCreateSessionRequest({ workspaceId: UUID, title: "  Fix checkout  " })).toEqual({
       workspaceId: UUID,
       title: "Fix checkout",
+      sandboxRetention: "ephemeral",
     });
     expect(parseUuidPathParameter(UUID, "sessionId")).toBe(UUID);
     expect(() => parseUuidPathParameter("session-1", "sessionId")).toThrow(

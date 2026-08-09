@@ -82,6 +82,7 @@ export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "c
 export type OrchestrationAcceptanceVerdict = "passed" | "failed";
 export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
 export type ExecutionCellState = "active" | "draining" | "disabled";
+export type SandboxRetentionPolicy = "ephemeral" | "persistent";
 
 export interface ExecutionCellTable {
   id: string;
@@ -391,6 +392,7 @@ export interface SessionTable {
   workspace_id: string;
   desired_model_profile_id: string;
   state: SessionState;
+  sandbox_retention_policy: Generated<SandboxRetentionPolicy>;
   pi_session_snapshot_key: string | null;
   workspace_snapshot_key: string | null;
   next_event_seq: GeneratedInt8;

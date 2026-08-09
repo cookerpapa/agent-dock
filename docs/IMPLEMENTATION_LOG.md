@@ -3261,3 +3261,20 @@
 - Pinned the patched `nanoid` transitive release after the current high-severity
   audit advisory affected Vite/PostCSS's prior lockfile version; the repository
   security gate again reports no unremediated high/critical finding.
+
+# 2026-08-10 — Session-selected persistent Cube lifecycle
+
+- Added an immutable Session-level automatic/persistent Sandbox retention
+  choice to the create-conversation product flow and carried it through
+  PostgreSQL, durable Run claim, the Worker protocol and the Tool release
+  boundary.
+- Kept both modes lazy. Ordinary Sessions retain the existing fifteen-minute
+  warm/LRU lifecycle; persistent Sessions keep their exact-Session Cube and
+  user processes across normal idle periods without retaining old Tool
+  authority.
+- Reserved a dedicated Workspace for each live persistent Session, protected
+  the retained process world from cross-Session displacement and reconciled
+  archived conversations into Cube cleanup.
+- Documented that persistent retention is not VM-state durability: failure
+  restores committed Pi/Workspace state into a fresh execution world and uses
+  the existing model-visible reset boundary.

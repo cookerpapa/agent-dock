@@ -288,6 +288,7 @@ export class LocalSupervisorExecutionBackend
           fencingToken: acknowledgement.fencingToken,
           nextEventSeq: positiveSafeInteger(request.nextEventSeq, "next event sequence"),
           input: { kind: "prompt", text: request.input.prompt },
+          sandboxRetention: request.sandboxRetention,
           model: {
             profileId: request.model.profileId,
             provider: request.model.provider,

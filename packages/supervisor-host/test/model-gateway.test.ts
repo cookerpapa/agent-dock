@@ -245,6 +245,7 @@ beforeAll(async () => {
       fencingToken: 1,
       nextEventSeq: 1,
       input: { kind: "prompt", text: "Repair it" },
+      sandboxRetention: "ephemeral",
       model: {
         profileId: tenant.defaultModelProfileId,
         provider: "deepseek",

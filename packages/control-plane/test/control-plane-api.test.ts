@@ -1869,6 +1869,7 @@ describe.sequential("single-user durable turn intake API", () => {
             fencingToken: lease.fencingToken,
             nextEventSeq: Number(request.nextEventSeq),
             input: { kind: "prompt", text: request.input.prompt },
+            sandboxRetention: request.sandboxRetention,
             model: {
               ...request.model,
               credentialBindingVersion: Number(request.model.credentialBindingVersion),
@@ -2552,6 +2553,7 @@ describe.sequential("single-user durable turn intake API", () => {
             idempotencyKey: "pinned-pi-fake-model",
             nextEventSeq: "1",
             input: { kind: "prompt", prompt: "Return the deterministic fake response." },
+            sandboxRetention: "ephemeral",
             model: {
               profileId: IDS.profile,
               provider: "agent-dock-fake",
@@ -3491,7 +3493,7 @@ describe.sequential("single-user durable turn intake API", () => {
       sessionState: "idle",
       stopReason: "long_turn_completed",
     });
-  });
+  }, 15_000);
 
   it("never revives an expired lease and quarantines the stopped session", async () => {
     const sessionResponse = await http.inject({

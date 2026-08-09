@@ -76,7 +76,8 @@ type WarmActivation = {
   handle: SandboxHandle;
   workspaceRevision: string;
   environment: EnvironmentRuntimeSnapshot;
-  expiresAt: number;
+  retention: "ephemeral" | "persistent";
+  expiresAt: number | null;
   lastUsedAt: number;
 };
 
@@ -270,7 +271,11 @@ export class ToolSandboxManager {
     }
     this.#reaper = setInterval(
       () =>
-        void Promise.all([this.reapWarm(), this.#reapOrphanedActivations()]).catch(() => undefined),
+        void Promise.all([
+          this.reapWarm(),
+          this.reapRetiredWarm(),
+          this.#reapOrphanedActivations(),
+        ]).catch(() => undefined),
       30_000,
     );
     this.#reaper.unref();
@@ -316,7 +321,7 @@ export class ToolSandboxManager {
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    await Promise.all([this.reapWarm(), this.#reapOrphanedActivations()]);
+    await Promise.all([this.reapWarm(), this.reapRetiredWarm(), this.#reapOrphanedActivations()]);
     if (
       request.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
       request.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
@@ -342,6 +347,16 @@ export class ToolSandboxManager {
     }
 
     let inherited = this.#warm.get(key);
+    if (
+      inherited?.retention === "persistent" &&
+      inherited.handle.assignment.sessionId !== request.assignment.sessionId
+    ) {
+      throw new SandboxManagerError(
+        "tool_sandbox_workspace_pinned",
+        "Workspace is pinned to another persistent Sandbox conversation",
+        false,
+      );
+    }
     if (
       inherited !== undefined &&
       (inherited.handle.assignment.sessionId !== request.assignment.sessionId ||
@@ -542,11 +557,8 @@ export class ToolSandboxManager {
     if (activation.materializing !== undefined) {
       handle = await activation.materializing.catch(() => undefined);
     }
-    if (
-      request.disposition === "keep_warm" &&
-      handle !== undefined &&
-      this.#provider.supportsWarmRebind !== false
-    ) {
+    const retainRequested = request.disposition !== "destroy";
+    if (retainRequested && handle !== undefined && this.#provider.supportsWarmRebind !== false) {
       if (this.#provider.retainForWarm !== undefined) {
         try {
           handle = await this.#provider.retainForWarm(handle);
@@ -557,11 +569,7 @@ export class ToolSandboxManager {
         }
       }
     }
-    if (
-      request.disposition === "keep_warm" &&
-      handle !== undefined &&
-      this.#provider.supportsWarmRebind !== false
-    ) {
+    if (retainRequested && handle !== undefined && this.#provider.supportsWarmRebind !== false) {
       const key = workspaceKey(request.assignment);
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {
@@ -573,8 +581,9 @@ export class ToolSandboxManager {
         handle,
         workspaceRevision: request.workspaceRevision,
         environment: activation.spec.environment,
+        retention: request.disposition === "keep_persistent" ? "persistent" : "ephemeral",
         lastUsedAt: now,
-        expiresAt: now + this.#warmTtlMs,
+        expiresAt: request.disposition === "keep_persistent" ? null : now + this.#warmTtlMs,
       });
       retained = true;
       await this.#stateRepository.setActivationState(request.activationId, "warm", {
@@ -763,9 +772,23 @@ export class ToolSandboxManager {
 
   async reapWarm(): Promise<void> {
     const now = this.#now();
-    const expired = [...this.#warm.entries()].filter(([, warm]) => warm.expiresAt <= now);
+    const expired = [...this.#warm.entries()].filter(
+      ([, warm]) => warm.expiresAt !== null && warm.expiresAt <= now,
+    );
     for (const [key, warm] of expired) {
       if (this.#warm.get(key) !== warm) continue;
+      this.#warm.delete(key);
+      await this.#provider.stop(warm.handle);
+      this.#releaseAdmission(warm.handle.activationId);
+      await this.#stateRepository.setActivationState(warm.handle.activationId, "released");
+    }
+  }
+
+  async reapRetiredWarm(): Promise<void> {
+    const retired = new Set(await this.#stateRepository.listRetiredWarmActivationIds());
+    if (retired.size === 0) return;
+    for (const [key, warm] of this.#warm) {
+      if (!retired.has(warm.handle.activationId) || this.#warm.get(key) !== warm) continue;
       this.#warm.delete(key);
       await this.#provider.stop(warm.handle);
       this.#releaseAdmission(warm.handle.activationId);
@@ -892,10 +915,13 @@ export class ToolSandboxManager {
   }
 
   async #enforceWarmLimit(): Promise<void> {
-    while (this.#warm.size > this.#maximumWarmActivations) {
-      const oldest = [...this.#warm.entries()].sort(
-        (left, right) => left[1].lastUsedAt - right[1].lastUsedAt,
-      )[0];
+    while (
+      [...this.#warm.values()].filter((warm) => warm.retention === "ephemeral").length >
+      this.#maximumWarmActivations
+    ) {
+      const oldest = [...this.#warm.entries()]
+        .filter(([, warm]) => warm.retention === "ephemeral")
+        .sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt)[0];
       if (oldest === undefined) return;
       this.#warm.delete(oldest[0]);
       await this.#provider.stop(oldest[1].handle);
@@ -933,10 +959,10 @@ export class ToolSandboxManager {
         false,
       );
     }
-    while (this.#admitted.size >= this.#maximumActiveSandboxes && this.#warm.size > 0) {
-      const oldest = [...this.#warm.entries()].sort(
-        (left, right) => left[1].lastUsedAt - right[1].lastUsedAt,
-      )[0];
+    while (this.#admitted.size >= this.#maximumActiveSandboxes) {
+      const oldest = [...this.#warm.entries()]
+        .filter(([, warm]) => warm.retention === "ephemeral")
+        .sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt)[0];
       if (oldest === undefined) break;
       if (this.#warm.get(oldest[0]) !== oldest[1]) continue;
       this.#warm.delete(oldest[0]);

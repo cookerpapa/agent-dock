@@ -48,6 +48,7 @@ const session: SessionResource = {
   projectId: project.projectId,
   workspaceId: project.workspaceId,
   state: "cold",
+  sandboxRetention: "ephemeral",
   modelProfileId: "50000000-0000-4000-8000-000000000001",
   createdAt: CREATED_AT,
 };

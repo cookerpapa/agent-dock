@@ -79,7 +79,12 @@ async function createQueuedTurns(
   prefix: string,
 ): Promise<Awaited<ReturnType<ControlPlaneStore["acceptTurn"]>>[]> {
   const project = await store.createProject(`${prefix}-project`);
-  const session = await store.createSession(project.projectId, project.workspaceId);
+  const session = await store.createSession(
+    project.projectId,
+    project.workspaceId,
+    "New conversation",
+    "ephemeral",
+  );
   const turns = [];
   for (let index = 1; index <= count; index += 1) {
     turns.push(
@@ -255,8 +260,18 @@ describe.sequential("global tenant scheduling", () => {
       maximumConcurrentTurns: 2,
     });
     const project = await store.createProject("shared-directory");
-    const firstSession = await store.createSession(project.projectId, project.workspaceId, "One");
-    const secondSession = await store.createSession(project.projectId, project.workspaceId, "Two");
+    const firstSession = await store.createSession(
+      project.projectId,
+      project.workspaceId,
+      "One",
+      "ephemeral",
+    );
+    const secondSession = await store.createSession(
+      project.projectId,
+      project.workspaceId,
+      "Two",
+      "ephemeral",
+    );
     await store.acceptTurn(firstSession.sessionId, "shared-one", { prompt: "first" });
     await store.acceptTurn(secondSession.sessionId, "shared-two", { prompt: "second" });
 

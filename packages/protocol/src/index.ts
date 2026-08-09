@@ -168,10 +168,12 @@ export {
   NonNegativeSafeIntegerSchema,
   OpaqueIdSchema,
   PositiveSafeIntegerSchema,
+  SandboxRetentionPolicySchema,
   TraceContextSchema,
   UtcTimestampSchema,
   UuidSchema,
   type TraceContext,
+  type SandboxRetentionPolicy,
 } from "./protocol-primitives.ts";
 
 export {

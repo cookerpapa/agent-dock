@@ -107,6 +107,7 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
       fencingToken: turn,
       nextEventSeq: turn,
       input: { kind: "prompt", text: `turn ${String(turn)}` },
+      sandboxRetention: "ephemeral",
       model: {
         profileId: IDS.profile,
         provider: "agent-dock-fake",

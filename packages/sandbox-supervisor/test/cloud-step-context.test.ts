@@ -30,6 +30,7 @@ const command: ExecuteTurnCommandMessage = {
     fencingToken: 9,
     nextEventSeq: 1,
     input: { kind: "prompt", text: "test" },
+    sandboxRetention: "ephemeral",
     model: {
       profileId: "profile-step",
       provider: "agent-dock-fake",
@@ -62,6 +63,13 @@ describe("Cloud Turn, Attempt and sampling Step contexts", () => {
     const first = createCloudTurnContext(command, "c".repeat(64));
     const repeated = createCloudTurnContext(command, "c".repeat(64));
     const changedWorkspace = createCloudTurnContext(command, "d".repeat(64));
+    const changedRetention = createCloudTurnContext(
+      {
+        ...command,
+        payload: { ...command.payload, sandboxRetention: "persistent" },
+      },
+      "c".repeat(64),
+    );
     const retryCommand: ExecuteTurnCommandMessage = {
       ...command,
       messageId: "20000000-0000-4000-8000-000000000001",
@@ -93,6 +101,7 @@ describe("Cloud Turn, Attempt and sampling Step contexts", () => {
     expect(first.sha256).toBe(repeated.sha256);
     expect(first.sha256).toBe(retriedTurn.sha256);
     expect(first.sha256).not.toBe(changedWorkspace.sha256);
+    expect(first.sha256).not.toBe(changedRetention.sha256);
     expect(firstAttempt.sha256).not.toBe(retryAttempt.sha256);
     expect(firstAttempt.context.turnContextSha256).toBe(first.sha256);
     expect(Object.isFrozen(first.context)).toBe(true);

@@ -401,6 +401,74 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
     });
   });
 
+  it("persists the Sandbox retention policy and reserves a Workspace for its persistent conversation", async () => {
+    const projectResponse = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: authorization(alpha.apiToken),
+      payload: { name: "Persistent devbox" },
+    });
+    expect(projectResponse.statusCode).toBe(201);
+    const project = projectResponse.json<ProjectResource>();
+
+    const persistentResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      headers: authorization(alpha.apiToken),
+      payload: {
+        workspaceId: project.workspaceId,
+        title: "Long-running development environment",
+        sandboxRetention: "persistent",
+      },
+    });
+    expect(persistentResponse.statusCode).toBe(201);
+    const persistent = persistentResponse.json<SessionResource>();
+    expect(persistent.sandboxRetention).toBe("persistent");
+
+    const detail = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${persistent.sessionId}`,
+      headers: authorization(alpha.apiToken),
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json<ConversationDetailResource>().session.sandboxRetention).toBe("persistent");
+
+    const conflicting = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      headers: authorization(alpha.apiToken),
+      payload: {
+        workspaceId: project.workspaceId,
+        title: "Conflicting conversation",
+        sandboxRetention: "ephemeral",
+      },
+    });
+    expect(conflicting.statusCode).toBe(409);
+
+    const archived = await http.inject({
+      method: "DELETE",
+      url: `/v1/conversations/${persistent.sessionId}`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "archive-persistent-devbox",
+      },
+    });
+    expect(archived.statusCode).toBe(200);
+
+    const replacement = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${project.projectId}/sessions`,
+      headers: authorization(alpha.apiToken),
+      payload: {
+        workspaceId: project.workspaceId,
+        title: "Replacement conversation",
+        sandboxRetention: "ephemeral",
+      },
+    });
+    expect(replacement.statusCode).toBe(201);
+    expect(replacement.json<SessionResource>().sandboxRetention).toBe("ephemeral");
+  });
+
   it("serializes concurrent registration at the configured total-tenant cap", async () => {
     const results = await Promise.all([
       register("capacity-charlie", "Charlie"),

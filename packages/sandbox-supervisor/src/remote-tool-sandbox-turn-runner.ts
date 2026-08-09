@@ -87,7 +87,10 @@ export interface ToolSandboxManagerBoundary {
   release(
     activationId: string,
     assignment: ToolSandboxAssignment,
-    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+    disposition:
+      | { kind: "keep_warm"; workspaceRevision: string }
+      | { kind: "keep_persistent"; workspaceRevision: string }
+      | { kind: "destroy" },
   ): Promise<{ retained: boolean }>;
   stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;
   operationUrlFor(activationId: string): string;
@@ -699,7 +702,13 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             toolAssignment,
             retainedWorkspaceRevision === undefined
               ? { kind: "destroy" }
-              : { kind: "keep_warm", workspaceRevision: retainedWorkspaceRevision },
+              : {
+                  kind:
+                    command.payload.sandboxRetention === "persistent"
+                      ? "keep_persistent"
+                      : "keep_warm",
+                  workspaceRevision: retainedWorkspaceRevision,
+                },
           )
           .catch((error: unknown) => {
             cleanupError = error;

@@ -28,6 +28,8 @@ An ordinary user sees:
 - a ChatGPT-style conversation surface;
 - named conversations in the left sidebar;
 - named Workspaces that can be created or selected for a new conversation;
+- a per-conversation choice between automatically reclaimed and persistent
+  Cube execution;
 - Pi-style streaming text, Tool calls, command output and code highlighting;
 - a `/workspace` directory browser with committed files and previews;
 - conversation deletion without deleting the shared Workspace.
@@ -76,10 +78,12 @@ Tenant ownership does not grant platform administration.
 
 Cold conversations do not retain a Pi process or microVM. A Run restores the
 Pi-native checkpoint into any eligible Worker. Pure chat never provisions a
-Sandbox. The first Tool call activates Cube; later Tool calls in the warm
-Session reuse it while its idle lease remains valid. Eviction preserves the
-Workspace through the trusted Volume/Data-Mover checkpoint path, not through
-the Worker filesystem.
+Sandbox. The first Tool call activates Cube. Ordinary conversations reuse it
+within a bounded idle window; a conversation created with persistent retention
+keeps its exact-Session process world beyond that window until deletion or an
+execution-plane failure. Both modes rotate Tool authority at every Run
+boundary. Eviction or failure preserves the Workspace through the trusted
+Volume/Data-Mover checkpoint path, not through the Worker filesystem.
 
 Every accepted Run freezes a credential-free logical Turn contract covering
 the model, environment, Workspace base revision and Tool/network policy. Each
@@ -153,6 +157,11 @@ existing Workspace immediately sees that head but starts with an empty Pi
 transcript. Ordinary Runs sharing one Workspace are serialized and advance the
 head with compare-and-set; explicit Fork/Candidate-Race Sessions remain
 isolated branches until promotion.
+
+A persistent-Sandbox conversation owns a dedicated Workspace so its live
+processes cannot become hidden state shared with another Pi transcript. The
+Cube remains lazily created and its process state is not a durable VM snapshot:
+Manager/node failure restores committed files and context into a fresh runtime.
 
 The browser no longer has a special repository-import workflow. The Agent can
 use normal `git`, package-manager and download commands inside the connected

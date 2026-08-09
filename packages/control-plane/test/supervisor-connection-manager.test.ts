@@ -244,7 +244,12 @@ async function createAcceptedTurn(): Promise<{
     defaultModelProfileId: profileId,
   });
   const project = await store.createProject(`project-${uuid()}`);
-  const session = await store.createSession(project.projectId, project.workspaceId);
+  const session = await store.createSession(
+    project.projectId,
+    project.workspaceId,
+    "New conversation",
+    "ephemeral",
+  );
   const accepted = await store.acceptTurn(session.sessionId, `turn-${uuid()}`, {
     prompt: "keep this assignment alive",
   });
@@ -330,6 +335,7 @@ async function createAcceptedTurn(): Promise<{
       idempotencyKey: `execute-${accepted.commandId}`,
       nextEventSeq: "1",
       input: { kind: "prompt", prompt: "keep this assignment alive" },
+      sandboxRetention: "ephemeral",
       model: {
         profileId,
         provider: "agent-dock-fake",

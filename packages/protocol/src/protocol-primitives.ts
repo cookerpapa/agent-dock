@@ -32,3 +32,9 @@ export const NonNegativeSafeIntegerSchema = Type.Integer({
   minimum: 0,
   maximum: Number.MAX_SAFE_INTEGER,
 });
+
+export const SandboxRetentionPolicySchema = Type.Union([
+  Type.Literal("ephemeral"),
+  Type.Literal("persistent"),
+]);
+export type SandboxRetentionPolicy = Static<typeof SandboxRetentionPolicySchema>;

@@ -45,6 +45,7 @@ export interface SandboxActivationStateRepository {
     failureCode?: string,
   ): Promise<void>;
   claimOrphanedActivations(limit: number): Promise<readonly SandboxOrphanedActivation[]>;
+  listRetiredWarmActivationIds(): Promise<readonly string[]>;
   listRuntimeAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]>;
   releaseRuntimeAssignment(assignment: SupervisorRuntimeAssignment): Promise<void>;
   close(): Promise<void>;
@@ -81,6 +82,9 @@ export class InMemorySandboxActivationStateRepository implements SandboxActivati
   }
   async settleOperation(): Promise<void> {}
   async claimOrphanedActivations(): Promise<readonly SandboxOrphanedActivation[]> {
+    return [];
+  }
+  async listRetiredWarmActivationIds(): Promise<readonly string[]> {
     return [];
   }
   async listRuntimeAssignments(): Promise<readonly SupervisorRuntimeAssignment[]> {
@@ -444,6 +448,26 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
           fencingToken: Number(row.fencing_token),
         },
       }));
+    });
+  }
+
+  async listRetiredWarmActivationIds(): Promise<readonly string[]> {
+    const now = validDate(this.#clock);
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#assertCurrentOwner(transaction, now);
+      const rows = await transaction
+        .selectFrom("sandbox_manager_activations as activation")
+        .innerJoin("sessions as session_row", (join) =>
+          join
+            .onRef("session_row.tenant_id", "=", "activation.tenant_id")
+            .onRef("session_row.id", "=", "activation.session_id"),
+        )
+        .select("activation.activation_id as activationId")
+        .where("activation.owner_instance_id", "=", this.#instanceId)
+        .where("activation.state", "=", "warm")
+        .where("session_row.archived_at", "is not", null)
+        .execute();
+      return rows.map((row) => row.activationId);
     });
   }
 

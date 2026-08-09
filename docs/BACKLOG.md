@@ -58,6 +58,8 @@ in the implementation log or Git history, not in the active backlog.
       healthy PostgreSQL-leased Agent Loop.
 - [ ] Expand orphan reconciliation and retention tests for Cube activations,
       POSIX volumes, Kopia snapshots, Pi checkpoints and quarantined Worker WALs.
+- [ ] Add an operator-visible persistent-Cube capacity dashboard and explicit
+      forced-stop control before enabling broad enterprise self-service.
 - [x] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
       operator diagnostics; never offer an automatic shell replay.
 - [ ] Measure Session affinity under load and keep it only while it improves

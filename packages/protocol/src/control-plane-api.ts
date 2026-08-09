@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import {
   NonNegativeSafeIntegerSchema,
   PositiveSafeIntegerSchema,
+  SandboxRetentionPolicySchema,
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
@@ -702,6 +703,7 @@ export const CreateSessionRequestSchema = Type.Object(
   {
     workspaceId: UuidSchema,
     title: Type.String({ minLength: 1, maxLength: 256 }),
+    sandboxRetention: Type.Optional(SandboxRetentionPolicySchema),
   },
   { additionalProperties: false },
 );
@@ -713,6 +715,7 @@ export const SessionResourceSchema = Type.Object(
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     state: Type.Literal("cold"),
+    sandboxRetention: SandboxRetentionPolicySchema,
     modelProfileId: UuidSchema,
     createdAt: UtcTimestampSchema,
   },
@@ -738,6 +741,7 @@ export const ConversationSummaryResourceSchema = Type.Object(
     workspaceId: UuidSchema,
     workspaceName: Type.String({ minLength: 1, maxLength: 256 }),
     state: SessionStateSchema,
+    sandboxRetention: SandboxRetentionPolicySchema,
     turnCount: NonNegativeSafeIntegerSchema,
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
@@ -761,6 +765,7 @@ export const ConversationSessionResourceSchema = Type.Object(
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     state: SessionStateSchema,
+    sandboxRetention: SandboxRetentionPolicySchema,
     modelProfileId: UuidSchema,
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
@@ -1737,6 +1742,7 @@ export type WorkspaceSourceSetEntrySnapshot = Static<typeof WorkspaceSourceSetEn
 export type WorkspaceSourceSetSnapshot = Static<typeof WorkspaceSourceSetSnapshotSchema>;
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export type ProjectResource = Static<typeof ProjectResourceSchema>;
+export type { SandboxRetentionPolicy } from "./protocol-primitives.ts";
 export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
 export type SessionResource = Static<typeof SessionResourceSchema>;
 export type WorkspaceSummaryResource = Static<typeof WorkspaceSummaryResourceSchema>;
@@ -2151,7 +2157,9 @@ export function parseTenantRegistrationResource(value: unknown): TenantRegistrat
   return parseSchema(TenantRegistrationResourceSchema, value, "tenant registration resource");
 }
 
-export function parseCreateSessionRequest(value: unknown): CreateSessionRequest {
+export function parseCreateSessionRequest(
+  value: unknown,
+): CreateSessionRequest & { sandboxRetention: Static<typeof SandboxRetentionPolicySchema> } {
   const request = parseSchema(CreateSessionRequestSchema, value, "create-session request");
   const title = request.title.trim();
   if (
@@ -2163,7 +2171,7 @@ export function parseCreateSessionRequest(value: unknown): CreateSessionRequest 
       "Conversation title must contain 1-256 safe UTF-8 bytes",
     );
   }
-  return { ...request, title };
+  return { ...request, title, sandboxRetention: request.sandboxRetention ?? "ephemeral" };
 }
 
 export function parseAcceptTurnRequest(value: unknown): AcceptTurnRequest {

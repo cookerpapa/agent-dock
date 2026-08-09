@@ -38,6 +38,9 @@ export type CloudTurnContext = Readonly<{
     recipeSha256: string;
   }>;
   workspace: Readonly<{ baseRevision: string | null }>;
+  sandbox: Readonly<{
+    retention: ExecuteTurnCommandMessage["payload"]["sandboxRetention"];
+  }>;
   tools: Readonly<{
     registryVersion: typeof REMOTE_TOOL_REGISTRY_VERSION;
     names: readonly ["read", "write", "edit", "bash"];
@@ -152,6 +155,7 @@ export function createCloudTurnContext(
       recipeSha256: payload.environment.recipeSha256,
     },
     workspace: { baseRevision: workspaceBaseRevision ?? null },
+    sandbox: { retention: payload.sandboxRetention },
     tools: {
       registryVersion: REMOTE_TOOL_REGISTRY_VERSION,
       names: ["read", "write", "edit", "bash"],

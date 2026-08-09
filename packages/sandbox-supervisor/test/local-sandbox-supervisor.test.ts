@@ -62,6 +62,7 @@ function command(
       fencingToken: overrides.fencingToken ?? 1,
       nextEventSeq: 1,
       input: { kind: "prompt", text: "hello" },
+      sandboxRetention: "ephemeral",
       model: {
         profileId: "profile-1",
         provider: "agent-dock-fake",

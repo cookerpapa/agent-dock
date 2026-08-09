@@ -418,6 +418,7 @@ export class RunCancellationExecutor {
           "session_row.id as sessionId",
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
+          "session_row.sandbox_retention_policy as sandboxRetention",
           "session_row.next_event_seq as nextEventSeq",
           "run.id as runId",
           "run_attempt.id as runAttemptId",
@@ -523,6 +524,7 @@ export class RunCancellationExecutor {
             idempotencyKey: row.targetIdempotencyKey,
             nextEventSeq: row.nextEventSeq,
             input: { kind: "prompt", prompt: row.inputText },
+            sandboxRetention: row.sandboxRetention,
             model: {
               profileId: row.modelProfileId,
               provider: row.provider,
