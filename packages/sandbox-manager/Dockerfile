@@ -39,6 +39,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY scripts/retry-npm-command.sh scripts/retry-npm-command.sh
+COPY packages/database/package.json packages/database/package.json
+COPY packages/domain/package.json packages/domain/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
@@ -82,6 +84,10 @@ COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
+COPY packages/database/package.json packages/database/package.json
+COPY packages/database/src packages/database/src
+COPY packages/domain/package.json packages/domain/package.json
+COPY packages/domain/src packages/domain/src
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/observability/src packages/observability/src
 COPY packages/protocol/package.json packages/protocol/package.json
@@ -92,7 +98,7 @@ COPY packages/sandbox-manager/src packages/sandbox-manager/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN cd /app/packages/sandbox-manager \
-    && node --input-type=module --eval "await import('undici')" \
+    && node --input-type=module --eval "await import('@agent-dock/database'); await import('undici')" \
     && rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 STOPSIGNAL SIGTERM
