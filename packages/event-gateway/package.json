@@ -1,0 +1,23 @@
+{
+  "name": "@agent-dock/event-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run --maxWorkers=2"
+  },
+  "dependencies": {
+    "@agent-dock/control-plane": "0.1.0",
+    "@agent-dock/database": "0.1.0",
+    "@agent-dock/observability": "0.1.0",
+    "@agent-dock/runtime-core": "0.1.0",
+    "fastify": "5.10.0",
+    "kysely": "0.29.4",
+    "tsx": "4.23.1"
+  }
+}

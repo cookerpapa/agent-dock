@@ -54,7 +54,7 @@ import {
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 import { PublicTenantRegistrationService } from "./public-tenant-registration.ts";
-import { SessionEventStream } from "./session-event-stream.ts";
+import { SessionEventStream } from "@agent-dock/runtime-core/session-event-stream";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import { WorkspaceVersionService } from "./workspace-version-service.ts";

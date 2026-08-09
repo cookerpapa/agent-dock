@@ -21,6 +21,7 @@
     "./run-command-executor": "./src/run-command-executor.ts",
     "./s3-checkpoint-object-store": "./src/s3-checkpoint-object-store.ts",
     "./session-event-hub": "./src/session-event-hub.ts",
+    "./session-event-stream": "./src/session-event-stream.ts",
     "./session-event-notifications": "./src/session-event-notifications.ts",
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./structured-test-command": "./src/structured-test-command.ts",

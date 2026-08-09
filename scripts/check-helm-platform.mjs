@@ -98,6 +98,24 @@ assert.equal(
 find("HorizontalPodAutoscaler", "agent-dock-control-plane");
 find("PodDisruptionBudget", "agent-dock-control-plane");
 
+const eventGateway = find("Deployment", "agent-dock-event-gateway");
+assert.equal(eventGateway.spec.replicas, 3);
+assert.equal(eventGateway.spec.strategy.rollingUpdate.maxUnavailable, 0);
+assert.equal(eventGateway.spec.template.spec.automountServiceAccountToken, false);
+const eventGatewayEnvironment = Object.fromEntries(
+  eventGateway.spec.template.spec.containers[0].env
+    .filter((entry) => entry.value !== undefined)
+    .map((entry) => [entry.name, String(entry.value)]),
+);
+assert.equal(eventGatewayEnvironment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
+  "/run/agent-dock-secrets/database-notification-url",
+);
+find("HorizontalPodAutoscaler", "agent-dock-event-gateway");
+find("PodDisruptionBudget", "agent-dock-event-gateway");
+find("Service", "event-gateway");
+
 const web = find("Deployment", "agent-dock-web");
 assert.equal(web.spec.replicas, 2);
 assert.equal(web.spec.template.spec.automountServiceAccountToken, false);

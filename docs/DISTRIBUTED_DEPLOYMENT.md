@@ -9,7 +9,9 @@ nodes. It is intentionally separate from the one-host installer in
 ```text
 Ingress
   → Web Deployment + HPA
-  → Control Plane Deployment + HPA
+       ├── REST → Control Plane Deployment + HPA
+       └── SSE  → Event Gateway Deployment + HPA
+  → Control Plane / Event Gateway
        ├── PostgreSQL/PgBouncer (external)
        ├── direct PostgreSQL LISTEN endpoint (external)
        ├── Temporal cluster (external)
@@ -28,8 +30,8 @@ Sandbox Manager replica N + Workspace Data Mover N
 
 The Chart is
 [`deploy/helm/agent-dock-platform`](../deploy/helm/agent-dock-platform).
-It deploys Web, Control Plane, the trusted Manager/Data-Mover replica set, the Pi
-Worker pool, policies, bootstrap migration and autoscalers. It does **not**
+It deploys Web, Control Plane, Event Gateway, the trusted Manager/Data-Mover
+replica set, the Pi Worker pool, policies, bootstrap migration and autoscalers. It does **not**
 silently install data stores or Cube under application credentials.
 
 ## 2. Required authorities
@@ -147,6 +149,7 @@ cluster can bypass only that check with
 | --- | --- | --- | --- |
 | Web | CPU HPA | 2–8 | stateless |
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
+| Event Gateway | CPU HPA | 3–32 | long-lived SSE only; PostgreSQL event sequence remains authoritative |
 | Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
 | Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
@@ -200,15 +203,16 @@ lost, a surviving replica expires its DB Lease, marks running Tool operations
 unknown and claims orphan cleanup. The next Attempt restores the last committed
 Pi and Workspace state and receives the model-visible Sandbox reset boundary.
 
-Use one AgentDock release per namespace. The stable `control-plane` and
-`sandbox-manager` Services plus per-Pod headless DNS form the routing contract.
+Use one AgentDock release per namespace. The stable `control-plane`,
+`event-gateway` and `sandbox-manager` Services plus per-Pod headless DNS form
+the routing contract.
 
 ## 9. What remains to prove
 
 The Chart and CI validate manifest shape and application-level routing. A real
 production claim additionally requires evidence for:
 
-- a Control Plane node disappearing during active streams;
+- an Event Gateway node disappearing during active streams and browser resume;
 - Pi Worker node loss and Temporal retry on another node;
 - Sandbox Manager ordinal replacement and cold Workspace recovery;
 - Cube compute-node drain/replacement;

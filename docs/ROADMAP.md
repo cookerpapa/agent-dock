@@ -73,8 +73,10 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   and Control Plane, version-aware Temporal/KEDA Pi Worker scaling, direct
   headless-DNS Worker management and a fixed Sandbox Manager/Data-Mover ring.
 - [x] Replace global Workspace hashing with an immutable execution Cell
-  directory and Cell-specific Temporal routing; raise the default Pi Worker Pod
-  to four bounded runtime slots.
+      directory and Cell-specific Temporal routing; raise the default Pi Worker Pod
+      to four bounded runtime slots.
+- [x] Split long-lived resumable SSE delivery into an independently scalable
+      Event Gateway while retaining PostgreSQL as the only durable event authority.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

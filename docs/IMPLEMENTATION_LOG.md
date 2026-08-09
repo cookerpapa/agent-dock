@@ -15,6 +15,16 @@
   trigger；跨 Session 的幂等约束仍然成立，Compaction 外键改为引用注册表。
 - 新增 up/down 迁移验证，并通过完整 database 测试套件。
 
+## 2026-08-09 — 独立 Event Gateway
+
+- 将通用 `SessionEventStream` 下沉到 `runtime-core`，并以 `DurableEventLog`
+  port 替代对 PostgreSQL Store 具体类的依赖。
+- 新增独立 Event Gateway：复用平台 Cookie/API Token 身份，使用 PostgreSQL
+  durable replay + `LISTEN/NOTIFY` wake-up 提供可恢复 SSE；它不能接收 Worker
+  事件或提交 Run，因而没有制造第二个事件权威。
+- Compose 和 Helm Web edge 将 Session event 路由到 Gateway；Helm 默认 3
+  副本，并提供 HPA、PDB、最小权限 Secret mount 和 NetworkPolicy。
+
 ## 2026-08-08 — 显式且有界的项目完成门禁
 
 - 复用冻结的项目环境 recipe：只有存在 ID 为 `settlement-gate` 的 verification

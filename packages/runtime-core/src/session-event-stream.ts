@@ -1,15 +1,15 @@
 import type { AgentDockEvent } from "@agent-dock/protocol";
 import type { ServerResponse } from "node:http";
 import {
-  DurableEventStore,
   DurableEventStoreError,
+  type DurableEventLog,
   type EventReplayWindow,
-} from "@agent-dock/runtime-core/durable-event-store";
+} from "./durable-event-store.ts";
 import {
   SessionEventHub,
   type SessionEventSubscription,
   type SessionEventWake,
-} from "@agent-dock/runtime-core/session-event-hub";
+} from "./session-event-hub.ts";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
@@ -75,7 +75,7 @@ async function nextWithHeartbeat(
 }
 
 export class OpenSessionEventStream {
-  readonly #store: DurableEventStore;
+  readonly #store: DurableEventLog;
   readonly #subscription: SessionEventSubscription;
   readonly #tenantId: string;
   readonly #sessionId: string;
@@ -86,7 +86,7 @@ export class OpenSessionEventStream {
   readonly #replayPageSize: number;
 
   constructor(options: {
-    store: DurableEventStore;
+    store: DurableEventLog;
     subscription: SessionEventSubscription;
     tenantId: string;
     sessionId: string;
@@ -213,13 +213,13 @@ export class OpenSessionEventStream {
 }
 
 export class SessionEventStream {
-  readonly #store: DurableEventStore;
+  readonly #store: DurableEventLog;
   readonly #hub: SessionEventHub;
   readonly #heartbeatIntervalMs: number;
   readonly #replayPageSize: number;
 
   constructor(
-    store: DurableEventStore,
+    store: DurableEventLog,
     hub: SessionEventHub,
     options: SessionEventStreamOptions = {},
   ) {

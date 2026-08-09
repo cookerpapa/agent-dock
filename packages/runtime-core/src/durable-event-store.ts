@@ -54,6 +54,23 @@ export interface DurableEventIngestor {
   ingest(value: unknown): Promise<EventAckMessage>;
 }
 
+export interface DurableEventLog extends DurableEventIngestor {
+  openReplayWindow(
+    tenantId: string,
+    sessionId: string,
+    afterSequence: number,
+    limit?: number,
+  ): Promise<EventReplayWindow>;
+
+  readReplayPage(
+    tenantId: string,
+    sessionId: string,
+    afterSequence: number,
+    throughSequence: number,
+    limit?: number,
+  ): Promise<readonly AgentDockEvent[]>;
+}
+
 type PersistedEventRow = {
   event_id: string;
   session_id: string;
@@ -168,7 +185,7 @@ function eventSelect() {
   ] as const;
 }
 
-export class DurableEventStore implements DurableEventIngestor {
+export class DurableEventStore implements DurableEventLog {
   readonly #database: Kysely<Database>;
   readonly #eventHub: SessionEventHub | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;

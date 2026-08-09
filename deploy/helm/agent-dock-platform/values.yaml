@@ -14,6 +14,10 @@ images:
     repository: agent-dock/control-plane
     tag: production
     pullPolicy: IfNotPresent
+  eventGateway:
+    repository: agent-dock/event-gateway
+    tag: production
+    pullPolicy: IfNotPresent
   web:
     repository: agent-dock/web-ui
     tag: production
@@ -51,6 +55,17 @@ controlPlane:
   resources:
     requests: { cpu: 250m, memory: 384Mi }
     limits: { cpu: "2", memory: 1Gi }
+
+eventGateway:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 32
+    targetCpuUtilization: 60
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "2", memory: 768Mi }
 
 web:
   replicas: 2
@@ -100,7 +115,8 @@ networkPolicy:
   trustedNamespaceLabel:
     key: agent-dock.io/trusted-plane
     value: "true"
-  trustedTcpPorts: [443, 3000, 3129, 4100, 4300, 4318, 5432, 7233, 9000, 9464, 9465, 9466]
+  trustedTcpPorts:
+    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 7233, 9000, 9464, 9465, 9466, 9467]
   # Add the explicit CIDRs of external PostgreSQL/PgBouncer, Temporal, S3,
   # provider proxy, Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
   externalEgressCidrs: []

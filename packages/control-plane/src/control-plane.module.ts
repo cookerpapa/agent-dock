@@ -11,7 +11,10 @@ import {
 import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
 import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
-import { SessionEventStream, type SessionEventStreamOptions } from "./session-event-stream.ts";
+import {
+  SessionEventStream,
+  type SessionEventStreamOptions,
+} from "@agent-dock/runtime-core/session-event-stream";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";

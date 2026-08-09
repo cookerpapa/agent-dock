@@ -341,7 +341,7 @@ export {
   OpenSessionEventStream,
   SessionEventStream,
   type SessionEventStreamOptions,
-} from "./session-event-stream.ts";
+} from "@agent-dock/runtime-core/session-event-stream";
 export {
   ControlPlaneStore,
   ControlPlaneStoreError,

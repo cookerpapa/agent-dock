@@ -9,7 +9,8 @@ The current production path is deliberately singular:
 
 ```text
 Browser
-  → NestJS Control Plane
+  → Web edge
+  → NestJS Control Plane (REST) / Event Gateway (resumable SSE)
   → Temporal Run Workflow
   → horizontally scalable trusted Pi Worker
   → authenticated Tool RPC
@@ -45,8 +46,8 @@ Tenant ownership does not grant platform administration.
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ REST + resumable SSE
 ┌───────────────────────────────▼─────────────────────────────────┐
-│ Control Plane                                                   │
-│ auth / tenants / sessions / Run admission / idempotency / CAS   │
+│ Control Plane + Event Gateway                                   │
+│ REST admission / auth / resumable durable SSE                   │
 │ PostgreSQL business state / MinIO immutable artifacts           │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ one Workflow per accepted Run
@@ -106,6 +107,7 @@ candidate activations remain parallel; shared Workspace/process effects do not.
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 The distributed Kubernetes profile keeps Web and Control Plane stateless,
+offloads long-lived browser streams to an independently scaled Event Gateway,
 binds each Workspace to an immutable execution Cell, scales that Cell's
 compatible Pi Workers from its Temporal Activity backlog with KEDA, and routes
 exact Worker management over StatefulSet headless DNS. The default Worker Pod

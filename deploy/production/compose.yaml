@@ -415,6 +415,57 @@ services:
     stop_grace_period: 30s
     logging: *bounded-logging
 
+  event-gateway:
+    image: agent-dock/event-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/event-gateway/Dockerfile
+      args: *application-build-args
+      network: host
+    restart: unless-stopped
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "4600"
+      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+      AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE: /run/agent-dock-secrets/database-url
+      AGENT_DOCK_METRICS_HOST: 0.0.0.0
+      AGENT_DOCK_METRICS_PORT: "9467"
+      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/agent-dock-secrets/database-url
+        read_only: true
+    networks:
+      - api
+      - database
+      - observability
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4600/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
   provider-relay-volume-bootstrap:
     image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
     restart: "no"
@@ -930,6 +981,8 @@ services:
     restart: unless-stopped
     depends_on:
       control-plane:
+        condition: service_healthy
+      event-gateway:
         condition: service_healthy
     environment:
       XDG_CONFIG_HOME: /tmp/caddy-config

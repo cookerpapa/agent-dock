@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./tenant-identity": "./src/tenant-identity.ts",
+    "./web-authentication": "./src/web-authentication.ts"
   },
   "scripts": {
     "bootstrap": "tsx src/bootstrap-main.ts",

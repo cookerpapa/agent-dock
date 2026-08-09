@@ -49,6 +49,17 @@ The NestJS/Fastify Control Plane owns:
 PostgreSQL is the source of truth. Temporal is the durable execution engine, not
 the business database.
 
+### Event Gateway
+
+The Event Gateway is the browser-facing, horizontally scalable read path for
+long-lived resumable SSE connections. It authenticates the same browser/API
+credentials as the Control Plane, opens a replay window from the selected
+`DurableEventLog`, and sends only events that have crossed its durable ACK
+boundary. PostgreSQL `NOTIFY` is a wake-up hint; the partitioned event table and
+its per-Session sequence remain authoritative, so reconnect and missed
+notifications are repaired by replay. The Gateway cannot admit Runs, ingest
+Worker events or commit terminal state.
+
 ### Temporal
 
 Every accepted Run starts one Workflow. Workflow code contains deterministic
@@ -182,6 +193,7 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
 | streamed event log/high-water mark | PostgreSQL, hash-partitioned by Session |
+| browser SSE connections and replay cursors | stateless Event Gateway replicas |
 | UI transcript projection | PostgreSQL-derived read model |
 
 The rendered browser transcript is not used to reconstruct Pi context during

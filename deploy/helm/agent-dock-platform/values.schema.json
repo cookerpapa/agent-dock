@@ -8,6 +8,7 @@
     "images",
     "bootstrap",
     "controlPlane",
+    "eventGateway",
     "web",
     "external",
     "networkPolicy",
@@ -50,9 +51,10 @@
     "images": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["controlPlane", "web", "sandboxManager"],
+      "required": ["controlPlane", "eventGateway", "web", "sandboxManager"],
       "properties": {
         "controlPlane": { "$ref": "#/$defs/image" },
+        "eventGateway": { "$ref": "#/$defs/image" },
         "web": { "$ref": "#/$defs/image" },
         "sandboxManager": { "$ref": "#/$defs/image" }
       }
@@ -90,6 +92,7 @@
       }
     },
     "controlPlane": { "$ref": "#/$defs/httpWorkload" },
+    "eventGateway": { "$ref": "#/$defs/httpWorkload" },
     "web": {
       "allOf": [
         { "$ref": "#/$defs/httpWorkload" },
