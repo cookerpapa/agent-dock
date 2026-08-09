@@ -17,6 +17,13 @@ stores product/control state, MinIO stores Pi JSONL segments/manifests, and a
 Worker PVC stores only that Worker replica's boot ledger and unacknowledged
 event spool.
 
+This hybrid profile writes Worker events directly to the shared PostgreSQL
+event store. It therefore disables the external Kafka Worker-event log even
+though the reusable Worker Helm chart keeps that distributed-deployment option
+enabled by default. The bridge also publishes a namespace-local
+`sandbox-manager` alias and excludes it from the trusted Worker HTTP proxy so a
+Cube lease can safely call its Manager owner during checkpoint and release.
+
 ## Prerequisites
 
 - the existing production Compose stack and Cube plane are healthy;

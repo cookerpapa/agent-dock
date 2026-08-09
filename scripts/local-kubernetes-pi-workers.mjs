@@ -645,6 +645,21 @@ async function bridgeComposeServices() {
       },
     ]),
   );
+  await applyManifest([
+    {
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: {
+        name: "sandbox-manager",
+        namespace: workerNamespace,
+        labels: { "agent-dock.io/bridge": "compose-owner-alias" },
+      },
+      spec: {
+        type: "ExternalName",
+        externalName: `sandbox-manager.${systemNamespace}.svc.cluster.local`,
+      },
+    },
+  ]);
   return resolved;
 }
 
@@ -928,6 +943,8 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "temporal.taskQueue=agent-dock-pi-runs-cell-0001-v1",
     "--set",
     "temporal.workerDeploymentName=agent-dock-pi-workers",
+    "--set",
+    "runtime.externalWorkerEventLog=false",
     "--set-string",
     `temporal.workerBuildId=${revision}`,
     "--set",

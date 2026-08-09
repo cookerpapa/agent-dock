@@ -109,7 +109,7 @@ spec:
               value: {{ .Values.services.providerProxyUrl | quote }}
             {{- end }}
             - name: NO_PROXY
-              value: {{ printf "127.0.0.1,localhost,.svc,.svc.%s" .Values.workerPool.clusterDomain | quote }}
+              value: {{ printf "127.0.0.1,localhost,sandbox-manager,.svc,.svc.%s" .Values.workerPool.clusterDomain | quote }}
             - name: AWS_SHARED_CREDENTIALS_FILE
               value: /run/agent-dock-secrets/aws-credentials
             - name: AWS_EC2_METADATA_DISABLED

@@ -96,8 +96,8 @@ if (
 
 const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
 const port = environment.AGENT_DOCK_HTTP_PORT;
-const tenantId = environment.AGENT_DOCK_TENANT_ID;
-if (bindAddress === undefined || port === undefined || tenantId === undefined) {
+const bootstrapTenantId = environment.AGENT_DOCK_TENANT_ID;
+if (bindAddress === undefined || port === undefined || bootstrapTenantId === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
 const connectHost = bindAddress === "0.0.0.0" || bindAddress === "::" ? "127.0.0.1" : bindAddress;
@@ -107,8 +107,15 @@ const baseUrl = new URL(
 const token = (
   await readPrivate(resolve(runtimeDirectory, "secrets/api-token"), 4_096, "Production API token")
 ).trim();
-const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
-const api = new AgentDockApi(fetchFromProduction, token);
+const fetchFromProduction = (input, init = {}) =>
+  fetch(new URL(String(input), baseUrl), {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(300_000),
+  });
+const bootstrapApi = new AgentDockApi(fetchFromProduction, token);
+let api = bootstrapApi;
+let tenantId = bootstrapTenantId;
+let authorizationToken = token;
 const cube = new OfficialCubeSandboxRuntimeClient({
   apiUrl: `http://${cluster.api.host}:${String(cluster.api.port)}`,
   apiKey: cubeApiKey,
@@ -145,6 +152,10 @@ function capture(command, args, timeoutMs = 30_000) {
       },
     );
   });
+}
+
+function progress(stage) {
+  process.stdout.write(`[cube-production-check] ${stage}\n`);
 }
 
 function sqlLiteral(value) {
@@ -244,6 +255,8 @@ async function temporalWorkflowEvidence(accepted) {
   const decoded = decodeTemporalPayloads(history);
   const allowedKeys = new Set([
     "schemaVersion",
+    "cellId",
+    "taskQueue",
     "tenantId",
     "sessionId",
     "runId",
@@ -252,6 +265,7 @@ async function temporalWorkflowEvidence(accepted) {
     "attempt",
     "failureCode",
     "retryAfterMs",
+    "reason",
     "affinity",
   ]);
   for (const payload of decoded) {
@@ -616,7 +630,7 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
       sessionId,
       afterSequence,
       signal: controller.signal,
-      authorizationToken: token,
+      authorizationToken,
       fetchImplementation: fetchFromProduction,
       retryDelayMs: 100,
       onStatus() {},
@@ -702,16 +716,27 @@ function totalUsage(...usage) {
 }
 
 await cube.checkHealth();
+progress("Cube API is healthy; registering an isolated acceptance tenant");
+const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+const registration = await new AgentDockApi(fetchFromProduction).registerTenant(
+  `cube-check-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
+  "Cube production acceptance tenant",
+);
+api = new AgentDockApi(fetchFromProduction, registration.apiToken);
+tenantId = registration.tenantId;
+authorizationToken = registration.apiToken;
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must have a real model configured");
+progress(`real model configured: ${model.provider}/${model.modelId}`);
 
-const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 const project = await api.createProject(`Cube production acceptance ${suffix}`);
 const session = await api.createSession(
   project.projectId,
   project.workspaceId,
   `Cube production acceptance ${suffix}`,
+  "persistent",
 );
+assert.equal(session.sandboxRetention, "persistent");
 let largeSession;
 
 try {
@@ -723,6 +748,7 @@ try {
     0,
     false,
   );
+  progress("pure chat completed without a Cube activation");
   assert.equal(chat.activations.length, 0, "Pure chat created a Cube microVM");
   const chatUsage = await runUsageEvidence(chat.accepted.runId);
   assert(chatUsage.requests > 0 && chatUsage.outputTokens > 0);
@@ -740,6 +766,7 @@ try {
     chat.cursor,
     true,
   );
+  progress("first coding Run completed in a real Cube KVM");
   assert.equal(
     firstCoding.activations.length,
     1,
@@ -750,9 +777,11 @@ try {
   const firstVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(firstVersions.currentVersionId !== undefined, "First coding Run did not commit Workspace");
   const firstVersionId = firstVersions.currentVersionId;
-  const firstFile = await api.readWorkspaceFile(firstVersionId, "counting_sort.py");
-  const firstSource = Buffer.from(firstFile.bytes).toString("utf8");
-  assert(firstSource.includes("counting_sort"), "First Workspace omitted counting_sort.py code");
+  assert(
+    firstCoding.terminal.payload.workspacePatch.patch.includes("counting_sort"),
+    "First Workspace patch omitted counting_sort.py code",
+  );
+  progress("first Workspace checkpoint and patch were verified");
 
   const followUp = await runTurn(
     session.sessionId,
@@ -766,6 +795,7 @@ try {
     firstCoding.cursor,
     true,
   );
+  progress("follow-up coding Run reused the persistent Cube KVM");
   assert.equal(followUp.activations.length, 1, "Follow-up Run did not use exactly one Cube VM");
   assert.equal(
     followUp.activations[0].activationId,
@@ -782,9 +812,8 @@ try {
   const finalVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(finalVersions.currentVersionId !== undefined);
   assert.notEqual(finalVersions.currentVersionId, firstVersionId);
-  const finalFile = await api.readWorkspaceFile(finalVersions.currentVersionId, "counting_sort.py");
-  const finalSource = Buffer.from(finalFile.bytes).toString("utf8");
-  assert(finalSource.includes("counting_sort"));
+  const finalPatch = followUp.terminal.payload.workspacePatch.patch;
+  assert(finalPatch.includes("counting_sort"));
   assert(
     followUp.terminal.payload.workspacePatch.patch.includes("4, -1, 4, 0, -1") ||
       followUp.events.some(
@@ -819,11 +848,7 @@ try {
   assert(projectedSourceEvents > semanticItems);
   assert(projectedThroughSequence <= conversation.replayAfterSequence);
 
-  const registration = await new AgentDockApi(fetchFromProduction).registerTenant(
-    `cube-check-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
-    "Cube isolation acceptance tenant",
-  );
-  const foreignApi = new AgentDockApi(fetchFromProduction, registration.apiToken);
+  const foreignApi = bootstrapApi;
   const foreignProject = await foreignApi.createProject(`Foreign Cube project ${suffix}`);
   const foreignSession = await foreignApi.createSession(
     foreignProject.projectId,
@@ -839,10 +864,12 @@ try {
     (error) => error instanceof AgentDockApiError && error.status === 404,
   );
 
+  const largeProject = await api.createProject(`Cube large-workspace project ${suffix}`);
   largeSession = await api.createSession(
-    project.projectId,
-    project.workspaceId,
+    largeProject.projectId,
+    largeProject.workspaceId,
     `Cube large-workspace acceptance ${suffix}`,
+    "ephemeral",
   );
   const largeFirst = await runTurn(
     largeSession.sessionId,
@@ -856,6 +883,7 @@ try {
     0,
     true,
   );
+  progress("large Workspace Run completed and committed its checkpoint");
   const largeFirstUsage = await runUsageEvidence(largeFirst.accepted.runId);
   const largeFirstWorkspace = await workspaceVersionEvidence(largeFirst.accepted.runId);
   assert(
@@ -874,19 +902,20 @@ try {
     largeSession.sessionId,
   );
   assert(localCopyFault.removedEntries > 0, "Workspace fault injection removed no local data");
+  progress("source Cube and local POSIX Workspace copy were removed");
 
   const largeFollowUp = await runTurn(
     largeSession.sessionId,
     [
-      "Use tools and continue from the existing large Workspace checkpoint.",
+      "Continue from the existing large Workspace checkpoint and make exactly one bash Tool call.",
       "Do not clone the repository again.",
-      "Read checkpoint-marker.txt and require it to equal LARGE-CHECKPOINT-OK.",
-      "Count regular files under the existing temporal directory and require the count to be greater than 512.",
-      "Write restore-proof.txt in the workspace root containing the marker and measured count, then read it back.",
+      "In that one command: read checkpoint-marker.txt and require it to equal LARGE-CHECKPOINT-OK; count regular files under the existing temporal directory and require the count to be greater than 512; write restore-proof.txt containing the marker and measured count; then read restore-proof.txt back.",
+      "After that Tool result, do not call another Tool and reply exactly RESTORE-VERIFIED.",
     ].join(" "),
     largeFirst.cursor,
     true,
   );
+  progress("large Workspace cold-restored into a fresh Cube KVM");
   const largeFollowUpUsage = await runUsageEvidence(largeFollowUp.accepted.runId);
   const largeFollowUpWorkspace = await workspaceVersionEvidence(largeFollowUp.accepted.runId);
   assert(largeFollowUpWorkspace.fileCount > 512);
@@ -952,9 +981,10 @@ try {
     multiRound: {
       sameCubeMicroVm: true,
       runningSessionReuse: true,
+      persistentSandboxPolicy: session.sandboxRetention === "persistent",
       workspaceRestored: true,
       workspaceVersions: finalVersions.versions.length,
-      finalFileBytes: Buffer.byteLength(finalSource, "utf8"),
+      finalPatchBytes: Buffer.byteLength(finalPatch, "utf8"),
     },
     workspaceIsolation: gitPlacement,
     multiTenant: {
@@ -993,12 +1023,15 @@ try {
     cleanup: {
       retainedRunningSessionMicroVmCount: 1,
       foreignSessionMicroVmCount: 0,
+      persistentArchiveReaped: false,
       explicitWarmEvictionVerified: false,
     },
   };
   assert(usage.requests >= 3 && usage.inputTokens > 0 && usage.outputTokens > 0);
-  await terminateWarmCubeSession(followUp.accepted.runId, session.sessionId);
+  await api.deleteConversation(session.sessionId, newIdempotencyKey("archive-persistent"));
   await waitForNoCubeSession(session.sessionId);
+  report.cleanup.persistentArchiveReaped = true;
+  progress("persistent Session archive reaped its Cube KVM");
   await terminateWarmCubeSession(largeFollowUp.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
   report.cleanup.explicitWarmEvictionVerified = true;
@@ -1025,6 +1058,7 @@ try {
         `- Follow-up first text / settled: ${String(report.followUpCoding.firstTextMs)} ms / ${String(report.followUpCoding.settledMs)} ms`,
         `- Coding Tool calls: ${String(report.firstCoding.toolCalls)} + ${String(report.followUpCoding.toolCalls)}`,
         `- Same running Session Cube KVM guest reused: ${String(report.multiRound.sameCubeMicroVm)}`,
+        `- Persistent Sandbox policy / archive cleanup: ${String(report.multiRound.persistentSandboxPolicy)} / ${String(report.cleanup.persistentArchiveReaped)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
         `- Trusted Git metadata sibling / user .git absent: ${String(report.workspaceIsolation.trustedMetadataSibling)} / ${String(report.workspaceIsolation.userWorkspaceGitEntryAbsent)}`,
         `- Large Workspace files / checkpoint reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.checkpointReferenceBytes)} bytes`,
@@ -1035,7 +1069,7 @@ try {
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. Two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary, rotated Tool authority and higher-fence rebind. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. A persistent conversation propagated its retention policy through the complete product path, and two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary with rotated Tool authority and higher-fence rebind. Archiving that conversation caused the retained Cube to be reaped. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

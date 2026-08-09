@@ -1,21 +1,19 @@
 {
   "accepted": true,
-  "recordedAt": "2026-07-25T12:09:52+08:00",
+  "recordedAt": "2026-08-09T19:01:22Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "profile": "single-node-local-kvm",
   "isolationValidated": true,
   "tenantCount": 2,
-  "firstToolMs": 2036,
-  "secondToolMs": 1767,
-  "totalMs": 7911,
+  "firstToolMs": 1810,
+  "secondToolMs": 1256,
+  "totalMs": 16167,
   "guestKernelDistinctFromHost": true,
   "forbiddenEndpointCount": 3,
-  "publicInternetDenied": true,
+  "publicInternetReachable": true,
+  "privateAndPlatformEgressDenied": true,
+  "persistentProcessSurvivedIdleTtlAndRunBoundary": true,
+  "staleToolAuthorityRejected": true,
   "cancellationDestroyedMicroVm": true,
-  "orphanCount": 0,
-  "network": {
-    "nodeInterface": "agentdock0",
-    "nodeMtu": 1500,
-    "flannelAndPodMtu": 1450
-  }
+  "orphanCount": 0
 }

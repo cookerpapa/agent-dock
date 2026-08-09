@@ -27,6 +27,7 @@ import {
 
 const enabled = process.env.AGENT_DOCK_CUBESANDBOX_TEST === "1";
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
+const PERSISTENT_IDLE_TTL_PROOF_MS = 250;
 
 type LiveConfiguration = Readonly<{
   templateId: string;
@@ -399,6 +400,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
       const manager = new ToolSandboxManager({
         provider,
         imageRevision: config.imageRevision,
+        warmTtlMs: PERSISTENT_IDLE_TTL_PROOF_MS,
       });
       const activationIds = new Set<string>();
       let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
@@ -623,10 +625,21 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             requestId: randomUUID(),
             activationId: second.activationId,
             assignment: secondAssignment,
-            disposition: "keep_warm",
+            disposition: "keep_persistent",
             workspaceRevision: warmRevision,
           }),
         ).resolves.toMatchObject({ retained: true });
+        await expect(
+          manager.execute(
+            second.capability,
+            operation(second.activationId, "printf stale-authority-must-not-run"),
+          ),
+        ).rejects.toMatchObject({ code: "invalid_tool_capability" });
+        await new Promise((resolvePromise) =>
+          setTimeout(resolvePromise, PERSISTENT_IDLE_TTL_PROOF_MS * 2),
+        );
+        await manager.reapWarm();
+        expect(manager.warmCount).toBe(1);
         const reboundAssignment: ToolSandboxAssignment = {
           ...secondAssignment,
           supervisorId: `cube-live-${testRun}-supervisor-rebound`,
@@ -705,7 +718,8 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             forbiddenEndpointCount: config.forbiddenEndpoints.length,
             publicInternetReachable: true,
             privateAndPlatformEgressDenied: true,
-            backgroundProcessSurvivedRunBoundary: true,
+            persistentProcessSurvivedIdleTtlAndRunBoundary: true,
+            staleToolAuthorityRejected: true,
             cancellationDestroyedMicroVm: true,
             orphanCount: 0,
           },

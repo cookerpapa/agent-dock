@@ -39,6 +39,7 @@ import * as executionCellWorkerRoutes from "./037_execution_cell_worker_routes.t
 import * as workspaceCellMigrations from "./038_workspace_cell_migrations.ts";
 import * as externalWorkerEventLog from "./039_external_worker_event_log.ts";
 import * as sessionSandboxRetention from "./040_session_sandbox_retention.ts";
+import * as decouplePersistentSandboxLeases from "./041_decouple_persistent_sandbox_leases.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -83,6 +84,7 @@ export const migrationProvider: MigrationProvider = {
       "038_workspace_cell_migrations": workspaceCellMigrations,
       "039_external_worker_event_log": externalWorkerEventLog,
       "040_session_sandbox_retention": sessionSandboxRetention,
+      "041_decouple_persistent_sandbox_leases": decouplePersistentSandboxLeases,
     };
   },
 };
@@ -278,3 +280,7 @@ export {
   down as downSessionSandboxRetention,
   up as upSessionSandboxRetention,
 } from "./040_session_sandbox_retention.ts";
+export {
+  down as downDecouplePersistentSandboxLeases,
+  up as upDecouplePersistentSandboxLeases,
+} from "./041_decouple_persistent_sandbox_leases.ts";

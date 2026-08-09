@@ -69,4 +69,23 @@ describe("Sandbox Manager ownership migration", () => {
     expect(definition.rows[0]?.indexdef).toContain("cleaning");
     expect(definition.rows[0]?.indexdef).toContain("workspace_id");
   });
+
+  it("allows a persistent activation to outlive its authorizing Run lease", async () => {
+    const constraint = await pglite.query<{ conname: string }>(`
+      select conname
+        from pg_constraint
+       where conrelid = 'sandbox_manager_activations'::regclass
+         and conname = 'sandbox_manager_activations_lease_id_fkey'
+    `);
+    expect(constraint.rows).toEqual([]);
+
+    const column = await pglite.query<{ is_nullable: string }>(`
+      select is_nullable
+        from information_schema.columns
+       where table_schema = 'public'
+         and table_name = 'sandbox_manager_activations'
+         and column_name = 'lease_id'
+    `);
+    expect(column.rows).toEqual([{ is_nullable: "NO" }]);
+  });
 });

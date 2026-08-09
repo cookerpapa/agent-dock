@@ -171,6 +171,11 @@ assert.equal(environment.AGENT_DOCK_SUPERVISOR_ID, "$(POD_NAME)");
 assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "4");
 assert.equal(environment.AGENT_DOCK_EXECUTION_CELL_ID, "cell-0001");
 assert.equal(environment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
+assert.equal(
+  environment.NO_PROXY,
+  "127.0.0.1,localhost,sandbox-manager,.svc,.svc.cluster.local",
+  "Owner callbacks to the Sandbox Manager must bypass the trusted-plane HTTP proxy",
+);
 assert.equal(environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE, "agent-dock-pi-runs-cell-0001-v1");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED, "true");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME, "agent-dock-pi-workers");

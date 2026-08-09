@@ -97,7 +97,12 @@ The live gate attests the Cube KVM guest and runs the Provider contract plus a
 real Pi remote-tool repair. It validates resources, public-proxy/private-denied
 networking, credential isolation, tenant-separated Workspaces,
 traversal/symlink denial, output bounds, cancellation, checkpoint restore and
-exact resource cleanup.
+exact resource cleanup. The Provider gate additionally starts a real background
+service, crosses the ordinary idle TTL under persistent retention, rotates the
+Attempt/fence, and requires the same Cube runtime, PID and service endpoint to
+survive before final zero-orphan cleanup. The production gate verifies the
+public Session policy reaches that lifecycle and that archiving the Session
+reaps the retained KVM guest.
 
 ## Control Plane load
 

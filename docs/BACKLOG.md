@@ -22,6 +22,9 @@ in the implementation log or Git history, not in the active backlog.
       unit/integration tests, package builds and deployment configuration.
 - [ ] Re-run the live Cube/KVM acceptance suite after Cube, K3s, template,
       Volume Plugin or egress changes.
+- [x] Extend the real Cube/KVM gate to prove persistent Session retention across
+      the ordinary idle TTL and a higher-fence Run boundary, then verify archive
+      cleanup and zero orphaned guests.
 - [ ] Re-run a bounded real-model multi-turn acceptance after Pi/model/provider
       integration changes.
 - [ ] Keep generated acceptance reports tied to the exact commit and deployment

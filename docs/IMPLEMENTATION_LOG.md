@@ -7,6 +7,26 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-10 — real persistent-Cube lifecycle acceptance
+
+- Extended the Cube Provider live gate from ordinary warm reuse to the actual
+  `keep_persistent` path. A real KVM guest now runs a background HTTP service,
+  crosses the configured ordinary warm TTL, rejects the revoked Tool
+  capability, rebinds under a new Attempt/fence, and must preserve its native
+  runtime identity, PID and service response.
+- Extended the production acceptance path so the public Session API creates a
+  persistent conversation, the policy flows through Temporal/Pi Worker to the
+  Sandbox Manager, and deleting the conversation must cause the retained Cube
+  to disappear. Large-workspace cold-restore evidence remains on a separate
+  ephemeral Workspace.
+- The live gate exposed and fixed three integration faults rather than masking
+  them in the test: the local hybrid Worker profile no longer waits on an
+  absent Kafka projector, persistent activation audit metadata no longer
+  prevents Run-lease deletion, and Kubernetes Workers can resolve and bypass
+  the proxy for the Sandbox Manager owner callback.
+- The gate still ends with exact zero-orphan cleanup and does not claim that
+  process state survives Manager, node or Cube failure.
+
 ## 2026-08-09 — 分区持久 Session 事件日志
 
 - 将 `session_events` 按 `session_id` 拆成 32 个 PostgreSQL 哈希分区，保留

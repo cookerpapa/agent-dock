@@ -132,5 +132,12 @@ npm run cubesandbox:live-check
 npm run production:check
 ```
 
-The live checks require a running Cube cluster and explicit acknowledgement
-when real model calls are enabled.
+The Provider live gate starts a real background service inside Cube, releases
+the Run with persistent retention, advances beyond the ordinary warm TTL and
+rebinds the same physical KVM guest under a new Attempt/fence. It requires the
+same PID and service endpoint to remain alive, rejects the old Tool capability,
+then destroys the guest and proves zero orphaned runtimes. The production gate
+also propagates the persistent policy through the public API and Worker path
+and requires conversation archival to reap the retained guest. Live checks
+require a running Cube cluster and explicit acknowledgement when real model
+calls are enabled.
