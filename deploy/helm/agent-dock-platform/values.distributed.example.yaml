@@ -15,6 +15,10 @@ images:
     repository: registry.example.com/agent-dock/control-plane
     tag: git-sha-0123456789abcdef
     pullPolicy: IfNotPresent
+  eventGateway:
+    repository: registry.example.com/agent-dock/event-gateway
+    tag: git-sha-0123456789abcdef
+    pullPolicy: IfNotPresent
   web:
     repository: registry.example.com/agent-dock/web-ui
     tag: git-sha-0123456789abcdef

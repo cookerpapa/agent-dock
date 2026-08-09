@@ -1,0 +1,19 @@
+apiVersion: agent-dock.io/v1alpha1
+kind: EnterpriseCellProfile
+metadata:
+  name: stage1-8-cells
+spec:
+  baseValues: deploy/helm/agent-dock-platform/values.distributed.example.yaml
+  globalNamespace: agent-dock-system
+  globalRelease: agent-dock
+  cellNamespacePrefix: agent-dock-cell-
+  cellReleasePrefix: agent-dock-cell-
+  clusterDomain: cluster.local
+  cellCount: 8
+  workerCapacity: 4
+  minimumWorkersPerCell: 2
+  maximumWorkersPerCell: 64
+  sandboxManagerReplicasPerCell: 3
+  sandboxManagerMaximumActivePerReplica: 128
+  controlPlaneMaximumReplicas: 24
+  eventGatewayMaximumReplicas: 64
