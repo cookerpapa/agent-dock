@@ -1,4 +1,11 @@
 export {
+  WorkspaceCellMigrationError,
+  WorkspaceCellMigrationService,
+  type WorkspaceCellMigrationInput,
+  type WorkspaceCellMigrationResult,
+  type WorkspaceCellMigrationServiceOptions,
+} from "./workspace-cell-migration-service.ts";
+export {
   PostgresTenantApiAuthenticator,
   bindTenantRequestIdentity,
   generateTenantApiCredential,

@@ -97,6 +97,23 @@ export interface ExecutionCellTable {
   updated_at: GeneratedTimestamp;
 }
 
+export interface WorkspaceCellMigrationTable {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  source_cell_id: string;
+  target_cell_id: string;
+  requested_by_user_id: string;
+  idempotency_key: string;
+  state: "requested" | "completed" | "failed";
+  workspace_version_id: string | null;
+  base_row_version: Int8;
+  result_row_version: NullableInt8;
+  failure_code: string | null;
+  requested_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
+}
+
 export type SandboxManagerInstanceState = "ready" | "stopped" | "lost";
 export type SandboxManagerActivationState =
   "reserved" | "materializing" | "active" | "warm" | "cleaning" | "released" | "unknown";
@@ -1056,6 +1073,7 @@ export interface PlatformRuntimeSettingChangeTable {
 
 export interface Database {
   execution_cells: ExecutionCellTable;
+  workspace_cell_migrations: WorkspaceCellMigrationTable;
   sandbox_manager_instances: SandboxManagerInstanceTable;
   sandbox_manager_activations: SandboxManagerActivationTable;
   sandbox_manager_operations: SandboxManagerOperationTable;

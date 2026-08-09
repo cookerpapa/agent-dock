@@ -76,6 +76,7 @@
     "production:down": "node scripts/production-compose.mjs down",
     "production:token": "node scripts/print-production-token.mjs",
     "production:tenant": "node scripts/production-compose.mjs run --rm --no-deps database-bootstrap /app/packages/control-plane/src/tenant-admin.ts",
+    "production:cell-admin": "node packages/control-plane/src/workspace-cell-admin.ts",
     "production:check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",

@@ -35,6 +35,11 @@ This order avoids a circular readiness dependency. The global Control Plane requ
 Managers to be reachable, while Pi Workers require the global Control Plane for authenticated
 enrollment.
 
+Each profile also expands a distinct Cube API, proxy node and Cube domain per Cell. A real
+deployment must replace the checked-in `.example.com` templates with independently scalable Cube
+authorities; pointing every Cell at one Cube cluster would preserve routing isolation but not the
+intended compute failure-domain isolation.
+
 Each Cell namespace must already contain the configured platform Secret and one ReadWriteMany
 Workspace PVC. Secret material is intentionally not copied by the deployment script. Cell
 namespaces receive `agent-dock.io/trusted-plane=true` and a stable execution-cell label; the
@@ -85,3 +90,27 @@ and POSIX volume. Kopia/object storage remains the durable checkpoint authority,
 Workspace can later be moved between Cells without treating a live VM or local PVC as the source
 of truth.
 
+## Draining and cross-Cell recovery
+
+Cross-Cell movement is an offline, checkpoint-based operation. It never transfers ownership of a
+live Cube VM. The operator first marks the source Cell `draining`, which prevents new Workspace
+placement there. A Workspace route moves only when it has no unsettled Run, no live/warm Sandbox
+activation, no active import and—when a version exists—a settled Workspace checkpoint. The
+transaction locks the Workspace and both Cell rows, advances the Workspace row-version fence,
+updates both placement counters and clears Worker affinity.
+
+Run the operation from a trusted Control Plane administration environment with
+`DATABASE_URL_FILE` configured:
+
+```bash
+npm run production:cell-admin -- drain \
+  --source cell-0003 \
+  --target cell-0007 \
+  --actor 00000000-0000-4000-8000-000000000001
+```
+
+Busy Workspaces remain in the draining Cell and are reported with a retryable reason. Re-run the
+command after their Runs settle. The Cell becomes `disabled` only after its Workspace count reaches
+zero. On the next Run, the destination Manager materializes the globally committed Kopia snapshot
+into the destination Cell's POSIX volume. Stale data on the old Cell is not an authority and can be
+garbage-collected after the migration audit has settled.
