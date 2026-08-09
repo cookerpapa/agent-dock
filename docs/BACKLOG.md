@@ -68,9 +68,12 @@ in the implementation log or Git history, not in the active backlog.
       Event-ID idempotency or resumable per-Session sequence order.
 - [x] Move authenticated resumable SSE connections onto a dedicated Event
       Gateway that can scale independently from REST/Run admission.
-- [ ] Measure active concurrent streaming Sessions against PostgreSQL commit
+- [x] Measure active concurrent streaming Sessions against PostgreSQL commit
       rate, WAL bytes, connection-pool wait and SSE delivery lag before adding
       an external event broker or terminal-delta retention compaction.
+- [ ] Complete the Kafka authority cutover behind `DurableEventLog`, including
+      exact-position replay, terminal projection barriers, export and rollback
+      refusal after the sequence barrier.
 
 ## Deployment
 

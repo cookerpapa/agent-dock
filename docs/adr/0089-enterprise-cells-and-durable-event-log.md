@@ -60,6 +60,20 @@ Run claim.
 - The first release of this ADR is deployable code and deterministic tests; a
   2,000/10,000 production claim still requires real multi-node load evidence.
 
+## Capacity gate result
+
+The repeatable 2,000-Session PostgreSQL profile was executed on 2026-08-09 at
+revision `4cddb77`. It committed 128,000 logical events without loss or
+sequence error, but sustained only 3,223 events/s with a batch-ACK p95 of
+3,592ms and approximately 1,038 WAL bytes/event. This failed the selected
+10,000 events/s and 500ms p95 gate even after hash partitioning and set-based
+cross-Session group commit.
+
+The measured gate therefore authorizes the Kafka adapter described by this
+ADR. PostgreSQL remains the active event authority until the Kafka producer,
+replay reader, terminal projection barrier and one-way cutover acceptance all
+pass together; a partial dual-write deployment is not permitted.
+
 ## Adopt-before-build evidence
 
 See [Enterprise Cell and Event Plane Survey](../research/enterprise-cell-and-event-plane.md).

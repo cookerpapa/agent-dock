@@ -46,6 +46,22 @@ cannot satisfy the selected deployment SLO. The application-facing contract is
 an AgentDock-owned `DurableEventLog` port so storage semantics remain testable
 without leaking a client SDK into domain code.
 
+The gate was run on 2026-08-09 against the real PostgreSQL adapter with 2,000
+Sessions, 8,000 acknowledged batches and 128,000 logical events. PostgreSQL
+preserved every sequence but reached 3,223 events/s and 3,592ms batch-ACK p95,
+failing the 10,000 events/s and 500ms p95 target. The exact report is
+[postgres-event-log-2000-latest.md](../reports/postgres-event-log-2000-latest.md).
+
+The production Kafka deployment uses KRaft through the maintained Strimzi
+operator, replicated partitions, `acks=all`, idempotent production and the
+Session ID as the record key. Confluent's maintained MIT-licensed JavaScript
+client is isolated behind the AgentDock `DurableEventLog` adapter. PostgreSQL
+stores only bounded sequence/position and semantic projection state after the
+cutover; it does not remain a second raw event authority.
+
+- <https://strimzi.io/docs/operators/latest/deploying.html>
+- <https://docs.confluent.io/kafka-clients/javascript/current/overview.html>
+
 ### Product state: PostgreSQL
 
 PostgreSQL continues to own Tenant, Workspace, Run, Attempt, Lease, Fence,
@@ -106,4 +122,3 @@ database replication system, Kubernetes autoscaler or distributed filesystem.
 - Cube handles and activation metadata contain no Cube management credential,
   so another Manager replica can reconcile committed identity without moving
   credentials into a Worker or guest.
-
