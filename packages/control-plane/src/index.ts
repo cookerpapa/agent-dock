@@ -212,6 +212,7 @@ export {
   type TurnExecutionResult,
 } from "@agent-dock/runtime-core/run-command-executor";
 export {
+  listPendingTemporalRunExecutions,
   TemporalRunOrchestrator,
   type TemporalRunOrchestratorActivity,
   type TemporalRunOrchestratorOptions,

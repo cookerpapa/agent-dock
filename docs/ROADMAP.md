@@ -72,14 +72,18 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Add a distributed Kubernetes application profile with multi-replica Web
   and Control Plane, version-aware Temporal/KEDA Pi Worker scaling, direct
   headless-DNS Worker management and a fixed Sandbox Manager/Data-Mover ring.
+- [x] Replace global Workspace hashing with an immutable execution Cell
+  directory and Cell-specific Temporal routing; raise the default Pi Worker Pod
+  to four bounded runtime slots.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
 
 - retained-data policy and hard deletion worker;
 - multi-node failure injection for Worker/node loss;
-- multi-node deployment acceptance for HPA/KEDA, external authorities and the
-  fixed Manager ring;
+- externalize Cell-local Sandbox Manager activation state and validate
+  multi-replica fail-closed recovery;
+- multi-node deployment acceptance for HPA/KEDA and external authorities;
 - object/checkpoint orphan garbage collection dashboards;
 - measured Session-affinity hit rate and queue-delay tuning;
 - sustained load evidence at the target Worker/Cube capacity.

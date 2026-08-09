@@ -170,23 +170,23 @@ maintaining a second, subtly different conversation implementation. It also
 allows true Worker replacement: no active Run means no Pi `AgentSession`, and
 any healthy Worker can restore the next Run.
 
-The capacity-one rule is the SDK crash boundary. An ordinary prompt normally
-cannot terminate the Worker, but it can cause model parsing, extension handlers,
-tool registration and cancellation paths to execute. A programming defect,
-native dependency failure or memory exhaustion could terminate the process.
-Because only one active activation is admitted, that failure cannot take down a
-second concurrently running tenant Session. The container runtime restarts the
-Worker and the Control Plane reassigns future work from committed state.
+Worker capacity is an explicit density/failure-domain trade-off. The enterprise
+profile admits four independent Pi SDK runtimes per Pod by default. A
+programming defect, native dependency failure or memory exhaustion that
+terminates the process can therefore interrupt up to four active Runs, but it
+cannot corrupt their committed Session or Workspace state. Operators that need
+the narrowest process failure domain can configure one slot; operators with
+measured memory headroom can choose up to sixteen.
 
-Capacity one does not mean the platform can run only one Agent. Production
-replicates the complete Worker process. All replicas poll the common Temporal
-Task Queue and each also polls its own private soft-affinity queue:
+Production replicates the complete Worker process. All replicas in one Cell
+poll that Cell's Temporal Task Queue and each also polls its own private
+soft-affinity queue:
 
 ```text
-Temporal Task Queue
-├── Pi Worker 1, one active SDK session
-├── Pi Worker 2, one active SDK session
-└── Pi Worker N, one active SDK session
+Cell Temporal Task Queue
+├── Pi Worker 1, up to configured runtime slots
+├── Pi Worker 2, up to configured runtime slots
+└── Pi Worker N, up to configured runtime slots
 ```
 
 After a successful Run, the Session remembers that exact Worker boot for at

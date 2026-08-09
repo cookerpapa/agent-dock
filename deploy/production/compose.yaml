@@ -43,7 +43,8 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:-http://{supervisorId}:4100}
   AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
   AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
-  AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
+  AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
+  AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-cell-0001-v1
   AGENT_DOCK_ADVANCED_MODULES_ENABLED: ${AGENT_DOCK_ADVANCED_MODULES_ENABLED:-false}
   AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
   AWS_EC2_METADATA_DISABLED: "true"
@@ -558,7 +559,8 @@ services:
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
       AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
       AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
-      AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-v1
+      AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
+      AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-cell-0001-v1
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state

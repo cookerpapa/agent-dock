@@ -24,6 +24,7 @@ export type SupervisorHostConfig = {
   maxConcurrentSessions: number;
   temporalAddress: string;
   temporalNamespace: string;
+  executionCellId: string;
   temporalTaskQueue: string;
   temporalWorkerDeploymentName?: string;
   temporalWorkerBuildId?: string;
@@ -348,8 +349,13 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_TEMPORAL_NAMESPACE",
       255,
     ),
+    executionCellId: bounded(
+      environment.AGENT_DOCK_EXECUTION_CELL_ID ?? "cell-0001",
+      "AGENT_DOCK_EXECUTION_CELL_ID",
+      64,
+    ),
     temporalTaskQueue: bounded(
-      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-v1",
+      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-cell-0001-v1",
       "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
       255,
     ),

@@ -195,6 +195,7 @@ describe("SupervisorHostRuntime", () => {
       maxConcurrentSessions: 1,
       temporalAddress: "temporal.test:7233",
       temporalNamespace: "agent-dock-test",
+      executionCellId: "cell-test",
       temporalTaskQueue: "agent-dock-pi-runs-test",
       temporalWorkerDeploymentName: "agent-dock-pi-workers",
       temporalWorkerBuildId: "runtime-test-build",

@@ -146,6 +146,8 @@ spec:
               {{- end }}
             - name: AGENT_DOCK_SUPERVISOR_CAPACITY
               value: {{ .Values.workerPool.capacity | quote }}
+            - name: AGENT_DOCK_EXECUTION_CELL_ID
+              value: {{ .Values.workerPool.executionCellId | quote }}
             - name: AGENT_DOCK_TEMPORAL_ADDRESS
               value: {{ .Values.temporal.address | quote }}
             - name: AGENT_DOCK_TEMPORAL_NAMESPACE

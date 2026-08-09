@@ -289,7 +289,7 @@ export async function loadProductionControlPlaneConfig(
       255,
     ),
     temporalTaskQueue: bounded(
-      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-v1",
+      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-cell-0001-v1",
       "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
       255,
     ),

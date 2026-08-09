@@ -91,7 +91,6 @@ export async function startControlPlane(): Promise<void> {
       database,
       address: config.temporalAddress,
       namespace: config.temporalNamespace,
-      taskQueue: config.temporalTaskQueue,
       onActivity: (activity) =>
         operationalLog({
           service: "agent-dock-control-plane",

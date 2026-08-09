@@ -1,5 +1,5 @@
 export const TEMPORAL_RUN_WORKFLOW = "agentDockRunWorkflow";
-export const TEMPORAL_RUN_TASK_QUEUE = "agent-dock-pi-runs-v1";
+export const TEMPORAL_RUN_TASK_QUEUE = "agent-dock-pi-runs-cell-0001-v1";
 export const TEMPORAL_DEFAULT_NAMESPACE = "agent-dock";
 export const TEMPORAL_RUN_WORKFLOW_ID_PREFIX = "agent-dock-run-v1-";
 export const TEMPORAL_WORKER_AFFINITY_TASK_QUEUE_PREFIX = "agent-dock-pi-worker-v1-";
@@ -14,7 +14,9 @@ export type TemporalWorkerAffinity = {
 };
 
 export type TemporalRunWorkflowInput = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  cellId: string;
+  taskQueue: string;
   tenantId: string;
   sessionId: string;
   runId: string;
@@ -66,14 +68,30 @@ function uuid(value: string, name: string): string {
   return value.toLowerCase();
 }
 
+function cellId(value: string): string {
+  if (!/^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$/.test(value)) {
+    throw new TypeError("cellId is invalid");
+  }
+  return value;
+}
+
+function taskQueue(value: string): string {
+  if (value.length < 1 || value.length > 255 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new TypeError("taskQueue is invalid");
+  }
+  return value;
+}
+
 export function validateTemporalRunWorkflowInput(
   value: TemporalRunWorkflowInput,
 ): TemporalRunWorkflowInput {
-  if (value.schemaVersion !== 1) {
+  if (value.schemaVersion !== 2) {
     throw new TypeError("Temporal Run input schema version is unsupported");
   }
   const input: TemporalRunWorkflowInput = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    cellId: cellId(value.cellId),
+    taskQueue: taskQueue(value.taskQueue),
     tenantId: uuid(value.tenantId, "tenantId"),
     sessionId: uuid(value.sessionId, "sessionId"),
     runId: uuid(value.runId, "runId"),

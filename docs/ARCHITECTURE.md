@@ -57,13 +57,16 @@ mutation are Activities.
 
 The Worker pool uses:
 
-- a common Activity Task Queue with `tenantId` fairness metadata;
-- capacity-one Worker-specific queues for soft Session affinity;
+- one Activity Task Queue per immutable Workspace execution Cell, with
+  `tenantId` fairness metadata;
+- capacity-aware Worker-specific queues for soft Session affinity;
 - durable timers and retry policy;
 - explicit cancellation.
 
 Affinity is an optimization. Any Worker can restore a Session and produce the
-correct result.
+correct result, provided that Worker belongs to the Workspace's Cell. A
+Workspace receives its Cell once when it is created; adding Cells never remaps
+existing Workspaces.
 
 Each Activity receives one exact `commandId`. The Worker-side
 `RunCommandExecutor` performs transactional eligibility and lifecycle commits
@@ -571,12 +574,13 @@ Ingress
        ├── direct PostgreSQL LISTEN URL
        └── Temporal Workflow client
 
-Temporal versioned Activity backlog
+Workspace execution Cell directory (PostgreSQL)
+  → Cell-specific Temporal versioned Activity backlog
   → KEDA
-  → Pi Worker StatefulSet (capacity one per Pod)
+  → Pi Worker StatefulSet (four runtime slots per Pod by default)
 
-fixed Workspace hash
-  → Sandbox Manager StatefulSet shard
+Cell-local manager URL set
+  → Sandbox Manager StatefulSet shard set
   → paired Workspace Data Mover
   → Cube control/compute cluster
 ```
@@ -586,11 +590,14 @@ StatefulSet headless DNS identity; WebSocket connection locality is not an
 execution-routing authority. Pi Worker termination stops Temporal polling and
 drains the active Activity before Pod exit.
 
-Sandbox Manager is deliberately not behind a random load balancer. The ordered
-URL list forms a fixed deterministic hash ring because each shard owns live Cube
-activation and handoff state. Ring resize is a drain/blue-green operation.
-PostgreSQL still serializes ordinary Runs sharing one Workspace and advances the
-Workspace head with CAS, independent of Workspace-to-Manager routing.
+The Cell directory replaces the former global Workspace hash as the durable
+placement authority. A Cell can be drained without remapping existing
+Workspaces, while new Workspaces are assigned to the least-loaded active Cell.
+Within the current Cell implementation, the ordered Manager URL list still
+forms a fixed shard set because live Cube activation state is process-local;
+Manager state externalization is the next enterprise execution-plane slice.
+PostgreSQL still serializes ordinary Runs sharing one Workspace and advances
+the Workspace head with CAS.
 
 Kubernetes HPA/KEDA creates Pods. A provider-specific node autoscaler is needed
 to create machines for pending Pods. The strict Helm profile, preflight and
@@ -601,6 +608,7 @@ acceptance is still required before claiming measured HA.
 ## 13. Current architectural decisions
 
 - [ADR-0053: CubeSandbox primary runtime](adr/0053-cubesandbox-primary-execution-plane.md)
+- [ADR-0089: enterprise execution Cells and durable event log](adr/0089-enterprise-cells-and-durable-event-log.md)
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
 - [ADR-0074: exact-command Temporal Activity boundary](adr/0074-exact-command-temporal-activity-boundary.md)
 - [ADR-0075: optional production observability profile](adr/0075-optional-production-observability-profile.md)

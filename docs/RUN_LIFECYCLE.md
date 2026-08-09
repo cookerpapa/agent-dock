@@ -49,8 +49,8 @@ instead of blindly replaying commands.
 
 1. The relay starts `agent-dock-run-v1-{runId}` with only tenant, Session, Run
    and command UUIDs. `USE_EXISTING` makes outbox redelivery idempotent.
-2. Temporal matches `executeRunCommand` to the common
-   `agent-dock-pi-runs-v1` Task Queue.
+2. Temporal resolves the Workspace's immutable Cell and matches
+   `executeRunCommand` to that Cell's Activity Task Queue.
 3. The Activity's exact PostgreSQL claim rechecks Session FIFO, tenant
    concurrency, Run state and command identity. Ineligible work returns
    `deferred`; the Workflow waits on a durable timer.

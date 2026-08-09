@@ -31,6 +31,7 @@ import * as externalPlatformGitMetadata from "./029_external_platform_git_metada
 import * as activePiSteer from "./030_active_pi_steer.ts";
 import * as typedToolOutcomes from "./031_typed_tool_outcomes.ts";
 import * as modelSamplingStepIdentity from "./032_model_sampling_step_identity.ts";
+import * as enterpriseExecutionCells from "./033_enterprise_execution_cells.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -67,6 +68,7 @@ export const migrationProvider: MigrationProvider = {
       "030_active_pi_steer": activePiSteer,
       "031_typed_tool_outcomes": typedToolOutcomes,
       "032_model_sampling_step_identity": modelSamplingStepIdentity,
+      "033_enterprise_execution_cells": enterpriseExecutionCells,
     };
   },
 };
@@ -225,3 +227,8 @@ export {
   down as downModelSamplingStepIdentity,
   up as upModelSamplingStepIdentity,
 } from "./032_model_sampling_step_identity.ts";
+
+export {
+  down as downEnterpriseExecutionCells,
+  up as upEnterpriseExecutionCells,
+} from "./033_enterprise_execution_cells.ts";

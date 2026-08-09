@@ -29,7 +29,7 @@
     "workerPool": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "replicas", "capacity", "clusterDomain"],
+      "required": ["name", "replicas", "capacity", "executionCellId", "clusterDomain"],
       "properties": {
         "name": {
           "type": "string",
@@ -38,7 +38,11 @@
           "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
         },
         "replicas": { "type": "integer", "minimum": 2, "maximum": 64 },
-        "capacity": { "type": "integer", "const": 1 },
+        "capacity": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "executionCellId": {
+          "type": "string",
+          "pattern": "^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$"
+        },
         "clusterDomain": {
           "type": "string",
           "minLength": 1,

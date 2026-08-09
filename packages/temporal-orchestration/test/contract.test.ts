@@ -10,7 +10,9 @@ import {
 } from "../src/contract.ts";
 
 const INPUT = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
+  cellId: "cell-0001",
+  taskQueue: "agent-dock-pi-runs-cell-0001-v1",
   tenantId: "a1000000-0000-4000-8000-000000000001",
   sessionId: "a1000000-0000-4000-8000-000000000002",
   runId: "a1000000-0000-4000-8000-000000000003",
@@ -47,6 +49,12 @@ describe("Temporal orchestration contract", () => {
     expect(() =>
       validateTemporalRunWorkflowInput({ ...INPUT, commandId: "not-a-command" }),
     ).toThrow("commandId must be a UUID");
+    expect(() => validateTemporalRunWorkflowInput({ ...INPUT, cellId: "../cell" })).toThrow(
+      "cellId is invalid",
+    );
+    expect(() =>
+      validateTemporalRunWorkflowInput({ ...INPUT, taskQueue: "queue\nsmuggle" }),
+    ).toThrow("taskQueue is invalid");
   });
 
   it("accepts only a deterministic Worker-specific affinity queue", () => {

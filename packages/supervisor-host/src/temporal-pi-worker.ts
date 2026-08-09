@@ -27,6 +27,7 @@ export type TemporalPiWorkerOptions = {
   database: Kysely<Database>;
   address: string;
   namespace: string;
+  cellId: string;
   taskQueue: string;
   identity: string;
   sandboxId: string;
@@ -67,6 +68,7 @@ export class TemporalPiWorker {
   readonly #database: Kysely<Database>;
   readonly #address: string;
   readonly #namespace: string;
+  readonly #cellId: string;
   readonly #taskQueue: string;
   readonly #identity: string;
   readonly #sandboxId: string;
@@ -94,6 +96,7 @@ export class TemporalPiWorker {
     this.#database = options.database;
     this.#address = bounded(options.address, "address", 512);
     this.#namespace = bounded(options.namespace, "namespace", 255);
+    this.#cellId = bounded(options.cellId, "cellId", 64);
     this.#taskQueue = bounded(options.taskQueue, "taskQueue", 255);
     this.#identity = bounded(options.identity, "identity", 255);
     this.#sandboxId = bounded(options.sandboxId, "sandboxId", 36);
@@ -201,6 +204,9 @@ export class TemporalPiWorker {
     route: "shared" | "affinity",
   ): Promise<TemporalRunActivityResult> {
     const input = validateTemporalRunWorkflowInput(rawInput);
+    if (input.cellId !== this.#cellId || input.taskQueue !== this.#taskQueue) {
+      throw new TypeError("Temporal Run was routed to the wrong execution Cell");
+    }
     if (route === "affinity") {
       if (this.#activeExecutions >= this.#maximumConcurrentRuns) {
         await this.#releaseAffinity(input);
@@ -228,6 +234,7 @@ export class TemporalPiWorker {
     context.cancellationSignal.addEventListener("abort", beginCancellation, { once: true });
     heartbeat({
       schemaVersion: 1,
+      cellId: input.cellId,
       runId: input.runId,
       commandId: input.commandId,
     });

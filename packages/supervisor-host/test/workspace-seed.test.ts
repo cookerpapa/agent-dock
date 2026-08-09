@@ -149,6 +149,7 @@ async function fixture(): Promise<Fixture> {
       id: IDS.workspace,
       tenant_id: IDS.tenant,
       project_id: IDS.project,
+      cell_id: "cell-0001",
       object_snapshot_key: null,
     })
     .execute();

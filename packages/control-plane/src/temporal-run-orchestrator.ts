@@ -47,7 +47,6 @@ export type TemporalRunOrchestratorOptions = {
   database: Kysely<Database>;
   address: string;
   namespace: string;
-  taskQueue: string;
   pollIntervalMs?: number;
   batchSize?: number;
   onActivity?: (activity: TemporalRunOrchestratorActivity) => void;
@@ -97,6 +96,53 @@ function wait(delayMs: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+export async function listPendingTemporalRunExecutions(
+  database: Kysely<Database>,
+  batchSize: number,
+): Promise<TemporalRunWorkflowInput[]> {
+  return database
+    .selectFrom("outbox")
+    .innerJoin("commands as command", (join) =>
+      join
+        .onRef("command.tenant_id", "=", "outbox.tenant_id")
+        .on(
+          sql<boolean>`${sql.ref("command.id")}::text = ${sql.ref("outbox.payload")} ->> 'commandId'`,
+        ),
+    )
+    .innerJoin("runs as run", (join) =>
+      join
+        .onRef("run.tenant_id", "=", "command.tenant_id")
+        .onRef("run.command_id", "=", "command.id"),
+    )
+    .innerJoin("sessions as session", (join) =>
+      join
+        .onRef("session.tenant_id", "=", "command.tenant_id")
+        .onRef("session.id", "=", "command.session_id"),
+    )
+    .innerJoin("workspaces as workspace", (join) =>
+      join
+        .onRef("workspace.tenant_id", "=", "session.tenant_id")
+        .onRef("workspace.id", "=", "session.workspace_id"),
+    )
+    .innerJoin("execution_cells as cell", "cell.id", "workspace.cell_id")
+    .select([
+      "cell.id as cellId",
+      "cell.temporal_task_queue as taskQueue",
+      "command.tenant_id as tenantId",
+      "command.session_id as sessionId",
+      "command.id as commandId",
+      "run.id as runId",
+    ])
+    .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
+    .where("outbox.published_at", "is", null)
+    .where("command.kind", "=", "turn.execute")
+    .where("command.state", "in", ["pending", "dispatched"])
+    .orderBy("outbox.created_at", "asc")
+    .limit(positiveInteger(batchSize, "batchSize"))
+    .execute()
+    .then((rows) => rows.map((row) => ({ schemaVersion: 2 as const, ...row })));
+}
+
 /**
  * Transactional-outbox relay only. It starts or cancels one deterministic
  * Temporal Workflow per accepted Run; it never selects a Pi Worker.
@@ -105,7 +151,6 @@ export class TemporalRunOrchestrator {
   readonly #database: Kysely<Database>;
   readonly #address: string;
   readonly #namespace: string;
-  readonly #taskQueue: string;
   readonly #pollIntervalMs: number;
   readonly #batchSize: number;
   readonly #onActivity: ((activity: TemporalRunOrchestratorActivity) => void) | undefined;
@@ -122,7 +167,6 @@ export class TemporalRunOrchestrator {
     this.#database = options.database;
     this.#address = bounded(options.address, "address", 512);
     this.#namespace = bounded(options.namespace, "namespace", 255);
-    this.#taskQueue = bounded(options.taskQueue, "taskQueue", 255);
     this.#pollIntervalMs = positiveInteger(
       options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
       "pollIntervalMs",
@@ -205,34 +249,7 @@ export class TemporalRunOrchestrator {
   }
 
   async #executionReferences(): Promise<ExecuteReference[]> {
-    return this.#database
-      .selectFrom("outbox")
-      .innerJoin("commands as command", (join) =>
-        join
-          .onRef("command.tenant_id", "=", "outbox.tenant_id")
-          .on(
-            sql<boolean>`${sql.ref("command.id")}::text = ${sql.ref("outbox.payload")} ->> 'commandId'`,
-          ),
-      )
-      .innerJoin("runs as run", (join) =>
-        join
-          .onRef("run.tenant_id", "=", "command.tenant_id")
-          .onRef("run.command_id", "=", "command.id"),
-      )
-      .select([
-        "command.tenant_id as tenantId",
-        "command.session_id as sessionId",
-        "command.id as commandId",
-        "run.id as runId",
-      ])
-      .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
-      .where("outbox.published_at", "is", null)
-      .where("command.kind", "=", "turn.execute")
-      .where("command.state", "in", ["pending", "dispatched"])
-      .orderBy("outbox.created_at", "asc")
-      .limit(this.#batchSize)
-      .execute()
-      .then((rows) => rows.map((row) => ({ schemaVersion: 1 as const, ...row })));
+    return listPendingTemporalRunExecutions(this.#database, this.#batchSize);
   }
 
   async #cancellationReferences(): Promise<CancellationReference[]> {
@@ -276,7 +293,7 @@ export class TemporalRunOrchestrator {
       const workflowInput = affinity === undefined ? input : { ...input, affinity };
       await this.#client!.workflow.start(TEMPORAL_RUN_WORKFLOW, {
         workflowId,
-        taskQueue: this.#taskQueue,
+        taskQueue: input.taskQueue,
         args: [workflowInput],
         workflowIdReusePolicy: "ALLOW_DUPLICATE_FAILED_ONLY",
         workflowIdConflictPolicy: "USE_EXISTING",

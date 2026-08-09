@@ -23,7 +23,7 @@ event spool.
 - Docker is available to the current user;
 - no Run is active during the short cutover;
 - at least 4 GiB of Docker memory is available for the k3d server and two
-  capacity-one Workers.
+  bounded-capacity Workers; the default is four runtime slots per Pod.
 
 No root K3s credential or passwordless sudo is required. The pinned k3d binary
 is fetched from the official release and checksum-verified automatically.

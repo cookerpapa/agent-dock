@@ -111,7 +111,12 @@ async function seed(): Promise<void> {
     .execute();
   await database
     .insertInto("workspaces")
-    .values({ id: IDS.workspace, tenant_id: IDS.tenant, project_id: IDS.project })
+    .values({
+      id: IDS.workspace,
+      tenant_id: IDS.tenant,
+      project_id: IDS.project,
+      cell_id: "cell-0001",
+    })
     .execute();
   await database
     .insertInto("workspace_sources")

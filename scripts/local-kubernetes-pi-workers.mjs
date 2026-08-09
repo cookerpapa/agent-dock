@@ -918,7 +918,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "temporal.namespace=agent-dock",
     "--set",
-    "temporal.taskQueue=agent-dock-pi-runs-v1",
+    "temporal.taskQueue=agent-dock-pi-runs-cell-0001-v1",
     "--set",
     "temporal.workerDeploymentName=agent-dock-pi-workers",
     "--set-string",

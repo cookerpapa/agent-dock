@@ -146,6 +146,10 @@ type WorkspaceRepositorySourceRow = {
   sourcePrivate: boolean | null;
 };
 
+type AssignedExecutionCell = {
+  id: string;
+};
+
 type EnvironmentVersionRow = {
   environmentVersionId: string;
   environmentVersionNumber: number;
@@ -683,12 +687,14 @@ export class ControlPlaneStore {
           .values({ id: projectId, tenant_id: this.#tenantId, name: request.name })
           .returning(["id", "name", "created_at"])
           .executeTakeFirstOrThrow();
+        const executionCell = await this.#assignExecutionCell(transaction);
         await transaction
           .insertInto("workspaces")
           .values({
             id: workspaceId,
             tenant_id: this.#tenantId,
             project_id: project.id,
+            cell_id: executionCell.id,
             object_snapshot_key: null,
           })
           .executeTakeFirstOrThrow();
@@ -841,6 +847,43 @@ export class ControlPlaneStore {
       }
       throw error;
     }
+  }
+
+  async #assignExecutionCell(transaction: Transaction<Database>): Promise<AssignedExecutionCell> {
+    const cell = await transaction
+      .selectFrom("execution_cells")
+      .select(["id", "assigned_workspaces", "capacity_weight"])
+      .where("state", "=", "active")
+      .orderBy(
+        sql<number>`(${sql.ref("assigned_workspaces")}::numeric / ${sql.ref("capacity_weight")})`,
+        "asc",
+      )
+      .orderBy("id", "asc")
+      .limit(1)
+      .forUpdate()
+      .executeTakeFirst();
+    if (cell === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "No active execution Cell is available",
+      );
+    }
+    const updated = await transaction
+      .updateTable("execution_cells")
+      .set({
+        assigned_workspaces: sql<string>`${sql.ref("assigned_workspaces")} + 1`,
+        updated_at: new Date(),
+      })
+      .where("id", "=", cell.id)
+      .where("state", "=", "active")
+      .executeTakeFirst();
+    if (updated.numUpdatedRows !== 1n) {
+      throw new ControlPlaneStoreError(
+        "conflict",
+        "Execution Cell changed while assigning the Workspace",
+      );
+    }
+    return { id: cell.id };
   }
 
   async createSession(

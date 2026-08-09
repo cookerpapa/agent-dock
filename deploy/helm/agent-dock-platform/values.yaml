@@ -78,7 +78,7 @@ external:
   temporal:
     address: temporal-frontend.temporal.svc.cluster.local:7233
     namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-v1
+    taskQueue: agent-dock-pi-runs-cell-0001-v1
   checkpointS3:
     endpoint: https://s3.example.com
     region: us-east-1
@@ -134,7 +134,8 @@ pi-workers:
   workerPool:
     name: primary-v1
     replicas: 2
-    capacity: 1
+    capacity: 4
+    executionCellId: cell-0001
     clusterDomain: cluster.local
   autoscaling:
     enabled: true
@@ -163,7 +164,7 @@ pi-workers:
   temporal:
     address: temporal-frontend.temporal.svc.cluster.local:7233
     namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-v1
+    taskQueue: agent-dock-pi-runs-cell-0001-v1
     workerDeploymentName: agent-dock-pi-workers
     workerBuildId: development
   conversationStorage:

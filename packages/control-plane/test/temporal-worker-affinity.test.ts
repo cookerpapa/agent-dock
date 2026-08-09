@@ -7,7 +7,11 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ControlPlaneStore, PostgresTemporalWorkerAffinity } from "../src/index.ts";
+import {
+  ControlPlaneStore,
+  listPendingTemporalRunExecutions,
+  PostgresTemporalWorkerAffinity,
+} from "../src/index.ts";
 
 const NOW = new Date("2026-07-26T08:00:00.000Z");
 const TENANT_ID = "71000000-0000-4000-8000-000000000001";
@@ -26,7 +30,9 @@ function workflowInput(
   accepted: Awaited<ReturnType<ControlPlaneStore["acceptTurn"]>>,
 ): TemporalRunWorkflowInput {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    cellId: "cell-0001",
+    taskQueue: "agent-dock-pi-runs-cell-0001-v1",
     tenantId: TENANT_ID,
     sessionId: accepted.sessionId,
     runId: accepted.runId,
@@ -156,6 +162,12 @@ afterAll(async () => {
 });
 
 describe.sequential("capacity-aware Temporal Worker affinity", () => {
+  it("resolves the immutable Workspace Cell into the Temporal routing input", async () => {
+    const input = await createAcceptedRun("cell-routing");
+    const pending = await listPendingTemporalRunExecutions(database, 100);
+    expect(pending.find((candidate) => candidate.commandId === input.commandId)).toEqual(input);
+  });
+
   it("targets a live cached Worker but never reserves beyond its remaining capacity", async () => {
     const affinity = new PostgresTemporalWorkerAffinity({
       database,
@@ -214,5 +226,27 @@ describe.sequential("capacity-aware Temporal Worker affinity", () => {
     await expect(affinity.reserve(input)).resolves.toMatchObject({
       sandboxId: SANDBOX_ID,
     });
+  });
+
+  it("assigns a new Workspace to the least-loaded active Cell", async () => {
+    await database
+      .insertInto("execution_cells")
+      .values({
+        id: "cell-0002",
+        display_name: "Secondary test Cell",
+        state: "active",
+        temporal_task_queue: "agent-dock-pi-runs-cell-0002-v1",
+        sandbox_manager_base_url: "http://sandbox-manager-cell-0002.test:4300",
+        workspace_storage_key: "workspace-cell-0002",
+        capacity_weight: 100,
+      })
+      .executeTakeFirstOrThrow();
+    const project = await store.createProject("cell-placement");
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("cell_id")
+      .where("id", "=", project.workspaceId)
+      .executeTakeFirstOrThrow();
+    expect(workspace.cell_id).toBe("cell-0002");
   });
 });

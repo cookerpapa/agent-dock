@@ -12,6 +12,7 @@ export {
   type EnvironmentValidationStatus,
   type EnvironmentOperationKind,
   type EnvironmentVersionState,
+  type ExecutionCellState,
   type Database,
   type OrchestrationAcceptanceVerdict,
   type OrchestrationDecisionGateState,
@@ -59,6 +60,7 @@ export {
   downWorkspaceFirstConversations,
   downTypedToolOutcomes,
   downModelSamplingStepIdentity,
+  downEnterpriseExecutionCells,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -86,6 +88,7 @@ export {
   upWorkspaceFirstConversations,
   upTypedToolOutcomes,
   upModelSamplingStepIdentity,
+  upEnterpriseExecutionCells,
 } from "./migrations/index.ts";
 
 export {

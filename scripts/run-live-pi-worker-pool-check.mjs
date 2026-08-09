@@ -261,7 +261,7 @@ async function activeWorkers() {
       "--namespace",
       "agent-dock",
       "--task-queue",
-      "agent-dock-pi-runs-v1",
+      "agent-dock-pi-runs-cell-0001-v1",
       "--address",
       "127.0.0.1:7233",
       "--output",

@@ -428,6 +428,7 @@ export class SupervisorHostRuntime {
         database: this.#database,
         address: this.#config.temporalAddress,
         namespace: this.#config.temporalNamespace,
+        cellId: this.#config.executionCellId,
         taskQueue: this.#config.temporalTaskQueue,
         identity: `${identity.supervisorId}/${identity.bootId}`,
         sandboxId: identity.sandboxId,

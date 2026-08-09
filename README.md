@@ -106,10 +106,10 @@ candidate activations remain parallel; shared Workspace/process effects do not.
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 The distributed Kubernetes profile keeps Web and Control Plane stateless,
-scales compatible Pi Workers from the Temporal Activity backlog with KEDA, and
-routes exact Worker management over StatefulSet headless DNS. Sandbox Managers
-use a fixed Workspace-sharded ring because live Cube activation authority cannot
-be served by a random load balancer. PostgreSQL, Temporal, S3/Kopia, the shared
+binds each Workspace to an immutable execution Cell, scales that Cell's
+compatible Pi Workers from its Temporal Activity backlog with KEDA, and routes
+exact Worker management over StatefulSet headless DNS. The default Worker Pod
+hosts four bounded Pi runtime slots. PostgreSQL, Temporal, S3/Kopia, the shared
 RWX Workspace volume and Cube remain external authorities. See
 [Distributed Kubernetes deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
 

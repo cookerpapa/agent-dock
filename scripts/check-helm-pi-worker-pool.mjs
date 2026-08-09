@@ -168,7 +168,9 @@ const environment = Object.fromEntries(
     .map((entry) => [entry.name, String(entry.value)]),
 );
 assert.equal(environment.AGENT_DOCK_SUPERVISOR_ID, "$(POD_NAME)");
-assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "1");
+assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "4");
+assert.equal(environment.AGENT_DOCK_EXECUTION_CELL_ID, "cell-0001");
+assert.equal(environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE, "agent-dock-pi-runs-cell-0001-v1");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED, "true");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME, "agent-dock-pi-workers");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID, "development");
@@ -257,7 +259,8 @@ find("PodDisruptionBudget", name);
 
 for (const invalidArgs of [
   ["--set", "workerPool.replicas=1"],
-  ["--set", "workerPool.capacity=2"],
+  ["--set", "workerPool.capacity=17"],
+  ["--set", "workerPool.executionCellId=wrong-cell"],
   ["--set", "unexpectedEscape=true"],
 ]) {
   const result = command(helm, ["lint", chart, "--strict", ...invalidArgs]);

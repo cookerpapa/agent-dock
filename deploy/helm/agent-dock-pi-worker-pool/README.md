@@ -1,6 +1,7 @@
 # AgentDock trusted Pi Worker pool chart
 
-This chart deploys the trusted, capacity-one Pi SDK Worker pool. It does not
+This chart deploys a trusted Pi SDK Worker pool with a bounded number of runtime
+slots per Pod. It does not
 deploy CubeSandbox, PostgreSQL, S3/MinIO, Temporal, the Control Plane, or any
 untrusted code-execution runtime.
 
@@ -69,7 +70,7 @@ For a release installed in `agent-dock-workers`, configure:
 ```text
 AGENT_DOCK_SUPERVISOR_ID_PREFIX=agent-dock-pi-worker-
 AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE=http://{supervisorId}.agent-dock-workers.svc.cluster.local:4100
-AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY=1
+AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY=16
 ```
 
 The chart creates one ClusterIP management Service whose name exactly matches
@@ -109,7 +110,9 @@ the Deployment's Current version.
 
 ## Scale and upgrade
 
-Scale one unchanged build by changing `workerPool.replicas`. Each added ordinal
+Bind each release to exactly one immutable execution Cell with
+`workerPool.executionCellId` and the Cell's `temporal.taskQueue`. Scale one
+unchanged build by changing `workerPool.replicas`. Each added ordinal
 gets its own Supervisor ID, management Service, and `ReadWriteOncePod` state
 claim.
 
@@ -133,10 +136,10 @@ npm run typecheck --workspace @agent-dock/supervisor-host
 npm run test --workspace @agent-dock/supervisor-host
 ```
 
-The chart gate verifies capacity one, stable identity/PVCs, per-Pod management
-routing, Build ID configuration, restricted Secret modes, NetworkPolicy,
-resource/security settings, blue/green rendering, and rejects unknown or unsafe
-values.
+The chart gate verifies bounded runtime capacity (four slots by default), Cell
+identity and Task Queue, stable identity/PVCs, per-Pod management routing, Build
+ID configuration, restricted Secret modes, NetworkPolicy, resource/security
+settings, blue/green rendering, and rejects unknown or unsafe values.
 
 A rendered or single-node installation is not a multi-node availability claim.
 Before claiming that, run Worker/node-loss, database/object-store failover,

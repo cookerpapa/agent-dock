@@ -81,6 +81,20 @@ export type OrchestrationState =
 export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "cancelled";
 export type OrchestrationAcceptanceVerdict = "passed" | "failed";
 export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
+export type ExecutionCellState = "active" | "draining" | "disabled";
+
+export interface ExecutionCellTable {
+  id: string;
+  display_name: string;
+  state: ExecutionCellState;
+  temporal_task_queue: string;
+  sandbox_manager_base_url: string;
+  workspace_storage_key: string;
+  capacity_weight: GeneratedInteger;
+  assigned_workspaces: GeneratedInt8;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
 
 export interface TenantTable {
   id: string;
@@ -214,6 +228,7 @@ export interface WorkspaceTable {
   id: string;
   tenant_id: string;
   project_id: string;
+  cell_id: string;
   object_snapshot_key: string | null;
   current_workspace_version_id: GeneratedNullable<string>;
   row_version: GeneratedInt8;
@@ -974,6 +989,7 @@ export interface PlatformRuntimeSettingChangeTable {
 }
 
 export interface Database {
+  execution_cells: ExecutionCellTable;
   tenants: TenantTable;
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;

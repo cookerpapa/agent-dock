@@ -986,7 +986,7 @@ try {
     },
     temporal: {
       scheduler: "Temporal",
-      taskQueue: "agent-dock-pi-runs-v1",
+      taskQueue: "agent-dock-pi-runs-cell-0001-v1",
       workflows: temporalWorkflows,
     },
     totalUsage: usage,
