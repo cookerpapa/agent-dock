@@ -96,6 +96,64 @@ export interface ExecutionCellTable {
   updated_at: GeneratedTimestamp;
 }
 
+export type SandboxManagerInstanceState = "ready" | "stopped" | "lost";
+export type SandboxManagerActivationState =
+  "reserved" | "materializing" | "active" | "warm" | "cleaning" | "released" | "unknown";
+export type SandboxManagerOperationState =
+  "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+
+export interface SandboxManagerInstanceTable {
+  instance_id: string;
+  cell_id: string;
+  owner_base_url: string;
+  state: SandboxManagerInstanceState;
+  lease_expires_at: Timestamp;
+  last_heartbeat_at: Timestamp;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface SandboxManagerActivationTable {
+  activation_id: string;
+  cell_id: string;
+  owner_instance_id: string;
+  owner_base_url: string;
+  tenant_id: string;
+  project_id: string;
+  workspace_id: string;
+  supervisor_id: string;
+  boot_id: string;
+  sandbox_id: string;
+  command_id: string;
+  session_id: string;
+  turn_id: string;
+  attempt_id: string;
+  lease_id: string;
+  fencing_token: Int8;
+  capability_sha256: string;
+  turn_context_sha256: string;
+  attempt_context_sha256: string;
+  environment_sha256: string;
+  workspace_revision: string | null;
+  runtime_id: string | null;
+  runtime_name: string | null;
+  state: SandboxManagerActivationState;
+  failure_code: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+export interface SandboxManagerOperationTable {
+  operation_id: string;
+  activation_id: string;
+  owner_instance_id: string;
+  request_sha256: string;
+  state: SandboxManagerOperationState;
+  failure_code: string | null;
+  started_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
+}
+
 export interface TenantTable {
   id: string;
   slug: string;
@@ -990,6 +1048,9 @@ export interface PlatformRuntimeSettingChangeTable {
 
 export interface Database {
   execution_cells: ExecutionCellTable;
+  sandbox_manager_instances: SandboxManagerInstanceTable;
+  sandbox_manager_activations: SandboxManagerActivationTable;
+  sandbox_manager_operations: SandboxManagerOperationTable;
   tenants: TenantTable;
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;

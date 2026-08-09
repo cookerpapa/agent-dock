@@ -1,8 +1,11 @@
 # ADR-0088: Distributed Kubernetes topology and demand scaling
 
-- Status: Accepted
+- Status: Partially superseded by ADR-0089
 - Date: 2026-08-09
 - Refines: ADR-0054, ADR-0067, ADR-0074 and ADR-0086
+
+The fixed process-local Sandbox Manager ring in decisions 6–7 is superseded.
+The remaining Kubernetes, Worker DNS and autoscaling decisions stay active.
 
 ## Context
 

@@ -134,9 +134,20 @@ export const ToolSandboxCreateResponseSchema = Type.Object(
     type: Type.Literal("tool_sandbox.reserved"),
     requestId: UuidSchema,
     activationId: UuidSchema,
+    ownerBaseUrl: Type.String({ minLength: 8, maxLength: 2_048 }),
     capability: Type.String({ pattern: "^adts_[A-Za-z0-9_-]{43}$" }),
     workspaceRoot: Type.Literal("/workspace"),
     continuity: Type.Union([Type.Literal("cold_restore"), Type.Literal("warm_reuse")]),
+  },
+  { additionalProperties: false },
+);
+
+export const ToolSandboxCreateRedirectResponseSchema = Type.Object(
+  {
+    ...ToolSandboxEnvelope,
+    type: Type.Literal("tool_sandbox.owner_redirect"),
+    requestId: UuidSchema,
+    ownerBaseUrl: Type.String({ minLength: 8, maxLength: 2_048 }),
   },
   { additionalProperties: false },
 );
@@ -293,6 +304,7 @@ export const SandboxManagerRequestSchema = Type.Union([
 
 export const SandboxManagerResponseSchema = Type.Union([
   ToolSandboxCreateResponseSchema,
+  ToolSandboxCreateRedirectResponseSchema,
   ToolSandboxCaptureResponseSchema,
   ToolSandboxReleaseResponseSchema,
   ToolSandboxStopResponseSchema,
@@ -544,6 +556,9 @@ export const ToolWorkerOutputSchema = Type.Union([
 export type ToolSandboxAssignment = Static<typeof ToolSandboxAssignmentSchema>;
 export type ToolSandboxCreateRequest = Static<typeof ToolSandboxCreateRequestSchema>;
 export type ToolSandboxCreateResponse = Static<typeof ToolSandboxCreateResponseSchema>;
+export type ToolSandboxCreateRedirectResponse = Static<
+  typeof ToolSandboxCreateRedirectResponseSchema
+>;
 export type ToolSandboxCaptureRequest = Static<typeof ToolSandboxCaptureRequestSchema>;
 export type ToolSandboxCaptureResponse = Static<typeof ToolSandboxCaptureResponseSchema>;
 export type ToolSandboxReleaseRequest = Static<typeof ToolSandboxReleaseRequestSchema>;

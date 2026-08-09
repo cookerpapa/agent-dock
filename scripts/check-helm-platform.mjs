@@ -89,7 +89,7 @@ assert.equal(
 );
 assert.equal(
   controlPlaneEnvironment.AGENT_DOCK_SANDBOX_MANAGER_URLS,
-  "http://sandbox-manager-0:4300,http://sandbox-manager-1:4300",
+  "http://sandbox-manager:4300",
 );
 assert.equal(
   controlPlaneEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
@@ -105,17 +105,22 @@ find("HorizontalPodAutoscaler", "agent-dock-web");
 find("Service", "agent-dock-web");
 
 const sandboxManagers = find("StatefulSet", "agent-dock-sandbox-manager");
-assert.equal(sandboxManagers.spec.replicas, 2);
+assert.equal(sandboxManagers.spec.replicas, 3);
 assert.equal(sandboxManagers.spec.podManagementPolicy, "Parallel");
 assert.equal(sandboxManagers.spec.template.spec.containers.length, 2);
 assert.equal(sandboxManagers.spec.template.spec.automountServiceAccountToken, false);
 assert.deepEqual(sandboxManagers.spec.volumeClaimTemplates[0].spec.accessModes, ["ReadWriteOnce"]);
-for (const ordinal of [0, 1]) {
-  const service = find("Service", `sandbox-manager-${ordinal}`);
-  assert.deepEqual(service.spec.selector, {
-    "statefulset.kubernetes.io/pod-name": `agent-dock-sandbox-manager-${ordinal}`,
-  });
-}
+find("Service", "sandbox-manager");
+const sandboxManagerEnvironment = Object.fromEntries(
+  sandboxManagers.spec.template.spec.containers[0].env
+    .filter((entry) => entry.value !== undefined)
+    .map((entry) => [entry.name, String(entry.value)]),
+);
+assert.equal(sandboxManagerEnvironment.AGENT_DOCK_EXECUTION_CELL_ID, "cell-0001");
+assert.equal(
+  sandboxManagerEnvironment.AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL,
+  "http://$(POD_NAME).agent-dock-sandbox-manager-headless:4300",
+);
 
 const workers = find("StatefulSet", "agent-dock-pi-worker-primary-v1");
 assert.equal(workers.spec.replicas, 2);
@@ -183,7 +188,7 @@ for (const resource of resources) {
 }
 
 for (const invalidArgs of [
-  ["--set", "sandboxPlane.shards=3"],
+  ["--set", "sandboxPlane.replicas=2"],
   ["--set", "controlPlane.replicas=1"],
   ["--set", "piWorkersEnabled=false"],
   ["--set", "networkPolicy.externalEgressCidrs[0]=0.0.0.0/0"],

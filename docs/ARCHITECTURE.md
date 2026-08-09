@@ -593,9 +593,11 @@ drains the active Activity before Pod exit.
 The Cell directory replaces the former global Workspace hash as the durable
 placement authority. A Cell can be drained without remapping existing
 Workspaces, while new Workspaces are assigned to the least-loaded active Cell.
-Within the current Cell implementation, the ordered Manager URL list still
-forms a fixed shard set because live Cube activation state is process-local;
-Manager state externalization is the next enterprise execution-plane slice.
+Within each Cell, Sandbox Manager replicas share durable instance Lease,
+activation owner and Tool operation identity in PostgreSQL. Creates use one
+stable Service, then pin subsequent operations to the returned owner URL. A
+surviving replica fences an expired owner, marks ambiguous operations
+`UNKNOWN` and reaps orphaned Cube activations without replaying their Tools.
 PostgreSQL still serializes ordinary Runs sharing one Workspace and advances
 the Workspace head with CAS.
 

@@ -14,7 +14,7 @@ platform service network.
 | Control Plane | Temporal | yes | internal namespace |
 | Control Plane | MinIO/S3 | yes | object-store credential |
 | Control Plane | exact Pi Worker management endpoint | yes | management service token |
-| Control Plane | Sandbox Manager shard | yes | materializer credential |
+| Control Plane | Sandbox Manager Service | yes | materializer credential |
 | Pi Worker | Control Plane management channel | yes | Worker boot credential |
 | Pi Worker | Model Gateway | yes | short-lived Run capability |
 | Pi Worker | Sandbox Manager | yes | service identity + Tool lease |

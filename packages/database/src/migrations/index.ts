@@ -32,6 +32,7 @@ import * as activePiSteer from "./030_active_pi_steer.ts";
 import * as typedToolOutcomes from "./031_typed_tool_outcomes.ts";
 import * as modelSamplingStepIdentity from "./032_model_sampling_step_identity.ts";
 import * as enterpriseExecutionCells from "./033_enterprise_execution_cells.ts";
+import * as sandboxManagerOwnership from "./034_sandbox_manager_ownership.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -69,6 +70,7 @@ export const migrationProvider: MigrationProvider = {
       "031_typed_tool_outcomes": typedToolOutcomes,
       "032_model_sampling_step_identity": modelSamplingStepIdentity,
       "033_enterprise_execution_cells": enterpriseExecutionCells,
+      "034_sandbox_manager_ownership": sandboxManagerOwnership,
     };
   },
 };
@@ -232,3 +234,8 @@ export {
   down as downEnterpriseExecutionCells,
   up as upEnterpriseExecutionCells,
 } from "./033_enterprise_execution_cells.ts";
+
+export {
+  down as downSandboxManagerOwnership,
+  up as upSandboxManagerOwnership,
+} from "./034_sandbox_manager_ownership.ts";

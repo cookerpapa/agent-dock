@@ -72,9 +72,10 @@ networkPolicy:
     - 198.51.100.32/28
 
 sandboxPlane:
-  # This is a fixed consistent-hash ring. Change it only through the documented
-  # drain/blue-green procedure, never through HPA.
-  shards: 2
+  # Replicas share durable activation ownership in PostgreSQL. The Service may
+  # route a create to any healthy replica; the owner URL pins later operations.
+  replicas: 3
+  executionCellId: cell-0001
   workspace:
     existingClaim: agent-dock-workspaces-rwx
   cube:
@@ -102,8 +103,7 @@ pi-workers:
   services:
     controlPlaneUrl: http://control-plane:3000
     sandboxManagerUrls:
-      - http://sandbox-manager-0:4300
-      - http://sandbox-manager-1:4300
+      - http://sandbox-manager:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""

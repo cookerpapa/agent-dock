@@ -63,7 +63,8 @@ ADR numbers are stable historical identities, so gaps are intentional.
   contract.
 - [ADR-0088](0088-distributed-kubernetes-and-demand-scaling.md) defines the
   external-authority Kubernetes topology, version-aware Temporal/KEDA Worker
-  scaling, exact Worker management DNS and fixed Sandbox Manager shard ring.
+  scaling and exact Worker management DNS. Its process-local Manager ring is
+  superseded by ADR-0089's DB-owned replica model.
 - [ADR-0089](0089-enterprise-cells-and-durable-event-log.md) assigns each
   Workspace to an immutable execution Cell and defines the measured cutover
   boundary for a pluggable high-frequency durable event log.

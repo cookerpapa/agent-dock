@@ -5,6 +5,11 @@ import { isAbsolute } from "node:path";
 export type SandboxManagerConfig = {
   host: string;
   port: number;
+  databaseUrl: string;
+  executionCellId: string;
+  advertisedBaseUrl: string;
+  ownershipLeaseMs: number;
+  ownershipHeartbeatMs: number;
   serviceToken: string;
   materializerToken?: string;
   imageRevision: string;
@@ -40,6 +45,20 @@ function bounded(value: string, name: string, maximum = 1_024): string {
     throw new TypeError(`${name} is invalid`);
   }
   return value;
+}
+
+function serviceUrl(value: string, name: string): string {
+  const parsed = new URL(bounded(value, name, 2_048));
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    parsed.search.length > 0 ||
+    parsed.hash.length > 0
+  ) {
+    throw new TypeError(`${name} is invalid`);
+  }
+  return parsed.toString();
 }
 
 function integer(
@@ -105,6 +124,27 @@ async function readCubeApiKey(path: string): Promise<string> {
   }
 }
 
+async function readDatabaseUrl(path: string): Promise<string> {
+  if (!isAbsolute(path) || path.includes("\0")) {
+    throw new TypeError("DATABASE_URL_FILE must be an absolute path");
+  }
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || metadata.size > 4_096) {
+      throw new TypeError("Sandbox Manager database URL file is not private and bounded");
+    }
+    const value = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
+    const parsed = new URL(value);
+    if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
+      throw new TypeError("Sandbox Manager database URL is invalid");
+    }
+    return value;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function loadSandboxManagerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SandboxManagerConfig> {
@@ -124,6 +164,28 @@ export async function loadSandboxManagerConfig(
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
+    databaseUrl: await readDatabaseUrl(required(environment, "DATABASE_URL_FILE")),
+    executionCellId: bounded(
+      required(environment, "AGENT_DOCK_EXECUTION_CELL_ID"),
+      "executionCellId",
+      64,
+    ),
+    advertisedBaseUrl: serviceUrl(
+      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL"),
+      "advertisedBaseUrl",
+    ),
+    ownershipLeaseMs: integer(
+      environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS,
+      15_000,
+      3_000,
+      300_000,
+    ),
+    ownershipHeartbeatMs: integer(
+      environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS,
+      5_000,
+      1_000,
+      60_000,
+    ),
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
     ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
       ? {}

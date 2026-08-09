@@ -7,10 +7,19 @@ export {
   SANDBOX_MANAGER_SERVICE_PATH,
   SandboxManagerClient,
   SandboxManagerClientError,
-  ShardedSandboxManagerClient,
+  ReplicatedSandboxManagerClient,
   type SandboxManagerClientOptions,
-  type ShardedSandboxManagerClientOptions,
+  type ReplicatedSandboxManagerClientOptions,
 } from "./client.ts";
+export {
+  InMemorySandboxActivationStateRepository,
+  PostgresSandboxActivationStateRepository,
+  SandboxActivationStateRepositoryError,
+  type PostgresSandboxActivationStateRepositoryOptions,
+  type SandboxActivationReservation,
+  type SandboxActivationReservationResult,
+  type SandboxActivationStateRepository,
+} from "./activation-state-repository.ts";
 export {
   CUBESANDBOX_PROVIDER_ID,
   CUBESANDBOX_RUNTIME_NAME,
@@ -43,7 +52,11 @@ export {
   type SandboxResourceLimits,
   type SandboxWriteFileInput,
 } from "./sandbox-provider.ts";
-export { ToolSandboxManager, type ToolSandboxManagerOptions } from "./tool-sandbox-manager.ts";
+export {
+  SandboxManagerOwnerRedirectError,
+  ToolSandboxManager,
+  type ToolSandboxManagerOptions,
+} from "./tool-sandbox-manager.ts";
 export { loadSandboxManagerConfig, type SandboxManagerConfig } from "./config.ts";
 export {
   SandboxManagerServer,

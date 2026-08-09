@@ -18,7 +18,7 @@ import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
-import { ShardedSandboxManagerClient } from "@agent-dock/sandbox-manager";
+import { ReplicatedSandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
@@ -69,7 +69,7 @@ export type SupervisorTemporalWorker = {
 };
 
 export type SupervisorSandboxManager = Pick<
-  ShardedSandboxManagerClient,
+  ReplicatedSandboxManagerClient,
   | "operationUrlFor"
   | "checkHealth"
   | "create"
@@ -181,7 +181,7 @@ export class SupervisorHostRuntime {
       });
     this.#sandboxManager =
       options.sandboxManager ??
-      new ShardedSandboxManagerClient({
+      new ReplicatedSandboxManagerClient({
         baseUrls: options.config.sandboxManagerBaseUrls,
         serviceToken: options.config.sandboxManagerServiceToken,
         allowInsecureHttp: options.config.allowInsecureInternalHttp,

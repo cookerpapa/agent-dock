@@ -25,6 +25,9 @@ export {
   type ReviewBundleTable,
   type SandboxRetirementReason,
   type SandboxRetirementState,
+  type SandboxManagerActivationState,
+  type SandboxManagerInstanceState,
+  type SandboxManagerOperationState,
   type SupervisorConnectionCloseReason,
   type SupervisorConnectionState,
   type TenantApiCredentialRole,
@@ -61,6 +64,7 @@ export {
   downTypedToolOutcomes,
   downModelSamplingStepIdentity,
   downEnterpriseExecutionCells,
+  downSandboxManagerOwnership,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -89,6 +93,7 @@ export {
   upTypedToolOutcomes,
   upModelSamplingStepIdentity,
   upEnterpriseExecutionCells,
+  upSandboxManagerOwnership,
 } from "./migrations/index.ts";
 
 export {

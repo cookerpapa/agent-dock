@@ -1,11 +1,24 @@
 import { loadSandboxManagerConfig } from "./config.ts";
+import { createDatabase } from "@agent-dock/database";
 import { startServiceObservability } from "@agent-dock/observability";
 import { CubeSandboxProvider } from "./cubesandbox-sandbox-provider.ts";
 import { SandboxManagerServer } from "./server.ts";
 import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
 import { HttpWorkspaceDataMover } from "./workspace-data-mover.ts";
+import { PostgresSandboxActivationStateRepository } from "./activation-state-repository.ts";
+import { randomUUID } from "node:crypto";
 
 const config = await loadSandboxManagerConfig();
+const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
+const activationState = new PostgresSandboxActivationStateRepository({
+  database,
+  cellId: config.executionCellId,
+  instanceId: randomUUID(),
+  ownerBaseUrl: config.advertisedBaseUrl,
+  leaseMs: config.ownershipLeaseMs,
+  heartbeatMs: config.ownershipHeartbeatMs,
+});
+await activationState.start();
 const observability = await startServiceObservability({
   serviceName: "agent-dock-sandbox-manager",
   defaultMetricsPort: 9466,
@@ -35,6 +48,8 @@ const provider = new CubeSandboxProvider({
 });
 const manager = new ToolSandboxManager({
   provider,
+  ownerBaseUrl: config.advertisedBaseUrl,
+  stateRepository: activationState,
   imageRevision: config.imageRevision,
   maximumActiveSandboxes: config.maximumActiveSandboxes,
   warmTtlMs: config.warmTtlMs,
@@ -56,7 +71,10 @@ process.stdout.write("AgentDock Sandbox Manager ready\n");
 
 let closing: Promise<void> | undefined;
 const close = (): Promise<void> => {
-  closing ??= server.close().finally(() => observability.close());
+  closing ??= server
+    .close()
+    .finally(() => database.destroy())
+    .finally(() => observability.close());
   return closing;
 };
 process.once("SIGTERM", () => void close());

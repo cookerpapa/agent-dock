@@ -4,9 +4,9 @@
 
 Accepted for staged implementation on 2026-08-09.
 
-This ADR supersedes the capacity-one Worker deployment decision in ADR-0057,
-ADR-0058, ADR-0059, ADR-0071 and ADR-0088. Their durable-state and isolation
-decisions remain in force.
+This ADR supersedes the capacity-one Worker and process-local Sandbox Manager
+ring decisions in ADR-0057, ADR-0058, ADR-0059, ADR-0071 and ADR-0088. Their
+durable-state and isolation decisions remain in force.
 
 ## Context
 

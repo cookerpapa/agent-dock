@@ -610,8 +610,20 @@ describe("provider-backed Tool Sandbox Manager", () => {
       const workspaceDataMoverTokenPath = join(directory, "workspace-data-mover-token");
       await writeFile(workspaceDataMoverTokenPath, `${"m".repeat(48)}\n`, { mode: 0o600 });
       await chmod(workspaceDataMoverTokenPath, 0o600);
+      const databaseUrlPath = join(directory, "database-url");
+      await writeFile(
+        databaseUrlPath,
+        "postgresql://agent-dock:secret@postgres:5432/agent-dock\n",
+        {
+          mode: 0o600,
+        },
+      );
+      await chmod(databaseUrlPath, 0o600);
       await expect(
         loadSandboxManagerConfig({
+          DATABASE_URL_FILE: databaseUrlPath,
+          AGENT_DOCK_EXECUTION_CELL_ID: "cell-0001",
+          AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: "http://sandbox-manager-0:4300",
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
@@ -623,6 +635,9 @@ describe("provider-backed Tool Sandbox Manager", () => {
           AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
         }),
       ).resolves.toMatchObject({
+        databaseUrl: "postgresql://agent-dock:secret@postgres:5432/agent-dock",
+        executionCellId: "cell-0001",
+        advertisedBaseUrl: "http://sandbox-manager-0:4300/",
         maximumActiveSandboxes: 2,
         maximumWarmActivations: 4,
         cubeSandbox: {

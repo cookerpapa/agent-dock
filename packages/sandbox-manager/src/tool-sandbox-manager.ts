@@ -27,9 +27,15 @@ import {
   type SandboxInspection,
   type SandboxProvider,
 } from "./sandbox-provider.ts";
+import {
+  InMemorySandboxActivationStateRepository,
+  type SandboxActivationStateRepository,
+} from "./activation-state-repository.ts";
 
 export type ToolSandboxManagerOptions = {
   provider: SandboxProvider;
+  ownerBaseUrl?: string;
+  stateRepository?: SandboxActivationStateRepository;
   idGenerator?: () => string;
   capabilityGenerator?: () => string;
   maximumActiveSandboxes?: number;
@@ -38,6 +44,16 @@ export type ToolSandboxManagerOptions = {
   clock?: () => number;
   imageRevision?: string;
 };
+
+export class SandboxManagerOwnerRedirectError extends Error {
+  readonly ownerBaseUrl: string;
+
+  constructor(ownerBaseUrl: string) {
+    super("Tool Sandbox activation is owned by another Sandbox Manager replica");
+    this.name = "SandboxManagerOwnerRedirectError";
+    this.ownerBaseUrl = ownerBaseUrl;
+  }
+}
 
 type ManagedActivation = {
   assignment: ToolSandboxAssignment;
@@ -93,6 +109,12 @@ function workspaceKey(assignment: ToolSandboxAssignment): string {
 
 function capabilityDigest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
+}
+
+function operationFailureCode(error: unknown): string {
+  return error instanceof SandboxManagerError && /^[a-z][a-z0-9_]{0,127}$/.test(error.code)
+    ? error.code
+    : "sandbox_manager_failed";
 }
 
 function sameEnvironment(
@@ -198,6 +220,8 @@ function sameSupervisorAssignment(
 
 export class ToolSandboxManager {
   readonly #provider: SandboxProvider;
+  readonly #ownerBaseUrl: string;
+  readonly #stateRepository: SandboxActivationStateRepository;
   readonly #idGenerator: () => string;
   readonly #capabilityGenerator: () => string;
   readonly #maximumActiveSandboxes: number;
@@ -216,6 +240,11 @@ export class ToolSandboxManager {
       throw new TypeError("Sandbox Provider ID is invalid");
     }
     this.#provider = options.provider;
+    this.#ownerBaseUrl = new URL(
+      options.ownerBaseUrl ?? "http://sandbox-manager.invalid",
+    ).toString();
+    this.#stateRepository =
+      options.stateRepository ?? new InMemorySandboxActivationStateRepository();
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#capabilityGenerator =
       options.capabilityGenerator ?? (() => `adts_${randomBytes(32).toString("base64url")}`);
@@ -239,7 +268,11 @@ export class ToolSandboxManager {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(this.#imageRevision)) {
       throw new TypeError("Tool Sandbox image revision is invalid");
     }
-    this.#reaper = setInterval(() => void this.reapWarm().catch(() => undefined), 30_000);
+    this.#reaper = setInterval(
+      () =>
+        void Promise.all([this.reapWarm(), this.#reapOrphanedActivations()]).catch(() => undefined),
+      30_000,
+    );
     this.#reaper.unref();
   }
 
@@ -279,11 +312,11 @@ export class ToolSandboxManager {
   }
 
   async checkHealth(): Promise<void> {
-    await this.#provider.checkHealth();
+    await Promise.all([this.#provider.checkHealth(), this.#stateRepository.checkHealth()]);
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    await this.reapWarm();
+    await Promise.all([this.reapWarm(), this.#reapOrphanedActivations()]);
     if (
       request.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
       request.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
@@ -332,6 +365,7 @@ export class ToolSandboxManager {
       );
     }
     const capability = validCapability(this.#capabilityGenerator());
+    const capabilitySha256 = capabilityDigest(capability).toString("hex");
     const spec = {
       activationId,
       assignment: request.assignment,
@@ -342,11 +376,40 @@ export class ToolSandboxManager {
         : { workspaceRestore: request.workspaceRestore }),
       policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
     } as const;
+    const reservation = await this.#stateRepository.reserve({
+      activationId,
+      assignment: request.assignment,
+      capabilitySha256,
+      turnContextSha256: request.turnContextSha256,
+      attemptContextSha256: request.attemptContextSha256,
+      environmentSha256: createHash("sha256")
+        .update(
+          JSON.stringify({
+            environmentVersionId: request.environment.environmentVersionId,
+            specSha256: request.environment.specSha256,
+            recipeSha256: request.environment.recipeSha256,
+          }),
+        )
+        .digest("hex"),
+      ...(request.workspaceRevision === undefined
+        ? {}
+        : { workspaceRevision: request.workspaceRevision }),
+    });
+    if (reservation.status === "redirect") {
+      throw new SandboxManagerOwnerRedirectError(reservation.ownerBaseUrl);
+    }
+    if (reservation.status === "busy") {
+      throw new SandboxManagerError(
+        "tool_sandbox_workspace_busy",
+        "Workspace already has a Tool Sandbox reservation",
+        true,
+      );
+    }
     this.#activations.set(activationId, {
       assignment: request.assignment,
       turnContextSha256: request.turnContextSha256,
       attemptContextSha256: request.attemptContextSha256,
-      capabilityDigest: capabilityDigest(capability),
+      capabilityDigest: Buffer.from(capabilitySha256, "hex"),
       spec,
       ...(inherited === undefined ? {} : { handle: inherited.handle }),
       materializedForCurrentAssignment: false,
@@ -358,6 +421,7 @@ export class ToolSandboxManager {
       type: "tool_sandbox.reserved",
       requestId: request.requestId,
       activationId,
+      ownerBaseUrl: this.#ownerBaseUrl,
       capability,
       workspaceRoot: "/workspace",
       continuity: inherited === undefined ? "cold_restore" : "warm_reuse",
@@ -412,11 +476,37 @@ export class ToolSandboxManager {
         false,
       );
     }
-    const result = this.#materialize(request.activationId, activation, signal).then((handle) =>
-      this.#provider.exec(handle, request, signal),
-    );
-    activation.operations.set(request.operationId, { requestSha256, result });
-    return result;
+    const durable = (async (): Promise<ToolSandboxOperationResponse> => {
+      const started = await this.#stateRepository.beginOperation(
+        request.activationId,
+        request.operationId,
+        requestSha256,
+      );
+      if (started !== "started") {
+        throw new SandboxManagerError(
+          "tool_operation_outcome_unknown",
+          "Tool operation may already have produced side effects",
+          false,
+        );
+      }
+      try {
+        const handle = await this.#materialize(request.activationId, activation, signal);
+        const response = await this.#provider.exec(handle, request, signal);
+        await this.#stateRepository.settleOperation(request.operationId, "succeeded");
+        return response;
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .settleOperation(
+            request.operationId,
+            signal?.aborted ? "cancelled" : "failed",
+            operationFailureCode(error),
+          )
+          .catch(() => undefined);
+        throw error;
+      }
+    })();
+    activation.operations.set(request.operationId, { requestSha256, result: durable });
+    return durable;
   }
 
   async capture(
@@ -487,12 +577,18 @@ export class ToolSandboxManager {
         expiresAt: now + this.#warmTtlMs,
       });
       retained = true;
+      await this.#stateRepository.setActivationState(request.activationId, "warm", {
+        handle,
+        workspaceRevision: request.workspaceRevision,
+      });
       await this.#enforceWarmLimit();
     } else if (handle !== undefined) {
       await this.#provider.stop(handle);
       this.#releaseAdmission(handle.activationId);
+      await this.#stateRepository.setActivationState(request.activationId, "released");
     } else {
       this.#releaseAdmission(request.activationId);
+      await this.#stateRepository.setActivationState(request.activationId, "released");
     }
     return {
       managerProtocolVersion: 1,
@@ -536,10 +632,19 @@ export class ToolSandboxManager {
     } else {
       this.#releaseAdmission(activationId);
     }
+    await this.#stateRepository.setActivationState(activationId, "released");
   }
 
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
-    return this.#provider.listAssignments(sandboxId);
+    const [providerAssignments, durableAssignments] = await Promise.all([
+      this.#provider.listAssignments(sandboxId),
+      this.#stateRepository.listRuntimeAssignments(sandboxId),
+    ]);
+    const assignments = new Map<string, SupervisorRuntimeAssignment>();
+    for (const assignment of [...providerAssignments, ...durableAssignments]) {
+      assignments.set(`${assignment.containerId}\0${assignment.fencingToken}`, assignment);
+    }
+    return [...assignments.values()];
   }
 
   async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
@@ -562,7 +667,10 @@ export class ToolSandboxManager {
       }
     }
     await this.#provider.terminateAndConfirmAbsent(assignment);
-    for (const activationId of terminatedActivationIds) this.#releaseAdmission(activationId);
+    await this.#stateRepository.releaseRuntimeAssignment(assignment);
+    for (const activationId of terminatedActivationIds) {
+      this.#releaseAdmission(activationId);
+    }
   }
 
   async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
@@ -624,6 +732,10 @@ export class ToolSandboxManager {
 
   async close(): Promise<void> {
     clearInterval(this.#reaper);
+    const ownedActivationIds = new Set([
+      ...this.#activations.keys(),
+      ...[...this.#warm.values()].map((warm) => warm.handle.activationId),
+    ]);
     for (const [activationId, activation] of this.#activations) {
       this.#revoke(activationId, activation);
     }
@@ -639,7 +751,14 @@ export class ToolSandboxManager {
       );
     }
     this.#admitted.clear();
-    await this.#provider.close();
+    try {
+      await this.#provider.close();
+      for (const activationId of ownedActivationIds) {
+        await this.#stateRepository.setActivationState(activationId, "released");
+      }
+    } finally {
+      await this.#stateRepository.close();
+    }
   }
 
   async reapWarm(): Promise<void> {
@@ -650,6 +769,7 @@ export class ToolSandboxManager {
       this.#warm.delete(key);
       await this.#provider.stop(warm.handle);
       this.#releaseAdmission(warm.handle.activationId);
+      await this.#stateRepository.setActivationState(warm.handle.activationId, "released");
     }
   }
 
@@ -699,6 +819,7 @@ export class ToolSandboxManager {
     }
     if (activation.materializing !== undefined) return activation.materializing;
     const materializing = (async (): Promise<SandboxHandle> => {
+      await this.#stateRepository.setActivationState(activationId, "materializing");
       await this.#acquireAdmission(activationId, activation.assignment, signal);
       let releaseAdmissionOnFailure = true;
       try {
@@ -750,9 +871,15 @@ export class ToolSandboxManager {
         }
         activation.handle = handle;
         activation.materializedForCurrentAssignment = true;
+        await this.#stateRepository.setActivationState(activationId, "active", { handle });
         return handle;
       } catch (error: unknown) {
         if (releaseAdmissionOnFailure) this.#releaseAdmission(activationId);
+        await this.#stateRepository
+          .setActivationState(activationId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
         throw error;
       }
     })();
@@ -773,6 +900,23 @@ export class ToolSandboxManager {
       this.#warm.delete(oldest[0]);
       await this.#provider.stop(oldest[1].handle);
       this.#releaseAdmission(oldest[1].handle.activationId);
+      await this.#stateRepository.setActivationState(oldest[1].handle.activationId, "released");
+    }
+  }
+
+  async #reapOrphanedActivations(): Promise<void> {
+    const orphaned = await this.#stateRepository.claimOrphanedActivations(16);
+    for (const orphan of orphaned) {
+      try {
+        await this.#provider.destroyActivation(orphan.activationId, orphan.assignment);
+        await this.#stateRepository.setActivationState(orphan.activationId, "released");
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setActivationState(orphan.activationId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+      }
     }
   }
 

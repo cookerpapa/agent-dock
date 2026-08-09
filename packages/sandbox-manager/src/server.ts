@@ -18,7 +18,10 @@ import {
   SANDBOX_MANAGER_SERVICE_PATH,
 } from "./client.ts";
 import { SandboxManagerError } from "./sandbox-provider.ts";
-import type { ToolSandboxManager } from "./tool-sandbox-manager.ts";
+import {
+  SandboxManagerOwnerRedirectError,
+  type ToolSandboxManager,
+} from "./tool-sandbox-manager.ts";
 
 const DEFAULT_BODY_LIMIT = 5 * 1_024 * 1_024;
 
@@ -279,12 +282,20 @@ export class SandboxManagerServer {
       await reply.code(200).send({ status: "ok" });
     });
     this.#server.get(SANDBOX_MANAGER_READY_PATH, async (_request, reply) => {
+      let healthy = this.#ready;
+      if (healthy) {
+        try {
+          await this.#manager.checkHealth();
+        } catch {
+          healthy = false;
+        }
+      }
       this.#metrics?.sandboxPrewarm.set(
         { provider: this.#manager.providerId },
         this.#manager.cleanPrewarmCount,
       );
-      await reply.code(this.#ready ? 200 : 503).send({
-        status: this.#ready ? "ready" : "not_ready",
+      await reply.code(healthy ? 200 : 503).send({
+        status: healthy ? "ready" : "not_ready",
       });
     });
 
@@ -302,13 +313,25 @@ export class SandboxManagerServer {
       try {
         const message = parseSandboxManagerRequest(request.body);
         if (message.type === "tool_sandbox.create") {
-          const reserved = await this.#observed({
-            request,
-            spanName: "sandbox.reserve",
-            operation: "reserve",
-            kind: "sandbox",
-            run: () => this.#manager.create(message),
-          });
+          let reserved;
+          try {
+            reserved = await this.#observed({
+              request,
+              spanName: "sandbox.reserve",
+              operation: "reserve",
+              kind: "sandbox",
+              run: () => this.#manager.create(message),
+            });
+          } catch (error: unknown) {
+            if (!(error instanceof SandboxManagerOwnerRedirectError)) throw error;
+            await reply.code(200).send({
+              managerProtocolVersion: 1,
+              type: "tool_sandbox.owner_redirect",
+              requestId: message.requestId,
+              ownerBaseUrl: error.ownerBaseUrl,
+            });
+            return;
+          }
           this.#metrics?.sandboxActive.set(
             { provider: this.#manager.providerId },
             this.#manager.activeCount,

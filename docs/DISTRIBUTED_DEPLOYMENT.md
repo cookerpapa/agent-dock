@@ -13,14 +13,14 @@ Ingress
        ├── PostgreSQL/PgBouncer (external)
        ├── direct PostgreSQL LISTEN endpoint (external)
        ├── Temporal cluster (external)
-       └── fixed Sandbox Manager shard ring
+       └── replicated Sandbox Manager Service
 
 Temporal Activity Task Queue
   → KEDA
   → Pi Worker StatefulSet (2..N)
        └── exact Worker management over headless DNS
 
-Sandbox Manager shard N + Workspace Data Mover N
+Sandbox Manager replica N + Workspace Data Mover N
   → Cube API/Proxy cluster (external KVM execution plane)
   → shared RWX POSIX Workspace volume
   → Kopia object repository
@@ -28,7 +28,7 @@ Sandbox Manager shard N + Workspace Data Mover N
 
 The Chart is
 [`deploy/helm/agent-dock-platform`](../deploy/helm/agent-dock-platform).
-It deploys Web, Control Plane, the trusted Manager/Data-Mover ring, the Pi
+It deploys Web, Control Plane, the trusted Manager/Data-Mover replica set, the Pi
 Worker pool, policies, bootstrap migration and autoscalers. It does **not**
 silently install data stores or Cube under application credentials.
 
@@ -97,13 +97,11 @@ cp deploy/helm/agent-dock-platform/values.distributed.example.yaml \
 ```
 
 Replace all image references, UUIDs, storage classes, endpoints and network
-CIDRs. Configure `global.imagePullSecrets` when the images are private. The
-fixed values must agree:
-
-```text
-sandboxPlane.shards
-  = pi-workers.services.sandboxManagerUrls.length
-```
+CIDRs. Configure `global.imagePullSecrets` when the images are private. Each
+execution Cell has one stable `sandbox-manager` Service and at least three
+Manager replicas. PostgreSQL ownership rows bind a live activation to one
+replica; the create response carries that replica's headless-DNS owner URL for
+all subsequent operations.
 
 Render without contacting a cluster:
 
@@ -112,7 +110,7 @@ npm run kubernetes:distributed:render -- \
   --values /secure/operator/agent-dock-values.yaml
 ```
 
-The CI Helm gate rejects unknown values, an inconsistent shard ring,
+The CI Helm gate rejects unknown values, fewer than three Manager replicas,
 single-replica API workloads, unsafe host mounts and drift in the expected
 autoscaling/management topology.
 
@@ -149,8 +147,8 @@ cluster can bypass only that check with
 | --- | --- | --- | --- |
 | Web | CPU HPA | 2–8 | stateless |
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
-| Pi Worker | KEDA Temporal Activity backlog | 2–32, one Run per Pod | no scale-to-zero; graceful Activity drain |
-| Sandbox Manager/Data Mover | fixed StatefulSet ring | 2 shards | no HPA; drain and blue-green to resize |
+| Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
+| Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
 | Kubernetes Nodes | cloud/provider node autoscaler | operator defined | Kubernetes YAML alone cannot create machines |
 
@@ -178,31 +176,32 @@ nodes. Cube guests still receive no Kubernetes, database, Temporal, model or
 object-store credentials. The platform NetworkPolicy and Cube guest egress
 policy are separate layers and both remain required.
 
-## 8. Sandbox Manager ring changes
+## 8. Sandbox Manager replica changes
 
-The shard function is stable only while the ordered Manager URL list is stable.
-Use the same drain for a ring resize or a Manager image/policy rollout if
-active Runs must not be sacrificed. An ordinary in-place StatefulSet rollout
-is safe for committed data, but the replaced shard destroys ambiguous live VM
-state and can make its current Run fail for cold recovery. To drain:
+Manager replicas no longer form a process-local hash ring. A create may reach
+any Ready replica through the Cell Service. Reservation uses a Workspace row
+lock and a partial unique index; subsequent calls follow the returned owner
+URL. A replica heartbeat Lease fences an expired owner before another replica
+may clean its activation. An ordinary in-place rollout preserves committed
+state, but an in-flight arbitrary Tool outcome can still become `UNKNOWN` and
+force the current Run to recover cold. To perform a no-sacrifice policy or
+image rollout:
 
 1. stop new coding Run admission;
 2. wait for active Tool operations to settle;
 3. destroy or expire warm Cube activations;
 4. checkpoint every dirty Workspace;
-5. deploy a new complete ring and matching Worker/Control Plane configuration;
+5. deploy the new replica set and matching Worker/Control Plane configuration;
 6. resume admission;
 7. reconcile the old ring and then remove it.
 
-Never change only `sandboxPlane.shards` on a live ring. If one Manager Pod is
-lost, Kubernetes may recreate that ordinal with its PVC, but ambiguous live VM
-process state is not adopted by another shard. The next Attempt restores the
-last committed Pi and Workspace state and receives the existing model-visible
-Sandbox reset boundary.
+Scaling `sandboxPlane.replicas` does not remap Workspaces. If one Manager Pod is
+lost, a surviving replica expires its DB Lease, marks running Tool operations
+unknown and claims orphan cleanup. The next Attempt restores the last committed
+Pi and Workspace state and receives the model-visible Sandbox reset boundary.
 
 Use one AgentDock release per namespace. The stable `control-plane` and
-`sandbox-manager-N` Service names intentionally form part of the Worker and
-Manager routing contract.
+`sandbox-manager` Services plus per-Pod headless DNS form the routing contract.
 
 ## 9. What remains to prove
 

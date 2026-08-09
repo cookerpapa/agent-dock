@@ -106,9 +106,10 @@ networkPolicy:
   externalEgressCidrs: []
 
 sandboxPlane:
-  shards: 2
-  maximumActivePerShard: 8
-  maximumWarmPerShard: 16
+  replicas: 3
+  executionCellId: cell-0001
+  maximumActivePerReplica: 128
+  maximumWarmPerReplica: 128
   warmTtlMs: 900000
   workspace:
     existingClaim: agent-dock-workspaces-rwx
@@ -156,8 +157,7 @@ pi-workers:
   services:
     controlPlaneUrl: http://control-plane:3000
     sandboxManagerUrls:
-      - http://sandbox-manager-0:4300
-      - http://sandbox-manager-1:4300
+      - http://sandbox-manager:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""

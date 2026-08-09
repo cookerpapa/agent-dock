@@ -22,7 +22,7 @@ import {
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import { activeTraceCarrier } from "@agent-dock/observability";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 export const SANDBOX_MANAGER_SERVICE_PATH = "/internal/v1/sandbox-manager";
 export const SANDBOX_MANAGER_OPERATION_PATH = "/internal/v1/tool-operation";
@@ -106,12 +106,14 @@ async function boundedJson(response: Response): Promise<unknown> {
 export class SandboxManagerClient {
   readonly #baseUrl: URL;
   readonly #serviceToken: string;
+  readonly #allowInsecureHttp: boolean;
   readonly #requestTimeoutMs: number;
   readonly #idGenerator: () => string;
 
   constructor(options: SandboxManagerClientOptions) {
     this.#baseUrl = baseUrl(options.baseUrl, options.allowInsecureHttp ?? false);
     this.#serviceToken = token(options.serviceToken);
+    this.#allowInsecureHttp = options.allowInsecureHttp ?? false;
     this.#requestTimeoutMs = positiveInteger(
       options.requestTimeoutMs ?? 300_000,
       "requestTimeoutMs",
@@ -150,7 +152,33 @@ export class SandboxManagerClient {
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
+    return this.#create(request, new Set());
+  }
+
+  async #create(
+    request: ToolSandboxCreateRequest,
+    visited: Set<string>,
+  ): Promise<ToolSandboxCreateResponse> {
+    const current = this.#baseUrl.toString();
+    if (visited.has(current) || visited.size >= 3) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_redirect_loop",
+        "Sandbox Manager owner redirect did not converge",
+        false,
+      );
+    }
+    visited.add(current);
     const response = await this.#service(request);
+    if (response.type === "tool_sandbox.owner_redirect") {
+      const owner = new SandboxManagerClient({
+        baseUrl: response.ownerBaseUrl,
+        serviceToken: this.#serviceToken,
+        allowInsecureHttp: this.#allowInsecureHttp,
+        requestTimeoutMs: this.#requestTimeoutMs,
+        idGenerator: this.#idGenerator,
+      });
+      return owner.#create(request, visited);
+    }
     if (response.type !== "tool_sandbox.reserved" || response.requestId !== request.requestId) {
       throw new SandboxManagerClientError(
         "sandbox_manager_protocol_error",
@@ -434,46 +462,50 @@ export class SandboxManagerClient {
   }
 }
 
-export type ShardedSandboxManagerClientOptions = Omit<SandboxManagerClientOptions, "baseUrl"> & {
+export type ReplicatedSandboxManagerClientOptions = Omit<SandboxManagerClientOptions, "baseUrl"> & {
   baseUrls: readonly string[];
 };
 
 /**
- * Routes every Workspace to one stable Sandbox Manager shard. A shard
- * owns the in-memory Cube handoff authority for the complete warm activation;
- * requests must therefore never be distributed by a random L4 load balancer.
- *
- * The shard set is an operator-owned fixed ring. Increasing it requires a
- * blue/green pool and draining the old warm activations first, just like a Pi
- * Worker build transition. Committed Workspace state remains external, so a
- * failed shard is recovered cold rather than adopting an ambiguous live VM.
+ * Balances new reservations across Cell-local Manager replicas. The durable
+ * owner returned by create controls the complete activation. Follow-up Tool
+ * calls never fail over to another replica because doing so could replay an
+ * ambiguous side effect. A warm owner can redirect a later create request back
+ * to itself through the PostgreSQL activation directory.
  */
-export class ShardedSandboxManagerClient {
+export class ReplicatedSandboxManagerClient {
   readonly #clients: readonly SandboxManagerClient[];
-  readonly #activationShards = new Map<string, number>();
+  readonly #ownerClients = new Map<string, SandboxManagerClient>();
+  readonly #activationOwners = new Map<string, SandboxManagerClient>();
+  readonly #serviceToken: string;
+  readonly #allowInsecureHttp: boolean;
+  readonly #requestTimeoutMs: number;
+  readonly #idGenerator: () => string;
+  #nextClient = 0;
 
-  constructor(options: ShardedSandboxManagerClientOptions) {
+  constructor(options: ReplicatedSandboxManagerClientOptions) {
     if (options.baseUrls.length < 1 || options.baseUrls.length > 256) {
-      throw new TypeError("Sandbox Manager shard URL list must contain 1-256 entries");
+      throw new TypeError("Sandbox Manager replica URL list must contain 1-256 entries");
     }
     if (new Set(options.baseUrls).size !== options.baseUrls.length) {
-      throw new TypeError("Sandbox Manager shard URLs must be unique");
+      throw new TypeError("Sandbox Manager replica URLs must be unique");
     }
-    this.#clients = options.baseUrls.map(
-      (baseUrl) => new SandboxManagerClient({ ...options, baseUrl }),
+    this.#serviceToken = token(options.serviceToken);
+    this.#allowInsecureHttp = options.allowInsecureHttp ?? false;
+    this.#requestTimeoutMs = positiveInteger(
+      options.requestTimeoutMs ?? 300_000,
+      "requestTimeoutMs",
     );
+    this.#idGenerator = options.idGenerator ?? randomUUID;
+    this.#clients = options.baseUrls.map((replicaUrl) => {
+      const client = new SandboxManagerClient({ ...options, baseUrl: replicaUrl });
+      this.#ownerClients.set(new URL(replicaUrl).toString(), client);
+      return client;
+    });
   }
 
   operationUrlFor(activationId: string): string {
-    const shard = this.#activationShards.get(activationId);
-    if (shard === undefined) {
-      throw new SandboxManagerClientError(
-        "sandbox_manager_shard_unknown",
-        "Tool Sandbox activation shard is unavailable",
-        false,
-      );
-    }
-    return this.#clients[shard]!.operationUrlFor(activationId);
+    return this.#ownedClient(activationId).operationUrlFor(activationId);
   }
 
   async checkHealth(): Promise<void> {
@@ -483,15 +515,16 @@ export class ShardedSandboxManagerClient {
     if (failure?.status === "rejected" && failure.reason instanceof Error) throw failure.reason;
     throw new SandboxManagerClientError(
       "sandbox_manager_unavailable",
-      "Sandbox Manager shard ring is unavailable",
+      "Sandbox Manager replica set is unavailable",
       true,
     );
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    const shard = this.#workspaceShard(request.assignment);
-    const response = await this.#clients[shard]!.create(request);
-    this.#activationShards.set(response.activationId, shard);
+    const client = this.#clients[this.#nextClient % this.#clients.length]!;
+    this.#nextClient += 1;
+    const response = await client.create(request);
+    this.#activationOwners.set(response.activationId, this.#ownerClient(response.ownerBaseUrl));
     return response;
   }
 
@@ -499,7 +532,7 @@ export class ShardedSandboxManagerClient {
     activationId: string,
     assignment: ToolSandboxAssignment,
   ): Promise<ToolSandboxCaptureResponse> {
-    return this.#ownedClient(activationId, assignment).capture(activationId, assignment);
+    return this.#ownedClient(activationId).capture(activationId, assignment);
   }
 
   async release(
@@ -508,21 +541,17 @@ export class ShardedSandboxManagerClient {
     disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
   ): Promise<ToolSandboxReleaseResponse> {
     try {
-      return await this.#ownedClient(activationId, assignment).release(
-        activationId,
-        assignment,
-        disposition,
-      );
+      return await this.#ownedClient(activationId).release(activationId, assignment, disposition);
     } finally {
-      this.#activationShards.delete(activationId);
+      this.#activationOwners.delete(activationId);
     }
   }
 
   async stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
     try {
-      await this.#ownedClient(activationId, assignment).stop(activationId, assignment);
+      await this.#ownedClient(activationId).stop(activationId, assignment);
     } finally {
-      this.#activationShards.delete(activationId);
+      this.#activationOwners.delete(activationId);
     }
   }
 
@@ -531,28 +560,18 @@ export class ShardedSandboxManagerClient {
     request: ToolSandboxOperationRequest,
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
-    const shard = this.#activationShards.get(request.activationId);
-    if (shard === undefined) {
-      throw new SandboxManagerClientError(
-        "sandbox_manager_shard_unknown",
-        "Tool Sandbox activation shard is unavailable",
-        false,
-      );
-    }
-    return this.#clients[shard]!.operation(capability, request, signal);
+    return this.#ownedClient(request.activationId).operation(capability, request, signal);
   }
 
   importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
-    return this.#clients[0]!.importGitHub(source, signal);
+    return this.#nextReplica().importGitHub(source, signal);
   }
 
   materializeFile(
     request: SandboxManagerMaterializeFileRequest,
     signal?: AbortSignal,
   ): Promise<SandboxManagerMaterializeFileResponse> {
-    return this.#clientForKey(
-      [request.tenantId, request.workspaceId, "materialize"].join("\0"),
-    ).materializeFile(request, signal);
+    return this.#nextReplica().materializeFile(request, signal);
   }
 
   async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
@@ -567,40 +586,53 @@ export class ShardedSandboxManagerClient {
   }
 
   async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
-    await this.#clientForKey(assignment.workspaceId).terminateAndConfirmAbsent(assignment);
+    await this.#allReplicas((client) => client.terminateAndConfirmAbsent(assignment));
   }
 
   async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
-    await this.#clientForKey(assignment.workspaceId).confirmAbsent(assignment);
+    await this.#allReplicas((client) => client.confirmAbsent(assignment));
   }
 
-  #ownedClient(activationId: string, assignment: ToolSandboxAssignment): SandboxManagerClient {
-    const expected = this.#workspaceShard(assignment);
-    const observed = this.#activationShards.get(activationId);
-    if (observed !== undefined && observed !== expected) {
-      throw new SandboxManagerClientError(
-        "sandbox_manager_shard_conflict",
-        "Tool Sandbox activation changed shard ownership",
-        false,
-      );
-    }
-    this.#activationShards.set(activationId, expected);
-    return this.#clients[expected]!;
+  #ownedClient(activationId: string): SandboxManagerClient {
+    const client = this.#activationOwners.get(activationId);
+    if (client !== undefined) return client;
+    throw new SandboxManagerClientError(
+      "sandbox_manager_owner_unknown",
+      "Tool Sandbox activation owner is unavailable",
+      false,
+    );
   }
 
-  #workspaceShard(assignment: ToolSandboxAssignment): number {
-    // All Sessions sharing one Workspace must reach the same Manager. A warm
-    // guest may retain background processes after its Run, so Session-level
-    // sharding could otherwise create two writers for one Workspace.
-    return this.#shard(assignment.workspaceId);
+  #ownerClient(ownerBaseUrl: string): SandboxManagerClient {
+    const key = new URL(ownerBaseUrl).toString();
+    const existing = this.#ownerClients.get(key);
+    if (existing !== undefined) return existing;
+    const client = new SandboxManagerClient({
+      baseUrl: key,
+      serviceToken: this.#serviceToken,
+      allowInsecureHttp: this.#allowInsecureHttp,
+      requestTimeoutMs: this.#requestTimeoutMs,
+      idGenerator: this.#idGenerator,
+    });
+    this.#ownerClients.set(key, client);
+    return client;
   }
 
-  #clientForKey(key: string): SandboxManagerClient {
-    return this.#clients[this.#shard(key)]!;
+  #nextReplica(): SandboxManagerClient {
+    const client = this.#clients[this.#nextClient % this.#clients.length]!;
+    this.#nextClient += 1;
+    return client;
   }
 
-  #shard(key: string): number {
-    const digest = createHash("sha256").update(key, "utf8").digest();
-    return digest.readUInt32BE(0) % this.#clients.length;
+  async #allReplicas(operation: (client: SandboxManagerClient) => Promise<void>): Promise<void> {
+    const results = await Promise.allSettled(this.#clients.map(operation));
+    if (results.some((result) => result.status === "fulfilled")) return;
+    const first = results[0];
+    if (first?.status === "rejected") throw first.reason;
+    throw new SandboxManagerClientError(
+      "sandbox_manager_unavailable",
+      "Sandbox Manager replica operation failed",
+      true,
+    );
   }
 }

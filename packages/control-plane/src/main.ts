@@ -25,7 +25,7 @@ import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
-import { ShardedSandboxManagerClient } from "@agent-dock/sandbox-manager/client";
+import { ReplicatedSandboxManagerClient } from "@agent-dock/sandbox-manager/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
@@ -144,7 +144,7 @@ export async function startControlPlane(): Promise<void> {
         leaseCoordinator: new SessionLeaseCoordinator({ database, sandboxId }),
       });
     };
-    const snapshotMaterializer = new ShardedSandboxManagerClient({
+    const snapshotMaterializer = new ReplicatedSandboxManagerClient({
       baseUrls: config.sandboxManagerBaseUrls,
       serviceToken: config.sandboxMaterializerToken,
       allowInsecureHttp: config.allowInsecureInternalHttp,

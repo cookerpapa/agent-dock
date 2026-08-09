@@ -1,8 +1,4 @@
 {{- $name := include "agent-dock-platform.name" . -}}
-{{- $managerUrls := list -}}
-{{- range $index := until (int .Values.sandboxPlane.shards) -}}
-{{- $managerUrls = append $managerUrls (printf "http://sandbox-manager-%d:4300" $index) -}}
-{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,7 +65,7 @@ spec:
             - { name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE, value: /run/agent-dock-secrets/cube-egress-config-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
             - name: AGENT_DOCK_SANDBOX_MANAGER_URLS
-              value: {{ join "," $managerUrls | quote }}
+              value: "http://sandbox-manager:4300"
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP, value: "true" }
             - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }

@@ -796,8 +796,13 @@ services:
     depends_on:
       workspace-data-mover:
         condition: service_healthy
+      database-bootstrap:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
+      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+      AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
+      AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: http://sandbox-manager:4300
       AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
       AGENT_DOCK_SANDBOX_MANAGER_PORT: "4300"
       AGENT_DOCK_SANDBOX_WARM_TTL_MS: "900000"
@@ -813,6 +818,10 @@ services:
       AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
       AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
     volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/agent-dock-secrets/database-url
+        read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
         target: /run/agent-dock-secrets/sandbox-manager-token
@@ -830,6 +839,7 @@ services:
         target: /run/agent-dock-secrets/metrics-token
         read_only: true
     networks:
+      - database
       - sandbox-control
       - observability
     healthcheck:

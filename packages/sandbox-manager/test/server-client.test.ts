@@ -21,9 +21,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
   SANDBOX_MANAGER_SERVICE_PATH,
+  ReplicatedSandboxManagerClient,
   SandboxManagerClient,
+  SandboxManagerOwnerRedirectError,
   SandboxManagerServer,
-  ShardedSandboxManagerClient,
   type SandboxManagerBackend,
 } from "../src/index.ts";
 
@@ -76,7 +77,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
-function backend(): SandboxManagerBackend {
+function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManagerBackend {
   return {
     providerId: "test-provider",
     async checkHealth() {},
@@ -87,6 +88,7 @@ function backend(): SandboxManagerBackend {
         type: "tool_sandbox.reserved",
         requestId: request.requestId,
         activationId: ACTIVATION_ID,
+        ownerBaseUrl,
         capability: CAPABILITY,
         workspaceRoot: "/workspace",
         continuity: "cold_restore",
@@ -153,7 +155,7 @@ function backend(): SandboxManagerBackend {
 }
 
 describe("Sandbox Manager authenticated RPC", () => {
-  it("stays ready while at least one Manager shard is healthy", async () => {
+  it("stays ready while at least one Manager replica is healthy", async () => {
     const server = new SandboxManagerServer({
       host: "127.0.0.1",
       port: 0,
@@ -162,7 +164,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     });
     servers.push(server);
     const address = await server.listen();
-    const client = new ShardedSandboxManagerClient({
+    const client = new ReplicatedSandboxManagerClient({
       baseUrls: ["http://127.0.0.1:1", address],
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
@@ -172,24 +174,26 @@ describe("Sandbox Manager authenticated RPC", () => {
     await expect(client.checkHealth()).resolves.toBeUndefined();
   });
 
-  it("keeps one Session on one stable Manager shard", async () => {
+  it("balances creates and pins every activation to its returned owner", async () => {
     const calls = [0, 0];
     const activationIds = [
       "10000000-0000-4000-8000-000000000021",
       "10000000-0000-4000-8000-000000000022",
     ];
     const addresses: string[] = [];
-    for (const shard of [0, 1]) {
+    for (const replica of [0, 1]) {
+      let ownerBaseUrl = "http://sandbox-manager.invalid";
       const delegate = backend();
       const manager: SandboxManagerBackend = {
         ...delegate,
         async create(request) {
-          calls[shard]! += 1;
+          calls[replica]! += 1;
           return {
             managerProtocolVersion: 1,
             type: "tool_sandbox.reserved",
             requestId: request.requestId,
-            activationId: activationIds[shard]!,
+            activationId: activationIds[replica]!,
+            ownerBaseUrl,
             capability: CAPABILITY,
             workspaceRoot: "/workspace",
             continuity: "cold_restore",
@@ -203,30 +207,22 @@ describe("Sandbox Manager authenticated RPC", () => {
         manager,
       });
       servers.push(server);
-      addresses.push(await server.listen());
+      ownerBaseUrl = await server.listen();
+      addresses.push(ownerBaseUrl);
     }
-    const client = new ShardedSandboxManagerClient({
+    const client = new ReplicatedSandboxManagerClient({
       baseUrls: addresses,
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
     });
     await expect(client.checkHealth()).resolves.toBeUndefined();
 
-    const workspaceFor = (target: number): string => {
-      for (let candidate = 0; candidate < 1_000; candidate += 1) {
-        const value = `workspace-shard-${String(candidate)}`;
-        if (createHash("sha256").update(value).digest().readUInt32BE(0) % 2 === target) {
-          return value;
-        }
-      }
-      throw new Error("failed to find deterministic shard fixture");
-    };
-    for (const shard of [0, 1]) {
+    for (const replica of [0, 1]) {
       const request: ToolSandboxCreateRequest = {
         managerProtocolVersion: 1,
         type: "tool_sandbox.create",
-        requestId: `10000000-0000-4000-8000-00000000003${String(shard)}`,
-        assignment: { ...assignment, workspaceId: workspaceFor(shard) },
+        requestId: `10000000-0000-4000-8000-00000000003${String(replica)}`,
+        assignment: { ...assignment, workspaceId: `workspace-replica-${String(replica)}` },
         turnContextSha256: STEP_CONTEXT_SHA256,
         attemptContextSha256: STEP_CONTEXT_SHA256,
         environment: {
@@ -242,26 +238,79 @@ describe("Sandbox Manager authenticated RPC", () => {
         workspaceSeed: { kind: "sample_java" },
       };
       const reserved = await client.create(request);
-      expect(reserved.activationId).toBe(activationIds[shard]);
+      expect(reserved.activationId).toBe(activationIds[0]);
       expect(client.operationUrlFor(reserved.activationId)).toBe(
-        new URL("/internal/v1/tool-operation", addresses[shard]).toString(),
+        new URL("/internal/v1/tool-operation", addresses[0]).toString(),
       );
       await expect(client.stop(reserved.activationId, request.assignment)).resolves.toBeUndefined();
       const siblingSessionRequest: ToolSandboxCreateRequest = {
         ...request,
-        requestId: `10000000-0000-4000-8000-00000000004${String(shard)}`,
+        requestId: `10000000-0000-4000-8000-00000000004${String(replica)}`,
         assignment: {
           ...request.assignment,
-          sessionId: `sibling-session-${String(shard)}`,
+          sessionId: `sibling-session-${String(replica)}`,
         },
       };
       const sibling = await client.create(siblingSessionRequest);
-      expect(sibling.activationId).toBe(activationIds[shard]);
+      expect(sibling.activationId).toBe(activationIds[1]);
+      expect(client.operationUrlFor(sibling.activationId)).toBe(
+        new URL("/internal/v1/tool-operation", addresses[1]).toString(),
+      );
       await expect(
         client.stop(sibling.activationId, siblingSessionRequest.assignment),
       ).resolves.toBeUndefined();
     }
     expect(calls).toEqual([2, 2]);
+  });
+
+  it("follows the durable activation owner instead of replaying create elsewhere", async () => {
+    const owner = new SandboxManagerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: SERVICE_TOKEN,
+      manager: backend(),
+    });
+    servers.push(owner);
+    const ownerAddress = await owner.listen();
+    const redirect = new SandboxManagerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: SERVICE_TOKEN,
+      manager: {
+        ...backend(),
+        async create() {
+          throw new SandboxManagerOwnerRedirectError(ownerAddress);
+        },
+      },
+    });
+    servers.push(redirect);
+    const redirectAddress = await redirect.listen();
+    const client = new SandboxManagerClient({
+      baseUrl: redirectAddress,
+      serviceToken: SERVICE_TOKEN,
+      allowInsecureHttp: true,
+    });
+
+    const reserved = await client.create({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.create",
+      requestId: "10000000-0000-4000-8000-000000000071",
+      assignment,
+      turnContextSha256: STEP_CONTEXT_SHA256,
+      attemptContextSha256: STEP_CONTEXT_SHA256,
+      environment: {
+        environmentVersionId: "10000000-0000-4000-8000-000000000013",
+        versionNumber: 1,
+        profileKey: "agent-dock-fullstack",
+        profileVersion: "1",
+        imageRevision: "development",
+        specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+        recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+      },
+      workspaceSeed: { kind: "sample_java" },
+    });
+    expect(reserved.activationId).toBe(ACTIVATION_ID);
   });
 
   it("separates the service credential from the per-activation tool capability", async () => {

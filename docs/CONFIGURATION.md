@@ -39,7 +39,7 @@ file outside Git. Its main restart-bound settings are:
 | `global.imagePullSecrets` | Namespace-local registry credentials used by every AgentDock Pod, including Pi Workers. |
 | `controlPlane.autoscaling` / `web.autoscaling` | HPA lower/upper bounds and CPU targets. |
 | `pi-workers.autoscaling` | KEDA Temporal backlog target, Worker lower/upper bounds and conservative scale-down windows. |
-| `sandboxPlane.shards` | Fixed Sandbox Manager/Data Mover ring size; changing it requires the documented drain procedure. |
+| `sandboxPlane.replicas` | Sandbox Manager/Data Mover replica count; production requires at least three for Lease-based owner-loss detection. |
 | `external.database.*` | PgBouncer application URL key plus a direct PostgreSQL session URL key for `LISTEN` and migrations. |
 | `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
 | `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |

@@ -4,11 +4,8 @@
 {{- if lt (int .Values.web.replicas) 2 -}}
 {{- fail "web.replicas must be at least 2 for the distributed profile" -}}
 {{- end -}}
-{{- if lt (int .Values.sandboxPlane.shards) 1 -}}
-{{- fail "sandboxPlane.shards must be positive" -}}
-{{- end -}}
-{{- if ne (int .Values.sandboxPlane.shards) (len (index .Values "pi-workers").services.sandboxManagerUrls) -}}
-{{- fail "sandboxPlane.shards must equal pi-workers.services.sandboxManagerUrls length; change the fixed shard ring only through a drained rollout" -}}
+{{- if lt (int .Values.sandboxPlane.replicas) 3 -}}
+{{- fail "sandboxPlane.replicas must be at least 3 for lease-based ownership failover" -}}
 {{- end -}}
 {{- if and .Values.controlPlane.autoscaling.enabled (lt (int .Values.controlPlane.autoscaling.maxReplicas) (int .Values.controlPlane.autoscaling.minReplicas)) -}}
 {{- fail "controlPlane.autoscaling.maxReplicas must be at least minReplicas" -}}

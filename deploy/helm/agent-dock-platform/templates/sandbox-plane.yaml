@@ -4,27 +4,25 @@ kind: Service
 metadata: { name: {{ $name }}-sandbox-manager-headless }
 spec:
   clusterIP: None
+  publishNotReadyAddresses: false
   selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
   ports:
     - { name: manager, port: 4300, targetPort: manager }
     - { name: metrics, port: 9466, targetPort: metrics }
-{{- $root := . }}
-{{- range $ordinal := until (int .Values.sandboxPlane.shards) }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: sandbox-manager-{{ $ordinal }}
+  name: sandbox-manager
   labels:
-    {{- include "agent-dock-platform.labels" $root | nindent 4 }}
-    agent-dock.io/sandbox-shard: {{ $ordinal | quote }}
+    {{- include "agent-dock-platform.labels" . | nindent 4 }}
 spec:
   selector:
-    statefulset.kubernetes.io/pod-name: {{ $name }}-sandbox-manager-{{ $ordinal }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: sandbox-manager
   ports:
     - { name: manager, port: 4300, targetPort: manager }
     - { name: metrics, port: 9466, targetPort: metrics }
-{{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -35,7 +33,7 @@ metadata:
     app.kubernetes.io/component: sandbox-manager
 spec:
   serviceName: {{ $name }}-sandbox-manager-headless
-  replicas: {{ .Values.sandboxPlane.shards }}
+  replicas: {{ .Values.sandboxPlane.replicas }}
   podManagementPolicy: Parallel
   updateStrategy: { type: RollingUpdate }
   persistentVolumeClaimRetentionPolicy: { whenDeleted: Retain, whenScaled: Retain }
@@ -81,11 +79,17 @@ spec:
             - { name: metrics, containerPort: 9466 }
           env:
             - { name: NODE_ENV, value: production }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
+            - { name: AGENT_DOCK_EXECUTION_CELL_ID, value: {{ .Values.sandboxPlane.executionCellId | quote }} }
+            - name: AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL
+              value: {{ printf "http://$(POD_NAME).%s-sandbox-manager-headless:4300" $name | quote }}
             - { name: AGENT_DOCK_SANDBOX_MANAGER_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_SANDBOX_MANAGER_PORT, value: "4300" }
             - { name: AGENT_DOCK_SANDBOX_WARM_TTL_MS, value: {{ .Values.sandboxPlane.warmTtlMs | quote }} }
-            - { name: AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES, value: {{ .Values.sandboxPlane.maximumActivePerShard | quote }} }
-            - { name: AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, value: {{ .Values.sandboxPlane.maximumWarmPerShard | quote }} }
+            - { name: AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES, value: {{ .Values.sandboxPlane.maximumActivePerReplica | quote }} }
+            - { name: AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, value: {{ .Values.sandboxPlane.maximumWarmPerReplica | quote }} }
             - { name: AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-manager-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_URL, value: http://127.0.0.1:4500 }
@@ -111,6 +115,7 @@ spec:
             capabilities: { drop: [ALL] }
           resources: {{- toYaml .Values.sandboxPlane.managerResources | nindent 12 }}
           volumeMounts:
+            - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-manager-token, subPath: sandbox-manager-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-materializer-token, subPath: sandbox-materializer-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
@@ -170,6 +175,6 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata: { name: {{ $name }}-sandbox-manager }
 spec:
-  minAvailable: 1
+  minAvailable: 2
   selector:
     matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
