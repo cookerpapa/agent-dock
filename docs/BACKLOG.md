@@ -64,6 +64,8 @@ in the implementation log or Git history, not in the active backlog.
       restore latency without starving other task queues.
 - [ ] Publish a repeatable capacity report for Worker, Cube, PostgreSQL,
       Temporal and object-storage saturation.
+- [x] Hash-partition the PostgreSQL Session event log without weakening global
+      Event-ID idempotency or resumable per-Session sequence order.
 - [ ] Measure active concurrent streaming Sessions against PostgreSQL commit
       rate, WAL bytes, connection-pool wait and SSE delivery lag before adding
       an external event broker or terminal-delta retention compaction.

@@ -767,6 +767,13 @@ export interface SessionEventCursorTable {
   updated_at: GeneratedTimestamp;
 }
 
+export interface SessionEventIdTable {
+  event_id: string;
+  session_id: string;
+  seq: Int8;
+  created_at: GeneratedTimestamp;
+}
+
 export interface ConversationTurnProjectionTable {
   turn_id: string;
   tenant_id: string;
@@ -1093,6 +1100,7 @@ export interface Database {
   commands: CommandTable;
   approvals: ApprovalTable;
   session_events: SessionEventTable;
+  session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
   conversation_turn_projections: ConversationTurnProjectionTable;
   outbox: OutboxTable;

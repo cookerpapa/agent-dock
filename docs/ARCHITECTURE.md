@@ -181,7 +181,7 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | active Pi `messages[]` | Pi SDK memory for one active Run |
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
-| streamed event log/high-water mark | PostgreSQL |
+| streamed event log/high-water mark | PostgreSQL, hash-partitioned by Session |
 | UI transcript projection | PostgreSQL-derived read model |
 
 The rendered browser transcript is not used to reconstruct Pi context during

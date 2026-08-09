@@ -65,6 +65,7 @@ export {
   downModelSamplingStepIdentity,
   downEnterpriseExecutionCells,
   downSandboxManagerOwnership,
+  downPartitionedSessionEventLog,
   migrationProvider,
   upDurableEventDelivery,
   upDurableRunsAndAttempts,
@@ -94,6 +95,7 @@ export {
   upModelSamplingStepIdentity,
   upEnterpriseExecutionCells,
   upSandboxManagerOwnership,
+  upPartitionedSessionEventLog,
 } from "./migrations/index.ts";
 
 export {

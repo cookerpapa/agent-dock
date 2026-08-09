@@ -7,6 +7,14 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-09 — 分区持久 Session 事件日志
+
+- 将 `session_events` 按 `session_id` 拆成 32 个 PostgreSQL 哈希分区，保留
+  cumulative ACK 和 SSE 断线续传依赖的 Session 内连续序号。
+- 因 PostgreSQL 分区唯一键必须包含分区键，新增全局 Event ID 注册表和注册
+  trigger；跨 Session 的幂等约束仍然成立，Compaction 外键改为引用注册表。
+- 新增 up/down 迁移验证，并通过完整 database 测试套件。
+
 ## 2026-08-08 — 显式且有界的项目完成门禁
 
 - 复用冻结的项目环境 recipe：只有存在 ID 为 `settlement-gate` 的 verification

@@ -33,6 +33,7 @@ import * as typedToolOutcomes from "./031_typed_tool_outcomes.ts";
 import * as modelSamplingStepIdentity from "./032_model_sampling_step_identity.ts";
 import * as enterpriseExecutionCells from "./033_enterprise_execution_cells.ts";
 import * as sandboxManagerOwnership from "./034_sandbox_manager_ownership.ts";
+import * as partitionedSessionEventLog from "./035_partitioned_session_event_log.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -71,6 +72,7 @@ export const migrationProvider: MigrationProvider = {
       "032_model_sampling_step_identity": modelSamplingStepIdentity,
       "033_enterprise_execution_cells": enterpriseExecutionCells,
       "034_sandbox_manager_ownership": sandboxManagerOwnership,
+      "035_partitioned_session_event_log": partitionedSessionEventLog,
     };
   },
 };
@@ -239,3 +241,8 @@ export {
   down as downSandboxManagerOwnership,
   up as upSandboxManagerOwnership,
 } from "./034_sandbox_manager_ownership.ts";
+
+export {
+  down as downPartitionedSessionEventLog,
+  up as upPartitionedSessionEventLog,
+} from "./035_partitioned_session_event_log.ts";
