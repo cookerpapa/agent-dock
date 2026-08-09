@@ -18,6 +18,14 @@ latency, repository size, Cube capacity, PostgreSQL/event-log throughput and wor
 profiles deliberately provision more Sandbox admission capacity than Worker slots, so the
 Sandbox Manager is not the first configured admission bottleneck.
 
+The global event plane uses the measured-gated Kafka path. Install the Strimzi
+cluster and topic from [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md) before
+deploying either profile. PostgreSQL remains the Run/fence/sequence authority;
+Kafka carries high-frequency Worker batches, and Event Gateway replicas build
+the replay/semantic projection consumed by SSE and terminal settlement. KEDA
+scales those replicas from Kafka consumer-group lag plus CPU, while retaining a
+three-replica floor if the scaler cannot read Kafka metrics.
+
 ## Deployment topology
 
 The same Helm chart has two explicit roles:
@@ -75,7 +83,7 @@ node scripts/enterprise-cells.mjs deploy \
 ```
 
 The Stage 2 command is identical except for the profile path. `preflight` requires KEDA, the
-Kubernetes Metrics API, all namespace-scoped credentials and RWX Workspace claims. Deployment is
+Kubernetes Metrics API, a Ready Kafka bootstrap service, all namespace-scoped credentials and RWX Workspace claims. Deployment is
 atomic per Helm release; a failed Cell does not silently mutate the directory of another Cell.
 
 ## Authorities and isolation

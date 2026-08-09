@@ -23,6 +23,7 @@ export type EventGatewayOptions = {
   eventHub?: SessionEventHub;
   heartbeatIntervalMs?: number;
   replayPageSize?: number;
+  dependencyReadiness?: () => Promise<void>;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
@@ -88,6 +89,7 @@ export class EventGateway {
       let ready = false;
       try {
         await sql`select 1`.execute(this.#database);
+        await options.dependencyReadiness?.();
         ready = this.#started;
       } catch {
         ready = false;

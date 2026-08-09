@@ -75,6 +75,9 @@ eventGateway:
     minReplicas: 3
     maxReplicas: 32
     targetCpuUtilization: 60
+    pollingIntervalSeconds: 5
+    cooldownSeconds: 300
+    kafkaLagThreshold: "1000"
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "2", memory: 768Mi }
@@ -106,6 +109,16 @@ external:
     address: temporal-frontend.temporal.svc.cluster.local:7233
     namespace: agent-dock
     taskQueue: agent-dock-pi-runs-cell-0001-v1
+  kafka:
+    brokers:
+      - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
+    topic: agent-dock-worker-events-v1
+    projectorGroupId: agent-dock-worker-event-projector-v1
+    security:
+      enabled: true
+      caSecretKey: kafka-ca.crt
+      usernameSecretKey: kafka-username
+      passwordSecretKey: kafka-password
   checkpointS3:
     endpoint: https://s3.example.com
     region: us-east-1
@@ -128,7 +141,7 @@ networkPolicy:
     key: agent-dock.io/trusted-plane
     value: "true"
   trustedTcpPorts:
-    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 7233, 9000, 9464, 9465, 9466, 9467]
+    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 7233, 9000, 9093, 9464, 9465, 9466, 9467]
   # Add the explicit CIDRs of external PostgreSQL/PgBouncer, Temporal, S3,
   # provider proxy, Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
   externalEgressCidrs: []
@@ -216,6 +229,7 @@ pi-workers:
     metricsTokenKey: metrics-token
   runtime:
     allowInsecureInternalHttp: true
+    externalWorkerEventLog: true
     checkpointCache: { ttlMs: 600000, maximumEntries: 512, maximumBytes: 33554432 }
     timeouts:
       sandboxManagerRequestMs: 300000

@@ -35,17 +35,28 @@ restart/reconnect evidence.
 ## Streaming durability
 
 Streaming text is coalesced before it enters the Worker WAL, then delivered as
-contiguous batches with cumulative ACK. The Control Plane integration suite
-includes a mixed redelivery/new-suffix case and proves that one batch performs
-one event-table insert and one cursor/Session advance. SSE still reads only
-committed PostgreSQL rows, and Pi recovery tests prove that committed text and
-Tool facts appear in Pi's effective next model context after hard-crash
-recovery.
+contiguous batches with cumulative ACK. The bounded profile writes one batch
+to the partitioned PostgreSQL event table. The enterprise profile commits one
+transactional transfer Outbox row, publishes it at least once to Kafka and
+projects it idempotently into that replay table. The integration suite covers
+mixed redelivery, an Outbox-backed ACK, duplicate Kafka projection and the
+separate persisted/projected cursor. SSE still reads only projected PostgreSQL
+rows, and Pi recovery tests prove that committed text and Tool facts appear in
+Pi's effective next model context after hard-crash recovery.
 
-This removes per-token transactions and per-event cursor updates. It is not yet
-a PostgreSQL saturation claim; the active-stream capacity experiment remains in
-the backlog and must measure transaction rate, WAL, pool wait and SSE lag on the
-deployment being described.
+This removes per-token transactions and per-event cursor updates. The measured
+2,000-Session PostgreSQL gate committed 128,000 logical events at 3,223 events/s
+with a 3,592 ms batch-ACK p95, which failed the selected 10,000 events/s and
+500 ms p95 enterprise gate and triggered the Kafka implementation. The Strimzi
+Stage 2 manifests are capacity inputs only; multi-node broker/projector loss and
+sustained Kafka throughput are not yet measured claims.
+
+The local transport acceptance in
+[kafka-worker-event-acceptance-latest.md](reports/kafka-worker-event-acceptance-latest.md)
+uses the production Confluent/librdkafka client against a real Kafka broker. It
+verifies Session-key ordering and end-to-end envelope projection without Node
+24 client warnings. It is deliberately scoped as a transport check rather than
+a multi-broker Stage 2 capacity result.
 
 For the end-to-end Control Plane boundary, deploy the current revision and run:
 

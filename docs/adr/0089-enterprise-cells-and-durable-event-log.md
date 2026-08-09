@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for staged implementation on 2026-08-09.
+Implemented for staged deployment on 2026-08-09.
 
 This ADR supersedes the capacity-one Worker and process-local Sandbox Manager
 ring decisions in ADR-0057, ADR-0058, ADR-0059, ADR-0071 and ADR-0088. Their
@@ -69,10 +69,43 @@ sequence error, but sustained only 3,223 events/s with a batch-ACK p95 of
 10,000 events/s and 500ms p95 gate even after hash partitioning and set-based
 cross-Session group commit.
 
-The measured gate therefore authorizes the Kafka adapter described by this
-ADR. PostgreSQL remains the active event authority until the Kafka producer,
-replay reader, terminal projection barrier and one-way cutover acceptance all
-pass together; a partial dual-write deployment is not permitted.
+The measured gate therefore authorized the Kafka adapter described by this
+ADR. The enterprise profile now uses a one-way pipeline:
+
+```text
+Worker WAL
+  -> PostgreSQL transactional batch Outbox + identity/hash registration
+  -> Kafka (Session key, at-least-once)
+  -> idempotent Event Gateway projection
+  -> partitioned PostgreSQL replay/semantic tables
+  -> resumable SSE
+```
+
+The Outbox is a bounded transfer ledger, not a second readable event stream.
+It lets the request transaction acknowledge an ordered durable batch without
+holding Session row locks across a Kafka network call. Published Outbox rows
+are retained for one day and then pruned; Kafka is the durable high-frequency
+transport and the PostgreSQL event table is its rebuildable browser/semantic
+projection. Content hashes and `(session_id, seq)` registrations reject
+conflicting redelivery at both boundaries.
+
+The Control Plane still owns terminal events and business settlement. A
+terminal transaction is admitted only when `last_projected_seq` has caught up
+with `last_persisted_seq`; it then advances persisted, projected and
+acknowledged cursors together. Thus a completed Turn cannot overtake text or
+Tool facts that the Worker already crossed through its durable ACK barrier.
+
+The checked-in Strimzi Stage 2 baseline has three KRaft controllers, six
+brokers, 256 Session-keyed partitions, replication factor three and
+`min.insync.replicas=2`. These are deployable capacity inputs, not a claim that
+10,000 concurrent Runs have been measured on the local machine.
+
+Event Gateway uses Confluent's maintained JavaScript client backed by
+librdkafka. It is the only Kafka client in this path. KEDA scales the shared
+projector group from consumer lag and CPU, with a non-zero failure fallback;
+the maximum replica count stays below the topic partition count. The baseline
+listener uses TLS plus SCRAM-SHA-512, and its KafkaUser is restricted to the
+event topic, projector group and idempotent producer operation.
 
 ## Adopt-before-build evidence
 

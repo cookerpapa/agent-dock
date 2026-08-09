@@ -1,0 +1,51 @@
+# Enterprise Worker event log
+
+Phase 2 uses an external Kafka cluster for high-frequency Worker events. Install
+the Strimzi operator first, label the namespace that runs the operator according
+to local policy, and then apply these manifests:
+
+```bash
+kubectl apply -f deploy/enterprise/kafka/namespace.yaml
+kubectl apply -f deploy/enterprise/kafka/cluster.yaml
+kubectl -n agent-dock-eventing wait kafka/agent-dock-kafka \
+  --for=condition=Ready --timeout=20m
+```
+
+The checked-in capacity is the Stage 2 baseline: six brokers, 256 partitions,
+replication factor three and `min.insync.replicas=2`. Its internal listener is
+TLS-only on port 9093 and requires SCRAM-SHA-512. The checked-in `KafkaUser`
+limits the Event Gateway to the Worker-event topic, projector consumer group
+and idempotent producer operation. Storage-class selection and any additional
+dedicated-node labels remain operator-specific. Do not expose the listener
+outside the trusted cluster network.
+
+The production manifest deliberately requires three Kubernetes availability
+zones and separate hosts for members of each node pool. Label Kafka worker
+nodes with `topology.kubernetes.io/zone` and provide at least three controller
+hosts plus six broker hosts before applying it. Strimzi rack awareness uses the
+same zone label so replicas are distributed across failure domains instead of
+only across processes on one machine.
+
+Strimzi creates the user password in
+`agent-dock-eventing/agent-dock-event-gateway` and the CA in
+`agent-dock-eventing/agent-dock-kafka-cluster-ca-cert`. Before the global plane
+is deployed, synchronize those values into the global namespace's existing
+platform Secret under these keys:
+
+```text
+kafka-username = agent-dock-event-gateway
+kafka-password = generated Secret key `password`
+kafka-ca.crt    = generated Secret key `ca.crt`
+```
+
+Use the organization's External Secrets/secret replication controller for
+continuous synchronization. AgentDock's enterprise preflight fails closed when
+any of the three keys is absent. Neither value is copied to a Pi Worker or Cube
+sandbox.
+
+AgentDock uses a transactional PostgreSQL Outbox before Kafka. A Worker ACK
+means the ordered batch and its hashes are durable in PostgreSQL; the Event
+Gateway publishes it at least once to Kafka and projects it idempotently into
+the partitioned replay table. Browser SSE reads only projected rows. Terminal
+Run commits wait for the projected cursor, so a completed Turn never overtakes
+its visible text or Tool events.

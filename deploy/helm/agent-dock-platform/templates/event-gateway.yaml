@@ -60,6 +60,15 @@ spec:
             - { name: PORT, value: "4600" }
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
             - { name: AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE, value: /run/agent-dock-secrets/database-notification-url }
+            - name: AGENT_DOCK_KAFKA_BROKERS
+              value: {{ join "," .Values.external.kafka.brokers | quote }}
+            - { name: AGENT_DOCK_WORKER_EVENT_TOPIC, value: {{ .Values.external.kafka.topic | quote }} }
+            - { name: AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP, value: {{ .Values.external.kafka.projectorGroupId | quote }} }
+            {{- if .Values.external.kafka.security.enabled }}
+            - { name: AGENT_DOCK_KAFKA_CA_FILE, value: /run/agent-dock-secrets/kafka-ca.crt }
+            - { name: AGENT_DOCK_KAFKA_USERNAME_FILE, value: /run/agent-dock-secrets/kafka-username }
+            - { name: AGENT_DOCK_KAFKA_PASSWORD_FILE, value: /run/agent-dock-secrets/kafka-password }
+            {{- end }}
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_METRICS_PORT, value: "9467" }
             - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }
@@ -77,6 +86,11 @@ spec:
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: {{ .Values.external.database.secretKey }}, readOnly: true }
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/database-notification-url, subPath: {{ .Values.external.database.notificationSecretKey }}, readOnly: true }
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
+            {{- if .Values.external.kafka.security.enabled }}
+            - { name: platform-secrets, mountPath: /run/agent-dock-secrets/kafka-ca.crt, subPath: {{ .Values.external.kafka.security.caSecretKey }}, readOnly: true }
+            - { name: platform-secrets, mountPath: /run/agent-dock-secrets/kafka-username, subPath: {{ .Values.external.kafka.security.usernameSecretKey }}, readOnly: true }
+            - { name: platform-secrets, mountPath: /run/agent-dock-secrets/kafka-password, subPath: {{ .Values.external.kafka.security.passwordSecretKey }}, readOnly: true }
+            {{- end }}
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: platform-secrets
@@ -105,19 +119,53 @@ spec:
     matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: event-gateway }
 {{- if .Values.eventGateway.autoscaling.enabled }}
 ---
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
 metadata: { name: {{ $name }}-event-gateway }
 spec:
   scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }}-event-gateway }
-  minReplicas: {{ .Values.eventGateway.autoscaling.minReplicas }}
-  maxReplicas: {{ .Values.eventGateway.autoscaling.maxReplicas }}
-  behavior:
-    scaleDown: { stabilizationWindowSeconds: 300 }
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: { type: Utilization, averageUtilization: {{ .Values.eventGateway.autoscaling.targetCpuUtilization }} }
+  pollingInterval: {{ .Values.eventGateway.autoscaling.pollingIntervalSeconds }}
+  cooldownPeriod: {{ .Values.eventGateway.autoscaling.cooldownSeconds }}
+  minReplicaCount: {{ .Values.eventGateway.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.eventGateway.autoscaling.maxReplicas }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ .Values.eventGateway.autoscaling.minReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: { stabilizationWindowSeconds: 300 }
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ join "," .Values.external.kafka.brokers | quote }}
+        consumerGroup: {{ .Values.external.kafka.projectorGroupId | quote }}
+        topic: {{ .Values.external.kafka.topic | quote }}
+        lagThreshold: {{ .Values.eventGateway.autoscaling.kafkaLagThreshold | quote }}
+        activationLagThreshold: "0"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "true"
+        scaleToZeroOnInvalidOffset: "false"
+        {{- if .Values.external.kafka.security.enabled }}
+        tls: enable
+        sasl: scram_sha512
+      authenticationRef:
+        name: {{ $name }}-event-gateway-kafka
+        {{- end }}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.eventGateway.autoscaling.targetCpuUtilization | quote }}
+{{- if .Values.external.kafka.security.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata: { name: {{ $name }}-event-gateway-kafka }
+spec:
+  secretTargetRef:
+    - { parameter: username, name: {{ .Values.global.existingSecret }}, key: {{ .Values.external.kafka.security.usernameSecretKey }} }
+    - { parameter: password, name: {{ .Values.global.existingSecret }}, key: {{ .Values.external.kafka.security.passwordSecretKey }} }
+    - { parameter: ca, name: {{ .Values.global.existingSecret }}, key: {{ .Values.external.kafka.security.caSecretKey }} }
+{{- end }}
 {{- end }}
 {{- end }}

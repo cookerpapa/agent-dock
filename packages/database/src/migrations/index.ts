@@ -37,6 +37,7 @@ import * as partitionedSessionEventLog from "./035_partitioned_session_event_log
 import * as fasterEventIdentityRegistration from "./036_faster_event_identity_registration.ts";
 import * as executionCellWorkerRoutes from "./037_execution_cell_worker_routes.ts";
 import * as workspaceCellMigrations from "./038_workspace_cell_migrations.ts";
+import * as externalWorkerEventLog from "./039_external_worker_event_log.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -79,6 +80,7 @@ export const migrationProvider: MigrationProvider = {
       "036_faster_event_identity_registration": fasterEventIdentityRegistration,
       "037_execution_cell_worker_routes": executionCellWorkerRoutes,
       "038_workspace_cell_migrations": workspaceCellMigrations,
+      "039_external_worker_event_log": externalWorkerEventLog,
     };
   },
 };
@@ -266,3 +268,7 @@ export {
   down as downWorkspaceCellMigrations,
   up as upWorkspaceCellMigrations,
 } from "./038_workspace_cell_migrations.ts";
+export {
+  down as downExternalWorkerEventLog,
+  up as upExternalWorkerEventLog,
+} from "./039_external_worker_event_log.ts";

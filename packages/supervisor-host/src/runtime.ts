@@ -5,6 +5,7 @@ import {
   TtlCheckpointObjectStore,
 } from "@agent-dock/runtime-core/checkpoint-runtime";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import { PostgresEventProjectionBarrier } from "@agent-dock/runtime-core/event-projection-barrier";
 import { LocalSupervisorExecutionBackend } from "@agent-dock/runtime-core/local-supervisor-execution-backend";
 import {
   PostgresTenantModelCredentialResolver,
@@ -421,7 +422,11 @@ export class SupervisorHostRuntime {
       const eventStore = new DurableEventStore({
         database: this.#database,
         eventNotificationPublisher: eventNotifications,
+        externalWorkerEventLog: this.#config.externalWorkerEventLog ?? false,
       });
+      const eventProjectionBarrier = this.#config.externalWorkerEventLog
+        ? new PostgresEventProjectionBarrier({ database: this.#database })
+        : undefined;
       const leaseCoordinator = new SessionLeaseCoordinator({
         database: this.#database,
         sandboxId: identity.sandboxId,
@@ -457,6 +462,7 @@ export class SupervisorHostRuntime {
           backend: localBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
+          ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
           claimOwnerId: `temporal:${identity.supervisorId}:${identity.bootId}`,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
@@ -465,6 +471,7 @@ export class SupervisorHostRuntime {
           backend: localBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
+          ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
         }),
       });
       this.#temporalWorker = temporalWorker;

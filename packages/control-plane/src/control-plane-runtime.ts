@@ -62,6 +62,7 @@ export type ControlPlaneRuntimeOptions = Omit<
   controlChannelRouter?: ControlChannelConfiguration;
   gateway?: GatewayConfiguration;
   maintenance?: MaintenanceConfiguration;
+  externalWorkerEventLog?: boolean;
 };
 
 export type ControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
@@ -154,6 +155,7 @@ export async function createControlPlaneRuntime(
     ...(options.sessionEventNotifications === undefined
       ? {}
       : { eventNotificationPublisher: options.sessionEventNotifications }),
+    externalWorkerEventLog: options.externalWorkerEventLog ?? false,
   });
   const eventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
   const controlChannelRouter = new WorkerControlChannelRouter({

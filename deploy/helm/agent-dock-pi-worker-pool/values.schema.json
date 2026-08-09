@@ -267,9 +267,16 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowInsecureInternalHttp", "checkpointCache", "timeouts", "repositoryImport"],
+      "required": [
+        "allowInsecureInternalHttp",
+        "externalWorkerEventLog",
+        "checkpointCache",
+        "timeouts",
+        "repositoryImport"
+      ],
       "properties": {
         "allowInsecureInternalHttp": { "type": "boolean" },
+        "externalWorkerEventLog": { "type": "boolean" },
         "checkpointCache": {
           "type": "object",
           "additionalProperties": false,

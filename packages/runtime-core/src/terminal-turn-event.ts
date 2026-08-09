@@ -56,7 +56,7 @@ export async function commitTerminalTurnEvent(
     .executeTakeFirst();
   const cursor = await transaction
     .selectFrom("session_event_cursors")
-    .select(["last_persisted_seq", "acknowledged_through_seq"])
+    .select(["last_persisted_seq", "last_projected_seq", "acknowledged_through_seq"])
     .where("session_id", "=", input.sessionId)
     .forUpdate()
     .executeTakeFirst();
@@ -66,7 +66,13 @@ export async function commitTerminalTurnEvent(
   const sequence = safeSequence(session.next_event_seq, "Session next event sequence");
   const persisted = safeSequence(cursor.last_persisted_seq, "Persisted event cursor");
   const acknowledged = safeSequence(cursor.acknowledged_through_seq, "Acknowledged event cursor");
-  if (sequence < 1 || persisted !== sequence - 1 || acknowledged !== persisted) {
+  const projected = safeSequence(cursor.last_projected_seq, "Projected event cursor");
+  if (
+    sequence < 1 ||
+    persisted !== sequence - 1 ||
+    projected !== persisted ||
+    acknowledged !== persisted
+  ) {
     throw new Error("Terminal event stream is not contiguous");
   }
 
@@ -112,11 +118,13 @@ export async function commitTerminalTurnEvent(
     .updateTable("session_event_cursors")
     .set({
       last_persisted_seq: sequence,
+      last_projected_seq: sequence,
       acknowledged_through_seq: sequence,
       updated_at: input.now,
     })
     .where("session_id", "=", input.sessionId)
     .where("last_persisted_seq", "=", cursor.last_persisted_seq)
+    .where("last_projected_seq", "=", cursor.last_projected_seq)
     .where("acknowledged_through_seq", "=", cursor.acknowledged_through_seq)
     .executeTakeFirst();
   expectOne(cursorUpdate.numUpdatedRows, "Advancing the terminal event cursor");

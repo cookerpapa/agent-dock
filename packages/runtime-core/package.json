@@ -10,6 +10,7 @@
     "./checkpoint-store": "./src/checkpoint-store.ts",
     "./conversation-turn-projection": "./src/conversation-turn-projection.ts",
     "./durable-event-store": "./src/durable-event-store.ts",
+    "./event-projection-barrier": "./src/event-projection-barrier.ts",
     "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
@@ -27,7 +28,8 @@
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
-    "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts"
+    "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts",
+    "./worker-event-log": "./src/worker-event-log.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -42,6 +44,7 @@
     "@agent-dock/temporal-orchestration": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
     "@aws-sdk/client-s3": "3.1090.0",
+    "@confluentinc/kafka-javascript": "1.10.0",
     "kysely": "0.29.4",
     "pg": "8.22.0"
   },

@@ -46,19 +46,20 @@ The NestJS/Fastify Control Plane owns:
 - model/proxy configuration metadata;
 - Temporal Workflow creation and cancellation.
 
-PostgreSQL is the source of truth. Temporal is the durable execution engine, not
-the business database.
+PostgreSQL is the business-state and sequence/fence source of truth. Temporal is
+the durable execution engine, not the business database; Kafka is the
+enterprise high-frequency Worker-event transport, not a Run-state authority.
 
 ### Event Gateway
 
 The Event Gateway is the browser-facing, horizontally scalable read path for
-long-lived resumable SSE connections. It authenticates the same browser/API
-credentials as the Control Plane, opens a replay window from the selected
-`DurableEventLog`, and sends only events that have crossed its durable ACK
-boundary. PostgreSQL `NOTIFY` is a wake-up hint; the partitioned event table and
-its per-Session sequence remain authoritative, so reconnect and missed
-notifications are repaired by replay. The Gateway cannot admit Runs, ingest
-Worker events or commit terminal state.
+long-lived resumable SSE connections. In the enterprise profile its replicas
+also bridge the transactional Worker-event Outbox to Kafka and consume the
+shared projector group. It authenticates the same browser/API credentials as
+the Control Plane, opens a replay window from `DurableEventLog`, and sends only
+projected events. PostgreSQL `NOTIFY` is a wake-up hint; reconnect and missed
+notifications are repaired from the partitioned replay table. The Gateway
+cannot admit Runs or commit terminal state.
 
 ### Temporal
 
@@ -192,7 +193,7 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | active Pi `messages[]` | Pi SDK memory for one active Run |
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
-| streamed event log/high-water mark | PostgreSQL, hash-partitioned by Session |
+| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/hash cursor and replay projection |
 | browser SSE connections and replay cursors | stateless Event Gateway replicas |
 | UI transcript projection | PostgreSQL-derived read model |
 
@@ -463,12 +464,19 @@ block are coalesced for at most 50 ms or 2 KiB. Tool/message/terminal boundaries
 flush pending text immediately. A bounded asynchronous publisher sends a
 contiguous batch after at most 20 ms, 64 events or 512 KiB.
 
-PostgreSQL validates an exact redelivery prefix in bulk, inserts the new suffix
-with one multi-row statement and advances the event cursor and Session once in
-the same synchronous transaction. It returns one cumulative ACK. Concurrent
-Session transactions benefit from PostgreSQL's native WAL group commit without
-an application-level cross-tenant coordinator. A unique event/sequence identity
-provides deduplication.
+The bounded self-hosted profile writes the suffix directly to the partitioned
+PostgreSQL event table. The enterprise profile writes one transactional Outbox
+row per Session batch together with sequence advancement, event identity and a
+canonical content hash, then returns one cumulative ACK. No Kafka network call
+occurs while PostgreSQL Session locks are held.
+
+Event Gateway replicas claim only the earliest unpublished batch for each
+Session, append it to Kafka with `sessionId` as the partition key, and tolerate
+duplicate append after an uncertain acknowledgement. The Kafka consumer group
+projects batches idempotently into the partitioned PostgreSQL replay table and
+advances `last_projected_seq`. Exact content hashes reject conflicting
+redelivery. Published transfer rows are bounded by retention; they are not a
+second replay API.
 The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
 its private `command.result` is only a prepared result.
 
@@ -477,7 +485,8 @@ barrier: the local spool must have no pending event and its cumulative ACK must
 equal the highest sequence produced by the Run. Terminal settlement therefore
 cannot overtake a non-terminal event still buffered at the Worker.
 
-The Control Plane creates the public terminal event in the same PostgreSQL
+In enterprise mode, terminal settlement first waits until the projected cursor
+equals the Worker-acknowledged cursor. The Control Plane then creates the public terminal event in the same PostgreSQL
 transaction that settles Run/Attempt/command/turn/session state, advances
 checkpoint and Workspace heads, materializes the semantic transcript and
 emits the database wake notification. A browser terminal event therefore
@@ -490,12 +499,12 @@ SSE uses the same durable event table:
 - database notification is a wake-up hint only;
 - the table remains the truth if notification is lost.
 
-Only PostgreSQL-committed events reach SSE. A Worker-WAL-only event is not yet
-visible; after Worker replacement it is either replayed and committed or never
-shown. Public text and Tool facts that were already shown survive in the event
-log and semantic projection. Successful/catchable Runs preserve them in Pi's
-native Session; an uncatchable crash uses the bounded one-time recovery bridge
-described above so they also affect Pi's next effective model context.
+Only PostgreSQL-projected events reach SSE. A Worker-WAL-only or
+Outbox/Kafka-only event is not yet visible. Public text and Tool facts that were
+already shown therefore survive in the replay table and semantic projection.
+Successful/catchable Runs preserve them in Pi's native Session; an uncatchable
+crash uses the bounded one-time recovery bridge described above so they also
+affect Pi's next effective model context.
 
 ## 9. Lease and fencing
 

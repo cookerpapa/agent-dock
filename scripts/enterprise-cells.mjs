@@ -353,13 +353,14 @@ const requiredSecretKeys = [
   "workspace-kopia-aws-credentials",
   "workspace-kopia-repository-password",
 ];
+const globalEventSecretKeys = ["kafka-ca.crt", "kafka-username", "kafka-password"];
 
-function verifyNamespaceAuthorities(namespace, values, requireWorkspace) {
+function verifyNamespaceAuthorities(namespace, values, requireWorkspace, extraSecretKeys = []) {
   const secretName = values.global.existingSecret;
   const result = optional("kubectl", ["get", "secret", secretName, "-n", namespace, "-o", "json"]);
   if (result.status !== 0) fail(`Secret ${namespace}/${secretName} is unavailable`);
   const secret = JSON.parse(result.stdout);
-  for (const key of requiredSecretKeys) {
+  for (const key of [...requiredSecretKeys, ...extraSecretKeys]) {
     if (typeof secret.data?.[key] !== "string") {
       fail(`Secret ${namespace}/${secretName} is missing ${key}`);
     }
@@ -384,8 +385,33 @@ function preflight(profile, topology, base) {
   if (optional("kubectl", ["get", "apiservice", "v1beta1.metrics.k8s.io"]).status !== 0) {
     fail("Kubernetes Metrics API is required for global-plane HPAs");
   }
+  const kafkaBroker = base.external.kafka.brokers[0];
+  const kafkaHost = kafkaBroker.replace(/:\d+$/, "");
+  const serviceMatch = /^([a-z0-9-]+)\.([a-z0-9-]+)\.svc(?:\.|$)/.exec(kafkaHost);
+  if (serviceMatch !== null) {
+    const [, serviceName, namespace] = serviceMatch;
+    const endpoints = optional("kubectl", [
+      "get",
+      "endpoints",
+      serviceName,
+      "-n",
+      namespace,
+      "-o",
+      "json",
+    ]);
+    if (endpoints.status !== 0) fail(`Kafka Service ${namespace}/${serviceName} is unavailable`);
+    const endpoint = JSON.parse(endpoints.stdout);
+    if (!endpoint.subsets?.some((subset) => (subset.addresses?.length ?? 0) > 0)) {
+      fail(`Kafka Service ${namespace}/${serviceName} has no Ready endpoint`);
+    }
+  }
   ensureNamespace(profile.globalNamespace);
-  verifyNamespaceAuthorities(profile.globalNamespace, base, false);
+  verifyNamespaceAuthorities(
+    profile.globalNamespace,
+    base,
+    false,
+    base.external.kafka.security.enabled ? globalEventSecretKeys : [],
+  );
   for (const cell of topology.cells) {
     ensureNamespace(cell.namespace, cell.id);
     verifyNamespaceAuthorities(cell.namespace, base, true);

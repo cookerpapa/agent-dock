@@ -38,7 +38,7 @@ for (const profile of profiles) {
   assert.ok(description.maximumSandboxAdmissions >= description.maximumRunSlots);
 
   const manifest = execute(["render", "--profile", profile.path]);
-  assert.equal((manifest.match(/^kind: ScaledObject$/gmu) ?? []).length, profile.cells);
+  assert.equal((manifest.match(/^kind: ScaledObject$/gmu) ?? []).length, profile.cells + 1);
   assert.equal(
     (manifest.match(/^kind: Deployment\nmetadata:\n  name: agent-dock-control-plane$/gmu) ?? [])
       .length,

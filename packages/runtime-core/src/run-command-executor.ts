@@ -26,6 +26,7 @@ import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { createHash, randomUUID } from "node:crypto";
+import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import { createCompletedRunReviewBundle } from "./review-bundle.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
@@ -204,6 +205,7 @@ export type RunCommandExecutorOptions = {
   leaseManager?: TurnExecutionLeaseManager;
   metrics?: AgentDockMetrics;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
+  eventProjectionBarrier?: EventProjectionBarrier;
 };
 
 type ClaimedTurn = {
@@ -318,6 +320,7 @@ export class RunCommandExecutor {
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #metrics: AgentDockMetrics | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
+  readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
 
   constructor(options: RunCommandExecutorOptions) {
     this.#database = options.database;
@@ -340,6 +343,7 @@ export class RunCommandExecutor {
     this.#leaseManager = options.leaseManager;
     this.#metrics = options.metrics;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
+    this.#eventProjectionBarrier = options.eventProjectionBarrier;
   }
 
   /**
@@ -453,9 +457,19 @@ export class RunCommandExecutor {
                 );
               }
             }
+            if (started) {
+              await this.#eventProjectionBarrier?.waitForSession(
+                claim.request.tenantId,
+                claim.request.sessionId,
+              );
+            }
             return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
           }
 
+          await this.#eventProjectionBarrier?.waitForSession(
+            claim.request.tenantId,
+            claim.request.sessionId,
+          );
           await this.#complete(claim, executionResult, acknowledgement);
           return {
             status: "completed",

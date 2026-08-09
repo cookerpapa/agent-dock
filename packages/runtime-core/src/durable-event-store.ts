@@ -9,10 +9,12 @@ import {
   type EventPublishMessage,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { classifyStructuredTestCommand } from "./structured-test-command.ts";
+import type { WorkerEventLogEnvelope, WorkerEventProjectionSink } from "./worker-event-log.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -43,6 +45,7 @@ export type DurableEventStoreOptions = {
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   clock?: () => Date;
   idGenerator?: () => string;
+  externalWorkerEventLog?: boolean;
 };
 
 export type EventReplayWindow = {
@@ -129,6 +132,24 @@ function normalizedUuid(value: string | null | undefined): string | null {
   return value === null || value === undefined ? null : value.toLowerCase();
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+    .join(",")}}`;
+}
+
+function eventContentSha256(tenantId: string, message: EventPublishMessage): string {
+  return createHash("sha256")
+    .update("agent-dock.worker-event.v1\0", "utf8")
+    .update(tenantId, "utf8")
+    .update("\0", "utf8")
+    .update(canonicalJson(message), "utf8")
+    .digest("hex");
+}
+
 function isoTimestamp(value: Date | string): string {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.valueOf())) {
@@ -194,12 +215,15 @@ type PreparedPublication = {
   last: EventPublishMessage;
 };
 
-export class DurableEventStore implements DurableEventLog, DurableEventGroupIngestor {
+export class DurableEventStore
+  implements DurableEventLog, DurableEventGroupIngestor, WorkerEventProjectionSink
+{
   readonly #database: Kysely<Database>;
   readonly #eventHub: SessionEventHub | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
+  readonly #externalWorkerEventLog: boolean;
 
   constructor(options: DurableEventStoreOptions) {
     this.#database = options.database;
@@ -207,6 +231,7 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+    this.#externalWorkerEventLog = options.externalWorkerEventLog ?? false;
   }
 
   async ingest(value: unknown): Promise<EventAckMessage> {
@@ -234,9 +259,12 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
           throughSequence: result.acknowledgedThroughSeq,
         } as const;
       });
-      if (this.#eventNotificationPublisher?.publishGroup !== undefined) {
+      if (
+        !this.#externalWorkerEventLog &&
+        this.#eventNotificationPublisher?.publishGroup !== undefined
+      ) {
         await this.#eventNotificationPublisher.publishGroup(transaction, notifications);
-      } else {
+      } else if (!this.#externalWorkerEventLog) {
         for (const notification of notifications) {
           await this.#eventNotificationPublisher?.publish(transaction, notification);
         }
@@ -251,11 +279,13 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
           "Grouped event acknowledgement is missing",
         );
       }
-      this.#eventHub?.notifyThrough(
-        result.tenantId,
-        publication.last.payload.event.sessionId,
-        result.acknowledgedThroughSeq,
-      );
+      if (!this.#externalWorkerEventLog) {
+        this.#eventHub?.notifyThrough(
+          result.tenantId,
+          publication.last.payload.event.sessionId,
+          result.acknowledgedThroughSeq,
+        );
+      }
       return this.#acknowledgement(publication.last, result.acknowledgedThroughSeq, now);
     });
   }
@@ -329,7 +359,7 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
     prepared: readonly PreparedPublication[],
     now: Date,
   ): Promise<readonly { tenantId: string; acknowledgedThroughSeq: number }[]> {
-    if (prepared.length === 1) {
+    if (prepared.length === 1 && !this.#externalWorkerEventLog) {
       return [await this.#ingestBatchTransaction(transaction, prepared[0]!.publications, now)];
     }
     const sessionIds = prepared.map(
@@ -338,9 +368,15 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
     if (new Set(sessionIds).size !== sessionIds.length) {
       const results = [];
       for (const publication of prepared) {
-        results.push(
-          await this.#ingestBatchTransaction(transaction, publication.publications, now),
-        );
+        if (this.#externalWorkerEventLog) {
+          results.push(
+            ...(await this.#ingestPreparedGroupTransaction(transaction, [publication], now)),
+          );
+        } else {
+          results.push(
+            await this.#ingestBatchTransaction(transaction, publication.publications, now),
+          );
+        }
       }
       return results;
     }
@@ -486,33 +522,12 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
       }
 
       const redeliveries = messages.filter((message) => message.payload.event.seq <= lastPersisted);
-      if (redeliveries.length > 0) {
-        const existingRows = await transaction
-          .selectFrom("session_events")
-          .select(eventSelect())
-          .where("tenant_id", "=", session.tenant_id)
-          .where("session_id", "=", firstEvent.sessionId)
-          .where(
-            "seq",
-            "in",
-            redeliveries.map((message) => String(message.payload.event.seq)),
-          )
-          .execute();
-        const existingBySequence = new Map(
-          existingRows.map((row) => [safeInteger(row.seq, "persisted event sequence"), row]),
-        );
-        for (const message of redeliveries) {
-          const existing = existingBySequence.get(message.payload.event.seq);
-          if (existing === undefined || !isExactRedelivery(existing, message)) {
-            throw new DurableEventStoreError(
-              existing === undefined ? "event_store_invariant" : "event_conflict",
-              existing === undefined
-                ? "Durable event prefix contains a missing sequence"
-                : `Conflicting event publication at sequence ${message.payload.event.seq}`,
-            );
-          }
-        }
-      }
+      await this.#verifyRedeliveries(
+        transaction,
+        session.tenant_id,
+        firstEvent.sessionId,
+        redeliveries,
+      );
       const newMessages = messages.filter((message) => message.payload.event.seq > lastPersisted);
       if (newMessages.length > 0) {
         const firstNewSequence = newMessages[0]!.payload.event.seq;
@@ -558,47 +573,94 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
           "Event ID was already used by another sequence",
         );
       }
-      await transaction
-        .insertInto("session_events")
-        .values(
-          newPublications.map((message) => {
-            const event = message.payload.event;
-            return {
-              event_id: event.eventId,
-              tenant_id: sessionById.get(event.sessionId)!.tenant_id,
-              session_id: event.sessionId,
-              turn_id: event.turnId,
-              agent_node_id: null,
-              agent_id: event.agentId,
-              command_id: message.payload.commandId ?? null,
-              seq: event.seq,
-              schema_version: event.schemaVersion,
-              type: event.type,
-              payload: event.payload,
-              lease_id: message.payload.leaseId,
-              fencing_token: message.payload.fencingToken,
-              occurred_at: new Date(event.occurredAt),
-              persisted_at: now,
+      if (!this.#externalWorkerEventLog) {
+        await transaction
+          .insertInto("session_events")
+          .values(
+            newPublications.map((message) =>
+              this.#eventRow(
+                sessionById.get(message.payload.event.sessionId)!.tenant_id,
+                message,
+                now,
+              ),
+            ),
+          )
+          .executeTakeFirstOrThrow();
+        for (const message of newPublications) {
+          await this.#recordStructuredTestResult(
+            transaction,
+            sessionById.get(message.payload.event.sessionId)!.tenant_id,
+            message,
+          );
+          await this.#recordContextCompaction(
+            transaction,
+            sessionById.get(message.payload.event.sessionId)!.tenant_id,
+            message,
+          );
+        }
+      } else {
+        await transaction
+          .insertInto("session_event_ids")
+          .values(
+            newPublications.map((message) => ({
+              event_id: message.payload.event.eventId,
+              session_id: message.payload.event.sessionId,
+              seq: message.payload.event.seq,
+              content_sha256: eventContentSha256(
+                sessionById.get(message.payload.event.sessionId)!.tenant_id,
+                message,
+              ),
+            })),
+          )
+          .executeTakeFirstOrThrow();
+        const batches = prepared
+          .map((publication) => {
+            const sessionId = publication.publications[0]!.payload.event.sessionId;
+            const session = sessionById.get(sessionId)!;
+            const cursor = cursorBySession.get(sessionId)!;
+            const lastPersisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
+            const messages = publication.publications.filter(
+              (message) => message.payload.event.seq > lastPersisted,
+            );
+            if (messages.length === 0) return undefined;
+            const envelope: WorkerEventLogEnvelope = {
+              schemaVersion: 1,
+              tenantId: session.tenant_id,
+              messages,
             };
-          }),
-        )
-        .executeTakeFirstOrThrow();
-      for (const message of newPublications) {
-        await this.#recordStructuredTestResult(
-          transaction,
-          sessionById.get(message.payload.event.sessionId)!.tenant_id,
-          message,
-        );
-        await this.#recordContextCompaction(
-          transaction,
-          sessionById.get(message.payload.event.sessionId)!.tenant_id,
-          message,
-        );
+            return { session, messages, envelope };
+          })
+          .filter((value): value is NonNullable<typeof value> => value !== undefined);
+        await transaction
+          .insertInto("worker_event_outbox")
+          .values(
+            batches.map(({ session, messages, envelope }) => ({
+              id: this.#idGenerator(),
+              tenant_id: session.tenant_id,
+              session_id: messages[0]!.payload.event.sessionId,
+              first_seq: messages[0]!.payload.event.seq,
+              last_seq: messages.at(-1)!.payload.event.seq,
+              envelope,
+              content_sha256: createHash("sha256")
+                .update(canonicalJson(envelope), "utf8")
+                .digest("hex"),
+              state: "pending" as const,
+              available_at: now,
+              claimed_by: null,
+              claimed_until: null,
+              last_error: null,
+              published_at: null,
+            })),
+          )
+          .executeTakeFirstOrThrow();
       }
     }
 
     if (advances.length > 0) {
       const advanceJson = JSON.stringify(advances);
+      const projectionAdvance = !this.#externalWorkerEventLog
+        ? sql`, last_projected_seq = advances."acknowledgedThrough"`
+        : sql``;
       const cursorUpdates = await sql<{ session_id: string }>`
         with advances as (
           select * from jsonb_to_recordset(${advanceJson}::jsonb) as value(
@@ -612,6 +674,7 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
            set last_persisted_seq = advances."acknowledgedThrough",
                acknowledged_through_seq = advances."acknowledgedThrough",
                updated_at = ${now}
+               ${projectionAdvance}
           from advances
          where cursor.session_id = advances."sessionId"
            and cursor.last_persisted_seq = advances."expectedLast"
@@ -666,7 +729,7 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
     const cursor = await this.#database
       .selectFrom("sessions as session_row")
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
-      .select("cursor.last_persisted_seq as highWaterMark")
+      .select("cursor.last_projected_seq as highWaterMark")
       .where("session_row.tenant_id", "=", tenantId)
       .where("session_row.id", "=", sessionId)
       .executeTakeFirst();
@@ -719,6 +782,251 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
       .limit(pageSize)
       .execute();
     return rows.map((row) => eventFromRow(row));
+  }
+
+  async project(envelope: WorkerEventLogEnvelope): Promise<void> {
+    const first = envelope.messages[0];
+    const last = envelope.messages.at(-1);
+    if (envelope.schemaVersion !== 1 || first === undefined || last === undefined) {
+      throw new DurableEventStoreError("invalid_event", "Worker event envelope was invalid");
+    }
+    const sessionId = first.payload.event.sessionId;
+    if (
+      envelope.messages.some(
+        (message, index) =>
+          message.payload.event.sessionId !== sessionId ||
+          message.payload.event.seq !== first.payload.event.seq + index,
+      )
+    ) {
+      throw new DurableEventStoreError(
+        "invalid_event",
+        "Worker event envelope was not one contiguous Session range",
+      );
+    }
+    const now = validDate(this.#clock);
+    const projectedThrough = await this.#database.transaction().execute(async (transaction) => {
+      const session = await transaction
+        .selectFrom("sessions")
+        .select("tenant_id")
+        .where("id", "=", sessionId)
+        .executeTakeFirst();
+      if (session === undefined || session.tenant_id !== envelope.tenantId) {
+        throw new DurableEventStoreError("not_found", "Worker event Session was not found");
+      }
+      const cursor = await transaction
+        .selectFrom("session_event_cursors")
+        .select(["last_persisted_seq", "last_projected_seq"])
+        .where("session_id", "=", sessionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (cursor === undefined) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Session event cursor is missing",
+        );
+      }
+      const persisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
+      const projected = safeInteger(cursor.last_projected_seq, "last projected sequence");
+      if (last.payload.event.seq > persisted) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Kafka event range was not authorized by the durable Session cursor",
+          true,
+        );
+      }
+
+      const registrations = await transaction
+        .selectFrom("session_event_ids")
+        .select(["event_id", "seq", "content_sha256"])
+        .where("session_id", "=", sessionId)
+        .where(
+          "seq",
+          "in",
+          envelope.messages.map((message) => String(message.payload.event.seq)),
+        )
+        .execute();
+      const registeredBySequence = new Map(
+        registrations.map((registration) => [
+          safeInteger(registration.seq, "registered event sequence"),
+          registration,
+        ]),
+      );
+      for (const message of envelope.messages) {
+        const event = message.payload.event;
+        const registration = registeredBySequence.get(event.seq);
+        if (
+          registration === undefined ||
+          normalizedUuid(registration.event_id) !== normalizedUuid(event.eventId) ||
+          registration.content_sha256 !== eventContentSha256(envelope.tenantId, message)
+        ) {
+          throw new DurableEventStoreError(
+            "event_conflict",
+            `Kafka event ${event.seq} did not match its durable identity registration`,
+          );
+        }
+      }
+
+      const redeliveries = envelope.messages.filter(
+        (message) => message.payload.event.seq <= projected,
+      );
+      if (redeliveries.length > 0) {
+        const rows = await transaction
+          .selectFrom("session_events")
+          .select(eventSelect())
+          .where("tenant_id", "=", envelope.tenantId)
+          .where("session_id", "=", sessionId)
+          .where(
+            "seq",
+            "in",
+            redeliveries.map((message) => String(message.payload.event.seq)),
+          )
+          .execute();
+        const rowsBySequence = new Map(
+          rows.map((row) => [safeInteger(row.seq, "projected event sequence"), row]),
+        );
+        for (const message of redeliveries) {
+          const row = rowsBySequence.get(message.payload.event.seq);
+          if (row === undefined || !isExactRedelivery(row, message)) {
+            throw new DurableEventStoreError(
+              "event_conflict",
+              `Kafka redelivery conflicted at sequence ${message.payload.event.seq}`,
+            );
+          }
+        }
+      }
+
+      const newMessages = envelope.messages.filter(
+        (message) => message.payload.event.seq > projected,
+      );
+      if (newMessages.length === 0) return projected;
+      if (newMessages[0]!.payload.event.seq !== projected + 1) {
+        throw new DurableEventStoreError(
+          "sequence_gap",
+          `Expected projected sequence ${projected + 1}, received ${newMessages[0]!.payload.event.seq}`,
+          true,
+        );
+      }
+      await transaction
+        .insertInto("session_events")
+        .values(newMessages.map((message) => this.#eventRow(envelope.tenantId, message, now)))
+        .executeTakeFirstOrThrow();
+      for (const message of newMessages) {
+        await this.#recordStructuredTestResult(transaction, envelope.tenantId, message);
+        await this.#recordContextCompaction(transaction, envelope.tenantId, message);
+      }
+      const throughSequence = newMessages.at(-1)!.payload.event.seq;
+      const update = await transaction
+        .updateTable("session_event_cursors")
+        .set({ last_projected_seq: throughSequence, updated_at: now })
+        .where("session_id", "=", sessionId)
+        .where("last_projected_seq", "=", cursor.last_projected_seq)
+        .executeTakeFirst();
+      expectOne(update.numUpdatedRows, "advancing the projected event cursor");
+      const notification = {
+        schemaVersion: 1,
+        tenantId: envelope.tenantId,
+        sessionId,
+        throughSequence,
+      } as const;
+      await this.#eventNotificationPublisher?.publish(transaction, notification);
+      return throughSequence;
+    });
+    this.#eventHub?.notifyThrough(envelope.tenantId, sessionId, projectedThrough);
+  }
+
+  async #verifyRedeliveries(
+    transaction: Transaction<Database>,
+    tenantId: string,
+    sessionId: string,
+    messages: readonly EventPublishMessage[],
+  ): Promise<void> {
+    if (messages.length === 0) return;
+    if (this.#externalWorkerEventLog) {
+      const rows = await transaction
+        .selectFrom("session_event_ids")
+        .select(["event_id", "seq", "content_sha256"])
+        .where("session_id", "=", sessionId)
+        .where(
+          "seq",
+          "in",
+          messages.map((message) => String(message.payload.event.seq)),
+        )
+        .execute();
+      const bySequence = new Map(
+        rows.map((row) => [safeInteger(row.seq, "registered event sequence"), row]),
+      );
+      for (const message of messages) {
+        const event = message.payload.event;
+        const row = bySequence.get(event.seq);
+        if (row === undefined) {
+          throw new DurableEventStoreError(
+            "event_store_invariant",
+            "Durable event prefix contains a missing identity registration",
+          );
+        }
+        if (
+          normalizedUuid(row.event_id) !== normalizedUuid(event.eventId) ||
+          row.content_sha256 !== eventContentSha256(tenantId, message)
+        ) {
+          throw new DurableEventStoreError(
+            "event_conflict",
+            `Conflicting event publication at sequence ${event.seq}`,
+          );
+        }
+      }
+      return;
+    }
+    const rows = await transaction
+      .selectFrom("session_events")
+      .select(eventSelect())
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "=", sessionId)
+      .where(
+        "seq",
+        "in",
+        messages.map((message) => String(message.payload.event.seq)),
+      )
+      .execute();
+    const bySequence = new Map(
+      rows.map((row) => [safeInteger(row.seq, "persisted event sequence"), row]),
+    );
+    for (const message of messages) {
+      const event = message.payload.event;
+      const row = bySequence.get(event.seq);
+      if (row === undefined) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Durable event prefix contains a missing sequence",
+        );
+      }
+      if (!isExactRedelivery(row, message)) {
+        throw new DurableEventStoreError(
+          "event_conflict",
+          `Conflicting event publication at sequence ${event.seq}`,
+        );
+      }
+    }
+  }
+
+  #eventRow(tenantId: string, message: EventPublishMessage, now: Date) {
+    const event = message.payload.event;
+    return {
+      event_id: event.eventId,
+      tenant_id: tenantId,
+      session_id: event.sessionId,
+      turn_id: event.turnId,
+      agent_node_id: null,
+      agent_id: event.agentId,
+      command_id: message.payload.commandId ?? null,
+      seq: event.seq,
+      schema_version: event.schemaVersion,
+      type: event.type,
+      payload: event.payload,
+      lease_id: message.payload.leaseId,
+      fencing_token: message.payload.fencingToken,
+      occurred_at: new Date(event.occurredAt),
+      persisted_at: now,
+    };
   }
 
   async #ingestBatchTransaction(
@@ -886,6 +1194,7 @@ export class DurableEventStore implements DurableEventLog, DurableEventGroupInge
       .updateTable("session_event_cursors")
       .set({
         last_persisted_seq: acknowledgedThroughSeq,
+        last_projected_seq: acknowledgedThroughSeq,
         acknowledged_through_seq: acknowledgedThroughSeq,
         updated_at: now,
       })

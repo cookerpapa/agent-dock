@@ -48,6 +48,7 @@ export type SupervisorHostConfig = {
   repositoryImportWaitMs: number;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
+  externalWorkerEventLog?: boolean;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -321,6 +322,7 @@ export async function loadSupervisorHostConfig(
       allowInlineSecrets,
     ),
     databaseUrl: await secret(environment, "DATABASE_URL", allowInlineSecrets),
+    externalWorkerEventLog: booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG"),
     managementHost: bounded(
       environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST",

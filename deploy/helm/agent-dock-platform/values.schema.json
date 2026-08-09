@@ -132,6 +132,7 @@
       "required": [
         "database",
         "temporal",
+        "kafka",
         "checkpointS3",
         "kopiaS3",
         "providerProxyUrl",
@@ -149,6 +150,33 @@
           }
         },
         "temporal": { "$ref": "#/$defs/temporal" },
+        "kafka": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["brokers", "topic", "projectorGroupId", "security"],
+          "properties": {
+            "brokers": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/boundedText" }
+            },
+            "topic": { "$ref": "#/$defs/boundedText" },
+            "projectorGroupId": { "$ref": "#/$defs/boundedText" },
+            "security": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "caSecretKey", "usernameSecretKey", "passwordSecretKey"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "caSecretKey": { "$ref": "#/$defs/secretKey" },
+                "usernameSecretKey": { "$ref": "#/$defs/secretKey" },
+                "passwordSecretKey": { "$ref": "#/$defs/secretKey" }
+              }
+            }
+          }
+        },
         "checkpointS3": { "$ref": "#/$defs/s3" },
         "kopiaS3": {
           "type": "object",
@@ -378,7 +406,10 @@
         "enabled": { "type": "boolean" },
         "minReplicas": { "type": "integer", "minimum": 2, "maximum": 256 },
         "maxReplicas": { "type": "integer", "minimum": 2, "maximum": 256 },
-        "targetCpuUtilization": { "type": "integer", "minimum": 10, "maximum": 95 }
+        "targetCpuUtilization": { "type": "integer", "minimum": 10, "maximum": 95 },
+        "pollingIntervalSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "cooldownSeconds": { "type": "integer", "minimum": 30, "maximum": 3600 },
+        "kafkaLagThreshold": { "type": "string", "pattern": "^[1-9][0-9]{0,8}$" }
       }
     },
     "httpWorkload": {

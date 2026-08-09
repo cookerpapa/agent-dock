@@ -116,6 +116,8 @@ spec:
               value: "true"
             - name: DATABASE_URL_FILE
               value: /run/agent-dock-secrets/database-url
+            - name: AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG
+              value: {{ .Values.runtime.externalWorkerEventLog | quote }}
             - name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP
               value: {{ .Values.runtime.allowInsecureInternalHttp | quote }}
             - name: AGENT_DOCK_CONTROL_PLANE_URL

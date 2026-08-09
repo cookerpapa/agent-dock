@@ -11,8 +11,12 @@ import type {
   SessionEventNotificationTransport,
 } from "@agent-dock/runtime-core/session-event-notifications";
 import type { Kysely, Transaction } from "kysely";
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventGateway } from "../src/event-gateway.ts";
+import { loadEventGatewayProductionConfig } from "../src/production-config.ts";
 
 const SESSION_ID = "00000000-0000-4000-8000-000000000011";
 const TENANT_ID = "00000000-0000-4000-8000-000000000001";
@@ -107,10 +111,49 @@ function createGateway(): EventGateway {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(running.splice(0).map((gateway) => gateway.close().catch(() => undefined)));
 });
 
 describe("Event Gateway", () => {
+  it("loads Kafka TLS/SCRAM only as one complete file-backed identity", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-event-gateway-config-"));
+    try {
+      const database = resolve(root, "database-url");
+      const ca = resolve(root, "ca.crt");
+      const username = resolve(root, "username");
+      const password = resolve(root, "password");
+      await Promise.all([
+        writeFile(database, "postgres://test\n", { mode: 0o600 }),
+        writeFile(ca, "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n", {
+          mode: 0o600,
+        }),
+        writeFile(username, "agent-dock-event-gateway\n", { mode: 0o600 }),
+        writeFile(password, "secret-password\n", { mode: 0o600 }),
+      ]);
+      vi.stubEnv("DATABASE_URL_FILE", database);
+      vi.stubEnv("AGENT_DOCK_KAFKA_BROKERS", "kafka.example:9093");
+      vi.stubEnv("AGENT_DOCK_KAFKA_CA_FILE", ca);
+      await expect(loadEventGatewayProductionConfig()).rejects.toThrow(
+        "Kafka TLS/SASL secret files must be configured together",
+      );
+      vi.stubEnv("AGENT_DOCK_KAFKA_USERNAME_FILE", username);
+      vi.stubEnv("AGENT_DOCK_KAFKA_PASSWORD_FILE", password);
+      await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
+        kafka: {
+          brokers: ["kafka.example:9093"],
+          security: {
+            username: "agent-dock-event-gateway",
+            password: "secret-password",
+            ca: "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+          },
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an unauthenticated browser before opening a stream", async () => {
     const gateway = createGateway();
     const response = await gateway.application.inject({

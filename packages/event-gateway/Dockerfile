@@ -15,6 +15,7 @@ COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/packag
 COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
+    && npm rebuild @confluentinc/kafka-javascript \
     && node scripts/harden-pi-dependencies.mjs \
     && node scripts/harden-pi-dependencies.mjs --check \
     && npm cache clean --force

@@ -52,6 +52,11 @@ external:
     address: temporal-frontend.temporal.svc.cluster.local:7233
     namespace: agent-dock
     taskQueue: agent-dock-pi-runs-cell-0001-v1
+  kafka:
+    brokers:
+      - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
+    topic: agent-dock-worker-events-v1
+    projectorGroupId: agent-dock-worker-event-projector-v1
   checkpointS3:
     endpoint: https://s3.example.com
     region: ap-east-1

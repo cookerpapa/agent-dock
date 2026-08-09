@@ -149,11 +149,29 @@ cluster can bypass only that check with
 | --- | --- | --- | --- |
 | Web | CPU HPA | 2–8 | stateless |
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
-| Event Gateway | CPU HPA | 3–32 | long-lived SSE only; PostgreSQL event sequence remains authoritative |
+| Event Gateway | KEDA Kafka lag + CPU | 3–32 | resumable SSE plus Kafka Outbox publishing/projection; Kafka partitions bound projector parallelism |
 | Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
 | Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
 | Kubernetes Nodes | cloud/provider node autoscaler | operator defined | Kubernetes YAML alone cannot create machines |
+
+The enterprise values enable the external Worker event log. Deploy the Strimzi
+baseline in [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md)
+before the global plane. Worker ACKs are backed by the transactional Outbox;
+SSE reads only the idempotent PostgreSQL projection, and terminal settlement
+waits for the projection cursor. If Kafka or the projector is unavailable,
+Runs remain non-terminal rather than exposing a completion gap.
+
+The baseline Kafka listener is TLS-only and uses SCRAM-SHA-512. Strimzi's
+generated CA/password must be synchronized into the global platform Secret as
+described in the Kafka deployment README. The Event Gateway and KEDA scaler
+share that identity; execution Cells and Cube sandboxes do not receive it.
+
+Event Gateway scaling uses the projector consumer-group lag as the primary
+backlog signal and CPU as a second signal. KEDA failure fallback holds the
+minimum replica floor when Kafka metrics are unavailable; it never scales this
+durability boundary to zero. Stage 1 permits up to 64 replicas, while Stage 2
+permits up to 128 replicas against the 256-partition topic.
 
 KEDA filters backlog by the configured Temporal Worker Deployment name and
 Build ID, so a blue-green Worker version scales from its own compatible queue

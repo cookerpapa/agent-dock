@@ -5,6 +5,17 @@ export type EventGatewayProductionConfig = {
   port: number;
   databaseUrl: string;
   databaseNotificationUrl: string;
+  kafka?: {
+    brokers: readonly string[];
+    clientId: string;
+    topic: string;
+    groupId: string;
+    security?: {
+      ca: string;
+      username: string;
+      password: string;
+    };
+  };
 };
 
 async function readSecret(path: string, name: string): Promise<string> {
@@ -29,10 +40,49 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
     readSecret(databaseUrlPath, "database URL"),
     readSecret(notificationUrlPath, "database notification URL"),
   ]);
+  const kafkaBrokers = (process.env.AGENT_DOCK_KAFKA_BROKERS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const kafkaSecurityPaths = [
+    process.env.AGENT_DOCK_KAFKA_CA_FILE,
+    process.env.AGENT_DOCK_KAFKA_USERNAME_FILE,
+    process.env.AGENT_DOCK_KAFKA_PASSWORD_FILE,
+  ];
+  const configuredKafkaSecurityPaths = kafkaSecurityPaths.filter(
+    (value): value is string => value !== undefined && value.length > 0,
+  );
+  if (
+    configuredKafkaSecurityPaths.length !== 0 &&
+    configuredKafkaSecurityPaths.length !== kafkaSecurityPaths.length
+  ) {
+    throw new Error("Kafka TLS/SASL secret files must be configured together");
+  }
+  const kafkaSecurity =
+    configuredKafkaSecurityPaths.length === 0
+      ? undefined
+      : {
+          ca: await readSecret(configuredKafkaSecurityPaths[0]!, "Kafka CA"),
+          username: await readSecret(configuredKafkaSecurityPaths[1]!, "Kafka username"),
+          password: await readSecret(configuredKafkaSecurityPaths[2]!, "Kafka password"),
+        };
+  const kafka =
+    kafkaBrokers.length === 0
+      ? undefined
+      : {
+          brokers: kafkaBrokers,
+          clientId: process.env.AGENT_DOCK_KAFKA_CLIENT_ID ?? "agent-dock-event-gateway",
+          topic: process.env.AGENT_DOCK_WORKER_EVENT_TOPIC ?? "agent-dock-worker-events-v1",
+          groupId:
+            process.env.AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP ??
+            "agent-dock-worker-event-projector-v1",
+          ...(kafkaSecurity === undefined ? {} : { security: kafkaSecurity }),
+        };
   return {
     host: process.env.HOST ?? "0.0.0.0",
     port: port(process.env.PORT),
     databaseUrl,
     databaseNotificationUrl,
+    ...(kafka === undefined ? {} : { kafka }),
   };
 }

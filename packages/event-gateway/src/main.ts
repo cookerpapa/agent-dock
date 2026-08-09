@@ -4,6 +4,11 @@ import { WebAuthenticationService } from "@agent-dock/control-plane/web-authenti
 import { startServiceObservability } from "@agent-dock/observability";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
+import {
+  KafkaWorkerEventLog,
+  KafkaWorkerEventProjector,
+  PostgresWorkerEventOutboxPublisher,
+} from "@agent-dock/runtime-core/worker-event-log";
 import { pathToFileURL } from "node:url";
 import { EventGateway } from "./event-gateway.ts";
 import { loadEventGatewayProductionConfig } from "./production-config.ts";
@@ -30,17 +35,55 @@ export async function startEventGateway(): Promise<void> {
       maximumConcurrentTurns: 1,
     },
   } as const;
+  const eventStore = new DurableEventStore({
+    database,
+    eventNotificationPublisher: notifications,
+  });
+  const kafkaLog =
+    config.kafka === undefined
+      ? undefined
+      : new KafkaWorkerEventLog({
+          brokers: config.kafka.brokers,
+          clientId: `${config.kafka.clientId}-producer`,
+          topic: config.kafka.topic,
+          ...(config.kafka.security === undefined ? {} : { security: config.kafka.security }),
+        });
+  const outboxPublisher =
+    kafkaLog === undefined
+      ? undefined
+      : new PostgresWorkerEventOutboxPublisher({ database, eventLog: kafkaLog });
+  const projector =
+    config.kafka === undefined
+      ? undefined
+      : new KafkaWorkerEventProjector({
+          brokers: config.kafka.brokers,
+          clientId: `${config.kafka.clientId}-projector`,
+          topic: config.kafka.topic,
+          groupId: config.kafka.groupId,
+          sink: eventStore,
+          ...(config.kafka.security === undefined ? {} : { security: config.kafka.security }),
+        });
   const gateway = new EventGateway({
     database,
-    eventLog: new DurableEventStore({ database }),
+    eventLog: eventStore,
     apiAuthenticator: new PostgresTenantApiAuthenticator({ database }),
     webSessionAuthenticator: new WebAuthenticationService(authenticationDefaults),
     notifications,
+    ...(projector === undefined || outboxPublisher === undefined
+      ? {}
+      : {
+          dependencyReadiness: async () => {
+            projector.checkHealth();
+            await outboxPublisher.checkHealth();
+          },
+        }),
   });
   let closing = false;
   const close = async (): Promise<void> => {
     if (closing) return;
     closing = true;
+    await outboxPublisher?.close();
+    await projector?.close();
     await gateway.close();
     await database.destroy();
     await observability.close();
@@ -52,6 +95,8 @@ export async function startEventGateway(): Promise<void> {
       });
     });
   }
+  await projector?.start();
+  await outboxPublisher?.start();
   await gateway.listen(config.port, config.host);
   process.stdout.write(
     `AgentDock Event Gateway listening on ${config.host}:${String(config.port)}\n`,

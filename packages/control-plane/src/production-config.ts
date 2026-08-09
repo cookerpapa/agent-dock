@@ -18,6 +18,7 @@ export type ProductionControlPlaneConfig = {
   sandboxManagerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
   advancedModulesEnabled: boolean;
+  externalWorkerEventLog: boolean;
   supervisorIdPrefix: string;
   supervisorMaximumCapacity: number;
   supervisorManagementBaseUrlTemplates: readonly string[];
@@ -349,6 +350,7 @@ export async function loadProductionControlPlaneConfig(
   return {
     databaseUrl,
     databaseNotificationUrl,
+    externalWorkerEventLog: booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG"),
     supervisorEnrollmentToken: await secret(
       environment,
       "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",

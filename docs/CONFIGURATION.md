@@ -38,10 +38,12 @@ file outside Git. Its main restart-bound settings are:
 | --- | --- |
 | `global.imagePullSecrets` | Namespace-local registry credentials used by every AgentDock Pod, including Pi Workers. |
 | `controlPlane.autoscaling` / `web.autoscaling` | HPA lower/upper bounds and CPU targets. |
+| `eventGateway.autoscaling` | KEDA Kafka-lag/CPU targets and the non-zero projector replica floor. |
 | `pi-workers.autoscaling` | KEDA Temporal backlog target, Worker lower/upper bounds and conservative scale-down windows. |
 | `sandboxPlane.replicas` | Sandbox Manager/Data Mover replica count; production requires at least three for Lease-based owner-loss detection. |
 | `external.database.*` | PgBouncer application URL key plus a direct PostgreSQL session URL key for `LISTEN` and migrations. |
 | `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
+| `external.kafka` | Enterprise Worker-event transport, shared idempotent projection group and TLS/SCRAM Secret-key mapping. The topic and identity must exist before rollout. |
 | `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |
 
 `AGENT_DOCK_SANDBOX_MANAGER_URLS` is the ordered, comma-separated Manager
@@ -49,6 +51,17 @@ ring injected into Control Plane and Workers. The ordering is part of runtime
 placement identity and must not be changed while activations are live.
 `AGENT_DOCK_DATABASE_NOTIFICATION_URL` (normally file-backed) must bypass
 transaction-pooling PgBouncer because PostgreSQL `LISTEN` is session-scoped.
+The enterprise Chart also injects `AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG=true`
+into Control Plane and Pi Workers. Do not enable only one side: all Worker
+publishers, the Event Gateway bridge and the terminal projection barrier are
+one cutover unit.
+
+The checked-in enterprise Kafka profile requires TLS plus SCRAM-SHA-512 and
+reads `kafka-ca.crt`, `kafka-username` and `kafka-password` from the global
+platform Secret. `security.enabled=false` is for explicit local development,
+not a Stage 1/2 deployment. Event Gateway reads the values from mounted files;
+KEDA references the same Secret through `TriggerAuthentication`, so rendered
+Pod environment values contain paths rather than credentials.
 
 See [Distributed Kubernetes deployment](DISTRIBUTED_DEPLOYMENT.md) for the
 preflight, Secret/PVC contract, scaling boundaries and blue-green procedure.

@@ -15,6 +15,7 @@ import {
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
+import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
 import type {
   TurnExecutionAcknowledgement,
   TurnExecutionLeaseManager,
@@ -121,6 +122,7 @@ export type RunCancellationExecutorOptions = {
   maxAttempts?: number;
   idGenerator?: () => string;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
+  eventProjectionBarrier?: EventProjectionBarrier;
 };
 
 type ClaimedCancellation = {
@@ -214,6 +216,7 @@ export class RunCancellationExecutor {
   readonly #maxAttempts: number;
   readonly #idGenerator: () => string;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
+  readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
 
   constructor(options: RunCancellationExecutorOptions) {
     this.#database = options.database;
@@ -231,6 +234,7 @@ export class RunCancellationExecutor {
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
+    this.#eventProjectionBarrier = options.eventProjectionBarrier;
   }
 
   /**
@@ -315,9 +319,19 @@ export class RunCancellationExecutor {
         }
         throw startFailure;
       }
+      if (started) {
+        await this.#eventProjectionBarrier?.waitForSession(
+          claim.request.target.tenantId,
+          claim.request.target.sessionId,
+        );
+      }
       return this.#recordFailure(claim, started, normalizeFailure(error));
     }
 
+    await this.#eventProjectionBarrier?.waitForSession(
+      claim.request.target.tenantId,
+      claim.request.target.sessionId,
+    );
     await this.#complete(claim, acknowledgement, result);
     return {
       status: "cancelled",

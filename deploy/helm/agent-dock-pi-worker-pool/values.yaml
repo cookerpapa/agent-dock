@@ -75,6 +75,7 @@ credentials:
 
 runtime:
   allowInsecureInternalHttp: true
+  externalWorkerEventLog: true
   checkpointCache:
     ttlMs: 600000
     maximumEntries: 512

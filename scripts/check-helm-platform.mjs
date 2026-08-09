@@ -95,6 +95,7 @@ assert.equal(
   controlPlaneEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
   "/run/agent-dock-secrets/database-notification-url",
 );
+assert.equal(controlPlaneEnvironment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
 find("HorizontalPodAutoscaler", "agent-dock-control-plane");
 find("PodDisruptionBudget", "agent-dock-control-plane");
 
@@ -112,7 +113,54 @@ assert.equal(
   eventGatewayEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
   "/run/agent-dock-secrets/database-notification-url",
 );
-find("HorizontalPodAutoscaler", "agent-dock-event-gateway");
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_KAFKA_BROKERS,
+  "agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093",
+);
+assert.equal(eventGatewayEnvironment.AGENT_DOCK_WORKER_EVENT_TOPIC, "agent-dock-worker-events-v1");
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_KAFKA_CA_FILE,
+  "/run/agent-dock-secrets/kafka-ca.crt",
+);
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_KAFKA_USERNAME_FILE,
+  "/run/agent-dock-secrets/kafka-username",
+);
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_KAFKA_PASSWORD_FILE,
+  "/run/agent-dock-secrets/kafka-password",
+);
+const eventGatewayScaler = find("ScaledObject", "agent-dock-event-gateway");
+assert.equal(eventGatewayScaler.spec.minReplicaCount, 3);
+assert.equal(eventGatewayScaler.spec.maxReplicaCount, 32);
+assert.equal(eventGatewayScaler.spec.triggers[0].type, "kafka");
+assert.equal(eventGatewayScaler.spec.triggers[0].metadata.lagThreshold, "1000");
+assert.equal(eventGatewayScaler.spec.triggers[0].metadata.tls, "enable");
+assert.equal(eventGatewayScaler.spec.triggers[0].metadata.sasl, "scram_sha512");
+assert.equal(
+  eventGatewayScaler.spec.triggers[0].authenticationRef.name,
+  "agent-dock-event-gateway-kafka",
+);
+assert.equal(
+  eventGatewayScaler.spec.triggers[0].metadata.bootstrapServers,
+  "agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093",
+);
+assert.equal(eventGatewayScaler.spec.triggers[1].type, "cpu");
+const eventGatewayKafkaAuthentication = find(
+  "TriggerAuthentication",
+  "agent-dock-event-gateway-kafka",
+);
+assert.deepEqual(
+  eventGatewayKafkaAuthentication.spec.secretTargetRef.map(({ parameter, key }) => ({
+    parameter,
+    key,
+  })),
+  [
+    { parameter: "username", key: "kafka-username" },
+    { parameter: "password", key: "kafka-password" },
+    { parameter: "ca", key: "kafka-ca.crt" },
+  ],
+);
 find("PodDisruptionBudget", "agent-dock-event-gateway");
 find("Service", "event-gateway");
 
@@ -151,6 +199,7 @@ assert.equal(
   workerEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL,
   "http://$(POD_NAME).agent-dock-pi-worker-primary-v1.$(POD_NAMESPACE).svc.cluster.local:4100",
 );
+assert.equal(workerEnvironment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
 const scaledObject = find("ScaledObject", "agent-dock-pi-worker-primary-v1");
 assert.equal(scaledObject.spec.minReplicaCount, 2);
 assert.equal(scaledObject.spec.maxReplicaCount, 32);

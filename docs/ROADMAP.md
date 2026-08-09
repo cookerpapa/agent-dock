@@ -76,7 +76,10 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
       directory and Cell-specific Temporal routing; raise the default Pi Worker Pod
       to four bounded runtime slots.
 - [x] Split long-lived resumable SSE delivery into an independently scalable
-      Event Gateway while retaining PostgreSQL as the only durable event authority.
+      Event Gateway.
+- [x] Cross the measured PostgreSQL event-capacity gate and add the enterprise
+      transactional Outbox -> Kafka -> idempotent PostgreSQL projection path,
+      including a terminal projection barrier and Strimzi deployment baseline.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

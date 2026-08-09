@@ -174,6 +174,7 @@ export async function startControlPlane(): Promise<void> {
     });
     runtime = await createControlPlaneRuntime({
       database,
+      externalWorkerEventLog: config.externalWorkerEventLog,
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),
