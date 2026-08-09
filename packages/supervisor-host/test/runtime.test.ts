@@ -145,7 +145,7 @@ describe("SupervisorHostRuntime", () => {
       database,
       allowedSupervisorIdPrefix: "supervisor-host-runtime-",
       managementBaseUrlTemplate: "http://{supervisorId}:4100",
-      maximumCapacity: 2,
+      maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
     new SupervisorProvisioningGateway({ provisioner }).install(server);
@@ -192,7 +192,7 @@ describe("SupervisorHostRuntime", () => {
       managementHost: "127.0.0.1",
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
-      maxConcurrentSessions: 1,
+      maxConcurrentSessions: 4,
       temporalAddress: "temporal.test:7233",
       temporalNamespace: "agent-dock-test",
       executionCellId: "cell-test",
@@ -223,14 +223,14 @@ describe("SupervisorHostRuntime", () => {
         new SupervisorHostRuntime({
           config: {
             ...baseConfig,
-            maxConcurrentSessions: 2,
+            maxConcurrentSessions: 17,
           },
           database,
           objectStore: objectStore(),
           sandboxManager: sandboxManager(),
           temporalWorkerFactory,
         }),
-    ).toThrow("Pi SDK Workers require exactly one concurrent Session");
+    ).toThrow("Pi SDK Worker runtime capacity must be between 1 and 16");
     let first: SupervisorHostRuntime | undefined;
     let second: SupervisorHostRuntime | undefined;
     try {

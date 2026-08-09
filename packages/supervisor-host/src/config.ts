@@ -338,7 +338,7 @@ export async function loadSupervisorHostConfig(
       allowInsecureInternalHttp,
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
-    maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 2, 1, 256),
+    maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 4, 1, 16),
     temporalAddress: bounded(
       required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
       "AGENT_DOCK_TEMPORAL_ADDRESS",

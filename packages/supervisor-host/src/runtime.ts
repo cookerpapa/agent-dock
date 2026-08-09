@@ -156,13 +156,20 @@ export class SupervisorHostRuntime {
   #terminalFailureCode: string | undefined;
 
   constructor(options: SupervisorHostRuntimeOptions) {
-    if (options.config.maxConcurrentSessions !== 1) {
-      throw new TypeError("Pi SDK Workers require exactly one concurrent Session");
+    if (
+      !Number.isSafeInteger(options.config.maxConcurrentSessions) ||
+      options.config.maxConcurrentSessions < 1 ||
+      options.config.maxConcurrentSessions > 16
+    ) {
+      throw new TypeError("Pi SDK Worker runtime capacity must be between 1 and 16");
     }
     this.#config = options.config;
     this.#database =
       options.database ??
-      createDatabase({ connectionString: options.config.databaseUrl, maxConnections: 4 });
+      createDatabase({
+        connectionString: options.config.databaseUrl,
+        maxConnections: Math.max(4, options.config.maxConcurrentSessions * 4),
+      });
     this.#ownsDatabase = options.database === undefined;
     this.#objectStore = options.objectStore;
     this.#provisioningClient =

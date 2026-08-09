@@ -73,7 +73,7 @@ spec:
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP, value: "true" }
             - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }
-            - { name: AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY, value: "1" }
+            - { name: AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY, value: {{ (index .Values "pi-workers").workerPool.capacity | quote }} }
             - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE
               value: {{ printf "http://{supervisorId}.agent-dock-pi-worker-%s.%s.svc.%s:4100" (index .Values "pi-workers").workerPool.name .Release.Namespace .Values.global.clusterDomain | quote }}
             - { name: AGENT_DOCK_TEMPORAL_ADDRESS, value: {{ .Values.external.temporal.address | quote }} }
