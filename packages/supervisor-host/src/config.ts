@@ -27,7 +27,7 @@ export type SupervisorHostConfig = {
   temporalTaskQueue: string;
   temporalWorkerDeploymentName?: string;
   temporalWorkerBuildId?: string;
-  sandboxManagerBaseUrl: string;
+  sandboxManagerBaseUrls: readonly string[];
   sandboxManagerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
   bootStateDirectory: string;
@@ -152,6 +152,18 @@ function internalServiceBaseUrl(value: string, allowInsecure: boolean, name: str
     throw new TypeError(`${name} is invalid`);
   }
   return parsed.toString();
+}
+
+function internalServiceBaseUrls(value: string, allowInsecure: boolean, name: string): string[] {
+  const values = value.split(",");
+  if (values.length < 1 || values.length > 256 || values.some((entry) => entry.trim() !== entry)) {
+    throw new TypeError(`${name} must contain 1-256 comma-separated URLs without whitespace`);
+  }
+  const parsed = values.map((entry) => internalServiceBaseUrl(entry, allowInsecure, name));
+  if (new Set(parsed).size !== parsed.length) {
+    throw new TypeError(`${name} must contain unique URLs`);
+  }
+  return parsed;
 }
 
 async function readSecretFile(path: string, name: string): Promise<string> {
@@ -342,10 +354,10 @@ export async function loadSupervisorHostConfig(
       255,
     ),
     ...temporalWorkerDeployment,
-    sandboxManagerBaseUrl: internalServiceBaseUrl(
-      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
+    sandboxManagerBaseUrls: internalServiceBaseUrls(
+      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URLS"),
       allowInsecureInternalHttp,
-      "AGENT_DOCK_SANDBOX_MANAGER_URL",
+      "AGENT_DOCK_SANDBOX_MANAGER_URLS",
     ),
     sandboxManagerRequestTimeoutMs,
     trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),

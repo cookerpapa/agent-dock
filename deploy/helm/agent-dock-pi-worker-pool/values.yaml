@@ -1,8 +1,24 @@
+global:
+  imagePullSecrets: []
+
 workerPool:
   name: primary-v1
   replicas: 2
   capacity: 1
   clusterDomain: cluster.local
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 32
+  pollingIntervalSeconds: 5
+  cooldownSeconds: 900
+  targetQueueSize: 1
+  scaleDownStabilizationSeconds: 900
+  scaleDownPeriodSeconds: 600
+
+lifecycle:
+  terminationGracePeriodSeconds: 1260
 
 management:
   ingress:
@@ -19,7 +35,9 @@ image:
 
 services:
   controlPlaneUrl: http://control-plane.agent-dock-system.svc.cluster.local:3000
-  sandboxManagerUrl: http://sandbox-manager.agent-dock-system.svc.cluster.local:4300
+  sandboxManagerUrls:
+    - http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300
+    - http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300
   githubGateway:
     enabled: true
     url: http://github-gateway.agent-dock-system.svc.cluster.local:4400

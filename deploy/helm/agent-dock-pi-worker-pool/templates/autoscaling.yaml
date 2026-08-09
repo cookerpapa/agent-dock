@@ -1,0 +1,52 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "agent-dock-pi-worker-pool.name" . }}
+  labels:
+    {{- include "agent-dock-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "agent-dock-pi-worker-pool.name" . }}
+    envSourceContainerName: pi-worker
+  pollingInterval: {{ .Values.autoscaling.pollingIntervalSeconds }}
+  cooldownPeriod: {{ .Values.autoscaling.cooldownSeconds }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ .Values.autoscaling.minReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationSeconds }}
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
+          selectPolicy: Min
+  triggers:
+    - type: temporal
+      metadata:
+        endpoint: {{ .Values.temporal.address | quote }}
+        namespace: {{ .Values.temporal.namespace | quote }}
+        taskQueue: {{ .Values.temporal.taskQueue | quote }}
+        queueTypes: "activity"
+        targetQueueSize: {{ .Values.autoscaling.targetQueueSize | quote }}
+        activationTargetQueueSize: "0"
+        workerDeploymentName: {{ .Values.temporal.workerDeploymentName | quote }}
+        workerDeploymentBuildId: {{ .Values.temporal.workerBuildId | quote }}
+{{- end }}

@@ -94,7 +94,7 @@ function objectStore() {
 
 function sandboxManager(): SupervisorSandboxManager {
   return {
-    operationUrl: "http://sandbox-manager.test/internal/v1/tool-operation",
+    operationUrlFor: () => "http://sandbox-manager.test/internal/v1/tool-operation",
     async checkHealth() {},
     async create() {
       throw new Error("unused");
@@ -198,7 +198,7 @@ describe("SupervisorHostRuntime", () => {
       temporalTaskQueue: "agent-dock-pi-runs-test",
       temporalWorkerDeploymentName: "agent-dock-pi-workers",
       temporalWorkerBuildId: "runtime-test-build",
-      sandboxManagerBaseUrl: "http://sandbox-manager.test:4300/",
+      sandboxManagerBaseUrls: ["http://sandbox-manager.test:4300/"],
       sandboxManagerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
       bootStateDirectory: join(root, "boot"),
@@ -280,6 +280,9 @@ describe("SupervisorHostRuntime", () => {
       ]);
       expect(temporalWorkerOptions.map((options) => options.affinityTtlMs)).toEqual([
         600_000, 600_000,
+      ]);
+      expect(temporalWorkerOptions.map((options) => options.shutdownGraceMs)).toEqual([
+        660_000, 660_000,
       ]);
       expect(temporalWorkerOptions.map((options) => options.workerDeployment)).toEqual([
         {

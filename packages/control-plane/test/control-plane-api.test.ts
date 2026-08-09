@@ -488,6 +488,7 @@ async function createAssignedTurn(options: {
       bootId: options.sandboxBootId,
       sandboxId: options.sandboxId,
       commandId: accepted.commandId,
+      workspaceId: assignedSession.workspaceId,
       sessionId: assignedSession.sessionId,
       turnId: accepted.turnId,
       leaseId,

@@ -39,6 +39,7 @@ Thumbs.db
 logs/
 tmp/
 .cache/
+deploy/helm/*/charts/*.tgz
 
 # Generated self-hosted production credentials and persistent runtime metadata
 deploy/production/runtime/

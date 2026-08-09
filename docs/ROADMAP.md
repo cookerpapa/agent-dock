@@ -69,12 +69,17 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   before the Control Plane may commit terminal state.
 - [x] Persist typed runtime world state while keeping only material Sandbox
   resets model-visible.
+- [x] Add a distributed Kubernetes application profile with multi-replica Web
+  and Control Plane, version-aware Temporal/KEDA Pi Worker scaling, direct
+  headless-DNS Worker management and a fixed Sandbox Manager/Data-Mover ring.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
 
 - retained-data policy and hard deletion worker;
 - multi-node failure injection for Worker/node loss;
+- multi-node deployment acceptance for HPA/KEDA, external authorities and the
+  fixed Manager ring;
 - object/checkpoint orphan garbage collection dashboards;
 - measured Session-affinity hit rate and queue-delay tuning;
 - sustained load evidence at the target Worker/Cube capacity.

@@ -59,7 +59,7 @@ const resources = parseAllDocuments(rendered)
     return document.toJSON();
   })
   .filter((document) => document !== null);
-assert.equal(resources.length, 7, "The Pi Worker pool resource inventory drifted");
+assert.equal(resources.length, 5, "The Pi Worker pool resource inventory drifted");
 
 function find(kind, name) {
   const matches = resources.filter(
@@ -81,18 +81,6 @@ assert.equal(
   service.spec.ports.some((port) => port.nodePort !== undefined),
   false,
 );
-for (const ordinal of [0, 1]) {
-  const managementService = find("Service", `${name}-${String(ordinal)}`);
-  assert.equal(managementService.spec.type, "ClusterIP");
-  assert.deepEqual(managementService.spec.selector, {
-    "statefulset.kubernetes.io/pod-name": `${name}-${String(ordinal)}`,
-  });
-  assert.deepEqual(
-    managementService.spec.ports.map((port) => port.port),
-    [4100, 9465],
-  );
-}
-
 const statefulSet = find("StatefulSet", name);
 assert.equal(statefulSet.spec.replicas, 2);
 assert.equal(statefulSet.spec.serviceName, name);
@@ -106,6 +94,23 @@ assert.equal(
   undefined,
   "A changing Build ID must not enter the immutable PVC template",
 );
+
+const privateRegistryRendered = requireSuccess(
+  command(helm, [
+    "template",
+    "pi-workers-private",
+    chart,
+    "--set",
+    "global.imagePullSecrets[0].name=agent-dock-registry",
+  ]),
+  "Pi Worker private-registry render",
+);
+const privateRegistryStatefulSet = parseAllDocuments(privateRegistryRendered)
+  .map((document) => document.toJSON())
+  .find((resource) => resource?.kind === "StatefulSet");
+assert.deepEqual(privateRegistryStatefulSet.spec.template.spec.imagePullSecrets, [
+  { name: "agent-dock-registry" },
+]);
 
 const alternateBuildRendered = requireSuccess(
   command(helm, [
@@ -135,6 +140,7 @@ assert.equal(pod.hostIPC, false);
 assert.equal(pod.hostNetwork, false);
 assert.equal(pod.hostPID, false);
 assert.equal(pod.shareProcessNamespace, false);
+assert.equal(pod.terminationGracePeriodSeconds, 1260);
 assert.equal(pod.containers.length, 1);
 assert.equal(
   pod.volumes.some((volume) => volume.hostPath !== undefined),
@@ -168,12 +174,16 @@ assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME, "agent-dock
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID, "development");
 assert.equal(
   environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL.startsWith(
-    "http://$(POD_NAME).$(POD_NAMESPACE).svc.",
+    `http://$(POD_NAME).${name}.$(POD_NAMESPACE).svc.`,
   ),
   true,
 );
 assert.equal(environment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
 assert.equal(environment.AGENT_DOCK_CHECKPOINT_S3_BUCKET, "agent-dock-checkpoints");
+assert.equal(
+  environment.AGENT_DOCK_SANDBOX_MANAGER_URLS,
+  "http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300,http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300",
+);
 assert.equal(environment.AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL, "http://127.0.0.1:4200");
 assert.equal(
   environment.AGENT_DOCK_OTLP_TRACES_ENDPOINT,
@@ -278,6 +288,37 @@ assert.match(nextBuild, /name: agent-dock-pi-worker-next-v2/);
 assert.match(nextBuild, /value: "revision-abcdef"/);
 assert.match(nextBuild, new RegExp(`agent-dock/supervisor-host@sha256:${"a".repeat(64)}`));
 assert.match(nextBuild, /type: OnDelete/);
+
+const autoscaledRendered = requireSuccess(
+  command(helm, [
+    "template",
+    "pi-workers-autoscaled",
+    chart,
+    "--namespace",
+    "agent-dock-workers",
+    "--set",
+    "autoscaling.enabled=true",
+    "--set",
+    "autoscaling.maxReplicas=6",
+  ]),
+  "Pi Worker KEDA render",
+);
+const autoscaledResources = parseAllDocuments(autoscaledRendered)
+  .map((document) => document.toJSON())
+  .filter((document) => document !== null);
+const scaledObject = autoscaledResources.find((resource) => resource.kind === "ScaledObject");
+assert.ok(scaledObject, "Autoscaled pool must render one KEDA ScaledObject");
+assert.equal(scaledObject.spec.scaleTargetRef.kind, "StatefulSet");
+assert.equal(scaledObject.spec.minReplicaCount, 2);
+assert.equal(scaledObject.spec.maxReplicaCount, 6);
+assert.equal(scaledObject.spec.triggers[0].type, "temporal");
+assert.equal(scaledObject.spec.triggers[0].metadata.queueTypes, "activity");
+assert.equal(scaledObject.spec.triggers[0].metadata.workerDeploymentBuildId, "development");
+assert.equal(
+  autoscaledResources.filter((resource) => resource.kind === "Service").length,
+  1,
+  "Autoscaled Workers must use StatefulSet headless DNS instead of per-ordinal Services",
+);
 
 const localIngress = requireSuccess(
   command(helm, [

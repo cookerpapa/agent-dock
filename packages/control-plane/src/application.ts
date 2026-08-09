@@ -7,6 +7,7 @@ import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import type { SessionEventStreamOptions } from "./session-event-stream.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
+import type { TurnSteerBackend } from "./turn-steer.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
 import type { PublicTenantRegistrationConfiguration } from "./public-tenant-registration.ts";
@@ -24,6 +25,7 @@ export type ControlPlaneApplicationOptions = Omit<
   tenantId?: string;
   defaultModelProfileId?: string;
   supervisorWebSocketGateway?: SupervisorWebSocketGateway;
+  turnSteerBackendFactory?: (sandboxId: string) => Promise<TurnSteerBackend>;
   supervisorProvisioningGateway?: SupervisorProvisioningGateway;
   productionHttpGateway?: ProductionHttpGateway;
   sessionEventNotifications?: SessionEventNotificationTransport;

@@ -3,6 +3,7 @@ import {
   type InternalServiceError,
   type SupervisorManagementResponse,
   type SupervisorRuntimeAssignment,
+  type SteerTurnCommandMessage,
 } from "@agent-dock/protocol";
 import {
   validateCheckpointObjectKey,
@@ -33,6 +34,7 @@ export type SupervisorManagementServerOptions = {
   readiness: () => boolean;
   assignmentInventory: SupervisorAssignmentInventory;
   artifactStore?: Pick<CheckpointObjectStore, "get">;
+  steerCommand?: (command: SteerTurnCommandMessage) => Promise<void>;
   bodyLimit?: number;
 };
 
@@ -114,6 +116,7 @@ export class SupervisorManagementServer {
   readonly #readiness: () => boolean;
   readonly #assignmentInventory: SupervisorAssignmentInventory;
   readonly #artifactStore: Pick<CheckpointObjectStore, "get"> | undefined;
+  readonly #steerCommand: ((command: SteerTurnCommandMessage) => Promise<void>) | undefined;
   #stopOperation: Promise<void> | undefined;
   #address: string | undefined;
 
@@ -131,6 +134,7 @@ export class SupervisorManagementServer {
     this.#readiness = options.readiness;
     this.#assignmentInventory = options.assignmentInventory;
     this.#artifactStore = options.artifactStore;
+    this.#steerCommand = options.steerCommand;
     this.#server = Fastify({
       logger: false,
       bodyLimit: positiveInteger(options.bodyLimit ?? DEFAULT_BODY_LIMIT, "bodyLimit", 1024 * 1024),
@@ -270,6 +274,23 @@ export class SupervisorManagementServer {
         type: "owner.stopped",
         requestId: message.requestId,
         identity: message.identity,
+      };
+    }
+
+    if (message.type === "turn.steer") {
+      if (this.#steerCommand === undefined) {
+        throw new SupervisorManagementServerError(
+          "steer_target_unavailable",
+          "Supervisor steer endpoint is unavailable",
+          true,
+        );
+      }
+      await this.#steerCommand(message.command);
+      return {
+        protocolVersion: 1,
+        type: "turn.steered",
+        requestId: message.requestId,
+        commandId: message.command.payload.commandId,
       };
     }
 

@@ -303,6 +303,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const secondAssignment = {
       ...assignment,
       commandId: "command-provider-test-second",
+      workspaceId: "workspace-provider-test-second",
       sessionId: "session-provider-test-second",
       turnId: "turn-provider-test-second",
       attemptId: "20000000-0000-4000-8000-000000000003",
@@ -346,6 +347,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const secondAssignment = {
       ...assignment,
       commandId: "command-provider-test-aborted",
+      workspaceId: "workspace-provider-test-aborted",
       sessionId: "session-provider-test-aborted",
       turnId: "turn-provider-test-aborted",
       attemptId: "30000000-0000-4000-8000-000000000003",
@@ -424,6 +426,54 @@ describe("provider-backed Tool Sandbox Manager", () => {
     expect(fixture.rebind).toHaveBeenCalledTimes(1);
     expect(fixture.exec).toHaveBeenCalledTimes(2);
     await manager.stop(second.activationId, nextAssignment);
+  });
+
+  it("destroys a warm process world before another Session uses the same Workspace", async () => {
+    const fixture = providerFixture();
+    const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
+    const capabilities = [CAPABILITY, SECOND_CAPABILITY];
+    const manager = new ToolSandboxManager({
+      provider: fixture.provider,
+      idGenerator: () => activationIds.shift()!,
+      capabilityGenerator: () => capabilities.shift()!,
+    });
+    const first = await manager.create(createRequest);
+    await manager.execute(first.capability, operation("60000000-0000-4000-8000-000000000012"));
+    await manager.release({
+      managerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "60000000-0000-4000-8000-000000000013",
+      activationId: first.activationId,
+      assignment,
+      disposition: "keep_warm",
+      workspaceRevision: "d".repeat(64),
+    });
+
+    const siblingSession = {
+      ...assignment,
+      commandId: "command-provider-test-sibling-session",
+      sessionId: "session-provider-test-sibling",
+      turnId: "turn-provider-test-sibling",
+      attemptId: "60000000-0000-4000-8000-000000000014",
+      leaseId: "60000000-0000-4000-8000-000000000014",
+      fencingToken: 6,
+    };
+    const second = await manager.create({
+      ...createRequest,
+      requestId: "60000000-0000-4000-8000-000000000015",
+      assignment: siblingSession,
+      workspaceRevision: "d".repeat(64),
+    });
+    expect(second.continuity).toBe("cold_restore");
+    expect(second.activationId).toBe(SECOND_ACTIVATION_ID);
+    expect(fixture.stopped).toBe(true);
+    await manager.execute(second.capability, {
+      ...operation("60000000-0000-4000-8000-000000000016"),
+      activationId: second.activationId,
+    });
+    expect(fixture.createCount).toBe(2);
+    expect(fixture.rebind).not.toHaveBeenCalled();
+    await manager.stop(second.activationId, siblingSession);
   });
 
   it("evicts the least-recently-used warm runtime when new demand reaches admission capacity", async () => {
@@ -510,6 +560,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       bootId: assignment.bootId,
       sandboxId: assignment.sandboxId,
       commandId: "command-provider-test-advanced",
+      workspaceId: assignment.workspaceId,
       sessionId: assignment.sessionId,
       turnId: "turn-provider-test-advanced",
       leaseId: "40000000-0000-4000-8000-000000000014",

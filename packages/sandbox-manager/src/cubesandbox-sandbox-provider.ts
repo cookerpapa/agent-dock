@@ -486,6 +486,7 @@ function supervisorAssignment(
     bootId: assignment.bootId,
     sandboxId: assignment.sandboxId,
     commandId: assignment.commandId,
+    workspaceId: assignment.workspaceId,
     sessionId: assignment.sessionId,
     turnId: assignment.turnId,
     leaseId: assignment.leaseId,
@@ -506,6 +507,7 @@ function sameRuntimeAssignment(
     actual.bootId === expected.bootId &&
     actual.sandboxId === expected.sandboxId &&
     actual.commandId === expected.commandId &&
+    actual.workspaceId === expected.workspaceId &&
     actual.sessionId === expected.sessionId &&
     actual.turnId === expected.turnId &&
     actual.leaseId === expected.leaseId &&

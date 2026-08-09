@@ -78,6 +78,28 @@ Residual risk remains for Cube/VMM/KVM/host vulnerabilities. Production
 hardening should place the Cube execution plane on dedicated hosts and keep the
 host patched.
 
+### Distributed replacement and partial failure
+
+Web and Control Plane replicas are replaceable because PostgreSQL, Temporal and
+object storage remain authoritative. Pi Workers stop Temporal polling before
+termination and receive a bounded drain window; a lost Worker cannot commit
+after its lease/fence is superseded. Authenticated steer targets the Worker
+address recorded with the current PostgreSQL assignment instead of relying on
+which Control Plane replica happened to accept the browser request.
+
+Sandbox Managers are deliberately not placed behind random load balancing.
+Workspace hashing selects a stable shard across every Session sharing that
+Workspace and for the lifetime of each warm activation.
+One unavailable shard does not make every API replica unready, but Runs mapped
+to it fail retryably until Kubernetes restores that ordinal. A replacement
+Manager never adopts ambiguous guest process state: it restores committed Pi
+and Workspace authorities and exposes the existing model-visible Sandbox reset
+boundary. Changing the ordered shard ring without draining is unsupported.
+
+These controls make the release multi-node-capable; they do not remove the
+external PostgreSQL, Temporal, object-storage, RWX filesystem, Kubernetes
+control-plane or Cube clusters from the infrastructure TCB.
+
 ### Network exfiltration and SSRF
 
 Public Web traffic crosses the trusted egress gateway. The gateway rejects

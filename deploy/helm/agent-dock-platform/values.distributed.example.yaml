@@ -1,0 +1,136 @@
+# Copy this file outside the repository and replace every example endpoint,
+# image reference, UUID and CIDR before deployment. Secrets are never placed in
+# this file; they live in global.existingSecret.
+global:
+  existingSecret: agent-dock-platform-secrets
+  imagePullSecrets:
+    - name: agent-dock-registry
+  imageRevision: git-sha-0123456789abcdef
+  storageClassName: replicated-rwo
+  trustedNodeSelector:
+    agent-dock.io/node-pool: trusted
+
+images:
+  controlPlane:
+    repository: registry.example.com/agent-dock/control-plane
+    tag: git-sha-0123456789abcdef
+    pullPolicy: IfNotPresent
+  web:
+    repository: registry.example.com/agent-dock/web-ui
+    tag: git-sha-0123456789abcdef
+    pullPolicy: IfNotPresent
+  sandboxManager:
+    repository: registry.example.com/agent-dock/sandbox-manager
+    tag: git-sha-0123456789abcdef
+    pullPolicy: IfNotPresent
+
+bootstrap:
+  tenantId: 4e0e7b96-4fe4-4f69-aef3-491335662c6f
+  userId: c0569a9d-26c6-49ce-a461-b149892f0536
+  apiCredentialId: 436a766a-345a-420f-af2c-22baa47a8ab1
+  credentialBindingId: 5b00f0af-2bad-46b4-999b-42069615e3ef
+  defaultModelProfileId: 2320c0e8-bec5-4074-9c85-01e50f26d85f
+  maximumConcurrentTurns: 32
+
+controlPlane:
+  platformModelSourceTenantId: 4e0e7b96-4fe4-4f69-aef3-491335662c6f
+  platformOperatorTenantId: 4e0e7b96-4fe4-4f69-aef3-491335662c6f
+
+web:
+  ingress:
+    enabled: true
+    className: nginx
+    host: agent-dock.example.com
+    tlsSecretName: agent-dock-web-tls
+
+external:
+  temporal:
+    address: temporal-frontend.temporal.svc.cluster.local:7233
+    namespace: agent-dock
+    taskQueue: agent-dock-pi-runs-v1
+  checkpointS3:
+    endpoint: https://s3.example.com
+    region: ap-east-1
+    bucket: agent-dock-checkpoints
+    keyPrefix: production/v1
+    forcePathStyle: false
+    allowInsecureEndpoint: false
+  kopiaS3:
+    endpoint: s3.example.com
+    region: ap-east-1
+    bucket: agent-dock-workspace-kopia
+    prefix: production/kopia/v1/
+    disableTls: false
+  providerProxyUrl: https://provider-proxy.example.com:3129
+
+networkPolicy:
+  # Use only the concrete networks that contain the external authorities above.
+  # In-cluster dependency namespaces can instead carry
+  # agent-dock.io/trusted-plane=true.
+  externalEgressCidrs:
+    - 203.0.113.16/28
+    - 198.51.100.32/28
+
+sandboxPlane:
+  # This is a fixed consistent-hash ring. Change it only through the documented
+  # drain/blue-green procedure, never through HPA.
+  shards: 2
+  workspace:
+    existingClaim: agent-dock-workspaces-rwx
+  cube:
+    apiUrl: https://cube-api.example.com
+    templateId: agent-dock-tool-v1
+    proxyNodeIp: cube-proxy.example.com
+    proxyPort: 443
+    proxyScheme: https
+    domain: cube.example.com
+    egressProxyHost: 10.255.255.254
+    egressProxyPort: 3128
+
+pi-workers:
+  image:
+    repository: registry.example.com/agent-dock/supervisor-host
+    tag: git-sha-0123456789abcdef
+    digest: ""
+    pullPolicy: IfNotPresent
+  temporal:
+    address: temporal-frontend.temporal.svc.cluster.local:7233
+    namespace: agent-dock
+    taskQueue: agent-dock-pi-runs-v1
+    workerDeploymentName: agent-dock-pi-workers
+    workerBuildId: git-sha-0123456789abcdef
+  services:
+    controlPlaneUrl: http://control-plane:3000
+    sandboxManagerUrls:
+      - http://sandbox-manager-0:4300
+      - http://sandbox-manager-1:4300
+    githubGateway: { enabled: false, url: http://github-gateway:4400 }
+    providerProxyUrl: https://provider-proxy.example.com:3129
+    otlpTracesEndpoint: ""
+  conversationStorage:
+    existingSecret: agent-dock-platform-secrets
+    databaseUrlKey: database-url
+    awsCredentialsKey: aws-credentials
+    s3:
+      bucket: agent-dock-checkpoints
+      region: ap-east-1
+      endpoint: https://s3.example.com
+      keyPrefix: production/v1
+      forcePathStyle: false
+      allowInsecureEndpoint: false
+      maxAttempts: 4
+  state:
+    storageClassName: replicated-rwo
+    accessModes: [ReadWriteOncePod]
+    size: 1Gi
+  placement:
+    nodeSelector:
+      agent-dock.io/node-pool: trusted
+    tolerations: []
+  networkPolicy:
+    enabled: true
+    trustedNamespaceLabel: { key: agent-dock.io/trusted-plane, value: "true" }
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 7233, 9000]
+    externalEgressCidrs:
+      - 203.0.113.16/28
+      - 198.51.100.32/28

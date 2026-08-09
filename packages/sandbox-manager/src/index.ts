@@ -7,7 +7,9 @@ export {
   SANDBOX_MANAGER_SERVICE_PATH,
   SandboxManagerClient,
   SandboxManagerClientError,
+  ShardedSandboxManagerClient,
   type SandboxManagerClientOptions,
+  type ShardedSandboxManagerClientOptions,
 } from "./client.ts";
 export {
   CUBESANDBOX_PROVIDER_ID,

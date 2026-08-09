@@ -14,3 +14,4 @@ packages/web-ui/Caddyfile
 deploy/observability/Caddyfile
 deploy/helm/agent-dock-execution-plane/templates/
 deploy/helm/agent-dock-pi-worker-pool/templates/
+deploy/helm/agent-dock-platform/templates/

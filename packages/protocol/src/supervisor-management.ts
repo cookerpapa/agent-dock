@@ -6,6 +6,7 @@ import {
   UtcTimestampSchema,
   UuidSchema,
 } from "./protocol-primitives.ts";
+import { SteerTurnCommandMessageSchema } from "./supervisor-wire.ts";
 
 const Sha256Schema = Type.String({ pattern: "^[0-9a-f]{64}$" });
 
@@ -58,6 +59,7 @@ export const SupervisorRuntimeAssignmentSchema = Type.Object(
     bootId: UuidSchema,
     sandboxId: UuidSchema,
     commandId: OpaqueIdSchema,
+    workspaceId: OpaqueIdSchema,
     sessionId: OpaqueIdSchema,
     turnId: OpaqueIdSchema,
     leaseId: UuidSchema,
@@ -105,6 +107,15 @@ export const SupervisorManagementRequestSchema = Type.Union([
     },
     { additionalProperties: false },
   ),
+  Type.Object(
+    {
+      protocolVersion: Type.Literal(1),
+      type: Type.Literal("turn.steer"),
+      requestId: UuidSchema,
+      command: SteerTurnCommandMessageSchema,
+    },
+    { additionalProperties: false },
+  ),
 ]);
 
 export const SupervisorManagementResponseSchema = Type.Union([
@@ -134,6 +145,15 @@ export const SupervisorManagementResponseSchema = Type.Union([
       requestId: UuidSchema,
       sandboxId: UuidSchema,
       containerId: UuidSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      protocolVersion: Type.Literal(1),
+      type: Type.Literal("turn.steered"),
+      requestId: UuidSchema,
+      commandId: UuidSchema,
     },
     { additionalProperties: false },
   ),

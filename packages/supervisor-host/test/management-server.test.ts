@@ -2,6 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  parseControlToSupervisorMessage,
+  type SteerTurnCommandMessage,
+} from "@agent-dock/protocol";
 
 import {
   HttpSandboxAssignmentInventory,
@@ -26,6 +30,7 @@ const ASSIGNMENT = {
   runtimeName: "agent-dock-runtime-1",
   ...IDENTITY,
   commandId: "10000000-0000-4000-8000-000000000003",
+  workspaceId: "10000000-0000-4000-8000-000000000008",
   sessionId: "10000000-0000-4000-8000-000000000004",
   turnId: "10000000-0000-4000-8000-000000000005",
   leaseId: "10000000-0000-4000-8000-000000000006",
@@ -38,6 +43,7 @@ const PROTOCOL_ASSIGNMENT = {
   bootId: ASSIGNMENT.bootId,
   sandboxId: ASSIGNMENT.sandboxId,
   commandId: ASSIGNMENT.commandId,
+  workspaceId: ASSIGNMENT.workspaceId,
   sessionId: ASSIGNMENT.sessionId,
   turnId: ASSIGNMENT.turnId,
   leaseId: ASSIGNMENT.leaseId,
@@ -62,6 +68,7 @@ async function harness() {
   let stopCalls = 0;
   let assignments = [PROTOCOL_ASSIGNMENT];
   let terminationCalls = 0;
+  const steerCommands: SteerTurnCommandMessage[] = [];
   const server = new SupervisorManagementServer({
     host: "127.0.0.1",
     port: 0,
@@ -71,6 +78,9 @@ async function harness() {
     readiness: () => ready,
     stopCurrentBoot: async () => {
       stopCalls += 1;
+    },
+    steerCommand: async (command) => {
+      steerCommands.push(command);
     },
     assignmentInventory: {
       async listAssignments(sandboxId) {
@@ -117,6 +127,9 @@ async function harness() {
     },
     terminationCalls() {
       return terminationCalls;
+    },
+    steerCommands() {
+      return [...steerCommands];
     },
   };
 }
@@ -195,6 +208,39 @@ describe("trusted Supervisor management boundary", () => {
           managementToken: TOKEN,
         }),
     ).toThrow("Plain HTTP Supervisor management requires explicit opt-in");
+  });
+
+  it("routes steer to the exact active Worker through the authenticated management channel", async () => {
+    const value = await harness();
+    const command = parseControlToSupervisorMessage({
+      protocolVersion: 1,
+      messageId: "10000000-0000-4000-8000-000000000010",
+      sentAt: "2026-08-09T08:00:00.000Z",
+      type: "command.turn.steer",
+      payload: {
+        commandId: "10000000-0000-4000-8000-000000000011",
+        targetCommandId: "10000000-0000-4000-8000-000000000012",
+        idempotencyKey: "steer-management-test",
+        tenantId: "tenant-1",
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        sessionId: ASSIGNMENT.sessionId,
+        runId: "10000000-0000-4000-8000-000000000013",
+        turnId: ASSIGNMENT.turnId,
+        attemptId: "10000000-0000-4000-8000-000000000014",
+        agentId: "root",
+        leaseId: ASSIGNMENT.leaseId,
+        fencingToken: ASSIGNMENT.fencingToken,
+        text: "Inspect the current failure before continuing.",
+      },
+    });
+    if (command.type !== "command.turn.steer") throw new Error("Expected steer command");
+    try {
+      await expect(value.client.steer(command)).resolves.toBeUndefined();
+      expect(value.steerCommands()).toEqual([command]);
+    } finally {
+      await value.server.close();
+    }
   });
 
   it("transports bounded artifacts only over the authenticated management boundary", async () => {

@@ -10,11 +10,12 @@ export type ProductionControlPlaneEnvironment = Readonly<Record<string, string |
 
 export type ProductionControlPlaneConfig = {
   databaseUrl: string;
+  databaseNotificationUrl: string;
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
   cubeEgressConfigToken: string;
-  sandboxManagerBaseUrl: string;
+  sandboxManagerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
   advancedModulesEnabled: boolean;
   supervisorIdPrefix: string;
@@ -106,6 +107,20 @@ function managementUrl(value: string, allowInsecure: boolean): string {
     throw new TypeError("Plain HTTP Supervisor management requires explicit opt-in");
   }
   return parsed.toString();
+}
+
+function managementUrls(value: string, allowInsecure: boolean): string[] {
+  const values = value.split(",");
+  if (values.length < 1 || values.length > 256 || values.some((entry) => entry.trim() !== entry)) {
+    throw new TypeError(
+      "AGENT_DOCK_SANDBOX_MANAGER_URLS must contain 1-256 comma-separated URLs without whitespace",
+    );
+  }
+  const parsed = values.map((entry) => managementUrl(entry, allowInsecure));
+  if (new Set(parsed).size !== parsed.length) {
+    throw new TypeError("AGENT_DOCK_SANDBOX_MANAGER_URLS must contain unique URLs");
+  }
+  return parsed;
 }
 
 function managementUrlTemplate(value: string, allowInsecure: boolean): string {
@@ -207,8 +222,15 @@ export async function loadProductionControlPlaneConfig(
       : configuredPlatformOperatorTenantId,
     "AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID",
   );
+  const databaseUrl = await loadProductionDatabaseUrl(environment);
+  const databaseNotificationUrl =
+    environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE === undefined &&
+    environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL === undefined
+      ? databaseUrl
+      : await secret(environment, "AGENT_DOCK_DATABASE_NOTIFICATION_URL", allowInlineSecrets);
   return {
-    databaseUrl: await loadProductionDatabaseUrl(environment),
+    databaseUrl,
+    databaseNotificationUrl,
     supervisorEnrollmentToken: await secret(
       environment,
       "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",
@@ -229,8 +251,8 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN",
       allowInlineSecrets,
     ),
-    sandboxManagerBaseUrl: managementUrl(
-      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URL"),
+    sandboxManagerBaseUrls: managementUrls(
+      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URLS"),
       allowInsecureInternalHttp,
     ),
     sandboxMaterializerToken: await secret(

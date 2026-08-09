@@ -22,7 +22,7 @@ import {
 } from "@agent-dock/protocol";
 import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 import { activeTraceCarrier } from "@agent-dock/observability";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 export const SANDBOX_MANAGER_SERVICE_PATH = "/internal/v1/sandbox-manager";
 export const SANDBOX_MANAGER_OPERATION_PATH = "/internal/v1/tool-operation";
@@ -121,6 +121,10 @@ export class SandboxManagerClient {
 
   get operationUrl(): string {
     return new URL(SANDBOX_MANAGER_OPERATION_PATH, this.#baseUrl).toString();
+  }
+
+  operationUrlFor(_activationId: string): string {
+    return this.operationUrl;
   }
 
   async checkHealth(): Promise<void> {
@@ -427,5 +431,176 @@ export class SandboxManagerClient {
       }
     }
     return value;
+  }
+}
+
+export type ShardedSandboxManagerClientOptions = Omit<SandboxManagerClientOptions, "baseUrl"> & {
+  baseUrls: readonly string[];
+};
+
+/**
+ * Routes every Workspace to one stable Sandbox Manager shard. A shard
+ * owns the in-memory Cube handoff authority for the complete warm activation;
+ * requests must therefore never be distributed by a random L4 load balancer.
+ *
+ * The shard set is an operator-owned fixed ring. Increasing it requires a
+ * blue/green pool and draining the old warm activations first, just like a Pi
+ * Worker build transition. Committed Workspace state remains external, so a
+ * failed shard is recovered cold rather than adopting an ambiguous live VM.
+ */
+export class ShardedSandboxManagerClient {
+  readonly #clients: readonly SandboxManagerClient[];
+  readonly #activationShards = new Map<string, number>();
+
+  constructor(options: ShardedSandboxManagerClientOptions) {
+    if (options.baseUrls.length < 1 || options.baseUrls.length > 256) {
+      throw new TypeError("Sandbox Manager shard URL list must contain 1-256 entries");
+    }
+    if (new Set(options.baseUrls).size !== options.baseUrls.length) {
+      throw new TypeError("Sandbox Manager shard URLs must be unique");
+    }
+    this.#clients = options.baseUrls.map(
+      (baseUrl) => new SandboxManagerClient({ ...options, baseUrl }),
+    );
+  }
+
+  operationUrlFor(activationId: string): string {
+    const shard = this.#activationShards.get(activationId);
+    if (shard === undefined) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_shard_unknown",
+        "Tool Sandbox activation shard is unavailable",
+        false,
+      );
+    }
+    return this.#clients[shard]!.operationUrlFor(activationId);
+  }
+
+  async checkHealth(): Promise<void> {
+    const results = await Promise.allSettled(this.#clients.map((client) => client.checkHealth()));
+    if (results.some((result) => result.status === "fulfilled")) return;
+    const failure = results[0];
+    if (failure?.status === "rejected" && failure.reason instanceof Error) throw failure.reason;
+    throw new SandboxManagerClientError(
+      "sandbox_manager_unavailable",
+      "Sandbox Manager shard ring is unavailable",
+      true,
+    );
+  }
+
+  async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
+    const shard = this.#workspaceShard(request.assignment);
+    const response = await this.#clients[shard]!.create(request);
+    this.#activationShards.set(response.activationId, shard);
+    return response;
+  }
+
+  capture(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+  ): Promise<ToolSandboxCaptureResponse> {
+    return this.#ownedClient(activationId, assignment).capture(activationId, assignment);
+  }
+
+  async release(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+    disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
+  ): Promise<ToolSandboxReleaseResponse> {
+    try {
+      return await this.#ownedClient(activationId, assignment).release(
+        activationId,
+        assignment,
+        disposition,
+      );
+    } finally {
+      this.#activationShards.delete(activationId);
+    }
+  }
+
+  async stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void> {
+    try {
+      await this.#ownedClient(activationId, assignment).stop(activationId, assignment);
+    } finally {
+      this.#activationShards.delete(activationId);
+    }
+  }
+
+  operation(
+    capability: string,
+    request: ToolSandboxOperationRequest,
+    signal?: AbortSignal,
+  ): Promise<ToolSandboxOperationResponse> {
+    const shard = this.#activationShards.get(request.activationId);
+    if (shard === undefined) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_shard_unknown",
+        "Tool Sandbox activation shard is unavailable",
+        false,
+      );
+    }
+    return this.#clients[shard]!.operation(capability, request, signal);
+  }
+
+  importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
+    return this.#clients[0]!.importGitHub(source, signal);
+  }
+
+  materializeFile(
+    request: SandboxManagerMaterializeFileRequest,
+    signal?: AbortSignal,
+  ): Promise<SandboxManagerMaterializeFileResponse> {
+    return this.#clientForKey(
+      [request.tenantId, request.workspaceId, "materialize"].join("\0"),
+    ).materializeFile(request, signal);
+  }
+
+  async listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]> {
+    const assignments = await Promise.all(
+      this.#clients.map((client) => client.listAssignments(sandboxId)),
+    );
+    const unique = new Map<string, SupervisorRuntimeAssignment>();
+    for (const assignment of assignments.flat()) {
+      unique.set(`${assignment.containerId}\0${assignment.fencingToken}`, assignment);
+    }
+    return [...unique.values()];
+  }
+
+  async terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
+    await this.#clientForKey(assignment.workspaceId).terminateAndConfirmAbsent(assignment);
+  }
+
+  async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
+    await this.#clientForKey(assignment.workspaceId).confirmAbsent(assignment);
+  }
+
+  #ownedClient(activationId: string, assignment: ToolSandboxAssignment): SandboxManagerClient {
+    const expected = this.#workspaceShard(assignment);
+    const observed = this.#activationShards.get(activationId);
+    if (observed !== undefined && observed !== expected) {
+      throw new SandboxManagerClientError(
+        "sandbox_manager_shard_conflict",
+        "Tool Sandbox activation changed shard ownership",
+        false,
+      );
+    }
+    this.#activationShards.set(activationId, expected);
+    return this.#clients[expected]!;
+  }
+
+  #workspaceShard(assignment: ToolSandboxAssignment): number {
+    // All Sessions sharing one Workspace must reach the same Manager. A warm
+    // guest may retain background processes after its Run, so Session-level
+    // sharding could otherwise create two writers for one Workspace.
+    return this.#shard(assignment.workspaceId);
+  }
+
+  #clientForKey(key: string): SandboxManagerClient {
+    return this.#clients[this.#shard(key)]!;
+  }
+
+  #shard(key: string): number {
+    const digest = createHash("sha256").update(key, "utf8").digest();
+    return digest.readUInt32BE(0) % this.#clients.length;
   }
 }

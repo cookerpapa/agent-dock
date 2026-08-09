@@ -8,6 +8,7 @@ export type SandboxRuntimeAssignment = SandboxRuntimeIdentity & {
   runtimeId: string;
   runtimeName: string;
   commandId: string;
+  workspaceId: string;
   sessionId: string;
   turnId: string;
   leaseId: string;

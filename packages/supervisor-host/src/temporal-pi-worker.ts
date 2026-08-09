@@ -32,6 +32,7 @@ export type TemporalPiWorkerOptions = {
   sandboxId: string;
   affinityTtlMs: number;
   maximumConcurrentRuns: number;
+  shutdownGraceMs: number;
   workerDeployment?: {
     deploymentName: string;
     buildId: string;
@@ -72,6 +73,7 @@ export class TemporalPiWorker {
   readonly #affinityTaskQueue: string;
   readonly #affinityTtlMs: number;
   readonly #maximumConcurrentRuns: number;
+  readonly #shutdownGraceMs: number;
   readonly #workerDeployment:
     | {
         deploymentName: string;
@@ -101,6 +103,7 @@ export class TemporalPiWorker {
       options.maximumConcurrentRuns,
       "maximumConcurrentRuns",
     );
+    this.#shutdownGraceMs = positiveInteger(options.shutdownGraceMs, "shutdownGraceMs");
     this.#workerDeployment =
       options.workerDeployment === undefined
         ? undefined
@@ -152,7 +155,7 @@ export class TemporalPiWorker {
         ...versioningOptions,
         maxConcurrentActivityTaskExecutions: this.#maximumConcurrentRuns,
         maxConcurrentWorkflowTaskExecutions: Math.max(8, this.#maximumConcurrentRuns * 4),
-        shutdownGraceTime: "30 seconds",
+        shutdownGraceTime: this.#shutdownGraceMs,
       });
       this.#affinityWorker = await Worker.create({
         connection: this.#connection,
@@ -164,7 +167,7 @@ export class TemporalPiWorker {
         identity: this.#identity,
         ...versioningOptions,
         maxConcurrentActivityTaskExecutions: this.#maximumConcurrentRuns,
-        shutdownGraceTime: "30 seconds",
+        shutdownGraceTime: this.#shutdownGraceMs,
       });
       this.#state = "running";
       this.#run = Promise.all([this.#sharedWorker.run(), this.#affinityWorker.run()])

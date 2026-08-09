@@ -61,6 +61,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0087](0087-committed-stream-batching-and-model-context.md) defines the
   committed-before-visible stream, set-based batching and Pi-context recovery
   contract.
+- [ADR-0088](0088-distributed-kubernetes-and-demand-scaling.md) defines the
+  external-authority Kubernetes topology, version-aware Temporal/KEDA Worker
+  scaling, exact Worker management DNS and fixed Sandbox Manager shard ring.
 
 ## Maintained optional modules
 

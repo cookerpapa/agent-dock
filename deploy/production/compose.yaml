@@ -31,7 +31,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
   AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
   AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/agent-dock-secrets/cube-egress-config-token
-  AGENT_DOCK_SANDBOX_MANAGER_URL: http://sandbox-manager:4300
+  AGENT_DOCK_SANDBOX_MANAGER_URLS: http://sandbox-manager:4300
   AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
@@ -549,7 +549,7 @@ services:
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
-      AGENT_DOCK_SANDBOX_MANAGER_URL: http://sandbox-manager:4300
+      AGENT_DOCK_SANDBOX_MANAGER_URLS: http://sandbox-manager:4300
       AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "300000"
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0

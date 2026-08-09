@@ -4,7 +4,11 @@ import type { CreateTurnSteerRequest, TurnSteerResource } from "@agent-dock/prot
 import type { Kysely, Transaction } from "kysely";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
-import { TurnSteerBackendError, type TurnSteerRequest } from "./turn-steer.ts";
+import {
+  TurnSteerBackendError,
+  type TurnSteerBackend,
+  type TurnSteerRequest,
+} from "./turn-steer.ts";
 
 export type TurnSteeringErrorCode =
   "not_found" | "conflict" | "idempotency_conflict" | "steer_transport_unavailable";
@@ -82,6 +86,7 @@ function resource(row: StoredSteer, replayed: boolean): TurnSteerResource {
 export class TurnSteeringService {
   readonly #database: Kysely<Database>;
   readonly #gateway: SupervisorWebSocketGateway | undefined;
+  readonly #backendFactory: ((sandboxId: string) => Promise<TurnSteerBackend>) | undefined;
   readonly #idGenerator: () => string;
   readonly #clock: () => Date;
   readonly #inflight = new Map<string, Promise<TurnSteerResource>>();
@@ -89,11 +94,13 @@ export class TurnSteeringService {
   constructor(options: {
     database: Kysely<Database>;
     gateway?: SupervisorWebSocketGateway;
+    backendFactory?: (sandboxId: string) => Promise<TurnSteerBackend>;
     idGenerator?: () => string;
     clock?: () => Date;
   }) {
     this.#database = options.database;
     this.#gateway = options.gateway;
+    this.#backendFactory = options.backendFactory;
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#clock = options.clock ?? (() => new Date());
   }
@@ -150,14 +157,17 @@ export class TurnSteeringService {
   }
 
   async #deliverStored(stored: StoredSteer, replayed: boolean): Promise<TurnSteerResource> {
-    if (this.#gateway === undefined) {
+    if (this.#backendFactory === undefined && this.#gateway === undefined) {
       throw new TurnSteeringError(
         "steer_transport_unavailable",
         "Active Pi steer transport is unavailable",
       );
     }
     await this.#markDispatched(stored);
-    const backend = this.#gateway.createRemoteSteerBackend(stored.sandboxId);
+    const backend =
+      this.#backendFactory === undefined
+        ? this.#gateway!.createRemoteSteerBackend(stored.sandboxId)
+        : await this.#backendFactory(stored.sandboxId);
     const delivery: TurnSteerRequest = {
       commandId: stored.commandId,
       idempotencyKey: stored.idempotencyKey,

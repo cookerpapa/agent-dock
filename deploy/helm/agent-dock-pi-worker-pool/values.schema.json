@@ -4,6 +4,8 @@
   "additionalProperties": false,
   "required": [
     "workerPool",
+    "autoscaling",
+    "lifecycle",
     "management",
     "image",
     "services",
@@ -20,6 +22,10 @@
     "serviceAccount"
   ],
   "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "workerPool": {
       "type": "object",
       "additionalProperties": false,
@@ -38,6 +44,46 @@
           "minLength": 1,
           "maxLength": 253,
           "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+        }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "minReplicas",
+        "maxReplicas",
+        "pollingIntervalSeconds",
+        "cooldownSeconds",
+        "targetQueueSize",
+        "scaleDownStabilizationSeconds",
+        "scaleDownPeriodSeconds"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 2, "maximum": 64 },
+        "maxReplicas": { "type": "integer", "minimum": 2, "maximum": 64 },
+        "pollingIntervalSeconds": { "type": "integer", "minimum": 2, "maximum": 300 },
+        "cooldownSeconds": { "type": "integer", "minimum": 60, "maximum": 7200 },
+        "targetQueueSize": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "scaleDownStabilizationSeconds": {
+          "type": "integer",
+          "minimum": 300,
+          "maximum": 7200
+        },
+        "scaleDownPeriodSeconds": { "type": "integer", "minimum": 60, "maximum": 1800 }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminationGracePeriodSeconds"],
+      "properties": {
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 960,
+          "maximum": 3600
         }
       }
     },
@@ -103,14 +149,20 @@
       "additionalProperties": false,
       "required": [
         "controlPlaneUrl",
-        "sandboxManagerUrl",
+        "sandboxManagerUrls",
         "githubGateway",
         "providerProxyUrl",
         "otlpTracesEndpoint"
       ],
       "properties": {
         "controlPlaneUrl": { "$ref": "#/$defs/httpUrl" },
-        "sandboxManagerUrl": { "$ref": "#/$defs/httpUrl" },
+        "sandboxManagerUrls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/httpUrl" }
+        },
         "providerProxyUrl": { "$ref": "#/$defs/optionalHttpUrl" },
         "otlpTracesEndpoint": { "$ref": "#/$defs/optionalHttpUrl" },
         "githubGateway": {

@@ -559,9 +559,44 @@ Grafana, their volume bootstrap and loopback ingress are enabled together by
 the `observability` profile. Core services do not require an OTLP collector to
 be ready.
 
-The Pi Worker manifests are horizontally scalable. Multi-node deployment needs
-shared PostgreSQL, object storage, Temporal and Cube infrastructure, but does
-not require changing the Worker execution contract.
+The distributed Kubernetes profile replaces local authorities with external HA
+PostgreSQL/PgBouncer, Temporal, S3/Kopia, a shared RWX POSIX volume and a Cube
+cluster:
+
+```text
+Ingress
+  → Web Deployment (HPA)
+  → Control Plane Deployment (HPA)
+       ├── PgBouncer transaction URL
+       ├── direct PostgreSQL LISTEN URL
+       └── Temporal Workflow client
+
+Temporal versioned Activity backlog
+  → KEDA
+  → Pi Worker StatefulSet (capacity one per Pod)
+
+fixed Workspace hash
+  → Sandbox Manager StatefulSet shard
+  → paired Workspace Data Mover
+  → Cube control/compute cluster
+```
+
+Any Control Plane replica can send steer to the exact active Worker through its
+StatefulSet headless DNS identity; WebSocket connection locality is not an
+execution-routing authority. Pi Worker termination stops Temporal polling and
+drains the active Activity before Pod exit.
+
+Sandbox Manager is deliberately not behind a random load balancer. The ordered
+URL list forms a fixed deterministic hash ring because each shard owns live Cube
+activation and handoff state. Ring resize is a drain/blue-green operation.
+PostgreSQL still serializes ordinary Runs sharing one Workspace and advances the
+Workspace head with CAS, independent of Workspace-to-Manager routing.
+
+Kubernetes HPA/KEDA creates Pods. A provider-specific node autoscaler is needed
+to create machines for pending Pods. The strict Helm profile, preflight and
+operator procedure are in
+[Distributed deployment](DISTRIBUTED_DEPLOYMENT.md). Multi-node failure
+acceptance is still required before claiming measured HA.
 
 ## 13. Current architectural decisions
 
@@ -588,6 +623,7 @@ not require changing the Worker execution contract.
 - [ADR-0085: Single-active Cube Tool execution](adr/0085-single-active-cube-tool-execution.md)
 - [ADR-0086: Reconnectable Worker Control Channel](adr/0086-reconnectable-worker-control-channel.md)
 - [ADR-0087: Committed stream batching and Pi context](adr/0087-committed-stream-batching-and-model-context.md)
+- [ADR-0088: Distributed Kubernetes topology and demand scaling](adr/0088-distributed-kubernetes-and-demand-scaling.md)
 
 See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
 not as supported runtime choices.

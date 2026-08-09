@@ -5,9 +5,11 @@ import { pathToFileURL } from "node:url";
 import { sql } from "kysely";
 import {
   HttpSupervisorManagementClient,
+  HttpSupervisorSteerBackend,
   RoutedHttpSandboxAssignmentInventory,
   RoutedHttpSupervisorOwnerBoundary,
 } from "./http-supervisor-management.ts";
+import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
 import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import {
@@ -23,7 +25,7 @@ import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
-import { SandboxManagerClient } from "@agent-dock/sandbox-manager/client";
+import { ShardedSandboxManagerClient } from "@agent-dock/sandbox-manager/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
@@ -51,7 +53,9 @@ export async function startControlPlane(): Promise<void> {
   });
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
   const notifications = new PostgresSessionEventNotifications({
-    connectionString: config.databaseUrl,
+    // LISTEN requires a session connection and must bypass PgBouncer's
+    // transaction pool in distributed deployments.
+    connectionString: config.databaseNotificationUrl,
   });
   const objectStore = createS3CheckpointObjectStoreFromEnvironment();
   let runtime: ControlPlaneRuntime | undefined;
@@ -125,8 +129,24 @@ export async function startControlPlane(): Promise<void> {
       }
       return client;
     };
-    const snapshotMaterializer = new SandboxManagerClient({
-      baseUrl: config.sandboxManagerBaseUrl,
+    const resolveSteerBackend = async (sandboxId: string): Promise<HttpSupervisorSteerBackend> => {
+      const identity = await database
+        .selectFrom("sandboxes")
+        .select(["supervisor_id", "boot_id"])
+        .where("id", "=", sandboxId)
+        .executeTakeFirst();
+      if (identity === undefined) throw new Error("Active Pi Worker identity is unavailable");
+      return new HttpSupervisorSteerBackend({
+        client: await resolveManagementClient({
+          supervisorId: identity.supervisor_id,
+          bootId: identity.boot_id,
+          sandboxId,
+        }),
+        leaseCoordinator: new SessionLeaseCoordinator({ database, sandboxId }),
+      });
+    };
+    const snapshotMaterializer = new ShardedSandboxManagerClient({
+      baseUrls: config.sandboxManagerBaseUrls,
       serviceToken: config.sandboxMaterializerToken,
       allowInsecureHttp: config.allowInsecureInternalHttp,
     });
@@ -162,6 +182,7 @@ export async function startControlPlane(): Promise<void> {
       assignmentInventoryFactory: (identity) =>
         new RoutedHttpSandboxAssignmentInventory(resolveManagementClient, identity),
       supervisorProvisioningGateway: provisioningGateway,
+      turnSteerBackendFactory: resolveSteerBackend,
       productionHttpGateway: httpGateway,
       publicRegistration: registrationConfiguration,
       webAuthentication,

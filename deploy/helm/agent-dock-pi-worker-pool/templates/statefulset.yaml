@@ -1,6 +1,10 @@
 {{- $name := include "agent-dock-pi-worker-pool.name" . -}}
-{{- if ge (int .Values.disruptionBudget.minAvailable) (int .Values.workerPool.replicas) -}}
-{{- fail "disruptionBudget.minAvailable must be lower than workerPool.replicas" -}}
+{{- $minimumReplicas := ternary (int .Values.autoscaling.minReplicas) (int .Values.workerPool.replicas) .Values.autoscaling.enabled -}}
+{{- if and .Values.autoscaling.enabled (lt (int .Values.autoscaling.maxReplicas) (int .Values.autoscaling.minReplicas)) -}}
+{{- fail "autoscaling.maxReplicas must be greater than or equal to autoscaling.minReplicas" -}}
+{{- end -}}
+{{- if ge (int .Values.disruptionBudget.minAvailable) $minimumReplicas -}}
+{{- fail "disruptionBudget.minAvailable must be lower than the minimum Worker replica count" -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -10,7 +14,7 @@ metadata:
     {{- include "agent-dock-pi-worker-pool.labels" . | nindent 4 }}
 spec:
   serviceName: {{ $name }}
-  replicas: {{ .Values.workerPool.replicas }}
+  replicas: {{ $minimumReplicas }}
   podManagementPolicy: Parallel
   minReadySeconds: 5
   revisionHistoryLimit: 5
@@ -30,6 +34,10 @@ spec:
         agent-dock.io/conversation-authority: external-postgresql-and-s3
         agent-dock.io/temporal-worker-deployment: {{ .Values.temporal.workerDeploymentName | quote }}
     spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "agent-dock-pi-worker-pool.serviceAccountName" . }}
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -37,7 +45,7 @@ spec:
       hostNetwork: false
       hostPID: false
       shareProcessNamespace: false
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -120,8 +128,8 @@ spec:
               value: /run/agent-dock-secrets/supervisor-management-token
             - name: AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE
               value: /run/agent-dock-secrets/sandbox-manager-token
-            - name: AGENT_DOCK_SANDBOX_MANAGER_URL
-              value: {{ .Values.services.sandboxManagerUrl | quote }}
+            - name: AGENT_DOCK_SANDBOX_MANAGER_URLS
+              value: {{ join "," .Values.services.sandboxManagerUrls | quote }}
             - name: AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS
               value: {{ .Values.runtime.timeouts.sandboxManagerRequestMs | quote }}
             - name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE
@@ -134,7 +142,7 @@ spec:
               {{- if .Values.management.ingress.enabled }}
               value: {{ printf "%s://$(POD_NAME).%s" .Values.management.ingress.scheme .Values.management.ingress.hostSuffix | quote }}
               {{- else }}
-              value: {{ printf "http://$(POD_NAME).$(POD_NAMESPACE).svc.%s:4100" .Values.workerPool.clusterDomain | quote }}
+              value: {{ printf "http://$(POD_NAME).%s.$(POD_NAMESPACE).svc.%s:4100" $name .Values.workerPool.clusterDomain | quote }}
               {{- end }}
             - name: AGENT_DOCK_SUPERVISOR_CAPACITY
               value: {{ .Values.workerPool.capacity | quote }}
@@ -233,10 +241,6 @@ spec:
             periodSeconds: 3
             timeoutSeconds: 2
             failureThreshold: 40
-          lifecycle:
-            preStop:
-              exec:
-                command: ["/bin/sh", "-c", "kill -TERM 1; sleep 5"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

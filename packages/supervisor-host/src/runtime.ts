@@ -18,7 +18,7 @@ import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
-import { SandboxManagerClient } from "@agent-dock/sandbox-manager";
+import { ShardedSandboxManagerClient } from "@agent-dock/sandbox-manager";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
@@ -34,7 +34,10 @@ import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { SupervisorBootLedger, type SupervisorHostBootIdentity } from "./boot-ledger.ts";
 import type { SupervisorHostConfig } from "./config.ts";
-import { SupervisorManagementServer } from "./management-server.ts";
+import {
+  SupervisorManagementServer,
+  SupervisorManagementServerError,
+} from "./management-server.ts";
 import { TenantModelGateway } from "./model-gateway.ts";
 import {
   TemporalPiWorker,
@@ -66,8 +69,8 @@ export type SupervisorTemporalWorker = {
 };
 
 export type SupervisorSandboxManager = Pick<
-  SandboxManagerClient,
-  | "operationUrl"
+  ShardedSandboxManagerClient,
+  | "operationUrlFor"
   | "checkHealth"
   | "create"
   | "capture"
@@ -171,8 +174,8 @@ export class SupervisorHostRuntime {
       });
     this.#sandboxManager =
       options.sandboxManager ??
-      new SandboxManagerClient({
-        baseUrl: options.config.sandboxManagerBaseUrl,
+      new ShardedSandboxManagerClient({
+        baseUrls: options.config.sandboxManagerBaseUrls,
         serviceToken: options.config.sandboxManagerServiceToken,
         allowInsecureHttp: options.config.allowInsecureInternalHttp,
         requestTimeoutMs: options.config.sandboxManagerRequestTimeoutMs,
@@ -258,6 +261,25 @@ export class SupervisorHostRuntime {
       },
       assignmentInventory: this.#sandboxManager,
       artifactStore: this.#objectStore,
+      steerCommand: async (command) => {
+        const local = this.#localSupervisor;
+        if (local === undefined) {
+          throw new SupervisorManagementServerError(
+            "steer_target_unavailable",
+            "Pi Run is not active on this Worker",
+            true,
+          );
+        }
+        const prepared = local.prepareSteer(command);
+        if (prepared.ack.payload.status === "rejected") {
+          throw new SupervisorManagementServerError(
+            prepared.ack.payload.code,
+            prepared.ack.payload.message,
+            prepared.ack.payload.retryable,
+          );
+        }
+        await prepared.run();
+      },
     });
     this.#managementServer = managementServer;
     try {
@@ -411,6 +433,8 @@ export class SupervisorHostRuntime {
         sandboxId: identity.sandboxId,
         affinityTtlMs: this.#config.checkpointReadCacheTtlMs,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
+        shutdownGraceMs:
+          this.#config.piTurnTimeoutMs + this.#config.sandboxManagerRequestTimeoutMs + 5 * 60_000,
         ...(this.#config.temporalWorkerDeploymentName === undefined ||
         this.#config.temporalWorkerBuildId === undefined
           ? {}
@@ -460,10 +484,12 @@ export class SupervisorHostRuntime {
   async #close(): Promise<void> {
     if (this.#state !== "failed") this.#state = "draining";
     this.#client?.setAcceptingAssignments(false);
-    this.#localSupervisor?.revokeAllAssignments();
+    // A Kubernetes scale-in is a drain, not a fencing event. Stop Temporal
+    // polling first and give the active Activity its bounded settlement window;
+    // owner replacement still uses stopCurrentBoot(), which revokes immediately.
     await this.#temporalWorker?.stop().catch(() => undefined);
-    await this.#client?.stop().catch(() => undefined);
     await this.#localSupervisor?.waitUntilAssignmentsSettled().catch(() => undefined);
+    await this.#client?.stop().catch(() => undefined);
     await this.#managementServer?.close().catch(() => undefined);
     await this.#modelGateway?.close().catch(() => undefined);
     this.#objectStore.destroy();

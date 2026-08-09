@@ -27,6 +27,32 @@ Shell environment variables override values from the runtime `.env` for one
 operator command. Use this only for an intentional one-off operation. Persist
 normal settings in `.env` so a later deployment does not silently revert them.
 
+### Distributed Kubernetes profile
+
+The multi-node-capable profile is configured through the strict Helm values in
+`deploy/helm/agent-dock-platform`, not through the single-host runtime `.env`.
+Start from `values.distributed.example.yaml` and keep the resulting operator
+file outside Git. Its main restart-bound settings are:
+
+| Helm value | Purpose |
+| --- | --- |
+| `global.imagePullSecrets` | Namespace-local registry credentials used by every AgentDock Pod, including Pi Workers. |
+| `controlPlane.autoscaling` / `web.autoscaling` | HPA lower/upper bounds and CPU targets. |
+| `pi-workers.autoscaling` | KEDA Temporal backlog target, Worker lower/upper bounds and conservative scale-down windows. |
+| `sandboxPlane.shards` | Fixed Sandbox Manager/Data Mover ring size; changing it requires the documented drain procedure. |
+| `external.database.*` | PgBouncer application URL key plus a direct PostgreSQL session URL key for `LISTEN` and migrations. |
+| `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
+| `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |
+
+`AGENT_DOCK_SANDBOX_MANAGER_URLS` is the ordered, comma-separated Manager
+ring injected into Control Plane and Workers. The ordering is part of runtime
+placement identity and must not be changed while activations are live.
+`AGENT_DOCK_DATABASE_NOTIFICATION_URL` (normally file-backed) must bypass
+transaction-pooling PgBouncer because PostgreSQL `LISTEN` is session-scoped.
+
+See [Distributed Kubernetes deployment](DISTRIBUTED_DEPLOYMENT.md) for the
+preflight, Secret/PVC contract, scaling boundaries and blue-green procedure.
+
 ## Administrator settings
 
 A platform administrator logs in through the normal Web entry point and lands

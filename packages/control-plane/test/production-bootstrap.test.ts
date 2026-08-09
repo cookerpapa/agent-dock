@@ -178,6 +178,11 @@ describe.sequential("production bootstrap and configuration", () => {
     roots.push(root);
     const environment = {
       DATABASE_URL_FILE: await secret(root, "database", "postgresql://db.invalid/agentdock"),
+      AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE: await secret(
+        root,
+        "database-notifications",
+        "postgresql://postgres-direct.invalid/agentdock",
+      ),
       AGENT_DOCK_API_TOKEN_FILE: await secret(
         root,
         "api",
@@ -203,7 +208,7 @@ describe.sequential("production bootstrap and configuration", () => {
         "cube-egress-config-token",
         `cube-egress-${"c".repeat(48)}`,
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_URL: "http://sandbox-manager:4300",
+      AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: await secret(
         root,
         "sandbox-materializer-token",
@@ -220,9 +225,11 @@ describe.sequential("production bootstrap and configuration", () => {
     };
     const runtime = await loadProductionControlPlaneConfig(environment);
     expect(runtime).toMatchObject({
+      databaseUrl: "postgresql://db.invalid/agentdock",
+      databaseNotificationUrl: "postgresql://postgres-direct.invalid/agentdock",
       supervisorIdPrefix: "pi-worker-",
       supervisorManagementBaseUrlTemplate: "http://{supervisorId}:4100",
-      sandboxManagerBaseUrl: "http://sandbox-manager:4300/",
+      sandboxManagerBaseUrls: ["http://sandbox-manager:4300/"],
       host: "0.0.0.0",
       port: 3000,
       temporalAddress: "temporal:7233",

@@ -3211,3 +3211,35 @@
   usage HTTP endpoint was removed from the default product surface. The harness
   now reads trusted usage evidence directly from PostgreSQL and records exact
   event-row/payload counts for the accepted Runs.
+
+# 2026-08-09 — Distributed Kubernetes application plane and demand scaling
+
+- Added a strict umbrella Helm Chart for multi-node-capable Web, Control Plane,
+  Pi Worker and trusted Sandbox Manager/Data Mover deployment. The release
+  consumes external PostgreSQL/PgBouncer, Temporal, S3/Kopia, RWX Workspace
+  storage and Cube authorities instead of hiding single-node data services in
+  application Pods.
+- Split the PostgreSQL application connection from the direct session endpoint
+  required by `LISTEN` and migrations. Added multi-replica Web/Control Plane
+  Deployments, HPA, disruption budgets, topology spreading, private-registry
+  pull secrets, deny-by-default NetworkPolicy and an atomic migration/bootstrap
+  hook.
+- Replaced random Sandbox Manager routing with an ordered deterministic shard
+  ring. Every Session sharing a Workspace, its Tool operations and owner-loss
+  cleanup return to one stable Manager ordinal; ordinary Workspace writer
+  serialization and head CAS remain globally enforced in PostgreSQL.
+- Replaced replica-local steer delivery with an authenticated direct Worker
+  management request resolved from the current PostgreSQL assignment. Pi
+  Workers now use StatefulSet headless DNS rather than one Service per ordinal.
+- Added KEDA Temporal-queue scaling for capacity-one Pi Workers, a two-Worker
+  floor, conservative scale-down and graceful Temporal Activity drain. Web and
+  Control Plane scale independently through HPA; machine provisioning remains
+  the operator's cluster-autoscaler responsibility.
+- Added render, preflight, atomic deploy and status commands. Preflight checks
+  KEDA, the Metrics API, at least two schedulable nodes, the complete Secret
+  contract and a real ReadWriteMany Workspace PVC. Helm/unit tests prove the
+  manifest and routing contracts; real multi-node node-loss and external-store
+  failover evidence remains intentionally unclaimed.
+- Pinned the patched `nanoid` transitive release after the current high-severity
+  audit advisory affected Vite/PostCSS's prior lockfile version; the repository
+  security gate again reports no unremediated high/critical finding.

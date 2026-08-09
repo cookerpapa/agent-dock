@@ -17,6 +17,9 @@
     "pi-security-undici": "npm:undici@8.10.0",
     "platform-security-find-my-way": "npm:find-my-way@9.7.0"
   },
+  "overrides": {
+    "nanoid": "3.3.17"
+  },
   "scripts": {
     "postinstall": "node scripts/harden-pi-dependencies.mjs",
     "dependencies:harden": "node scripts/harden-pi-dependencies.mjs",
@@ -35,13 +38,17 @@
     "cubesandbox:ps": "node scripts/production-compose.mjs ps",
     "cubesandbox:logs": "node scripts/production-compose.mjs logs --follow",
     "cubesandbox:down": "node scripts/production-compose.mjs down",
-    "helm:check": "node scripts/check-helm-pi-worker-pool.mjs",
+    "helm:check": "node scripts/check-helm-pi-worker-pool.mjs && node scripts/check-helm-platform.mjs",
     "image:closure-check": "node scripts/check-supervisor-image-closure.mjs",
     "kubernetes:pi-workers:install-runtime": "node scripts/ensure-k3d.mjs",
     "kubernetes:pi-workers:up": "node scripts/local-kubernetes-pi-workers.mjs up",
     "kubernetes:pi-workers:down": "node scripts/local-kubernetes-pi-workers.mjs down",
     "kubernetes:pi-workers:status": "node scripts/local-kubernetes-pi-workers.mjs status",
     "kubernetes:pi-workers:check": "node scripts/local-kubernetes-pi-workers.mjs check",
+    "kubernetes:distributed:render": "node scripts/distributed-kubernetes.mjs render",
+    "kubernetes:distributed:preflight": "node scripts/distributed-kubernetes.mjs preflight",
+    "kubernetes:distributed:deploy": "node scripts/distributed-kubernetes.mjs deploy",
+    "kubernetes:distributed:status": "node scripts/distributed-kubernetes.mjs status",
     "object-store:check": "node scripts/run-minio-check.mjs",
     "benchmark:pi-session-storage": "node scripts/run-pi-session-storage-benchmark.mjs",
     "benchmark:event-spool": "node --experimental-strip-types scripts/run-event-spool-benchmark.mjs",

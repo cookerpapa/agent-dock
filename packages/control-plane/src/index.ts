@@ -271,6 +271,7 @@ export {
   HttpSandboxAssignmentInventory,
   HttpSupervisorManagementClient,
   HttpSupervisorManagementError,
+  HttpSupervisorSteerBackend,
   HttpSupervisorOwnerBoundary,
   RoutedHttpSandboxAssignmentInventory,
   RoutedHttpSupervisorOwnerBoundary,

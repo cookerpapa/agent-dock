@@ -10,12 +10,16 @@ platform service network.
 | Browser | Web ingress | yes | browser session cookie |
 | Web ingress | Control Plane | yes | trusted internal route |
 | Control Plane | PostgreSQL | yes | DB credential |
+| Control Plane | PostgreSQL direct session endpoint | yes | DB credential; `LISTEN`/migration only |
 | Control Plane | Temporal | yes | internal namespace |
 | Control Plane | MinIO/S3 | yes | object-store credential |
+| Control Plane | exact Pi Worker management endpoint | yes | management service token |
+| Control Plane | Sandbox Manager shard | yes | materializer credential |
 | Pi Worker | Control Plane management channel | yes | Worker boot credential |
 | Pi Worker | Model Gateway | yes | short-lived Run capability |
 | Pi Worker | Sandbox Manager | yes | service identity + Tool lease |
 | Sandbox Manager | Cube API/Proxy | yes | Cube API credential |
+| Sandbox Manager | co-located Data Mover | yes | Data Mover service credential |
 | Data Mover | Cube Volume/POSIX storage | yes | deployment identity |
 | Data Mover | object storage | yes | scoped checkpoint credential |
 | Cube guest | Cube egress gateway | yes | no platform credential |
@@ -33,6 +37,13 @@ into the service that needs them.
 
 The Worker does not receive the Cube API key. The Sandbox Manager does not
 receive the model provider key.
+
+In the distributed profile, NetworkPolicy starts from denied ingress/egress.
+In-cluster authorities must live in a namespace carrying the explicitly
+reviewed trusted-plane label; external PostgreSQL, Temporal, S3, Cube, proxy
+and OTLP addresses must use concrete operator-supplied CIDRs. Private image
+registry access is a node/runtime concern and is authenticated with
+`imagePullSecrets`, not with a credential mounted into application containers.
 
 ## Cube egress
 

@@ -85,17 +85,10 @@ function positiveInteger(value: number, name: string, maximum: number): number {
 }
 
 function workspaceKey(assignment: ToolSandboxAssignment): string {
-  // A warm activation belongs to the durable tenant/project/workspace/session,
-  // not to the ephemeral Pi worker that happened to execute the previous Run.
-  // RunAttempt ownership is transferred by the monotonically increasing fence
-  // in provider.rebind(); keeping supervisor identity in this key would strand
-  // the running Session VM whenever Temporal schedules the next Run elsewhere.
-  return [
-    assignment.tenantId,
-    assignment.projectId,
-    assignment.workspaceId,
-    assignment.sessionId,
-  ].join("\0");
+  // One Workspace must have at most one active or warm process world. A second
+  // Session may share its files, but it must not leave the first Session's
+  // background processes alive as an independent writer.
+  return [assignment.tenantId, assignment.projectId, assignment.workspaceId].join("\0");
 }
 
 function capabilityDigest(value: string): Buffer {
@@ -141,6 +134,7 @@ function sameAssignment(left: ToolSandboxAssignment, right: ToolSandboxAssignmen
     left.bootId === right.bootId &&
     left.sandboxId === right.sandboxId &&
     left.commandId === right.commandId &&
+    left.workspaceId === right.workspaceId &&
     left.sessionId === right.sessionId &&
     left.turnId === right.turnId &&
     left.attemptId === right.attemptId &&
@@ -308,8 +302,8 @@ export class ToolSandboxManager {
     const key = workspaceKey(request.assignment);
     if ([...this.#activations.values()].some((entry) => workspaceKey(entry.assignment) === key)) {
       throw new SandboxManagerError(
-        "tool_sandbox_session_busy",
-        "Workspace session already has a Tool Sandbox reservation",
+        "tool_sandbox_workspace_busy",
+        "Workspace already has a Tool Sandbox reservation",
         true,
       );
     }
@@ -317,7 +311,8 @@ export class ToolSandboxManager {
     let inherited = this.#warm.get(key);
     if (
       inherited !== undefined &&
-      (request.workspaceRevision === undefined ||
+      (inherited.handle.assignment.sessionId !== request.assignment.sessionId ||
+        request.workspaceRevision === undefined ||
         request.workspaceRevision !== inherited.workspaceRevision ||
         !sameEnvironment(request.environment, inherited.environment))
     ) {

@@ -12,6 +12,9 @@ in the implementation log or Git history, not in the active backlog.
 - [x] Publish one configuration reference that separates administrator hot
       settings, supported operator settings, fixed production policy,
       generated identity and secrets.
+- [x] Provide a strict distributed Helm profile, preflight/deploy command,
+      migration hook, explicit external-authority contract and workload
+      autoscaling policies.
 
 ## Release verification
 
@@ -70,6 +73,9 @@ in the implementation log or Git history, not in the active backlog.
 - [ ] Validate the existing horizontal Pi Worker manifests on more than one
       physical node with external PostgreSQL, S3-compatible storage and
       Temporal.
+- [ ] Run the complete distributed Helm profile on at least three physical
+      nodes and record HPA, KEDA, node-autoscaler and Manager-shard replacement
+      evidence.
 - [ ] Validate Cube compute-node drain, replacement and Workspace recovery from
       committed Kopia state.
 - [ ] Replace workstation-specific network/proxy assumptions with explicit

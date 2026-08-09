@@ -1,8 +1,10 @@
 import {
   parseInternalServiceError,
+  parseControlToSupervisorMessage,
   parseSupervisorManagementResponse,
   type SupervisorManagementRequest,
   type SupervisorRuntimeAssignment,
+  type SteerTurnCommandMessage,
 } from "@agent-dock/protocol";
 import {
   SandboxAssignmentInventoryError,
@@ -13,6 +15,12 @@ import type {
   SupervisorBootIdentity,
   SupervisorOwnerBoundary,
 } from "./supervisor-connection-manager.ts";
+import type { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
+import {
+  TurnSteerBackendError,
+  type TurnSteerBackend,
+  type TurnSteerRequest,
+} from "./turn-steer.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_MANAGEMENT_PATH = "/internal/v1/supervisor/manage";
@@ -83,6 +91,7 @@ function protocolAssignment(value: SandboxRuntimeAssignment): SupervisorRuntimeA
     bootId: value.bootId,
     sandboxId: value.sandboxId,
     commandId: value.commandId,
+    workspaceId: value.workspaceId,
     sessionId: value.sessionId,
     turnId: value.turnId,
     leaseId: value.leaseId,
@@ -98,6 +107,7 @@ function runtimeAssignment(value: SupervisorRuntimeAssignment): SandboxRuntimeAs
     bootId: value.bootId,
     sandboxId: value.sandboxId,
     commandId: value.commandId,
+    workspaceId: value.workspaceId,
     sessionId: value.sessionId,
     turnId: value.turnId,
     leaseId: value.leaseId,
@@ -236,6 +246,115 @@ export class HttpSupervisorManagementClient {
       );
     }
     return bytes;
+  }
+
+  async steer(command: SteerTurnCommandMessage): Promise<void> {
+    const requestId = this.requestId();
+    let response;
+    try {
+      response = await this.request({
+        protocolVersion: 1,
+        type: "turn.steer",
+        requestId,
+        command,
+      });
+    } catch (first: unknown) {
+      if (!(first instanceof HttpSupervisorManagementError) || !first.retryable) throw first;
+      // The Worker deduplicates by commandId, so retrying the same command is
+      // safe even when the first HTTP response was lost after delivery.
+      response = await this.request({
+        protocolVersion: 1,
+        type: "turn.steer",
+        requestId,
+        command,
+      }).catch(() => {
+        throw new TurnSteerBackendError(
+          "supervisor_management_unavailable",
+          "Steer delivery outcome is temporarily unknown",
+          false,
+          true,
+        );
+      });
+    }
+    if (
+      response.type !== "turn.steered" ||
+      response.requestId !== requestId ||
+      response.commandId !== command.payload.commandId
+    ) {
+      throw new TurnSteerBackendError(
+        "backend_protocol_violation",
+        "Supervisor steer response did not match",
+        false,
+        true,
+      );
+    }
+  }
+}
+
+export class HttpSupervisorSteerBackend implements TurnSteerBackend {
+  readonly #client: HttpSupervisorManagementClient;
+  readonly #leaseCoordinator: SessionLeaseCoordinator;
+  readonly #idGenerator: () => string;
+  readonly #clock: () => Date;
+
+  constructor(options: {
+    client: HttpSupervisorManagementClient;
+    leaseCoordinator: SessionLeaseCoordinator;
+    idGenerator?: () => string;
+    clock?: () => Date;
+  }) {
+    this.#client = options.client;
+    this.#leaseCoordinator = options.leaseCoordinator;
+    this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
+    this.#clock = options.clock ?? (() => new Date());
+  }
+
+  async steer(request: TurnSteerRequest): Promise<void> {
+    const lease = await this.#leaseCoordinator.currentAssignment(request.target);
+    const sentAt = this.#clock();
+    if (Number.isNaN(sentAt.valueOf())) throw new TypeError("steer clock returned an invalid date");
+    const command = parseControlToSupervisorMessage({
+      protocolVersion: 1,
+      messageId: this.#idGenerator(),
+      sentAt: sentAt.toISOString(),
+      type: "command.turn.steer",
+      payload: {
+        commandId: request.commandId,
+        targetCommandId: request.target.commandId,
+        idempotencyKey: request.idempotencyKey,
+        tenantId: request.target.tenantId,
+        projectId: request.target.projectId,
+        workspaceId: request.target.workspaceId,
+        sessionId: request.target.sessionId,
+        runId: request.target.runId,
+        turnId: request.target.turnId,
+        attemptId: request.target.attemptId,
+        agentId: "root",
+        leaseId: lease.leaseId,
+        fencingToken: lease.fencingToken,
+        text: request.text,
+      },
+    });
+    if (command.type !== "command.turn.steer") {
+      throw new TurnSteerBackendError(
+        "backend_protocol_violation",
+        "Constructed supervisor steer command was invalid",
+        false,
+      );
+    }
+    try {
+      await this.#client.steer(command);
+    } catch (error: unknown) {
+      if (error instanceof TurnSteerBackendError) throw error;
+      if (error instanceof HttpSupervisorManagementError) {
+        throw new TurnSteerBackendError(error.code, error.message, error.retryable);
+      }
+      throw new TurnSteerBackendError(
+        "supervisor_management_unavailable",
+        "Supervisor steer delivery failed",
+        true,
+      );
+    }
   }
 }
 

@@ -105,6 +105,14 @@ candidate activations remain parallel; shared Workspace/process effects do not.
 
 See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
+The distributed Kubernetes profile keeps Web and Control Plane stateless,
+scales compatible Pi Workers from the Temporal Activity backlog with KEDA, and
+routes exact Worker management over StatefulSet headless DNS. Sandbox Managers
+use a fixed Workspace-sharded ring because live Cube activation authority cannot
+be served by a random load balancer. PostgreSQL, Temporal, S3/Kopia, the shared
+RWX Workspace volume and Cube remain external authorities. See
+[Distributed Kubernetes deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
+
 ## Durable state
 
 PostgreSQL is authoritative for:
@@ -279,6 +287,7 @@ documentation should be based on these reproducible measurements.
 - [Run lifecycle](docs/RUN_LIFECYCLE.md)
 - [Configuration reference](docs/CONFIGURATION.md)
 - [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
+- [Distributed Kubernetes deployment](docs/DISTRIBUTED_DEPLOYMENT.md)
 - [Implementation log](docs/IMPLEMENTATION_LOG.md)
 - [Backlog](docs/BACKLOG.md)
 

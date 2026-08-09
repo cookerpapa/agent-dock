@@ -926,7 +926,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "services.controlPlaneUrl=http://control-plane.agent-dock-system.svc.cluster.local:3000",
     "--set",
-    "services.sandboxManagerUrl=http://sandbox-manager.agent-dock-system.svc.cluster.local:4300",
+    "services.sandboxManagerUrls[0]=http://sandbox-manager.agent-dock-system.svc.cluster.local:4300",
     "--set",
     `services.githubGateway.enabled=${String(githubGatewayEnabled)}`,
     "--set",

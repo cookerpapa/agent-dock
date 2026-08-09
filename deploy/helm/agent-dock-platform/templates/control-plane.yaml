@@ -1,0 +1,151 @@
+{{- $name := include "agent-dock-platform.name" . -}}
+{{- $managerUrls := list -}}
+{{- range $index := until (int .Values.sandboxPlane.shards) -}}
+{{- $managerUrls = append $managerUrls (printf "http://sandbox-manager-%d:4300" $index) -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-control-plane
+  labels:
+    {{- include "agent-dock-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ ternary (int .Values.controlPlane.autoscaling.minReplicas) (int .Values.controlPlane.replicas) .Values.controlPlane.autoscaling.enabled }}
+  minReadySeconds: 5
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: control-plane }
+  template:
+    metadata:
+      labels:
+        {{- include "agent-dock-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      {{- with .Values.global.trustedNodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.trustedTolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: control-plane }
+      containers:
+        - name: control-plane
+          image: {{ include "agent-dock-platform.image" .Values.images.controlPlane | quote }}
+          imagePullPolicy: {{ .Values.images.controlPlane.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 3000 }
+            - { name: metrics, containerPort: 9464 }
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: HOST, value: 0.0.0.0 }
+            - { name: PORT, value: "3000" }
+            - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
+            - { name: AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE, value: /run/agent-dock-secrets/database-notification-url }
+            - { name: AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE, value: /run/agent-dock-secrets/supervisor-enrollment-token }
+            - { name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE, value: /run/agent-dock-secrets/supervisor-management-token }
+            - { name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE, value: /run/agent-dock-secrets/model-credential-master-key }
+            - { name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE, value: /run/agent-dock-secrets/cube-egress-config-token }
+            - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
+            - name: AGENT_DOCK_SANDBOX_MANAGER_URLS
+              value: {{ join "," $managerUrls | quote }}
+            - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
+            - { name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP, value: "true" }
+            - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }
+            - { name: AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY, value: "1" }
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE
+              value: {{ printf "http://{supervisorId}.agent-dock-pi-worker-%s.%s.svc.%s:4100" (index .Values "pi-workers").workerPool.name .Release.Namespace .Values.global.clusterDomain | quote }}
+            - { name: AGENT_DOCK_TEMPORAL_ADDRESS, value: {{ .Values.external.temporal.address | quote }} }
+            - { name: AGENT_DOCK_TEMPORAL_NAMESPACE, value: {{ .Values.external.temporal.namespace | quote }} }
+            - { name: AGENT_DOCK_TEMPORAL_TASK_QUEUE, value: {{ .Values.external.temporal.taskQueue | quote }} }
+            - { name: AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID, value: {{ .Values.controlPlane.platformModelSourceTenantId | quote }} }
+            - { name: AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID, value: {{ .Values.controlPlane.platformOperatorTenantId | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED, value: {{ .Values.controlPlane.publicRegistrationEnabled | quote }} }
+            - { name: AGENT_DOCK_WEB_SESSION_COOKIE_SECURE, value: "true" }
+            - { name: AWS_SHARED_CREDENTIALS_FILE, value: /run/agent-dock-secrets/aws-credentials }
+            - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_BUCKET, value: {{ .Values.external.checkpointS3.bucket | quote }} }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_REGION, value: {{ .Values.external.checkpointS3.region | quote }} }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_ENDPOINT, value: {{ .Values.external.checkpointS3.endpoint | quote }} }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX, value: {{ .Values.external.checkpointS3.keyPrefix | quote }} }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE, value: {{ .Values.external.checkpointS3.forcePathStyle | quote }} }
+            - { name: AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT, value: {{ .Values.external.checkpointS3.allowInsecureEndpoint | quote }} }
+            - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
+            - { name: AGENT_DOCK_METRICS_PORT, value: "9464" }
+            - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }
+            {{- if .Values.external.otlpTracesEndpoint }}
+            - { name: AGENT_DOCK_OTLP_TRACES_ENDPOINT, value: {{ .Values.external.otlpTracesEndpoint | quote }} }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /health/ready, port: http }, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 6 }
+          livenessProbe: { httpGet: { path: /health/live, port: http }, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 6 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "agent-dock-platform.secretMounts" . | nindent 12 }}
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: platform-secrets
+          secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
+        - name: tmp
+          emptyDir: { sizeLimit: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels:
+    {{- include "agent-dock-platform.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: control-plane }
+  ports:
+    - { name: http, port: 3000, targetPort: http }
+    - { name: metrics, port: 9464, targetPort: metrics }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: {{ $name }}-control-plane }
+spec:
+  minAvailable: {{ max 1 (sub (ternary (int .Values.controlPlane.autoscaling.minReplicas) (int .Values.controlPlane.replicas) .Values.controlPlane.autoscaling.enabled) 1) }}
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: control-plane }
+{{- if .Values.controlPlane.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: {{ $name }}-control-plane }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }}-control-plane }
+  minReplicas: {{ .Values.controlPlane.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.controlPlane.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.controlPlane.autoscaling.targetCpuUtilization }} }
+{{- end }}

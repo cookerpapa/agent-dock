@@ -90,7 +90,7 @@ export interface ToolSandboxManagerBoundary {
     disposition: { kind: "keep_warm"; workspaceRevision: string } | { kind: "destroy" },
   ): Promise<{ retained: boolean }>;
   stop(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;
-  readonly operationUrl: string;
+  operationUrlFor(activationId: string): string;
 }
 
 export type RemoteToolSandboxTurnRunnerOptions = {
@@ -643,7 +643,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           const settlementGate = settlementGatePolicyFromCommand(command);
           return [
             createTrustedRemoteToolsExtension({
-              operationUrl: this.#manager.operationUrl,
+              operationUrl: this.#manager.operationUrlFor(activeSandbox.activationId),
               activationId: activeSandbox.activationId,
               capability: activeSandbox.capability,
               turnContextSha256: cloudTurn.sha256,
