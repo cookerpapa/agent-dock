@@ -784,12 +784,17 @@ async function switchControlPlaneToKubernetes(runtimeEnvironment, revision) {
     supervisorManagementUrlTemplate:
       runtimeEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
       "http://{supervisorId}:4100",
+    bootstrapSupervisorManagementUrlTemplate:
+      runtimeEnvironment.AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE ??
+      runtimeEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
+      "http://{supervisorId}:4100",
   };
   await writePrivate(switchStatePath, `${JSON.stringify(previous, null, 2)}\n`);
   await replaceRuntimeEnvironment({
     AGENT_DOCK_PI_WORKER_DEPLOYMENT: "kubernetes",
     AGENT_DOCK_SUPERVISOR_ID_PREFIX: workerPrefix,
     AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: `http://{supervisorId}.${managementHostSuffix}`,
+    AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: `http://{supervisorId}.${managementHostSuffix}`,
   });
   await stopAndRemoveComposeWorkers();
   await productionCompose(
@@ -805,6 +810,8 @@ async function restoreComposeWorkers(previous) {
     AGENT_DOCK_PI_WORKER_DEPLOYMENT: previous.piWorkerDeployment,
     AGENT_DOCK_SUPERVISOR_ID_PREFIX: previous.supervisorIdPrefix,
     AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: previous.supervisorManagementUrlTemplate,
+    AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:
+      previous.bootstrapSupervisorManagementUrlTemplate ?? previous.supervisorManagementUrlTemplate,
   });
   await productionCompose(
     ["up", "--detach", "--no-deps", "control-plane"],

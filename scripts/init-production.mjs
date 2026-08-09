@@ -99,6 +99,30 @@ async function replacePrivateFile(path, contents) {
   }
 }
 
+async function ensureBootstrapSupervisorManagementRoute(runtimeDirectory) {
+  const environmentPath = resolve(runtimeDirectory, ".env");
+  const lines = (await readPrivateFile(environmentPath))
+    .split(/\r?\n/u)
+    .filter((line, index, all) => !(index === all.length - 1 && line.length === 0));
+  const bootstrapKey = "AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE";
+  if (lines.some((line) => line.startsWith(`${bootstrapKey}=`))) return false;
+  const runtimeEntry = lines.find((line) =>
+    line.startsWith("AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES="),
+  );
+  const runtimeTemplate = runtimeEntry?.slice(runtimeEntry.indexOf("=") + 1);
+  if (
+    runtimeTemplate === undefined ||
+    runtimeTemplate.includes(",") ||
+    runtimeTemplate.split("{supervisorId}").length !== 2
+  ) {
+    throw new Error("Production Supervisor management route cannot initialize the bootstrap Cell");
+  }
+  const insertionIndex = lines.indexOf(runtimeEntry) + 1;
+  lines.splice(insertionIndex, 0, `${bootstrapKey}=${runtimeTemplate}`);
+  await replacePrivateFile(environmentPath, `${lines.join("\n")}\n`);
+  return true;
+}
+
 function parseAwsCredentials(value) {
   const match =
     /^\[default\]\naws_access_key_id = ([A-Za-z0-9][A-Za-z0-9_-]{15,63})\naws_secret_access_key = ([A-Za-z0-9_-]{43,128})\n?$/.exec(
@@ -435,6 +459,8 @@ if (await validateExisting(runtimeDirectory)) {
   const observabilitySecretsCreated = await ensureObservabilitySecrets(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
+  const bootstrapSupervisorManagementRouteCreated =
+    await ensureBootstrapSupervisorManagementRoute(runtimeDirectory);
   process.stdout.write(
     `${JSON.stringify({
       initialized: true,
@@ -447,6 +473,7 @@ if (await validateExisting(runtimeDirectory)) {
       githubGatewaySecretsCreated,
       observabilitySecretsCreated,
       objectStoreCredentialMigrated,
+      bootstrapSupervisorManagementRouteCreated,
       runtimeDirectory,
     })}\n`,
   );
@@ -609,6 +636,7 @@ const environment = [
   `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID=${identities.modelProfileId}`,
   `AGENT_DOCK_SUPERVISOR_ID_PREFIX=${supervisorIdPrefix}`,
   "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES=http://{supervisorId}:4100",
+  "AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE=http://{supervisorId}:4100",
   "AGENT_DOCK_PI_WORKER_DEPLOYMENT=compose",
   "AGENT_DOCK_SUPERVISOR_CAPACITY=1",
   `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,
