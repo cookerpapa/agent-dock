@@ -1,3 +1,4 @@
+{{- if .Values.executionPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 apiVersion: v1
 kind: Service
@@ -178,3 +179,4 @@ spec:
   minAvailable: 2
   selector:
     matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+{{- end }}

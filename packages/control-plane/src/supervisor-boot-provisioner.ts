@@ -21,7 +21,7 @@ const DEFAULT_MAX_BODY_BYTES = 16 * 1_024;
 export type SupervisorBootProvisionerOptions = {
   database: Kysely<Database>;
   allowedSupervisorIdPrefix: string;
-  managementBaseUrlTemplate: string;
+  managementBaseUrlTemplates: readonly string[];
   maximumCapacity: number;
   enrollmentToken: string;
   credentialTtlMs?: number;
@@ -184,7 +184,7 @@ function sameProvision(
 export class SupervisorBootProvisioner {
   readonly #database: Kysely<Database>;
   readonly #allowedSupervisorIdPrefix: string;
-  readonly #managementBaseUrlTemplate: string;
+  readonly #managementBaseUrlTemplates: readonly string[];
   readonly #maximumCapacity: number;
   readonly #enrollmentDigest: Buffer;
   readonly #credentialTtlMs: number;
@@ -193,7 +193,20 @@ export class SupervisorBootProvisioner {
   constructor(options: SupervisorBootProvisionerOptions) {
     this.#database = options.database;
     this.#allowedSupervisorIdPrefix = supervisorIdPrefix(options.allowedSupervisorIdPrefix);
-    this.#managementBaseUrlTemplate = managementUrlTemplate(options.managementBaseUrlTemplate);
+    if (
+      options.managementBaseUrlTemplates.length < 1 ||
+      options.managementBaseUrlTemplates.length > 64
+    ) {
+      throw new TypeError("managementBaseUrlTemplates must contain 1-64 templates");
+    }
+    this.#managementBaseUrlTemplates = options.managementBaseUrlTemplates.map((template) =>
+      managementUrlTemplate(template),
+    );
+    if (
+      new Set(this.#managementBaseUrlTemplates).size !== this.#managementBaseUrlTemplates.length
+    ) {
+      throw new TypeError("managementBaseUrlTemplates must contain unique templates");
+    }
     this.#maximumCapacity = positiveInteger(options.maximumCapacity, "maximumCapacity", 256);
     this.#enrollmentDigest = tokenDigest(boundedToken(options.enrollmentToken, "enrollmentToken"));
     this.#credentialTtlMs = positiveInteger(
@@ -234,13 +247,12 @@ export class SupervisorBootProvisioner {
       this.#allowedSupervisorIdPrefix,
     );
     const provisionedManagementBaseUrl = managementUrl(request.managementBaseUrl);
-    const expectedManagementBaseUrl = managementUrl(
-      this.#managementBaseUrlTemplate.replace("{supervisorId}", provisionedSupervisorId),
+    const matchesAllowedManagementRoute = this.#managementBaseUrlTemplates.some(
+      (template) =>
+        managementUrl(template.replace("{supervisorId}", provisionedSupervisorId)) ===
+        provisionedManagementBaseUrl,
     );
-    if (
-      provisionedManagementBaseUrl !== expectedManagementBaseUrl ||
-      request.maxConcurrentSessions > this.#maximumCapacity
-    ) {
+    if (!matchesAllowedManagementRoute || request.maxConcurrentSessions > this.#maximumCapacity) {
       throw new SupervisorBootProvisionError(
         "provision_policy_rejected",
         "Supervisor provision request is outside deployment policy",

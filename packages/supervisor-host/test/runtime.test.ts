@@ -144,7 +144,7 @@ describe("SupervisorHostRuntime", () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "supervisor-host-runtime-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
     });

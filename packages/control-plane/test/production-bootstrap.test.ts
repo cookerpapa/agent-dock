@@ -26,6 +26,18 @@ const CONFIG: ProductionBootstrapConfig = {
   maximumSessions: 1_000,
   maximumUnsettledTurns: 100,
   maximumConcurrentTurns: 2,
+  executionCells: [
+    {
+      id: "cell-bootstrap",
+      displayName: "Bootstrap Cell",
+      state: "active",
+      temporalTaskQueue: "agent-dock-pi-runs-cell-bootstrap-v1",
+      sandboxManagerBaseUrl: "http://sandbox-manager.agent-dock-cell-bootstrap:4300",
+      supervisorManagementBaseUrlTemplate: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
+      workspaceStorageKey: "workspace-cell-bootstrap",
+      capacityWeight: 200,
+    },
+  ],
 };
 const API_TOKEN = `adk_${CONFIG.apiCredentialId}.${"a".repeat(43)}`;
 
@@ -74,6 +86,7 @@ describe.sequential("production bootstrap and configuration", () => {
       apiCredentialId: CONFIG.apiCredentialId,
       credentialBindingId: CONFIG.credentialBindingId,
       modelProfileId: CONFIG.modelProfileId,
+      executionCellCount: 1,
     });
     await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toBeDefined();
     const counts = await Promise.all([
@@ -96,6 +109,23 @@ describe.sequential("production bootstrap and configuration", () => {
         .execute(),
     ]);
     expect(counts.map((rows) => rows.length)).toEqual([1, 1, 1, 1, 1]);
+    await expect(
+      database
+        .selectFrom("execution_cells")
+        .select([
+          "temporal_task_queue",
+          "sandbox_manager_base_url",
+          "supervisor_management_url_template",
+          "capacity_weight",
+        ])
+        .where("id", "=", "cell-bootstrap")
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      temporal_task_queue: "agent-dock-pi-runs-cell-bootstrap-v1",
+      sandbox_manager_base_url: "http://sandbox-manager.agent-dock-cell-bootstrap:4300",
+      supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
+      capacity_weight: 200,
+    });
 
     await database
       .updateTable("tenant_api_credentials")
@@ -218,7 +248,8 @@ describe.sequential("production bootstrap and configuration", () => {
       AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
       AGENT_DOCK_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: "http://{supervisorId}:4100",
+      AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:
+        "http://{supervisorId}:4100,http://{supervisorId}.cell-0002:4100",
       AGENT_DOCK_IMAGE_REVISION: "sha-0123456789abcdef",
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
       HOST: "0.0.0.0",
@@ -228,7 +259,10 @@ describe.sequential("production bootstrap and configuration", () => {
       databaseUrl: "postgresql://db.invalid/agentdock",
       databaseNotificationUrl: "postgresql://postgres-direct.invalid/agentdock",
       supervisorIdPrefix: "pi-worker-",
-      supervisorManagementBaseUrlTemplate: "http://{supervisorId}:4100",
+      supervisorManagementBaseUrlTemplates: [
+        "http://{supervisorId}:4100",
+        "http://{supervisorId}.cell-0002:4100",
+      ],
       sandboxManagerBaseUrls: ["http://sandbox-manager:4300/"],
       host: "0.0.0.0",
       port: 3000,

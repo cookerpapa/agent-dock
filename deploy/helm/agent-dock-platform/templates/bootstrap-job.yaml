@@ -1,4 +1,4 @@
-{{- if .Values.bootstrap.enabled }}
+{{- if and .Values.globalPlaneEnabled .Values.bootstrap.enabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 apiVersion: batch/v1
 kind: Job
@@ -59,6 +59,7 @@ spec:
             - { name: AGENT_DOCK_TENANT_MAXIMUM_SESSIONS, value: {{ .Values.bootstrap.maximumSessions | quote }} }
             - { name: AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS, value: {{ .Values.bootstrap.maximumUnsettledTurns | quote }} }
             - { name: AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS, value: {{ .Values.bootstrap.maximumConcurrentTurns | quote }} }
+            - { name: AGENT_DOCK_EXECUTION_CELLS_JSON, value: {{ toJson .Values.executionCells | quote }} }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

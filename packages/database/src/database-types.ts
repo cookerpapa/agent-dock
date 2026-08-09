@@ -89,6 +89,7 @@ export interface ExecutionCellTable {
   state: ExecutionCellState;
   temporal_task_queue: string;
   sandbox_manager_base_url: string;
+  supervisor_management_url_template: string;
   workspace_storage_key: string;
   capacity_weight: GeneratedInteger;
   assigned_workspaces: GeneratedInt8;

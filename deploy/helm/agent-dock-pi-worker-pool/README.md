@@ -69,7 +69,7 @@ For a release installed in `agent-dock-workers`, configure:
 
 ```text
 AGENT_DOCK_SUPERVISOR_ID_PREFIX=agent-dock-pi-worker-
-AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE=http://{supervisorId}.agent-dock-workers.svc.cluster.local:4100
+AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES=http://{supervisorId}.agent-dock-workers.svc.cluster.local:4100
 AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY=16
 ```
 

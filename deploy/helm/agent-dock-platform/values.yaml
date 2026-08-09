@@ -1,4 +1,16 @@
 piWorkersEnabled: true
+executionPlaneEnabled: true
+globalPlaneEnabled: true
+
+executionCells:
+  - id: cell-0001
+    displayName: Initial execution cell
+    state: active
+    temporalTaskQueue: agent-dock-pi-runs-cell-0001-v1
+    sandboxManagerBaseUrl: http://sandbox-manager:4300
+    supervisorManagementBaseUrlTemplate: http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100
+    workspaceStorageKey: workspace-cell-0001
+    capacityWeight: 100
 
 global:
   clusterDomain: cluster.local

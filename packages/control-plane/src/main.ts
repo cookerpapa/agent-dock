@@ -152,7 +152,7 @@ export async function startControlPlane(): Promise<void> {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: config.supervisorIdPrefix,
-      managementBaseUrlTemplate: config.supervisorManagementBaseUrlTemplate,
+      managementBaseUrlTemplates: config.supervisorManagementBaseUrlTemplates,
       maximumCapacity: config.supervisorMaximumCapacity,
       enrollmentToken: config.supervisorEnrollmentToken,
     });

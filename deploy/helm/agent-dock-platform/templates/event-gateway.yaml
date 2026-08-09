@@ -1,3 +1,4 @@
+{{- if .Values.globalPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -118,4 +119,5 @@ spec:
       resource:
         name: cpu
         target: { type: Utilization, averageUtilization: {{ .Values.eventGateway.autoscaling.targetCpuUtilization }} }
+{{- end }}
 {{- end }}

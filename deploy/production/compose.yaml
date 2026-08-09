@@ -40,7 +40,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID: ${AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID:-}
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
   AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
-  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:-http://{supervisorId}:4100}
+  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:-http://{supervisorId}:4100}
   AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
   AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
   AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
@@ -81,6 +81,8 @@ x-bootstrap-environment: &bootstrap-environment
   AGENT_DOCK_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_TENANT_MAXIMUM_SESSIONS:-1000}
   AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS:-100}
   AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  AGENT_DOCK_EXECUTION_CELLS_JSON: >-
+    [{"id":"cell-0001","displayName":"Initial execution cell","state":"active","temporalTaskQueue":"agent-dock-pi-runs-cell-0001-v1","sandboxManagerBaseUrl":"http://sandbox-manager:4300","supervisorManagementBaseUrlTemplate":"http://{supervisorId}:4100","workspaceStorageKey":"workspace-cell-0001","capacityWeight":100}]
 
 x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind

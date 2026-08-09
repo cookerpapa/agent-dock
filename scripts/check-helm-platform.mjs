@@ -84,7 +84,7 @@ const controlPlaneEnvironment = Object.fromEntries(
     .map((entry) => [entry.name, String(entry.value)]),
 );
 assert.equal(
-  controlPlaneEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE,
+  controlPlaneEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES,
   "http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100",
 );
 assert.equal(
@@ -208,12 +208,42 @@ for (const resource of resources) {
 for (const invalidArgs of [
   ["--set", "sandboxPlane.replicas=2"],
   ["--set", "controlPlane.replicas=1"],
-  ["--set", "piWorkersEnabled=false"],
   ["--set", "networkPolicy.externalEgressCidrs[0]=0.0.0.0/0"],
   ["--set", "unexpectedEscape=true"],
 ]) {
   const result = command(helm, ["template", "invalid-platform", chart, ...invalidArgs]);
   assert.notEqual(result.status, 0, `Platform chart unexpectedly accepted ${invalidArgs.at(-1)}`);
+}
+
+const controlOnlyResources = documents(
+  requireSuccess(
+    command(helm, [
+      "template",
+      "agent-dock-global",
+      chart,
+      "--namespace",
+      "agent-dock-system",
+      "--set",
+      "piWorkersEnabled=false",
+      "--set",
+      "executionPlaneEnabled=false",
+    ]),
+    "Control-only platform render",
+  ),
+);
+assert.equal(
+  controlOnlyResources.some((resource) => resource.kind === "StatefulSet"),
+  false,
+  "The global control-plane release must not own Cell StatefulSets",
+);
+for (const name of ["agent-dock-global-control-plane", "agent-dock-global-event-gateway"]) {
+  assert.equal(
+    controlOnlyResources.some(
+      (resource) => resource.kind === "Deployment" && resource.metadata?.name === name,
+    ),
+    true,
+    `Deployment/${name} must remain in the global release`,
+  );
 }
 
 console.log("helm_platform_check_passed");

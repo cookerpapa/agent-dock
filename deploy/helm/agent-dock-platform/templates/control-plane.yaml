@@ -1,4 +1,11 @@
+{{- if .Values.globalPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
+{{- $sandboxManagerUrls := list -}}
+{{- $supervisorManagementUrlTemplates := list -}}
+{{- range .Values.executionCells -}}
+{{- $sandboxManagerUrls = append $sandboxManagerUrls .sandboxManagerBaseUrl -}}
+{{- $supervisorManagementUrlTemplates = append $supervisorManagementUrlTemplates .supervisorManagementBaseUrlTemplate -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -65,13 +72,13 @@ spec:
             - { name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE, value: /run/agent-dock-secrets/cube-egress-config-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
             - name: AGENT_DOCK_SANDBOX_MANAGER_URLS
-              value: "http://sandbox-manager:4300"
+              value: {{ join "," $sandboxManagerUrls | quote }}
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP, value: "true" }
             - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }
             - { name: AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY, value: {{ (index .Values "pi-workers").workerPool.capacity | quote }} }
-            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE
-              value: {{ printf "http://{supervisorId}.agent-dock-pi-worker-%s.%s.svc.%s:4100" (index .Values "pi-workers").workerPool.name .Release.Namespace .Values.global.clusterDomain | quote }}
+            - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES
+              value: {{ join "," $supervisorManagementUrlTemplates | quote }}
             - { name: AGENT_DOCK_TEMPORAL_ADDRESS, value: {{ .Values.external.temporal.address | quote }} }
             - { name: AGENT_DOCK_TEMPORAL_NAMESPACE, value: {{ .Values.external.temporal.namespace | quote }} }
             - { name: AGENT_DOCK_TEMPORAL_TASK_QUEUE, value: {{ .Values.external.temporal.taskQueue | quote }} }
@@ -144,4 +151,5 @@ spec:
       resource:
         name: cpu
         target: { type: Utilization, averageUtilization: {{ .Values.controlPlane.autoscaling.targetCpuUtilization }} }
+{{- end }}
 {{- end }}

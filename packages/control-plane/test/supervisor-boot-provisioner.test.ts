@@ -84,7 +84,7 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       credentialTtlMs: 60_000,
@@ -137,7 +137,7 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       clock: () => now,
@@ -182,12 +182,18 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: [
+        "http://{supervisorId}:4100",
+        "http://{supervisorId}.cell-0002:4100",
+      ],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
     const workerA = request({ supervisorId: "production-supervisor-a" });
-    const workerB = request({ supervisorId: "production-supervisor-b" });
+    const workerB = request({
+      supervisorId: "production-supervisor-b",
+      managementBaseUrl: "http://production-supervisor-b.cell-0002:4100",
+    });
     await expect(
       Promise.all([provisioner.provision(workerA.body), provisioner.provision(workerB.body)]),
     ).resolves.toHaveLength(2);
@@ -209,7 +215,7 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const original = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
@@ -218,7 +224,7 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const restricted = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 1,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
@@ -245,7 +251,7 @@ describe.sequential("production Supervisor boot provisioning", () => {
     const provisioner = new SupervisorBootProvisioner({
       database,
       allowedSupervisorIdPrefix: "production-supervisor-",
-      managementBaseUrlTemplate: "http://{supervisorId}:4100",
+      managementBaseUrlTemplates: ["http://{supervisorId}:4100"],
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
       clock: () => new Date("2026-07-19T12:00:00.000Z"),

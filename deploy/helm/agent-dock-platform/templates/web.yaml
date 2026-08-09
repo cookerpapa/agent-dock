@@ -1,3 +1,4 @@
+{{- if .Values.globalPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -109,4 +110,5 @@ spec:
             pathType: Prefix
             backend:
               service: { name: {{ $name }}-web, port: { number: 8080 } }
+{{- end }}
 {{- end }}

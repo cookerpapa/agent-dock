@@ -9,6 +9,7 @@ export type ProductionBootstrapResult = {
   apiCredentialId: string;
   credentialBindingId: string;
   modelProfileId: string;
+  executionCellCount: number;
 };
 
 export class ProductionBootstrapError extends Error {
@@ -43,6 +44,77 @@ export async function bootstrapProductionDatabase(
   }
   const apiTokenSha256 = tenantApiTokenDigest(apiToken);
   await database.transaction().execute(async (transaction) => {
+    for (const cell of config.executionCells) {
+      await transaction
+        .insertInto("execution_cells")
+        .values({
+          id: cell.id,
+          display_name: cell.displayName,
+          state: cell.state,
+          temporal_task_queue: cell.temporalTaskQueue,
+          sandbox_manager_base_url: cell.sandboxManagerBaseUrl,
+          supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
+          workspace_storage_key: cell.workspaceStorageKey,
+          capacity_weight: cell.capacityWeight,
+          assigned_workspaces: 0,
+        })
+        .onConflict((conflict) => conflict.column("id").doNothing())
+        .executeTakeFirst();
+      const existing = await transaction
+        .selectFrom("execution_cells")
+        .select([
+          "temporal_task_queue",
+          "sandbox_manager_base_url",
+          "supervisor_management_url_template",
+          "workspace_storage_key",
+          "assigned_workspaces",
+        ])
+        .where("id", "=", cell.id)
+        .executeTakeFirstOrThrow();
+      const assignedWorkspaces = Number(existing.assigned_workspaces);
+      if (!Number.isSafeInteger(assignedWorkspaces) || assignedWorkspaces < 0) {
+        throw new ProductionBootstrapError(
+          "bootstrap_cell_invalid",
+          `Execution Cell ${cell.id} has an invalid Workspace count`,
+        );
+      }
+      if (assignedWorkspaces > 0) {
+        exact(
+          existing.temporal_task_queue === cell.temporalTaskQueue,
+          `Cell ${cell.id} Task Queue`,
+        );
+        exact(
+          existing.sandbox_manager_base_url === cell.sandboxManagerBaseUrl,
+          `Cell ${cell.id} Sandbox Manager route`,
+        );
+        exact(
+          existing.supervisor_management_url_template === cell.supervisorManagementBaseUrlTemplate,
+          `Cell ${cell.id} Supervisor management route`,
+        );
+        exact(
+          existing.workspace_storage_key === cell.workspaceStorageKey,
+          `Cell ${cell.id} Workspace storage route`,
+        );
+      }
+      await transaction
+        .updateTable("execution_cells")
+        .set({
+          display_name: cell.displayName,
+          state: cell.state,
+          capacity_weight: cell.capacityWeight,
+          ...(assignedWorkspaces === 0
+            ? {
+                temporal_task_queue: cell.temporalTaskQueue,
+                sandbox_manager_base_url: cell.sandboxManagerBaseUrl,
+                supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
+                workspace_storage_key: cell.workspaceStorageKey,
+              }
+            : {}),
+          updated_at: new Date(),
+        })
+        .where("id", "=", cell.id)
+        .executeTakeFirstOrThrow();
+    }
     await transaction
       .insertInto("tenants")
       .values({ id: config.tenantId, slug: config.tenantSlug })
@@ -268,5 +340,6 @@ export async function bootstrapProductionDatabase(
     apiCredentialId: config.apiCredentialId,
     credentialBindingId: config.credentialBindingId,
     modelProfileId: config.modelProfileId,
+    executionCellCount: config.executionCells.length,
   };
 }

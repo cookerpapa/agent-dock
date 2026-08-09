@@ -35,6 +35,7 @@ import * as enterpriseExecutionCells from "./033_enterprise_execution_cells.ts";
 import * as sandboxManagerOwnership from "./034_sandbox_manager_ownership.ts";
 import * as partitionedSessionEventLog from "./035_partitioned_session_event_log.ts";
 import * as fasterEventIdentityRegistration from "./036_faster_event_identity_registration.ts";
+import * as executionCellWorkerRoutes from "./037_execution_cell_worker_routes.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -75,6 +76,7 @@ export const migrationProvider: MigrationProvider = {
       "034_sandbox_manager_ownership": sandboxManagerOwnership,
       "035_partitioned_session_event_log": partitionedSessionEventLog,
       "036_faster_event_identity_registration": fasterEventIdentityRegistration,
+      "037_execution_cell_worker_routes": executionCellWorkerRoutes,
     };
   },
 };
@@ -253,3 +255,8 @@ export {
   down as downFasterEventIdentityRegistration,
   up as upFasterEventIdentityRegistration,
 } from "./036_faster_event_identity_registration.ts";
+
+export {
+  down as downExecutionCellWorkerRoutes,
+  up as upExecutionCellWorkerRoutes,
+} from "./037_execution_cell_worker_routes.ts";

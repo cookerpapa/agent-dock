@@ -20,7 +20,7 @@ export type ProductionControlPlaneConfig = {
   advancedModulesEnabled: boolean;
   supervisorIdPrefix: string;
   supervisorMaximumCapacity: number;
-  supervisorManagementBaseUrlTemplate: string;
+  supervisorManagementBaseUrlTemplates: readonly string[];
   allowInsecureInternalHttp: boolean;
   host: string;
   port: number;
@@ -51,6 +51,18 @@ export type ProductionBootstrapConfig = {
   maximumSessions: number;
   maximumUnsettledTurns: number;
   maximumConcurrentTurns: number;
+  executionCells: readonly ProductionExecutionCellConfig[];
+};
+
+export type ProductionExecutionCellConfig = {
+  id: string;
+  displayName: string;
+  state: "active" | "draining" | "disabled";
+  temporalTaskQueue: string;
+  sandboxManagerBaseUrl: string;
+  supervisorManagementBaseUrlTemplate: string;
+  workspaceStorageKey: string;
+  capacityWeight: number;
 };
 
 function required(environment: ProductionControlPlaneEnvironment, name: string): string {
@@ -91,6 +103,96 @@ function integerValue(
   return parsed;
 }
 
+function executionCells(value: string): readonly ProductionExecutionCellConfig[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError("AGENT_DOCK_EXECUTION_CELLS_JSON must be valid JSON");
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64) {
+    throw new TypeError("AGENT_DOCK_EXECUTION_CELLS_JSON must contain 1 to 64 Cells");
+  }
+  const cells = parsed.map((entry, index): ProductionExecutionCellConfig => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new TypeError(`Execution Cell ${String(index)} must be an object`);
+    }
+    const cell = entry as Record<string, unknown>;
+    const id = cell.id;
+    const displayName = cell.displayName;
+    const state = cell.state;
+    const temporalTaskQueue = cell.temporalTaskQueue;
+    const sandboxManagerBaseUrl = cell.sandboxManagerBaseUrl;
+    const supervisorManagementBaseUrlTemplate = cell.supervisorManagementBaseUrlTemplate;
+    const workspaceStorageKey = cell.workspaceStorageKey;
+    const capacityWeight = cell.capacityWeight;
+    if (typeof id !== "string" || !/^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$/u.test(id)) {
+      throw new TypeError(`Execution Cell ${String(index)} has an invalid ID`);
+    }
+    if (typeof displayName !== "string" || displayName.length < 1 || displayName.length > 128) {
+      throw new TypeError(`Execution Cell ${id} has an invalid display name`);
+    }
+    if (state !== "active" && state !== "draining" && state !== "disabled") {
+      throw new TypeError(`Execution Cell ${id} has an invalid state`);
+    }
+    if (
+      typeof temporalTaskQueue !== "string" ||
+      temporalTaskQueue.length < 1 ||
+      temporalTaskQueue.length > 255
+    ) {
+      throw new TypeError(`Execution Cell ${id} has an invalid Temporal Task Queue`);
+    }
+    if (
+      typeof sandboxManagerBaseUrl !== "string" ||
+      !/^https?:\/\/[^\s]+$/u.test(sandboxManagerBaseUrl) ||
+      sandboxManagerBaseUrl.length > 2_048
+    ) {
+      throw new TypeError(`Execution Cell ${id} has an invalid Sandbox Manager URL`);
+    }
+    if (
+      typeof workspaceStorageKey !== "string" ||
+      !/^[A-Za-z0-9._/-]{1,128}$/u.test(workspaceStorageKey)
+    ) {
+      throw new TypeError(`Execution Cell ${id} has an invalid Workspace storage key`);
+    }
+    if (
+      typeof supervisorManagementBaseUrlTemplate !== "string" ||
+      supervisorManagementBaseUrlTemplate.split("{supervisorId}").length !== 2 ||
+      !/^https?:\/\/[^\s]+$/u.test(
+        supervisorManagementBaseUrlTemplate.replace("{supervisorId}", "worker-validation"),
+      ) ||
+      supervisorManagementBaseUrlTemplate.length > 2_048
+    ) {
+      throw new TypeError(`Execution Cell ${id} has an invalid Supervisor management template`);
+    }
+    if (
+      typeof capacityWeight !== "number" ||
+      !Number.isSafeInteger(capacityWeight) ||
+      capacityWeight < 1 ||
+      capacityWeight > 1_000_000
+    ) {
+      throw new TypeError(`Execution Cell ${id} has an invalid capacity weight`);
+    }
+    return {
+      id,
+      displayName,
+      state,
+      temporalTaskQueue,
+      sandboxManagerBaseUrl,
+      supervisorManagementBaseUrlTemplate,
+      workspaceStorageKey,
+      capacityWeight,
+    };
+  });
+  if (new Set(cells.map((cell) => cell.id)).size !== cells.length) {
+    throw new TypeError("Execution Cell IDs must be unique");
+  }
+  if (new Set(cells.map((cell) => cell.temporalTaskQueue)).size !== cells.length) {
+    throw new TypeError("Execution Cell Temporal Task Queues must be unique");
+  }
+  return cells;
+}
+
 function managementUrl(value: string, allowInsecure: boolean): string {
   const parsed = new URL(value);
   if (
@@ -119,6 +221,22 @@ function managementUrls(value: string, allowInsecure: boolean): string[] {
   const parsed = values.map((entry) => managementUrl(entry, allowInsecure));
   if (new Set(parsed).size !== parsed.length) {
     throw new TypeError("AGENT_DOCK_SANDBOX_MANAGER_URLS must contain unique URLs");
+  }
+  return parsed;
+}
+
+function managementUrlTemplates(value: string, allowInsecure: boolean): string[] {
+  const values = value.split(",");
+  if (values.length < 1 || values.length > 64 || values.some((entry) => entry.trim() !== entry)) {
+    throw new TypeError(
+      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain 1-64 comma-separated templates without whitespace",
+    );
+  }
+  const parsed = values.map((entry) => managementUrlTemplate(entry, allowInsecure));
+  if (new Set(parsed).size !== parsed.length) {
+    throw new TypeError(
+      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain unique templates",
+    );
   }
   return parsed;
 }
@@ -271,8 +389,8 @@ export async function loadProductionControlPlaneConfig(
       1,
       256,
     ),
-    supervisorManagementBaseUrlTemplate: managementUrlTemplate(
-      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE"),
+    supervisorManagementBaseUrlTemplates: managementUrlTemplates(
+      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES"),
       allowInsecureInternalHttp,
     ),
     allowInsecureInternalHttp,
@@ -420,5 +538,6 @@ export function loadProductionBootstrapConfig(
       1,
       256,
     ),
+    executionCells: executionCells(required(environment, "AGENT_DOCK_EXECUTION_CELLS_JSON")),
   };
 }
