@@ -1,0 +1,23 @@
+{
+  "format": "agent-dock.kafka-worker-event-acceptance.v1",
+  "generatedAt": "2026-08-09T15:37:56.526Z",
+  "revision": "17b0c20a13ac7454f4088aa20aba67ce6482ac73",
+  "input": {
+    "sessionCount": 64,
+    "eventsPerBatch": 16,
+    "logicalEvents": 2048,
+    "partitions": 16
+  },
+  "result": {
+    "projectedEnvelopes": 128,
+    "projectedLogicalEvents": 2048,
+    "durationMs": 1580.85,
+    "eventsPerSecond": 1295.51,
+    "sessionOrderViolations": 0
+  },
+  "scope": [
+    "single local Kafka broker",
+    "Kafka transport and Session-key ordering only",
+    "not a Stage 2 capacity or broker-failover claim"
+  ]
+}
