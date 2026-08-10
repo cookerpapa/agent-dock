@@ -262,6 +262,11 @@ assert.equal(
   "Explicit external CIDRs must be usable with standard HTTPS services",
 );
 assert.equal(
+  networkPolicy.spec.egress.some((rule) => rule.ports?.some((port) => port.port === 4600)),
+  true,
+  "Pi Workers must be able to reach the durable Event Gateway",
+);
+assert.equal(
   JSON.stringify(networkPolicy).includes('"cidr":"0.0.0.0/0"'),
   false,
   "The Worker pool must not silently add unrestricted egress",
