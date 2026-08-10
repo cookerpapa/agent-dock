@@ -130,6 +130,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "eventIngest",
         "database",
         "temporal",
         "kafka",
@@ -139,6 +140,15 @@
         "otlpTracesEndpoint"
       ],
       "properties": {
+        "eventIngest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["serviceUrl", "tokenSecretKey"],
+          "properties": {
+            "serviceUrl": { "$ref": "#/$defs/httpUrl" },
+            "tokenSecretKey": { "$ref": "#/$defs/secretKey" }
+          }
+        },
         "database": {
           "type": "object",
           "additionalProperties": false,

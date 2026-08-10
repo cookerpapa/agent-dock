@@ -62,6 +62,19 @@ cutover; it does not remain a second raw event authority.
 - <https://strimzi.io/docs/operators/latest/deploying.html>
 - <https://docs.confluent.io/kafka-clients/javascript/current/overview.html>
 
+The initial adapter used a transactional PostgreSQL payload Outbox before
+Kafka. That pattern is appropriate when a business-state update and an emitted
+event must commit atomically, but the high-frequency Worker stream had no such
+source mutation: the Worker WAL was already the retry source and PostgreSQL
+later stored the same payload as the browser projection. ADR-0091 therefore
+replaces the transfer table with an authenticated Event Gateway ingest. The
+gateway validates Session/lease/fence state, waits for the idempotent Kafka
+producer ACK, and persists only bounded cursor metadata. This removes the
+second payload copy while preserving fail-closed terminal ordering.
+
+- <https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html>
+- <https://kafka.apache.org/40/configuration/producer-configs/>
+
 ### Product state: PostgreSQL
 
 PostgreSQL continues to own Tenant, Workspace, Run, Attempt, Lease, Fence,

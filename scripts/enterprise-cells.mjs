@@ -349,6 +349,7 @@ const requiredSecretKeys = [
   "sandbox-materializer-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
+  "worker-event-ingest-token",
   "workspace-data-mover-token",
   "workspace-kopia-aws-credentials",
   "workspace-kopia-repository-password",

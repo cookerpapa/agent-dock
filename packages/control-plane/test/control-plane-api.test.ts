@@ -52,10 +52,7 @@ import {
   createControlPlaneApplication,
 } from "../src/index.ts";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
-import {
-  PostgresWorkerEventOutboxPublisher,
-  type WorkerEventLogBatch,
-} from "@agent-dock/runtime-core/worker-event-log";
+import type { WorkerEventLogBatch } from "@agent-dock/runtime-core/worker-event-log";
 import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
 
 const IDS = {
@@ -2725,7 +2722,7 @@ describe.sequential("single-user durable turn intake API", () => {
     ).toEqual({ last_persisted_seq: "48", acknowledged_through_seq: "48" });
   });
 
-  it("ACKs an external Worker event batch through Outbox and exposes it only after projection", async () => {
+  it("ACKs an external Worker event batch after Kafka and exposes it only after projection", async () => {
     const assigned = await createAssignedTurn({
       sandboxId: IDS.externalEventSandbox,
       sandboxBootId: IDS.externalEventSandboxBoot,
@@ -2757,9 +2754,15 @@ describe.sequential("single-user durable turn intake API", () => {
         events,
       },
     };
+    const appended: WorkerEventLogBatch[] = [];
     const externalStore = new DurableEventStore({
       database,
-      externalWorkerEventLog: true,
+      workerEventLog: {
+        append: (batches) => {
+          appended.push(...batches);
+          return Promise.resolve();
+        },
+      },
     });
     await expect(externalStore.ingest(batch)).resolves.toMatchObject({
       payload: { acknowledgedThroughSeq: 2 },
@@ -2798,39 +2801,24 @@ describe.sequential("single-user durable turn intake API", () => {
       ),
     ).rejects.toThrow("Terminal event stream is not contiguous");
 
-    const outbox = await database
-      .selectFrom("worker_event_outbox")
-      .select(["envelope", "first_seq", "last_seq", "state"])
-      .where("session_id", "=", assigned.assignedSession.sessionId)
-      .executeTakeFirstOrThrow();
-    expect(outbox).toMatchObject({ first_seq: "1", last_seq: "2", state: "pending" });
-    const appended: WorkerEventLogBatch[] = [];
-    const publisher = new PostgresWorkerEventOutboxPublisher({
-      database,
-      eventLog: {
-        append: (batches) => {
-          appended.push(...batches);
-          return Promise.resolve();
-        },
-      },
-      publisherId: "test-event-bridge",
-    });
-    await expect(publisher.drainOnce()).resolves.toBe(1);
     expect(appended).toHaveLength(1);
     const envelope = {
       schemaVersion: 1 as const,
       tenantId: appended[0]!.tenantId,
       messages: appended[0]!.messages,
     };
-    await externalStore.project(envelope);
-    await externalStore.project(envelope);
-    await expect(
-      database
-        .selectFrom("worker_event_outbox")
-        .select("state")
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toEqual({ state: "published" });
+    await externalStore.project(envelope, {
+      consumerGroup: "test-projector",
+      topic: "test-events",
+      partition: 0,
+      offset: "0",
+    });
+    await externalStore.project(envelope, {
+      consumerGroup: "test-projector",
+      topic: "test-events",
+      partition: 0,
+      offset: "0",
+    });
 
     const replay = await externalStore.openReplayWindow(
       IDS.tenant,
@@ -2872,47 +2860,50 @@ describe.sequential("single-user durable turn intake API", () => {
         },
       },
     };
-    await externalStore.ingest(retryEvent);
-    const failingPublisher = new PostgresWorkerEventOutboxPublisher({
+    const failingStore = new DurableEventStore({
       database,
-      eventLog: {
+      workerEventLog: {
         append: () => Promise.reject(new Error("injected Kafka outage")),
       },
-      publisherId: "test-failing-event-bridge",
     });
-    await expect(failingPublisher.drainOnce()).rejects.toThrow("injected Kafka outage");
+    await expect(failingStore.ingest(retryEvent)).rejects.toThrow("injected Kafka outage");
     await expect(
       database
-        .selectFrom("worker_event_outbox")
-        .select(["state", "attempts", "claimed_by", "last_error"])
+        .selectFrom("session_event_cursors")
+        .select(["last_persisted_seq", "last_projected_seq"])
         .where("session_id", "=", assigned.assignedSession.sessionId)
-        .where("first_seq", "=", "3")
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({
-      state: "pending",
-      attempts: 1,
-      claimed_by: null,
-      last_error: "injected Kafka outage",
+      last_persisted_seq: "2",
+      last_projected_seq: "2",
     });
     const retried: WorkerEventLogBatch[] = [];
-    const retryPublisher = new PostgresWorkerEventOutboxPublisher({
+    const retryStore = new DurableEventStore({
       database,
-      eventLog: {
+      workerEventLog: {
         append: (batches) => {
           retried.push(...batches);
           return Promise.resolve();
         },
       },
-      publisherId: "test-retry-event-bridge",
-      clock: () => new Date(Date.now() + 1_000),
     });
-    await expect(retryPublisher.drainOnce()).resolves.toBe(1);
+    await expect(retryStore.ingest(retryEvent)).resolves.toMatchObject({
+      payload: { acknowledgedThroughSeq: 3 },
+    });
     expect(retried).toHaveLength(1);
-    await externalStore.project({
-      schemaVersion: 1,
-      tenantId: retried[0]!.tenantId,
-      messages: retried[0]!.messages,
-    });
+    await retryStore.project(
+      {
+        schemaVersion: 1,
+        tenantId: retried[0]!.tenantId,
+        messages: retried[0]!.messages,
+      },
+      {
+        consumerGroup: "test-projector",
+        topic: "test-events",
+        partition: 0,
+        offset: "1",
+      },
+    );
     await expect(
       externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 2),
     ).resolves.toMatchObject({

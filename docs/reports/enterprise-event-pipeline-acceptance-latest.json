@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-08-10T12:58:30.492Z",
+  "kafka": {
+    "brokers": ["127.0.0.1:9092"],
+    "topic": "agent-dock-enterprise-acceptance-630e2066-1219-464a-bf7a-b5e22c79edcf",
+    "groupId": "agent-dock-enterprise-projector-a61588c4-ceb1-4b2c-9a7e-43f906dd5186"
+  },
+  "postgres": {
+    "realServer": true
+  },
+  "assertions": {
+    "validAuthenticationAccepted": true,
+    "invalidAuthenticationRejected": true,
+    "kafkaFirstDurability": true,
+    "duplicateProjectionIsIdempotent": true,
+    "projectorRestartRecovered": true,
+    "terminalBarrierContiguous": true,
+    "postgresPayloadOutboxAbsent": true,
+    "projectedEventCount": 5,
+    "projectionPartitionCount": 1
+  },
+  "latencyMs": {
+    "coldFirstBatchAckAndProjection": 3621.78
+  },
+  "scope": [
+    "real PostgreSQL server and real single Kafka broker",
+    "functional restart and idempotency acceptance",
+    "not a multi-broker HA, failover, or capacity claim"
+  ]
+}

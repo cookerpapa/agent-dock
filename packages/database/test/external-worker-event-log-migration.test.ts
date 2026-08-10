@@ -43,32 +43,28 @@ describe("external Worker event log migration", () => {
     expect(constraints.rows).toEqual([{ conname: "session_event_cursors_projection_valid" }]);
   });
 
-  it("creates an ordered transactional Outbox with content hashes", async () => {
+  it("uses Kafka-first projection offsets without a PostgreSQL payload Outbox", async () => {
+    const tables = await pglite.query<{ table_name: string }>(`
+      select table_name
+        from information_schema.tables
+       where table_schema = 'public'
+         and table_name in ('worker_event_outbox', 'worker_event_projection_offsets')
+       order by table_name
+    `);
+    expect(tables.rows).toEqual([{ table_name: "worker_event_projection_offsets" }]);
     const columns = await pglite.query<{ column_name: string }>(`
       select column_name
         from information_schema.columns
        where table_schema = 'public'
-         and table_name = 'worker_event_outbox'
-         and column_name in ('envelope', 'content_sha256', 'claimed_until', 'published_at')
-       order by column_name
+         and table_name = 'worker_event_projection_offsets'
+       order by ordinal_position
     `);
     expect(columns.rows).toEqual([
-      { column_name: "claimed_until" },
-      { column_name: "content_sha256" },
-      { column_name: "envelope" },
-      { column_name: "published_at" },
-    ]);
-    const indexes = await pglite.query<{ indexname: string }>(`
-      select indexname
-        from pg_indexes
-       where schemaname = 'public'
-         and tablename = 'worker_event_outbox'
-         and indexname in ('worker_event_outbox_delivery_idx', 'worker_event_outbox_session_idx')
-       order by indexname
-    `);
-    expect(indexes.rows).toEqual([
-      { indexname: "worker_event_outbox_delivery_idx" },
-      { indexname: "worker_event_outbox_session_idx" },
+      { column_name: "consumer_group" },
+      { column_name: "topic" },
+      { column_name: "partition" },
+      { column_name: "last_offset" },
+      { column_name: "updated_at" },
     ]);
   });
 });

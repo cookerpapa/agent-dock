@@ -49,6 +49,8 @@ export type SupervisorHostConfig = {
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
   externalWorkerEventLog?: boolean;
+  workerEventIngestBaseUrl?: string;
+  workerEventIngestToken?: string;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -249,6 +251,21 @@ export async function loadSupervisorHostConfig(
   if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
     throw new TypeError("GitHub Gateway URL and service token must be configured together");
   }
+  const externalWorkerEventLog = booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG");
+  const workerEventIngest = externalWorkerEventLog
+    ? {
+        workerEventIngestBaseUrl: internalServiceBaseUrl(
+          required(environment, "AGENT_DOCK_WORKER_EVENT_INGEST_URL"),
+          allowInsecureInternalHttp,
+          "AGENT_DOCK_WORKER_EVENT_INGEST_URL",
+        ),
+        workerEventIngestToken: await secret(
+          environment,
+          "AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN",
+          allowInlineSecrets,
+        ),
+      }
+    : {};
   const temporalWorkerVersioningEnabled = booleanValue(
     environment,
     "AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED",
@@ -322,7 +339,8 @@ export async function loadSupervisorHostConfig(
       allowInlineSecrets,
     ),
     databaseUrl: await secret(environment, "DATABASE_URL", allowInlineSecrets),
-    externalWorkerEventLog: booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG"),
+    externalWorkerEventLog,
+    ...workerEventIngest,
     managementHost: bounded(
       environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST",

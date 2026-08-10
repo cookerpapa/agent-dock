@@ -50,4 +50,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
   mountPath: /run/agent-dock-secrets/metrics-token
   subPath: metrics-token
   readOnly: true
+- name: platform-secrets
+  mountPath: /run/agent-dock-secrets/worker-event-ingest-token
+  subPath: {{ .Values.external.eventIngest.tokenSecretKey }}
+  readOnly: true
 {{- end -}}

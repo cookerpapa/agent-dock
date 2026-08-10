@@ -38,10 +38,11 @@ function shardHash(value: string): number {
 }
 
 /**
- * Groups independent Session event batches into one PostgreSQL commit while
- * retaining a stable shard per Session. Acknowledgements are emitted only
- * after the grouped transaction commits, so browser-visible events keep their
- * "durable before visible" contract.
+ * Groups independent Session event batches behind one durable-store call while
+ * retaining a stable shard per Session. This becomes one PostgreSQL commit in
+ * local mode or one authenticated HTTP/Kafka append group in enterprise mode.
+ * Acknowledgements are emitted only after the selected durable boundary, so
+ * browser-visible events keep their "durable before visible" contract.
  */
 export class GroupedDurableEventIngestor implements DurableEventIngestor {
   readonly #store: DurableEventGroupIngestor;
@@ -138,6 +139,15 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
             publication.resolve(acknowledgements[index]!);
           }
         } catch (error: unknown) {
+          const retryable =
+            typeof error === "object" &&
+            error !== null &&
+            "retryable" in error &&
+            (error as { retryable?: unknown }).retryable === true;
+          if (retryable) {
+            for (const publication of group) publication.reject(error);
+            continue;
+          }
           // A single invalid Session must not poison unrelated Session streams.
           // The grouped transaction is atomic, so retrying each durable event
           // publication independently cannot duplicate a partial group commit.

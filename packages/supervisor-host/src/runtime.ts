@@ -5,6 +5,8 @@ import {
   TtlCheckpointObjectStore,
 } from "@agent-dock/runtime-core/checkpoint-runtime";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
+import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
 import { PostgresEventProjectionBarrier } from "@agent-dock/runtime-core/event-projection-barrier";
 import { LocalSupervisorExecutionBackend } from "@agent-dock/runtime-core/local-supervisor-execution-backend";
 import {
@@ -419,11 +421,17 @@ export class SupervisorHostRuntime {
         connectionString: this.#config.databaseUrl,
         applicationName: `${this.#config.supervisorId}-event-publisher`,
       });
-      const eventStore = new DurableEventStore({
-        database: this.#database,
-        eventNotificationPublisher: eventNotifications,
-        externalWorkerEventLog: this.#config.externalWorkerEventLog ?? false,
-      });
+      const eventStore = this.#config.externalWorkerEventLog
+        ? new HttpDurableEventIngestor({
+            baseUrl: this.#config.workerEventIngestBaseUrl!,
+            serviceToken: this.#config.workerEventIngestToken!,
+            allowInsecureHttp: this.#config.allowInsecureInternalHttp,
+          })
+        : new DurableEventStore({
+            database: this.#database,
+            eventNotificationPublisher: eventNotifications,
+          });
+      const groupedEventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
       const eventProjectionBarrier = this.#config.externalWorkerEventLog
         ? new PostgresEventProjectionBarrier({ database: this.#database })
         : undefined;
@@ -434,7 +442,7 @@ export class SupervisorHostRuntime {
       const localBackend = new LocalSupervisorExecutionBackend({
         supervisor: localSupervisor,
         leaseCoordinator,
-        eventIngestor: eventStore,
+        eventIngestor: groupedEventIngestor,
       });
       const temporalWorker = this.#temporalWorkerFactory({
         database: this.#database,

@@ -12,6 +12,7 @@ import {
 import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
 import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
+import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -172,9 +173,16 @@ export async function startControlPlane(): Promise<void> {
         return true;
       },
     });
+    const workerEventIngestor = config.externalWorkerEventLog
+      ? new HttpDurableEventIngestor({
+          baseUrl: config.workerEventIngestBaseUrl!,
+          serviceToken: config.workerEventIngestToken!,
+          allowInsecureHttp: config.allowInsecureInternalHttp,
+        })
+      : undefined;
     runtime = await createControlPlaneRuntime({
       database,
-      externalWorkerEventLog: config.externalWorkerEventLog,
+      ...(workerEventIngestor === undefined ? {} : { workerEventIngestor }),
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),

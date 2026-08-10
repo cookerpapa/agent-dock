@@ -96,6 +96,10 @@ assert.equal(
   "/run/agent-dock-secrets/database-notification-url",
 );
 assert.equal(controlPlaneEnvironment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
+assert.equal(
+  controlPlaneEnvironment.AGENT_DOCK_WORKER_EVENT_INGEST_URL,
+  "http://event-gateway:4600",
+);
 find("HorizontalPodAutoscaler", "agent-dock-control-plane");
 find("PodDisruptionBudget", "agent-dock-control-plane");
 
@@ -109,6 +113,10 @@ const eventGatewayEnvironment = Object.fromEntries(
     .map((entry) => [entry.name, String(entry.value)]),
 );
 assert.equal(eventGatewayEnvironment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE,
+  "/run/agent-dock-secrets/worker-event-ingest-token",
+);
 assert.equal(
   eventGatewayEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
   "/run/agent-dock-secrets/database-notification-url",
@@ -200,6 +208,7 @@ assert.equal(
   "http://$(POD_NAME).agent-dock-pi-worker-primary-v1.$(POD_NAMESPACE).svc.cluster.local:4100",
 );
 assert.equal(workerEnvironment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
+assert.equal(workerEnvironment.AGENT_DOCK_WORKER_EVENT_INGEST_URL, "http://event-gateway:4600");
 const scaledObject = find("ScaledObject", "agent-dock-pi-worker-primary-v1");
 assert.equal(scaledObject.spec.minReplicaCount, 2);
 assert.equal(scaledObject.spec.maxReplicaCount, 32);

@@ -9,12 +9,16 @@ import {
   type EventPublishMessage,
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { classifyStructuredTestCommand } from "./structured-test-command.ts";
-import type { WorkerEventLogEnvelope, WorkerEventProjectionSink } from "./worker-event-log.ts";
+import type {
+  WorkerEventLogAppender,
+  WorkerEventLogEnvelope,
+  WorkerEventLogPosition,
+  WorkerEventProjectionSink,
+} from "./worker-event-log.ts";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -45,7 +49,7 @@ export type DurableEventStoreOptions = {
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   clock?: () => Date;
   idGenerator?: () => string;
-  externalWorkerEventLog?: boolean;
+  workerEventLog?: WorkerEventLogAppender;
 };
 
 export type EventReplayWindow = {
@@ -132,24 +136,6 @@ function normalizedUuid(value: string | null | undefined): string | null {
   return value === null || value === undefined ? null : value.toLowerCase();
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-    .join(",")}}`;
-}
-
-function eventContentSha256(tenantId: string, message: EventPublishMessage): string {
-  return createHash("sha256")
-    .update("agent-dock.worker-event.v1\0", "utf8")
-    .update(tenantId, "utf8")
-    .update("\0", "utf8")
-    .update(canonicalJson(message), "utf8")
-    .digest("hex");
-}
-
 function isoTimestamp(value: Date | string): string {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.valueOf())) {
@@ -223,6 +209,7 @@ export class DurableEventStore
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
+  readonly #workerEventLog: WorkerEventLogAppender | undefined;
   readonly #externalWorkerEventLog: boolean;
 
   constructor(options: DurableEventStoreOptions) {
@@ -231,7 +218,8 @@ export class DurableEventStore
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
-    this.#externalWorkerEventLog = options.externalWorkerEventLog ?? false;
+    this.#workerEventLog = options.workerEventLog;
+    this.#externalWorkerEventLog = options.workerEventLog !== undefined;
   }
 
   async ingest(value: unknown): Promise<EventAckMessage> {
@@ -599,20 +587,6 @@ export class DurableEventStore
           );
         }
       } else {
-        await transaction
-          .insertInto("session_event_ids")
-          .values(
-            newPublications.map((message) => ({
-              event_id: message.payload.event.eventId,
-              session_id: message.payload.event.sessionId,
-              seq: message.payload.event.seq,
-              content_sha256: eventContentSha256(
-                sessionById.get(message.payload.event.sessionId)!.tenant_id,
-                message,
-              ),
-            })),
-          )
-          .executeTakeFirstOrThrow();
         const batches = prepared
           .map((publication) => {
             const sessionId = publication.publications[0]!.payload.event.sessionId;
@@ -623,36 +597,15 @@ export class DurableEventStore
               (message) => message.payload.event.seq > lastPersisted,
             );
             if (messages.length === 0) return undefined;
-            const envelope: WorkerEventLogEnvelope = {
-              schemaVersion: 1,
-              tenantId: session.tenant_id,
-              messages,
-            };
-            return { session, messages, envelope };
+            return { tenantId: session.tenant_id, messages };
           })
           .filter((value): value is NonNullable<typeof value> => value !== undefined);
-        await transaction
-          .insertInto("worker_event_outbox")
-          .values(
-            batches.map(({ session, messages, envelope }) => ({
-              id: this.#idGenerator(),
-              tenant_id: session.tenant_id,
-              session_id: messages[0]!.payload.event.sessionId,
-              first_seq: messages[0]!.payload.event.seq,
-              last_seq: messages.at(-1)!.payload.event.seq,
-              envelope,
-              content_sha256: createHash("sha256")
-                .update(canonicalJson(envelope), "utf8")
-                .digest("hex"),
-              state: "pending" as const,
-              available_at: now,
-              claimed_by: null,
-              claimed_until: null,
-              last_error: null,
-              published_at: null,
-            })),
-          )
-          .executeTakeFirstOrThrow();
+        if (batches.length > 0) {
+          // Kafka is the enterprise stream's first durable acceptance
+          // boundary. Keep the Session rows locked until the broker ACKs so
+          // the projector cannot overtake the lightweight cursor commit.
+          await this.#workerEventLog!.append(batches);
+        }
       }
     }
 
@@ -784,7 +737,7 @@ export class DurableEventStore
     return rows.map((row) => eventFromRow(row));
   }
 
-  async project(envelope: WorkerEventLogEnvelope): Promise<void> {
+  async project(envelope: WorkerEventLogEnvelope, position: WorkerEventLogPosition): Promise<void> {
     const first = envelope.messages[0];
     const last = envelope.messages.at(-1);
     if (envelope.schemaVersion !== 1 || first === undefined || last === undefined) {
@@ -803,8 +756,26 @@ export class DurableEventStore
         "Worker event envelope was not one contiguous Session range",
       );
     }
+    if (
+      !Number.isSafeInteger(position.partition) ||
+      position.partition < 0 ||
+      !/^(0|[1-9][0-9]{0,18})$/u.test(position.offset)
+    ) {
+      throw new DurableEventStoreError("invalid_event", "Kafka projection position was invalid");
+    }
     const now = validDate(this.#clock);
-    const projectedThrough = await this.#database.transaction().execute(async (transaction) => {
+    const result = await this.#database.transaction().execute(async (transaction) => {
+      const consumed = await transaction
+        .selectFrom("worker_event_projection_offsets")
+        .select("last_offset")
+        .where("consumer_group", "=", position.consumerGroup)
+        .where("topic", "=", position.topic)
+        .where("partition", "=", position.partition)
+        .forUpdate()
+        .executeTakeFirst();
+      if (consumed !== undefined && BigInt(consumed.last_offset) >= BigInt(position.offset)) {
+        return { projectedThrough: null, notified: false } as const;
+      }
       const session = await transaction
         .selectFrom("sessions")
         .select("tenant_id")
@@ -833,37 +804,6 @@ export class DurableEventStore
           "Kafka event range was not authorized by the durable Session cursor",
           true,
         );
-      }
-
-      const registrations = await transaction
-        .selectFrom("session_event_ids")
-        .select(["event_id", "seq", "content_sha256"])
-        .where("session_id", "=", sessionId)
-        .where(
-          "seq",
-          "in",
-          envelope.messages.map((message) => String(message.payload.event.seq)),
-        )
-        .execute();
-      const registeredBySequence = new Map(
-        registrations.map((registration) => [
-          safeInteger(registration.seq, "registered event sequence"),
-          registration,
-        ]),
-      );
-      for (const message of envelope.messages) {
-        const event = message.payload.event;
-        const registration = registeredBySequence.get(event.seq);
-        if (
-          registration === undefined ||
-          normalizedUuid(registration.event_id) !== normalizedUuid(event.eventId) ||
-          registration.content_sha256 !== eventContentSha256(envelope.tenantId, message)
-        ) {
-          throw new DurableEventStoreError(
-            "event_conflict",
-            `Kafka event ${event.seq} did not match its durable identity registration`,
-          );
-        }
       }
 
       const redeliveries = envelope.messages.filter(
@@ -898,40 +838,60 @@ export class DurableEventStore
       const newMessages = envelope.messages.filter(
         (message) => message.payload.event.seq > projected,
       );
-      if (newMessages.length === 0) return projected;
-      if (newMessages[0]!.payload.event.seq !== projected + 1) {
+      if (newMessages.length > 0 && newMessages[0]!.payload.event.seq !== projected + 1) {
         throw new DurableEventStoreError(
           "sequence_gap",
           `Expected projected sequence ${projected + 1}, received ${newMessages[0]!.payload.event.seq}`,
           true,
         );
       }
-      await transaction
-        .insertInto("session_events")
-        .values(newMessages.map((message) => this.#eventRow(envelope.tenantId, message, now)))
-        .executeTakeFirstOrThrow();
-      for (const message of newMessages) {
-        await this.#recordStructuredTestResult(transaction, envelope.tenantId, message);
-        await this.#recordContextCompaction(transaction, envelope.tenantId, message);
+      let throughSequence = projected;
+      if (newMessages.length > 0) {
+        await transaction
+          .insertInto("session_events")
+          .values(newMessages.map((message) => this.#eventRow(envelope.tenantId, message, now)))
+          .executeTakeFirstOrThrow();
+        for (const message of newMessages) {
+          await this.#recordStructuredTestResult(transaction, envelope.tenantId, message);
+          await this.#recordContextCompaction(transaction, envelope.tenantId, message);
+        }
+        throughSequence = newMessages.at(-1)!.payload.event.seq;
+        const update = await transaction
+          .updateTable("session_event_cursors")
+          .set({ last_projected_seq: throughSequence, updated_at: now })
+          .where("session_id", "=", sessionId)
+          .where("last_projected_seq", "=", cursor.last_projected_seq)
+          .executeTakeFirst();
+        expectOne(update.numUpdatedRows, "advancing the projected event cursor");
+        const notification = {
+          schemaVersion: 1,
+          tenantId: envelope.tenantId,
+          sessionId,
+          throughSequence,
+        } as const;
+        await this.#eventNotificationPublisher?.publish(transaction, notification);
       }
-      const throughSequence = newMessages.at(-1)!.payload.event.seq;
-      const update = await transaction
-        .updateTable("session_event_cursors")
-        .set({ last_projected_seq: throughSequence, updated_at: now })
-        .where("session_id", "=", sessionId)
-        .where("last_projected_seq", "=", cursor.last_projected_seq)
-        .executeTakeFirst();
-      expectOne(update.numUpdatedRows, "advancing the projected event cursor");
-      const notification = {
-        schemaVersion: 1,
-        tenantId: envelope.tenantId,
-        sessionId,
-        throughSequence,
-      } as const;
-      await this.#eventNotificationPublisher?.publish(transaction, notification);
-      return throughSequence;
+      await transaction
+        .insertInto("worker_event_projection_offsets")
+        .values({
+          consumer_group: position.consumerGroup,
+          topic: position.topic,
+          partition: position.partition,
+          last_offset: position.offset,
+          updated_at: now,
+        })
+        .onConflict((conflict) =>
+          conflict.columns(["consumer_group", "topic", "partition"]).doUpdateSet({
+            last_offset: position.offset,
+            updated_at: now,
+          }),
+        )
+        .executeTakeFirstOrThrow();
+      return { projectedThrough: throughSequence, notified: newMessages.length > 0 } as const;
     });
-    this.#eventHub?.notifyThrough(envelope.tenantId, sessionId, projectedThrough);
+    if (result.notified && result.projectedThrough !== null) {
+      this.#eventHub?.notifyThrough(envelope.tenantId, sessionId, result.projectedThrough);
+    }
   }
 
   async #verifyRedeliveries(
@@ -941,41 +901,6 @@ export class DurableEventStore
     messages: readonly EventPublishMessage[],
   ): Promise<void> {
     if (messages.length === 0) return;
-    if (this.#externalWorkerEventLog) {
-      const rows = await transaction
-        .selectFrom("session_event_ids")
-        .select(["event_id", "seq", "content_sha256"])
-        .where("session_id", "=", sessionId)
-        .where(
-          "seq",
-          "in",
-          messages.map((message) => String(message.payload.event.seq)),
-        )
-        .execute();
-      const bySequence = new Map(
-        rows.map((row) => [safeInteger(row.seq, "registered event sequence"), row]),
-      );
-      for (const message of messages) {
-        const event = message.payload.event;
-        const row = bySequence.get(event.seq);
-        if (row === undefined) {
-          throw new DurableEventStoreError(
-            "event_store_invariant",
-            "Durable event prefix contains a missing identity registration",
-          );
-        }
-        if (
-          normalizedUuid(row.event_id) !== normalizedUuid(event.eventId) ||
-          row.content_sha256 !== eventContentSha256(tenantId, message)
-        ) {
-          throw new DurableEventStoreError(
-            "event_conflict",
-            `Conflicting event publication at sequence ${event.seq}`,
-          );
-        }
-      }
-      return;
-    }
     const rows = await transaction
       .selectFrom("session_events")
       .select(eventSelect())
@@ -994,6 +919,12 @@ export class DurableEventStore
       const event = message.payload.event;
       const row = bySequence.get(event.seq);
       if (row === undefined) {
+        if (this.#externalWorkerEventLog) {
+          // The Kafka ACK can legitimately precede the PostgreSQL projection.
+          // The original record is already durable, so an ACK retry does not
+          // need a second Kafka append or a temporary identity row.
+          continue;
+        }
         throw new DurableEventStoreError(
           "event_store_invariant",
           "Durable event prefix contains a missing sequence",

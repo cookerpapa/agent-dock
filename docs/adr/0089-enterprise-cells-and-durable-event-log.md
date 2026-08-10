@@ -4,6 +4,12 @@
 
 Implemented for staged deployment on 2026-08-09.
 
+The PostgreSQL payload-Outbox portion was superseded by
+[ADR-0091](0091-kafka-first-worker-event-ingest.md) after the transfer ledger
+was found to duplicate high-frequency payloads without an atomic business-state
+mutation to protect. Cell placement, Kafka ordering, projection and terminal
+barrier decisions below remain current.
+
 This ADR supersedes the capacity-one Worker and process-local Sandbox Manager
 ring decisions in ADR-0057, ADR-0058, ADR-0059, ADR-0071 and ADR-0088. Their
 durable-state and isolation decisions remain in force.

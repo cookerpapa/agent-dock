@@ -37,12 +37,13 @@ restart/reconnect evidence.
 Streaming text is coalesced before it enters the Worker WAL, then delivered as
 contiguous batches with cumulative ACK. The bounded profile writes one batch
 to the partitioned PostgreSQL event table. The enterprise profile commits one
-transactional transfer Outbox row, publishes it at least once to Kafka and
-projects it idempotently into that replay table. The integration suite covers
-mixed redelivery, an Outbox-backed ACK, duplicate Kafka projection and the
-separate persisted/projected cursor. SSE still reads only projected PostgreSQL
-rows, and Pi recovery tests prove that committed text and Tool facts appear in
-Pi's effective next model context after hard-crash recovery.
+authenticated batch directly to Kafka and projects it idempotently into that
+replay table. PostgreSQL stores sequence/fence cursors and projection state but
+no intermediate raw-payload Outbox. The integration suite covers mixed
+redelivery, Kafka-backed ACK, duplicate projection and the separate
+persisted/projected cursor. SSE still reads only projected PostgreSQL rows, and
+Pi recovery tests prove that committed text and Tool facts appear in Pi's
+effective next model context after hard-crash recovery.
 
 This removes per-token transactions and per-event cursor updates. The measured
 2,000-Session PostgreSQL gate committed 128,000 logical events at 3,223 events/s
@@ -57,6 +58,14 @@ uses the production Confluent/librdkafka client against a real Kafka broker. It
 verifies Session-key ordering and end-to-end envelope projection without Node
 24 client warnings. It is deliberately scoped as a transport check rather than
 a multi-broker Stage 2 capacity result.
+
+The end-to-end
+[enterprise event-pipeline acceptance](reports/enterprise-event-pipeline-acceptance-latest.json)
+uses a real PostgreSQL server and real Kafka broker. It validates the
+authenticated HTTP ingest boundary, duplicate projection, projector
+stop/restart recovery, contiguous terminal settlement and removal of the old
+PostgreSQL payload Outbox. It remains a single-node functional check, not an HA
+or broker-failover claim.
 
 For the end-to-end Control Plane boundary, deploy the current revision and run:
 

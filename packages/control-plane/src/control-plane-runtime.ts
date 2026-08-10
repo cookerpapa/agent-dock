@@ -8,7 +8,10 @@ import {
   type ControlPlaneApplicationOptions,
 } from "./application.ts";
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import {
+  DurableEventStore,
+  type DurableEventGroupIngestor,
+} from "@agent-dock/runtime-core/durable-event-store";
 import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
 import {
   SupervisorMaintenanceRuntime,
@@ -62,7 +65,7 @@ export type ControlPlaneRuntimeOptions = Omit<
   controlChannelRouter?: ControlChannelConfiguration;
   gateway?: GatewayConfiguration;
   maintenance?: MaintenanceConfiguration;
-  externalWorkerEventLog?: boolean;
+  workerEventIngestor?: DurableEventGroupIngestor;
 };
 
 export type ControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
@@ -155,9 +158,10 @@ export async function createControlPlaneRuntime(
     ...(options.sessionEventNotifications === undefined
       ? {}
       : { eventNotificationPublisher: options.sessionEventNotifications }),
-    externalWorkerEventLog: options.externalWorkerEventLog ?? false,
   });
-  const eventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
+  const eventIngestor = new GroupedDurableEventIngestor({
+    store: options.workerEventIngestor ?? eventStore,
+  });
   const controlChannelRouter = new WorkerControlChannelRouter({
     ...options.controlChannelRouter,
     eventIngestor,

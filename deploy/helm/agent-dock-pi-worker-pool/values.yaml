@@ -36,6 +36,7 @@ image:
 
 services:
   controlPlaneUrl: http://control-plane.agent-dock-system.svc.cluster.local:3000
+  eventGatewayUrl: http://event-gateway.agent-dock-system.svc.cluster.local:4600
   sandboxManagerUrls:
     - http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300
     - http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300
@@ -72,6 +73,7 @@ credentials:
   modelCredentialMasterKeyKey: model-credential-master-key
   githubGatewayTokenKey: github-gateway-token
   metricsTokenKey: metrics-token
+  workerEventIngestTokenKey: worker-event-ingest-token
 
 runtime:
   allowInsecureInternalHttp: true

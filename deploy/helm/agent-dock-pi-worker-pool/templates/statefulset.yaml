@@ -118,6 +118,12 @@ spec:
               value: /run/agent-dock-secrets/database-url
             - name: AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG
               value: {{ .Values.runtime.externalWorkerEventLog | quote }}
+            {{- if .Values.runtime.externalWorkerEventLog }}
+            - name: AGENT_DOCK_WORKER_EVENT_INGEST_URL
+              value: {{ .Values.services.eventGatewayUrl | quote }}
+            - name: AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE
+              value: /run/agent-dock-secrets/worker-event-ingest-token
+            {{- end }}
             - name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP
               value: {{ .Values.runtime.allowInsecureInternalHttp | quote }}
             - name: AGENT_DOCK_CONTROL_PLANE_URL
@@ -297,8 +303,14 @@ spec:
             {{- end }}
             - name: secrets
               mountPath: /run/agent-dock-secrets/metrics-token
-              subPath: metrics-token
+              subPath: {{ .Values.credentials.metricsTokenKey }}
               readOnly: true
+            {{- if .Values.runtime.externalWorkerEventLog }}
+            - name: secrets
+              mountPath: /run/agent-dock-secrets/worker-event-ingest-token
+              subPath: {{ .Values.credentials.workerEventIngestTokenKey }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: workspace
           emptyDir:
@@ -331,6 +343,10 @@ spec:
               {{- end }}
               - key: {{ .Values.credentials.metricsTokenKey }}
                 path: metrics-token
+              {{- if .Values.runtime.externalWorkerEventLog }}
+              - key: {{ .Values.credentials.workerEventIngestTokenKey }}
+                path: worker-event-ingest-token
+              {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: worker-state

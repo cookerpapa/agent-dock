@@ -3298,3 +3298,33 @@
 - Documented that persistent retention is not VM-state durability: failure
   restores committed Pi/Workspace state into a fresh execution world and uses
   the existing model-visible reset boundary.
+
+# 2026-08-10 — Kafka-first enterprise Worker event plane
+
+- Removed the PostgreSQL `worker_event_outbox` raw-payload transfer copy from
+  the current enterprise schema. PostgreSQL now retains only bounded
+  Session/fence cursors, the replay/semantic projection and the projector's
+  consumed Kafka offset.
+- Added an authenticated internal Event Gateway ingest contract. Trusted Pi
+  Workers publish their local-WAL batches through this contract; only Event
+  Gateway holds the topic-scoped Kafka producer/consumer credential.
+- Made Kafka `acks=all` with idempotent production the first shared payload
+  durability boundary. The projector commits replay rows, semantic state,
+  `last_projected_seq` and the consumed partition offset in one PostgreSQL
+  transaction before advancing the Kafka group offset.
+- Kept the existing four-millisecond cross-Session group-commit window in each
+  multi-slot Pi Worker Host, so concurrent publications share one authenticated
+  HTTP/Kafka append group. Retryable shared-dependency failures reject the
+  group once instead of amplifying an outage into one request per Session.
+- Preserved cumulative ACK, exact Session ordering, idempotent redelivery and
+  the terminal projection barrier. Kafka failure leaves the Worker WAL suffix
+  pending; projector downtime leaves a visible persisted/projected gap rather
+  than exposing an early terminal event.
+- Wired the ingest identity through strict distributed Helm values, mounted it
+  only into trusted services and kept Kafka credentials out of Pi Workers and
+  Cube guests.
+- Added a real PostgreSQL + real Kafka functional acceptance covering invalid
+  token rejection, duplicate delivery, projector stop/restart recovery,
+  terminal ordering and removal of the payload Outbox. A separate single-broker
+  transport run preserved per-Session order for 16,384 logical events across
+  256 Sessions; it is not represented as multi-broker capacity evidence.

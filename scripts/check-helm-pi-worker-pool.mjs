@@ -172,6 +172,10 @@ assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "4");
 assert.equal(environment.AGENT_DOCK_EXECUTION_CELL_ID, "cell-0001");
 assert.equal(environment.AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, "true");
 assert.equal(
+  environment.AGENT_DOCK_WORKER_EVENT_INGEST_URL,
+  "http://event-gateway.agent-dock-system.svc.cluster.local:4600",
+);
+assert.equal(
   environment.NO_PROXY,
   "127.0.0.1,localhost,sandbox-manager,.svc,.svc.cluster.local",
   "Owner callbacks to the Sandbox Manager must bypass the trusted-plane HTTP proxy",
@@ -238,6 +242,7 @@ assert.deepEqual(secretMounts.map((mount) => mount.subPath).sort(), [
   "sandbox-manager-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
+  "worker-event-ingest-token",
 ]);
 assert.equal(
   secretMounts.every(

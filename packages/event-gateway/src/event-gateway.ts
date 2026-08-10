@@ -3,13 +3,16 @@ import type { TenantApiAuthenticator } from "@agent-dock/control-plane/tenant-id
 import { readWebSessionCookie } from "@agent-dock/control-plane/web-authentication";
 import {
   DurableEventStoreError,
+  type DurableEventGroupIngestor,
   type DurableEventLog,
 } from "@agent-dock/runtime-core/durable-event-store";
+import { WORKER_EVENT_INGEST_PATH } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import { SessionEventStream } from "@agent-dock/runtime-core/session-event-stream";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { sql, type Kysely } from "kysely";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 const SESSION_EVENT_PATH = "/v1/sessions/:sessionId/events";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,11 +27,20 @@ export type EventGatewayOptions = {
   heartbeatIntervalMs?: number;
   replayPageSize?: number;
   dependencyReadiness?: () => Promise<void>;
+  workerEventIngestor?: DurableEventGroupIngestor;
+  workerEventIngestToken?: string;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
   if (value === undefined || value.length > 4_103) return undefined;
   return /^Bearer ([A-Za-z0-9._~+/=-]{32,4096})$/.exec(value)?.[1];
+}
+
+function serviceTokenDigest(value: string): Buffer {
+  if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/u.test(value)) {
+    throw new TypeError("Worker event ingest service token is invalid");
+  }
+  return createHash("sha256").update(value, "utf8").digest();
 }
 
 function parseSessionId(value: unknown): string | undefined {
@@ -72,6 +84,12 @@ export class EventGateway {
   #closing: Promise<void> | undefined;
 
   constructor(options: EventGatewayOptions) {
+    if (
+      (options.workerEventIngestor === undefined) !==
+      (options.workerEventIngestToken === undefined)
+    ) {
+      throw new TypeError("Worker event ingest gateway requires both an ingestor and a token");
+    }
     this.#database = options.database;
     this.#notifications = options.notifications;
     this.eventHub = options.eventHub ?? new SessionEventHub();
@@ -81,7 +99,7 @@ export class EventGateway {
         : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
       ...(options.replayPageSize === undefined ? {} : { replayPageSize: options.replayPageSize }),
     });
-    this.application = Fastify({ logger: false });
+    this.application = Fastify({ logger: false, bodyLimit: 16 * 1_024 * 1_024 });
     this.application.get("/health/live", async (_request, reply) => {
       await reply.code(200).send({ status: "ok" });
     });
@@ -96,6 +114,56 @@ export class EventGateway {
       }
       await reply.code(ready ? 200 : 503).send({ status: ready ? "ready" : "not_ready" });
     });
+    if (options.workerEventIngestor !== undefined && options.workerEventIngestToken !== undefined) {
+      const expectedToken = serviceTokenDigest(options.workerEventIngestToken);
+      this.application.post(WORKER_EVENT_INGEST_PATH, async (request, reply) => {
+        const supplied = bearerToken(request.headers.authorization);
+        const suppliedDigest =
+          supplied === undefined
+            ? Buffer.alloc(expectedToken.length)
+            : createHash("sha256").update(supplied, "utf8").digest();
+        if (supplied === undefined || !timingSafeEqual(expectedToken, suppliedDigest)) {
+          await sendError(reply, 401, "worker_event_ingest_unauthorized", "Unauthorized");
+          return;
+        }
+        const body = request.body as
+          { schemaVersion?: unknown; publications?: unknown } | null | undefined;
+        if (
+          body === null ||
+          body === undefined ||
+          body.schemaVersion !== 1 ||
+          !Array.isArray(body.publications) ||
+          body.publications.length < 1 ||
+          body.publications.length > 64
+        ) {
+          await sendError(reply, 400, "invalid_worker_event_group", "Invalid event group");
+          return;
+        }
+        try {
+          const acknowledgements = await options.workerEventIngestor!.ingestGroup(
+            body.publications,
+          );
+          await reply.code(200).send({ schemaVersion: 1, acknowledgements });
+        } catch (error: unknown) {
+          const status =
+            error instanceof DurableEventStoreError
+              ? error.retryable
+                ? 503
+                : error.code === "not_found"
+                  ? 404
+                  : 409
+              : 503;
+          await sendError(
+            reply,
+            status,
+            error instanceof DurableEventStoreError ? error.code : "worker_event_ingest_failed",
+            error instanceof DurableEventStoreError
+              ? error.message
+              : "Worker event ingest is temporarily unavailable",
+          );
+        }
+      });
+    }
     this.application.get(SESSION_EVENT_PATH, async (request, reply) => {
       let identity;
       try {

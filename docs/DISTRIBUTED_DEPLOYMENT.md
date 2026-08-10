@@ -75,9 +75,13 @@ sandbox-manager-token
 sandbox-materializer-token
 supervisor-enrollment-token
 supervisor-management-token
+worker-event-ingest-token
 workspace-data-mover-token
 workspace-kopia-aws-credentials
 workspace-kopia-repository-password
+kafka-ca.crt
+kafka-username
+kafka-password
 ```
 
 Use `kubectl create secret generic ... --from-file=<key>=<private-file>` or an
@@ -149,7 +153,7 @@ cluster can bypass only that check with
 | --- | --- | --- | --- |
 | Web | CPU HPA | 2–8 | stateless |
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
-| Event Gateway | KEDA Kafka lag + CPU | 3–32 | resumable SSE plus Kafka Outbox publishing/projection; Kafka partitions bound projector parallelism |
+| Event Gateway | KEDA Kafka lag + CPU | 3–32 | authenticated Kafka ingest, resumable SSE and projection; Kafka partitions bound projector parallelism |
 | Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
 | Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
@@ -157,10 +161,11 @@ cluster can bypass only that check with
 
 The enterprise values enable the external Worker event log. Deploy the Strimzi
 baseline in [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md)
-before the global plane. Worker ACKs are backed by the transactional Outbox;
-SSE reads only the idempotent PostgreSQL projection, and terminal settlement
-waits for the projection cursor. If Kafka or the projector is unavailable,
-Runs remain non-terminal rather than exposing a completion gap.
+before the global plane. Workers publish through the authenticated Event
+Gateway contract and receive a cumulative ACK only after Kafka accepts the
+batch. SSE reads only the idempotent PostgreSQL projection, and terminal
+settlement waits for the projection cursor. If Kafka or the projector is
+unavailable, Runs remain non-terminal rather than exposing a completion gap.
 
 The baseline Kafka listener is TLS-only and uses SCRAM-SHA-512. Strimzi's
 generated CA/password must be synchronized into the global platform Secret as

@@ -121,9 +121,13 @@ function preflight(namespace, values) {
     "sandbox-materializer-token",
     "supervisor-enrollment-token",
     "supervisor-management-token",
+    "worker-event-ingest-token",
     "workspace-data-mover-token",
     "workspace-kopia-aws-credentials",
     "workspace-kopia-repository-password",
+    "kafka-ca.crt",
+    "kafka-username",
+    "kafka-password",
   ];
   for (const key of requiredSecretKeys) {
     if (typeof secret.data?.[key] !== "string") fail(`Secret ${secretName} is missing key ${key}`);

@@ -71,6 +71,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0090](0090-session-selected-sandbox-retention.md) makes Cube retention a
   durable Session choice while preserving lazy activation, fencing and the
   one-live-process-world-per-Workspace invariant.
+- [ADR-0091](0091-kafka-first-worker-event-ingest.md) removes the PostgreSQL
+  payload transfer Outbox and makes authenticated Kafka append the enterprise
+  Worker stream's first shared durability boundary.
 
 ## Maintained optional modules
 

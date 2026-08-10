@@ -13,11 +13,12 @@ platform service network.
 | Control Plane | PostgreSQL direct session endpoint | yes | DB credential; `LISTEN`/migration only |
 | Control Plane | Temporal | yes | internal namespace |
 | Event Gateway | Kafka brokers | yes | TLS + SCRAM-SHA-512, topic/group-scoped ACL |
-| Event Gateway | PostgreSQL | yes | Outbox claim and replay projection credential |
+| Event Gateway | PostgreSQL | yes | sequence validation and replay projection credential |
 | Control Plane | MinIO/S3 | yes | object-store credential |
 | Control Plane | exact Pi Worker management endpoint | yes | management service token |
 | Control Plane | Sandbox Manager Service | yes | materializer credential |
 | Pi Worker | Control Plane management channel | yes | Worker boot credential |
+| Pi Worker | Event Gateway internal ingest | yes | dedicated service token; no Kafka credential |
 | Pi Worker | Model Gateway | yes | short-lived Run capability |
 | Pi Worker | Sandbox Manager | yes | service identity + Tool lease |
 | Sandbox Manager | Cube API/Proxy | yes | Cube API credential |

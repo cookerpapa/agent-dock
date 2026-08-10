@@ -5,6 +5,7 @@ export type EventGatewayProductionConfig = {
   port: number;
   databaseUrl: string;
   databaseNotificationUrl: string;
+  workerEventIngestToken?: string;
   kafka?: {
     brokers: readonly string[];
     clientId: string;
@@ -78,11 +79,20 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
             "agent-dock-worker-event-projector-v1",
           ...(kafkaSecurity === undefined ? {} : { security: kafkaSecurity }),
         };
+  const workerEventIngestToken =
+    kafka === undefined
+      ? undefined
+      : await readSecret(
+          process.env.AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE ??
+            "/run/agent-dock-secrets/worker-event-ingest-token",
+          "Worker event ingest token",
+        );
   return {
     host: process.env.HOST ?? "0.0.0.0",
     port: port(process.env.PORT),
     databaseUrl,
     databaseNotificationUrl,
     ...(kafka === undefined ? {} : { kafka }),
+    ...(workerEventIngestToken === undefined ? {} : { workerEventIngestToken }),
   };
 }

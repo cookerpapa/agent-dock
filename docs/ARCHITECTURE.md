@@ -54,12 +54,14 @@ enterprise high-frequency Worker-event transport, not a Run-state authority.
 
 The Event Gateway is the browser-facing, horizontally scalable read path for
 long-lived resumable SSE connections. In the enterprise profile its replicas
-also bridge the transactional Worker-event Outbox to Kafka and consume the
-shared projector group. It authenticates the same browser/API credentials as
-the Control Plane, opens a replay window from `DurableEventLog`, and sends only
-projected events. PostgreSQL `NOTIFY` is a wake-up hint; reconnect and missed
-notifications are repaired from the partitioned replay table. The Gateway
-cannot admit Runs or commit terminal state.
+also expose an authenticated internal Worker-event ingest endpoint, append
+accepted batches directly to Kafka and consume the shared projector group. Pi
+Workers never receive Kafka credentials. The Gateway authenticates the same
+browser/API credentials as the Control Plane, opens a replay window from
+`DurableEventLog`, and sends only projected events. PostgreSQL `NOTIFY` is a
+wake-up hint; reconnect and missed notifications are repaired from the
+partitioned replay table. The Gateway cannot admit Runs or commit terminal
+state.
 
 ### Temporal
 
@@ -193,7 +195,7 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | active Pi `messages[]` | Pi SDK memory for one active Run |
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
-| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/hash cursor and replay projection |
+| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/projection cursor, consumed offset and replay projection |
 | browser SSE connections and replay cursors | stateless Event Gateway replicas |
 | UI transcript projection | PostgreSQL-derived read model |
 
@@ -472,18 +474,20 @@ flush pending text immediately. A bounded asynchronous publisher sends a
 contiguous batch after at most 20 ms, 64 events or 512 KiB.
 
 The bounded self-hosted profile writes the suffix directly to the partitioned
-PostgreSQL event table. The enterprise profile writes one transactional Outbox
-row per Session batch together with sequence advancement, event identity and a
-canonical content hash, then returns one cumulative ACK. No Kafka network call
-occurs while PostgreSQL Session locks are held.
+PostgreSQL event table. In the enterprise profile, the Worker sends the suffix
+to Event Gateway through a service-authenticated HTTP contract. Event Gateway
+validates the current Session/lease/fence and appends directly to Kafka with
+`sessionId` as the partition key. Kafka `acks=all` is the first shared durable
+payload boundary; PostgreSQL retains only bounded sequence cursors at ingest,
+so the event payload is not written to a transfer Outbox and then written
+again to the replay table.
 
-Event Gateway replicas claim only the earliest unpublished batch for each
-Session, append it to Kafka with `sessionId` as the partition key, and tolerate
-duplicate append after an uncertain acknowledgement. The Kafka consumer group
-projects batches idempotently into the partitioned PostgreSQL replay table and
-advances `last_projected_seq`. Exact content hashes reject conflicting
-redelivery. Published transfer rows are bounded by retention; they are not a
-second replay API.
+The Kafka consumer group projects batches idempotently into the partitioned
+PostgreSQL replay table. Replay rows, semantic projections,
+`last_projected_seq` and the consumed Kafka partition offset commit in one
+database transaction; the Kafka group offset advances only afterward. A lost
+ingest response may create a duplicate Kafka record, but exact Session-event
+redelivery is harmless and conflicting content fails closed.
 The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
 its private `command.result` is only a prepared result.
 
@@ -506,8 +510,8 @@ SSE uses the same durable event table:
 - database notification is a wake-up hint only;
 - the table remains the truth if notification is lost.
 
-Only PostgreSQL-projected events reach SSE. A Worker-WAL-only or
-Outbox/Kafka-only event is not yet visible. Public text and Tool facts that were
+Only PostgreSQL-projected events reach SSE. A Worker-WAL-only or Kafka-only
+event is not yet visible. Public text and Tool facts that were
 already shown therefore survive in the replay table and semantic projection.
 Successful/catchable Runs preserve them in Pi's native Session; an uncatchable
 crash uses the bounded one-time recovery bridge described above so they also

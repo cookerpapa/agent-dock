@@ -43,6 +43,7 @@ file outside Git. Its main restart-bound settings are:
 | `sandboxPlane.replicas` | Sandbox Manager/Data Mover replica count; production requires at least three for Lease-based owner-loss detection. |
 | `external.database.*` | PgBouncer application URL key plus a direct PostgreSQL session URL key for `LISTEN` and migrations. |
 | `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
+| `external.eventIngest` | Internal Event Gateway service URL and dedicated Worker-ingest service-token key. |
 | `external.kafka` | Enterprise Worker-event transport, shared idempotent projection group and TLS/SCRAM Secret-key mapping. The topic and identity must exist before rollout. |
 | `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |
 
@@ -51,10 +52,12 @@ ring injected into Control Plane and Workers. The ordering is part of runtime
 placement identity and must not be changed while activations are live.
 `AGENT_DOCK_DATABASE_NOTIFICATION_URL` (normally file-backed) must bypass
 transaction-pooling PgBouncer because PostgreSQL `LISTEN` is session-scoped.
-The enterprise Chart also injects `AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG=true`
-into Control Plane and Pi Workers. Do not enable only one side: all Worker
-publishers, the Event Gateway bridge and the terminal projection barrier are
-one cutover unit.
+The enterprise Chart also injects `AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG=true`,
+the Event Gateway URL and a dedicated ingest service token into Control Plane
+and Pi Workers. Do not enable only one side: all Worker publishers, Event
+Gateway Kafka ingest/projectors and the terminal projection barrier are one
+cutover unit. The service token authenticates AgentDock's internal HTTP
+contract; Kafka TLS/SCRAM credentials remain mounted only in Event Gateway.
 
 The checked-in enterprise Kafka profile requires TLS plus SCRAM-SHA-512 and
 reads `kafka-ca.crt`, `kafka-username` and `kafka-password` from the global

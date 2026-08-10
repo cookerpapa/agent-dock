@@ -12,6 +12,7 @@
     "./durable-event-store": "./src/durable-event-store.ts",
     "./event-projection-barrier": "./src/event-projection-barrier.ts",
     "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
+    "./http-durable-event-ingestor": "./src/http-durable-event-ingestor.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./pi-session-manifest": "./src/pi-session-manifest.ts",

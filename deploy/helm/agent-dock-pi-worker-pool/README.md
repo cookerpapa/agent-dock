@@ -57,7 +57,8 @@ kubectl -n agent-dock-workers create secret generic agent-dock-pi-worker-secrets
   --from-file=sandbox-manager-token=/private/sandbox-manager-token \
   --from-file=model-credential-master-key=/private/model-credential-master-key \
   --from-file=github-gateway-token=/private/github-gateway-token \
-  --from-file=metrics-token=/private/metrics-token
+  --from-file=metrics-token=/private/metrics-token \
+  --from-file=worker-event-ingest-token=/private/worker-event-ingest-token
 ```
 
 Kubernetes projects these files as decimal mode `288` (`0440`) and assigns the

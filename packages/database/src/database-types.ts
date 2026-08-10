@@ -792,26 +792,15 @@ export interface SessionEventIdTable {
   event_id: string;
   session_id: string;
   seq: Int8;
-  content_sha256: string | null;
   created_at: GeneratedTimestamp;
 }
 
-export interface WorkerEventOutboxTable {
-  id: string;
-  tenant_id: string;
-  session_id: string;
-  first_seq: Int8;
-  last_seq: Int8;
-  envelope: JsonObject;
-  content_sha256: string;
-  state: "pending" | "published";
-  attempts: GeneratedInteger;
-  available_at: GeneratedTimestamp;
-  claimed_by: string | null;
-  claimed_until: NullableTimestamp;
-  last_error: string | null;
-  created_at: GeneratedTimestamp;
-  published_at: NullableTimestamp;
+export interface WorkerEventProjectionOffsetTable {
+  consumer_group: string;
+  topic: string;
+  partition: number;
+  last_offset: Int8;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface ConversationTurnProjectionTable {
@@ -1143,7 +1132,7 @@ export interface Database {
   session_events: SessionEventTable;
   session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
-  worker_event_outbox: WorkerEventOutboxTable;
+  worker_event_projection_offsets: WorkerEventProjectionOffsetTable;
   conversation_turn_projections: ConversationTurnProjectionTable;
   outbox: OutboxTable;
   artifacts: ArtifactTable;

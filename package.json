@@ -62,6 +62,7 @@
     "benchmark:event-spool": "node --experimental-strip-types scripts/run-event-spool-benchmark.mjs",
     "benchmark:postgres-event-log": "tsx scripts/run-postgres-event-log-benchmark.ts",
     "eval:kafka-events": "tsx scripts/run-kafka-event-log-acceptance.ts",
+    "eval:enterprise-events": "tsx --tsconfig packages/control-plane/tsconfig.json scripts/run-enterprise-event-pipeline-acceptance.ts",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:config:observability": "AGENT_DOCK_PRODUCTION_PROFILES=observability node scripts/production-compose.mjs config --quiet",

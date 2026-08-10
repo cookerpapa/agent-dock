@@ -3,8 +3,12 @@ import type {
   TenantApiAuthenticator,
   TenantRequestIdentity,
 } from "@agent-dock/control-plane/tenant-identity";
-import type { AgentDockEvent, EventAckMessage } from "@agent-dock/protocol";
-import type { DurableEventLog } from "@agent-dock/runtime-core/durable-event-store";
+import type { AgentDockEvent, EventAckMessage, EventPublishMessage } from "@agent-dock/protocol";
+import type {
+  DurableEventGroupIngestor,
+  DurableEventLog,
+} from "@agent-dock/runtime-core/durable-event-store";
+import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import type {
   SessionEventNotification,
   SessionEventNotificationHandlers,
@@ -123,6 +127,7 @@ describe("Event Gateway", () => {
       const ca = resolve(root, "ca.crt");
       const username = resolve(root, "username");
       const password = resolve(root, "password");
+      const ingestToken = resolve(root, "worker-event-ingest-token");
       await Promise.all([
         writeFile(database, "postgres://test\n", { mode: 0o600 }),
         writeFile(ca, "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n", {
@@ -130,6 +135,7 @@ describe("Event Gateway", () => {
         }),
         writeFile(username, "agent-dock-event-gateway\n", { mode: 0o600 }),
         writeFile(password, "secret-password\n", { mode: 0o600 }),
+        writeFile(ingestToken, `${"i".repeat(48)}\n`, { mode: 0o600 }),
       ]);
       vi.stubEnv("DATABASE_URL_FILE", database);
       vi.stubEnv("AGENT_DOCK_KAFKA_BROKERS", "kafka.example:9093");
@@ -139,6 +145,7 @@ describe("Event Gateway", () => {
       );
       vi.stubEnv("AGENT_DOCK_KAFKA_USERNAME_FILE", username);
       vi.stubEnv("AGENT_DOCK_KAFKA_PASSWORD_FILE", password);
+      vi.stubEnv("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE", ingestToken);
       await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
         kafka: {
           brokers: ["kafka.example:9093"],
@@ -166,6 +173,68 @@ describe("Event Gateway", () => {
         code: "authentication_required",
         message: "A valid AgentDock login session or API credential is required",
       },
+    });
+  });
+
+  it("accepts Worker events only through the authenticated internal ingest boundary", async () => {
+    const publication: EventPublishMessage = {
+      protocolVersion: 1,
+      messageId: globalThis.crypto.randomUUID(),
+      sentAt: event.occurredAt,
+      type: "event.publish",
+      payload: {
+        leaseId: globalThis.crypto.randomUUID(),
+        fencingToken: 1,
+        event,
+      },
+    };
+    const store: DurableEventGroupIngestor = {
+      ingest: (value) => store.ingestGroup([value]).then((values) => values[0]!),
+      ingestGroup: (values) =>
+        Promise.resolve(
+          values.map((value) => {
+            const message = value as EventPublishMessage;
+            return {
+              protocolVersion: 1 as const,
+              messageId: globalThis.crypto.randomUUID(),
+              sentAt: event.occurredAt,
+              type: "event.ack" as const,
+              payload: {
+                sessionId: message.payload.event.sessionId,
+                leaseId: message.payload.leaseId,
+                fencingToken: message.payload.fencingToken,
+                acknowledgedThroughSeq: message.payload.event.seq,
+              },
+            };
+          }),
+        ),
+    };
+    const serviceToken = "i".repeat(48);
+    const gateway = new EventGateway({
+      database: {} as Kysely<Database>,
+      eventLog: new StaticEventLog(),
+      apiAuthenticator: new StaticAuthenticator(API_TOKEN),
+      webSessionAuthenticator: new StaticAuthenticator("web-token"),
+      notifications: new FakeNotifications(),
+      workerEventIngestor: store,
+      workerEventIngestToken: serviceToken,
+    });
+    running.push(gateway);
+    const unauthorized = await gateway.application.inject({
+      method: "POST",
+      url: "/internal/v1/worker-events",
+      payload: { schemaVersion: 1, publications: [publication] },
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const address = await gateway.listen(0, "127.0.0.1");
+    const client = new HttpDurableEventIngestor({
+      baseUrl: address,
+      serviceToken,
+      allowInsecureHttp: true,
+    });
+    await expect(client.ingest(publication)).resolves.toMatchObject({
+      payload: { acknowledgedThroughSeq: 1 },
     });
   });
 

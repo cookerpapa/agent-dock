@@ -40,6 +40,7 @@ import * as workspaceCellMigrations from "./038_workspace_cell_migrations.ts";
 import * as externalWorkerEventLog from "./039_external_worker_event_log.ts";
 import * as sessionSandboxRetention from "./040_session_sandbox_retention.ts";
 import * as decouplePersistentSandboxLeases from "./041_decouple_persistent_sandbox_leases.ts";
+import * as kafkaFirstWorkerEventLog from "./042_kafka_first_worker_event_log.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -85,6 +86,7 @@ export const migrationProvider: MigrationProvider = {
       "039_external_worker_event_log": externalWorkerEventLog,
       "040_session_sandbox_retention": sessionSandboxRetention,
       "041_decouple_persistent_sandbox_leases": decouplePersistentSandboxLeases,
+      "042_kafka_first_worker_event_log": kafkaFirstWorkerEventLog,
     };
   },
 };

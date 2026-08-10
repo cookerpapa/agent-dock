@@ -99,6 +99,9 @@ web:
     limits: { cpu: 500m, memory: 256Mi }
 
 external:
+  eventIngest:
+    serviceUrl: http://event-gateway:4600
+    tokenSecretKey: worker-event-ingest-token
   database:
     # database-url should target PgBouncer transaction pooling. The separate
     # database-notification-url Secret key must target PostgreSQL directly.
@@ -197,6 +200,7 @@ pi-workers:
     pullPolicy: IfNotPresent
   services:
     controlPlaneUrl: http://control-plane:3000
+    eventGatewayUrl: http://event-gateway:4600
     sandboxManagerUrls:
       - http://sandbox-manager:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
@@ -227,6 +231,7 @@ pi-workers:
     modelCredentialMasterKeyKey: model-credential-master-key
     githubGatewayTokenKey: github-gateway-token
     metricsTokenKey: metrics-token
+    workerEventIngestTokenKey: worker-event-ingest-token
   runtime:
     allowInsecureInternalHttp: true
     externalWorkerEventLog: true
@@ -248,7 +253,7 @@ pi-workers:
   networkPolicy:
     enabled: true
     trustedNamespaceLabel: { key: agent-dock.io/trusted-plane, value: "true" }
-    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 7233, 9000]
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 4600, 5432, 7233, 9000]
     externalEgressCidrs: []
   disruptionBudget: { minAvailable: 1 }
   placement: { nodeSelector: {}, tolerations: [] }

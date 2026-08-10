@@ -77,9 +77,10 @@ in the implementation log or Git history, not in the active backlog.
       rate, WAL bytes, connection-pool wait and SSE delivery lag before adding
       an external event broker or terminal-delta retention compaction.
 - [x] Add the gated Kafka Worker-event path behind `DurableEventLog`, including
-      a transactional transfer Outbox, Session-keyed ordering, idempotent
+      authenticated Kafka-first ingest, Session-keyed ordering, idempotent
       replay projection and a terminal projection barrier. PostgreSQL remains
-      authoritative for business settlement and projection cursors.
+      authoritative for business settlement and projection cursors without
+      duplicating the raw event payload in a transfer Outbox.
 - [ ] Run sustained multi-node Kafka broker/projector loss and partition-rebalance
       acceptance before publishing a measured Stage 2 throughput claim.
 

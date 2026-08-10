@@ -67,6 +67,8 @@ spec:
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
             - { name: AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE, value: /run/agent-dock-secrets/database-notification-url }
             - { name: AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG, value: "true" }
+            - { name: AGENT_DOCK_WORKER_EVENT_INGEST_URL, value: {{ .Values.external.eventIngest.serviceUrl | quote }} }
+            - { name: AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE, value: /run/agent-dock-secrets/worker-event-ingest-token }
             - { name: AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE, value: /run/agent-dock-secrets/supervisor-enrollment-token }
             - { name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE, value: /run/agent-dock-secrets/supervisor-management-token }
             - { name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE, value: /run/agent-dock-secrets/model-credential-master-key }

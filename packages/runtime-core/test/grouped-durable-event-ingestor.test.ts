@@ -2,6 +2,7 @@ import type { EventAckMessage, EventPublishMessage } from "@agent-dock/protocol"
 import { describe, expect, it, vi } from "vitest";
 import type { DurableEventGroupIngestor } from "../src/durable-event-store.ts";
 import { GroupedDurableEventIngestor } from "../src/grouped-durable-event-ingestor.ts";
+import { HttpDurableEventIngestError } from "../src/http-durable-event-ingestor.ts";
 
 function publication(sessionId: string, sequence = 1): EventPublishMessage {
   const occurredAt = new Date().toISOString();
@@ -103,5 +104,29 @@ describe("GroupedDurableEventIngestor", () => {
     expect(results[0]).toMatchObject({ status: "rejected" });
     expect(results[1]).toMatchObject({ status: "fulfilled" });
     expect(store.ingest).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not amplify a retryable shared dependency outage into individual requests", async () => {
+    const messages = [
+      publication(globalThis.crypto.randomUUID()),
+      publication(globalThis.crypto.randomUUID()),
+    ];
+    const store: DurableEventGroupIngestor = {
+      ingest: vi.fn(async (value: unknown) => acknowledgement(value as EventPublishMessage)),
+      ingestGroup: vi.fn(async () => {
+        throw new HttpDurableEventIngestError(503, "Kafka is unavailable");
+      }),
+    };
+    const ingestor = new GroupedDurableEventIngestor({
+      store,
+      shardCount: 1,
+      maximumGroupSize: 2,
+      maximumDelayMs: 100,
+    });
+
+    const results = await Promise.allSettled(messages.map((message) => ingestor.ingest(message)));
+    expect(results.every((result) => result.status === "rejected")).toBe(true);
+    expect(store.ingestGroup).toHaveBeenCalledOnce();
+    expect(store.ingest).not.toHaveBeenCalled();
   });
 });

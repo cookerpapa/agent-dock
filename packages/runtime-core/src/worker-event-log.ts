@@ -1,8 +1,5 @@
-import type { Database } from "@agent-dock/database";
 import { parseSupervisorToControlMessage, type EventPublishMessage } from "@agent-dock/protocol";
 import { KafkaJS } from "@confluentinc/kafka-javascript";
-import { sql, type Kysely } from "kysely";
-import { createHash, randomUUID } from "node:crypto";
 
 const { CompressionTypes, Kafka, logLevel } = KafkaJS;
 type Producer = ReturnType<InstanceType<typeof Kafka>["producer"]>;
@@ -19,6 +16,13 @@ export type WorkerEventLogEnvelope = Readonly<{
   messages: readonly EventPublishMessage[];
 }>;
 
+export type WorkerEventLogPosition = Readonly<{
+  consumerGroup: string;
+  topic: string;
+  partition: number;
+  offset: string;
+}>;
+
 export interface WorkerEventLogAppender {
   append(batches: readonly WorkerEventLogBatch[]): Promise<void>;
   checkHealth?(): Promise<void>;
@@ -26,7 +30,7 @@ export interface WorkerEventLogAppender {
 }
 
 export interface WorkerEventProjectionSink {
-  project(envelope: WorkerEventLogEnvelope): Promise<void>;
+  project(envelope: WorkerEventLogEnvelope, position: WorkerEventLogPosition): Promise<void>;
 }
 
 export type KafkaWorkerEventLogOptions = Readonly<{
@@ -104,19 +108,6 @@ export function parseWorkerEventLogEnvelope(value: Buffer | string | null): Work
   });
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-    .join(",")}}`;
-}
-
-function envelopeHash(envelope: WorkerEventLogEnvelope): string {
-  return createHash("sha256").update(canonicalJson(envelope), "utf8").digest("hex");
-}
-
 function kafka(options: KafkaWorkerEventLogOptions): InstanceType<typeof Kafka> {
   const bootstrapServers = brokers(options.brokers);
   return new Kafka({
@@ -146,6 +137,8 @@ export class KafkaWorkerEventLog implements WorkerEventLogAppender {
       "allow.auto.create.topics": false,
       "enable.idempotence": true,
       "max.in.flight.requests.per.connection": 5,
+      "request.timeout.ms": 10_000,
+      "delivery.timeout.ms": 30_000,
       acks: -1,
       "compression.codec": CompressionTypes.GZIP,
     });
@@ -205,6 +198,7 @@ export class KafkaWorkerEventLog implements WorkerEventLogAppender {
 
 export class KafkaWorkerEventProjector {
   readonly #topic: string;
+  readonly #groupId: string;
   readonly #sink: WorkerEventProjectionSink;
   readonly #partitionsConsumedConcurrently: number;
   readonly #consumer: Consumer;
@@ -215,6 +209,7 @@ export class KafkaWorkerEventProjector {
 
   constructor(options: KafkaWorkerEventProjectorOptions) {
     this.#topic = bounded(options.topic, "topic");
+    this.#groupId = bounded(options.groupId, "groupId");
     this.#sink = options.sink;
     this.#partitionsConsumedConcurrently = options.partitionsConsumedConcurrently ?? 4;
     if (
@@ -225,9 +220,10 @@ export class KafkaWorkerEventProjector {
       throw new TypeError("partitionsConsumedConcurrently is invalid");
     }
     this.#consumer = kafka(options).consumer({
-      "group.id": bounded(options.groupId, "groupId"),
+      "group.id": this.#groupId,
       "allow.auto.create.topics": false,
       "auto.offset.reset": "earliest",
+      "enable.auto.commit": false,
     });
     this.#consumer.logger().setLogLevel(logLevel.NOTHING);
   }
@@ -240,8 +236,16 @@ export class KafkaWorkerEventProjector {
     this.#runPromise = this.#consumer
       .run({
         partitionsConsumedConcurrently: this.#partitionsConsumedConcurrently,
-        eachMessage: async ({ message }) => {
-          await this.#sink.project(parseWorkerEventLogEnvelope(message.value));
+        eachMessage: async ({ topic, partition, message }) => {
+          await this.#projectWithRetry(parseWorkerEventLogEnvelope(message.value), {
+            consumerGroup: this.#groupId,
+            topic,
+            partition,
+            offset: message.offset,
+          });
+          await this.#consumer.commitOffsets([
+            { topic, partition, offset: (BigInt(message.offset) + 1n).toString() },
+          ]);
         },
       })
       .catch((error: unknown) => {
@@ -263,206 +267,27 @@ export class KafkaWorkerEventProjector {
     await this.#runPromise;
     this.#started = false;
   }
-}
 
-export type PostgresWorkerEventOutboxPublisherOptions = Readonly<{
-  database: Kysely<Database>;
-  eventLog: WorkerEventLogAppender;
-  publisherId?: string;
-  batchSize?: number;
-  claimDurationMs?: number;
-  idlePollMs?: number;
-  publishedRetentionMs?: number;
-  clock?: () => Date;
-}>;
-
-type ClaimedOutboxRow = Readonly<{
-  id: string;
-  tenant_id: string;
-  envelope: Record<string, unknown>;
-  content_sha256: string;
-  attempts: number;
-}>;
-
-function positiveBounded(value: number, name: string, maximum: number): number {
-  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-    throw new TypeError(`${name} is invalid`);
-  }
-  return value;
-}
-
-export class PostgresWorkerEventOutboxPublisher {
-  readonly #database: Kysely<Database>;
-  readonly #eventLog: WorkerEventLogAppender;
-  readonly #publisherId: string;
-  readonly #batchSize: number;
-  readonly #claimDurationMs: number;
-  readonly #idlePollMs: number;
-  readonly #clock: () => Date;
-  readonly #publishedRetentionMs: number;
-  #closed = false;
-  #runPromise: Promise<void> | undefined;
-  #nextPruneAt = 0;
-
-  constructor(options: PostgresWorkerEventOutboxPublisherOptions) {
-    this.#database = options.database;
-    this.#eventLog = options.eventLog;
-    this.#publisherId = bounded(
-      options.publisherId ?? `event-bridge-${randomUUID()}`,
-      "publisherId",
-    );
-    this.#batchSize = positiveBounded(options.batchSize ?? 128, "batchSize", 2_048);
-    this.#claimDurationMs = positiveBounded(
-      options.claimDurationMs ?? 30_000,
-      "claimDurationMs",
-      300_000,
-    );
-    this.#idlePollMs = positiveBounded(options.idlePollMs ?? 100, "idlePollMs", 10_000);
-    this.#clock = options.clock ?? (() => new Date());
-    this.#publishedRetentionMs = positiveBounded(
-      options.publishedRetentionMs ?? 24 * 60 * 60_000,
-      "publishedRetentionMs",
-      30 * 24 * 60 * 60_000,
-    );
-  }
-
-  async start(): Promise<void> {
-    if (this.#closed || this.#runPromise !== undefined) {
-      throw new Error("Worker event Outbox publisher cannot start");
-    }
-    await this.#eventLog.checkHealth?.();
-    this.#runPromise = this.#run();
-  }
-
-  async drainOnce(): Promise<number> {
-    const now = this.#clock();
-    if (!(now instanceof Date) || Number.isNaN(now.valueOf())) {
-      throw new TypeError("Worker event Outbox clock returned an invalid Date");
-    }
-    const claimedUntil = new Date(now.valueOf() + this.#claimDurationMs);
-    const claimed = await this.#database.transaction().execute(async (transaction) => {
-      const result = await sql<ClaimedOutboxRow>`
-        with candidates as (
-          select candidate.id
-            from worker_event_outbox as candidate
-           where candidate.state = 'pending'
-             and candidate.available_at <= ${now}
-             and (candidate.claimed_until is null or candidate.claimed_until <= ${now})
-             and not exists (
-               select 1
-                 from worker_event_outbox as earlier
-                where earlier.session_id = candidate.session_id
-                  and earlier.state = 'pending'
-                  and earlier.first_seq < candidate.first_seq
-             )
-           order by candidate.created_at asc, candidate.id asc
-           for update skip locked
-           limit ${this.#batchSize}
-        )
-        update worker_event_outbox as row
-           set claimed_by = ${this.#publisherId},
-               claimed_until = ${claimedUntil}
-          from candidates
-         where row.id = candidates.id
-        returning row.id, row.tenant_id, row.envelope, row.content_sha256, row.attempts
-      `.execute(transaction);
-      return result.rows;
-    });
-    if (claimed.length === 0) return 0;
-
-    try {
-      const batches = claimed.map((row) => {
-        const envelope = parseWorkerEventLogEnvelope(JSON.stringify(row.envelope));
-        if (envelope.tenantId !== row.tenant_id || envelopeHash(envelope) !== row.content_sha256) {
-          throw new Error("Worker event Outbox envelope failed its integrity check");
-        }
-        return { tenantId: envelope.tenantId, messages: envelope.messages };
-      });
-      await this.#eventLog.append(batches);
-      const completedAt = this.#clock();
-      await this.#database
-        .updateTable("worker_event_outbox")
-        .set({
-          state: "published",
-          published_at: completedAt,
-          claimed_by: null,
-          claimed_until: null,
-          last_error: null,
-        })
-        .where(
-          "id",
-          "in",
-          claimed.map((row) => row.id),
-        )
-        .where("claimed_by", "=", this.#publisherId)
-        .execute();
-      await this.#prunePublished(completedAt);
-      return claimed.length;
-    } catch (error) {
-      const failedAt = this.#clock();
-      const maximumAttempts = Math.max(...claimed.map((row) => row.attempts + 1));
-      const retryAt = new Date(
-        failedAt.valueOf() + Math.min(30_000, 100 * 2 ** Math.min(maximumAttempts, 8)),
-      );
-      await this.#database
-        .updateTable("worker_event_outbox")
-        .set({
-          attempts: sql<number>`${sql.ref("attempts")} + 1`,
-          available_at: retryAt,
-          claimed_by: null,
-          claimed_until: null,
-          last_error:
-            error instanceof Error ? error.message.slice(0, 1_000) : "Kafka append failed",
-        })
-        .where(
-          "id",
-          "in",
-          claimed.map((row) => row.id),
-        )
-        .where("claimed_by", "=", this.#publisherId)
-        .execute();
-      throw error;
-    }
-  }
-
-  async checkHealth(): Promise<void> {
-    if (this.#closed) throw new Error("Worker event Outbox publisher is closed");
-    await this.#eventLog.checkHealth?.();
-  }
-
-  async close(): Promise<void> {
-    if (this.#closed) return;
-    this.#closed = true;
-    await this.#runPromise;
-    await this.#eventLog.close?.();
-  }
-
-  async #run(): Promise<void> {
-    while (!this.#closed) {
+  async #projectWithRetry(
+    envelope: WorkerEventLogEnvelope,
+    position: WorkerEventLogPosition,
+  ): Promise<void> {
+    const deadline = Date.now() + 60_000;
+    let delayMs = 10;
+    while (true) {
       try {
-        const count = await this.drainOnce();
-        if (count > 0) continue;
-      } catch {
-        // The durable row remains pending with bounded backoff. Keep the bridge alive.
+        await this.#sink.project(envelope, position);
+        return;
+      } catch (error: unknown) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "retryable" in error &&
+          (error as { retryable?: unknown }).retryable === true;
+        if (!retryable || Date.now() >= deadline) throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, 1_000);
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, this.#idlePollMs));
     }
-  }
-
-  async #prunePublished(now: Date): Promise<void> {
-    if (now.valueOf() < this.#nextPruneAt) return;
-    this.#nextPruneAt = now.valueOf() + 60_000;
-    const cutoff = new Date(now.valueOf() - this.#publishedRetentionMs);
-    await sql`
-      delete from worker_event_outbox
-       where id in (
-         select id
-           from worker_event_outbox
-          where state = 'published'
-            and published_at < ${cutoff}
-          order by published_at asc
-          limit 1000
-       )
-    `.execute(this.#database);
   }
 }

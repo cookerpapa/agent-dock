@@ -19,6 +19,8 @@ export type ProductionControlPlaneConfig = {
   sandboxMaterializerToken: string;
   advancedModulesEnabled: boolean;
   externalWorkerEventLog: boolean;
+  workerEventIngestBaseUrl?: string;
+  workerEventIngestToken?: string;
   supervisorIdPrefix: string;
   supervisorMaximumCapacity: number;
   supervisorManagementBaseUrlTemplates: readonly string[];
@@ -347,10 +349,25 @@ export async function loadProductionControlPlaneConfig(
     environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL === undefined
       ? databaseUrl
       : await secret(environment, "AGENT_DOCK_DATABASE_NOTIFICATION_URL", allowInlineSecrets);
+  const externalWorkerEventLog = booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG");
+  const workerEventIngest = externalWorkerEventLog
+    ? {
+        workerEventIngestBaseUrl: managementUrl(
+          required(environment, "AGENT_DOCK_WORKER_EVENT_INGEST_URL"),
+          allowInsecureInternalHttp,
+        ),
+        workerEventIngestToken: await secret(
+          environment,
+          "AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN",
+          allowInlineSecrets,
+        ),
+      }
+    : {};
   return {
     databaseUrl,
     databaseNotificationUrl,
-    externalWorkerEventLog: booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG"),
+    externalWorkerEventLog,
+    ...workerEventIngest,
     supervisorEnrollmentToken: await secret(
       environment,
       "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",

@@ -153,6 +153,7 @@
       "additionalProperties": false,
       "required": [
         "controlPlaneUrl",
+        "eventGatewayUrl",
         "sandboxManagerUrls",
         "githubGateway",
         "providerProxyUrl",
@@ -160,6 +161,7 @@
       ],
       "properties": {
         "controlPlaneUrl": { "$ref": "#/$defs/httpUrl" },
+        "eventGatewayUrl": { "$ref": "#/$defs/httpUrl" },
         "sandboxManagerUrls": {
           "type": "array",
           "minItems": 1,
@@ -253,7 +255,8 @@
         "sandboxManagerTokenKey",
         "modelCredentialMasterKeyKey",
         "githubGatewayTokenKey",
-        "metricsTokenKey"
+        "metricsTokenKey",
+        "workerEventIngestTokenKey"
       ],
       "properties": {
         "supervisorEnrollmentTokenKey": { "$ref": "#/$defs/secretKey" },
@@ -261,7 +264,8 @@
         "sandboxManagerTokenKey": { "$ref": "#/$defs/secretKey" },
         "modelCredentialMasterKeyKey": { "$ref": "#/$defs/secretKey" },
         "githubGatewayTokenKey": { "$ref": "#/$defs/secretKey" },
-        "metricsTokenKey": { "$ref": "#/$defs/secretKey" }
+        "metricsTokenKey": { "$ref": "#/$defs/secretKey" },
+        "workerEventIngestTokenKey": { "$ref": "#/$defs/secretKey" }
       }
     },
     "runtime": {

@@ -7,7 +7,6 @@ import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/post
 import {
   KafkaWorkerEventLog,
   KafkaWorkerEventProjector,
-  PostgresWorkerEventOutboxPublisher,
 } from "@agent-dock/runtime-core/worker-event-log";
 import { pathToFileURL } from "node:url";
 import { EventGateway } from "./event-gateway.ts";
@@ -35,10 +34,6 @@ export async function startEventGateway(): Promise<void> {
       maximumConcurrentTurns: 1,
     },
   } as const;
-  const eventStore = new DurableEventStore({
-    database,
-    eventNotificationPublisher: notifications,
-  });
   const kafkaLog =
     config.kafka === undefined
       ? undefined
@@ -48,10 +43,11 @@ export async function startEventGateway(): Promise<void> {
           topic: config.kafka.topic,
           ...(config.kafka.security === undefined ? {} : { security: config.kafka.security }),
         });
-  const outboxPublisher =
-    kafkaLog === undefined
-      ? undefined
-      : new PostgresWorkerEventOutboxPublisher({ database, eventLog: kafkaLog });
+  const eventStore = new DurableEventStore({
+    database,
+    eventNotificationPublisher: notifications,
+    ...(kafkaLog === undefined ? {} : { workerEventLog: kafkaLog }),
+  });
   const projector =
     config.kafka === undefined
       ? undefined
@@ -69,22 +65,26 @@ export async function startEventGateway(): Promise<void> {
     apiAuthenticator: new PostgresTenantApiAuthenticator({ database }),
     webSessionAuthenticator: new WebAuthenticationService(authenticationDefaults),
     notifications,
-    ...(projector === undefined || outboxPublisher === undefined
+    ...(projector === undefined || kafkaLog === undefined
       ? {}
       : {
           dependencyReadiness: async () => {
             projector.checkHealth();
-            await outboxPublisher.checkHealth();
+            await kafkaLog.checkHealth();
           },
+          workerEventIngestor: eventStore,
+          workerEventIngestToken: config.workerEventIngestToken!,
         }),
   });
   let closing = false;
   const close = async (): Promise<void> => {
     if (closing) return;
     closing = true;
-    await outboxPublisher?.close();
-    await projector?.close();
+    // Stop accepting new Worker batches before draining the projector and
+    // closing the producer used as their durable acknowledgement boundary.
     await gateway.close();
+    await projector?.close();
+    await kafkaLog?.close();
     await database.destroy();
     await observability.close();
   };
@@ -96,7 +96,6 @@ export async function startEventGateway(): Promise<void> {
     });
   }
   await projector?.start();
-  await outboxPublisher?.start();
   await gateway.listen(config.port, config.host);
   process.stdout.write(
     `AgentDock Event Gateway listening on ${config.host}:${String(config.port)}\n`,

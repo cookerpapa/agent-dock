@@ -43,9 +43,17 @@ continuous synchronization. AgentDock's enterprise preflight fails closed when
 any of the three keys is absent. Neither value is copied to a Pi Worker or Cube
 sandbox.
 
-AgentDock uses a transactional PostgreSQL Outbox before Kafka. A Worker ACK
-means the ordered batch and its hashes are durable in PostgreSQL; the Event
-Gateway publishes it at least once to Kafka and projects it idempotently into
-the partitioned replay table. Browser SSE reads only projected rows. Terminal
-Run commits wait for the projected cursor, so a completed Turn never overtakes
-its visible text or Tool events.
+AgentDock uses Kafka as the enterprise Worker stream's first shared payload
+durability boundary. Pi Workers call an authenticated internal Event Gateway
+endpoint and never receive Kafka credentials. A cumulative Worker ACK means
+Kafka accepted the ordered Session-keyed batch; the consumer group then
+projects it idempotently into PostgreSQL together with its consumed offset.
+Browser SSE reads only projected rows. Terminal Run commits wait for the
+projected cursor, so a completed Turn never overtakes its visible text or Tool
+events.
+
+The global platform Secret must also contain the independent
+`worker-event-ingest-token` key configured by
+`external.eventIngest.tokenSecretKey`. This credential is shared only by
+trusted AgentDock Workers, Control Plane and Event Gateway; it must not be
+copied into Cube guests.

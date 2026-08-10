@@ -112,6 +112,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 
 The distributed Kubernetes profile keeps Web and Control Plane stateless,
 offloads long-lived browser streams to an independently scaled Event Gateway,
+routes authenticated Worker event batches through that Gateway to a
+Session-keyed Kafka log without giving Kafka credentials to Pi Workers, and
 binds each Workspace to an immutable execution Cell, scales that Cell's
 compatible Pi Workers from its Temporal Activity backlog with KEDA, and routes
 exact Worker management over StatefulSet headless DNS. The default Worker Pod

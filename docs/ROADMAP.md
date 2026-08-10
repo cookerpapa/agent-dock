@@ -78,8 +78,9 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Split long-lived resumable SSE delivery into an independently scalable
       Event Gateway.
 - [x] Cross the measured PostgreSQL event-capacity gate and add the enterprise
-      transactional Outbox -> Kafka -> idempotent PostgreSQL projection path,
-      including a terminal projection barrier and Strimzi deployment baseline.
+      Kafka-first -> idempotent PostgreSQL projection path, including an
+      authenticated Worker ingest gateway, terminal projection barrier and
+      Strimzi deployment baseline without a PostgreSQL payload Outbox.
 - [x] Add a Session-level automatic/persistent Cube retention choice with lazy
       activation, dedicated-Workspace ownership and archive-driven cleanup.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
