@@ -2,9 +2,7 @@
   "schemaVersion": 1,
   "measuredAt": "2026-08-10T16:41:37.745Z",
   "kafka": {
-    "brokers": [
-      "127.0.0.1:19092"
-    ],
+    "brokers": ["127.0.0.1:19092"],
     "topic": "agent-dock-enterprise-acceptance-ce0de2bd-6d86-4e3f-b5c3-39b888ceaac3",
     "groupId": "agent-dock-enterprise-projector-3a6a97c2-3ed7-4481-b1f9-d1f4df1beb64"
   },
