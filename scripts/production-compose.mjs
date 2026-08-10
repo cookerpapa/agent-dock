@@ -247,6 +247,7 @@ const serviceArguments =
   command === "build" && commandArguments.length === 0
     ? [
         "control-plane",
+        "event-gateway",
         "supervisor-host",
         "sandbox-manager",
         "web",
