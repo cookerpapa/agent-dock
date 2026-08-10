@@ -50,15 +50,7 @@ spec:
           env:
             - { name: NODE_ENV, value: production }
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
-            - { name: AWS_SHARED_CREDENTIALS_FILE, value: /run/agent-dock-secrets/aws-credentials }
-            - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_BUCKET, value: {{ .Values.external.checkpointS3.bucket | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_REGION, value: {{ .Values.external.checkpointS3.region | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_ENDPOINT, value: {{ .Values.external.checkpointS3.endpoint | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX, value: {{ .Values.external.checkpointS3.keyPrefix | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE, value: {{ .Values.external.checkpointS3.forcePathStyle | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT, value: {{ .Values.external.checkpointS3.allowInsecureEndpoint | quote }} }
-            - { name: AGENT_DOCK_EVENT_HOT_RETENTION_DAYS, value: {{ .Values.eventRetention.hotDays | quote }} }
+            - { name: AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE, value: /run/agent-dock-secrets/live-event-store-url }
             - { name: AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS, value: {{ .Values.eventRetention.intervalMs | quote }} }
             - { name: AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE, value: {{ .Values.eventRetention.batchSize | quote }} }
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
@@ -78,8 +70,8 @@ spec:
               subPath: {{ .Values.external.database.secretKey }}
               readOnly: true
             - name: platform-secrets
-              mountPath: /run/agent-dock-secrets/aws-credentials
-              subPath: aws-credentials
+              mountPath: /run/agent-dock-secrets/live-event-store-url
+              subPath: {{ .Values.external.liveEventStore.urlSecretKey }}
               readOnly: true
             - name: platform-secrets
               mountPath: /run/agent-dock-secrets/metrics-token

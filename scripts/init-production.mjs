@@ -287,6 +287,28 @@ async function ensureObservabilitySecrets(runtimeDirectory) {
   return created;
 }
 
+async function ensureEventStreamSecrets(runtimeDirectory) {
+  const application = applicationIdentity();
+  const specs = [
+    ["worker-event-ingest-token", `${randomSecret()}\n`, /^[A-Za-z0-9_-]{64}$/],
+    ["live-event-store-url", "redis://valkey:6379\n", /^redis:\/\/valkey:6379$/],
+  ];
+  const created = [];
+  for (const [name, contents, pattern] of specs) {
+    const path = resolve(runtimeDirectory, "secrets", name);
+    try {
+      const existing = (await readPrivateFile(path)).trim();
+      if (!pattern.test(existing)) throw new Error(`Production ${name} is invalid`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await writePrivateFile(path, contents);
+      if (application.changeOwnership) await chown(path, application.uid, application.gid);
+      created.push(name);
+    }
+  }
+  return created;
+}
+
 async function ensureGitHubGatewaySecrets(runtimeDirectory) {
   const application = applicationIdentity();
   const specs = [
@@ -457,6 +479,7 @@ if (await validateExisting(runtimeDirectory)) {
   const cubeEgressConfigTokenCreated = await ensureCubeEgressConfigToken(runtimeDirectory);
   const githubGatewaySecretsCreated = await ensureGitHubGatewaySecrets(runtimeDirectory);
   const observabilitySecretsCreated = await ensureObservabilitySecrets(runtimeDirectory);
+  const eventStreamSecretsCreated = await ensureEventStreamSecrets(runtimeDirectory);
   const objectStoreCredentialMigrated =
     await ensureDedicatedObjectStoreCredential(runtimeDirectory);
   const bootstrapSupervisorManagementRouteCreated =
@@ -472,6 +495,7 @@ if (await validateExisting(runtimeDirectory)) {
       cubeEgressConfigTokenCreated,
       githubGatewaySecretsCreated,
       observabilitySecretsCreated,
+      eventStreamSecretsCreated,
       objectStoreCredentialMigrated,
       bootstrapSupervisorManagementRouteCreated,
       runtimeDirectory,
@@ -605,6 +629,11 @@ await writePrivateFile(resolve(secretsDirectory, "github-webhook-secret"), `${ra
 await writePrivateFile(resolve(secretsDirectory, "github-app-private-key.pem"), "not-configured\n");
 await writePrivateFile(resolve(secretsDirectory, "metrics-token"), `${randomSecret()}\n`);
 await writePrivateFile(resolve(secretsDirectory, "grafana-admin-password"), `${randomSecret()}\n`);
+await writePrivateFile(
+  resolve(secretsDirectory, "worker-event-ingest-token"),
+  `${randomSecret()}\n`,
+);
+await writePrivateFile(resolve(secretsDirectory, "live-event-store-url"), "redis://valkey:6379\n");
 await writePrivateFile(
   resolve(secretsDirectory, "aws-credentials"),
   `[default]\naws_access_key_id = ${minioApplicationUser}\naws_secret_access_key = ${minioApplicationPassword}\n`,

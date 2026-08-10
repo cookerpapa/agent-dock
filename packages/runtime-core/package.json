@@ -14,6 +14,7 @@
     "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
     "./http-durable-event-ingestor": "./src/http-durable-event-ingestor.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
+    "./live-session-event-store": "./src/live-session-event-store.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./pi-session-manifest": "./src/pi-session-manifest.ts",
     "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
@@ -30,6 +31,7 @@
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
+    "./terminal-turn-projection": "./src/terminal-turn-projection.ts",
     "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts",
     "./worker-event-log": "./src/worker-event-log.ts"
   },
@@ -47,6 +49,7 @@
     "@agent-dock/workspace-runtime": "0.1.0",
     "@aws-sdk/client-s3": "3.1090.0",
     "@confluentinc/kafka-javascript": "1.10.0",
+    "iovalkey": "0.4.0",
     "kysely": "0.29.4",
     "pg": "8.22.0"
   },

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-08-10T12:58:30.492Z",
+  "measuredAt": "2026-08-10T15:43:28.162Z",
   "kafka": {
-    "brokers": ["127.0.0.1:9092"],
-    "topic": "agent-dock-enterprise-acceptance-630e2066-1219-464a-bf7a-b5e22c79edcf",
-    "groupId": "agent-dock-enterprise-projector-a61588c4-ceb1-4b2c-9a7e-43f906dd5186"
+    "brokers": ["127.0.0.1:19092"],
+    "topic": "agent-dock-enterprise-acceptance-7a30c103-8ff5-40cf-96c6-d2a8a2341bac",
+    "groupId": "agent-dock-enterprise-projector-18e5d67f-f1cc-4565-809c-52570dbc9e21"
   },
   "postgres": {
     "realServer": true
@@ -17,14 +17,16 @@
     "projectorRestartRecovered": true,
     "terminalBarrierContiguous": true,
     "postgresPayloadOutboxAbsent": true,
+    "postgresRawStreamingRows": 0,
     "projectedEventCount": 5,
     "projectionPartitionCount": 1
   },
   "latencyMs": {
-    "coldFirstBatchAckAndProjection": 3621.78
+    "coldFirstBatchAckAndProjection": 4609.72
   },
   "scope": [
     "real PostgreSQL server and real single Kafka broker",
+    "real Valkey server for rebuildable live replay",
     "functional restart and idempotency acceptance",
     "not a multi-broker HA, failover, or capacity claim"
   ]

@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 import type { SessionEventNotificationPublisher } from "@agent-dock/runtime-core/session-event-notifications";
 import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
+import type { TerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =
@@ -35,6 +36,7 @@ export type AssignmentReconcilerOptions = {
   inventory: SandboxAssignmentInventory;
   clock?: () => Date;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
+  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 export type AssignmentReconciliationResult = {
@@ -138,6 +140,7 @@ export class AssignmentReconciler {
   readonly #inventory: SandboxAssignmentInventory;
   readonly #clock: () => Date;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
+  readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: AssignmentReconcilerOptions) {
     if (options.sandboxId.trim().length === 0) {
@@ -148,6 +151,7 @@ export class AssignmentReconciler {
     this.#inventory = options.inventory;
     this.#clock = options.clock ?? (() => new Date());
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
+    this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
   async reconcileExpiredAssignments(
@@ -656,6 +660,25 @@ export class AssignmentReconciler {
       .where("id", "=", candidate.sessionId)
       .where("state", "=", session.state)
       .executeTakeFirstOrThrow();
+    const terminalEventId = randomUUID();
+    const terminalBody = {
+      type: "turn.failed",
+      payload: {
+        code: ASSIGNMENT_LOST,
+        message: ASSIGNMENT_LOST_MESSAGE,
+        retryable: false,
+      },
+    } as const;
+    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+      tenantId: session.tenant_id,
+      sessionId: candidate.sessionId,
+      turnId: turn.id,
+      commandId: executeCommand.id,
+      agentId: "root",
+      body: terminalBody,
+      eventId: terminalEventId,
+      occurredAt: now.toISOString(),
+    });
     await commitTerminalTurnEvent(transaction, {
       tenantId: session.tenant_id,
       sessionId: candidate.sessionId,
@@ -664,16 +687,10 @@ export class AssignmentReconciler {
       agentId: "root",
       leaseId: candidate.leaseId,
       fencingToken: candidate.fencingToken,
-      body: {
-        type: "turn.failed",
-        payload: {
-          code: ASSIGNMENT_LOST,
-          message: ASSIGNMENT_LOST_MESSAGE,
-          retryable: false,
-        },
-      },
+      body: terminalBody,
       now,
-      eventId: randomUUID(),
+      eventId: terminalEventId,
+      ...(preparedProjection === undefined ? {} : { preparedProjection }),
       ...(this.#eventNotificationPublisher === undefined
         ? {}
         : { notificationPublisher: this.#eventNotificationPublisher }),

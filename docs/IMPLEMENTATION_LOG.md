@@ -3349,3 +3349,22 @@
 - Added single-host Compose and multi-replica Helm deployment for the Worker
   with only database/object-store credentials, plus large Session, archive
   integrity, semantic-survival, cursor-expiry and schema tests.
+
+# 2026-08-10 — Kafka/Valkey live replay and canonical PostgreSQL Turns
+
+- Replaced the raw-event PostgreSQL/object-archive path with one production
+  chain: Worker WAL → authenticated Event Gateway → Session-keyed Kafka →
+  Valkey Streams → projected cursor → resumable SSE. The self-hosted Compose
+  profile now uses the same path as distributed Kubernetes.
+- Event batches receive a cumulative ACK only after Kafka accepts them. Valkey
+  uses explicit Session sequence IDs and validates exact redelivery; the
+  projector advances its PostgreSQL high-water/offset transaction only after
+  the live append succeeds. Missing replay sequences fail closed.
+- Terminal settlement now asks Event Gateway for the fully projected current
+  Turn, then atomically stores one terminal event and its complete text/Tool
+  transcript with Run/checkpoint state. PostgreSQL raw streaming rows remain
+  zero in the production acceptance path.
+- Added a reconcilable Valkey compactor, explicit SSE replay floors and an
+  operator command that rebuilds a fresh live read model from retained Kafka
+  records above those floors. Removed obsolete event-archive runtime/schema
+  metadata instead of maintaining a compatibility path.

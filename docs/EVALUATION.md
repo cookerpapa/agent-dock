@@ -35,13 +35,14 @@ restart/reconnect evidence.
 ## Streaming durability
 
 Streaming text is coalesced before it enters the Worker WAL, then delivered as
-contiguous batches with cumulative ACK. The bounded profile writes one batch
-to the partitioned PostgreSQL event table. The enterprise profile commits one
-authenticated batch directly to Kafka and projects it idempotently into that
-replay table. PostgreSQL stores sequence/fence cursors and projection state but
-no intermediate raw-payload Outbox. The integration suite covers mixed
-redelivery, Kafka-backed ACK, duplicate projection and the separate
-persisted/projected cursor. SSE still reads only projected PostgreSQL rows, and
+contiguous batches with cumulative ACK. Both production profiles commit an
+authenticated batch directly to Kafka and project it idempotently into a
+Valkey Stream. PostgreSQL stores sequence/fence cursors, terminal canonical
+Turns and projection offsets, but neither an intermediate payload Outbox nor
+raw token deltas. The integration suite covers mixed redelivery, Kafka-backed
+ACK, Valkey conflict/gap detection and the separate persisted/projected cursor.
+SSE reads only Valkey rows covered by that projected cursor plus PostgreSQL
+terminal rows, and
 Pi recovery tests prove that committed text and Tool facts appear in Pi's
 effective next model context after hard-crash recovery.
 
@@ -61,11 +62,11 @@ a multi-broker Stage 2 capacity result.
 
 The end-to-end
 [enterprise event-pipeline acceptance](reports/enterprise-event-pipeline-acceptance-latest.json)
-uses a real PostgreSQL server and real Kafka broker. It validates the
+uses a real PostgreSQL server, Kafka broker and Valkey server. It validates the
 authenticated HTTP ingest boundary, duplicate projection, projector
-stop/restart recovery, contiguous terminal settlement and removal of the old
-PostgreSQL payload Outbox. It remains a single-node functional check, not an HA
-or broker-failover claim.
+stop/restart recovery, contiguous terminal settlement, zero PostgreSQL raw
+stream rows and removal of the old payload Outbox. It remains a single-node
+functional check, not an HA or broker-failover claim.
 
 For the end-to-end Control Plane boundary, deploy the current revision and run:
 

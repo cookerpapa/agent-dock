@@ -17,6 +17,7 @@ import { RunCommandExecutor } from "@agent-dock/runtime-core/run-command-executo
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import { PostgresRunAttemptPhaseObserver } from "@agent-dock/runtime-core/run-attempt-runtime";
 import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
+import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import type { AgentDockMetrics } from "@agent-dock/observability";
@@ -435,6 +436,12 @@ export class SupervisorHostRuntime {
       const eventProjectionBarrier = this.#config.externalWorkerEventLog
         ? new PostgresEventProjectionBarrier({ database: this.#database })
         : undefined;
+      const terminalTurnProjectionSource = this.#config.externalWorkerEventLog
+        ? new HttpTerminalTurnProjectionSource({
+            baseUrl: this.#config.workerEventIngestBaseUrl!,
+            serviceToken: this.#config.workerEventIngestToken!,
+          })
+        : undefined;
       const leaseCoordinator = new SessionLeaseCoordinator({
         database: this.#database,
         sandboxId: identity.sandboxId,
@@ -471,6 +478,7 @@ export class SupervisorHostRuntime {
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
+          ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
           claimOwnerId: `temporal:${identity.supervisorId}:${identity.bootId}`,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
@@ -480,6 +488,7 @@ export class SupervisorHostRuntime {
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
+          ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
         }),
       });
       this.#temporalWorker = temporalWorker;

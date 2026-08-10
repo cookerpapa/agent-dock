@@ -75,12 +75,25 @@ second payload copy while preserving fail-closed terminal ordering.
 - <https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html>
 - <https://kafka.apache.org/40/configuration/producer-configs/>
 
+### Live replay read model: Valkey Streams
+
+Kafka is optimized for retained ordered transport, while browser SSE needs a
+cheap Session-and-sequence range read. Event Gateway therefore projects the
+acknowledged Kafka prefix into Valkey Streams with explicit sequence IDs.
+Valkey is bounded and rebuildable; PostgreSQL stores the projected high-water,
+terminal canonical Turn and replay floor. The projector must append Valkey
+before advancing that high-water, so a browser cannot observe an uncommitted
+or missing range. `noeviction`, persistence and HA are deployment requirements.
+
+- <https://valkey.io/topics/streams-intro/>
+- <https://valkey.io/topics/persistence/>
+
 ### Product state: PostgreSQL
 
 PostgreSQL continues to own Tenant, Workspace, Run, Attempt, Lease, Fence,
-terminal settlement and materialized transcript state. Large append-only event
-tables use declarative time/hash partitioning; Kafka does not become a second
-business database.
+terminal settlement and materialized transcript state. Streaming text and Tool
+deltas do not become a lifetime PostgreSQL table; Kafka/Valkey do not become a
+second business database.
 
 - <https://www.postgresql.org/docs/current/ddl-partitioning.html>
 

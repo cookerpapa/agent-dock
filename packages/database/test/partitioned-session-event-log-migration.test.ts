@@ -57,7 +57,7 @@ describe("partitioned Session event log migration", () => {
     expect(trigger.rows).toEqual([{ tgname: "session_events_register_event_id" }]);
   });
 
-  it("adds a replay floor, immutable archive metadata, and eager vacuuming to hot partitions", async () => {
+  it("adds a replay floor, removes obsolete raw archives, and eagerly vacuums local partitions", async () => {
     const cursorColumn = await pglite.query<{ column_default: string; is_nullable: string }>(`
       select column_default, is_nullable
         from information_schema.columns
@@ -72,7 +72,7 @@ describe("partitioned Session event log migration", () => {
        where table_schema = 'public'
          and table_name = 'session_event_archives'
     `);
-    expect(archiveTable.rows).toEqual([{ table_name: "session_event_archives" }]);
+    expect(archiveTable.rows).toEqual([]);
     const partitionOptions = await pglite.query<{ reloptions: string[] }>(`
       select reloptions
         from pg_class

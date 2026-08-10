@@ -13,7 +13,10 @@ platform service network.
 | Control Plane | PostgreSQL direct session endpoint | yes | DB credential; `LISTEN`/migration only |
 | Control Plane | Temporal | yes | internal namespace |
 | Event Gateway | Kafka brokers | yes | TLS + SCRAM-SHA-512, topic/group-scoped ACL |
-| Event Gateway | PostgreSQL | yes | sequence validation and replay projection credential |
+| Event Gateway | Valkey | yes | private URL/TLS identity; live replay only |
+| Event Gateway | PostgreSQL | yes | sequence validation, cursor and terminal-event credential |
+| Live Stream Compactor | Valkey + PostgreSQL | yes | private URL + DB credential |
+| Control Plane | Event Gateway internal projection | yes | dedicated service token |
 | Control Plane | MinIO/S3 | yes | object-store credential |
 | Control Plane | exact Pi Worker management endpoint | yes | management service token |
 | Control Plane | Sandbox Manager Service | yes | materializer credential |
@@ -34,7 +37,7 @@ platform service network.
 
 ## Trusted product plane
 
-Control Plane, Event Gateway, Kafka, Temporal, PostgreSQL, object storage, model gateway and Worker
+Control Plane, Event Gateway, Kafka, Valkey, Temporal, PostgreSQL, object storage, model gateway and Worker
 management use private deployment networks. Their credentials are injected only
 into the service that needs them.
 

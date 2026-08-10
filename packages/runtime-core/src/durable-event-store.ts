@@ -12,6 +12,10 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import {
+  LiveSessionEventStoreError,
+  type LiveSessionEventStore,
+} from "./live-session-event-store.ts";
 import { classifyStructuredTestCommand } from "./structured-test-command.ts";
 import type {
   WorkerEventLogAppender,
@@ -51,6 +55,7 @@ export type DurableEventStoreOptions = {
   clock?: () => Date;
   idGenerator?: () => string;
   workerEventLog?: WorkerEventLogAppender;
+  liveEventStore?: LiveSessionEventStore;
 };
 
 export type EventReplayWindow = {
@@ -212,6 +217,7 @@ export class DurableEventStore
   readonly #idGenerator: () => string;
   readonly #workerEventLog: WorkerEventLogAppender | undefined;
   readonly #externalWorkerEventLog: boolean;
+  readonly #liveEventStore: LiveSessionEventStore | undefined;
 
   constructor(options: DurableEventStoreOptions) {
     this.#database = options.database;
@@ -221,6 +227,12 @@ export class DurableEventStore
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
     this.#workerEventLog = options.workerEventLog;
     this.#externalWorkerEventLog = options.workerEventLog !== undefined;
+    this.#liveEventStore = options.liveEventStore;
+    if (this.#externalWorkerEventLog !== (this.#liveEventStore !== undefined)) {
+      throw new TypeError(
+        "External Worker event log and live event store must be configured together",
+      );
+    }
   }
 
   async ingest(value: unknown): Promise<EventAckMessage> {
@@ -735,6 +747,72 @@ export class DurableEventStore
     ) {
       throw new TypeError("replay sequence bounds are invalid");
     }
+    if (this.#liveEventStore !== undefined) {
+      const [liveEvents, terminalRows] = await Promise.all([
+        this.#liveEventStore.readPage(
+          tenantId,
+          sessionId,
+          afterSequence,
+          throughSequence,
+          pageSize,
+        ),
+        this.#database
+          .selectFrom("session_terminal_events")
+          .select([
+            "event_id",
+            "session_id",
+            "turn_id",
+            "agent_id",
+            "seq",
+            "schema_version",
+            "type",
+            "payload",
+            "occurred_at",
+          ])
+          .where("tenant_id", "=", tenantId)
+          .where("session_id", "=", sessionId)
+          .where("seq", ">", String(afterSequence))
+          .where("seq", "<=", String(throughSequence))
+          .orderBy("seq", "asc")
+          .limit(pageSize)
+          .execute(),
+      ]);
+      const terminalEvents = terminalRows.map((row) =>
+        parseAgentDockEvent({
+          schemaVersion: row.schema_version,
+          eventId: row.event_id,
+          sessionId: row.session_id,
+          turnId: row.turn_id,
+          agentId: row.agent_id,
+          seq: safeInteger(row.seq, "terminal event sequence"),
+          occurredAt: isoTimestamp(row.occurred_at),
+          type: row.type,
+          payload: row.payload,
+        }),
+      );
+      const page = [...liveEvents, ...terminalEvents]
+        .sort((left, right) => left.seq - right.seq)
+        .slice(0, pageSize);
+      let expectedSequence = afterSequence + 1;
+      for (const event of page) {
+        if (event.seq !== expectedSequence) {
+          throw new DurableEventStoreError(
+            "event_store_invariant",
+            `Live event replay is missing sequence ${expectedSequence}`,
+            true,
+          );
+        }
+        expectedSequence += 1;
+      }
+      if (page.length === 0 && afterSequence < throughSequence) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          `Live event replay is missing sequence ${expectedSequence}`,
+          true,
+        );
+      }
+      return page;
+    }
     const rows = await this.#database
       .selectFrom("session_events")
       .select(eventSelect())
@@ -821,23 +899,17 @@ export class DurableEventStore
         (message) => message.payload.event.seq <= projected,
       );
       if (redeliveries.length > 0) {
-        const rows = await transaction
-          .selectFrom("session_events")
-          .select(eventSelect())
-          .where("tenant_id", "=", envelope.tenantId)
-          .where("session_id", "=", sessionId)
-          .where(
-            "seq",
-            "in",
-            redeliveries.map((message) => String(message.payload.event.seq)),
-          )
-          .execute();
-        const rowsBySequence = new Map(
-          rows.map((row) => [safeInteger(row.seq, "projected event sequence"), row]),
+        const existing = await this.#liveEventStore!.readPage(
+          envelope.tenantId,
+          sessionId,
+          redeliveries[0]!.payload.event.seq - 1,
+          redeliveries.at(-1)!.payload.event.seq,
+          redeliveries.length,
         );
+        const bySequence = new Map(existing.map((event) => [event.seq, event]));
         for (const message of redeliveries) {
-          const row = rowsBySequence.get(message.payload.event.seq);
-          if (row === undefined || !isExactRedelivery(row, message)) {
+          const event = bySequence.get(message.payload.event.seq);
+          if (event === undefined || !isDeepStrictEqual(event, message.payload.event)) {
             throw new DurableEventStoreError(
               "event_conflict",
               `Kafka redelivery conflicted at sequence ${message.payload.event.seq}`,
@@ -858,12 +930,41 @@ export class DurableEventStore
       }
       let throughSequence = projected;
       if (newMessages.length > 0) {
-        await transaction
-          .insertInto("session_events")
-          .values(newMessages.map((message) => this.#eventRow(envelope.tenantId, message, now)))
-          .executeTakeFirstOrThrow();
+        try {
+          await this.#liveEventStore!.append({
+            tenantId: envelope.tenantId,
+            sessionId,
+            previousSequence: projected,
+            messages: newMessages,
+          });
+        } catch (error: unknown) {
+          if (error instanceof LiveSessionEventStoreError) {
+            throw new DurableEventStoreError(
+              error.code === "sequence_gap" ? "sequence_gap" : "event_conflict",
+              "Kafka projection conflicted with the live event stream",
+              error.code === "sequence_gap" || error.code === "redelivery_missing",
+            );
+          }
+          throw error;
+        }
+        const turnId = newMessages[0]!.payload.event.turnId;
+        const turnEvents =
+          turnId === null
+            ? []
+            : await this.#liveEventStore!.readTurn(
+                envelope.tenantId,
+                sessionId,
+                turnId,
+                0,
+                newMessages.at(-1)!.payload.event.seq,
+              );
         for (const message of newMessages) {
-          await this.#recordStructuredTestResult(transaction, envelope.tenantId, message);
+          await this.#recordStructuredTestResult(
+            transaction,
+            envelope.tenantId,
+            message,
+            turnEvents,
+          );
           await this.#recordContextCompaction(transaction, envelope.tenantId, message);
         }
         throughSequence = newMessages.at(-1)!.payload.event.seq;
@@ -1167,21 +1268,42 @@ export class DurableEventStore
     transaction: Transaction<Database>,
     tenantId: string,
     message: EventPublishMessage,
+    turnEvents?: readonly AgentDockEvent[],
   ): Promise<void> {
     const event = message.payload.event;
     if (event.type !== "tool.completed" || event.turnId === null) return;
-    const started = await transaction
-      .selectFrom("session_events")
-      .select(["payload", "occurred_at"])
-      .where("tenant_id", "=", tenantId)
-      .where("session_id", "=", event.sessionId)
-      .where("turn_id", "=", event.turnId)
-      .where("type", "=", "tool.started")
-      .where(sql<boolean>`${sql.ref("payload")} ->> 'toolCallId' = ${event.payload.toolCallId}`)
-      .orderBy("seq", "desc")
-      .executeTakeFirst();
-    if (started === undefined || started.payload.toolName !== "bash") return;
-    const input = started.payload.input;
+    const liveStarted = turnEvents
+      ?.filter(
+        (candidate) =>
+          candidate.type === "tool.started" &&
+          candidate.payload.toolCallId === event.payload.toolCallId,
+      )
+      .at(-1);
+    const persistedStarted =
+      liveStarted === undefined
+        ? await transaction
+            .selectFrom("session_events")
+            .select(["payload", "occurred_at"])
+            .where("tenant_id", "=", tenantId)
+            .where("session_id", "=", event.sessionId)
+            .where("turn_id", "=", event.turnId)
+            .where("type", "=", "tool.started")
+            .where(
+              sql<boolean>`${sql.ref("payload")} ->> 'toolCallId' = ${event.payload.toolCallId}`,
+            )
+            .orderBy("seq", "desc")
+            .executeTakeFirst()
+        : undefined;
+    const startedPayload =
+      liveStarted?.type === "tool.started" ? liveStarted.payload : persistedStarted?.payload;
+    const startedAt = liveStarted?.occurredAt ?? persistedStarted?.occurred_at;
+    if (
+      startedPayload === undefined ||
+      startedPayload.toolName !== "bash" ||
+      startedAt === undefined
+    )
+      return;
+    const input = startedPayload.input;
     if (typeof input !== "object" || input === null || !("command" in input)) return;
     const command = (input as { command?: unknown }).command;
     if (typeof command !== "string" || command.length < 1 || command.length > 4_096) return;
@@ -1202,7 +1324,7 @@ export class DurableEventStore
         : (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 2_000);
     const durationMs = Math.max(
       0,
-      new Date(event.occurredAt).valueOf() - new Date(started.occurred_at).valueOf(),
+      new Date(event.occurredAt).valueOf() - new Date(startedAt).valueOf(),
     );
     await transaction
       .insertInto("test_results")

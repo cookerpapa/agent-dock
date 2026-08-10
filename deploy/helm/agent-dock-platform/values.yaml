@@ -71,7 +71,6 @@ controlPlane:
 eventRetention:
   enabled: true
   replicas: 2
-  hotDays: 14
   intervalMs: 60000
   batchSize: 100
   resources:
@@ -132,6 +131,8 @@ external:
       caSecretKey: kafka-ca.crt
       usernameSecretKey: kafka-username
       passwordSecretKey: kafka-password
+  liveEventStore:
+    urlSecretKey: live-event-store-url
   checkpointS3:
     endpoint: https://s3.example.com
     region: us-east-1
@@ -154,7 +155,7 @@ networkPolicy:
     key: agent-dock.io/trusted-plane
     value: "true"
   trustedTcpPorts:
-    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 7233, 9000, 9093, 9464, 9465, 9466, 9467]
+    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 6379, 7233, 9000, 9093, 9464, 9465, 9466, 9467]
   # Add the explicit CIDRs of external PostgreSQL/PgBouncer, Temporal, S3,
   # provider proxy, Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
   externalEgressCidrs: []

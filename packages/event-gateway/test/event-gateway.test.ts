@@ -129,6 +129,7 @@ describe("Event Gateway", () => {
       const username = resolve(root, "username");
       const password = resolve(root, "password");
       const ingestToken = resolve(root, "worker-event-ingest-token");
+      const liveEventStoreUrl = resolve(root, "live-event-store-url");
       await Promise.all([
         writeFile(database, "postgres://test\n", { mode: 0o600 }),
         writeFile(ca, "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n", {
@@ -137,6 +138,7 @@ describe("Event Gateway", () => {
         writeFile(username, "agent-dock-event-gateway\n", { mode: 0o600 }),
         writeFile(password, "secret-password\n", { mode: 0o600 }),
         writeFile(ingestToken, `${"i".repeat(48)}\n`, { mode: 0o600 }),
+        writeFile(liveEventStoreUrl, "rediss://valkey.example:6379\n", { mode: 0o600 }),
       ]);
       vi.stubEnv("DATABASE_URL_FILE", database);
       vi.stubEnv("AGENT_DOCK_KAFKA_BROKERS", "kafka.example:9093");
@@ -147,7 +149,9 @@ describe("Event Gateway", () => {
       vi.stubEnv("AGENT_DOCK_KAFKA_USERNAME_FILE", username);
       vi.stubEnv("AGENT_DOCK_KAFKA_PASSWORD_FILE", password);
       vi.stubEnv("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE", ingestToken);
+      vi.stubEnv("AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE", liveEventStoreUrl);
       await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
+        liveEventStoreUrl: "rediss://valkey.example:6379",
         kafka: {
           brokers: ["kafka.example:9093"],
           security: {

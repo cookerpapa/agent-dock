@@ -31,6 +31,10 @@ import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import { createCompletedRunReviewBundle } from "./review-bundle.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
+import type {
+  PreparedTerminalTurnProjection,
+  TerminalTurnProjectionSource,
+} from "./terminal-turn-projection.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -207,6 +211,7 @@ export type RunCommandExecutorOptions = {
   metrics?: AgentDockMetrics;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   eventProjectionBarrier?: EventProjectionBarrier;
+  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 type ClaimedTurn = {
@@ -322,6 +327,7 @@ export class RunCommandExecutor {
   readonly #metrics: AgentDockMetrics | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
+  readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCommandExecutorOptions) {
     this.#database = options.database;
@@ -345,6 +351,7 @@ export class RunCommandExecutor {
     this.#metrics = options.metrics;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#eventProjectionBarrier = options.eventProjectionBarrier;
+    this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
   /**
@@ -813,19 +820,12 @@ export class RunCommandExecutor {
       }
       safeMailboxPosition(row.mailboxPosition);
 
-      const usedToolCalls = await transaction
-        .selectFrom("session_events")
-        .select((expression) => expression.fn.countAll<string>().as("count"))
-        .where("tenant_id", "=", row.tenantId)
-        .where("session_id", "=", row.sessionId)
-        .where("turn_id", "=", row.turnId)
-        .where("type", "=", "tool.started")
-        .executeTakeFirstOrThrow();
       const maximumToolCalls = safeNonNegativeInteger(row.maximumToolCalls, "tool-call budget");
-      const remainingToolCalls = Math.max(
-        0,
-        maximumToolCalls - safeNonNegativeInteger(usedToolCalls.count, "used tool-call count"),
-      );
+      // A post-ACK attempt is never blindly replayed. Pre-ACK retries cannot
+      // have executed a Tool, so every newly claimed execution starts with the
+      // full per-Run budget. The trusted Runner decrements it in memory while
+      // the Agent Loop is active.
+      const remainingToolCalls = maximumToolCalls;
 
       const attemptNumber = row.attempts + 1;
       if (row.runAttemptCount !== row.attempts) {
@@ -1228,6 +1228,24 @@ export class RunCommandExecutor {
     acknowledgement: TurnExecutionAcknowledgement | undefined,
   ): Promise<void> {
     const now = safeDate(this.#clock);
+    const terminalEventId = this.#idGenerator();
+    const terminalBody = {
+      type: "turn.completed",
+      payload: {
+        stopReason: result.stopReason,
+        ...(result.workspacePatch === undefined ? {} : { workspacePatch: result.workspacePatch }),
+      },
+    } as const;
+    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+      tenantId: claim.request.tenantId,
+      sessionId: claim.request.sessionId,
+      turnId: claim.request.turnId,
+      commandId: claim.request.commandId,
+      agentId: "root",
+      body: terminalBody,
+      eventId: terminalEventId,
+      occurredAt: now.toISOString(),
+    });
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (
@@ -1317,7 +1335,6 @@ export class RunCommandExecutor {
         .where("state", "=", rows.sessionState)
         .executeTakeFirst();
       expectOne(sessionUpdate.numUpdatedRows, "settling a session");
-      const terminalEventId = this.#idGenerator();
       await commitTerminalTurnEvent(transaction, {
         tenantId: claim.request.tenantId,
         sessionId: claim.request.sessionId,
@@ -1326,17 +1343,10 @@ export class RunCommandExecutor {
         agentId: "root",
         leaseId: acknowledgement?.leaseId ?? terminalEventId,
         fencingToken: acknowledgement?.fencingToken ?? claim.request.attemptNumber,
-        body: {
-          type: "turn.completed",
-          payload: {
-            stopReason: result.stopReason,
-            ...(result.workspacePatch === undefined
-              ? {}
-              : { workspacePatch: result.workspacePatch }),
-          },
-        },
+        body: terminalBody,
         now,
         eventId: terminalEventId,
+        ...(preparedProjection === undefined ? {} : { preparedProjection }),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),
@@ -1370,6 +1380,28 @@ export class RunCommandExecutor {
   ): Promise<RunCommandExecutionResult> {
     const now = safeDate(this.#clock);
     const shouldRetry = !started && failure.retryable && claim.attempt < this.#maxAttempts;
+    const terminalEventId = this.#idGenerator();
+    const terminalBody = {
+      type: "turn.failed",
+      payload: {
+        code: failure.code,
+        message: failure.safeMessage,
+        retryable: failure.retryable,
+      },
+    } as const;
+    let preparedProjection: PreparedTerminalTurnProjection | undefined;
+    if (!shouldRetry) {
+      preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+        tenantId: claim.request.tenantId,
+        sessionId: claim.request.sessionId,
+        turnId: claim.request.turnId,
+        commandId: claim.request.commandId,
+        agentId: "root",
+        body: terminalBody,
+        eventId: terminalEventId,
+        occurredAt: now.toISOString(),
+      });
+    }
 
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
@@ -1576,7 +1608,6 @@ export class RunCommandExecutor {
         .where("state", "=", rows.turnState)
         .executeTakeFirst();
       expectOne(turnUpdate.numUpdatedRows, "failing a turn");
-      const terminalEventId = this.#idGenerator();
       await commitTerminalTurnEvent(transaction, {
         tenantId: claim.request.tenantId,
         sessionId: claim.request.sessionId,
@@ -1585,16 +1616,10 @@ export class RunCommandExecutor {
         agentId: "root",
         leaseId: acknowledgement?.leaseId ?? terminalEventId,
         fencingToken: acknowledgement?.fencingToken ?? claim.request.attemptNumber,
-        body: {
-          type: "turn.failed",
-          payload: {
-            code: failure.code,
-            message: failure.safeMessage,
-            retryable: failure.retryable,
-          },
-        },
+        body: terminalBody,
         now,
         eventId: terminalEventId,
+        ...(preparedProjection === undefined ? {} : { preparedProjection }),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

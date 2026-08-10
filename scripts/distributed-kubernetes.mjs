@@ -122,6 +122,7 @@ function preflight(namespace, values) {
     "supervisor-enrollment-token",
     "supervisor-management-token",
     "worker-event-ingest-token",
+    "live-event-store-url",
     "workspace-data-mover-token",
     "workspace-kopia-aws-credentials",
     "workspace-kopia-repository-password",

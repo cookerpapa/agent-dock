@@ -57,6 +57,8 @@ external:
       - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
     topic: agent-dock-worker-events-v1
     projectorGroupId: agent-dock-worker-event-projector-v1
+  liveEventStore:
+    urlSecretKey: live-event-store-url
   checkpointS3:
     endpoint: https://s3.example.com
     region: ap-east-1

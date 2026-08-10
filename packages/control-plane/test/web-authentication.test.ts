@@ -38,12 +38,15 @@ beforeAll(async () => {
     db: pglite,
     host: "127.0.0.1",
     port: 0,
-    maxConnections: 2,
+    // pglite-socket multiplexing is not PostgreSQL wire-compatible under
+    // concurrent parse/execute traffic; one connection keeps this integration
+    // test deterministic while production tests use real PostgreSQL.
+    maxConnections: 1,
   });
   await socketServer.start();
   database = createDatabase({
     connectionString: `postgresql://postgres@${socketServer.getServerConn()}/postgres?sslmode=disable`,
-    maxConnections: 2,
+    maxConnections: 1,
   });
   await runMigrations(database, "up");
   vault = new TenantModelCredentialVault(Buffer.alloc(32, 9).toString("base64url"));

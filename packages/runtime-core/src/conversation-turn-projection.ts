@@ -10,6 +10,15 @@ import { sql, type Kysely, type Transaction } from "kysely";
 
 type ProjectionDatabase = Kysely<Database> | Transaction<Database>;
 
+export type StoreConversationTurnProjectionInput = {
+  tenantId: string;
+  sessionId: string;
+  turnId: string;
+  transcript: ConversationTurnTranscriptResource;
+  sourceEventCount: number;
+  projectedAt?: Date;
+};
+
 type ProjectionEventRow = {
   event_id: string;
   session_id: string;
@@ -74,9 +83,10 @@ function toolItemIndex(
 }
 
 /**
- * Reduces the durable, public event history for one turn into the bounded
- * semantic transcript used by conversation discovery. Pi JSONL and
- * session_events remain the authoritative conversation and audit records.
+ * Reduces the durable public event history for one Turn into the bounded
+ * semantic transcript used by conversation discovery. Pi JSONL remains the
+ * model-context authority; Kafka/Valkey supplies live deltas in the
+ * distributed profile and PostgreSQL stores this canonical terminal view.
  */
 export function projectConversationTurnTranscript(
   events: readonly AgentDockEvent[],
@@ -309,6 +319,40 @@ export async function materializeConversationTurnProjection(
       ...(input.projectedAt === undefined ? {} : { projectedAt: input.projectedAt }),
     })
   ).get(input.turnId);
+}
+
+export async function storeConversationTurnProjection(
+  database: ProjectionDatabase,
+  input: StoreConversationTurnProjectionInput,
+): Promise<void> {
+  if (!Number.isSafeInteger(input.sourceEventCount) || input.sourceEventCount < 1) {
+    throw new TypeError("Conversation projection source event count must be positive");
+  }
+  const transcript = parseConversationTurnTranscriptResource(input.transcript);
+  await database
+    .insertInto("conversation_turn_projections")
+    .values({
+      turn_id: input.turnId,
+      tenant_id: input.tenantId,
+      session_id: input.sessionId,
+      schema_version: 1,
+      through_seq: transcript.throughSequence,
+      source_event_count: input.sourceEventCount,
+      transcript: transcript as unknown as Record<string, unknown>,
+      projected_at: input.projectedAt ?? new Date(),
+    })
+    .onConflict((conflict) =>
+      conflict.column("turn_id").doUpdateSet({
+        tenant_id: sql`excluded.tenant_id`,
+        session_id: sql`excluded.session_id`,
+        schema_version: sql`excluded.schema_version`,
+        through_seq: sql`excluded.through_seq`,
+        source_event_count: sql`excluded.source_event_count`,
+        transcript: sql`excluded.transcript`,
+        projected_at: sql`excluded.projected_at`,
+      }),
+    )
+    .executeTakeFirstOrThrow();
 }
 
 export async function materializeConversationTurnProjections(

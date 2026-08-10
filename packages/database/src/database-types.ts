@@ -789,27 +789,6 @@ export interface SessionEventCursorTable {
   updated_at: GeneratedTimestamp;
 }
 
-export interface SessionEventArchiveTable {
-  id: string;
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  first_seq: Int8;
-  last_seq: Int8;
-  event_count: number;
-  format: "agent-dock.session-events.ndjson.gzip.v1";
-  object_key: string | null;
-  sha256: string | null;
-  uncompressed_sha256: string | null;
-  size_bytes: NullableInt8;
-  uncompressed_size_bytes: NullableInt8;
-  state: "uploading" | "committed";
-  claim_owner: string;
-  claim_until: Timestamp;
-  created_at: GeneratedTimestamp;
-  archived_at: NullableTimestamp;
-}
-
 export interface SessionEventIdTable {
   event_id: string;
   session_id: string;
@@ -834,6 +813,37 @@ export interface ConversationTurnProjectionTable {
   source_event_count: number;
   transcript: JsonObject;
   projected_at: GeneratedTimestamp;
+}
+
+export interface SessionTerminalEventTable {
+  event_id: string;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  agent_id: string;
+  command_id: string;
+  seq: Int8;
+  schema_version: number;
+  type: "turn.completed" | "turn.failed" | "turn.cancelled";
+  payload: JsonObject;
+  occurred_at: Timestamp;
+  persisted_at: GeneratedTimestamp;
+}
+
+export interface SessionLiveStreamCompactionTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  through_seq: Int8;
+  state: "pending" | "completed";
+  attempts: GeneratedInteger;
+  available_at: GeneratedTimestamp;
+  claim_owner: string | null;
+  claim_until: NullableTimestamp;
+  last_error: string | null;
+  created_at: GeneratedTimestamp;
+  completed_at: NullableTimestamp;
 }
 
 export interface OutboxTable {
@@ -1152,11 +1162,12 @@ export interface Database {
   commands: CommandTable;
   approvals: ApprovalTable;
   session_events: SessionEventTable;
-  session_event_archives: SessionEventArchiveTable;
   session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
   worker_event_projection_offsets: WorkerEventProjectionOffsetTable;
   conversation_turn_projections: ConversationTurnProjectionTable;
+  session_terminal_events: SessionTerminalEventTable;
+  session_live_stream_compactions: SessionLiveStreamCompactionTable;
   outbox: OutboxTable;
   artifacts: ArtifactTable;
   test_results: TestResultTable;

@@ -22,7 +22,8 @@ The global event plane uses the measured-gated Kafka path. Install the Strimzi
 cluster and topic from [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md) before
 deploying either profile. PostgreSQL remains the Run/fence/sequence authority;
 Kafka carries high-frequency Worker batches, and Event Gateway replicas build
-the replay/semantic projection consumed by SSE and terminal settlement. KEDA
+the Valkey live replay plus PostgreSQL terminal projection consumed by SSE and
+terminal settlement. KEDA
 scales those replicas from Kafka consumer-group lag plus CPU, while retaining a
 three-replica floor if the scaler cannot read Kafka metrics.
 

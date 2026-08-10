@@ -54,6 +54,8 @@ import {
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 import type { WorkerEventLogBatch } from "@agent-dock/runtime-core/worker-event-log";
 import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
+import { MemoryLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import { LiveTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -2755,8 +2757,10 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     };
     const appended: WorkerEventLogBatch[] = [];
+    const liveEventStore = new MemoryLiveSessionEventStore();
     const externalStore = new DurableEventStore({
       database,
+      liveEventStore,
       workerEventLog: {
         append: (batches) => {
           appended.push(...batches);
@@ -2831,6 +2835,12 @@ describe.sequential("single-user durable turn intake API", () => {
         event.type === "assistant.text.delta" ? event.payload.text : undefined,
       ),
     ).toEqual(["hello ", "from Kafka"]);
+    const liveConversation = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${assigned.assignedSession.sessionId}`,
+    });
+    expect(liveConversation.statusCode).toBe(200);
+    expect(liveConversation.json<ConversationDetailResource>().replayAfterSequence).toBe(0);
     expect(
       await database
         .selectFrom("session_event_cursors")
@@ -2862,6 +2872,7 @@ describe.sequential("single-user durable turn intake API", () => {
     };
     const failingStore = new DurableEventStore({
       database,
+      liveEventStore,
       workerEventLog: {
         append: () => Promise.reject(new Error("injected Kafka outage")),
       },
@@ -2880,6 +2891,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const retried: WorkerEventLogBatch[] = [];
     const retryStore = new DurableEventStore({
       database,
+      liveEventStore,
       workerEventLog: {
         append: (batches) => {
           retried.push(...batches);
@@ -2910,6 +2922,69 @@ describe.sequential("single-user durable turn intake API", () => {
       highWaterMark: 3,
       events: [{ seq: 3, type: "assistant.text.delta", payload: { text: "after retry" } }],
     });
+    const terminalEventId = globalThis.crypto.randomUUID();
+    const terminalNow = new Date();
+    const terminalBody = {
+      type: "turn.completed" as const,
+      payload: { stopReason: "external_event_test_complete" },
+    };
+    const preparedProjection = await new LiveTerminalTurnProjectionSource({
+      database,
+      liveEvents: liveEventStore,
+    }).prepare({
+      tenantId: IDS.tenant,
+      sessionId: assigned.assignedSession.sessionId,
+      turnId: assigned.accepted.turnId,
+      commandId: assigned.accepted.commandId,
+      agentId: "root",
+      body: terminalBody,
+      eventId: terminalEventId,
+      occurredAt: terminalNow.toISOString(),
+    });
+    await database.transaction().execute((transaction) =>
+      commitTerminalTurnEvent(transaction, {
+        tenantId: IDS.tenant,
+        sessionId: assigned.assignedSession.sessionId,
+        turnId: assigned.accepted.turnId,
+        commandId: assigned.accepted.commandId,
+        agentId: "root",
+        leaseId: assigned.runtime.leaseId,
+        fencingToken: assigned.runtime.fencingToken,
+        body: terminalBody,
+        now: terminalNow,
+        eventId: terminalEventId,
+        preparedProjection,
+      }),
+    );
+    await expect(
+      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 3),
+    ).resolves.toMatchObject({
+      highWaterMark: 4,
+      events: [{ seq: 4, type: "turn.completed" }],
+    });
+    expect(
+      await database
+        .selectFrom("conversation_turn_projections")
+        .select("transcript")
+        .where("turn_id", "=", assigned.accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      transcript: {
+        throughSequence: 4,
+        items: [{ kind: "text", text: "hello from Kafkaafter retry" }],
+      },
+    });
+    expect(
+      await database
+        .selectFrom("session_events")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("session_id", "=", assigned.assignedSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ count: "0" });
+    await liveEventStore.trimThrough(IDS.tenant, assigned.assignedSession.sessionId, 3);
+    await expect(
+      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 0),
+    ).rejects.toMatchObject({ code: "event_store_invariant", retryable: true });
   });
 
   it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(

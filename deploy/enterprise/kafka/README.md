@@ -47,13 +47,29 @@ AgentDock uses Kafka as the enterprise Worker stream's first shared payload
 durability boundary. Pi Workers call an authenticated internal Event Gateway
 endpoint and never receive Kafka credentials. A cumulative Worker ACK means
 Kafka accepted the ordered Session-keyed batch; the consumer group then
-projects it idempotently into PostgreSQL together with its consumed offset.
-Browser SSE reads only projected rows. Terminal Run commits wait for the
-projected cursor, so a completed Turn never overtakes its visible text or Tool
-events.
+projects it idempotently into Valkey before committing its consumed offset and
+projected high-water mark to PostgreSQL. Browser SSE reads only that covered
+Valkey prefix plus PostgreSQL terminal Turn rows. Terminal Run commits wait for
+the projected cursor and complete canonical transcript, so a completed Turn
+never overtakes its visible text or Tool events.
 
 The global platform Secret must also contain the independent
 `worker-event-ingest-token` key configured by
 `external.eventIngest.tokenSecretKey`. This credential is shared only by
 trusted AgentDock Workers, Control Plane and Event Gateway; it must not be
 copied into Cube guests.
+
+The same Secret must contain `live-event-store-url`, pointing to an HA Valkey
+deployment with persistence and `noeviction`. Valkey is a rebuildable read
+model, not a business-state authority. Keep Kafka topic retention longer than
+AgentDock's live replay window. After total Valkey loss, stop the normal Event
+Gateway projector, point its configuration at a fresh empty Valkey instance,
+and run the Event Gateway image's rebuild entry point. From a source checkout:
+
+```bash
+npm run events:rebuild-live
+```
+
+It replays only sequences above each Session's PostgreSQL replay floor and at
+or below its Kafka-accepted cursor. Restart Event Gateway after the rebuild; do
+not run it concurrently against a non-empty live read model during traffic.

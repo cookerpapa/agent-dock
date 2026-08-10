@@ -20,15 +20,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
 import {
   FileCheckpointObjectStore,
-  DurableEventStore,
   PI_SESSION_MANIFEST_MEDIA_TYPE,
   PostgresSandboxCheckpointStore,
   S3CheckpointObjectStore,
-  SessionEventRetentionService,
+  SessionLiveStreamCompactionService,
   decodePiSessionManifest,
-  verifySessionEventArchive,
   type S3CheckpointObjectStoreOptions,
-  type CheckpointObjectStore,
 } from "../src/index.ts";
 import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 
@@ -969,15 +966,14 @@ describe("PostgreSQL hard-crash semantic recovery", () => {
   });
 });
 
-describe("PostgreSQL Session event hot retention", () => {
-  it("archives one projected terminal Turn before advancing the replay floor", async () => {
+describe("Valkey Session live-stream compaction", () => {
+  it("retries a failed trim and advances the replay floor only after success", async () => {
     const isolatedPglite = await PGlite.create();
     const isolatedSocket = new PGLiteSocketServer({
       db: isolatedPglite,
       host: "127.0.0.1",
       port: 0,
     });
-    const isolatedObjectRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-event-retention-test-"));
     let isolatedDatabase: Kysely<Database> | undefined;
     try {
       await isolatedSocket.start();
@@ -987,181 +983,72 @@ describe("PostgreSQL Session event hot retention", () => {
       });
       await runMigrations(isolatedDatabase, "up");
       await seed(isolatedDatabase);
-      const now = new Date("2026-08-10T00:00:00.000Z");
-      const old = new Date("2026-05-01T00:00:00.000Z");
-      await isolatedDatabase.transaction().execute(async (transaction) => {
-        await transaction
-          .updateTable("turns")
-          .set({ state: "completed", stop_reason: "stop", settled_at: old })
-          .where("id", "=", IDS.turn1)
-          .executeTakeFirstOrThrow();
-        await transaction
-          .insertInto("session_events")
-          .values([
-            {
-              event_id: "61000000-0000-4000-8000-000000000001",
-              tenant_id: IDS.tenant,
-              session_id: IDS.session,
-              turn_id: IDS.turn1,
-              agent_node_id: null,
-              agent_id: "root",
-              command_id: IDS.command1,
-              seq: 1,
-              schema_version: 1,
-              type: "turn.started",
-              payload: {},
-              lease_id: IDS.lease1,
-              fencing_token: 1,
-              occurred_at: old,
-              persisted_at: old,
-            },
-            {
-              event_id: "61000000-0000-4000-8000-000000000002",
-              tenant_id: IDS.tenant,
-              session_id: IDS.session,
-              turn_id: IDS.turn1,
-              agent_node_id: null,
-              agent_id: "root",
-              command_id: IDS.command1,
-              seq: 2,
-              schema_version: 1,
-              type: "assistant.text.delta",
-              payload: { text: "durable output" },
-              lease_id: IDS.lease1,
-              fencing_token: 1,
-              occurred_at: old,
-              persisted_at: old,
-            },
-            {
-              event_id: "61000000-0000-4000-8000-000000000003",
-              tenant_id: IDS.tenant,
-              session_id: IDS.session,
-              turn_id: IDS.turn1,
-              agent_node_id: null,
-              agent_id: "root",
-              command_id: null,
-              seq: 3,
-              schema_version: 1,
-              type: "turn.completed",
-              payload: { stopReason: "stop" },
-              lease_id: IDS.lease1,
-              fencing_token: 1,
-              occurred_at: old,
-              persisted_at: old,
-            },
-          ])
-          .execute();
-        await transaction
-          .insertInto("session_event_cursors")
-          .values({
-            session_id: IDS.session,
-            last_persisted_seq: 3,
-            last_projected_seq: 3,
-            acknowledged_through_seq: 3,
-          })
-          .executeTakeFirstOrThrow();
-        await transaction
-          .insertInto("conversation_turn_projections")
-          .values({
-            turn_id: IDS.turn1,
-            tenant_id: IDS.tenant,
-            session_id: IDS.session,
-            schema_version: 1,
-            through_seq: 3,
-            source_event_count: 3,
-            transcript: {
-              schemaVersion: 1,
-              throughSequence: 3,
-              startedSequence: 1,
-              terminalSequence: 3,
-              stopReason: "stop",
-              failure: null,
-              cancellation: null,
-              workspacePatch: null,
-              items: [
-                {
-                  kind: "text",
-                  text: "durable output",
-                  firstSequence: 2,
-                  lastSequence: 2,
-                },
-              ],
-            },
-            projected_at: old,
-          })
-          .executeTakeFirstOrThrow();
-      });
-
-      const fileObjectStore = new FileCheckpointObjectStore({ rootDirectory: isolatedObjectRoot });
-      let failNextPut = true;
-      const objectStore: CheckpointObjectStore = {
-        put: async (key, bytes) => {
-          if (failNextPut) {
-            failNextPut = false;
-            throw new Error("injected object-store outage");
-          }
-          await fileObjectStore.put(key, bytes);
-        },
-        get: (key) => fileObjectStore.get(key),
-        delete: (key) => fileObjectStore.delete(key),
-      };
-      const service = new SessionEventRetentionService({
-        database: isolatedDatabase,
-        objectStore,
-        ownerId: "retention-test",
-        clock: () => now,
-        hotRetentionMs: 24 * 60 * 60 * 1_000,
-      });
-      await expect(service.runOnce()).rejects.toThrow("injected object-store outage");
-      expect(
-        await isolatedDatabase
-          .selectFrom("session_event_archives")
-          .select(["state", "claim_until"])
-          .executeTakeFirst(),
-      ).toMatchObject({ state: "uploading", claim_until: now });
-      const result = await service.runOnce();
-      expect(result).toMatchObject({
-        status: "archived",
-        sessionId: IDS.session,
-        firstSequence: 1,
-        lastSequence: 3,
-        eventCount: 3,
-      });
-      expect(await isolatedDatabase.selectFrom("session_events").selectAll().execute()).toEqual([]);
-      const archive = await isolatedDatabase
-        .selectFrom("session_event_archives")
-        .selectAll()
+      await isolatedDatabase
+        .insertInto("session_event_cursors")
+        .values({
+          session_id: IDS.session,
+          last_persisted_seq: 3,
+          last_projected_seq: 3,
+          acknowledged_through_seq: 3,
+          replay_floor_seq: 0,
+        })
         .executeTakeFirstOrThrow();
-      expect(archive.state).toBe("committed");
-      const compressed = await objectStore.get(archive.object_key!);
-      expect(
-        verifySessionEventArchive(compressed, {
-          sha256: archive.sha256!,
-          uncompressedSha256: archive.uncompressed_sha256!,
-          sizeBytes: Number(archive.size_bytes),
-          uncompressedSizeBytes: Number(archive.uncompressed_size_bytes),
-        }),
-      ).toEqual({ firstSequence: 1, lastSequence: 3, eventCount: 3 });
+      await isolatedDatabase
+        .insertInto("session_live_stream_compactions")
+        .values({
+          id: "61000000-0000-4000-8000-000000000001",
+          tenant_id: IDS.tenant,
+          session_id: IDS.session,
+          turn_id: IDS.turn1,
+          through_seq: 3,
+          state: "pending",
+          attempts: 0,
+          available_at: new Date(0),
+          claim_owner: null,
+          claim_until: null,
+          last_error: null,
+          created_at: new Date(0),
+          completed_at: null,
+        })
+        .executeTakeFirstOrThrow();
+      let calls = 0;
+      const service = new SessionLiveStreamCompactionService({
+        database: isolatedDatabase,
+        liveEvents: {
+          append: () => Promise.resolve(0),
+          readPage: () => Promise.resolve([]),
+          readTurn: () => Promise.resolve([]),
+          trimThrough: () => {
+            calls += 1;
+            return calls === 1
+              ? Promise.reject(new Error("injected Valkey outage"))
+              : Promise.resolve();
+          },
+        },
+        ownerId: "compaction-test",
+        clock: () => new Date("2026-08-10T00:00:00.000Z"),
+      });
+      await expect(service.runOnce()).rejects.toThrow("injected Valkey outage");
+      await isolatedDatabase
+        .updateTable("session_live_stream_compactions")
+        .set({ available_at: new Date(0) })
+        .execute();
+      await expect(service.runOnce()).resolves.toMatchObject({
+        status: "compacted",
+        throughSequence: 3,
+      });
       await expect(service.runOnce()).resolves.toEqual({ status: "idle" });
-      await expect(
-        new DurableEventStore({ database: isolatedDatabase }).openReplayWindow(
-          IDS.tenant,
-          IDS.session,
-          0,
-        ),
-      ).rejects.toMatchObject({ code: "cursor_expired" });
       expect(
         await isolatedDatabase
-          .selectFrom("conversation_turn_projections")
-          .select("transcript")
-          .where("turn_id", "=", IDS.turn1)
+          .selectFrom("session_event_cursors")
+          .select("replay_floor_seq")
+          .where("session_id", "=", IDS.session)
           .executeTakeFirst(),
-      ).toBeDefined();
+      ).toMatchObject({ replay_floor_seq: "3" });
     } finally {
       await isolatedDatabase?.destroy();
       await isolatedSocket.stop().catch(() => undefined);
       await isolatedPglite.close().catch(() => undefined);
-      await rm(isolatedObjectRoot, { recursive: true, force: true });
     }
   }, 30_000);
 });

@@ -1152,6 +1152,7 @@ export class ControlPlaneStore {
         "source.github_repository_id as sourceRepositoryId",
         "github_repository.private as sourcePrivate",
         "cursor.last_persisted_seq as lastPersistedSequence",
+        "cursor.replay_floor_seq as replayFloorSequence",
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
       .where("session_row.id", "=", sessionId)
@@ -1243,6 +1244,13 @@ export class ControlPlaneStore {
         .where("session_id", "=", sessionId)
         .where("turn_id", "in", terminalTurnIds)
         .execute();
+      const repairedTurnIds = new Set(projectionRows.map((row) => row.turn_id));
+      if (missingTerminalTurnIds.some((turnId) => !repairedTurnIds.has(turnId))) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "A terminal conversation projection is missing",
+        );
+      }
     }
     const transcriptByTurnId = new Map(
       projectionRows.map((row) => {
@@ -1294,23 +1302,16 @@ export class ControlPlaneStore {
       .filter((row) => !transcriptByTurnId.has(row.turnId))
       .map((row) => row.turnId);
     if (unprojectedTurnIds.length > 0) {
-      const earliestIncludedEvent = await this.#database
-        .selectFrom("session_events")
-        .select((expression) => expression.fn.min<string>("seq").as("sequence"))
-        .where("tenant_id", "=", this.#tenantId)
-        .where("session_id", "=", sessionId)
-        .where("turn_id", "in", unprojectedTurnIds)
-        .executeTakeFirstOrThrow();
-      replayAfterSequence =
-        earliestIncludedEvent.sequence === null
-          ? replayAfterSequence
-          : Math.max(
-              0,
-              positiveSafeInteger(
-                earliestIncludedEvent.sequence,
-                "Conversation first included event sequence",
-              ) - 1,
-            );
+      // An active Turn is not yet represented by a canonical transcript. Start
+      // SSE after the latest settled projection so the browser replays its
+      // already-durable Kafka/Valkey events. This deliberately does not query
+      // PostgreSQL's local-only raw-event adapter.
+      replayAfterSequence = Math.max(
+        nonNegativeSafeInteger(conversation.replayFloorSequence, "Conversation replay floor"),
+        ...projectionRows.map((row) =>
+          positiveSafeInteger(row.through_seq, "Conversation projection sequence"),
+        ),
+      );
     }
 
     const environment = await this.#loadActiveProjectEnvironment(conversation.projectId);

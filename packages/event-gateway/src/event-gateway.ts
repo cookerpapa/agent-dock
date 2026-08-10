@@ -10,6 +10,11 @@ import { WORKER_EVENT_INGEST_PATH } from "@agent-dock/runtime-core/http-durable-
 import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import { SessionEventStream } from "@agent-dock/runtime-core/session-event-stream";
+import {
+  parsePrepareTerminalTurnProjectionInput,
+  TERMINAL_TURN_PROJECTION_PATH,
+  type TerminalTurnProjectionSource,
+} from "@agent-dock/runtime-core/terminal-turn-projection";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { sql, type Kysely } from "kysely";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -29,6 +34,7 @@ export type EventGatewayOptions = {
   dependencyReadiness?: () => Promise<void>;
   workerEventIngestor?: DurableEventGroupIngestor;
   workerEventIngestToken?: string;
+  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
@@ -116,13 +122,16 @@ export class EventGateway {
     });
     if (options.workerEventIngestor !== undefined && options.workerEventIngestToken !== undefined) {
       const expectedToken = serviceTokenDigest(options.workerEventIngestToken);
-      this.application.post(WORKER_EVENT_INGEST_PATH, async (request, reply) => {
+      const isAuthorizedWorker = (request: FastifyRequest): boolean => {
         const supplied = bearerToken(request.headers.authorization);
         const suppliedDigest =
           supplied === undefined
             ? Buffer.alloc(expectedToken.length)
             : createHash("sha256").update(supplied, "utf8").digest();
-        if (supplied === undefined || !timingSafeEqual(expectedToken, suppliedDigest)) {
+        return supplied !== undefined && timingSafeEqual(expectedToken, suppliedDigest);
+      };
+      this.application.post(WORKER_EVENT_INGEST_PATH, async (request, reply) => {
+        if (!isAuthorizedWorker(request)) {
           await sendError(reply, 401, "worker_event_ingest_unauthorized", "Unauthorized");
           return;
         }
@@ -163,6 +172,26 @@ export class EventGateway {
           );
         }
       });
+      if (options.terminalTurnProjectionSource !== undefined) {
+        this.application.post(TERMINAL_TURN_PROJECTION_PATH, async (request, reply) => {
+          if (!isAuthorizedWorker(request)) {
+            await sendError(reply, 401, "terminal_projection_unauthorized", "Unauthorized");
+            return;
+          }
+          try {
+            const input = parsePrepareTerminalTurnProjectionInput(request.body);
+            const projection = await options.terminalTurnProjectionSource!.prepare(input);
+            await reply.code(200).send(projection);
+          } catch (error: unknown) {
+            await sendError(
+              reply,
+              error instanceof TypeError ? 400 : 409,
+              "terminal_projection_failed",
+              error instanceof Error ? error.message : "Terminal projection failed",
+            );
+          }
+        });
+      }
     }
     this.application.get(SESSION_EVENT_PATH, async (request, reply) => {
       let identity;

@@ -50,7 +50,7 @@ Tenant ownership does not grant platform administration.
 ┌───────────────────────────────▼─────────────────────────────────┐
 │ Control Plane + Event Gateway                                   │
 │ REST admission / auth / resumable durable SSE                   │
-│ PostgreSQL business state / MinIO immutable artifacts           │
+│ PostgreSQL canonical state / Kafka + Valkey live-event path     │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ one Workflow per accepted Run
 ┌───────────────────────────────▼─────────────────────────────────┐
@@ -113,7 +113,9 @@ See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
 The distributed Kubernetes profile keeps Web and Control Plane stateless,
 offloads long-lived browser streams to an independently scaled Event Gateway,
 routes authenticated Worker event batches through that Gateway to a
-Session-keyed Kafka log without giving Kafka credentials to Pi Workers, and
+Session-keyed Kafka log without giving Kafka credentials to Pi Workers. A
+Valkey Stream read model supplies cross-replica live replay, while PostgreSQL
+keeps only terminal canonical Turns and monotonic cursors. The platform also
 binds each Workspace to an immutable execution Cell, scales that Cell's
 compatible Pi Workers from its Temporal Activity backlog with KEDA, and routes
 exact Worker management over StatefulSet headless DNS. The default Worker Pod
@@ -128,26 +130,32 @@ PostgreSQL is authoritative for:
 - tenants, users, roles and browser sessions;
 - Projects, Workspaces, conversations, messages and Runs;
 - RunAttempt leases, heartbeat, fencing tokens and terminal state;
-- hot event replay, semantic conversation projections, event sequence cursors,
+- terminal conversation projections, event sequence/replay cursors,
   idempotency keys and Workspace head CAS;
 - model/proxy configuration metadata and usage records.
 
 MinIO/S3 stores immutable:
 
 - Pi native JSONL segment manifests;
-- compressed cold event archives after the SSE hot window;
 - Workspace/Kopia checkpoints;
 - artifacts and Review Bundles.
+
+Kafka stores accepted high-frequency Worker batches. Valkey is the bounded,
+rebuildable SSE read model: the projector appends a contiguous Session range
+before PostgreSQL advances its projected high-water mark, so the browser never
+sees an event that Kafka has not durably accepted. At Turn settlement, the
+complete text/Tool transcript and one terminal event are committed to
+PostgreSQL. After the live window, Valkey deltas are trimmed and stale SSE
+cursors explicitly reload the canonical conversation.
 
 The active Pi `messages[]` is reconstructed by the Pi SDK from its native
 checkpoint. AgentDock does not rebuild model context from the rendered browser
 transcript. Pi compaction therefore survives Worker movement and cold restore.
 Pi JSONL uses compressed content-addressed 8 MiB segments, reuses stable full
 chunks and replaces only the bounded trailing chunk when the native Session
-has not been rewritten. Terminal
-stream events remain in PostgreSQL for a configurable 14-day hot window; after
-their semantic projection commits, an independently scalable retention Worker
-archives them to object storage and advances an explicit replay floor.
+has not been rewritten. The live-stream compactor never archives token deltas
+into PostgreSQL or S3; Kafka retention is longer than the Valkey replay window
+so a fresh live read model can be rebuilt operationally.
 
 ## Workspace model
 

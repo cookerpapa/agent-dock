@@ -45,6 +45,7 @@ file outside Git. Its main restart-bound settings are:
 | `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
 | `external.eventIngest` | Internal Event Gateway service URL and dedicated Worker-ingest service-token key. |
 | `external.kafka` | Enterprise Worker-event transport, shared idempotent projection group and TLS/SCRAM Secret-key mapping. The topic and identity must exist before rollout. |
+| `external.liveEventStore` | Valkey URL Secret key used by Event Gateway replay/projectors and the live-stream compactor. The file may contain one URL or comma-separated cluster seed URLs. |
 | `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |
 
 `AGENT_DOCK_SANDBOX_MANAGER_URLS` is the ordered, comma-separated Manager
@@ -149,28 +150,28 @@ The bootstrap service account tenant has a separate policy surface:
 Those bootstrap values are reconciled by the database bootstrap service. They
 do not define the policy of accounts created through public registration.
 
-### Object storage
+### Object storage and live events
 
 | Variable | Default | Purpose | Notes |
 | --- | --- | --- | --- |
 | `AGENT_DOCK_CHECKPOINT_BUCKET` | `agent-dock-checkpoints` | Immutable Pi Session checkpoint objects. | Changing an occupied bucket does not migrate existing checkpoints. |
 | `AGENT_DOCK_CHECKPOINT_REGION` | `us-east-1` | S3 region used for Pi checkpoint requests. | Must match the selected object store. |
 | `AGENT_DOCK_WORKSPACE_KOPIA_BUCKET` | `agent-dock-workspace-kopia` | Kopia repository objects for durable Workspace checkpoints. | Changing an occupied repository requires an explicit migration and recovery test. |
-| `AGENT_DOCK_EVENT_HOT_RETENTION_DAYS` | `14` | Days terminal raw SSE events remain queryable in PostgreSQL before archive. | Conversation projections and Pi checkpoints are not deleted. Recreate Event Retention. |
-| `AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS` | `60000` | Idle scan interval for the archive Worker. | Minimum 1000 ms. Recreate Event Retention. |
-| `AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE` | `100` | Maximum terminal Turns archived before the Worker yields. | Tune against PostgreSQL/object-store capacity. Recreate Event Retention. |
+| `AGENT_DOCK_WORKER_EVENT_RETENTION_MS` | `86400000` | Kafka raw Worker-event retention in the single-host topic bootstrap. | Must exceed the one-hour Valkey live replay window. Recreate the topic to change an existing topic. |
+| `AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS` | `60000` | Idle scan interval for the Valkey compactor. | Minimum 1000 ms. Recreate Event Retention. |
+| `AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE` | `100` | Maximum terminal Turns trimmed before the Worker yields. | Tune against Valkey and PostgreSQL control-row capacity. Recreate Event Retention. |
 
 The default topology deliberately fixes MinIO endpoints, key prefixes and
 path-style access to its internal object-storage network. External S3 is a
 deployment-topology change, not a supported `.env` toggle in the single-host
 profile.
 
-The distributed Helm profile exposes the same policy under
-`eventRetention.hotDays`, `eventRetention.intervalMs` and
-`eventRetention.batchSize`. Its replicas are safe to increase because claims
-and replay-floor advancement are coordinated in PostgreSQL. Object-store
-lifecycle rules must not expire Pi Session segments or event archives earlier
-than the platform's legal/audit retention policy.
+The distributed Helm profile exposes compactor cadence under
+`eventRetention.intervalMs` and `eventRetention.batchSize`. Its replicas are
+safe to increase because claims and replay-floor advancement are coordinated
+in PostgreSQL. Kafka topic retention must exceed the live replay window so an
+empty Valkey read model can be rebuilt. Object-store lifecycle rules apply to
+Pi Session, Workspace and Artifact objects, not raw token deltas.
 
 ### Optional modules and observability
 

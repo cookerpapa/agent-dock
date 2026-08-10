@@ -124,11 +124,12 @@ tenant's persistent process world.
 Tool file APIs normalize paths beneath `/workspace`, reject absolute/traversal
 and symlink escape, bound file sizes and validate immutable checkpoint hashes.
 The Data Mover never accepts an arbitrary host path from the model or browser.
-Pi Session segments and cold event archives are content-addressed and validated
-against both stored and reconstructed SHA-256 digests before use. Event rows are
-deleted from hot PostgreSQL storage only after the terminal semantic projection
-and immutable archive upload exist; replay-floor advancement and archive
-metadata commit in the same transaction.
+Pi Session segments are content-addressed and validated against both stored and
+reconstructed SHA-256 digests before use. Live events use explicit Session
+sequence IDs in Valkey and reject gaps/conflicting replay. They are trimmed only
+after the terminal semantic projection exists; replay-floor advancement occurs
+only after the trim succeeds. Missing live data makes SSE unavailable instead
+of returning a partial transcript.
 
 ### Duplicate/ambiguous side effects
 
@@ -166,9 +167,9 @@ deployment configuration.
 
 Conversation deletion is a soft archive. It removes the Session from ordinary
 listing/direct conversation reads but retains the Pi checkpoint, semantic
-conversation projection, cold raw-event archive and Workspace audit history.
-Terminal raw events are moved out of PostgreSQL only after the configured hot
-window; that is a storage-tier transition, not user-data deletion. A future
+conversation projection and Workspace audit history. Raw deltas age out of the
+bounded Kafka/Valkey window after the complete terminal projection commits;
+that is a storage-tier transition, not user-data deletion. A future
 hard-deletion/garbage-collection worker must erase database metadata and all
 referenced immutable objects under explicit tenant/legal policy. The browser
 delete action does not silently erase a shared Workspace.

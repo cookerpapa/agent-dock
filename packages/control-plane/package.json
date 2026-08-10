@@ -14,7 +14,7 @@
     "tenant-admin": "tsx src/tenant-admin.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest --run --maxWorkers=2"
+    "test": "vitest --run --maxWorkers=1 --testTimeout=30000 --hookTimeout=60000"
   },
   "dependencies": {
     "@agent-dock/database": "0.1.0",

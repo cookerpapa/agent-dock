@@ -48,7 +48,7 @@ The NestJS/Fastify Control Plane owns:
 
 PostgreSQL is the business-state and sequence/fence source of truth. Temporal is
 the durable execution engine, not the business database; Kafka is the
-enterprise high-frequency Worker-event transport, not a Run-state authority.
+high-frequency Worker-event durability boundary, not a Run-state authority.
 
 ### Event Gateway
 
@@ -56,12 +56,13 @@ The Event Gateway is the browser-facing, horizontally scalable read path for
 long-lived resumable SSE connections. In the enterprise profile its replicas
 also expose an authenticated internal Worker-event ingest endpoint, append
 accepted batches directly to Kafka and consume the shared projector group. Pi
-Workers never receive Kafka credentials. The Gateway authenticates the same
-browser/API credentials as the Control Plane, opens a replay window from
-`DurableEventLog`, and sends only projected events. PostgreSQL `NOTIFY` is a
-wake-up hint; reconnect and missed notifications are repaired from the
-partitioned replay table. The Gateway cannot admit Runs or commit terminal
-state.
+Workers never receive Kafka or Valkey credentials. The projector builds a
+bounded Valkey Stream read model and only then advances PostgreSQL's projected
+cursor. The Gateway authenticates the same browser/API credentials as the
+Control Plane and sends only that acknowledged prefix. PostgreSQL `NOTIFY` is a
+wake-up hint; reconnect reads Valkey live events plus PostgreSQL terminal
+events. The Gateway also prepares the complete terminal Turn projection, but
+only the Control Plane's fenced lifecycle transaction can commit it.
 
 ### Temporal
 
@@ -195,8 +196,9 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | active Pi `messages[]` | Pi SDK memory for one active Run |
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
-| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/projection cursor, consumed offset and hot replay projection |
-| terminal raw events beyond the hot window | immutable gzip NDJSON object archive |
+| Worker event durability and ordering | Session-keyed Kafka log |
+| bounded live SSE replay | Valkey Streams, rebuilt from retained Kafka records |
+| event high-water/replay floor and terminal Turns | PostgreSQL cursors and canonical conversation projections |
 | browser SSE connections and replay cursors | stateless Event Gateway replicas |
 | UI transcript projection | PostgreSQL-derived read model |
 
@@ -477,8 +479,8 @@ block are coalesced for at most 50 ms or 2 KiB. Tool/message/terminal boundaries
 flush pending text immediately. A bounded asynchronous publisher sends a
 contiguous batch after at most 20 ms, 64 events or 512 KiB.
 
-The bounded self-hosted profile writes the suffix directly to the partitioned
-PostgreSQL event table. In the enterprise profile, the Worker sends the suffix
+The deterministic local test adapter can write the suffix directly to the
+partitioned PostgreSQL event table. Both production profiles send the suffix
 to Event Gateway through a service-authenticated HTTP contract. Event Gateway
 validates the current Session/lease/fence and appends directly to Kafka with
 `sessionId` as the partition key. Kafka `acks=all` is the first shared durable
@@ -486,11 +488,11 @@ payload boundary; PostgreSQL retains only bounded sequence cursors at ingest,
 so the event payload is not written to a transfer Outbox and then written
 again to the replay table.
 
-The Kafka consumer group projects batches idempotently into the partitioned
-PostgreSQL replay table. Replay rows, semantic projections,
+The Kafka consumer group projects batches idempotently into a Valkey Stream
+using the Session sequence as its explicit ID. After that append succeeds,
 `last_projected_seq` and the consumed Kafka partition offset commit in one
-database transaction; the Kafka group offset advances only afterward. A lost
-ingest response may create a duplicate Kafka record, but exact Session-event
+PostgreSQL transaction; the Kafka group offset advances only afterward. A lost
+response or failed database commit may cause replay, but exact Session-event
 redelivery is harmless and conflicting content fails closed.
 The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
 its private `command.result` is only a prepared result.
@@ -500,37 +502,40 @@ barrier: the local spool must have no pending event and its cumulative ACK must
 equal the highest sequence produced by the Run. Terminal settlement therefore
 cannot overtake a non-terminal event still buffered at the Worker.
 
-In enterprise mode, terminal settlement first waits until the projected cursor
-equals the Worker-acknowledged cursor. The Control Plane then creates the public terminal event in the same PostgreSQL
-transaction that settles Run/Attempt/command/turn/session state, advances
-checkpoint and Workspace heads, materializes the semantic transcript and
-emits the database wake notification. A browser terminal event therefore
-cannot get ahead of canonical business/checkpoint state.
+Terminal settlement first waits until the projected cursor equals the
+Worker-acknowledged cursor. Event Gateway reads the complete current Turn from
+Valkey and prepares its canonical transcript. The Control Plane revalidates the
+cursor and creates the public terminal event in the same PostgreSQL transaction
+that settles Run/Attempt/command/turn/session state, advances checkpoint and
+Workspace heads, stores the complete transcript and emits the database wake
+notification. A browser terminal event therefore cannot get ahead of canonical
+business/checkpoint state.
 
-SSE uses the same durable event table:
+SSE merges the bounded live stream and terminal store:
 
 - event IDs are sequence numbers;
 - `Last-Event-ID` resumes from the committed suffix;
 - database notification is a wake-up hint only;
-- the table remains the truth if notification is lost.
+- Valkey supplies non-terminal deltas through the PostgreSQL projected cursor;
+- PostgreSQL supplies one terminal event per completed Turn.
 
-Only PostgreSQL-projected events reach SSE. A Worker-WAL-only or Kafka-only
-event is not yet visible. Public text and Tool facts that were
-already shown therefore survive in the replay table and semantic projection.
+Only Kafka events appended to Valkey and covered by the PostgreSQL projected
+cursor reach SSE. A Worker-WAL-only or Kafka-only event is not yet visible.
+Public text and Tool facts already shown are therefore durable in Kafka and
+available from the live read model; terminal Turns survive independently in
+the PostgreSQL semantic projection.
 Successful/catchable Runs preserve them in Pi's native Session; an uncatchable
 crash uses the bounded one-time recovery bridge described above so they also
 affect Pi's next effective model context.
 
-The replay table is intentionally hot storage. Once a terminal Turn has a
-committed semantic projection and is older than the configured retention
-window, the Event Retention service uploads its exact contiguous event rows as
-a content-addressed gzip NDJSON object. One PostgreSQL transaction then commits
-the immutable archive metadata, removes those hot rows and advances the
-Session's `replay_floor_seq`. An SSE cursor below that floor receives HTTP 410
-and reloads the semantic conversation read model; active and recent cursors
-retain exact sequence replay. Multiple retention replicas coordinate through
-leased row claims. Archive-before-delete and cursor CAS prevent partial cold
-migration from erasing the replay authority.
+The Valkey read model is intentionally bounded. Once a terminal Turn has a
+committed semantic projection and exceeds the live window, the compactor trims
+the Stream through that terminal sequence, then advances the Session's
+`replay_floor_seq`. An SSE cursor below that floor receives HTTP 410 and reloads
+the semantic conversation read model. Multiple compactor replicas coordinate
+through leased PostgreSQL jobs. Kafka retention exceeds this window and the
+Event Gateway image includes an operator rebuild command for a fresh Valkey
+instance; a missing sequence fails closed instead of returning partial output.
 
 ## 9. Lease and fencing
 

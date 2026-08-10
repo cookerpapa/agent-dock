@@ -24,6 +24,7 @@ import type {
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
+import type { TerminalTurnProjectionSource } from "./terminal-turn-projection.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -123,6 +124,7 @@ export type RunCancellationExecutorOptions = {
   idGenerator?: () => string;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   eventProjectionBarrier?: EventProjectionBarrier;
+  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 type ClaimedCancellation = {
@@ -217,6 +219,7 @@ export class RunCancellationExecutor {
   readonly #idGenerator: () => string;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
+  readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCancellationExecutorOptions) {
     this.#database = options.database;
@@ -235,6 +238,7 @@ export class RunCancellationExecutor {
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#eventProjectionBarrier = options.eventProjectionBarrier;
+    this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
   /**
@@ -571,7 +575,15 @@ export class RunCancellationExecutor {
           false,
         );
       }
-      const priorTerminalEvent = await transaction
+      const canonicalTerminalEvent = await transaction
+        .selectFrom("session_terminal_events")
+        .select("event_id")
+        .where("tenant_id", "=", claim.request.target.tenantId)
+        .where("session_id", "=", claim.request.target.sessionId)
+        .where("turn_id", "=", claim.request.target.turnId)
+        .where("command_id", "=", claim.request.target.commandId)
+        .executeTakeFirst();
+      const localTerminalEvent = await transaction
         .selectFrom("session_events")
         .select("event_id")
         .where("tenant_id", "=", claim.request.target.tenantId)
@@ -580,7 +592,7 @@ export class RunCancellationExecutor {
         .where("command_id", "=", claim.request.target.commandId)
         .where("type", "in", ["turn.completed", "turn.failed", "turn.cancelled"])
         .executeTakeFirst();
-      if (priorTerminalEvent !== undefined) {
+      if (canonicalTerminalEvent !== undefined || localTerminalEvent !== undefined) {
         throw new TurnCancellationBackendError(
           "cancellation_too_late",
           "Turn already emitted a terminal event before cancellation",
@@ -661,6 +673,21 @@ export class RunCancellationExecutor {
     result: TurnCancellationResult,
   ): Promise<void> {
     const now = safeDate(this.#clock);
+    const terminalEventId = this.#idGenerator();
+    const terminalBody = {
+      type: "turn.cancelled",
+      payload: { reason: result.reason, forced: result.forced },
+    } as const;
+    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+      tenantId: claim.request.target.tenantId,
+      sessionId: claim.request.target.sessionId,
+      turnId: claim.request.target.turnId,
+      commandId: claim.request.target.commandId,
+      agentId: "root",
+      body: terminalBody,
+      eventId: terminalEventId,
+      occurredAt: now.toISOString(),
+    });
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (
@@ -757,12 +784,10 @@ export class RunCancellationExecutor {
         agentId: "root",
         leaseId: acknowledgement.leaseId,
         fencingToken: acknowledgement.fencingToken,
-        body: {
-          type: "turn.cancelled",
-          payload: { reason: result.reason, forced: result.forced },
-        },
+        body: terminalBody,
         now,
-        eventId: this.#idGenerator(),
+        eventId: terminalEventId,
+        ...(preparedProjection === undefined ? {} : { preparedProjection }),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

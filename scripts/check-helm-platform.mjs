@@ -115,8 +115,11 @@ const eventRetentionEnvironment = Object.fromEntries(
     .filter((entry) => entry.value !== undefined)
     .map((entry) => [entry.name, String(entry.value)]),
 );
-assert.equal(eventRetentionEnvironment.AGENT_DOCK_EVENT_HOT_RETENTION_DAYS, "14");
 assert.equal(eventRetentionEnvironment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
+assert.equal(
+  eventRetentionEnvironment.AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE,
+  "/run/agent-dock-secrets/live-event-store-url",
+);
 find("NetworkPolicy", "agent-dock-event-retention");
 
 const eventGateway = find("Deployment", "agent-dock-event-gateway");
@@ -132,6 +135,10 @@ assert.equal(eventGatewayEnvironment.DATABASE_URL_FILE, "/run/agent-dock-secrets
 assert.equal(
   eventGatewayEnvironment.AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE,
   "/run/agent-dock-secrets/worker-event-ingest-token",
+);
+assert.equal(
+  eventGatewayEnvironment.AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE,
+  "/run/agent-dock-secrets/live-event-store-url",
 );
 assert.equal(
   eventGatewayEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,

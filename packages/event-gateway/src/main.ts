@@ -3,11 +3,13 @@ import { PostgresTenantApiAuthenticator } from "@agent-dock/control-plane/tenant
 import { WebAuthenticationService } from "@agent-dock/control-plane/web-authentication";
 import { startServiceObservability } from "@agent-dock/observability";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import {
   KafkaWorkerEventLog,
   KafkaWorkerEventProjector,
 } from "@agent-dock/runtime-core/worker-event-log";
+import { LiveTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 import { pathToFileURL } from "node:url";
 import { EventGateway } from "./event-gateway.ts";
 import { loadEventGatewayProductionConfig } from "./production-config.ts";
@@ -43,10 +45,16 @@ export async function startEventGateway(): Promise<void> {
           topic: config.kafka.topic,
           ...(config.kafka.security === undefined ? {} : { security: config.kafka.security }),
         });
+  const liveEvents =
+    config.kafka === undefined
+      ? undefined
+      : new ValkeyLiveSessionEventStore({ url: config.liveEventStoreUrl! });
   const eventStore = new DurableEventStore({
     database,
     eventNotificationPublisher: notifications,
-    ...(kafkaLog === undefined ? {} : { workerEventLog: kafkaLog }),
+    ...(kafkaLog === undefined || liveEvents === undefined
+      ? {}
+      : { workerEventLog: kafkaLog, liveEventStore: liveEvents }),
   });
   const projector =
     config.kafka === undefined
@@ -71,9 +79,14 @@ export async function startEventGateway(): Promise<void> {
           dependencyReadiness: async () => {
             projector.checkHealth();
             await kafkaLog.checkHealth();
+            await liveEvents!.checkHealth();
           },
           workerEventIngestor: eventStore,
           workerEventIngestToken: config.workerEventIngestToken!,
+          terminalTurnProjectionSource: new LiveTerminalTurnProjectionSource({
+            database,
+            liveEvents: liveEvents!,
+          }),
         }),
   });
   let closing = false;
@@ -85,6 +98,7 @@ export async function startEventGateway(): Promise<void> {
     await gateway.close();
     await projector?.close();
     await kafkaLog?.close();
+    await liveEvents?.close();
     await database.destroy();
     await observability.close();
   };

@@ -5,8 +5,12 @@ import {
   type AgentDockEventBody,
 } from "@agent-dock/protocol";
 import { sql, type Transaction } from "kysely";
-import { materializeConversationTurnProjection } from "./conversation-turn-projection.ts";
+import {
+  materializeConversationTurnProjection,
+  storeConversationTurnProjection,
+} from "./conversation-turn-projection.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
+import type { PreparedTerminalTurnProjection } from "./terminal-turn-projection.ts";
 
 type TerminalEventBody = Extract<
   AgentDockEventBody,
@@ -25,6 +29,8 @@ export type CommitTerminalTurnEventInput = {
   now: Date;
   eventId: string;
   notificationPublisher?: SessionEventNotificationPublisher;
+  preparedProjection?: PreparedTerminalTurnProjection;
+  liveStreamRetentionMs?: number;
 };
 
 function safeSequence(value: string | number | bigint, description: string): number {
@@ -86,33 +92,107 @@ export async function commitTerminalTurnEvent(
     occurredAt: input.now.toISOString(),
     ...input.body,
   });
-  await transaction
-    .insertInto("session_events")
-    .values({
-      event_id: event.eventId,
-      tenant_id: input.tenantId,
-      session_id: input.sessionId,
-      turn_id: input.turnId,
-      agent_node_id: null,
-      agent_id: input.agentId,
-      command_id: input.commandId,
-      seq: sequence,
-      schema_version: event.schemaVersion,
-      type: event.type,
-      payload: event.payload,
-      lease_id: input.leaseId,
-      fencing_token: input.fencingToken,
-      occurred_at: input.now,
-      persisted_at: input.now,
-    })
-    .executeTakeFirstOrThrow();
-
-  await materializeConversationTurnProjection(transaction, {
-    tenantId: input.tenantId,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    projectedAt: input.now,
-  });
+  if (input.preparedProjection === undefined) {
+    // Local development and deterministic store tests keep the compact
+    // PostgreSQL-only adapter. Production always supplies the externally
+    // prepared canonical projection and never stores streaming deltas here.
+    await transaction
+      .insertInto("session_events")
+      .values({
+        event_id: event.eventId,
+        tenant_id: input.tenantId,
+        session_id: input.sessionId,
+        turn_id: input.turnId,
+        agent_node_id: null,
+        agent_id: input.agentId,
+        command_id: input.commandId,
+        seq: sequence,
+        schema_version: event.schemaVersion,
+        type: event.type,
+        payload: event.payload,
+        lease_id: input.leaseId,
+        fencing_token: input.fencingToken,
+        occurred_at: input.now,
+        persisted_at: input.now,
+      })
+      .executeTakeFirstOrThrow();
+    await materializeConversationTurnProjection(transaction, {
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      projectedAt: input.now,
+    });
+  } else {
+    const prepared = input.preparedProjection;
+    const preparedEvent = prepared.terminalEvent;
+    if (
+      event.type !== "turn.completed" &&
+      event.type !== "turn.failed" &&
+      event.type !== "turn.cancelled"
+    ) {
+      throw new Error("Constructed terminal Turn event is not terminal");
+    }
+    if (
+      prepared.previousSequence !== persisted ||
+      preparedEvent.eventId !== event.eventId ||
+      preparedEvent.sessionId !== event.sessionId ||
+      preparedEvent.turnId !== event.turnId ||
+      preparedEvent.agentId !== event.agentId ||
+      preparedEvent.seq !== event.seq ||
+      preparedEvent.occurredAt !== event.occurredAt ||
+      preparedEvent.type !== event.type ||
+      JSON.stringify(preparedEvent.payload) !== JSON.stringify(event.payload)
+    ) {
+      throw new Error("Prepared terminal Turn projection no longer matches durable state");
+    }
+    await transaction
+      .insertInto("session_terminal_events")
+      .values({
+        event_id: event.eventId,
+        tenant_id: input.tenantId,
+        session_id: input.sessionId,
+        turn_id: input.turnId,
+        agent_id: input.agentId,
+        command_id: input.commandId,
+        seq: sequence,
+        schema_version: event.schemaVersion,
+        type: event.type,
+        payload: event.payload,
+        occurred_at: input.now,
+        persisted_at: input.now,
+      })
+      .executeTakeFirstOrThrow();
+    await storeConversationTurnProjection(transaction, {
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      transcript: prepared.transcript,
+      sourceEventCount: prepared.sourceEventCount,
+      projectedAt: input.now,
+    });
+    const retentionMs = input.liveStreamRetentionMs ?? 60 * 60 * 1_000;
+    if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
+      throw new TypeError("Live event retention must be at least one minute");
+    }
+    await transaction
+      .insertInto("session_live_stream_compactions")
+      .values({
+        id: globalThis.crypto.randomUUID(),
+        tenant_id: input.tenantId,
+        session_id: input.sessionId,
+        turn_id: input.turnId,
+        through_seq: sequence,
+        state: "pending",
+        attempts: 0,
+        available_at: new Date(input.now.valueOf() + retentionMs),
+        claim_owner: null,
+        claim_until: null,
+        last_error: null,
+        created_at: input.now,
+        completed_at: null,
+      })
+      .executeTakeFirstOrThrow();
+  }
 
   const cursorUpdate = await transaction
     .updateTable("session_event_cursors")

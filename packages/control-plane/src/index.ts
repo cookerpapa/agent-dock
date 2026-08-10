@@ -135,15 +135,10 @@ export {
   type S3CheckpointObjectStoreOptions,
 } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
 export {
-  DEFAULT_SESSION_EVENT_ARCHIVE_MAX_BYTES,
-  DEFAULT_SESSION_EVENT_HOT_RETENTION_MS,
-  DEFAULT_SESSION_EVENT_RETENTION_CLAIM_MS,
-  SESSION_EVENT_ARCHIVE_FORMAT,
-  SessionEventRetentionError,
-  SessionEventRetentionService,
-  verifySessionEventArchive,
-  type SessionEventRetentionOptions,
-  type SessionEventRetentionResult,
+  SessionLiveStreamCompactionError,
+  SessionLiveStreamCompactionService,
+  type SessionLiveStreamCompactionOptions,
+  type SessionLiveStreamCompactionResult,
 } from "@agent-dock/runtime-core/session-event-retention";
 export {
   RunCancellationExecutor,

@@ -153,7 +153,7 @@ cluster can bypass only that check with
 | --- | --- | --- | --- |
 | Web | CPU HPA | 2–8 | stateless |
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
-| Event Gateway | KEDA Kafka lag + CPU | 3–32 | authenticated Kafka ingest, resumable SSE and projection; Kafka partitions bound projector parallelism |
+| Event Gateway | KEDA Kafka lag + CPU | 3–32 | authenticated Kafka ingest, Valkey projection and resumable SSE; Kafka partitions bound projector parallelism |
 | Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
 | Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
@@ -163,14 +163,20 @@ The enterprise values enable the external Worker event log. Deploy the Strimzi
 baseline in [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md)
 before the global plane. Workers publish through the authenticated Event
 Gateway contract and receive a cumulative ACK only after Kafka accepts the
-batch. SSE reads only the idempotent PostgreSQL projection, and terminal
-settlement waits for the projection cursor. If Kafka or the projector is
+batch. The projector writes a contiguous Valkey Stream range before advancing
+the PostgreSQL high-water mark; SSE merges that live range with PostgreSQL's
+terminal Turn rows. Terminal settlement waits for the projection cursor and a
+complete canonical transcript. If Kafka, Valkey or the projector is
 unavailable, Runs remain non-terminal rather than exposing a completion gap.
 
 The baseline Kafka listener is TLS-only and uses SCRAM-SHA-512. Strimzi's
 generated CA/password must be synchronized into the global platform Secret as
 described in the Kafka deployment README. The Event Gateway and KEDA scaler
 share that identity; execution Cells and Cube sandboxes do not receive it.
+The platform Secret also supplies the trusted Valkey URL. Pi Workers and Cube
+sandboxes never receive that URL. Deploy Valkey with persistence/no-eviction
+and HA appropriate to the environment; Kafka retention must remain longer than
+the one-hour live replay window.
 
 Event Gateway scaling uses the projector consumer-group lag as the primary
 backlog signal and CPU as a second signal. KEDA failure fallback holds the

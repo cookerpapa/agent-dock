@@ -13,6 +13,11 @@ import { PostgresEventProjectionBarrier } from "@agent-dock/runtime-core/event-p
 import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
 import {
+  HttpTerminalTurnProjectionSource,
+  LiveTerminalTurnProjectionSource,
+} from "@agent-dock/runtime-core/terminal-turn-projection";
+import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import {
   KafkaWorkerEventLog,
   KafkaWorkerEventProjector,
 } from "@agent-dock/runtime-core/worker-event-log";
@@ -39,6 +44,7 @@ const reportPath =
 const topic = `agent-dock-enterprise-acceptance-${randomUUID()}`;
 const groupId = `agent-dock-enterprise-projector-${randomUUID()}`;
 const serviceToken = `acceptance-${"a".repeat(48)}`;
+const liveEventStoreUrl = process.env.AGENT_DOCK_LIVE_EVENT_STORE_URL ?? "redis://127.0.0.1:16379";
 const ids = {
   tenant: randomUUID(),
   user: randomUUID(),
@@ -80,6 +86,7 @@ let application: Awaited<ReturnType<typeof createControlPlaneApplication>> | und
 let gateway: EventGateway | undefined;
 let eventLog: KafkaWorkerEventLog | undefined;
 let projector: KafkaWorkerEventProjector | undefined;
+const liveEvents = new ValkeyLiveSessionEventStore({ url: liveEventStoreUrl });
 
 try {
   await runMigrations(database, "up");
@@ -252,7 +259,11 @@ try {
     clientId: "agent-dock-enterprise-ingest",
     topic,
   });
-  const store = new DurableEventStore({ database, workerEventLog: eventLog });
+  const store = new DurableEventStore({
+    database,
+    workerEventLog: eventLog,
+    liveEventStore: liveEvents,
+  });
   projector = new KafkaWorkerEventProjector({
     brokers,
     clientId: "agent-dock-enterprise-projector",
@@ -269,6 +280,7 @@ try {
     notifications: new NoopNotifications(),
     workerEventIngestor: store,
     workerEventIngestToken: serviceToken,
+    terminalTurnProjectionSource: new LiveTerminalTurnProjectionSource({ database, liveEvents }),
   });
   await projector.start();
   const address = await gateway.listen(0, "127.0.0.1");
@@ -328,12 +340,12 @@ try {
   });
   const firstProjectionMs = performance.now() - startedAt;
   await ingest.ingest(first);
-  const duplicateCount = await database
+  const rawPostgresCount = await database
     .selectFrom("session_events")
     .select(({ fn }) => fn.countAll<string>().as("count"))
     .where("session_id", "=", session.sessionId)
     .executeTakeFirstOrThrow();
-  if (duplicateCount.count !== "2") throw new Error("Duplicate ingest changed the event stream");
+  if (rawPostgresCount.count !== "0") throw new Error("Streaming deltas leaked into PostgreSQL");
 
   await projector.close();
   const second = publication(3, [" survives ", "restart"]);
@@ -359,6 +371,25 @@ try {
     ids.tenant,
     session.sessionId,
   );
+  const terminalEventId = randomUUID();
+  const terminalNow = new Date();
+  const terminalBody = {
+    type: "turn.completed" as const,
+    payload: { stopReason: "acceptance_complete" },
+  };
+  const preparedProjection = await new HttpTerminalTurnProjectionSource({
+    baseUrl: address,
+    serviceToken,
+  }).prepare({
+    tenantId: ids.tenant,
+    sessionId: session.sessionId,
+    turnId: accepted.turnId,
+    commandId: accepted.commandId,
+    agentId: "root",
+    body: terminalBody,
+    eventId: terminalEventId,
+    occurredAt: terminalNow.toISOString(),
+  });
   const terminal = await database.transaction().execute((transaction) =>
     commitTerminalTurnEvent(transaction, {
       tenantId: ids.tenant,
@@ -368,9 +399,10 @@ try {
       agentId: "root",
       leaseId,
       fencingToken: 1,
-      body: { type: "turn.completed", payload: { stopReason: "acceptance_complete" } },
-      now: new Date(),
-      eventId: randomUUID(),
+      body: terminalBody,
+      now: terminalNow,
+      eventId: terminalEventId,
+      preparedProjection,
     }),
   );
   if (terminal.seq !== 5) throw new Error("Terminal projection barrier was not contiguous");
@@ -397,12 +429,14 @@ try {
       projectorRestartRecovered: true,
       terminalBarrierContiguous: true,
       postgresPayloadOutboxAbsent: true,
+      postgresRawStreamingRows: Number(rawPostgresCount.count),
       projectedEventCount: replay.events.length,
       projectionPartitionCount: projectionOffsets.length,
     },
     latencyMs: { coldFirstBatchAckAndProjection: Number(firstProjectionMs.toFixed(2)) },
     scope: [
       "real PostgreSQL server and real single Kafka broker",
+      "real Valkey server for rebuildable live replay",
       "functional restart and idempotency acceptance",
       "not a multi-broker HA, failover, or capacity claim",
     ],
@@ -417,12 +451,14 @@ try {
       `- Measured: ${report.measuredAt}\n` +
       `- PostgreSQL: real server\n` +
       `- Kafka: real single broker\n` +
+      `- Valkey: real server\n` +
       `- Projected events: ${String(report.assertions.projectedEventCount)}\n` +
       `- Invalid service token rejected: yes\n` +
       `- Duplicate projection rows: 0\n` +
       `- Projector stop/restart recovery: passed\n` +
       `- Terminal projection barrier: passed\n` +
       `- PostgreSQL payload Outbox present: no\n\n` +
+      `- PostgreSQL raw streaming rows: ${String(report.assertions.postgresRawStreamingRows)}\n\n` +
       `This is a single-node functional acceptance, not a multi-broker HA, failover, or capacity claim.\n`,
     "utf8",
   );
@@ -431,6 +467,7 @@ try {
   await gateway?.close().catch(() => undefined);
   await projector?.close().catch(() => undefined);
   await eventLog?.close().catch(() => undefined);
+  await liveEvents.close().catch(() => undefined);
   await admin.deleteTopics({ topics: [topic] }).catch(() => undefined);
   await admin.disconnect().catch(() => undefined);
   await application?.close().catch(() => undefined);

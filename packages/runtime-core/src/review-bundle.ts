@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Database } from "@agent-dock/database";
 import {
   canonicalReviewBundleManifestJson,
+  parseConversationTurnTranscriptResource,
   parseEnvironmentValidationReport,
   parseReviewBundleManifest,
   parseWorkspaceSourceSetSnapshot,
@@ -51,20 +52,32 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function assistantText(events: readonly { seq: string; payload: Record<string, unknown> }[]) {
-  const complete = events
-    .map((event) => (typeof event.payload.text === "string" ? event.payload.text : ""))
-    .join("");
+function assistantText(
+  items: readonly {
+    kind: string;
+    text?: string;
+    firstSequence?: number;
+    lastSequence?: number;
+  }[],
+) {
+  const textItems = items.filter(
+    (item): item is typeof item & { text: string; firstSequence: number; lastSequence: number } =>
+      item.kind === "text" &&
+      typeof item.text === "string" &&
+      typeof item.firstSequence === "number" &&
+      typeof item.lastSequence === "number",
+  );
+  const complete = textItems.map((item) => item.text).join("");
   const truncated = complete.length > MAX_ASSISTANT_TEXT_LENGTH;
   const text = complete.slice(0, MAX_ASSISTANT_TEXT_LENGTH);
   return {
     text,
     textSha256: sha256(complete),
-    ...(events.length === 0
+    ...(textItems.length === 0
       ? {}
       : {
-          firstSeq: safeInteger(events[0]!.seq, "First assistant event sequence"),
-          lastSeq: safeInteger(events.at(-1)!.seq, "Last assistant event sequence"),
+          firstSeq: textItems[0]!.firstSequence,
+          lastSeq: textItems.at(-1)!.lastSequence,
         }),
     truncated,
   };
@@ -145,27 +158,15 @@ export async function createCompletedRunReviewBundle(
   const currentAttempt = attempts.find((attempt) => attempt.id === identity.attemptId);
   if (currentAttempt === undefined) throw new TypeError("Current Run Attempt is missing");
 
-  let eventQuery = transaction
-    .selectFrom("session_events")
-    .select(["seq", "type", "payload"])
+  const projectionRow = await transaction
+    .selectFrom("conversation_turn_projections")
+    .select("transcript")
     .where("tenant_id", "=", identity.tenantId)
     .where("session_id", "=", identity.sessionId)
-    .where("turn_id", "=", identity.turnId);
-  if (currentAttempt.lease_id !== null && currentAttempt.fencing_token !== null) {
-    eventQuery = eventQuery
-      .where("lease_id", "=", currentAttempt.lease_id)
-      .where("fencing_token", "=", currentAttempt.fencing_token);
-  }
-  const events = await eventQuery.orderBy("seq").execute();
-  const assistantEvents = events.filter(
-    (event): event is typeof event & { payload: Record<string, unknown> } =>
-      event.type === "assistant.text.delta",
-  );
-  const terminal = [...events].reverse().find((event) => event.type === "turn.completed");
-  const terminalPayload = terminal?.payload as Record<string, unknown> | undefined;
-  const workspacePatch = terminalPayload?.workspacePatch as
-    { patch?: unknown; truncated?: unknown } | undefined;
-  const patch = typeof workspacePatch?.patch === "string" ? workspacePatch.patch : undefined;
+    .where("turn_id", "=", identity.turnId)
+    .executeTakeFirstOrThrow();
+  const transcript = parseConversationTurnTranscriptResource(projectionRow.transcript);
+  const patch = transcript.workspacePatch?.patch;
 
   const workspaceVersion = await transaction
     .selectFrom("workspace_versions")
@@ -196,30 +197,16 @@ export async function createCompletedRunReviewBundle(
     .orderBy("id")
     .limit(100)
     .execute();
-  const testEvents = await transaction
-    .selectFrom("session_events")
-    .select(["seq", "payload"])
-    .where("tenant_id", "=", identity.tenantId)
-    .where("session_id", "=", identity.sessionId)
-    .where("turn_id", "=", identity.turnId)
-    .where("type", "=", "tool.completed")
-    .orderBy("seq")
-    .execute();
   const testSequenceByToolCall = new Map(
-    testEvents.flatMap((event) => {
-      const payload = event.payload;
-      return "toolCallId" in payload && typeof payload.toolCallId === "string"
-        ? [[payload.toolCallId, event.seq] as const]
-        : [];
-    }),
+    transcript.items.flatMap((item) =>
+      item.kind === "tool" ? [[item.toolCallId, item.firstSequence] as const] : [],
+    ),
   );
   tests.sort((left, right) => {
     const leftSeq = testSequenceByToolCall.get(left.tool_call_id);
     const rightSeq = testSequenceByToolCall.get(right.tool_call_id);
     if (leftSeq !== undefined && rightSeq !== undefined) {
-      const leftSequence = BigInt(leftSeq);
-      const rightSequence = BigInt(rightSeq);
-      return leftSequence < rightSequence ? -1 : leftSequence > rightSequence ? 1 : 0;
+      return leftSeq - rightSeq;
     }
     if (leftSeq !== undefined) return -1;
     if (rightSeq !== undefined) return 1;
@@ -296,7 +283,7 @@ export async function createCompletedRunReviewBundle(
       claimedAt: iso(attempt.claimed_at),
       ...(attempt.settled_at === null ? {} : { settledAt: iso(attempt.settled_at) }),
     })),
-    assistant: assistantText(assistantEvents),
+    assistant: assistantText(transcript.items),
     changes: {
       ...(workspaceVersion === undefined ? {} : { workspaceVersionId: workspaceVersion.id }),
       ...(patchArtifact === undefined

@@ -42,6 +42,7 @@ import * as sessionSandboxRetention from "./040_session_sandbox_retention.ts";
 import * as decouplePersistentSandboxLeases from "./041_decouple_persistent_sandbox_leases.ts";
 import * as kafkaFirstWorkerEventLog from "./042_kafka_first_worker_event_log.ts";
 import * as sessionEventHotRetention from "./043_session_event_hot_retention.ts";
+import * as canonicalConversationsAndLiveStreams from "./044_canonical_conversations_and_live_streams.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -89,6 +90,7 @@ export const migrationProvider: MigrationProvider = {
       "041_decouple_persistent_sandbox_leases": decouplePersistentSandboxLeases,
       "042_kafka_first_worker_event_log": kafkaFirstWorkerEventLog,
       "043_session_event_hot_retention": sessionEventHotRetention,
+      "044_canonical_conversations_and_live_streams": canonicalConversationsAndLiveStreams,
     };
   },
 };
@@ -288,3 +290,7 @@ export {
   down as downDecouplePersistentSandboxLeases,
   up as upDecouplePersistentSandboxLeases,
 } from "./041_decouple_persistent_sandbox_leases.ts";
+export {
+  down as downCanonicalConversationsAndLiveStreams,
+  up as upCanonicalConversationsAndLiveStreams,
+} from "./044_canonical_conversations_and_live_streams.ts";

@@ -6,7 +6,7 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 ## Completed foundation
 
 - Pi SDK Agent Loop with native Session/compaction restore;
-- PostgreSQL durable Run/Attempt/event state;
+- PostgreSQL durable Run/Attempt state and canonical conversation Turns;
 - resumable SSE;
 - multi-tenant authentication and quotas;
 - Temporal as the sole Run scheduler;
@@ -78,14 +78,13 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
 - [x] Split long-lived resumable SSE delivery into an independently scalable
       Event Gateway.
 - [x] Cross the measured PostgreSQL event-capacity gate and add the enterprise
-      Kafka-first -> idempotent PostgreSQL projection path, including an
-      authenticated Worker ingest gateway, terminal projection barrier and
-      Strimzi deployment baseline without a PostgreSQL payload Outbox.
+      Kafka-first -> Valkey live projection path, including an authenticated
+      Worker ingest gateway, terminal canonical projection barrier and Strimzi
+      deployment baseline without a PostgreSQL raw-payload copy.
 - [x] Add a Session-level automatic/persistent Cube retention choice with lazy
       activation, dedicated-Workspace ownership and archive-driven cleanup.
-- [x] Move large Pi Sessions to compressed bounded object segments and archive
-      projected terminal raw events out of PostgreSQL after a configurable hot
-      replay window.
+- [x] Move large Pi Sessions to compressed bounded object segments; keep live
+      deltas in Kafka/Valkey and only terminal canonical Turns in PostgreSQL.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

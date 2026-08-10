@@ -21,6 +21,7 @@ import {
   type TurnExecutionBackend,
 } from "../src/index.ts";
 import { createCompletedRunReviewBundle } from "@agent-dock/runtime-core/review-bundle";
+import { materializeConversationTurnProjection } from "@agent-dock/runtime-core/conversation-turn-projection";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 
 const IDS = {
@@ -575,7 +576,7 @@ async function settlePassingCandidate(
           type: "turn.completed",
           payload: {
             stopReason: "stop",
-            workspacePatch: { patch, truncated: false },
+            workspacePatch: { format: "unified_diff", patch, truncated: false },
           },
           lease_id: leaseId,
           fencing_token: 1,
@@ -626,6 +627,12 @@ async function settlePassingCandidate(
         })),
       ])
       .execute();
+    await materializeConversationTurnProjection(transaction, {
+      tenantId: IDS.tenant,
+      sessionId: candidate.sessionId,
+      turnId: run.turn_id,
+      projectedAt: settledAt,
+    });
     await createCompletedRunReviewBundle(
       transaction,
       {

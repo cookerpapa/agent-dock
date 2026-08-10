@@ -61,6 +61,7 @@ spec:
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
             - { name: AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE, value: /run/agent-dock-secrets/database-notification-url }
             - { name: AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE, value: /run/agent-dock-secrets/worker-event-ingest-token }
+            - { name: AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE, value: /run/agent-dock-secrets/live-event-store-url }
             - name: AGENT_DOCK_KAFKA_BROKERS
               value: {{ join "," .Values.external.kafka.brokers | quote }}
             - { name: AGENT_DOCK_WORKER_EVENT_TOPIC, value: {{ .Values.external.kafka.topic | quote }} }
@@ -88,6 +89,7 @@ spec:
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/database-notification-url, subPath: {{ .Values.external.database.notificationSecretKey }}, readOnly: true }
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/worker-event-ingest-token, subPath: {{ .Values.external.eventIngest.tokenSecretKey }}, readOnly: true }
+            - { name: platform-secrets, mountPath: /run/agent-dock-secrets/live-event-store-url, subPath: {{ .Values.external.liveEventStore.urlSecretKey }}, readOnly: true }
             {{- if .Values.external.kafka.security.enabled }}
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/kafka-ca.crt, subPath: {{ .Values.external.kafka.security.caSecretKey }}, readOnly: true }
             - { name: platform-secrets, mountPath: /run/agent-dock-secrets/kafka-username, subPath: {{ .Values.external.kafka.security.usernameSecretKey }}, readOnly: true }

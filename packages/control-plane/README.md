@@ -9,7 +9,7 @@ AgentDock.
 - Projects, named Workspaces and named conversations;
 - Run/Attempt admission, idempotency and Session ordering;
 - leases, fencing tokens, heartbeats and terminal commit;
-- event persistence and resumable SSE;
+- canonical terminal conversation persistence and resumable SSE cursors;
 - immutable Pi/Workspace checkpoint pointers;
 - Temporal Workflow start/cancel;
 - model/proxy configuration and usage;
@@ -46,9 +46,11 @@ durable side effects.
 
 ## State
 
-PostgreSQL is authoritative for business state and event cursors. MinIO/S3
-stores immutable Pi and Workspace artifacts. Temporal owns Workflow history,
-not the user-facing records.
+PostgreSQL is authoritative for business state, complete terminal conversation
+projections and event cursors. Kafka is the durable live-event log and Valkey
+is its bounded, rebuildable SSE read model. MinIO/S3 stores immutable Pi and
+Workspace artifacts. Temporal owns Workflow history, not the user-facing
+records.
 
 Conversation titles are independent from Workspace names. A Workspace may be
 shared by multiple conversations. Archived conversations are excluded from

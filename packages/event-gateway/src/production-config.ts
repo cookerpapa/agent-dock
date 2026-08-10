@@ -6,6 +6,7 @@ export type EventGatewayProductionConfig = {
   databaseUrl: string;
   databaseNotificationUrl: string;
   workerEventIngestToken?: string;
+  liveEventStoreUrl?: string;
   kafka?: {
     brokers: readonly string[];
     clientId: string;
@@ -87,6 +88,14 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
             "/run/agent-dock-secrets/worker-event-ingest-token",
           "Worker event ingest token",
         );
+  const liveEventStoreUrl =
+    kafka === undefined
+      ? undefined
+      : await readSecret(
+          process.env.AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE ??
+            "/run/agent-dock-secrets/live-event-store-url",
+          "Valkey live event store URL",
+        );
   return {
     host: process.env.HOST ?? "0.0.0.0",
     port: port(process.env.PORT),
@@ -94,5 +103,6 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
     databaseNotificationUrl,
     ...(kafka === undefined ? {} : { kafka }),
     ...(workerEventIngestToken === undefined ? {} : { workerEventIngestToken }),
+    ...(liveEventStoreUrl === undefined ? {} : { liveEventStoreUrl }),
   };
 }

@@ -107,11 +107,10 @@
     "eventRetention": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "replicas", "hotDays", "intervalMs", "batchSize", "resources"],
+      "required": ["enabled", "replicas", "intervalMs", "batchSize", "resources"],
       "properties": {
         "enabled": { "type": "boolean" },
         "replicas": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "hotDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
         "intervalMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
         "batchSize": { "type": "integer", "minimum": 1, "maximum": 10000 },
         "resources": { "$ref": "#/$defs/resources" }
@@ -148,6 +147,7 @@
         "database",
         "temporal",
         "kafka",
+        "liveEventStore",
         "checkpointS3",
         "kopiaS3",
         "providerProxyUrl",
@@ -200,6 +200,12 @@
               }
             }
           }
+        },
+        "liveEventStore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["urlSecretKey"],
+          "properties": { "urlSecretKey": { "$ref": "#/$defs/secretKey" } }
         },
         "checkpointS3": { "$ref": "#/$defs/s3" },
         "kopiaS3": {
