@@ -1210,6 +1210,28 @@ async function checkDeployment(expectedRevision, { requireCurrent = true, emit =
       throw new Error(`Worker Pod ${pod.metadata?.name} has no Event Gateway credential file`);
     }
   }
+  const eventGatewayProbe = await kubectlCapture(
+    [
+      "--namespace",
+      workerNamespace,
+      "exec",
+      pods.items[0].metadata.name,
+      "--",
+      "node",
+      "--input-type=module",
+      "--eval",
+      [
+        "const response=await fetch(",
+        "'http://event-gateway.agent-dock-system.svc.cluster.local:4600/internal/v1/worker-events',",
+        "{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(5000)});",
+        "console.log(response.status);",
+      ].join(""),
+    ],
+    10_000,
+  );
+  if (eventGatewayProbe !== "401") {
+    throw new Error("Kubernetes Pi Workers cannot reach the authenticated Event Gateway");
+  }
 
   const controlPlane = await composeContainer("control-plane");
   await waitForManagementRoutes(controlPlane);
