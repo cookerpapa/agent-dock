@@ -1,6 +1,6 @@
 # Enterprise event-pipeline acceptance
 
-- Measured: 2026-08-10T15:43:28.162Z
+- Measured: 2026-08-10T16:41:37.745Z
 - PostgreSQL: real server
 - Kafka: real single broker
 - Valkey: real server

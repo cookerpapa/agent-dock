@@ -1,10 +1,12 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-08-10T15:43:28.162Z",
+  "measuredAt": "2026-08-10T16:41:37.745Z",
   "kafka": {
-    "brokers": ["127.0.0.1:19092"],
-    "topic": "agent-dock-enterprise-acceptance-7a30c103-8ff5-40cf-96c6-d2a8a2341bac",
-    "groupId": "agent-dock-enterprise-projector-18e5d67f-f1cc-4565-809c-52570dbc9e21"
+    "brokers": [
+      "127.0.0.1:19092"
+    ],
+    "topic": "agent-dock-enterprise-acceptance-ce0de2bd-6d86-4e3f-b5c3-39b888ceaac3",
+    "groupId": "agent-dock-enterprise-projector-3a6a97c2-3ed7-4481-b1f9-d1f4df1beb64"
   },
   "postgres": {
     "realServer": true
@@ -22,7 +24,7 @@
     "projectionPartitionCount": 1
   },
   "latencyMs": {
-    "coldFirstBatchAckAndProjection": 4609.72
+    "coldFirstBatchAckAndProjection": 1247.66
   },
   "scope": [
     "real PostgreSQL server and real single Kafka broker",
