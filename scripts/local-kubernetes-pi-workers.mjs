@@ -56,6 +56,7 @@ const workerMetricsHosts = workerIds.map(
 );
 
 const composeNetworks = {
+  api: "agent-dock-production_api",
   management: "agent-dock-production_management",
   database: "agent-dock-production_database",
   objectStorage: "agent-dock-production_object-storage",
@@ -67,6 +68,12 @@ const composeNetworks = {
 };
 
 const bridgeTargets = [
+  {
+    name: "event-gateway",
+    composeService: "event-gateway",
+    network: composeNetworks.api,
+    port: 4600,
+  },
   {
     name: "control-plane",
     composeService: "control-plane",
@@ -677,6 +684,7 @@ async function applyWorkerSecret(githubGatewayEnabled) {
     "supervisor-enrollment-token": await source("supervisor-enrollment-token"),
     "supervisor-management-token": await source("supervisor-management-token"),
     "sandbox-manager-token": await source("sandbox-manager-token"),
+    "worker-event-ingest-token": await source("worker-event-ingest-token"),
     "model-credential-master-key": await source("model-credential-master-key"),
     "metrics-token": await source("metrics-token"),
   };
@@ -944,11 +952,13 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "temporal.workerDeploymentName=agent-dock-pi-workers",
     "--set",
-    "runtime.externalWorkerEventLog=false",
+    "runtime.externalWorkerEventLog=true",
     "--set-string",
     `temporal.workerBuildId=${revision}`,
     "--set",
     "services.controlPlaneUrl=http://control-plane.agent-dock-system.svc.cluster.local:3000",
+    "--set",
+    "services.eventGatewayUrl=http://event-gateway.agent-dock-system.svc.cluster.local:4600",
     "--set",
     "services.sandboxManagerUrls[0]=http://sandbox-manager.agent-dock-system.svc.cluster.local:4300",
     "--set",
@@ -1184,6 +1194,21 @@ async function checkDeployment(expectedRevision, { requireCurrent = true, emit =
       (condition) => condition.type === "Ready" && condition.status === "True",
     );
     if (!ready) throw new Error(`Worker Pod ${pod.metadata?.name} is not Ready`);
+    const worker = pod.spec?.containers?.find((container) => container.name === "pi-worker");
+    const environment = new Map((worker?.env ?? []).map((entry) => [entry.name, entry]));
+    if (environment.get("AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG")?.value !== "true") {
+      throw new Error(`Worker Pod ${pod.metadata?.name} bypasses the durable Event Gateway`);
+    }
+    if (
+      environment.get("AGENT_DOCK_WORKER_EVENT_INGEST_URL")?.value !==
+      `http://event-gateway.${systemNamespace}.svc.cluster.local:4600`
+    ) {
+      throw new Error(`Worker Pod ${pod.metadata?.name} has an invalid Event Gateway route`);
+    }
+    const eventToken = environment.get("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE");
+    if (eventToken?.value !== "/run/agent-dock-secrets/worker-event-ingest-token") {
+      throw new Error(`Worker Pod ${pod.metadata?.name} has no Event Gateway credential file`);
+    }
   }
 
   const controlPlane = await composeContainer("control-plane");
