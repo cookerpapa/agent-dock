@@ -128,18 +128,26 @@ PostgreSQL is authoritative for:
 - tenants, users, roles and browser sessions;
 - Projects, Workspaces, conversations, messages and Runs;
 - RunAttempt leases, heartbeat, fencing tokens and terminal state;
-- event sequence cursors, idempotency keys and Workspace head CAS;
+- hot event replay, semantic conversation projections, event sequence cursors,
+  idempotency keys and Workspace head CAS;
 - model/proxy configuration metadata and usage records.
 
 MinIO/S3 stores immutable:
 
 - Pi native JSONL segment manifests;
+- compressed cold event archives after the SSE hot window;
 - Workspace/Kopia checkpoints;
 - artifacts and Review Bundles.
 
 The active Pi `messages[]` is reconstructed by the Pi SDK from its native
 checkpoint. AgentDock does not rebuild model context from the rendered browser
 transcript. Pi compaction therefore survives Worker movement and cold restore.
+Pi JSONL uses compressed content-addressed 8 MiB segments, reuses stable full
+chunks and replaces only the bounded trailing chunk when the native Session
+has not been rewritten. Terminal
+stream events remain in PostgreSQL for a configurable 14-day hot window; after
+their semantic projection commits, an independently scalable retention Worker
+archives them to object storage and advances an explicit replay floor.
 
 ## Workspace model
 

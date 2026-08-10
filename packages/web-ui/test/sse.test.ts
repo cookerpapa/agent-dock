@@ -117,4 +117,35 @@ describe("SSE session client", () => {
       message: "SSE frame identity does not match its event",
     });
   });
+
+  it("reloads the semantic conversation when the retained SSE cursor expires", async () => {
+    const controller = new AbortController();
+    const cursors: string[] = [];
+    let calls = 0;
+    let reloads = 0;
+    const lastSequence = await streamSessionEvents({
+      sessionId: SESSION_ID,
+      afterSequence: 3,
+      signal: controller.signal,
+      retryDelayMs: 0,
+      fetchImplementation: async (_input, init) => {
+        cursors.push(new Headers(init?.headers).get("last-event-id") ?? "missing");
+        calls += 1;
+        if (calls === 1) return new Response("expired", { status: 410 });
+        controller.abort();
+        return eventStream("");
+      },
+      onCursorExpired: async () => {
+        reloads += 1;
+        return 27;
+      },
+      onEvent() {
+        throw new Error("no event should be delivered");
+      },
+      onStatus() {},
+    });
+    expect(lastSequence).toBe(27);
+    expect(reloads).toBe(1);
+    expect(cursors).toEqual(["3", "27"]);
+  });
 });

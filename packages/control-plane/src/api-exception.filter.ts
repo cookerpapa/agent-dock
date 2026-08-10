@@ -139,7 +139,9 @@ function mappedError(error: unknown): ErrorResponse {
     const status =
       error.code === "not_found"
         ? 404
-        : error.code === "cursor_ahead" || error.code === "event_conflict"
+        : error.code === "cursor_ahead" ||
+            error.code === "cursor_expired" ||
+            error.code === "event_conflict"
           ? 409
           : error.code === "event_store_invariant"
             ? 503

@@ -124,6 +124,11 @@ tenant's persistent process world.
 Tool file APIs normalize paths beneath `/workspace`, reject absolute/traversal
 and symlink escape, bound file sizes and validate immutable checkpoint hashes.
 The Data Mover never accepts an arbitrary host path from the model or browser.
+Pi Session segments and cold event archives are content-addressed and validated
+against both stored and reconstructed SHA-256 digests before use. Event rows are
+deleted from hot PostgreSQL storage only after the terminal semantic projection
+and immutable archive upload exist; replay-floor advancement and archive
+metadata commit in the same transaction.
 
 ### Duplicate/ambiguous side effects
 
@@ -160,10 +165,13 @@ deployment configuration.
 ## Data retention
 
 Conversation deletion is a soft archive. It removes the Session from ordinary
-listing/direct conversation reads but retains the durable event, Pi checkpoint
-and Workspace audit history for retention/recovery. A future retention worker
-must delete those records under explicit policy; the browser delete action does
-not silently erase a shared Workspace.
+listing/direct conversation reads but retains the Pi checkpoint, semantic
+conversation projection, cold raw-event archive and Workspace audit history.
+Terminal raw events are moved out of PostgreSQL only after the configured hot
+window; that is a storage-tier transition, not user-data deletion. A future
+hard-deletion/garbage-collection worker must erase database metadata and all
+referenced immutable objects under explicit tenant/legal policy. The browser
+delete action does not silently erase a shared Workspace.
 
 ## Required evidence
 

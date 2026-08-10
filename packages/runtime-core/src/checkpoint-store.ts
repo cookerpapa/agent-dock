@@ -1,7 +1,6 @@
 import type { Database } from "@agent-dock/database";
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
 import {
-  MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
@@ -28,12 +27,21 @@ import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
 import {
   PI_SESSION_MANIFEST_MEDIA_TYPE,
+  PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE,
+  PI_SESSION_MANIFEST_MAX_BYTES,
   PiSessionManifestError,
   decodePiSessionManifest,
   preparePiSessionManifest,
   restorePiSessionManifest,
   type PiSessionManifest,
+  type PiSessionSegmentDescriptor,
 } from "./pi-session-manifest.ts";
+
+// One object is either an 8 MiB Pi segment, a bounded manifest, or a compressed
+// event archive whose uncompressed limit is 128 MiB. Keep the object-store
+// guard comfortably above those payloads without permitting unbounded reads.
+export const MAX_CHECKPOINT_OBJECT_BYTES = 136 * 1_024 * 1_024;
+const PI_SEGMENT_UPLOAD_CONCURRENCY = 4;
 
 export interface CheckpointObjectStore {
   put(objectKey: string, bytes: Uint8Array): Promise<void>;
@@ -73,6 +81,8 @@ type LoadedPiSessionState = {
   manifest: PiSessionManifest;
   manifestSha256: string;
 };
+
+type LoadedPiSessionManifestState = Omit<LoadedPiSessionState, "bytes">;
 
 type PreparedPiSessionArtifact = {
   artifactId: string;
@@ -193,10 +203,7 @@ export class FileCheckpointObjectStore implements CheckpointObjectStore {
         false,
       );
     }
-    if (
-      metadata.size < 1 ||
-      metadata.size > Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES)
-    ) {
+    if (metadata.size < 1 || metadata.size > MAX_CHECKPOINT_OBJECT_BYTES) {
       throw new SandboxCheckpointStoreError(
         "checkpoint_object_invalid",
         "Checkpoint object is outside its byte limit",
@@ -959,7 +966,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
               sha256: pi.sha256,
               sizeBytes: safeSize(
                 pi.size_bytes,
-                MAX_PI_SESSION_SNAPSHOT_BYTES,
+                PI_SESSION_MANIFEST_MAX_BYTES,
                 "Pi session checkpoint",
               ),
               ...(pi.media_type === null ? {} : { mediaType: pi.media_type }),
@@ -981,7 +988,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     piSession: Uint8Array,
     allowCancellation = false,
   ): Promise<PreparedPiSessionArtifact> {
-    let previous: LoadedPiSessionState | undefined;
+    let previous: LoadedPiSessionManifestState | undefined;
     if (baseRevision !== null) {
       const metadata = await this.#database
         .transaction()
@@ -996,18 +1003,24 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         );
       }
       if (metadata.piSession !== undefined) {
-        previous = await this.#loadPiSession(command, metadata.piSession);
-        validatePiSessionSnapshot(previous.bytes);
+        previous = await this.#loadPiSessionManifest(metadata.piSession);
       }
     }
 
     const prepared = preparePiSessionManifest(piSession, PINNED_PI_CODING_AGENT_VERSION, previous);
-    await Promise.all(
-      prepared.newSegments.map(async (segment) => {
-        const objectKey = this.#piSegmentObjectKey(command, segment.descriptor.sha256);
-        await this.#putContentAddressed(objectKey, segment.bytes);
-      }),
-    );
+    for (
+      let index = 0;
+      index < prepared.newSegments.length;
+      index += PI_SEGMENT_UPLOAD_CONCURRENCY
+    ) {
+      const batch = prepared.newSegments.slice(index, index + PI_SEGMENT_UPLOAD_CONCURRENCY);
+      await Promise.all(
+        batch.map(async (segment) => {
+          const objectKey = this.#piSegmentObjectKey(command, segment.descriptor);
+          await this.#putContentAddressed(objectKey, segment.bytes);
+        }),
+      );
+    }
     const objectKey = this.#piManifestObjectKey(command, prepared.manifestSha256);
     await this.#putContentAddressed(objectKey, prepared.manifestBytes);
     return {
@@ -1027,9 +1040,31 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     reference: ArtifactReference,
   ): Promise<LoadedPiSessionState> {
+    const loaded = await this.#loadPiSessionManifest(reference);
+    try {
+      const bytes = await restorePiSessionManifest(loaded.manifest, async (descriptor) =>
+        this.#objectStore.get(this.#piSegmentObjectKey(command, descriptor)),
+      );
+      return { bytes, ...loaded };
+    } catch (error: unknown) {
+      if (!(error instanceof PiSessionManifestError)) throw error;
+      throw new SandboxCheckpointStoreError(
+        "checkpoint_corrupt",
+        "Pi session checkpoint failed integrity validation",
+        false,
+      );
+    }
+  }
+
+  async #loadPiSessionManifest(
+    reference: ArtifactReference,
+  ): Promise<LoadedPiSessionManifestState> {
     const stored = await this.#objectStore.get(reference.objectKey);
-    this.#verifyObject(stored, reference, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session");
-    if (reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE) {
+    this.#verifyObject(stored, reference, PI_SESSION_MANIFEST_MAX_BYTES, "Pi session manifest");
+    if (
+      reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE &&
+      reference.mediaType !== PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE
+    ) {
       throw new SandboxCheckpointStoreError(
         "checkpoint_incompatible",
         "Pi session checkpoint format is unsupported",
@@ -1041,11 +1076,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       if (manifest.piVersion !== PINNED_PI_CODING_AGENT_VERSION) {
         throw new PiSessionManifestError("Pi session manifest version is incompatible");
       }
-      const bytes = await restorePiSessionManifest(manifest, async (descriptor) =>
-        this.#objectStore.get(this.#piSegmentObjectKey(command, descriptor.sha256)),
-      );
       return {
-        bytes,
         manifest,
         manifestSha256: reference.sha256,
       };
@@ -1081,14 +1112,19 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     }
   }
 
-  #piSegmentObjectKey(command: ExecuteTurnCommandMessage, digest: string): string {
+  #piSegmentObjectKey(
+    command: ExecuteTurnCommandMessage,
+    descriptor: PiSessionSegmentDescriptor,
+  ): string {
     return validateCheckpointObjectKey(
       [
         "pi-sessions",
         command.payload.tenantId,
         command.payload.sessionId,
         "segments",
-        `${digest}.jsonl`,
+        descriptor.encoding === "gzip"
+          ? `${descriptor.sha256}.jsonl.gz`
+          : `${descriptor.sha256}.jsonl`,
       ].join("/"),
     );
   }

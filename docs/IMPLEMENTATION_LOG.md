@@ -3328,3 +3328,24 @@
   terminal ordering and removal of the payload Outbox. A separate single-broker
   transport run preserved per-Session order for 16,384 logical events across
   256 Sessions; it is not represented as multi-broker capacity evidence.
+
+# 2026-08-10 — Tiered large-Session and event retention storage
+
+- Raised the Pi-native logical Session envelope to 512 MiB and replaced the
+  uncompressed small-segment writer with gzip-compressed, content-addressed
+  8 MiB chunks. Append saves reuse stable full chunks and replace only one
+  bounded tail; restore validates stored/raw hashes with bounded four-object
+  concurrency. Read-only v2 support permits in-place checkpoint migration.
+- Added a projection-gated Event Retention service. It claims one contiguous
+  terminal Turn prefix, uploads exact raw rows as immutable gzip NDJSON, then
+  atomically commits archive metadata, deletes the hot replay rows and advances
+  the Session replay floor. Stale claims and replay-floor CAS conflicts fail
+  closed, while old SSE clients receive an explicit reload response.
+- Kept Session-hash PostgreSQL partitions for the interactive access path and
+  lowered leaf autovacuum thresholds. Deferred time-root repartitioning and
+  `pg_partman` because neither replaces the semantic-projection/object-archive
+  safety gate and no measured hot-table vacuum bottleneck currently warrants a
+  second partition dimension.
+- Added single-host Compose and multi-replica Helm deployment for the Worker
+  with only database/object-store credentials, plus large Session, archive
+  integrity, semantic-survival, cursor-expiry and schema tests.

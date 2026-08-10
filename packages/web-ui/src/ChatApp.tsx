@@ -162,13 +162,19 @@ export default function ChatApp() {
       onStatus(status) {
         update({ type: "stream.status", status });
       },
+      async onCursorExpired() {
+        const detail = await api.getConversation(sessionId);
+        lastSequenceRef.current = detail.replayAfterSequence;
+        update({ type: "conversation.loaded", conversation: detail });
+        return detail.replayAfterSequence;
+      },
     }).catch(() => {
       if (!controller.signal.aborted) {
         update({ type: "api.error", message: "实时连接已中断，正在等待重新连接。" });
       }
     });
     return () => controller.abort();
-  }, [authPhase, reconnectGeneration, refreshConversations, state.session?.sessionId, update]);
+  }, [api, authPhase, reconnectGeneration, refreshConversations, state.session?.sessionId, update]);
 
   // A Run can fail before the trusted Runner publishes its first session
   // event (for example during Sandbox provisioning). The durable Run record is

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { MAX_WORKSPACE_SNAPSHOT_BYTES } from "@agent-dock/protocol";
-
 import {
   createS3CheckpointObjectStoreFromEnvironment,
+  MAX_CHECKPOINT_OBJECT_BYTES,
   S3CheckpointObjectStore,
   SandboxCheckpointStoreError,
   type S3CheckpointObjectStoreOptions,
@@ -89,7 +88,7 @@ describe("S3 checkpoint object store", () => {
         retryable: false,
       });
       await expect(
-        store.put("valid/object.bin", Buffer.alloc(MAX_WORKSPACE_SNAPSHOT_BYTES + 1)),
+        store.put("valid/object.bin", Buffer.alloc(MAX_CHECKPOINT_OBJECT_BYTES + 1)),
       ).rejects.toMatchObject({
         code: "checkpoint_object_invalid",
         retryable: false,

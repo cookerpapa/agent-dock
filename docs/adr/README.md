@@ -74,6 +74,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0091](0091-kafka-first-worker-event-ingest.md) removes the PostgreSQL
   payload transfer Outbox and makes authenticated Kafka append the enterprise
   Worker stream's first shared durability boundary.
+- [ADR-0092](0092-tiered-session-and-event-storage.md) stores large Pi-native
+  Sessions as compressed content-addressed objects and keeps PostgreSQL event
+  replay bounded through projection-gated hot-to-cold archival.
 
 ## Maintained optional modules
 

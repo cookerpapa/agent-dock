@@ -16,6 +16,7 @@ export * from "./run-command-executor.ts";
 export * from "./s3-checkpoint-object-store.ts";
 export * from "./session-event-hub.ts";
 export * from "./session-event-notifications.ts";
+export * from "./session-event-retention.ts";
 export * from "./session-lease-coordinator.ts";
 export * from "./structured-test-command.ts";
 export * from "./terminal-turn-event.ts";

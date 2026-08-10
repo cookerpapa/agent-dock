@@ -103,6 +103,22 @@ assert.equal(
 find("HorizontalPodAutoscaler", "agent-dock-control-plane");
 find("PodDisruptionBudget", "agent-dock-control-plane");
 
+const eventRetention = find("Deployment", "agent-dock-event-retention");
+assert.equal(eventRetention.spec.replicas, 2);
+assert.equal(eventRetention.spec.template.spec.automountServiceAccountToken, false);
+const eventRetentionContainer = eventRetention.spec.template.spec.containers[0];
+assert.deepEqual(eventRetentionContainer.command, [
+  "/app/packages/control-plane/src/event-retention-main.ts",
+]);
+const eventRetentionEnvironment = Object.fromEntries(
+  eventRetentionContainer.env
+    .filter((entry) => entry.value !== undefined)
+    .map((entry) => [entry.name, String(entry.value)]),
+);
+assert.equal(eventRetentionEnvironment.AGENT_DOCK_EVENT_HOT_RETENTION_DAYS, "14");
+assert.equal(eventRetentionEnvironment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
+find("NetworkPolicy", "agent-dock-event-retention");
+
 const eventGateway = find("Deployment", "agent-dock-event-gateway");
 assert.equal(eventGateway.spec.replicas, 3);
 assert.equal(eventGateway.spec.strategy.rollingUpdate.maxUnavailable, 0);

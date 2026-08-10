@@ -1,4 +1,5 @@
 import {
+  MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
   MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type ExecuteTurnCommandMessage,
@@ -138,26 +139,33 @@ function jsonRecord(value: unknown): value is Record<string, unknown> {
 
 export function validatePiSessionSnapshot(bytes: Uint8Array): void {
   assertNonEmptyBounded(bytes, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session snapshot");
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw checkpointError("Pi session snapshot is not valid UTF-8");
-  }
-  if (text.includes("\0")) throw checkpointError("Pi session snapshot contains a NUL byte");
-  const lines = text.split("\n").filter((line) => line.length > 0);
-  if (lines.length < 2) throw checkpointError("Pi session snapshot is not settled");
+  if (bytes.at(-1) !== 0x0a) throw checkpointError("Pi session snapshot is not settled");
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let hasAssistant = false;
   let hasInterruptionMarker = false;
-  for (const [index, line] of lines.entries()) {
+  let lineStart = 0;
+  let parsedLines = 0;
+  for (let index = 0; index < buffer.byteLength; index += 1) {
+    if (buffer[index] !== 0x0a) continue;
+    const line = buffer.subarray(lineStart, index);
+    lineStart = index + 1;
+    if (line.byteLength === 0) continue;
+    if (line.includes(0)) throw checkpointError("Pi session snapshot contains a NUL byte");
+    let text: string;
+    try {
+      text = decoder.decode(line);
+    } catch {
+      throw checkpointError("Pi session snapshot is not valid UTF-8");
+    }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(line) as unknown;
+      parsed = JSON.parse(text) as unknown;
     } catch {
       throw checkpointError("Pi session snapshot contains malformed JSONL");
     }
     if (!jsonRecord(parsed)) throw checkpointError("Pi session JSONL entry is not an object");
-    if (index === 0) {
+    if (parsedLines === 0) {
       if (
         parsed.type !== "session" ||
         typeof parsed.id !== "string" ||
@@ -166,6 +174,7 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
       ) {
         throw checkpointError("Pi session header does not belong to the sandbox workspace");
       }
+      parsedLines += 1;
       continue;
     }
     if (
@@ -178,7 +187,9 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
     if (parsed.type === "custom_message" && parsed.customType === "agent-dock.run_interrupted") {
       hasInterruptionMarker = true;
     }
+    parsedLines += 1;
   }
+  if (parsedLines < 2) throw checkpointError("Pi session snapshot is not settled");
   if (!hasAssistant && !hasInterruptionMarker) {
     throw checkpointError("Pi session snapshot has no assistant message or interruption boundary");
   }
@@ -193,7 +204,7 @@ export function encodeSettledCheckpoint(
     format: "agent-dock.settled-checkpoint.v1",
     piSession: encodeBlob(
       checkpoint.piSession,
-      MAX_PI_SESSION_SNAPSHOT_BYTES,
+      MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
       "Pi session snapshot",
     ),
     workspace: encodeBlob(checkpoint.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot"),
@@ -222,7 +233,7 @@ export function decodeSettledCheckpoint(
   }
   const piSession = decodeBlob(
     checkpoint.piSession,
-    MAX_PI_SESSION_SNAPSHOT_BYTES,
+    MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
     "Pi session snapshot",
   );
   const workspace = decodeBlob(

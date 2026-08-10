@@ -191,11 +191,12 @@ Cube runtime lifetime and Workspace lifetime are independent.
 | Workspace identity and current revision | PostgreSQL |
 | Runs, Attempts, leases and fences | PostgreSQL |
 | Workflow timers/retry history | Temporal |
-| Pi native Session bytes | immutable object storage |
+| Pi native Session bytes | compressed, content-addressed immutable object segments |
 | active Pi `messages[]` | Pi SDK memory for one active Run |
 | Workspace checkpoint bytes | immutable Kopia/object storage |
 | live process tree | one Cube microVM |
-| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/projection cursor, consumed offset and replay projection |
+| Worker event transport/high-water mark | Kafka in enterprise mode; PostgreSQL sequence/projection cursor, consumed offset and hot replay projection |
+| terminal raw events beyond the hot window | immutable gzip NDJSON object archive |
 | browser SSE connections and replay cursors | stateless Event Gateway replicas |
 | UI transcript projection | PostgreSQL-derived read model |
 
@@ -359,8 +360,11 @@ continuity during normal idle time, not VM-state durability across failure.
 Pi writes its native append-only Session tree, including compaction records.
 After `agent_settled`, the Worker:
 
-1. segments the complete JSONL by content hash;
-2. uploads missing immutable segments;
+1. validates the complete native JSONL and splits it into bounded 8 MiB raw
+   chunks;
+2. gzip-compresses and uploads missing content-addressed segments; an
+   append-only Session reuses its complete previous chunks without downloading
+   the prior JSONL and replaces only its bounded trailing chunk;
 3. writes a new immutable manifest;
 4. advances the PostgreSQL checkpoint head under the current fence.
 
@@ -369,7 +373,7 @@ On another Worker:
 ```text
 PostgreSQL checkpoint head
   → immutable manifest
-  → cache/object-store segments
+  → four-at-a-time bounded cache/object-store segment reads
   → reconstructed session.jsonl
   → Pi SessionManager.open()
   → Pi reconstructs effective model context
@@ -516,6 +520,17 @@ already shown therefore survive in the replay table and semantic projection.
 Successful/catchable Runs preserve them in Pi's native Session; an uncatchable
 crash uses the bounded one-time recovery bridge described above so they also
 affect Pi's next effective model context.
+
+The replay table is intentionally hot storage. Once a terminal Turn has a
+committed semantic projection and is older than the configured retention
+window, the Event Retention service uploads its exact contiguous event rows as
+a content-addressed gzip NDJSON object. One PostgreSQL transaction then commits
+the immutable archive metadata, removes those hot rows and advances the
+Session's `replay_floor_seq`. An SSE cursor below that floor receives HTTP 410
+and reloads the semantic conversation read model; active and recent cursors
+retain exact sequence replay. Multiple retention replicas coordinate through
+leased row claims. Archive-before-delete and cursor CAS prevent partial cold
+migration from erasing the replay authority.
 
 ## 9. Lease and fencing
 

@@ -417,6 +417,66 @@ services:
     stop_grace_period: 30s
     logging: *bounded-logging
 
+  event-retention:
+    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    build:
+      context: ../..
+      dockerfile: packages/control-plane/Dockerfile
+      args: *application-build-args
+      network: host
+    restart: unless-stopped
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      minio-bootstrap:
+        condition: service_completed_successfully
+    command: [/app/packages/control-plane/src/event-retention-main.ts]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
+      AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
+      AWS_EC2_METADATA_DISABLED: "true"
+      AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
+      AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
+      AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
+      AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX: production/v1
+      AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
+      AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
+      AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
+      AGENT_DOCK_EVENT_HOT_RETENTION_DAYS: ${AGENT_DOCK_EVENT_HOT_RETENTION_DAYS:-14}
+      AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS: ${AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS:-60000}
+      AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE: ${AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE:-100}
+      AGENT_DOCK_METRICS_HOST: 0.0.0.0
+      AGENT_DOCK_METRICS_PORT: "9468"
+      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
+      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
+    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/agent-dock-secrets/database-url
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
+        target: /run/agent-dock-secrets/aws-credentials
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/agent-dock-secrets/metrics-token
+        read_only: true
+    networks:
+      - database
+      - object-storage
+      - observability
+    <<: *application-security
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
   event-gateway:
     image: agent-dock/event-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
@@ -706,7 +766,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
       - /workspace:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
     pids_limit: 256
-    mem_limit: 768m
+    mem_limit: 2g
     cpus: 2.0
     stop_grace_period: 45s
     logging: *bounded-logging

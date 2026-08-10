@@ -11,6 +11,7 @@
     "images",
     "bootstrap",
     "controlPlane",
+    "eventRetention",
     "eventGateway",
     "web",
     "external",
@@ -103,6 +104,19 @@
       }
     },
     "controlPlane": { "$ref": "#/$defs/httpWorkload" },
+    "eventRetention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "replicas", "hotDays", "intervalMs", "batchSize", "resources"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "hotDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "intervalMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
+        "batchSize": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
     "eventGateway": { "$ref": "#/$defs/httpWorkload" },
     "web": {
       "allOf": [

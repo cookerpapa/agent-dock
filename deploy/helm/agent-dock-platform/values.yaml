@@ -65,8 +65,18 @@ controlPlane:
   publicRegistrationEnabled: true
   supervisorIdPrefix: agent-dock-pi-worker-
   resources:
-    requests: { cpu: 250m, memory: 384Mi }
-    limits: { cpu: "2", memory: 1Gi }
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 4Gi }
+
+eventRetention:
+  enabled: true
+  replicas: 2
+  hotDays: 14
+  intervalMs: 60000
+  batchSize: 100
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
 
 eventGateway:
   replicas: 3

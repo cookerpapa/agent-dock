@@ -83,11 +83,14 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
       Strimzi deployment baseline without a PostgreSQL payload Outbox.
 - [x] Add a Session-level automatic/persistent Cube retention choice with lazy
       activation, dedicated-Workspace ownership and archive-driven cleanup.
+- [x] Move large Pi Sessions to compressed bounded object segments and archive
+      projected terminal raw events out of PostgreSQL after a configurable hot
+      replay window.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
 
-- retained-data policy and hard deletion worker;
+- tenant/session hard deletion and object garbage collection policy;
 - multi-node failure injection for Worker/node loss;
 - externalize Cell-local Sandbox Manager activation state and validate
   multi-replica fail-closed recovery;

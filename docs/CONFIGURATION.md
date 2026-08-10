@@ -156,11 +156,21 @@ do not define the policy of accounts created through public registration.
 | `AGENT_DOCK_CHECKPOINT_BUCKET` | `agent-dock-checkpoints` | Immutable Pi Session checkpoint objects. | Changing an occupied bucket does not migrate existing checkpoints. |
 | `AGENT_DOCK_CHECKPOINT_REGION` | `us-east-1` | S3 region used for Pi checkpoint requests. | Must match the selected object store. |
 | `AGENT_DOCK_WORKSPACE_KOPIA_BUCKET` | `agent-dock-workspace-kopia` | Kopia repository objects for durable Workspace checkpoints. | Changing an occupied repository requires an explicit migration and recovery test. |
+| `AGENT_DOCK_EVENT_HOT_RETENTION_DAYS` | `14` | Days terminal raw SSE events remain queryable in PostgreSQL before archive. | Conversation projections and Pi checkpoints are not deleted. Recreate Event Retention. |
+| `AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS` | `60000` | Idle scan interval for the archive Worker. | Minimum 1000 ms. Recreate Event Retention. |
+| `AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE` | `100` | Maximum terminal Turns archived before the Worker yields. | Tune against PostgreSQL/object-store capacity. Recreate Event Retention. |
 
 The default topology deliberately fixes MinIO endpoints, key prefixes and
 path-style access to its internal object-storage network. External S3 is a
 deployment-topology change, not a supported `.env` toggle in the single-host
 profile.
+
+The distributed Helm profile exposes the same policy under
+`eventRetention.hotDays`, `eventRetention.intervalMs` and
+`eventRetention.batchSize`. Its replicas are safe to increase because claims
+and replay-floor advancement are coordinated in PostgreSQL. Object-store
+lifecycle rules must not expire Pi Session segments or event archives earlier
+than the platform's legal/audit retention policy.
 
 ### Optional modules and observability
 

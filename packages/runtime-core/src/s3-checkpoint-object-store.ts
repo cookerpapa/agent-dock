@@ -6,19 +6,14 @@ import {
   S3Client,
   type S3ClientConfig,
 } from "@aws-sdk/client-s3";
-import { MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 
 import {
   SandboxCheckpointStoreError,
+  MAX_CHECKPOINT_OBJECT_BYTES,
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
 } from "./checkpoint-store.ts";
-
-const MAX_CHECKPOINT_OBJECT_BYTES = Math.max(
-  MAX_PI_SESSION_SNAPSHOT_BYTES,
-  MAX_WORKSPACE_SNAPSHOT_BYTES,
-);
 
 type S3Credentials = NonNullable<S3ClientConfig["credentials"]>;
 

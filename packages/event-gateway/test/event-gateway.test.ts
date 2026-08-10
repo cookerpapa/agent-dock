@@ -8,6 +8,7 @@ import type {
   DurableEventGroupIngestor,
   DurableEventLog,
 } from "@agent-dock/runtime-core/durable-event-store";
+import { DurableEventStoreError } from "@agent-dock/runtime-core/durable-event-store";
 import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import type {
   SessionEventNotification,
@@ -255,5 +256,39 @@ describe("Event Gateway", () => {
     expect(frame).toContain("event: assistant.text.delta\n");
     expect(frame).toContain('"text":"hello"');
     abort.abort();
+  });
+
+  it("tells a stale SSE client to reload the semantic conversation projection", async () => {
+    const expiredEventLog: DurableEventLog = {
+      ingest: () => Promise.reject(new Error("not used")),
+      openReplayWindow: () =>
+        Promise.reject(
+          new DurableEventStoreError(
+            "cursor_expired",
+            "The requested event cursor is outside the retained hot window",
+          ),
+        ),
+      readReplayPage: () => Promise.resolve([]),
+    };
+    const gateway = new EventGateway({
+      database: {} as Kysely<Database>,
+      eventLog: expiredEventLog,
+      apiAuthenticator: new StaticAuthenticator(API_TOKEN),
+      webSessionAuthenticator: new StaticAuthenticator("web-token"),
+      notifications: new FakeNotifications(),
+    });
+    running.push(gateway);
+    const response = await gateway.application.inject({
+      method: "GET",
+      url: `/v1/sessions/${SESSION_ID}/events`,
+      headers: { authorization: `Bearer ${API_TOKEN}`, "last-event-id": "1" },
+    });
+    expect(response.statusCode).toBe(410);
+    expect(response.json()).toEqual({
+      error: {
+        code: "event_cursor_expired",
+        message: "The retained event window moved forward; reload the conversation",
+      },
+    });
   });
 });

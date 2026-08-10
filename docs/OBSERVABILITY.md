@@ -32,7 +32,7 @@ unless an external endpoint is configured explicitly.
 
 ## Metrics
 
-Prometheus scrapes three bearer-protected endpoints over the internal
+Prometheus scrapes five bearer-protected endpoints over the internal
 observability network:
 
 | Service | Internal endpoint | Main signals |
@@ -40,6 +40,8 @@ observability network:
 | Control Plane | `control-plane:9464/metrics` | queue, outcomes, attempts, process |
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
 | Sandbox Manager | `sandbox-manager:9466/metrics` | Provider lifecycle, tools, process |
+| Event Gateway | `event-gateway:9467/metrics` | ingest/projector and stream process signals |
+| Event Retention | `event-retention:9468/metrics` | archive-worker process signals |
 
 `agent_dock_sandbox_active{provider="cubesandbox"}` reports assigned and
 exact-Session warm Cube activations. Provider lifecycle, warm reuse and cleanup

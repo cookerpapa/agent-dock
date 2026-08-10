@@ -95,6 +95,7 @@ export type StreamSessionEventsOptions = {
   signal: AbortSignal;
   onEvent(event: AgentDockEvent): void;
   onStatus(status: SessionStreamStatus): void;
+  onCursorExpired?(): Promise<number>;
   fetchImplementation?: FetchImplementation;
   retryDelayMs?: number;
   authorizationToken?: string;
@@ -218,6 +219,15 @@ export async function streamSessionEvents(options: StreamSessionEventsOptions): 
         },
       );
       if (!response.ok) {
+        if (response.status === 410 && options.onCursorExpired !== undefined) {
+          lastSequence = nonNegativeInteger(
+            await options.onCursorExpired(),
+            "cursor reset sequence",
+          );
+          attempt = 0;
+          serverRetryMs = undefined;
+          continue;
+        }
         const retryable =
           response.status >= 500 || response.status === 408 || response.status === 429;
         throw new SessionStreamError(

@@ -785,7 +785,29 @@ export interface SessionEventCursorTable {
   last_persisted_seq: GeneratedInt8;
   last_projected_seq: GeneratedInt8;
   acknowledged_through_seq: GeneratedInt8;
+  replay_floor_seq: GeneratedInt8;
   updated_at: GeneratedTimestamp;
+}
+
+export interface SessionEventArchiveTable {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  first_seq: Int8;
+  last_seq: Int8;
+  event_count: number;
+  format: "agent-dock.session-events.ndjson.gzip.v1";
+  object_key: string | null;
+  sha256: string | null;
+  uncompressed_sha256: string | null;
+  size_bytes: NullableInt8;
+  uncompressed_size_bytes: NullableInt8;
+  state: "uploading" | "committed";
+  claim_owner: string;
+  claim_until: Timestamp;
+  created_at: GeneratedTimestamp;
+  archived_at: NullableTimestamp;
 }
 
 export interface SessionEventIdTable {
@@ -1130,6 +1152,7 @@ export interface Database {
   commands: CommandTable;
   approvals: ApprovalTable;
   session_events: SessionEventTable;
+  session_event_archives: SessionEventArchiveTable;
   session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
   worker_event_projection_offsets: WorkerEventProjectionOffsetTable;

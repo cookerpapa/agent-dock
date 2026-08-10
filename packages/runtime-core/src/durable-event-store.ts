@@ -29,6 +29,7 @@ export type DurableEventStoreErrorCode =
   | "sequence_gap"
   | "stale_fence"
   | "cursor_ahead"
+  | "cursor_expired"
   | "event_store_invariant";
 
 export class DurableEventStoreError extends Error {
@@ -682,7 +683,10 @@ export class DurableEventStore
     const cursor = await this.#database
       .selectFrom("sessions as session_row")
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
-      .select("cursor.last_projected_seq as highWaterMark")
+      .select([
+        "cursor.last_projected_seq as highWaterMark",
+        "cursor.replay_floor_seq as replayFloor",
+      ])
       .where("session_row.tenant_id", "=", tenantId)
       .where("session_row.id", "=", sessionId)
       .executeTakeFirst();
@@ -690,6 +694,13 @@ export class DurableEventStore
       throw new DurableEventStoreError("not_found", "Session event stream was not found");
     }
     const highWaterMark = safeInteger(cursor.highWaterMark, "session event high-water mark");
+    const replayFloor = safeInteger(cursor.replayFloor, "session event replay floor");
+    if (afterSequence < replayFloor) {
+      throw new DurableEventStoreError(
+        "cursor_expired",
+        "Last-Event-ID is older than the retained hot event window; reload the conversation",
+      );
+    }
     if (afterSequence > highWaterMark) {
       throw new DurableEventStoreError(
         "cursor_ahead",

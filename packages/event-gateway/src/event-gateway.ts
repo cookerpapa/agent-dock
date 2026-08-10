@@ -206,6 +206,15 @@ export class EventGateway {
           await sendError(reply, 404, "session_not_found", "The Session was not found");
           return;
         }
+        if (error instanceof DurableEventStoreError && error.code === "cursor_expired") {
+          await sendError(
+            reply,
+            410,
+            "event_cursor_expired",
+            "The retained event window moved forward; reload the conversation",
+          );
+          return;
+        }
         await sendError(reply, 503, "event_stream_unavailable", "The event stream is unavailable");
         return;
       }

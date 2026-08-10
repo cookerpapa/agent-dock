@@ -81,6 +81,10 @@ in the implementation log or Git history, not in the active backlog.
       replay projection and a terminal projection barrier. PostgreSQL remains
       authoritative for business settlement and projection cursors without
       duplicating the raw event payload in a transfer Outbox.
+- [x] Keep raw terminal events in a configurable PostgreSQL hot window, archive
+      exact contiguous Turn ranges to immutable object storage only after the
+      semantic projection commits, and make expired SSE cursors reload the
+      retained conversation projection explicitly.
 - [ ] Run sustained multi-node Kafka broker/projector loss and partition-rebalance
       acceptance before publishing a measured Stage 2 throughput claim.
 

@@ -4,7 +4,7 @@ import {
   PI_SESSION_MANIFEST_MAX_SEGMENTS,
   preparePiSessionManifest,
   restorePiSessionManifest,
-} from "../packages/control-plane/src/pi-session-manifest.ts";
+} from "../packages/runtime-core/src/pi-session-manifest.ts";
 
 const TURN_COUNT = 120;
 const RESTORE_SAMPLES = 100;
@@ -82,7 +82,6 @@ for (let turn = 1; turn <= TURN_COUNT; turn += 1) {
   objects.set(prepared.manifestSha256, prepared.manifestBytes);
   manifestStoredBytes += prepared.manifestBytes.byteLength;
   previous = {
-    bytes: sessionBytes,
     manifest: prepared.manifest,
     manifestSha256: prepared.manifestSha256,
   };
@@ -117,7 +116,7 @@ process.stdout.write(
         storedBytesAcrossTurns: wholeFileStoredBytes,
         objectsWritten: TURN_COUNT,
       },
-      segmentedManifestV2: {
+      compressedSegmentedManifestV3: {
         storedBytesAcrossTurns: segmentedStoredBytes,
         uniqueSegmentBytes: segmentStoredBytes,
         manifestBytesAcrossTurns: manifestStoredBytes,

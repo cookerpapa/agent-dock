@@ -30,6 +30,7 @@ export {
 export {
   AgentModelRuntimeSchema,
   AgentWorkspaceSeedSchema,
+  MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
   MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   SandboxCheckpointBlobSchema,

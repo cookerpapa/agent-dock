@@ -2,14 +2,20 @@ import { Type, type Static } from "typebox";
 import { DeepSeekModelIdSchema } from "./control-plane-api.ts";
 import { WorkspacePatchSchema } from "./event-envelope.ts";
 
-export const MAX_PI_SESSION_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
+// Pi owns the native Session file and can legitimately retain a long append-only
+// tree even when its effective model context has been compacted. The production
+// checkpoint path never puts these bytes in a control-plane envelope: it chunks
+// and compresses them into object storage. Keep the logical Session bound
+// separate from the much smaller legacy inline-envelope bound below.
+export const MAX_PI_SESSION_SNAPSHOT_BYTES = 512 * 1_024 * 1_024;
+export const MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
 // Provider-native Workspace checkpoints carry a bounded file index and an
 // encrypted recovery reference. Large filesystem bytes remain in the Provider
 // snapshot instead of being base64-inlined into this control message.
 export const MAX_WORKSPACE_SNAPSHOT_BYTES = 32 * 1_024 * 1_024;
 
 const MAX_BASE64_SNAPSHOT_LENGTH =
-  Math.ceil(Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES) / 3) * 4;
+  Math.ceil(Math.max(MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES) / 3) * 4;
 
 const Sha256Schema = Type.String({ pattern: "^[0-9a-f]{64}$" });
 
@@ -35,8 +41,18 @@ export const SandboxCheckpointBlobSchema = Type.Object(
     sha256: Sha256Schema,
     sizeBytes: Type.Integer({
       minimum: 1,
-      maximum: Math.max(MAX_PI_SESSION_SNAPSHOT_BYTES, MAX_WORKSPACE_SNAPSHOT_BYTES),
+      maximum: MAX_WORKSPACE_SNAPSHOT_BYTES,
     }),
+    data: Type.String({ minLength: 4, maxLength: MAX_BASE64_SNAPSHOT_LENGTH }),
+  },
+  { additionalProperties: false },
+);
+
+const InlinePiSessionCheckpointBlobSchema = Type.Object(
+  {
+    encoding: Type.Literal("base64"),
+    sha256: Sha256Schema,
+    sizeBytes: Type.Integer({ minimum: 1, maximum: MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES }),
     data: Type.String({ minLength: 4, maxLength: MAX_BASE64_SNAPSHOT_LENGTH }),
   },
   { additionalProperties: false },
@@ -45,7 +61,7 @@ export const SandboxCheckpointBlobSchema = Type.Object(
 export const SandboxSettledCheckpointSchema = Type.Object(
   {
     format: Type.Literal("agent-dock.settled-checkpoint.v1"),
-    piSession: SandboxCheckpointBlobSchema,
+    piSession: InlinePiSessionCheckpointBlobSchema,
     workspace: SandboxCheckpointBlobSchema,
     workspacePatch: Type.Optional(WorkspacePatchSchema),
   },

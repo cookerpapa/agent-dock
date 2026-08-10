@@ -31,13 +31,12 @@ function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-describe("Pi session manifest v2", () => {
+describe("Pi session manifest v3", () => {
   it("stores append-only suffixes and reconstructs byte-identical Pi JSONL", async () => {
     const firstBytes = session("one");
     const first = preparePiSessionManifest(firstBytes, "0.80.10");
     const secondBytes = session("one", "two");
     const second = preparePiSessionManifest(secondBytes, "0.80.10", {
-      bytes: firstBytes,
       manifest: first.manifest,
       manifestSha256: first.manifestSha256,
     });
@@ -45,9 +44,6 @@ describe("Pi session manifest v2", () => {
     expect(second.manifest.mode).toBe("append");
     expect(second.manifest.previousManifestSha256).toBe(first.manifestSha256);
     expect(second.newSegments).toHaveLength(1);
-    expect(second.manifest.segments.slice(0, first.manifest.segments.length)).toEqual(
-      first.manifest.segments,
-    );
 
     const objects = new Map<string, Uint8Array>();
     for (const segment of [...first.newSegments, ...second.newSegments]) {
@@ -62,34 +58,61 @@ describe("Pi session manifest v2", () => {
     ).resolves.toEqual(secondBytes);
   });
 
-  it("rebases non-append Pi output and consolidates an excessive segment chain", () => {
+  it("keeps one bounded tail object instead of adding one segment per small Turn", () => {
+    let previous = preparePiSessionManifest(session("one"), "0.80.10");
+    for (let index = 2; index <= 120; index += 1) {
+      const next = preparePiSessionManifest(
+        session(...Array.from({ length: index }, (_, offset) => `turn-${String(offset)}`)),
+        "0.80.10",
+        { manifest: previous.manifest, manifestSha256: previous.manifestSha256 },
+      );
+      expect(next.manifest.segments).toHaveLength(1);
+      previous = next;
+    }
+  });
+
+  it("rebases non-append Pi output and keeps small append chains consolidated", () => {
     const firstBytes = session("one");
     const first = preparePiSessionManifest(firstBytes, "0.80.10");
     const rewritten = session("different");
     const rebase = preparePiSessionManifest(rewritten, "0.80.10", {
-      bytes: firstBytes,
       manifest: first.manifest,
       manifestSha256: first.manifestSha256,
     });
     expect(rebase.manifest.mode).toBe("rebase");
     expect(rebase.manifest.sessionSha256).toBe(digest(rewritten));
 
-    let previousBytes = firstBytes;
     let previous = first;
-    let consolidated = false;
     for (let index = 2; index <= PI_SESSION_MANIFEST_MAX_SEGMENTS + 4; index += 1) {
       const nextBytes = session(...Array.from({ length: index }, (_, offset) => String(offset)));
       const next = preparePiSessionManifest(nextBytes, "0.80.10", {
-        bytes: previousBytes,
         manifest: previous.manifest,
         manifestSha256: previous.manifestSha256,
       });
-      if (next.manifest.mode === "rebase") consolidated = true;
-      expect(next.manifest.segments.length).toBeLessThanOrEqual(PI_SESSION_MANIFEST_MAX_SEGMENTS);
-      previousBytes = nextBytes;
+      expect(next.manifest.segments).toHaveLength(1);
       previous = next;
     }
-    expect(consolidated).toBe(true);
+  });
+
+  it("compresses and restores a Session larger than the former 2 MiB envelope", async () => {
+    const bytes = session("x".repeat(3 * 1_024 * 1_024));
+    const prepared = preparePiSessionManifest(bytes, "0.80.10");
+    expect(bytes.byteLength).toBeGreaterThan(2 * 1_024 * 1_024);
+    expect(prepared.manifest.segments.every((entry) => entry.encoding === "gzip")).toBe(true);
+    expect(
+      prepared.manifest.segments.reduce((sum, entry) => sum + entry.storedSizeBytes, 0),
+    ).toBeLessThan(bytes.byteLength / 10);
+
+    const objects = new Map(
+      prepared.newSegments.map((entry) => [entry.descriptor.sha256, entry.bytes] as const),
+    );
+    const restored = await restorePiSessionManifest(prepared.manifest, async (descriptor) => {
+      const stored = objects.get(descriptor.sha256);
+      if (stored === undefined) throw new Error("missing fixture segment");
+      return stored;
+    });
+    expect(restored.byteLength).toBe(bytes.byteLength);
+    expect(digest(restored)).toBe(digest(bytes));
   });
 
   it("rejects malformed manifests and corrupt, missing, or reordered segments", async () => {

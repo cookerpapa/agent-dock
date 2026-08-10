@@ -63,6 +63,40 @@ spec:
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
+metadata: { name: {{ $name }}-event-retention }
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: event-retention }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
+      ports: [{ protocol: TCP, port: 9468 }]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to:
+        - namespaceSelector:
+            matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
+      ports:
+        {{- range $trustedPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+    {{- range $externalCidrs }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+      ports:
+        {{- range $trustedPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
 metadata: { name: {{ $name }}-event-gateway }
 spec:
   podSelector:

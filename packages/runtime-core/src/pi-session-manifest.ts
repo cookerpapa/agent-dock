@@ -1,15 +1,29 @@
 import { MAX_PI_SESSION_SNAPSHOT_BYTES } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
+import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
 
-export const PI_SESSION_MANIFEST_FORMAT = "agent-dock.pi-session-manifest.v2";
-export const PI_SESSION_MANIFEST_MEDIA_TYPE = "application/vnd.agent-dock.pi-session-manifest+json";
-export const PI_SESSION_SEGMENT_TARGET_BYTES = 256 * 1_024;
-export const PI_SESSION_MANIFEST_MAX_SEGMENTS = 32;
+export const PI_SESSION_MANIFEST_FORMAT = "agent-dock.pi-session-manifest.v3";
+export const PI_SESSION_MANIFEST_MEDIA_TYPE =
+  "application/vnd.agent-dock.pi-session-manifest.v3+json";
+export const PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE =
+  "application/vnd.agent-dock.pi-session-manifest+json";
+export const PI_SESSION_MANIFEST_MAX_BYTES = 2 * 1_024 * 1_024;
+export const PI_SESSION_SEGMENT_TARGET_BYTES = 8 * 1_024 * 1_024;
+export const PI_SESSION_MANIFEST_MAX_SEGMENTS = 64;
+
+const LEGACY_MANIFEST_FORMAT = "agent-dock.pi-session-manifest.v2";
+const LEGACY_MANIFEST_MAX_SEGMENTS = 32;
+const RESTORE_CONCURRENCY = 4;
 
 export type PiSessionSegmentDescriptor = {
+  /** SHA-256 and size of the reconstructed native JSONL bytes. */
   sha256: string;
   sizeBytes: number;
   lineCount: number;
+  encoding: "gzip" | "identity";
+  /** SHA-256 and size of the immutable object-store representation. */
+  storedSha256: string;
+  storedSizeBytes: number;
 };
 
 export type PiSessionManifest = {
@@ -25,6 +39,7 @@ export type PiSessionManifest = {
 
 export type PiSessionSegment = {
   descriptor: PiSessionSegmentDescriptor;
+  /** Compressed bytes written to object storage. */
   bytes: Uint8Array;
 };
 
@@ -36,7 +51,6 @@ export type PreparedPiSessionManifest = {
 };
 
 export type PreviousPiSessionManifest = {
-  bytes: Uint8Array;
   manifest: PiSessionManifest;
   manifestSha256: string;
 };
@@ -75,48 +89,52 @@ function assertJsonlBoundary(bytes: Uint8Array, description: string): void {
   }
 }
 
+function encodeSegment(rawBytes: Uint8Array): PiSessionSegment {
+  const storedBytes = gzipSync(rawBytes, { level: zlibConstants.Z_BEST_SPEED });
+  return {
+    descriptor: {
+      sha256: digest(rawBytes),
+      sizeBytes: rawBytes.byteLength,
+      lineCount: lineCount(rawBytes),
+      encoding: "gzip",
+      storedSha256: digest(storedBytes),
+      storedSizeBytes: storedBytes.byteLength,
+    },
+    bytes: storedBytes,
+  };
+}
+
+/**
+ * Fixed-size chunks keep every S3 operation bounded even when one JSONL entry
+ * contains a very large Tool result. JSONL framing is validated after complete
+ * reconstruction rather than requiring every physical chunk to end on a line.
+ */
 function segment(bytes: Uint8Array): PiSessionSegment[] {
   assertJsonlBoundary(bytes, "Pi session");
   const output: PiSessionSegment[] = [];
-  let segmentStart = 0;
-  let lineStart = 0;
-  for (let index = 0; index < bytes.byteLength; index += 1) {
-    if (bytes[index] !== 0x0a) continue;
-    const lineEnd = index + 1;
-    if (lineStart > segmentStart && lineEnd - segmentStart > PI_SESSION_SEGMENT_TARGET_BYTES) {
-      const part = bytes.slice(segmentStart, lineStart);
-      output.push({
-        descriptor: {
-          sha256: digest(part),
-          sizeBytes: part.byteLength,
-          lineCount: lineCount(part),
-        },
-        bytes: part,
-      });
-      segmentStart = lineStart;
-    }
-    lineStart = lineEnd;
-  }
-  if (segmentStart < bytes.byteLength) {
-    const part = bytes.slice(segmentStart);
-    output.push({
-      descriptor: {
-        sha256: digest(part),
-        sizeBytes: part.byteLength,
-        lineCount: lineCount(part),
-      },
-      bytes: part,
-    });
+  for (let start = 0; start < bytes.byteLength; start += PI_SESSION_SEGMENT_TARGET_BYTES) {
+    output.push(
+      encodeSegment(
+        bytes.subarray(start, Math.min(start + PI_SESSION_SEGMENT_TARGET_BYTES, bytes.byteLength)),
+      ),
+    );
   }
   return output;
 }
 
-function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
-  if (prefix.byteLength > bytes.byteLength) return false;
-  for (let index = 0; index < prefix.byteLength; index += 1) {
-    if (bytes[index] !== prefix[index]) return false;
+function segmentSuffix(bytes: Uint8Array): PiSessionSegment[] {
+  if (bytes.byteLength < 1 || bytes.at(-1) !== 0x0a) {
+    throw new PiSessionManifestError("Pi session suffix is not line aligned");
   }
-  return true;
+  const output: PiSessionSegment[] = [];
+  for (let start = 0; start < bytes.byteLength; start += PI_SESSION_SEGMENT_TARGET_BYTES) {
+    output.push(
+      encodeSegment(
+        bytes.subarray(start, Math.min(start + PI_SESSION_SEGMENT_TARGET_BYTES, bytes.byteLength)),
+      ),
+    );
+  }
+  return output;
 }
 
 function canonicalManifestBytes(manifest: PiSessionManifest): Uint8Array {
@@ -159,17 +177,28 @@ export function preparePiSessionManifest(
 
   if (
     previous !== undefined &&
-    previous.bytes.byteLength < sessionBytes.byteLength &&
-    previous.bytes.at(-1) === 0x0a &&
-    startsWith(sessionBytes, previous.bytes)
+    previous.manifest.totalSizeBytes < sessionBytes.byteLength &&
+    digest(sessionBytes.subarray(0, previous.manifest.totalSizeBytes)) ===
+      previous.manifest.sessionSha256
   ) {
     mode = "append";
     previousManifestSha256 = previous.manifestSha256;
-    const baseSegments = previous.manifest.segments.map((descriptor) => ({ ...descriptor }));
-    const suffix = sessionBytes.slice(previous.bytes.byteLength);
-    const suffixSegments = segmentSuffix(suffix);
-    newSegments = suffixSegments;
-    descriptors = [...baseSegments, ...suffixSegments.map((entry) => entry.descriptor)];
+    const previousDescriptors = previous.manifest.segments;
+    const previousLast = previousDescriptors.at(-1)!;
+    // A settled Run is usually much smaller than 8 MiB. Rewriting one bounded
+    // partial tail prevents the active manifest from growing by one object per
+    // Turn while still reusing every already-full immutable chunk.
+    const reusableCount =
+      previousLast.sizeBytes === PI_SESSION_SEGMENT_TARGET_BYTES
+        ? previousDescriptors.length
+        : previousDescriptors.length - 1;
+    const reusable = previousDescriptors
+      .slice(0, reusableCount)
+      .map((descriptor) => ({ ...descriptor }));
+    const reusableBytes = reusable.reduce((sum, descriptor) => sum + descriptor.sizeBytes, 0);
+    const tailSegments = segmentSuffix(sessionBytes.subarray(reusableBytes));
+    newSegments = tailSegments;
+    descriptors = [...reusable, ...tailSegments.map((entry) => entry.descriptor)];
   }
 
   if (
@@ -183,50 +212,20 @@ export function preparePiSessionManifest(
     descriptors = newSegments.map((entry) => entry.descriptor);
   }
 
+  if (descriptors.length > PI_SESSION_MANIFEST_MAX_SEGMENTS) {
+    throw new PiSessionManifestError("Pi session requires too many bounded segments");
+  }
   const manifest = makeManifest(piVersion, mode, descriptors, sessionBytes, previousManifestSha256);
   const manifestBytes = canonicalManifestBytes(manifest);
+  if (manifestBytes.byteLength > PI_SESSION_MANIFEST_MAX_BYTES) {
+    throw new PiSessionManifestError("Pi session manifest is outside its byte limit");
+  }
   return {
     manifest,
     manifestBytes,
     manifestSha256: digest(manifestBytes),
     newSegments,
   };
-}
-
-function segmentSuffix(bytes: Uint8Array): PiSessionSegment[] {
-  if (bytes.byteLength < 1 || bytes.at(-1) !== 0x0a) {
-    throw new PiSessionManifestError("Pi session suffix is not line aligned");
-  }
-  const output: PiSessionSegment[] = [];
-  let segmentStart = 0;
-  let lineStart = 0;
-  for (let index = 0; index < bytes.byteLength; index += 1) {
-    if (bytes[index] !== 0x0a) continue;
-    const lineEnd = index + 1;
-    if (lineStart > segmentStart && lineEnd - segmentStart > PI_SESSION_SEGMENT_TARGET_BYTES) {
-      const part = bytes.slice(segmentStart, lineStart);
-      output.push({
-        descriptor: {
-          sha256: digest(part),
-          sizeBytes: part.byteLength,
-          lineCount: lineCount(part),
-        },
-        bytes: part,
-      });
-      segmentStart = lineStart;
-    }
-    lineStart = lineEnd;
-  }
-  const part = bytes.slice(segmentStart);
-  output.push({
-    descriptor: {
-      sha256: digest(part),
-      sizeBytes: part.byteLength,
-      lineCount: lineCount(part),
-    },
-    bytes: part,
-  });
-  return output;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -236,8 +235,82 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function commonManifestMetadata(value: Record<string, unknown>, maximumSegments: number): void {
+  if (
+    typeof value.piVersion !== "string" ||
+    value.piVersion.length < 1 ||
+    value.piVersion.length > 64 ||
+    (value.mode !== "append" && value.mode !== "rebase") ||
+    !validSha256(value.sessionSha256) ||
+    !Number.isSafeInteger(value.totalSizeBytes) ||
+    Number(value.totalSizeBytes) < 1 ||
+    Number(value.totalSizeBytes) > MAX_PI_SESSION_SNAPSHOT_BYTES ||
+    !Number.isSafeInteger(value.totalLineCount) ||
+    Number(value.totalLineCount) < 2 ||
+    (value.previousManifestSha256 !== undefined && !validSha256(value.previousManifestSha256)) ||
+    !Array.isArray(value.segments) ||
+    value.segments.length < 1 ||
+    value.segments.length > maximumSegments
+  ) {
+    throw new PiSessionManifestError("Pi session manifest metadata is invalid");
+  }
+}
+
+function decodeLegacyDescriptor(raw: unknown): PiSessionSegmentDescriptor {
+  const item = record(raw);
+  if (
+    !validSha256(item.sha256) ||
+    !Number.isSafeInteger(item.sizeBytes) ||
+    Number(item.sizeBytes) < 1 ||
+    Number(item.sizeBytes) > MAX_PI_SESSION_SNAPSHOT_BYTES ||
+    !Number.isSafeInteger(item.lineCount) ||
+    Number(item.lineCount) < 0
+  ) {
+    throw new PiSessionManifestError("Pi session segment metadata is invalid");
+  }
+  return {
+    sha256: item.sha256,
+    sizeBytes: Number(item.sizeBytes),
+    lineCount: Number(item.lineCount),
+    encoding: "identity",
+    storedSha256: item.sha256,
+    storedSizeBytes: Number(item.sizeBytes),
+  };
+}
+
+function decodeDescriptor(raw: unknown): PiSessionSegmentDescriptor {
+  const item = record(raw);
+  if (
+    !validSha256(item.sha256) ||
+    !Number.isSafeInteger(item.sizeBytes) ||
+    Number(item.sizeBytes) < 1 ||
+    Number(item.sizeBytes) > PI_SESSION_SEGMENT_TARGET_BYTES ||
+    !Number.isSafeInteger(item.lineCount) ||
+    Number(item.lineCount) < 0 ||
+    item.encoding !== "gzip" ||
+    !validSha256(item.storedSha256) ||
+    !Number.isSafeInteger(item.storedSizeBytes) ||
+    Number(item.storedSizeBytes) < 1 ||
+    Number(item.storedSizeBytes) > PI_SESSION_SEGMENT_TARGET_BYTES + 1_024 * 1_024
+  ) {
+    throw new PiSessionManifestError("Pi session segment metadata is invalid");
+  }
+  return {
+    sha256: item.sha256,
+    sizeBytes: Number(item.sizeBytes),
+    lineCount: Number(item.lineCount),
+    encoding: "gzip",
+    storedSha256: item.storedSha256,
+    storedSizeBytes: Number(item.storedSizeBytes),
+  };
+}
+
+/**
+ * V2 remains a read-only migration format so an in-place deployment can write
+ * its next V3 manifest without discarding existing immutable checkpoints.
+ */
 export function decodePiSessionManifest(bytes: Uint8Array): PiSessionManifest {
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_PI_SESSION_SNAPSHOT_BYTES) {
+  if (bytes.byteLength < 1 || bytes.byteLength > PI_SESSION_MANIFEST_MAX_BYTES) {
     throw new PiSessionManifestError("Pi session manifest is outside its byte limit");
   }
   let text: string;
@@ -256,43 +329,17 @@ export function decodePiSessionManifest(bytes: Uint8Array): PiSessionManifest {
     throw new PiSessionManifestError("Pi session manifest is malformed JSON");
   }
   const value = record(parsed);
-  if (
-    value.format !== PI_SESSION_MANIFEST_FORMAT ||
-    typeof value.piVersion !== "string" ||
-    value.piVersion.length < 1 ||
-    value.piVersion.length > 64 ||
-    (value.mode !== "append" && value.mode !== "rebase") ||
-    !validSha256(value.sessionSha256) ||
-    !Number.isSafeInteger(value.totalSizeBytes) ||
-    Number(value.totalSizeBytes) < 1 ||
-    Number(value.totalSizeBytes) > MAX_PI_SESSION_SNAPSHOT_BYTES ||
-    !Number.isSafeInteger(value.totalLineCount) ||
-    Number(value.totalLineCount) < 2 ||
-    (value.previousManifestSha256 !== undefined && !validSha256(value.previousManifestSha256)) ||
-    !Array.isArray(value.segments) ||
-    value.segments.length < 1 ||
-    value.segments.length > PI_SESSION_MANIFEST_MAX_SEGMENTS
-  ) {
-    throw new PiSessionManifestError("Pi session manifest metadata is invalid");
+  const legacy = value.format === LEGACY_MANIFEST_FORMAT;
+  if (!legacy && value.format !== PI_SESSION_MANIFEST_FORMAT) {
+    throw new PiSessionManifestError("Pi session manifest format is unsupported");
   }
-  const segments = value.segments.map((raw) => {
-    const item = record(raw);
-    if (
-      !validSha256(item.sha256) ||
-      !Number.isSafeInteger(item.sizeBytes) ||
-      Number(item.sizeBytes) < 1 ||
-      Number(item.sizeBytes) > MAX_PI_SESSION_SNAPSHOT_BYTES ||
-      !Number.isSafeInteger(item.lineCount) ||
-      Number(item.lineCount) < 1
-    ) {
-      throw new PiSessionManifestError("Pi session segment metadata is invalid");
-    }
-    return {
-      sha256: item.sha256,
-      sizeBytes: Number(item.sizeBytes),
-      lineCount: Number(item.lineCount),
-    };
-  });
+  commonManifestMetadata(
+    value,
+    legacy ? LEGACY_MANIFEST_MAX_SEGMENTS : PI_SESSION_MANIFEST_MAX_SEGMENTS,
+  );
+  const segments = (value.segments as unknown[]).map((raw) =>
+    legacy ? decodeLegacyDescriptor(raw) : decodeDescriptor(raw),
+  );
   if (
     segments.reduce((sum, item) => sum + item.sizeBytes, 0) !== value.totalSizeBytes ||
     segments.reduce((sum, item) => sum + item.lineCount, 0) !== value.totalLineCount
@@ -301,39 +348,64 @@ export function decodePiSessionManifest(bytes: Uint8Array): PiSessionManifest {
   }
   return {
     format: PI_SESSION_MANIFEST_FORMAT,
-    piVersion: value.piVersion,
-    mode: value.mode,
+    piVersion: value.piVersion as string,
+    mode: value.mode as PiSessionManifest["mode"],
     ...(value.previousManifestSha256 === undefined
       ? {}
-      : { previousManifestSha256: value.previousManifestSha256 }),
+      : { previousManifestSha256: value.previousManifestSha256 as string }),
     segments,
-    sessionSha256: value.sessionSha256,
+    sessionSha256: value.sessionSha256 as string,
     totalSizeBytes: Number(value.totalSizeBytes),
     totalLineCount: Number(value.totalLineCount),
   };
+}
+
+function decodeStoredSegment(
+  descriptor: PiSessionSegmentDescriptor,
+  storedBytes: Uint8Array,
+): Uint8Array {
+  if (
+    storedBytes.byteLength !== descriptor.storedSizeBytes ||
+    digest(storedBytes) !== descriptor.storedSha256
+  ) {
+    throw new PiSessionManifestError("Pi session segment failed stored integrity validation");
+  }
+  let rawBytes: Uint8Array;
+  try {
+    rawBytes = descriptor.encoding === "gzip" ? gunzipSync(storedBytes) : storedBytes;
+  } catch {
+    throw new PiSessionManifestError("Pi session segment decompression failed");
+  }
+  if (
+    rawBytes.byteLength !== descriptor.sizeBytes ||
+    lineCount(rawBytes) !== descriptor.lineCount ||
+    digest(rawBytes) !== descriptor.sha256
+  ) {
+    throw new PiSessionManifestError("Pi session segment failed integrity validation");
+  }
+  return rawBytes;
 }
 
 export async function restorePiSessionManifest(
   manifest: PiSessionManifest,
   loadSegment: (descriptor: PiSessionSegmentDescriptor) => Promise<Uint8Array>,
 ): Promise<Uint8Array> {
-  const loaded = await Promise.all(
-    manifest.segments.map(async (descriptor) => {
-      const bytes = await loadSegment(descriptor);
-      if (
-        bytes.byteLength !== descriptor.sizeBytes ||
-        bytes.at(-1) !== 0x0a ||
-        lineCount(bytes) !== descriptor.lineCount ||
-        digest(bytes) !== descriptor.sha256
-      ) {
-        throw new PiSessionManifestError("Pi session segment failed integrity validation");
-      }
-      return bytes;
-    }),
-  );
-  const restored = Buffer.concat(loaded.map((bytes) => Buffer.from(bytes)));
+  const restored = Buffer.allocUnsafe(manifest.totalSizeBytes);
+  let writeOffset = 0;
+  for (let start = 0; start < manifest.segments.length; start += RESTORE_CONCURRENCY) {
+    const descriptors = manifest.segments.slice(start, start + RESTORE_CONCURRENCY);
+    const batch = await Promise.all(
+      descriptors.map(async (descriptor) =>
+        decodeStoredSegment(descriptor, await loadSegment(descriptor)),
+      ),
+    );
+    for (const rawBytes of batch) {
+      Buffer.from(rawBytes).copy(restored, writeOffset);
+      writeOffset += rawBytes.byteLength;
+    }
+  }
   if (
-    restored.byteLength !== manifest.totalSizeBytes ||
+    writeOffset !== manifest.totalSizeBytes ||
     lineCount(restored) !== manifest.totalLineCount ||
     digest(restored) !== manifest.sessionSha256
   ) {

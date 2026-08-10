@@ -97,6 +97,7 @@ export {
 } from "./assignment-reconciler.ts";
 export {
   FileCheckpointObjectStore,
+  MAX_CHECKPOINT_OBJECT_BYTES,
   PostgresSandboxCheckpointStore,
   SandboxCheckpointStoreError,
   validateCheckpointObjectKey,
@@ -112,6 +113,8 @@ export {
 } from "@agent-dock/runtime-core/checkpoint-object-cache";
 export {
   PI_SESSION_MANIFEST_FORMAT,
+  PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE,
+  PI_SESSION_MANIFEST_MAX_BYTES,
   PI_SESSION_MANIFEST_MAX_SEGMENTS,
   PI_SESSION_MANIFEST_MEDIA_TYPE,
   PI_SESSION_SEGMENT_TARGET_BYTES,
@@ -131,6 +134,17 @@ export {
   type S3CheckpointEnvironment,
   type S3CheckpointObjectStoreOptions,
 } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
+export {
+  DEFAULT_SESSION_EVENT_ARCHIVE_MAX_BYTES,
+  DEFAULT_SESSION_EVENT_HOT_RETENTION_MS,
+  DEFAULT_SESSION_EVENT_RETENTION_CLAIM_MS,
+  SESSION_EVENT_ARCHIVE_FORMAT,
+  SessionEventRetentionError,
+  SessionEventRetentionService,
+  verifySessionEventArchive,
+  type SessionEventRetentionOptions,
+  type SessionEventRetentionResult,
+} from "@agent-dock/runtime-core/session-event-retention";
 export {
   RunCancellationExecutor,
   RunCancellationExecutorInvariantError,

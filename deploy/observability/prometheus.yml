@@ -19,3 +19,11 @@ scrape_configs:
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:
       - targets: [sandbox-manager:9466]
+  - job_name: agent-dock-event-gateway
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [event-gateway:9467]
+  - job_name: agent-dock-event-retention
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [event-retention:9468]

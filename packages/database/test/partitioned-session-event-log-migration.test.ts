@@ -56,4 +56,33 @@ describe("partitioned Session event log migration", () => {
     `);
     expect(trigger.rows).toEqual([{ tgname: "session_events_register_event_id" }]);
   });
+
+  it("adds a replay floor, immutable archive metadata, and eager vacuuming to hot partitions", async () => {
+    const cursorColumn = await pglite.query<{ column_default: string; is_nullable: string }>(`
+      select column_default, is_nullable
+        from information_schema.columns
+       where table_schema = 'public'
+         and table_name = 'session_event_cursors'
+         and column_name = 'replay_floor_seq'
+    `);
+    expect(cursorColumn.rows).toEqual([{ column_default: "0", is_nullable: "NO" }]);
+    const archiveTable = await pglite.query<{ table_name: string }>(`
+      select table_name
+        from information_schema.tables
+       where table_schema = 'public'
+         and table_name = 'session_event_archives'
+    `);
+    expect(archiveTable.rows).toEqual([{ table_name: "session_event_archives" }]);
+    const partitionOptions = await pglite.query<{ reloptions: string[] }>(`
+      select reloptions
+        from pg_class
+       where oid = 'session_events_p00'::regclass
+    `);
+    expect(partitionOptions.rows[0]?.reloptions).toEqual(
+      expect.arrayContaining([
+        "autovacuum_vacuum_scale_factor=0.02",
+        "autovacuum_vacuum_threshold=5000",
+      ]),
+    );
+  });
 });

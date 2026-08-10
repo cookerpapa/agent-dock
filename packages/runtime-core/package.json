@@ -26,6 +26,7 @@
     "./session-event-hub": "./src/session-event-hub.ts",
     "./session-event-stream": "./src/session-event-stream.ts",
     "./session-event-notifications": "./src/session-event-notifications.ts",
+    "./session-event-retention": "./src/session-event-retention.ts",
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
