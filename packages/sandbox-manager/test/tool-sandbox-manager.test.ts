@@ -876,6 +876,23 @@ describe("provider-backed Tool Sandbox Manager", () => {
       });
       await expect(
         loadSandboxManagerConfig({
+          DATABASE_URL_FILE: databaseUrlPath,
+          AGENT_DOCK_EXECUTION_CELL_ID: "cell-0001",
+          AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: "http://sandbox-manager-0:4300",
+          AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS: "10000",
+          AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS: "5000",
+          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_IMAGE_REVISION: "development",
+          AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
+          AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
+          AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
+          AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
+          AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: "http://workspace-data-mover:4500",
+          AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
+        }),
+      ).rejects.toThrow("heartbeat must leave lease failure margin");
+      await expect(
+        loadSandboxManagerConfig({
           AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",

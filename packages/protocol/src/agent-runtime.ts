@@ -6,7 +6,7 @@ import { WorkspacePatchSchema } from "./event-envelope.ts";
 // tree even when its effective model context has been compacted. The production
 // checkpoint path never puts these bytes in a control-plane envelope: it chunks
 // and compresses them into object storage. Keep the logical Session bound
-// separate from the much smaller legacy inline-envelope bound below.
+// separate from the much smaller internal inline-envelope bound below.
 export const MAX_PI_SESSION_SNAPSHOT_BYTES = 512 * 1_024 * 1_024;
 export const MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES = 2 * 1_024 * 1_024;
 // Provider-native Workspace checkpoints carry a bounded file index and an

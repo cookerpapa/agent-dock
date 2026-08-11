@@ -662,30 +662,19 @@ acceptance is still required before claiming measured HA.
 ## 13. Current architectural decisions
 
 - [ADR-0053: CubeSandbox primary runtime](adr/0053-cubesandbox-primary-execution-plane.md)
-- [ADR-0089: enterprise execution Cells and durable event log](adr/0089-enterprise-cells-and-durable-event-log.md)
 - [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
-- [ADR-0074: exact-command Temporal Activity boundary](adr/0074-exact-command-temporal-activity-boundary.md)
-- [ADR-0075: optional production observability profile](adr/0075-optional-production-observability-profile.md)
-- [ADR-0076: append-only Worker event WAL](adr/0076-append-only-worker-event-wal.md)
-- [ADR-0067: Cube POSIX volumes and Kopia authority](adr/0067-cube-posix-volumes-and-kopia-workspace-authority.md)
-- [ADR-0068: Session-resident Cube and POSIX Workspace continuity](adr/0068-session-resident-cube-and-posix-workspaces.md)
-- [ADR-0069: Cube-only runtime and Workspace-first conversations](adr/0069-cube-only-runtime-and-workspace-first-conversations.md)
+- [ADR-0067: durable Workspace](adr/0067-cube-posix-volumes-and-kopia-workspace-authority.md)
+  and [ADR-0068: Session-resident Cube](adr/0068-session-resident-cube-and-posix-workspaces.md)
 - [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)
 - [ADR-0071: SDK-only Pi runtime](adr/0071-sdk-only-pi-runtime-and-current-format-only-restores.md)
-- [ADR-0072: Trusted Workspace Volume envelope](adr/0072-trusted-workspace-volume-envelope.md)
-- [ADR-0073: Trusted platform Git metadata](adr/0073-trusted-platform-git-metadata.md)
-- [ADR-0077: Active Pi steer](adr/0077-explicit-active-pi-steer.md)
-- [ADR-0078: Worker Control Channel and optional modules](adr/0078-worker-control-channel-and-optional-product-modules.md)
-- [ADR-0079: Interrupted Pi conversation checkpoints](adr/0079-interrupted-pi-conversation-checkpoints.md)
 - [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
-- [ADR-0081: Per-sampling Step world state](adr/0081-per-sampling-cloud-step-world-state.md)
-- [ADR-0082: Cloud Turn, Attempt and Step contexts](adr/0082-cloud-turn-attempt-and-step-contexts.md)
-- [ADR-0083: Model sampling-attempt identity](adr/0083-model-sampling-attempt-identity.md)
-- [ADR-0084: Explicit bounded settlement gate](adr/0084-explicit-bounded-settlement-gate.md)
-- [ADR-0085: Single-active Cube Tool execution](adr/0085-single-active-cube-tool-execution.md)
-- [ADR-0086: Reconnectable Worker Control Channel](adr/0086-reconnectable-worker-control-channel.md)
 - [ADR-0087: Committed stream batching and Pi context](adr/0087-committed-stream-batching-and-model-context.md)
 - [ADR-0088: Distributed Kubernetes topology and demand scaling](adr/0088-distributed-kubernetes-and-demand-scaling.md)
+- [ADR-0089: Enterprise execution Cells](adr/0089-enterprise-cells-and-durable-event-log.md)
+- [ADR-0091: Kafka-first ingest](adr/0091-kafka-first-worker-event-ingest.md)
+  and [ADR-0093: canonical conversations](adr/0093-kafka-valkey-live-events-and-canonical-conversations.md)
+- [ADR-0094: Cross-component time and retention budgets](adr/0094-cross-component-time-and-retention-budgets.md)
 
-See the [ADR index](adr/README.md). Retired ADRs remain available in Git history,
-not as supported runtime choices.
+The [ADR index](adr/README.md) links the lower-level decisions behind these
+boundaries. Retired cutover designs remain in Git history, not as supported
+runtime choices.

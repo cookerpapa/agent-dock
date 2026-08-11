@@ -2,8 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-25
-- Supersedes: ADR-0055's Temporal deferral and ADR-0054's production
-  PostgreSQL-to-Supervisor matching path
+- Supersedes ADR-0054's production PostgreSQL-to-Supervisor matching path.
 
 ## Context
 
@@ -78,8 +77,8 @@ to the trusted Pi Worker process.
 
 ## Consequences
 
-- A cold Session consumes neither a Pi process nor a Worker slot. Each active
-  Activity consumes one capacity-one Pi SDK slot on exactly one Worker.
+- A cold Session consumes neither a Pi runtime nor a Worker slot. Each active
+  Activity consumes one bounded Pi SDK slot on exactly one Worker.
 - Adding Supervisor replicas increases the number of Temporal Activity
   pollers; there is no Control Plane lane count to update.
 - Pure chat and coding Runs use the same durable orchestration path, while
@@ -96,7 +95,8 @@ to the trusted Pi Worker process.
 ## Required evidence
 
 - deterministic outbox-to-Workflow replay without duplicate Run execution;
-- two Worker replicas consuming one common Task Queue with capacity one each;
+- multiple Worker replicas consuming one common Task Queue within their
+  declared capacities;
 - same-Session FIFO and cross-Session parallelism;
 - tenant fairness keys and existing tenant concurrency limits;
 - Workflow cancellation reaching the exact live Pi activation;

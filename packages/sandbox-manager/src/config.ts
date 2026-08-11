@@ -161,6 +161,21 @@ export async function loadSandboxManagerConfig(
   if (cubeProxyScheme !== "http" && cubeProxyScheme !== "https") {
     throw new TypeError("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME is invalid");
   }
+  const ownershipLeaseMs = integer(
+    environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS,
+    15_000,
+    3_000,
+    300_000,
+  );
+  const ownershipHeartbeatMs = integer(
+    environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS,
+    5_000,
+    1_000,
+    60_000,
+  );
+  if (ownershipHeartbeatMs * 2 >= ownershipLeaseMs) {
+    throw new TypeError("Sandbox Manager heartbeat must leave lease failure margin");
+  }
   return {
     host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
     port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
@@ -174,18 +189,8 @@ export async function loadSandboxManagerConfig(
       required(environment, "AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL"),
       "advertisedBaseUrl",
     ),
-    ownershipLeaseMs: integer(
-      environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS,
-      15_000,
-      3_000,
-      300_000,
-    ),
-    ownershipHeartbeatMs: integer(
-      environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS,
-      5_000,
-      1_000,
-      60_000,
-    ),
+    ownershipLeaseMs,
+    ownershipHeartbeatMs,
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
     ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
       ? {}

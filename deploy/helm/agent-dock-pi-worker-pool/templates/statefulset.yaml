@@ -6,6 +6,26 @@
 {{- if ge (int .Values.disruptionBudget.minAvailable) $minimumReplicas -}}
 {{- fail "disruptionBudget.minAvailable must be lower than the minimum Worker replica count" -}}
 {{- end -}}
+{{- $timeouts := .Values.runtime.timeouts -}}
+{{- if lt (int $timeouts.sandboxManagerRequestMs) 360000 -}}
+{{- fail "runtime.timeouts.sandboxManagerRequestMs must outlive the maximum Tool execution" -}}
+{{- end -}}
+{{- if gt (int $timeouts.modelUpstreamRequestMs) (int $timeouts.modelRequestMs) -}}
+{{- fail "runtime.timeouts.modelUpstreamRequestMs cannot exceed modelRequestMs" -}}
+{{- end -}}
+{{- if gt (int $timeouts.modelRequestMs) (int $timeouts.turnMs) -}}
+{{- fail "runtime.timeouts.modelRequestMs cannot exceed turnMs" -}}
+{{- end -}}
+{{- if lt (int $timeouts.modelCapabilityTtlMs) (add (int $timeouts.turnMs) 60000) -}}
+{{- fail "runtime.timeouts.modelCapabilityTtlMs must outlive turnMs by one minute" -}}
+{{- end -}}
+{{- if lt (int .Values.runtime.repositoryImport.waitMs) (int .Values.runtime.repositoryImport.leaseMs) -}}
+{{- fail "runtime.repositoryImport.waitMs cannot expire before leaseMs" -}}
+{{- end -}}
+{{- $requiredTerminationGraceMs := add (int $timeouts.turnMs) (int $timeouts.sandboxManagerRequestMs) 360000 -}}
+{{- if lt (mul (int .Values.lifecycle.terminationGracePeriodSeconds) 1000) $requiredTerminationGraceMs -}}
+{{- fail "lifecycle.terminationGracePeriodSeconds cannot expire before Worker settlement" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -187,7 +207,7 @@ spec:
             - name: AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL
               value: http://127.0.0.1:4200
             - name: AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS
-              value: "600000"
+              value: {{ .Values.runtime.timeouts.modelCapabilityTtlMs | quote }}
             - name: AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN
               value: "32"
             - name: AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS

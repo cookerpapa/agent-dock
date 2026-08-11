@@ -35,9 +35,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0069](0069-cube-only-runtime-and-workspace-first-conversations.md):
   Cube-only cutover and Workspace-first conversations.
 - ADR-0070 through ADR-0079 define terminal commit recovery, SDK-only Pi,
-  trusted Workspace/Git metadata, exact-command Activities, optional
-  observability, the Worker WAL, steer, the Control Channel and interrupted Pi
-  checkpoints.
+  trusted Workspace/Git metadata, exact-command Activities, the Worker WAL,
+  steer, the Control Channel and interrupted Pi checkpoints. Historical
+  cutover-only ADR numbers in this range are intentionally absent.
 - [ADR-0080](0080-cloud-step-and-recoverable-tool-execution.md) freezes the
   accepted execution view, makes Tool operations reconnectable by identity,
   orders command output and makes the terminal delivery barrier explicit.
@@ -77,6 +77,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0093](0093-kafka-valkey-live-events-and-canonical-conversations.md)
   keeps streaming deltas in Kafka plus a rebuildable Valkey replay view while
   PostgreSQL stores only terminal canonical Turns and sequence/business state.
+- [ADR-0094](0094-cross-component-time-and-retention-budgets.md) treats
+  timeout, lease, shutdown and live-retention values as one ordered recovery
+  policy and validates the relationships in startup/CI checks.
 
 ## Maintained optional modules
 

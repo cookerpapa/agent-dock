@@ -8,7 +8,7 @@ AgentDock completed two production cutovers:
 
 - trusted Pi Workers now run the public embedded Pi SDK directly;
 - Pi conversation checkpoints now use content-addressed JSONL segments and the
-  `agent-dock.pi-session-manifest.v2` manifest.
+  compressed `agent-dock.pi-session-manifest.v3` manifest.
 
 The repository nevertheless retained a complete Pi RPC subprocess runner,
 environment-configured extension entrypoint, RPC-only UI adapter and spike.
@@ -24,7 +24,7 @@ unmaintained runtime.
 
 Pi SDK execution is the only supported Agent Loop:
 
-- every Pi Worker has capacity one and runs `PiSdkTurnRunner`;
+- every Pi Worker runs a bounded set of independent `PiSdkTurnRunner` slots;
 - Tool implementations are registered as activation-local inline extensions;
 - shared errors, cancellation, checkpoint and event contracts use neutral
   `Pi*` names rather than `PiRpc*`;
@@ -35,14 +35,15 @@ Conversation restore accepts only the current manifest media type and pinned Pi
 version. Older development snapshots fail closed with
 `checkpoint_incompatible`; no migration reader remains.
 
-Historical ADRs, implementation logs and completed backlog entries remain as
-decision history. They are not executable compatibility promises.
+Implementation logs and completed backlog entries remain as decision history.
+They are not executable compatibility promises.
 
 ## Consequences
 
 - A missing environment variable can no longer reactivate the old runtime.
-- Pi SDK isolation is provided by a capacity-one Worker process (one Pod in
-  Kubernetes); an SDK isolation failure poisons and retires that Worker.
+- Pi SDK isolation is provided by a replaceable Worker process (one Pod in
+  Kubernetes); an SDK isolation failure poisons and retires that Worker and
+  its bounded active slots resume from committed state.
 - Upgrading Pi or the checkpoint format requires an explicit new decision,
   migration and contract test.
 - Existing development data written in the old whole-file format must be

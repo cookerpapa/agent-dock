@@ -124,6 +124,10 @@ describe("Pi session manifest v3", () => {
       `${JSON.stringify({ ...prepared.manifest, sessionSha256: "bad" })}\n`,
     );
     expect(() => decodePiSessionManifest(malformed)).toThrow(PiSessionManifestError);
+    const obsolete = Buffer.from(
+      `${JSON.stringify({ ...prepared.manifest, format: "agent-dock.pi-session-manifest.v2" })}\n`,
+    );
+    expect(() => decodePiSessionManifest(obsolete)).toThrow("format is unsupported");
 
     const objects = new Map(
       prepared.newSegments.map((entry) => [entry.descriptor.sha256, entry] as const),

@@ -164,6 +164,8 @@ try {
       "vitest",
       "--run",
       "test/checkpoint-store.test.ts",
+      "--testNamePattern",
+      "S3-compatible settled checkpoint store",
     ],
     {
       ...process.env,
@@ -172,6 +174,7 @@ try {
       AGENT_DOCK_TEST_S3_ACCESS_KEY_ID: accessKeyId,
       AGENT_DOCK_TEST_S3_SECRET_ACCESS_KEY: secretAccessKey,
       AGENT_DOCK_TEST_S3_KEY_PREFIX: keyPrefix,
+      AGENT_DOCK_TEST_S3_ONLY: "true",
     },
     "S3 checkpoint compatibility test",
   );

@@ -300,6 +300,7 @@
           "additionalProperties": false,
           "required": [
             "sandboxManagerRequestMs",
+            "modelCapabilityTtlMs",
             "modelUpstreamRequestMs",
             "modelRequestMs",
             "turnMs"
@@ -307,8 +308,13 @@
           "properties": {
             "sandboxManagerRequestMs": {
               "type": "integer",
-              "minimum": 1000,
+              "minimum": 360000,
               "maximum": 900000
+            },
+            "modelCapabilityTtlMs": {
+              "type": "integer",
+              "minimum": 61000,
+              "maximum": 3600000
             },
             "modelUpstreamRequestMs": {
               "type": "integer",

@@ -26,6 +26,11 @@ function requireSuccess(result, description) {
   return result.stdout;
 }
 
+function requireFailure(result, pattern, description) {
+  assert.notEqual(result.status, 0, `${description} unexpectedly succeeded`);
+  assert.match(`${result.stdout ?? ""}\n${result.stderr ?? ""}`, pattern, description);
+}
+
 function resolveHelm() {
   const configured = process.env.AGENT_DOCK_HELM_BIN;
   if (configured !== undefined) {
@@ -51,6 +56,29 @@ const rendered = requireSuccess(
     "1.34.0",
   ]),
   "Pi Worker pool Helm render",
+);
+
+requireFailure(
+  command(helm, [
+    "template",
+    "pi-workers-invalid-capability",
+    chart,
+    "--set",
+    "runtime.timeouts.modelCapabilityTtlMs=600000",
+  ]),
+  /modelCapabilityTtlMs must outlive turnMs/,
+  "Pi Worker Helm capability/Turn ordering",
+);
+requireFailure(
+  command(helm, [
+    "template",
+    "pi-workers-invalid-grace",
+    chart,
+    "--set",
+    "lifecycle.terminationGracePeriodSeconds=960",
+  ]),
+  /terminationGracePeriodSeconds cannot expire before Worker settlement/,
+  "Pi Worker Helm termination/settlement ordering",
 );
 
 const resources = parseAllDocuments(rendered)
@@ -140,7 +168,7 @@ assert.equal(pod.hostIPC, false);
 assert.equal(pod.hostNetwork, false);
 assert.equal(pod.hostPID, false);
 assert.equal(pod.shareProcessNamespace, false);
-assert.equal(pod.terminationGracePeriodSeconds, 1260);
+assert.equal(pod.terminationGracePeriodSeconds, 1320);
 assert.equal(pod.containers.length, 1);
 assert.equal(
   pod.volumes.some((volume) => volume.hostPath !== undefined),
@@ -197,6 +225,22 @@ assert.equal(
   "http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300,http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300",
 );
 assert.equal(environment.AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL, "http://127.0.0.1:4200");
+const sandboxManagerTimeoutMs = Number(environment.AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS);
+const modelCapabilityTtlMs = Number(environment.AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS);
+const modelUpstreamTimeoutMs = Number(
+  environment.AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS,
+);
+const modelRequestTimeoutMs = Number(environment.AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS);
+const turnTimeoutMs = Number(environment.AGENT_DOCK_PI_TURN_TIMEOUT_MS);
+assert.ok(sandboxManagerTimeoutMs >= 360_000);
+assert.ok(modelUpstreamTimeoutMs <= modelRequestTimeoutMs);
+assert.ok(modelRequestTimeoutMs <= turnTimeoutMs);
+assert.ok(modelCapabilityTtlMs >= turnTimeoutMs + 60_000);
+assert.ok(
+  pod.terminationGracePeriodSeconds * 1_000 >=
+    turnTimeoutMs + sandboxManagerTimeoutMs + 5 * 60_000 + 60_000,
+  "Pod termination must outlive the Worker drain budget and shutdown margin",
+);
 assert.equal(
   environment.AGENT_DOCK_OTLP_TRACES_ENDPOINT,
   undefined,

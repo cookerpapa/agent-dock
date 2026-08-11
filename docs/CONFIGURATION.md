@@ -221,11 +221,52 @@ for missing Web settings.
 | Cube warm idle lifetime | 15 minutes (`900000` ms). |
 | Maximum active Tool Sandboxes | 2. |
 | Maximum warm Sandboxes | 4. |
-| Pi Run timeout | 10 minutes. |
+| Maximum remote Tool execution | 5 minutes. |
+| Worker-to-Sandbox Manager request | 6 minutes. |
+| Pi Turn timeout | 10 minutes. |
+| Model Gateway upstream request | 120 seconds. |
 | Pi model-request timeout | 150 seconds. |
+| Model capability TTL | 15 minutes. |
 | Model requests per Run | 32. |
 | Pi checkpoint read-cache TTL | 10 minutes. |
 | Pi checkpoint read-cache capacity | 512 objects / 32 MiB. |
+| Compose/Kubernetes Pi Worker termination grace | 22 minutes. |
+| Sandbox Manager ownership heartbeat / lease | 5 seconds / 15 seconds. |
+| Worker Control Channel heartbeat / timeout / lease | 10 seconds / 30 seconds / 60 seconds. |
+| Valkey live replay / single-host Kafka retention | 1 hour / 24 hours. |
+
+### Cross-component ordering
+
+These durations are not independent tuning values. AgentDock validates the
+following order in Worker startup and deployment CI:
+
+```text
+Tool execution 5m
+  < Worker-to-Manager request 6m
+
+provider upstream 120s
+  <= Pi model request 150s
+  <= Pi Turn 10m
+  < model Capability 15m
+
+Pi Turn 10m + Manager request 6m + settlement 5m + process margin 1m
+  <= Worker termination grace 22m
+
+Valkey live replay 1h
+  < Kafka raw-event retention 24h (single host) / 7d (enterprise)
+```
+
+Lease-style settings have their own ordering: heartbeat intervals must leave
+at least one missed-heartbeat detection margin before ownership expiry. Lease
+expiry changes who may commit; cache and warm-idle expiry only trigger a cold
+restore and never extend authority. Browser session TTL and Temporal history
+retention are similarly separate from Run/Tool ownership.
+
+Increasing an upstream timeout without also increasing the downstream request,
+Capability and shutdown budgets is rejected. Reducing Kafka retention below
+the live replay window is also rejected because Valkey could no longer be
+rebuilt before canonical-transcript fallback. See
+[ADR-0094](adr/0094-cross-component-time-and-retention-budgets.md).
 
 Changing these values requires a code/deployment-policy change plus capacity,
 failure and security acceptance. They are not supported administrator hot

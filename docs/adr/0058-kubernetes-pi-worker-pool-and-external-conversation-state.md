@@ -2,14 +2,12 @@
 
 - Status: accepted
 - Date: 2026-07-26
-- Extends: ADR-0054, ADR-0056, and ADR-0057
-- Supersedes: ADR-0057's description of Kubernetes as only a future Worker
-  deployment option
+- Extends: ADR-0054 and ADR-0056
 
 ## Context
 
-Temporal already assigns each Run Activity directly to one capacity-one Pi SDK
-Worker. PostgreSQL and S3-compatible storage already let a later Run resume on a
+Temporal already assigns each Run Activity directly to one available Pi SDK
+Worker slot. PostgreSQL and S3-compatible storage already let a later Run resume on a
 different Worker. The supported deployment nevertheless starts the Workers as
 Docker Compose replicas on one host.
 
@@ -39,9 +37,9 @@ current crash contract.
 1. AgentDock adds a separate `agent-dock-pi-worker-pool` Helm chart for the
    trusted application plane. CubeSandbox remains the untrusted Tool execution
    plane; the Pi Worker chart does not deploy or impersonate Cube.
-2. One Kubernetes StatefulSet Pod equals one capacity-one Pi SDK Worker process.
-   `podManagementPolicy: Parallel` permits horizontal scale-out without imposing
-   application ordering between Workers.
+2. One Kubernetes StatefulSet Pod equals one bounded-capacity Pi SDK Worker
+   process. `podManagementPolicy: Parallel` permits horizontal scale-out
+   without imposing application ordering between Workers.
 3. The StatefulSet Pod name is the stable Supervisor ID. A private
    `ReadWriteOncePod` PVC holds only its boot ledger and unacknowledged/quarantine
    event spool. Scaling down or deleting the StatefulSet retains those claims by

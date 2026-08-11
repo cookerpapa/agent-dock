@@ -218,6 +218,11 @@ services:
     entrypoint: [/bin/bash, -eu, -o, pipefail, -c]
     command:
       - |
+        retention_ms=${AGENT_DOCK_WORKER_EVENT_RETENTION_MS:-86400000}
+        if [[ ! "$${retention_ms}" =~ ^[0-9]+$ ]] || (( retention_ms <= 3600000 )); then
+          echo "AGENT_DOCK_WORKER_EVENT_RETENTION_MS must exceed the one-hour live replay window" >&2
+          exit 1
+        fi
         /opt/kafka/bin/kafka-topics.sh \
           --bootstrap-server kafka:9092 \
           --create --if-not-exists \
@@ -225,7 +230,7 @@ services:
           --partitions 24 \
           --replication-factor 1 \
           --config cleanup.policy=delete \
-          --config retention.ms=${AGENT_DOCK_WORKER_EVENT_RETENTION_MS:-86400000} \
+          --config retention.ms="$${retention_ms}" \
           --config min.insync.replicas=1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic agent-dock-worker-events-v1
     networks:
@@ -788,7 +793,7 @@ services:
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
       AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
       AGENT_DOCK_SANDBOX_MANAGER_URLS: http://sandbox-manager:4300
-      AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "300000"
+      AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "360000"
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
@@ -810,7 +815,7 @@ services:
       AGENT_DOCK_MODEL_GATEWAY_HOST: 127.0.0.1
       AGENT_DOCK_MODEL_GATEWAY_PORT: "4200"
       AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: http://127.0.0.1:4200
-      AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "600000"
+      AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "900000"
       AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN: "32"
       AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
       AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
@@ -900,7 +905,7 @@ services:
     pids_limit: 256
     mem_limit: 2g
     cpus: 2.0
-    stop_grace_period: 45s
+    stop_grace_period: 22m
     logging: *bounded-logging
 
   supervisor-host-1:

@@ -78,8 +78,8 @@ execute only through the capability-scoped, credential-free Tool Sandbox.
 
 - Existing tenants, bearer tokens, conversations, Workspaces, and model
   bindings continue to work.
-- The legacy token-oriented React component remains source-compatible for
-  development reference but is no longer the production entrypoint.
+- The browser account flow is the only maintained production entrypoint; no
+  alternate token-oriented React shell is retained.
 - A platform model change creates a new immutable version for existing browser
   account bindings and becomes the template for later registrations. Existing
   accepted Turns retain their immutable model snapshot. Manually provisioned

@@ -1,335 +1,224 @@
 # AgentDock
 
-AgentDock is a self-hosted, multi-tenant Cloud Coding Agent built on the Pi SDK.
-It separates the trusted Agent Loop from untrusted code execution and turns Pi
-sessions, Workspace state, scheduling, streaming events and model access into a
-durable cloud product.
+AgentDock is a self-hosted, multi-tenant Cloud Coding Agent built on the Pi
+SDK. It separates the trusted Agent Loop from untrusted code execution and
+makes conversations, Workspaces, streaming output and recovery durable across
+replaceable Workers.
 
-The current production path is deliberately singular:
+The production runtime is intentionally singular: Pi runs in a trusted Worker
+and `read/write/edit/bash` execute only inside a CubeSandbox KVM microVM. There
+is no container-runtime fallback.
 
-```text
-Browser
-  → Web edge
-  → NestJS Control Plane (REST) / Event Gateway (resumable SSE)
-  → Temporal Run Workflow
-  → horizontally scalable trusted Pi Worker
-  → authenticated Tool RPC
-  → Sandbox Manager
-  → CubeSandbox KVM microVM
-```
+## What users get
 
-There is no alternate container runtime or lower-security fallback.
+- browser login, optional public registration and tenant-isolated data;
+- a conversation UI with resumable streaming text and Tool results;
+- named Workspaces that can be selected when a conversation is created;
+- automatic or persistent per-conversation Sandbox retention;
+- a committed `/workspace` directory and source-file browser;
+- conversation deletion without deleting a shared Workspace;
+- a separate administrator page for hot model credentials and Cube proxy
+  settings.
 
-## Product
-
-An ordinary user sees:
-
-- username/password login and optional public registration;
-- a ChatGPT-style conversation surface;
-- named conversations in the left sidebar;
-- named Workspaces that can be created or selected for a new conversation;
-- a per-conversation choice between automatically reclaimed and persistent
-  Cube execution;
-- Pi-style streaming text, Tool calls, command output and code highlighting;
-- a `/workspace` directory browser with committed files and previews;
-- conversation deletion without deleting the shared Workspace.
-
-A dedicated platform administrator lands on a separate settings page. The
-administrator can rotate the deployment model credential/model and the
-CubeSandbox outbound proxy configuration without restarting the cluster.
-Tenant ownership does not grant platform administration.
+Pure chat does not create a Sandbox. The first Tool call activates Cube, and
+later Runs may reuse the same exact-Session process world while it remains
+healthy. Cold conversations retain neither a dedicated Pi process nor a
+microVM.
 
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│ Browser                                                         │
-│ login / conversations / Workspace directory / admin settings    │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ REST + resumable SSE
-┌───────────────────────────────▼─────────────────────────────────┐
-│ Control Plane + Event Gateway                                   │
-│ REST admission / auth / resumable durable SSE                   │
-│ PostgreSQL canonical state / Kafka + Valkey live-event path     │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ one Workflow per accepted Run
-┌───────────────────────────────▼─────────────────────────────────┐
-│ Temporal                                                        │
-│ durable timers / retries / cancellation / Worker matching       │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ capacity-aware soft affinity
-┌───────────────────────────────▼─────────────────────────────────┐
-│ Trusted Pi Worker pool                                          │
-│ Pi SDK AgentSession / native JSONL restore / model gateway       │
-│ bounded event spool / no untrusted local bash / no Cube key      │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ leased and fenced Tool RPC
-┌───────────────────────────────▼─────────────────────────────────┐
-│ Trusted Sandbox Manager                                         │
-│ Cube lifecycle / assignment verification / checkpoint CAS       │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ Cube API
-┌───────────────────────────────▼─────────────────────────────────┐
-│ Untrusted CubeSandbox microVM                                   │
-│ /workspace / bash / edit / git / build / test                   │
-│ no platform credentials / public-only proxy / bounded resources │
-└─────────────────────────────────────────────────────────────────┘
+Browser
+  │ REST + resumable SSE
+  ▼
+Web / Control Plane / Event Gateway
+  │ durable Run admission
+  ▼
+Temporal
+  │ one Workflow per accepted Run
+  ▼
+Trusted Pi Worker pool
+  │ Pi SDK + native Session restore + model gateway
+  │ leased and fenced Tool RPC
+  ▼
+Sandbox Manager
+  │ Cube lifecycle + Workspace checkpoint CAS
+  ▼
+CubeSandbox KVM microVM
+    /workspace + bash/edit/git/build/test
+    no platform credentials
 ```
 
-Cold conversations do not retain a Pi process or microVM. A Run restores the
-Pi-native checkpoint into any eligible Worker. Pure chat never provisions a
-Sandbox. The first Tool call activates Cube. Ordinary conversations reuse it
-within a bounded idle window; a conversation created with persistent retention
-keeps its exact-Session process world beyond that window until deletion or an
-execution-plane failure. Both modes rotate Tool authority at every Run
-boundary. Eviction or failure preserves the Workspace through the trusted
-Volume/Data-Mover checkpoint path, not through the Worker filesystem.
+The single-host profile packages this chain for one Linux/WSL2 host. The
+distributed Helm profile keeps Web, Control Plane, Event Gateway, Pi Workers
+and Sandbox Manager replicas replaceable, places Workspaces in immutable
+execution Cells and scales Pi Workers from Temporal backlog.
 
-Every accepted Run freezes a credential-free logical Turn contract covering
-the model, environment, Workspace base revision and Tool/network policy. Each
-physical Attempt separately binds its Worker, lease and fence, while every
-logical sampling boundary captures a Step and transient provider attempts stay
-beneath it. Tool operations are bound to all three contexts. A short transport
-disconnect reattaches to the same execution; loss
-of the execution ledger or VM is shown as `UNKNOWN` and never causes an
-automatic shell replay.
+### One message through the system
 
-Transient 429/5xx model failures use Pi's bounded native retry inside the same
-frozen Cloud Step. Every sampling attempt is separately budgeted and audited;
-provider-level hidden retries remain disabled, cancellation interrupts
-backoff, and Tool executions are never replayed by this mechanism.
+1. The Control Plane authenticates the user, serializes ordinary Runs sharing
+   one Session/Workspace and commits the accepted command to PostgreSQL.
+2. Temporal durably schedules the Run to an eligible Worker. A retry creates a
+   new Attempt with new ownership; it does not blindly replay a Tool.
+3. The Worker restores the latest Pi-native checkpoint from S3 and opens it
+   with the Pi SDK, so Pi—not the browser transcript—reconstructs model
+   context and compaction state.
+4. Model text and Tool events enter the Worker WAL, cross the Kafka durability
+   boundary in ordered batches, and are projected into a bounded Valkey replay
+   view before SSE can expose them.
+5. If Pi calls a Tool, the Worker presents a short-lived lease/fence-bound
+   capability to Sandbox Manager. The Manager lazily creates or reuses the
+   Session's Cube microVM and executes the operation there.
+6. On settlement, the canonical conversation Turn, terminal event, Pi
+   checkpoint pointer, Workspace head and Run state commit together. A later
+   Worker can then resume from that boundary.
 
-An environment recipe may opt into a single project verification follow-up by
-naming one offline command `settlement-gate`. The gate is default-off, runs
-repository code only through the Cube Tool Sandbox, and can never loop beyond
-one additional Pi continuation.
+See [Architecture](docs/ARCHITECTURE.md) and
+[Run lifecycle](docs/RUN_LIFECYCLE.md) for the detailed protocols.
 
-Pi preserves model order for sibling remote Tools because one Cube activation
-admits one cancellable operation at a time. Cross-Session Runs and isolated
-candidate activations remain parallel; shared Workspace/process effects do not.
+## Durable state and recovery
 
-See [Architecture](docs/ARCHITECTURE.md) for the state and message flows.
+| Authority | Data |
+| --- | --- |
+| PostgreSQL | accounts, Sessions, Runs/Attempts, leases/fences, canonical completed Turns, sequence cursors and Workspace head CAS |
+| Temporal | durable Run Workflow, retries, cancellation and timers |
+| Kafka | accepted high-frequency Worker event batches |
+| Valkey | bounded, rebuildable live SSE replay view |
+| S3/MinIO | immutable Pi-native Session segments and object artifacts |
+| Cube Volume + Kopia | durable `/workspace` checkpoints and cold restore |
 
-The distributed Kubernetes profile keeps Web and Control Plane stateless,
-offloads long-lived browser streams to an independently scaled Event Gateway,
-routes authenticated Worker event batches through that Gateway to a
-Session-keyed Kafka log without giving Kafka credentials to Pi Workers. A
-Valkey Stream read model supplies cross-replica live replay, while PostgreSQL
-keeps only terminal canonical Turns and monotonic cursors. The platform also
-binds each Workspace to an immutable execution Cell, scales that Cell's
-compatible Pi Workers from its Temporal Activity backlog with KEDA, and routes
-exact Worker management over StatefulSet headless DNS. The default Worker Pod
-hosts four bounded Pi runtime slots. PostgreSQL, Temporal, S3/Kopia, the shared
-RWX Workspace volume and Cube remain external authorities. See
-[Distributed Kubernetes deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
+Anything shown through SSE has first crossed a shared durable boundary. Raw
+token deltas do not grow PostgreSQL forever: the terminal transcript is stored
+as one canonical Turn, the live Valkey suffix is trimmed after its replay
+window, and Kafka retention remains long enough to rebuild that suffix.
 
-## Durable state
+Pi Session JSONL is the model-context authority. Compaction, interrupted-turn
+markers and execution-world reset facts survive cold restore without AgentDock
+inventing a second `messages[]` implementation.
 
-PostgreSQL is authoritative for:
+Timeouts, leases and retention are checked as ordered recovery budgets. For
+example, a Tool's execution limit is shorter than its RPC timeout, model
+Capabilities outlive a Pi Turn, Worker termination grace covers settlement,
+and Kafka retention outlives the Valkey replay window. See
+[Configuration](docs/CONFIGURATION.md) and
+[ADR-0094](docs/adr/0094-cross-component-time-and-retention-budgets.md).
 
-- tenants, users, roles and browser sessions;
-- Projects, Workspaces, conversations, messages and Runs;
-- RunAttempt leases, heartbeat, fencing tokens and terminal state;
-- terminal conversation projections, event sequence/replay cursors,
-  idempotency keys and Workspace head CAS;
-- model/proxy configuration metadata and usage records.
+## Security boundary
 
-MinIO/S3 stores immutable:
-
-- Pi native JSONL segment manifests;
-- Workspace/Kopia checkpoints;
-- artifacts and Review Bundles.
-
-Kafka stores accepted high-frequency Worker batches. Valkey is the bounded,
-rebuildable SSE read model: the projector appends a contiguous Session range
-before PostgreSQL advances its projected high-water mark, so the browser never
-sees an event that Kafka has not durably accepted. At Turn settlement, the
-complete text/Tool transcript and one terminal event are committed to
-PostgreSQL. After the live window, Valkey deltas are trimmed and stale SSE
-cursors explicitly reload the canonical conversation.
-
-The active Pi `messages[]` is reconstructed by the Pi SDK from its native
-checkpoint. AgentDock does not rebuild model context from the rendered browser
-transcript. Pi compaction therefore survives Worker movement and cold restore.
-Pi JSONL uses compressed content-addressed 8 MiB segments, reuses stable full
-chunks and replaces only the bounded trailing chunk when the native Session
-has not been rewritten. The live-stream compactor never archives token deltas
-into PostgreSQL or S3; Kafka retention is longer than the Valkey replay window
-so a fresh live read model can be rebuilt operationally.
-
-## Workspace model
-
-A Workspace is the durable `/workspace` directory. It can be shared by
-multiple conversations, while every conversation keeps an independent title
-and Pi transcript:
-
-```text
-Workspace "order-service"
-├── Conversation "fix flaky payment test"
-├── Conversation "add idempotency key"
-└── committed Workspace versions
-```
-
-The Workspace row owns the committed directory head. A new conversation on an
-existing Workspace immediately sees that head but starts with an empty Pi
-transcript. Ordinary Runs sharing one Workspace are serialized and advance the
-head with compare-and-set; explicit Fork/Candidate-Race Sessions remain
-isolated branches until promotion.
-
-A persistent-Sandbox conversation owns a dedicated Workspace so its live
-processes cannot become hidden state shared with another Pi transcript. The
-Cube remains lazily created and its process state is not a durable VM snapshot:
-Manager/node failure restores committed files and context into a fresh runtime.
-
-The browser no longer has a special repository-import workflow. The Agent can
-use normal `git`, package-manager and download commands inside the connected
-Cube microVM. Public network access is routed through the deployment-owned
-proxy and rejects private, link-local, metadata and platform destinations.
-Cube mounts only the user-data child of the trusted POSIX Volume. Checkpoint
-generation state and AgentDock's synthetic Git baseline both remain in the
-trusted envelope, so a fresh `/workspace` contains only user files. A
-repository explicitly created or cloned by the user remains ordinary
-Workspace data.
-
-## Security invariants
-
-1. Pi/model credentials remain in the trusted Worker and model gateway.
-2. User commands execute only inside CubeSandbox KVM microVMs.
-3. Tool requests are bound to tenant, Workspace, Session, RunAttempt, lease and
-   monotonically increasing fencing token.
-4. A stale Worker cannot execute a Tool or advance the Workspace head.
-5. Cube receives no database, MinIO, model, platform or orchestration
-   credential.
-6. Public egress does not imply private-network or platform reachability.
-7. One tenant cannot list, read or mutate another tenant's conversations or
-   Workspaces.
-8. Tool side effects are never blindly retried as exactly-once execution.
-9. Terminal Run settlement cannot overtake events that have not crossed the
-   Worker's cumulative durable ACK barrier.
+- Pi, provider authentication and model credentials stay in trusted Workers.
+- User and repository commands run only in CubeSandbox KVM microVMs.
+- Cube receives no database, S3, Temporal, Kubernetes, model or Cube-management
+  credential.
+- Tool authority binds tenant, Workspace, Session, Run, Attempt, lease and a
+  monotonically increasing fencing token.
+- Stale Workers cannot execute another Tool or advance the Workspace head.
+- Public egress passes through a deployment-owned proxy that rejects private,
+  link-local, metadata and platform destinations.
+- Ambiguous shell outcomes become `UNKNOWN`; arbitrary side effects are never
+  advertised or retried as exactly-once execution.
 
 See [Threat model](docs/THREAT_MODEL.md) and
 [Network matrix](docs/NETWORK_MATRIX.md).
 
 ## Technology
 
-- TypeScript / Node.js 24
-- NestJS with Fastify
-- React
-- PostgreSQL with Kysely
-- MinIO/S3
-- Temporal Server and TypeScript SDK
-- Pi SDK and native Pi Session format
-- Tencent CubeSandbox with KVM
-- Kopia-backed trusted Workspace checkpointing
-- optional OpenTelemetry, Prometheus, Grafana and Jaeger observability profile
-- Vitest plus live Cube/model acceptance scripts
+TypeScript, Node.js 24, NestJS/Fastify, React, PostgreSQL/Kysely, Temporal,
+Kafka, Valkey, Pi SDK, MinIO/S3, Kopia, Kubernetes/KEDA and Tencent
+CubeSandbox/KVM. Metrics and tracing are available through an optional
+OpenTelemetry, Prometheus, Grafana and Jaeger profile.
 
-## Local production deployment
+## Deploy on one host
 
-On a Debian/Ubuntu x86_64 Linux host or WSL2 distribution with systemd and KVM
-enabled, run the idempotent installer:
+Requirements are an x86_64 Debian/Ubuntu Linux host or WSL2 distribution with
+systemd and KVM enabled. The idempotent installer prepares the pinned host
+toolchain, Cube execution plane and AgentDock services:
 
 ```bash
 ./install.sh
 ```
 
-It prepares the pinned host toolchain, Docker/K3s, Cube execution plane,
-AgentDock services and Kubernetes Pi Worker Pool. It does not accept a model
-key or account password; configure those from the administrator page after the
-deployment is healthy. Use `./install.sh --check-only` for a read-only host
-diagnosis and see [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for
-options and the manual prepared-host path.
+The installer does not ask for a provider key or account password. After the
+deployment is healthy, open `http://127.0.0.1:8080`, create the designated
+administrator account and configure the model from the administrator page.
 
-The underlying prepared-host commands remain available:
+Useful operations:
 
 ```bash
-npm ci --ignore-scripts
-npm run dependencies:harden
-npm run cubesandbox:init
-npm run cubesandbox:cluster-install
-npm run production:deploy
-```
-
-`production:deploy` starts the 15-service core product topology. Start the
-optional five-service metrics and tracing stack with:
-
-```bash
-npm run production:up:observability
-```
-
-The Web product is served on:
-
-```text
-http://127.0.0.1:8080
-```
-
-Useful commands:
-
-```bash
+./install.sh --check-only
 npm run production:ps
 npm run production:logs
 npm run production:check
 npm run production:backup
 ```
 
-`production:check` is the real CubeSandbox production acceptance path. It can
-consume model tokens and must be run only with the required live-check
-acknowledgement/configuration.
+`production:check` is the real Cube/model acceptance path and may consume
+tokens. See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for host
+preparation, secrets, backup and recovery.
 
-See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for configuration,
-backup, recovery and operator procedures.
+## Deploy on Kubernetes
 
-## Verification
-
-Zero-token checks:
+The strict distributed chart is under `deploy/helm/agent-dock-platform`. It
+expects external PostgreSQL/PgBouncer, Temporal, S3/Kopia, Kafka, Valkey, RWX
+Workspace storage and Cube authorities. Start from the example values and run
+the preflight before rollout:
 
 ```bash
-npm run format:check
-npm run build
-npm run check
-npm run security:audit
+cp deploy/helm/agent-dock-platform/values.distributed.example.yaml values.yaml
+npm run distributed:preflight -- --values values.yaml
+npm run distributed:deploy -- --values values.yaml
 ```
 
-Targeted boundaries:
+Kubernetes HPA/KEDA scales Pods; a provider-specific node autoscaler is still
+required to add machines. Multi-node deployment and failure gates are in
+[Distributed deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
+
+## Configuration
+
+Configuration has three layers:
+
+- administrator hot settings in PostgreSQL: model/key and Cube public proxy;
+- restart-bound operator settings in the generated single-host `.env` or Helm
+  values;
+- installer-owned identities and secret files that must not be hand-edited.
+
+Run `npm run production:config` after changing the single-host configuration.
+Helm values are schema-validated. The complete supported surface and the
+cross-component time/retention constraints are documented in
+[Configuration](docs/CONFIGURATION.md).
+
+## Verify a change
+
+The zero-token repository gate is:
 
 ```bash
-npm test --workspace @agent-dock/control-plane
-npm test --workspace @agent-dock/sandbox-manager
-npm test --workspace @agent-dock/web-ui
+npm ci
+npm run ci
+```
+
+Infrastructure-specific checks include:
+
+```bash
+npm run object-store:check
 npm run cubesandbox:template-check
+npm run production:check
 ```
 
-The live gate verifies the real Cube runtime, credential absence, network
-policy, cross-tenant isolation, resource limits, cancellation, checkpoint
-restore, multi-round Pi state and cleanup. Claims in the resume or project
-documentation should be based on these reproducible measurements.
+Only the last command requires a running production topology and explicit live
+model/Cube acknowledgement. Performance and reliability claims should be tied
+to reproducible reports from the exact tested revision.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Architecture decisions](docs/adr/README.md)
-- [Optimization boundary](docs/OPTIMIZATION_BOUNDARY.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
+- [Distributed deployment](docs/DISTRIBUTED_DEPLOYMENT.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Sandbox Provider](docs/SANDBOX_PROVIDER.md)
-- [CubeSandbox Provider](docs/CUBESANDBOX_PROVIDER.md)
-- [Network matrix](docs/NETWORK_MATRIX.md)
-- [Run lifecycle](docs/RUN_LIFECYCLE.md)
-- [Configuration reference](docs/CONFIGURATION.md)
-- [Production deployment](docs/PRODUCTION_DEPLOYMENT.md)
-- [Distributed Kubernetes deployment](docs/DISTRIBUTED_DEPLOYMENT.md)
-- [Implementation log](docs/IMPLEMENTATION_LOG.md)
-- [Backlog](docs/BACKLOG.md)
+- [Roadmap](docs/ROADMAP.md) and [backlog](docs/BACKLOG.md)
 
-## Current status
-
-The repository implements the full vertical path from browser authentication
-through durable Run orchestration, Pi SDK execution, Cube Tool execution,
-streaming events, Pi/Workspace checkpoints and multi-tenant recovery. It also
-contains horizontal Pi Worker manifests, Session-affinity scheduling,
-administrator-owned hot configuration, fault/load evaluation and deployment
-automation.
-
-The active ADR set is intentionally pruned to decisions that still constrain
-the current product or maintained optional modules. Retired designs remain
-available through Git history and the implementation log; they are not
-selectable runtimes.
+The default product path is the one described above. Research capabilities
+that are disabled by default are listed separately in
+[Optional modules](docs/OPTIONAL_MODULES.md); retired runtimes remain only in
+Git history and the implementation log.

@@ -27,7 +27,6 @@ import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
 import {
   PI_SESSION_MANIFEST_MEDIA_TYPE,
-  PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE,
   PI_SESSION_MANIFEST_MAX_BYTES,
   PiSessionManifestError,
   decodePiSessionManifest,
@@ -1061,10 +1060,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
   ): Promise<LoadedPiSessionManifestState> {
     const stored = await this.#objectStore.get(reference.objectKey);
     this.#verifyObject(stored, reference, PI_SESSION_MANIFEST_MAX_BYTES, "Pi session manifest");
-    if (
-      reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE &&
-      reference.mediaType !== PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE
-    ) {
+    if (reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE) {
       throw new SandboxCheckpointStoreError(
         "checkpoint_incompatible",
         "Pi session checkpoint format is unsupported",

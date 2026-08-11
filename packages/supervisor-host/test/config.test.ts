@@ -12,6 +12,46 @@ async function secret(root: string, name: string, value: string): Promise<string
   return path;
 }
 
+async function validEnvironment(root: string): Promise<Record<string, string>> {
+  return {
+    AGENT_DOCK_SUPERVISOR_ID: "supervisor-production-1",
+    AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: "http://supervisor-production-1:4100",
+    AGENT_DOCK_CONTROL_PLANE_URL: "http://control-plane:3000",
+    AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
+    AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
+      root,
+      "timing-enrollment",
+      `enroll-${"e".repeat(48)}`,
+    ),
+    AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: await secret(
+      root,
+      "timing-management",
+      `manage-${"m".repeat(48)}`,
+    ),
+    AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+      root,
+      "timing-sandbox-manager",
+      `sandbox-manager-${"s".repeat(48)}`,
+    ),
+    AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
+      root,
+      "timing-model-master-key",
+      Buffer.alloc(32, 9).toString("base64url"),
+    ),
+    DATABASE_URL_FILE: await secret(
+      root,
+      "timing-database",
+      "postgresql://agentdock:secret@postgres:5432/agentdock",
+    ),
+    AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+    AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
+    AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
+    AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
+    AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
+    AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
+  };
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -129,6 +169,39 @@ describe("Supervisor host production configuration", () => {
     });
     expect(config.temporalWorkerDeploymentName).toBe("agent-dock-pi-workers");
     expect(config.temporalWorkerBuildId).toBe("revision-123");
+  });
+
+  it("rejects timeout combinations that can expire an upstream boundary first", async () => {
+    const root = await mkdtemp(join(tmpdir(), "agent-dock-host-config-"));
+    roots.push(root);
+    const environment = await validEnvironment(root);
+
+    await expect(
+      loadSupervisorHostConfig({
+        ...environment,
+        AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "300000",
+      }),
+    ).rejects.toThrow("maximum Tool execution");
+    await expect(
+      loadSupervisorHostConfig({
+        ...environment,
+        AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "151000",
+        AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000",
+      }),
+    ).rejects.toThrow("upstream timeout");
+    await expect(
+      loadSupervisorHostConfig({
+        ...environment,
+        AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "600000",
+      }),
+    ).rejects.toThrow("capability TTL");
+    await expect(
+      loadSupervisorHostConfig({
+        ...environment,
+        AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS: "300000",
+        AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "299999",
+      }),
+    ).rejects.toThrow("ownership lease");
   });
 
   it("accepts a private group-readable Kubernetes Secret projection", async () => {

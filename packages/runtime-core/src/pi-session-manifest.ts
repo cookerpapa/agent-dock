@@ -5,14 +5,10 @@ import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
 export const PI_SESSION_MANIFEST_FORMAT = "agent-dock.pi-session-manifest.v3";
 export const PI_SESSION_MANIFEST_MEDIA_TYPE =
   "application/vnd.agent-dock.pi-session-manifest.v3+json";
-export const PI_SESSION_LEGACY_MANIFEST_MEDIA_TYPE =
-  "application/vnd.agent-dock.pi-session-manifest+json";
 export const PI_SESSION_MANIFEST_MAX_BYTES = 2 * 1_024 * 1_024;
 export const PI_SESSION_SEGMENT_TARGET_BYTES = 8 * 1_024 * 1_024;
 export const PI_SESSION_MANIFEST_MAX_SEGMENTS = 64;
 
-const LEGACY_MANIFEST_FORMAT = "agent-dock.pi-session-manifest.v2";
-const LEGACY_MANIFEST_MAX_SEGMENTS = 32;
 const RESTORE_CONCURRENCY = 4;
 
 export type PiSessionSegmentDescriptor = {
@@ -20,7 +16,7 @@ export type PiSessionSegmentDescriptor = {
   sha256: string;
   sizeBytes: number;
   lineCount: number;
-  encoding: "gzip" | "identity";
+  encoding: "gzip";
   /** SHA-256 and size of the immutable object-store representation. */
   storedSha256: string;
   storedSizeBytes: number;
@@ -256,28 +252,6 @@ function commonManifestMetadata(value: Record<string, unknown>, maximumSegments:
   }
 }
 
-function decodeLegacyDescriptor(raw: unknown): PiSessionSegmentDescriptor {
-  const item = record(raw);
-  if (
-    !validSha256(item.sha256) ||
-    !Number.isSafeInteger(item.sizeBytes) ||
-    Number(item.sizeBytes) < 1 ||
-    Number(item.sizeBytes) > MAX_PI_SESSION_SNAPSHOT_BYTES ||
-    !Number.isSafeInteger(item.lineCount) ||
-    Number(item.lineCount) < 0
-  ) {
-    throw new PiSessionManifestError("Pi session segment metadata is invalid");
-  }
-  return {
-    sha256: item.sha256,
-    sizeBytes: Number(item.sizeBytes),
-    lineCount: Number(item.lineCount),
-    encoding: "identity",
-    storedSha256: item.sha256,
-    storedSizeBytes: Number(item.sizeBytes),
-  };
-}
-
 function decodeDescriptor(raw: unknown): PiSessionSegmentDescriptor {
   const item = record(raw);
   if (
@@ -305,10 +279,6 @@ function decodeDescriptor(raw: unknown): PiSessionSegmentDescriptor {
   };
 }
 
-/**
- * V2 remains a read-only migration format so an in-place deployment can write
- * its next V3 manifest without discarding existing immutable checkpoints.
- */
 export function decodePiSessionManifest(bytes: Uint8Array): PiSessionManifest {
   if (bytes.byteLength < 1 || bytes.byteLength > PI_SESSION_MANIFEST_MAX_BYTES) {
     throw new PiSessionManifestError("Pi session manifest is outside its byte limit");
@@ -329,17 +299,11 @@ export function decodePiSessionManifest(bytes: Uint8Array): PiSessionManifest {
     throw new PiSessionManifestError("Pi session manifest is malformed JSON");
   }
   const value = record(parsed);
-  const legacy = value.format === LEGACY_MANIFEST_FORMAT;
-  if (!legacy && value.format !== PI_SESSION_MANIFEST_FORMAT) {
+  if (value.format !== PI_SESSION_MANIFEST_FORMAT) {
     throw new PiSessionManifestError("Pi session manifest format is unsupported");
   }
-  commonManifestMetadata(
-    value,
-    legacy ? LEGACY_MANIFEST_MAX_SEGMENTS : PI_SESSION_MANIFEST_MAX_SEGMENTS,
-  );
-  const segments = (value.segments as unknown[]).map((raw) =>
-    legacy ? decodeLegacyDescriptor(raw) : decodeDescriptor(raw),
-  );
+  commonManifestMetadata(value, PI_SESSION_MANIFEST_MAX_SEGMENTS);
+  const segments = (value.segments as unknown[]).map(decodeDescriptor);
   if (
     segments.reduce((sum, item) => sum + item.sizeBytes, 0) !== value.totalSizeBytes ||
     segments.reduce((sum, item) => sum + item.lineCount, 0) !== value.totalLineCount
@@ -372,7 +336,7 @@ function decodeStoredSegment(
   }
   let rawBytes: Uint8Array;
   try {
-    rawBytes = descriptor.encoding === "gzip" ? gunzipSync(storedBytes) : storedBytes;
+    rawBytes = gunzipSync(storedBytes);
   } catch {
     throw new PiSessionManifestError("Pi session segment decompression failed");
   }

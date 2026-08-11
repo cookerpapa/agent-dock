@@ -226,7 +226,8 @@ single-host default permits two simultaneous Cube guests, so additional Pi
 Workers can continue model-only work without allowing a burst of 2 GiB guests
 to exhaust the host.
 
-Long-session storage uses the safe optimization described in ADR-0055:
+Long-session storage uses the current-format optimization described in
+[ADR-0071](adr/0071-sdk-only-pi-runtime-and-current-format-only-restores.md):
 tenant/session-scoped content-addressed, line-aligned JSONL segments plus an
 immutable manifest. Reconstructing
 history from UI messages remains incompatible because it would lose Pi-specific

@@ -8,7 +8,7 @@ Accepted.
 
 Every accepted AgentDock Run is a distinct Temporal Workflow. The Pi execution
 Activity is currently matched from one common Task Queue, so a same-Session
-follow-up can run on any healthy capacity-one Pi Worker. This is the durable
+follow-up can run on any healthy Pi Worker with an available slot. This is the durable
 correctness path: PostgreSQL resolves the current checkpoint head and S3 stores
 the Pi-native checkpoint, while a Worker-local ten-minute cache only avoids
 re-reading immutable objects.
@@ -83,4 +83,3 @@ remain outside Temporal history.
   scheduler or Task Queue.
 - The optimization adds observable affinity hit, busy-bypass, stale-bypass and
   timeout-fallback outcomes that must be covered by production acceptance.
-

@@ -5,6 +5,9 @@ import { TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS } from "@agent-dock/tem
 
 const MAX_SECRET_BYTES = 16 * 1_024;
 const TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS = 5 * 60_000;
+const MAX_REMOTE_TOOL_EXECUTION_MS = 5 * 60_000;
+const REMOTE_TOOL_TRANSPORT_MARGIN_MS = 60_000;
+const MODEL_CAPABILITY_EXPIRY_MARGIN_MS = 60_000;
 
 export type SupervisorHostEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -287,7 +290,7 @@ export async function loadSupervisorHostConfig(
   const sandboxManagerRequestTimeoutMs = integerValue(
     environment,
     "AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS",
-    300_000,
+    MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS,
     1_000,
     900_000,
   );
@@ -298,6 +301,61 @@ export async function loadSupervisorHostConfig(
     1_000,
     15 * 60_000,
   );
+  const modelGatewayCapabilityTtlMs = integerValue(
+    environment,
+    "AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS",
+    15 * 60_000,
+    1_000,
+    60 * 60_000,
+  );
+  const modelGatewayUpstreamRequestTimeoutMs = integerValue(
+    environment,
+    "AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS",
+    120_000,
+    1_000,
+    300_000,
+  );
+  const piModelRequestTimeoutMs = integerValue(
+    environment,
+    "AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS",
+    150_000,
+    1_000,
+    300_000,
+  );
+  const repositoryImportLeaseMs = integerValue(
+    environment,
+    "AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS",
+    240_000,
+    1_000,
+    10 * 60_000,
+  );
+  const repositoryImportWaitMs = integerValue(
+    environment,
+    "AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS",
+    300_000,
+    1_000,
+    15 * 60_000,
+  );
+  if (
+    sandboxManagerRequestTimeoutMs <
+    MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS
+  ) {
+    throw new TypeError(
+      "Sandbox Manager timeout must outlive the maximum Tool execution and transport margin",
+    );
+  }
+  if (modelGatewayUpstreamRequestTimeoutMs > piModelRequestTimeoutMs) {
+    throw new TypeError("Model upstream timeout cannot exceed the Pi model-request timeout");
+  }
+  if (piModelRequestTimeoutMs > piTurnTimeoutMs) {
+    throw new TypeError("Pi model-request timeout cannot exceed the Pi Turn timeout");
+  }
+  if (modelGatewayCapabilityTtlMs < piTurnTimeoutMs + MODEL_CAPABILITY_EXPIRY_MARGIN_MS) {
+    throw new TypeError("Model capability TTL must outlive the Pi Turn timeout and expiry margin");
+  }
+  if (repositoryImportWaitMs < repositoryImportLeaseMs) {
+    throw new TypeError("Repository import wait must not expire before its ownership lease");
+  }
   if (
     piTurnTimeoutMs + sandboxManagerRequestTimeoutMs + TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS >
     TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS
@@ -419,13 +477,7 @@ export async function loadSupervisorHostConfig(
     modelGatewayAdvertisedBaseUrl: modelGatewayBaseUrl(
       required(environment, "AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL"),
     ),
-    modelGatewayCapabilityTtlMs: integerValue(
-      environment,
-      "AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS",
-      10 * 60_000,
-      1_000,
-      60 * 60_000,
-    ),
+    modelGatewayCapabilityTtlMs,
     modelGatewayMaximumRequestsPerTurn: integerValue(
       environment,
       "AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN",
@@ -433,35 +485,11 @@ export async function loadSupervisorHostConfig(
       1,
       256,
     ),
-    modelGatewayUpstreamRequestTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS",
-      120_000,
-      1_000,
-      300_000,
-    ),
-    piModelRequestTimeoutMs: integerValue(
-      environment,
-      "AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS",
-      150_000,
-      1_000,
-      300_000,
-    ),
+    modelGatewayUpstreamRequestTimeoutMs,
+    piModelRequestTimeoutMs,
     piTurnTimeoutMs,
-    repositoryImportLeaseMs: integerValue(
-      environment,
-      "AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS",
-      240_000,
-      1_000,
-      10 * 60_000,
-    ),
-    repositoryImportWaitMs: integerValue(
-      environment,
-      "AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS",
-      300_000,
-      1_000,
-      15 * 60_000,
-    ),
+    repositoryImportLeaseMs,
+    repositoryImportWaitMs,
     ...(githubGatewayBaseUrl === undefined || githubGatewayServiceToken === undefined
       ? {}
       : {

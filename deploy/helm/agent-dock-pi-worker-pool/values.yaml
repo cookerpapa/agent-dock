@@ -19,7 +19,7 @@ autoscaling:
   scaleDownPeriodSeconds: 600
 
 lifecycle:
-  terminationGracePeriodSeconds: 1260
+  terminationGracePeriodSeconds: 1320
 
 management:
   ingress:
@@ -83,7 +83,8 @@ runtime:
     maximumEntries: 512
     maximumBytes: 33554432
   timeouts:
-    sandboxManagerRequestMs: 300000
+    sandboxManagerRequestMs: 360000
+    modelCapabilityTtlMs: 900000
     modelUpstreamRequestMs: 120000
     modelRequestMs: 150000
     turnMs: 600000

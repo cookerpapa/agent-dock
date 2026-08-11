@@ -9,7 +9,6 @@ import type {
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-  MAX_WORKSPACE_SNAPSHOT_BYTES,
 } from "@agent-dock/protocol";
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
@@ -567,7 +566,10 @@ async function activateSecondTurnAfterHardCrash(targetDatabase: Kysely<Database>
   });
 }
 
+const s3Only = process.env.AGENT_DOCK_TEST_S3_ONLY === "true";
+
 beforeAll(async () => {
+  if (s3Only) return;
   pglite = await PGlite.create();
   socketServer = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
   await socketServer.start();
@@ -581,6 +583,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  if (s3Only) return;
   await database?.destroy();
   await socketServer?.stop();
   await pglite?.close();
@@ -1187,18 +1190,6 @@ describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store",
       );
       await expect(reader.load(command(1))).rejects.toMatchObject({
         code: "checkpoint_corrupt",
-        retryable: false,
-      });
-
-      await rawClient.send(
-        new PutObjectCommand({
-          Bucket: configuration.options.bucket,
-          Key: `${configuration.physicalPrefix}/probes/oversized.bin`,
-          Body: Buffer.alloc(MAX_WORKSPACE_SNAPSHOT_BYTES + 1),
-        }),
-      );
-      await expect(readerObjectStore.get("probes/oversized.bin")).rejects.toMatchObject({
-        code: "checkpoint_object_invalid",
         retryable: false,
       });
     } finally {

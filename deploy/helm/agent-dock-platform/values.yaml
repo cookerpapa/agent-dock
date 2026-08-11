@@ -203,7 +203,7 @@ pi-workers:
     scaleDownStabilizationSeconds: 900
     scaleDownPeriodSeconds: 600
   lifecycle:
-    terminationGracePeriodSeconds: 1260
+    terminationGracePeriodSeconds: 1320
   image:
     repository: agent-dock/supervisor-host
     tag: production
@@ -248,7 +248,8 @@ pi-workers:
     externalWorkerEventLog: true
     checkpointCache: { ttlMs: 600000, maximumEntries: 512, maximumBytes: 33554432 }
     timeouts:
-      sandboxManagerRequestMs: 300000
+      sandboxManagerRequestMs: 360000
+      modelCapabilityTtlMs: 900000
       modelUpstreamRequestMs: 120000
       modelRequestMs: 150000
       turnMs: 600000
