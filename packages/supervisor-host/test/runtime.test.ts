@@ -21,7 +21,7 @@ import {
   resolveProductionSandboxScenario,
   SupervisorHostRuntime,
   type SupervisorHostConfig,
-  type SupervisorSandboxManager,
+  type SupervisorToolBroker,
   type SupervisorTemporalWorker,
   type TemporalPiWorkerOptions,
 } from "../src/index.ts";
@@ -92,9 +92,9 @@ function objectStore() {
   };
 }
 
-function sandboxManager(): SupervisorSandboxManager {
+function toolBroker(): SupervisorToolBroker {
   return {
-    operationUrlFor: () => "http://sandbox-manager.test/internal/v1/tool-operation",
+    operationUrlFor: () => "http://tool-broker.test/internal/v1/tool-operation",
     async checkHealth() {},
     async create() {
       throw new Error("unused");
@@ -186,7 +186,7 @@ describe("SupervisorHostRuntime", () => {
       allowInsecureInternalHttp: true,
       enrollmentToken: ENROLLMENT_TOKEN,
       managementToken: MANAGEMENT_TOKEN,
-      sandboxManagerServiceToken: `sandbox-manager-${"s".repeat(48)}`,
+      toolBrokerServiceToken: `tool-broker-${"s".repeat(48)}`,
       modelCredentialMasterKey: Buffer.alloc(32, 7).toString("base64url"),
       databaseUrl: connectionString,
       managementHost: "127.0.0.1",
@@ -199,8 +199,8 @@ describe("SupervisorHostRuntime", () => {
       temporalTaskQueue: "agent-dock-pi-runs-test",
       temporalWorkerDeploymentName: "agent-dock-pi-workers",
       temporalWorkerBuildId: "runtime-test-build",
-      sandboxManagerBaseUrls: ["http://sandbox-manager.test:4300/"],
-      sandboxManagerRequestTimeoutMs: 300_000,
+      toolBrokerBaseUrls: ["http://tool-broker.test:4300/"],
+      toolBrokerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
       bootStateDirectory: join(root, "boot"),
       eventSpoolDirectory: join(root, "spool"),
@@ -227,7 +227,7 @@ describe("SupervisorHostRuntime", () => {
           },
           database,
           objectStore: objectStore(),
-          sandboxManager: sandboxManager(),
+          toolBroker: toolBroker(),
           temporalWorkerFactory,
         }),
     ).toThrow("Pi SDK Worker runtime capacity must be between 1 and 16");
@@ -238,7 +238,7 @@ describe("SupervisorHostRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
-        sandboxManager: sandboxManager(),
+        toolBroker: toolBroker(),
         temporalWorkerFactory,
       });
       await first.start();
@@ -252,7 +252,7 @@ describe("SupervisorHostRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
-        sandboxManager: sandboxManager(),
+        toolBroker: toolBroker(),
         temporalWorkerFactory,
       });
       await second.start();

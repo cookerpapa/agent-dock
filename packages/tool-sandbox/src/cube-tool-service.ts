@@ -445,7 +445,7 @@ class ToolWorkerBridge {
     }
     if (output.type === "worker.captured") {
       this.#captures.get(output.requestId)?.resolve({
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.captured",
         requestId: output.requestId,
         activationId: output.activationId,

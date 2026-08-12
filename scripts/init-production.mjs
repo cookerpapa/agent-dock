@@ -164,12 +164,12 @@ async function ensureModelCredentialMasterKey(runtimeDirectory) {
   return true;
 }
 
-async function ensureSandboxManagerToken(runtimeDirectory) {
-  const path = resolve(runtimeDirectory, "secrets/sandbox-manager-token");
+async function ensureToolBrokerToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/tool-broker-token");
   try {
     const existing = (await readPrivateFile(path)).trim();
     if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
-      throw new Error("Production Sandbox Manager token is invalid");
+      throw new Error("Production Tool Broker token is invalid");
     }
     return false;
   } catch (error) {
@@ -472,7 +472,7 @@ await assertPrivateDirectory(runtimeDirectory);
 
 if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
-  const sandboxManagerTokenCreated = await ensureSandboxManagerToken(runtimeDirectory);
+  const toolBrokerTokenCreated = await ensureToolBrokerToken(runtimeDirectory);
   const sandboxMaterializerTokenCreated = await ensureSandboxMaterializerToken(runtimeDirectory);
   await ensureWorkspaceDataMoverState(runtimeDirectory);
   const workspaceDataMoverSecretsCreated = await ensureWorkspaceDataMoverSecrets(runtimeDirectory);
@@ -489,7 +489,7 @@ if (await validateExisting(runtimeDirectory)) {
       initialized: true,
       reused: true,
       modelCredentialMasterKeyCreated,
-      sandboxManagerTokenCreated,
+      toolBrokerTokenCreated,
       sandboxMaterializerTokenCreated,
       workspaceDataMoverSecretsCreated,
       cubeEgressConfigTokenCreated,
@@ -607,7 +607,7 @@ await writePrivateFile(
   resolve(secretsDirectory, "supervisor-management-token"),
   `${randomSecret()}\n`,
 );
-await writePrivateFile(resolve(secretsDirectory, "sandbox-manager-token"), `${randomSecret()}\n`);
+await writePrivateFile(resolve(secretsDirectory, "tool-broker-token"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "sandbox-materializer-token"),
   `${randomSecret()}\n`,

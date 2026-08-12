@@ -66,14 +66,6 @@ function integer(value, name, minimum, maximum) {
   return value;
 }
 
-function cellTemplate(value, name, pattern) {
-  const template = boundedString(value, name, pattern);
-  if (template.split("{cellId}").length !== 2) {
-    fail(`${name} must contain {cellId} exactly once`);
-  }
-  return template;
-}
-
 function loadYaml(path, name) {
   if (!existsSync(path)) fail(`${name} does not exist: ${path}`);
   return mapping(parse(readFileSync(path, "utf8")), name);
@@ -133,6 +125,21 @@ function loadProfile(path) {
     "spec.cellReleasePrefix",
     /^[a-z0-9][a-z0-9-]*-$/u,
   );
+  const sandboxDomainNamespace = boundedString(
+    spec.sandboxDomainNamespace,
+    "spec.sandboxDomainNamespace",
+    /^[a-z0-9][a-z0-9-]*$/u,
+  );
+  const sandboxDomainRelease = boundedString(
+    spec.sandboxDomainRelease,
+    "spec.sandboxDomainRelease",
+    /^[a-z0-9][a-z0-9-]*$/u,
+  );
+  const sandboxDomainId = boundedString(
+    spec.sandboxDomainId,
+    "spec.sandboxDomainId",
+    /^sandbox-domain-[a-z0-9][a-z0-9-]*$/u,
+  );
   const clusterDomain = boundedString(spec.clusterDomain, "spec.clusterDomain", /^[a-z0-9.-]+$/u);
   return {
     name,
@@ -141,22 +148,17 @@ function loadProfile(path) {
     globalRelease,
     cellNamespacePrefix,
     cellReleasePrefix,
+    sandboxDomainNamespace,
+    sandboxDomainRelease,
+    sandboxDomainId,
     clusterDomain,
-    cubeApiUrlTemplate: cellTemplate(
-      spec.cubeApiUrlTemplate,
-      "spec.cubeApiUrlTemplate",
-      /^https:\/\/[^\s]+$/u,
+    cubeApiUrl: boundedString(spec.cubeApiUrl, "spec.cubeApiUrl", /^https:\/\/[^\s]+$/u),
+    cubeProxyNodeIp: boundedString(
+      spec.cubeProxyNodeIp,
+      "spec.cubeProxyNodeIp",
+      /^[A-Za-z0-9.-]+$/u,
     ),
-    cubeProxyNodeIpTemplate: cellTemplate(
-      spec.cubeProxyNodeIpTemplate,
-      "spec.cubeProxyNodeIpTemplate",
-      /^[A-Za-z0-9.{}-]+$/u,
-    ),
-    cubeDomainTemplate: cellTemplate(
-      spec.cubeDomainTemplate,
-      "spec.cubeDomainTemplate",
-      /^[A-Za-z0-9.{}-]+$/u,
-    ),
+    cubeDomain: boundedString(spec.cubeDomain, "spec.cubeDomain", /^[A-Za-z0-9.-]+$/u),
     cellCount: integer(spec.cellCount, "spec.cellCount", 1, 64),
     workerCapacity: integer(spec.workerCapacity, "spec.workerCapacity", 1, 64),
     minimumWorkersPerCell: integer(
@@ -171,17 +173,19 @@ function loadProfile(path) {
       1,
       256,
     ),
-    sandboxManagerReplicasPerCell: integer(
-      spec.sandboxManagerReplicasPerCell,
-      "spec.sandboxManagerReplicasPerCell",
-      1,
-      16,
-    ),
-    sandboxManagerMaximumActivePerReplica: integer(
-      spec.sandboxManagerMaximumActivePerReplica,
-      "spec.sandboxManagerMaximumActivePerReplica",
+    toolBrokerReplicas: integer(spec.toolBrokerReplicas, "spec.toolBrokerReplicas", 1, 16),
+    dataMoverReplicas: integer(spec.dataMoverReplicas, "spec.dataMoverReplicas", 1, 16),
+    toolBrokerMaximumActivePerReplica: integer(
+      spec.toolBrokerMaximumActivePerReplica,
+      "spec.toolBrokerMaximumActivePerReplica",
       1,
       4096,
+    ),
+    maximumActiveSandboxes: integer(
+      spec.maximumActiveSandboxes,
+      "spec.maximumActiveSandboxes",
+      1,
+      1_000_000,
     ),
     controlPlaneMaximumReplicas: integer(
       spec.controlPlaneMaximumReplicas,
@@ -215,9 +219,8 @@ function cellDescriptor(profile, index) {
     displayName: `Execution Cell ${suffix}`,
     state: "active",
     temporalTaskQueue: `agent-dock-pi-runs-${id}-v1`,
-    sandboxManagerBaseUrl: `http://sandbox-manager.${namespace}.svc.${profile.clusterDomain}:4300`,
+    sandboxDomainId: profile.sandboxDomainId,
     supervisorManagementBaseUrlTemplate: `http://{supervisorId}.agent-dock-pi-worker-${workerPoolName}.${namespace}.svc.${profile.clusterDomain}:4100`,
-    workspaceStorageKey: `workspace-${id}`,
     capacityWeight: 100,
   };
 }
@@ -231,26 +234,32 @@ function buildTopology(profile) {
   );
   const maximumRunSlots =
     profile.cellCount * profile.maximumWorkersPerCell * profile.workerCapacity;
-  const maximumSandboxAdmissions =
-    profile.cellCount *
-    profile.sandboxManagerReplicasPerCell *
-    profile.sandboxManagerMaximumActivePerReplica;
+  const maximumSandboxAdmissions = profile.maximumActiveSandboxes;
   if (maximumSandboxAdmissions < maximumRunSlots) {
     fail(
       `Sandbox admission capacity ${maximumSandboxAdmissions} is below Worker slot capacity ${maximumRunSlots}`,
     );
   }
-  return { cells, maximumRunSlots, maximumSandboxAdmissions };
+  const domain = {
+    id: profile.sandboxDomainId,
+    displayName: "Primary Sandbox Domain",
+    state: "active",
+    toolBrokerBaseUrl: `http://tool-broker.${profile.sandboxDomainNamespace}.svc.${profile.clusterDomain}:4300`,
+    workspaceStorageKey: "workspace-domain-0001",
+    maximumActiveSandboxes: profile.maximumActiveSandboxes,
+  };
+  return { cells, domain, maximumRunSlots, maximumSandboxAdmissions };
 }
 
 function globalValues(base, profile, topology) {
   const values = structuredClone(base);
   values.globalPlaneEnabled = true;
-  values.executionPlaneEnabled = false;
+  values.sandboxPlaneEnabled = false;
   values.piWorkersEnabled = false;
   values.executionCells = topology.cells.map(
     ({ namespace, release, workerPoolName, ...cell }) => cell,
   );
+  values.sandboxDomains = [topology.domain];
   values.global.clusterDomain = profile.clusterDomain;
   values.controlPlane.autoscaling.enabled = true;
   values.controlPlane.autoscaling.maxReplicas = profile.controlPlaneMaximumReplicas;
@@ -260,11 +269,32 @@ function globalValues(base, profile, topology) {
   return values;
 }
 
-function cellValues(base, profile, topology, cell, workersEnabled) {
+function domainValues(base, profile, topology) {
   const values = structuredClone(base);
   values.globalPlaneEnabled = false;
-  values.executionPlaneEnabled = true;
-  values.piWorkersEnabled = workersEnabled;
+  values.sandboxPlaneEnabled = true;
+  values.piWorkersEnabled = false;
+  values.bootstrap.enabled = false;
+  values.executionCells = topology.cells.map(
+    ({ namespace, release, workerPoolName, ...cell }) => cell,
+  );
+  values.sandboxDomains = [topology.domain];
+  values.global.clusterDomain = profile.clusterDomain;
+  values.sandboxPlane.domainId = profile.sandboxDomainId;
+  values.sandboxPlane.toolBrokerReplicas = profile.toolBrokerReplicas;
+  values.sandboxPlane.dataMoverReplicas = profile.dataMoverReplicas;
+  values.sandboxPlane.cube.apiUrl = profile.cubeApiUrl;
+  values.sandboxPlane.cube.proxyNodeIp = profile.cubeProxyNodeIp;
+  values.sandboxPlane.cube.domain = profile.cubeDomain;
+  values.sandboxPlane.maximumActivePerReplica = profile.toolBrokerMaximumActivePerReplica;
+  return values;
+}
+
+function cellValues(base, profile, topology, cell) {
+  const values = structuredClone(base);
+  values.globalPlaneEnabled = false;
+  values.sandboxPlaneEnabled = false;
+  values.piWorkersEnabled = true;
   values.bootstrap.enabled = false;
   values.executionCells = [
     Object.fromEntries(
@@ -273,16 +303,8 @@ function cellValues(base, profile, topology, cell, workersEnabled) {
       ),
     ),
   ];
+  values.sandboxDomains = [topology.domain];
   values.global.clusterDomain = profile.clusterDomain;
-  values.sandboxPlane.replicas = profile.sandboxManagerReplicasPerCell;
-  values.sandboxPlane.executionCellId = cell.id;
-  values.sandboxPlane.cube.apiUrl = profile.cubeApiUrlTemplate.replace("{cellId}", cell.id);
-  values.sandboxPlane.cube.proxyNodeIp = profile.cubeProxyNodeIpTemplate.replace(
-    "{cellId}",
-    cell.id,
-  );
-  values.sandboxPlane.cube.domain = profile.cubeDomainTemplate.replace("{cellId}", cell.id);
-  values.sandboxPlane.maximumActivePerReplica = profile.sandboxManagerMaximumActivePerReplica;
   values["pi-workers"].workerPool.name = cell.workerPoolName;
   values["pi-workers"].workerPool.replicas = profile.minimumWorkersPerCell;
   values["pi-workers"].workerPool.capacity = profile.workerCapacity;
@@ -295,9 +317,7 @@ function cellValues(base, profile, topology, cell, workersEnabled) {
   values["pi-workers"].temporal.workerDeploymentName = `agent-dock-pi-workers-${cell.id}`;
   values["pi-workers"].services.controlPlaneUrl =
     `http://control-plane.${profile.globalNamespace}.svc.${profile.clusterDomain}:3000`;
-  values["pi-workers"].services.sandboxManagerUrls = [
-    `http://sandbox-manager.${cell.namespace}.svc.${profile.clusterDomain}:4300`,
-  ];
+  values["pi-workers"].services.toolBrokerUrls = [topology.domain.toolBrokerBaseUrl];
   return values;
 }
 
@@ -345,7 +365,7 @@ const requiredSecretKeys = [
   "database-url",
   "metrics-token",
   "model-credential-master-key",
-  "sandbox-manager-token",
+  "tool-broker-token",
   "sandbox-materializer-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
@@ -414,9 +434,11 @@ function preflight(profile, topology, base) {
     false,
     base.external.kafka.security.enabled ? globalEventSecretKeys : [],
   );
+  ensureNamespace(profile.sandboxDomainNamespace);
+  verifyNamespaceAuthorities(profile.sandboxDomainNamespace, base, true);
   for (const cell of topology.cells) {
     ensureNamespace(cell.namespace, cell.id);
-    verifyNamespaceAuthorities(cell.namespace, base, true);
+    verifyNamespaceAuthorities(cell.namespace, base, false);
   }
 }
 
@@ -449,6 +471,9 @@ function summary(profile, topology) {
     maximumWorkersPerCell: profile.maximumWorkersPerCell,
     maximumRunSlots: topology.maximumRunSlots,
     maximumSandboxAdmissions: topology.maximumSandboxAdmissions,
+    sandboxDomains: 1,
+    toolBrokerReplicas: profile.toolBrokerReplicas,
+    dataMoverReplicas: profile.dataMoverReplicas,
   };
 }
 
@@ -478,6 +503,11 @@ try {
   }
   if (action === "status") {
     run("helm", ["status", profile.globalRelease, "-n", profile.globalNamespace], true);
+    run(
+      "helm",
+      ["status", profile.sandboxDomainRelease, "-n", profile.sandboxDomainNamespace],
+      true,
+    );
     for (const cell of topology.cells) {
       run("helm", ["status", cell.release, "-n", cell.namespace], true);
     }
@@ -490,18 +520,21 @@ try {
   const base = mergeValues(defaults, loadYaml(valuesPath, "base values"));
   run("helm", ["dependency", "build", chart]);
   const global = globalValues(base, profile, topology);
-  const cellDocuments = topology.cells.map((cell) =>
-    cellValues(base, profile, topology, cell, true),
-  );
+  const domain = domainValues(base, profile, topology);
+  const cellDocuments = topology.cells.map((cell) => cellValues(base, profile, topology, cell));
   if (action === "render") {
-    withTemporaryValues([global, ...cellDocuments], (paths) => {
+    withTemporaryValues([global, domain, ...cellDocuments], (paths) => {
       process.stdout.write(
         `# agent-dock-enterprise-summary: ${JSON.stringify(summary(profile, topology))}\n`,
       );
       process.stdout.write(helmTemplate(profile.globalRelease, profile.globalNamespace, paths[0]));
+      process.stdout.write("\n---\n");
+      process.stdout.write(
+        helmTemplate(profile.sandboxDomainRelease, profile.sandboxDomainNamespace, paths[1]),
+      );
       topology.cells.forEach((cell, index) => {
         process.stdout.write("\n---\n");
-        process.stdout.write(helmTemplate(cell.release, cell.namespace, paths[index + 1]));
+        process.stdout.write(helmTemplate(cell.release, cell.namespace, paths[index + 2]));
       });
     });
     process.exit(0);
@@ -512,16 +545,11 @@ try {
     process.stdout.write(`${JSON.stringify(summary(profile, topology))}\n`);
     process.exit(0);
   }
-  const managerOnlyDocuments = topology.cells.map((cell) =>
-    cellValues(base, profile, topology, cell, false),
-  );
-  withTemporaryValues([global, ...managerOnlyDocuments, ...cellDocuments], (paths) => {
-    topology.cells.forEach((cell, index) =>
-      upgrade(cell.release, cell.namespace, paths[index + 1]),
-    );
+  withTemporaryValues([global, domain, ...cellDocuments], (paths) => {
+    upgrade(profile.sandboxDomainRelease, profile.sandboxDomainNamespace, paths[1]);
     upgrade(profile.globalRelease, profile.globalNamespace, paths[0]);
     topology.cells.forEach((cell, index) =>
-      upgrade(cell.release, cell.namespace, paths[1 + managerOnlyDocuments.length + index]),
+      upgrade(cell.release, cell.namespace, paths[index + 2]),
     );
   });
   process.stdout.write(`${JSON.stringify(summary(profile, topology))}\n`);

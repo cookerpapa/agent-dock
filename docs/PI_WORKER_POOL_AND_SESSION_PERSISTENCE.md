@@ -35,7 +35,7 @@ Every Worker has:
 - a private management address validated against an operator URL template.
 
 Shared durable authorities are PostgreSQL, S3-compatible object storage, the
-Sandbox Manager, and the Model Gateway credential store. Worker local memory is
+Tool Broker, and the Model Gateway credential store. Worker local memory is
 never required to resume a cold Session.
 
 ## What is saved after a turn
@@ -221,7 +221,7 @@ rolling update as a safe Workflow-code upgrade.
 
 Pi Worker count and Tool Sandbox count are separate capacity controls. A pure
 chat Run consumes a Worker without materializing Cube. Coding Runs acquire the
-Sandbox Manager's bounded FIFO admission on their first Tool operation. The
+Tool Broker's bounded FIFO admission on their first Tool operation. The
 single-host default permits two simultaneous Cube guests, so additional Pi
 Workers can continue model-only work without allowing a burst of 2 GiB guests
 to exhaust the host.

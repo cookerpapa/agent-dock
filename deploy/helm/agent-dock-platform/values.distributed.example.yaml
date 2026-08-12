@@ -23,8 +23,8 @@ images:
     repository: registry.example.com/agent-dock/web-ui
     tag: git-sha-0123456789abcdef
     pullPolicy: IfNotPresent
-  sandboxManager:
-    repository: registry.example.com/agent-dock/sandbox-manager
+  toolBroker:
+    repository: registry.example.com/agent-dock/tool-broker
     tag: git-sha-0123456789abcdef
     pullPolicy: IfNotPresent
 
@@ -85,8 +85,9 @@ networkPolicy:
 sandboxPlane:
   # Replicas share durable activation ownership in PostgreSQL. The Service may
   # route a create to any healthy replica; the owner URL pins later operations.
-  replicas: 3
-  executionCellId: cell-0001
+  domainId: sandbox-domain-0001
+  toolBrokerReplicas: 3
+  dataMoverReplicas: 2
   workspace:
     existingClaim: agent-dock-workspaces-rwx
   cube:
@@ -113,8 +114,8 @@ pi-workers:
     workerBuildId: git-sha-0123456789abcdef
   services:
     controlPlaneUrl: http://control-plane:3000
-    sandboxManagerUrls:
-      - http://sandbox-manager:4300
+    toolBrokerUrls:
+      - http://tool-broker:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""

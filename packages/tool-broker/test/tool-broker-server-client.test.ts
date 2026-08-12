@@ -20,12 +20,12 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
-  SANDBOX_MANAGER_SERVICE_PATH,
-  ReplicatedSandboxManagerClient,
-  SandboxManagerClient,
-  SandboxManagerOwnerRedirectError,
-  SandboxManagerServer,
-  type SandboxManagerBackend,
+  TOOL_BROKER_SERVICE_PATH,
+  ReplicatedToolBrokerClient,
+  ToolBrokerClient,
+  ToolBrokerOwnerRedirectError,
+  ToolBrokerServer,
+  type ToolBrokerBackend,
 } from "../src/index.ts";
 
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
@@ -61,12 +61,12 @@ const runtimeAssignment: SupervisorRuntimeAssignment = {
   fencingToken: assignment.fencingToken,
 };
 
-const servers: SandboxManagerServer[] = [];
+const servers: ToolBrokerServer[] = [];
 let telemetry: TelemetryRuntime;
 let observedServerTrace: TraceCarrier | undefined;
 
 beforeAll(async () => {
-  telemetry = await initializeTelemetry({ serviceName: "sandbox-manager-rpc-test" });
+  telemetry = await initializeTelemetry({ serviceName: "tool-broker-rpc-test" });
 });
 
 afterAll(async () => {
@@ -77,14 +77,14 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
-function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManagerBackend {
+function backend(ownerBaseUrl = "http://tool-broker.invalid"): ToolBrokerBackend {
   return {
     providerId: "test-provider",
     async checkHealth() {},
     async create(request) {
       observedServerTrace = activeTraceCarrier();
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.reserved",
         requestId: request.requestId,
         activationId: ACTIVATION_ID,
@@ -99,7 +99,7 @@ function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManage
     },
     async release(request) {
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.released",
         requestId: request.requestId,
         activationId: request.activationId,
@@ -115,7 +115,7 @@ function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManage
     async execute(capability, request) {
       if (capability !== CAPABILITY) throw new Error("wrong capability");
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation_result",
         activationId: request.activationId,
         operationId: request.operationId,
@@ -133,7 +133,7 @@ function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManage
     async materializeFile(request) {
       const content = Buffer.from("immutable\n");
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "workspace.file_materialized",
         requestId: request.requestId,
         tenantId: request.tenantId,
@@ -154,17 +154,17 @@ function backend(ownerBaseUrl = "http://sandbox-manager.invalid"): SandboxManage
   };
 }
 
-describe("Sandbox Manager authenticated RPC", () => {
-  it("stays ready while at least one Manager replica is healthy", async () => {
-    const server = new SandboxManagerServer({
+describe("Tool Broker authenticated RPC", () => {
+  it("stays ready while at least one Tool Broker replica is healthy", async () => {
+    const server = new ToolBrokerServer({
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
-      manager: backend(),
+      broker: backend(),
     });
     servers.push(server);
     const address = await server.listen();
-    const client = new ReplicatedSandboxManagerClient({
+    const client = new ReplicatedToolBrokerClient({
       baseUrls: ["http://127.0.0.1:1", address],
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
@@ -182,14 +182,14 @@ describe("Sandbox Manager authenticated RPC", () => {
     ];
     const addresses: string[] = [];
     for (const replica of [0, 1]) {
-      let ownerBaseUrl = "http://sandbox-manager.invalid";
+      let ownerBaseUrl = "http://tool-broker.invalid";
       const delegate = backend();
-      const manager: SandboxManagerBackend = {
+      const broker: ToolBrokerBackend = {
         ...delegate,
         async create(request) {
           calls[replica]! += 1;
           return {
-            managerProtocolVersion: 1,
+            toolBrokerProtocolVersion: 1,
             type: "tool_sandbox.reserved",
             requestId: request.requestId,
             activationId: activationIds[replica]!,
@@ -200,17 +200,17 @@ describe("Sandbox Manager authenticated RPC", () => {
           };
         },
       };
-      const server = new SandboxManagerServer({
+      const server = new ToolBrokerServer({
         host: "127.0.0.1",
         port: 0,
         serviceToken: SERVICE_TOKEN,
-        manager,
+        broker,
       });
       servers.push(server);
       ownerBaseUrl = await server.listen();
       addresses.push(ownerBaseUrl);
     }
-    const client = new ReplicatedSandboxManagerClient({
+    const client = new ReplicatedToolBrokerClient({
       baseUrls: addresses,
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
@@ -219,7 +219,7 @@ describe("Sandbox Manager authenticated RPC", () => {
 
     for (const replica of [0, 1]) {
       const request: ToolSandboxCreateRequest = {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.create",
         requestId: `10000000-0000-4000-8000-00000000003${String(replica)}`,
         assignment: { ...assignment, workspaceId: `workspace-replica-${String(replica)}` },
@@ -264,35 +264,35 @@ describe("Sandbox Manager authenticated RPC", () => {
   });
 
   it("follows the durable activation owner instead of replaying create elsewhere", async () => {
-    const owner = new SandboxManagerServer({
+    const owner = new ToolBrokerServer({
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
-      manager: backend(),
+      broker: backend(),
     });
     servers.push(owner);
     const ownerAddress = await owner.listen();
-    const redirect = new SandboxManagerServer({
+    const redirect = new ToolBrokerServer({
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
-      manager: {
+      broker: {
         ...backend(),
         async create() {
-          throw new SandboxManagerOwnerRedirectError(ownerAddress);
+          throw new ToolBrokerOwnerRedirectError(ownerAddress);
         },
       },
     });
     servers.push(redirect);
     const redirectAddress = await redirect.listen();
-    const client = new SandboxManagerClient({
+    const client = new ToolBrokerClient({
       baseUrl: redirectAddress,
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
     });
 
     const reserved = await client.create({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000071",
       assignment,
@@ -314,18 +314,18 @@ describe("Sandbox Manager authenticated RPC", () => {
   });
 
   it("separates the service credential from the per-activation tool capability", async () => {
-    const metrics = new AgentDockMetrics("sandbox-manager-test");
-    const server = new SandboxManagerServer({
+    const metrics = new AgentDockMetrics("tool-broker-test");
+    const server = new ToolBrokerServer({
       host: "127.0.0.1",
       port: 0,
       serviceToken: SERVICE_TOKEN,
       materializerToken: MATERIALIZER_TOKEN,
-      manager: backend(),
+      broker: backend(),
       metrics,
     });
     servers.push(server);
     const address = await server.listen();
-    const client = new SandboxManagerClient({
+    const client = new ToolBrokerClient({
       baseUrl: address,
       serviceToken: SERVICE_TOKEN,
       allowInsecureHttp: true,
@@ -333,7 +333,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     await expect(client.checkHealth()).resolves.toBeUndefined();
 
     const request: ToolSandboxCreateRequest = {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000011",
       assignment,
@@ -365,7 +365,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     expect(observedServerTrace?.traceparent).toContain("1".repeat(32));
 
     const operation: ToolSandboxOperationRequest = {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation",
       activationId: ACTIVATION_ID,
       operationId: "10000000-0000-4000-8000-000000000012",
@@ -398,14 +398,14 @@ describe("Sandbox Manager authenticated RPC", () => {
     await expect(client.terminateAndConfirmAbsent(runtimeAssignment)).resolves.toBeUndefined();
 
     const manifest = Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
-    const materializer = new SandboxManagerClient({
+    const materializer = new ToolBrokerClient({
       baseUrl: address,
       serviceToken: MATERIALIZER_TOKEN,
       allowInsecureHttp: true,
     });
     await expect(
       materializer.materializeFile({
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "workspace.materialize_file",
         requestId: "10000000-0000-4000-8000-000000000099",
         tenantId: assignment.tenantId,
@@ -425,7 +425,7 @@ describe("Sandbox Manager authenticated RPC", () => {
       content: Buffer.from("immutable\n").toString("base64"),
     });
 
-    const overPrivileged = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
+    const overPrivileged = await fetch(new URL(TOOL_BROKER_SERVICE_PATH, address), {
       method: "POST",
       headers: {
         authorization: `Bearer ${MATERIALIZER_TOKEN}`,
@@ -435,7 +435,7 @@ describe("Sandbox Manager authenticated RPC", () => {
     });
     expect(overPrivileged.status).toBe(401);
 
-    const unauthorized = await fetch(new URL(SANDBOX_MANAGER_SERVICE_PATH, address), {
+    const unauthorized = await fetch(new URL(TOOL_BROKER_SERVICE_PATH, address), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),
@@ -443,19 +443,19 @@ describe("Sandbox Manager authenticated RPC", () => {
     expect(unauthorized.status).toBe(401);
     const exportedMetrics = await metrics.registry.metrics();
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_operation_seconds_count{service="sandbox-manager-test",operation="reserve",outcome="completed"} 1',
+      'agent_dock_sandbox_operation_seconds_count{service="tool-broker-test",operation="reserve",outcome="completed"} 1',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_tool_duration_seconds_count{service="sandbox-manager-test",tool="bash.exec",outcome="completed"} 1',
+      'agent_dock_tool_duration_seconds_count{service="tool-broker-test",tool="bash.exec",outcome="completed"} 1',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_active{provider="test-provider",service="sandbox-manager-test"} 0',
+      'agent_dock_sandbox_admission_active{provider="test-provider",service="tool-broker-test"} 0',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_limit{provider="test-provider",service="sandbox-manager-test"} 2',
+      'agent_dock_sandbox_admission_limit{provider="test-provider",service="tool-broker-test"} 2',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_waiting{provider="test-provider",service="sandbox-manager-test"} 0',
+      'agent_dock_sandbox_admission_waiting{provider="test-provider",service="tool-broker-test"} 0',
     );
   });
 });

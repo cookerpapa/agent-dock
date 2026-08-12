@@ -43,6 +43,7 @@ import * as decouplePersistentSandboxLeases from "./041_decouple_persistent_sand
 import * as kafkaFirstWorkerEventLog from "./042_kafka_first_worker_event_log.ts";
 import * as sessionEventHotRetention from "./043_session_event_hot_retention.ts";
 import * as canonicalConversationsAndLiveStreams from "./044_canonical_conversations_and_live_streams.ts";
+import * as sandboxDomainsAndToolBroker from "./045_sandbox_domains_and_tool_broker.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -91,6 +92,7 @@ export const migrationProvider: MigrationProvider = {
       "042_kafka_first_worker_event_log": kafkaFirstWorkerEventLog,
       "043_session_event_hot_retention": sessionEventHotRetention,
       "044_canonical_conversations_and_live_streams": canonicalConversationsAndLiveStreams,
+      "045_sandbox_domains_and_tool_broker": sandboxDomainsAndToolBroker,
     };
   },
 };
@@ -256,14 +258,19 @@ export {
 } from "./033_enterprise_execution_cells.ts";
 
 export {
-  down as downSandboxManagerOwnership,
-  up as upSandboxManagerOwnership,
+  down as downToolBrokerOwnership,
+  up as upToolBrokerOwnership,
 } from "./034_sandbox_manager_ownership.ts";
 
 export {
   down as downPartitionedSessionEventLog,
   up as upPartitionedSessionEventLog,
 } from "./035_partitioned_session_event_log.ts";
+
+export {
+  down as downSandboxDomainsAndToolBroker,
+  up as upSandboxDomainsAndToolBroker,
+} from "./045_sandbox_domains_and_tool_broker.ts";
 
 export {
   down as downFasterEventIdentityRegistration,

@@ -8,7 +8,7 @@ The local production profile is a self-hosted, loopback-only deployment:
 127.0.0.1:8080
   → Web ingress
   → Control Plane / Temporal / Pi Workers
-  → Sandbox Manager
+  → Tool Broker
   → CubeSandbox KVM execution plane
 ```
 
@@ -189,7 +189,7 @@ npm run cubesandbox:template-check
 npm run cubesandbox:live-check
 ```
 
-The registered template revision must match the Sandbox Manager environment.
+The registered template revision must match the Tool Broker environment.
 The Manager fails closed if guest runtime/toolchain evidence does not match.
 
 Cube guests:
@@ -249,7 +249,7 @@ Check:
 - Web/Control Plane health endpoint;
 - Temporal frontend and Worker registrations;
 - PostgreSQL and MinIO readiness;
-- Sandbox Manager health;
+- Tool Broker health;
 - Cube API/Proxy/Cubelet health;
 - Pi Worker pool status;
 - egress gateway configuration revision.

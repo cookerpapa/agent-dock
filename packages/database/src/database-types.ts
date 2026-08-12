@@ -82,16 +82,27 @@ export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "c
 export type OrchestrationAcceptanceVerdict = "passed" | "failed";
 export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
 export type ExecutionCellState = "active" | "draining" | "disabled";
+export type SandboxDomainState = "active" | "draining" | "disabled";
 export type SandboxRetentionPolicy = "ephemeral" | "persistent";
+
+export interface SandboxDomainTable {
+  id: string;
+  display_name: string;
+  state: SandboxDomainState;
+  tool_broker_base_url: string;
+  workspace_storage_key: string;
+  maximum_active_sandboxes: GeneratedInteger;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
 
 export interface ExecutionCellTable {
   id: string;
   display_name: string;
   state: ExecutionCellState;
   temporal_task_queue: string;
-  sandbox_manager_base_url: string;
+  sandbox_domain_id: string;
   supervisor_management_url_template: string;
-  workspace_storage_key: string;
   capacity_weight: GeneratedInteger;
   assigned_workspaces: GeneratedInt8;
   created_at: GeneratedTimestamp;
@@ -115,26 +126,25 @@ export interface WorkspaceCellMigrationTable {
   settled_at: NullableTimestamp;
 }
 
-export type SandboxManagerInstanceState = "ready" | "stopped" | "lost";
-export type SandboxManagerActivationState =
+export type ToolBrokerInstanceState = "ready" | "stopped" | "lost";
+export type ToolBrokerActivationState =
   "reserved" | "materializing" | "active" | "warm" | "cleaning" | "released" | "unknown";
-export type SandboxManagerOperationState =
-  "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+export type ToolBrokerOperationState = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 
-export interface SandboxManagerInstanceTable {
+export interface ToolBrokerInstanceTable {
   instance_id: string;
-  cell_id: string;
+  sandbox_domain_id: string;
   owner_base_url: string;
-  state: SandboxManagerInstanceState;
+  state: ToolBrokerInstanceState;
   lease_expires_at: Timestamp;
   last_heartbeat_at: Timestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
 
-export interface SandboxManagerActivationTable {
+export interface ToolBrokerActivationTable {
   activation_id: string;
-  cell_id: string;
+  sandbox_domain_id: string;
   owner_instance_id: string;
   owner_base_url: string;
   tenant_id: string;
@@ -156,18 +166,18 @@ export interface SandboxManagerActivationTable {
   workspace_revision: string | null;
   runtime_id: string | null;
   runtime_name: string | null;
-  state: SandboxManagerActivationState;
+  state: ToolBrokerActivationState;
   failure_code: string | null;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
 
-export interface SandboxManagerOperationTable {
+export interface ToolBrokerOperationTable {
   operation_id: string;
   activation_id: string;
   owner_instance_id: string;
   request_sha256: string;
-  state: SandboxManagerOperationState;
+  state: ToolBrokerOperationState;
   failure_code: string | null;
   started_at: GeneratedTimestamp;
   settled_at: NullableTimestamp;
@@ -1115,11 +1125,12 @@ export interface PlatformRuntimeSettingChangeTable {
 }
 
 export interface Database {
+  sandbox_domains: SandboxDomainTable;
   execution_cells: ExecutionCellTable;
   workspace_cell_migrations: WorkspaceCellMigrationTable;
-  sandbox_manager_instances: SandboxManagerInstanceTable;
-  sandbox_manager_activations: SandboxManagerActivationTable;
-  sandbox_manager_operations: SandboxManagerOperationTable;
+  tool_broker_instances: ToolBrokerInstanceTable;
+  tool_broker_activations: ToolBrokerActivationTable;
+  tool_broker_operations: ToolBrokerOperationTable;
   tenants: TenantTable;
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;

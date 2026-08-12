@@ -78,7 +78,7 @@ export function projectInstructionsFromSnapshot(
   return `${content}${file.content.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by AgentDock]" : ""}`;
 }
 
-export interface ToolSandboxManagerBoundary {
+export interface ToolBrokerBoundary {
   create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse>;
   capture(
     activationId: string,
@@ -97,7 +97,7 @@ export interface ToolSandboxManagerBoundary {
 }
 
 export type RemoteToolSandboxTurnRunnerOptions = {
-  manager: ToolSandboxManagerBoundary;
+  broker: ToolBrokerBoundary;
   runtimeIdentity: SandboxRuntimeIdentity;
   trustedWorkspaceDirectory: string;
   scenario?: AgentTurnScenario | AgentTurnScenarioResolver;
@@ -152,7 +152,7 @@ async function releaseModelRuntimeLease(
 }
 
 export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
-  readonly #manager: ToolSandboxManagerBoundary;
+  readonly #broker: ToolBrokerBoundary;
   readonly #runtimeIdentity: SandboxRuntimeIdentity;
   readonly #trustedWorkspaceDirectory: string;
   readonly #scenario: AgentTurnScenario | AgentTurnScenarioResolver;
@@ -176,7 +176,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   >();
 
   constructor(options: RemoteToolSandboxTurnRunnerOptions) {
-    this.#manager = options.manager;
+    this.#broker = options.broker;
     this.#runtimeIdentity = validateSandboxRuntimeIdentity(options.runtimeIdentity);
     this.#trustedWorkspaceDirectory = resolve(options.trustedWorkspaceDirectory);
     this.#scenario = options.scenario ?? "java_repair";
@@ -386,7 +386,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       if (activation === undefined) return Promise.resolve();
       if (stopPromise === undefined) {
         const startedAt = performance.now();
-        stopPromise = this.#manager.stop(activation.activationId, toolAssignment).then(
+        stopPromise = this.#broker.stop(activation.activationId, toolAssignment).then(
           () => {
             this.#metrics?.sandboxDuration.observe(
               { operation: "stop", outcome: "completed" },
@@ -410,7 +410,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
 
     try {
       const createRequest: ToolSandboxCreateRequest = {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.create",
         requestId: this.#idGenerator(),
         assignment: toolAssignment,
@@ -434,7 +434,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       };
       const createStartedAt = performance.now();
       try {
-        activation = await this.#manager.create(createRequest);
+        activation = await this.#broker.create(createRequest);
         this.#metrics?.sandboxDuration.observe(
           { operation: "reserve", outcome: "completed" },
           (performance.now() - createStartedAt) / 1_000,
@@ -510,7 +510,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           }
         }
         const checkpointStartedAt = performance.now();
-        const captured = await this.#manager
+        const captured = await this.#broker
           .capture(activation.activationId, toolAssignment)
           .catch((error: unknown) => {
             this.#metrics?.checkpointDuration.observe(
@@ -646,7 +646,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           const settlementGate = settlementGatePolicyFromCommand(command);
           return [
             createTrustedRemoteToolsExtension({
-              operationUrl: this.#manager.operationUrlFor(activeSandbox.activationId),
+              operationUrl: this.#broker.operationUrlFor(activeSandbox.activationId),
               activationId: activeSandbox.activationId,
               capability: activeSandbox.capability,
               turnContextSha256: cloudTurn.sha256,
@@ -696,7 +696,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       await fakeModel?.stop().catch(() => undefined);
       let cleanupError: unknown;
       if (activation !== undefined && completedSuccessfully && !signal.aborted) {
-        await this.#manager
+        await this.#broker
           .release(
             activation.activationId,
             toolAssignment,

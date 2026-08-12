@@ -18,7 +18,7 @@ export type SupervisorHostConfig = {
   allowInsecureInternalHttp: boolean;
   enrollmentToken: string;
   managementToken: string;
-  sandboxManagerServiceToken: string;
+  toolBrokerServiceToken: string;
   modelCredentialMasterKey: string;
   databaseUrl: string;
   managementHost: string;
@@ -31,8 +31,8 @@ export type SupervisorHostConfig = {
   temporalTaskQueue: string;
   temporalWorkerDeploymentName?: string;
   temporalWorkerBuildId?: string;
-  sandboxManagerBaseUrls: readonly string[];
-  sandboxManagerRequestTimeoutMs: number;
+  toolBrokerBaseUrls: readonly string[];
+  toolBrokerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
   bootStateDirectory: string;
   eventSpoolDirectory: string;
@@ -287,9 +287,9 @@ export async function loadSupervisorHostConfig(
         ),
       }
     : {};
-  const sandboxManagerRequestTimeoutMs = integerValue(
+  const toolBrokerRequestTimeoutMs = integerValue(
     environment,
-    "AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS",
+    "AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS",
     MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS,
     1_000,
     900_000,
@@ -336,12 +336,9 @@ export async function loadSupervisorHostConfig(
     1_000,
     15 * 60_000,
   );
-  if (
-    sandboxManagerRequestTimeoutMs <
-    MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS
-  ) {
+  if (toolBrokerRequestTimeoutMs < MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS) {
     throw new TypeError(
-      "Sandbox Manager timeout must outlive the maximum Tool execution and transport margin",
+      "Tool Broker timeout must outlive the maximum Tool execution and transport margin",
     );
   }
   if (modelGatewayUpstreamRequestTimeoutMs > piModelRequestTimeoutMs) {
@@ -357,11 +354,11 @@ export async function loadSupervisorHostConfig(
     throw new TypeError("Repository import wait must not expire before its ownership lease");
   }
   if (
-    piTurnTimeoutMs + sandboxManagerRequestTimeoutMs + TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS >
+    piTurnTimeoutMs + toolBrokerRequestTimeoutMs + TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS >
     TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS
   ) {
     throw new TypeError(
-      "Pi Turn timeout plus Sandbox Manager timeout exceeds the Temporal Activity settlement budget",
+      "Pi Turn timeout plus Tool Broker timeout exceeds the Temporal Activity settlement budget",
     );
   }
   return {
@@ -386,9 +383,9 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
       allowInlineSecrets,
     ),
-    sandboxManagerServiceToken: await secret(
+    toolBrokerServiceToken: await secret(
       environment,
-      "AGENT_DOCK_SANDBOX_MANAGER_TOKEN",
+      "AGENT_DOCK_TOOL_BROKER_TOKEN",
       allowInlineSecrets,
     ),
     modelCredentialMasterKey: await secret(
@@ -438,12 +435,12 @@ export async function loadSupervisorHostConfig(
       255,
     ),
     ...temporalWorkerDeployment,
-    sandboxManagerBaseUrls: internalServiceBaseUrls(
-      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URLS"),
+    toolBrokerBaseUrls: internalServiceBaseUrls(
+      required(environment, "AGENT_DOCK_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,
-      "AGENT_DOCK_SANDBOX_MANAGER_URLS",
+      "AGENT_DOCK_TOOL_BROKER_URLS",
     ),
-    sandboxManagerRequestTimeoutMs,
+    toolBrokerRequestTimeoutMs,
     trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),
     bootStateDirectory: required(environment, "AGENT_DOCK_BOOT_STATE_DIRECTORY"),
     eventSpoolDirectory: required(environment, "AGENT_DOCK_EVENT_SPOOL_DIRECTORY"),

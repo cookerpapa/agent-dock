@@ -18,12 +18,12 @@ process-local Manager map cannot support safe replica replacement.
 1. Each Workspace receives one immutable `cell_id` when it is created. Adding
    Cells changes placement only for new Workspaces; moving an existing
    Workspace is an explicit drained migration.
-2. A Cell owns a versioned Temporal Activity Task Queue, a Pi Worker pool, a
-   replicated Sandbox Manager service, a Cube target and a Workspace storage
-   target.
+2. A Cell owns a versioned Temporal Activity Task Queue and a Pi Worker pool.
+   Sandbox execution and Workspace storage are resolved through its Sandbox
+   Domain as defined by [ADR-0095](0095-sandbox-domains-and-cube-control-plane.md).
 3. PostgreSQL is authoritative for Cell membership, Workspace placement,
-   Run/Attempt/lease/fence state and Sandbox Manager activation ownership.
-4. Sandbox Manager replicas persist instance leases, activation owner and Tool
+   Run/Attempt/lease/fence state and Tool Broker activation ownership.
+4. Tool Broker replicas persist instance leases, activation owner and Tool
    operation identity. After owner loss, a replacement may reattach only when
    Cube proves the same immutable operation; otherwise the result becomes
    `UNKNOWN` and is never replayed.
@@ -42,9 +42,9 @@ Kafka-first durability and canonical-transcript contracts are defined by
 
 ## Consequences
 
-- Callers carry a Cell identity but cannot choose a Cube endpoint or Manager
+- Callers carry a Cell identity but cannot choose a Cube endpoint or Broker
   owner directly.
-- Manager replica replacement is fenced through durable ownership rather than
+- Tool Broker replica replacement is fenced through durable ownership rather than
   process-local promises.
 - Cross-Cell migration is a maintenance operation because a running KVM cannot
   be atomically transferred together with Worker ownership.

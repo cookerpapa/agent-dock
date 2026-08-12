@@ -93,8 +93,11 @@ in the implementation log or Git history, not in the active backlog.
       physical node with external PostgreSQL, S3-compatible storage and
       Temporal.
 - [ ] Run the complete distributed Helm profile on at least three physical
-      nodes and record HPA, KEDA, node-autoscaler and Manager-shard replacement
+      nodes and record HPA, KEDA, node-autoscaler, Tool Broker replacement and
+      Data Mover replacement
       evidence.
+- [ ] Design and validate an activation/Attempt-scoped, expiring Cube data-plane
+      grant before bypassing the Tool Broker for Tool payload transport.
 - [ ] Validate Cube compute-node drain, replacement and Workspace recovery from
       committed Kopia state.
 - [ ] Replace workstation-specific network/proxy assumptions with explicit

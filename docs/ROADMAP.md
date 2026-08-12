@@ -71,7 +71,7 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   resets model-visible.
 - [x] Add a distributed Kubernetes application profile with multi-replica Web
   and Control Plane, version-aware Temporal/KEDA Pi Worker scaling, direct
-  headless-DNS Worker management and a fixed Sandbox Manager/Data-Mover ring.
+  headless-DNS Worker management and a shared Sandbox Domain.
 - [x] Replace global Workspace hashing with an immutable execution Cell
       directory and Cell-specific Temporal routing; raise the default Pi Worker Pod
       to four bounded runtime slots.
@@ -85,14 +85,18 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
       activation, dedicated-Workspace ownership and archive-driven cleanup.
 - [x] Move large Pi Sessions to compressed bounded object segments; keep live
       deltas in Kafka/Valkey and only terminal canonical Turns in PostgreSQL.
+- [x] Separate execution Cells from Sandbox Domains, narrow the Manager into a
+      Tool Broker and scale Workspace Data Movers independently.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone
 
 - tenant/session hard deletion and object garbage collection policy;
 - multi-node failure injection for Worker/node loss;
-- externalize Cell-local Sandbox Manager activation state and validate
-  multi-replica fail-closed recovery;
+- validate multi-replica Tool Broker owner-loss and Data Mover failover on a
+  real multi-node Domain;
+- design an activation/Attempt-scoped expiring Cube data-plane grant before
+  considering direct Worker-to-CubeProxy Tool payloads;
 - multi-node deployment acceptance for HPA/KEDA and external authorities;
 - object/checkpoint orphan garbage collection dashboards;
 - measured Session-affinity hit rate and queue-delay tuning;

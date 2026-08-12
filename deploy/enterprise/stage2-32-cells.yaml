@@ -8,15 +8,20 @@ spec:
   globalRelease: agent-dock
   cellNamespacePrefix: agent-dock-cell-
   cellReleasePrefix: agent-dock-cell-
+  sandboxDomainNamespace: agent-dock-sandbox-0001
+  sandboxDomainRelease: agent-dock-sandbox-0001
+  sandboxDomainId: sandbox-domain-0001
   clusterDomain: cluster.local
-  cubeApiUrlTemplate: https://cube-api-{cellId}.example.com
-  cubeProxyNodeIpTemplate: cube-proxy-{cellId}.example.com
-  cubeDomainTemplate: "{cellId}.cube.example.com"
+  cubeApiUrl: https://cube-api.example.com
+  cubeProxyNodeIp: cube-proxy.example.com
+  cubeDomain: cube.example.com
   cellCount: 32
   workerCapacity: 4
   minimumWorkersPerCell: 2
   maximumWorkersPerCell: 80
-  sandboxManagerReplicasPerCell: 3
-  sandboxManagerMaximumActivePerReplica: 128
+  toolBrokerReplicas: 8
+  dataMoverReplicas: 6
+  toolBrokerMaximumActivePerReplica: 2048
+  maximumActiveSandboxes: 10240
   controlPlaneMaximumReplicas: 64
   eventGatewayMaximumReplicas: 128

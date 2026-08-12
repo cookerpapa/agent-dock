@@ -10,8 +10,8 @@ import type {
   ToolSandboxOperationResponse,
   ToolSandboxReleaseRequest,
   ToolSandboxReleaseResponse,
-  SandboxManagerMaterializeFileRequest,
-  SandboxManagerMaterializeFileResponse,
+  ToolBrokerMaterializeFileRequest,
+  ToolBrokerMaterializeFileResponse,
 } from "@agent-dock/protocol";
 import {
   canonicalEnvironmentRecipeJson,
@@ -22,7 +22,7 @@ import {
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   DEFAULT_TOOL_SANDBOX_POLICY,
-  SandboxManagerError,
+  ToolBrokerError,
   type SandboxHandle,
   type SandboxInspection,
   type SandboxProvider,
@@ -32,7 +32,7 @@ import {
   type SandboxActivationStateRepository,
 } from "./activation-state-repository.ts";
 
-export type ToolSandboxManagerOptions = {
+export type ToolBrokerOptions = {
   provider: SandboxProvider;
   ownerBaseUrl?: string;
   stateRepository?: SandboxActivationStateRepository;
@@ -45,12 +45,12 @@ export type ToolSandboxManagerOptions = {
   imageRevision?: string;
 };
 
-export class SandboxManagerOwnerRedirectError extends Error {
+export class ToolBrokerOwnerRedirectError extends Error {
   readonly ownerBaseUrl: string;
 
   constructor(ownerBaseUrl: string) {
-    super("Tool Sandbox activation is owned by another Sandbox Manager replica");
-    this.name = "SandboxManagerOwnerRedirectError";
+    super("Tool Sandbox activation is owned by another Tool Broker replica");
+    this.name = "ToolBrokerOwnerRedirectError";
     this.ownerBaseUrl = ownerBaseUrl;
   }
 }
@@ -86,7 +86,7 @@ type AdmissionWaiter = {
   assignment: ToolSandboxAssignment;
   signal?: AbortSignal;
   resolve: () => void;
-  reject: (error: SandboxManagerError) => void;
+  reject: (error: ToolBrokerError) => void;
   abort?: () => void;
 };
 
@@ -113,9 +113,9 @@ function capabilityDigest(value: string): Buffer {
 }
 
 function operationFailureCode(error: unknown): string {
-  return error instanceof SandboxManagerError && /^[a-z][a-z0-9_]{0,127}$/.test(error.code)
+  return error instanceof ToolBrokerError && /^[a-z][a-z0-9_]{0,127}$/.test(error.code)
     ? error.code
-    : "sandbox_manager_failed";
+    : "tool_broker_failed";
 }
 
 function sameEnvironment(
@@ -143,7 +143,7 @@ function validCapability(value: string): string {
 
 function validActivationId(value: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw new TypeError("Sandbox Manager ID generator returned an invalid UUID");
+    throw new TypeError("Tool Broker ID generator returned an invalid UUID");
   }
   return value;
 }
@@ -219,7 +219,7 @@ function sameSupervisorAssignment(
   );
 }
 
-export class ToolSandboxManager {
+export class ToolBroker {
   readonly #provider: SandboxProvider;
   readonly #ownerBaseUrl: string;
   readonly #stateRepository: SandboxActivationStateRepository;
@@ -236,14 +236,12 @@ export class ToolSandboxManager {
   readonly #admissionWaiters: AdmissionWaiter[] = [];
   readonly #reaper: NodeJS.Timeout;
 
-  constructor(options: ToolSandboxManagerOptions) {
+  constructor(options: ToolBrokerOptions) {
     if (!/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(options.provider.providerId)) {
       throw new TypeError("Sandbox Provider ID is invalid");
     }
     this.#provider = options.provider;
-    this.#ownerBaseUrl = new URL(
-      options.ownerBaseUrl ?? "http://sandbox-manager.invalid",
-    ).toString();
+    this.#ownerBaseUrl = new URL(options.ownerBaseUrl ?? "http://tool-broker.invalid").toString();
     this.#stateRepository =
       options.stateRepository ?? new InMemorySandboxActivationStateRepository();
     this.#idGenerator = options.idGenerator ?? randomUUID;
@@ -331,15 +329,15 @@ export class ToolSandboxManager {
         .update(canonicalEnvironmentRecipeJson(request.environment.recipe))
         .digest("hex") !== request.environment.recipeSha256
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "environment_policy_mismatch",
-        "Run environment is not served by this Sandbox Manager",
+        "Run environment is not served by this Tool Broker",
         false,
       );
     }
     const key = workspaceKey(request.assignment);
     if ([...this.#activations.values()].some((entry) => workspaceKey(entry.assignment) === key)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_workspace_busy",
         "Workspace already has a Tool Sandbox reservation",
         true,
@@ -351,7 +349,7 @@ export class ToolSandboxManager {
       inherited?.retention === "persistent" &&
       inherited.handle.assignment.sessionId !== request.assignment.sessionId
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_workspace_pinned",
         "Workspace is pinned to another persistent Sandbox conversation",
         false,
@@ -373,7 +371,7 @@ export class ToolSandboxManager {
 
     const activationId = validActivationId(inherited?.handle.activationId ?? this.#idGenerator());
     if (this.#activations.has(activationId)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_collision",
         "Tool Sandbox activation identity collided",
         false,
@@ -411,12 +409,19 @@ export class ToolSandboxManager {
         : { workspaceRevision: request.workspaceRevision }),
     });
     if (reservation.status === "redirect") {
-      throw new SandboxManagerOwnerRedirectError(reservation.ownerBaseUrl);
+      throw new ToolBrokerOwnerRedirectError(reservation.ownerBaseUrl);
     }
     if (reservation.status === "busy") {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_workspace_busy",
         "Workspace already has a Tool Sandbox reservation",
+        true,
+      );
+    }
+    if (reservation.status === "capacity") {
+      throw new ToolBrokerError(
+        "sandbox_domain_capacity_exhausted",
+        "Sandbox Domain has reached its active Sandbox limit",
         true,
       );
     }
@@ -432,7 +437,7 @@ export class ToolSandboxManager {
       seenCaptureIds: new Set(),
     });
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.reserved",
       requestId: request.requestId,
       activationId,
@@ -450,14 +455,14 @@ export class ToolSandboxManager {
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
     if (request.turnContextSha256 !== activation.turnContextSha256) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "turn_context_mismatch",
         "Tool operation did not match the frozen Cloud Turn context",
         false,
       );
     }
     if (request.attemptContextSha256 !== activation.attemptContextSha256) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "attempt_context_mismatch",
         "Tool operation did not match the current Cloud Attempt context",
         false,
@@ -469,7 +474,7 @@ export class ToolSandboxManager {
     const existing = activation.operations.get(request.operationId);
     if (existing !== undefined) {
       if (existing.requestSha256 === requestSha256) return existing.result;
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_operation_identity_conflict",
         "Tool operation ID was reused for a different request",
         false,
@@ -485,7 +490,7 @@ export class ToolSandboxManager {
       request.stepContextSequence < currentStep.sequence ||
       request.stepContextSha256 !== currentStep.sha256
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "step_context_mismatch",
         "Tool operation used a stale or conflicting Cloud Step",
         false,
@@ -498,7 +503,7 @@ export class ToolSandboxManager {
         requestSha256,
       );
       if (started !== "started") {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "tool_operation_outcome_unknown",
           "Tool operation may already have produced side effects",
           false,
@@ -531,7 +536,7 @@ export class ToolSandboxManager {
   ): Promise<ToolSandboxCaptureResponse> {
     const activation = this.#owned(activationId, assignment);
     if (activation.seenCaptureIds.has(requestId)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_capture_replay",
         "Tool Sandbox capture ID was already used",
         false,
@@ -540,7 +545,7 @@ export class ToolSandboxManager {
     activation.seenCaptureIds.add(requestId);
     if (!activation.materializedForCurrentAssignment) {
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.unused",
         requestId,
         activationId,
@@ -600,7 +605,7 @@ export class ToolSandboxManager {
       await this.#stateRepository.setActivationState(request.activationId, "released");
     }
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.released",
       requestId: request.requestId,
       activationId: request.activationId,
@@ -624,7 +629,7 @@ export class ToolSandboxManager {
       return;
     }
     if (!sameAssignment(activation.assignment, assignment)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "Tool Sandbox assignment identity did not match",
         false,
@@ -688,7 +693,7 @@ export class ToolSandboxManager {
 
   async importGitHub(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array> {
     if (this.#provider.importGitHub === undefined) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "repository_import_removed",
         "Repository import is not available; clone the repository from a Cube Tool session",
         false,
@@ -698,11 +703,11 @@ export class ToolSandboxManager {
   }
 
   async materializeFile(
-    request: SandboxManagerMaterializeFileRequest,
+    request: ToolBrokerMaterializeFileRequest,
     signal?: AbortSignal,
-  ): Promise<SandboxManagerMaterializeFileResponse> {
+  ): Promise<ToolBrokerMaterializeFileResponse> {
     if (this.#provider.materializeFile === undefined) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "snapshot_materializer_unavailable",
         "The configured Sandbox Provider cannot materialize immutable Workspace files",
         false,
@@ -728,7 +733,7 @@ export class ToolSandboxManager {
       return await this.#provider.materializeFile(request, signal);
     } catch (error: unknown) {
       if (
-        error instanceof SandboxManagerError &&
+        error instanceof ToolBrokerError &&
         error.code === "snapshot_materializer_cleanup_failed"
       ) {
         releaseAdmission = false;
@@ -752,11 +757,7 @@ export class ToolSandboxManager {
     for (const waiter of this.#admissionWaiters.splice(0)) {
       this.#removeAbortListener(waiter);
       waiter.reject(
-        new SandboxManagerError(
-          "tool_sandbox_admission_closed",
-          "Tool Sandbox admission closed",
-          true,
-        ),
+        new ToolBrokerError("tool_sandbox_admission_closed", "Tool Sandbox admission closed", true),
       );
     }
     this.#admitted.clear();
@@ -805,7 +806,7 @@ export class ToolSandboxManager {
       candidate.byteLength !== expected.byteLength ||
       !timingSafeEqual(candidate, expected)
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "invalid_tool_capability",
         "Tool Sandbox operation is not authorized",
         false,
@@ -817,7 +818,7 @@ export class ToolSandboxManager {
   #owned(activationId: string, assignment: ToolSandboxAssignment): ManagedActivation {
     const activation = this.#activations.get(activationId);
     if (activation === undefined || !sameAssignment(activation.assignment, assignment)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "Tool Sandbox assignment identity did not match",
         false,
@@ -847,7 +848,7 @@ export class ToolSandboxManager {
       let releaseAdmissionOnFailure = true;
       try {
         if (this.#activations.get(activationId) !== activation || signal?.aborted) {
-          throw new SandboxManagerError(
+          throw new ToolBrokerError(
             "tool_sandbox_admission_cancelled",
             "Tool Sandbox admission was cancelled",
             false,
@@ -866,7 +867,7 @@ export class ToolSandboxManager {
               throw cleanupError;
             }
             handle = undefined;
-            if (error instanceof SandboxManagerError && !error.retryable) throw error;
+            if (error instanceof ToolBrokerError && !error.retryable) throw error;
           }
         }
         if (handle === undefined) handle = await this.#provider.create(activation.spec);
@@ -886,7 +887,7 @@ export class ToolSandboxManager {
             releaseAdmissionOnFailure = false;
             throw cleanupError;
           }
-          throw new SandboxManagerError(
+          throw new ToolBrokerError(
             "sandbox_provider_protocol_error",
             "Sandbox Provider returned a mismatched handle",
             false,
@@ -953,7 +954,7 @@ export class ToolSandboxManager {
   ): Promise<void> {
     if (this.#admitted.has(activationId)) return;
     if (signal?.aborted) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_admission_cancelled",
         "Tool Sandbox admission was cancelled",
         false,
@@ -969,7 +970,7 @@ export class ToolSandboxManager {
       await this.#provider.stop(oldest[1].handle);
       this.#releaseAdmission(oldest[1].handle.activationId);
       if (signal?.aborted) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "tool_sandbox_admission_cancelled",
           "Tool Sandbox admission was cancelled",
           false,
@@ -994,7 +995,7 @@ export class ToolSandboxManager {
           if (index >= 0) this.#admissionWaiters.splice(index, 1);
           this.#removeAbortListener(waiter);
           rejectPromise(
-            new SandboxManagerError(
+            new ToolBrokerError(
               "tool_sandbox_admission_cancelled",
               "Tool Sandbox admission was cancelled",
               false,
@@ -1029,7 +1030,7 @@ export class ToolSandboxManager {
     if (waiter === undefined) return;
     this.#removeAbortListener(waiter);
     waiter.reject(
-      new SandboxManagerError(
+      new ToolBrokerError(
         "tool_sandbox_admission_cancelled",
         "Tool Sandbox admission was cancelled",
         false,
@@ -1046,7 +1047,7 @@ export class ToolSandboxManager {
   #now(): number {
     const value = this.#clock();
     if (!Number.isSafeInteger(value) || value < 0) {
-      throw new TypeError("Sandbox Manager clock returned an invalid timestamp");
+      throw new TypeError("Tool Broker clock returned an invalid timestamp");
     }
     return value;
   }

@@ -1,16 +1,16 @@
 export {
-  SANDBOX_MANAGER_INVENTORY_PATH,
-  SANDBOX_MANAGER_LIVE_PATH,
-  SANDBOX_MANAGER_MATERIALIZER_PATH,
-  SANDBOX_MANAGER_OPERATION_PATH,
-  SANDBOX_MANAGER_READY_PATH,
-  SANDBOX_MANAGER_SERVICE_PATH,
-  SandboxManagerClient,
-  SandboxManagerClientError,
-  ReplicatedSandboxManagerClient,
-  type SandboxManagerClientOptions,
-  type ReplicatedSandboxManagerClientOptions,
-} from "./client.ts";
+  TOOL_BROKER_INVENTORY_PATH,
+  TOOL_BROKER_LIVE_PATH,
+  TOOL_BROKER_MATERIALIZER_PATH,
+  TOOL_BROKER_OPERATION_PATH,
+  TOOL_BROKER_READY_PATH,
+  TOOL_BROKER_SERVICE_PATH,
+  ToolBrokerClient,
+  ToolBrokerClientError,
+  ReplicatedToolBrokerClient,
+  type ToolBrokerClientOptions,
+  type ReplicatedToolBrokerClientOptions,
+} from "./tool-broker-client.ts";
 export {
   InMemorySandboxActivationStateRepository,
   PostgresSandboxActivationStateRepository,
@@ -40,7 +40,7 @@ export {
 export {
   DEFAULT_TOOL_SANDBOX_POLICY,
   SANDBOX_PROVIDER_API_VERSION,
-  SandboxManagerError,
+  ToolBrokerError,
   type SandboxCreateSpec,
   type SandboxEffectiveIsolation,
   type SandboxHandle,
@@ -52,17 +52,13 @@ export {
   type SandboxResourceLimits,
   type SandboxWriteFileInput,
 } from "./sandbox-provider.ts";
+export { ToolBrokerOwnerRedirectError, ToolBroker, type ToolBrokerOptions } from "./tool-broker.ts";
+export { loadToolBrokerConfig, type ToolBrokerConfig } from "./tool-broker-config.ts";
 export {
-  SandboxManagerOwnerRedirectError,
-  ToolSandboxManager,
-  type ToolSandboxManagerOptions,
-} from "./tool-sandbox-manager.ts";
-export { loadSandboxManagerConfig, type SandboxManagerConfig } from "./config.ts";
-export {
-  SandboxManagerServer,
-  type SandboxManagerBackend,
-  type SandboxManagerServerOptions,
-} from "./server.ts";
+  ToolBrokerServer,
+  type ToolBrokerBackend,
+  type ToolBrokerServerOptions,
+} from "./tool-broker-server.ts";
 export {
   HttpWorkspaceDataMover,
   KopiaWorkspaceDataMover,
@@ -73,6 +69,8 @@ export {
   type WorkspaceDataMoverIdentity,
   type WorkspaceDataMoverInitializeBaselineInput,
   type WorkspaceDataMoverMaterializeInput,
+  type WorkspaceDataMoverLock,
   type WorkspaceDataMoverPrepareInput,
   type WorkspaceDataMoverSnapshotInput,
 } from "./workspace-data-mover.ts";
+export { PostgresWorkspaceDataMoverLock } from "./workspace-data-mover.ts";

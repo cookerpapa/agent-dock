@@ -19,13 +19,13 @@ platform service network.
 | Control Plane | Event Gateway internal projection | yes | dedicated service token |
 | Control Plane | MinIO/S3 | yes | object-store credential |
 | Control Plane | exact Pi Worker management endpoint | yes | management service token |
-| Control Plane | Sandbox Manager Service | yes | materializer credential |
+| Control Plane | Tool Broker Service | yes | materializer credential |
 | Pi Worker | Control Plane management channel | yes | Worker boot credential |
 | Pi Worker | Event Gateway internal ingest | yes | dedicated service token; no Kafka credential |
 | Pi Worker | Model Gateway | yes | short-lived Run capability |
-| Pi Worker | Sandbox Manager | yes | service identity + Tool lease |
-| Sandbox Manager | Cube API/Proxy | yes | Cube API credential |
-| Sandbox Manager | co-located Data Mover | yes | Data Mover service credential |
+| Pi Worker | Tool Broker | yes | service identity + Tool lease |
+| Tool Broker | Cube API/Proxy | yes | Cube API credential |
+| Tool Broker | independent Data Mover | yes | Data Mover service credential |
 | Data Mover | Cube Volume/POSIX storage | yes | deployment identity |
 | Data Mover | object storage | yes | scoped checkpoint credential |
 | Cube guest | Cube egress gateway | yes | no platform credential |
@@ -41,7 +41,7 @@ Control Plane, Event Gateway, Kafka, Valkey, Temporal, PostgreSQL, object storag
 management use private deployment networks. Their credentials are injected only
 into the service that needs them.
 
-The Worker does not receive the Cube API key. The Sandbox Manager does not
+The Worker does not receive the Cube API key. The Tool Broker does not
 receive the model provider key.
 
 In the distributed profile, NetworkPolicy starts from denied ingress/egress.
@@ -80,7 +80,7 @@ address at connection time. Redirects remain subject to the same validation.
 | DB credential | Control Plane/trusted services | browser, Cube |
 | object-store credential | Control Plane/Data Mover/Worker as scoped | browser, Cube |
 | Temporal credential/config | Control Plane/Workers | browser, Cube |
-| Cube API key | Sandbox Manager | browser, Pi prompt, Cube guest |
+| Cube API key | Tool Broker | browser, Pi prompt, Cube guest |
 | browser password hash | authentication store | logs, browser response |
 | Tool lease/handoff secret | Worker/Manager/guest Tool service | model context, Workspace |
 

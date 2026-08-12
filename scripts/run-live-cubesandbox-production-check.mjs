@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   OfficialCubeSandboxRuntimeClient,
   workspaceVolumeId,
-} from "../packages/sandbox-manager/src/index.ts";
+} from "../packages/tool-broker/src/index.ts";
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
@@ -516,7 +516,7 @@ async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
     const sandboxId = ${JSON.stringify(logicalSandboxId)};
     const sessionId = ${JSON.stringify(sessionId)};
     const token = readFileSync(
-      "/run/agent-dock-secrets/sandbox-manager-token",
+      "/run/agent-dock-secrets/tool-broker-token",
       "utf8",
     ).trim();
     const endpoint = "http://127.0.0.1:4300/internal/v1/sandbox-inventory";
@@ -561,7 +561,7 @@ async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
       "scripts/production-compose.mjs",
       "exec",
       "-T",
-      "sandbox-manager",
+      "tool-broker",
       "node",
       "--input-type=module",
       "--eval",

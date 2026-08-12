@@ -132,10 +132,11 @@ The trusted model gateway resolves the deployment-owned model configuration,
 injects the provider credential, enforces request identity and records usage.
 Only the trusted Runner can reach it. The Cube guest cannot.
 
-### Sandbox Manager
+### Tool Broker
 
-The Manager is the only application component that controls Cube. Its API is
-narrow and authenticated. It:
+The Tool Broker is the only AgentDock component that controls Cube. Its API is
+narrow and authenticated. Cube owns generic microVM placement and lifecycle;
+the Broker keeps only AgentDock-specific authority. It:
 
 - validates Tool leases and fencing tokens;
 - binds every reservation and operation to one stable logical Turn digest and
@@ -288,7 +289,7 @@ Pi context hook captures Step N and its semantic WorldState
   → model emits Tool Call from Step N
   → Pi serializes sibling remote Tools in model order
   → Worker sends Turn + Attempt digests and Step N sequence/digest
-  → Sandbox Manager validates Turn contract, Attempt/fence ownership and rejects stale Steps
+  → Tool Broker validates Turn contract, Attempt/fence ownership and rejects stale Steps
   → ensure exact Session Cube activation
   → restore current Workspace if activation is cold
   → execute Tool in guest
@@ -432,7 +433,7 @@ Pi JSONL also keeps a typed, versioned and hidden
 `agent-dock.runtime_world_state` custom entry that does not participate in
 model context. It records only facts that can affect later reasoning: Sandbox
 availability/continuity, environment fingerprint, committed Workspace revision
-and Tool-policy fingerprint. The Sandbox Manager reservation reports whether
+and Tool-policy fingerprint. The Tool Broker reservation reports whether
 the exact Session runtime is a `warm_reuse` or a `cold_restore`. If a previously
 active Cube is no longer available, the Worker appends one short model-visible
 `<sandbox_reset>` fact before the next prompt:
@@ -603,7 +604,7 @@ The single-node development/production profile runs:
 - MinIO;
 - Temporal;
 - Pi Workers (Compose or Kubernetes deployment);
-- Sandbox Manager;
+- Tool Broker;
 - Cube control/execution plane;
 - Cube egress gateway;
 - trusted Workspace Data Mover;
@@ -631,9 +632,9 @@ Workspace execution Cell directory (PostgreSQL)
   → KEDA
   → Pi Worker StatefulSet (four runtime slots per Pod by default)
 
-Cell-local manager URL set
-  → Sandbox Manager StatefulSet shard set
-  → paired Workspace Data Mover
+Sandbox Domain directory (PostgreSQL)
+  → shared Tool Broker StatefulSet
+  → independent Workspace Data Mover Deployment
   → Cube control/compute cluster
 ```
 
@@ -642,16 +643,16 @@ StatefulSet headless DNS identity; WebSocket connection locality is not an
 execution-routing authority. Pi Worker termination stops Temporal polling and
 drains the active Activity before Pod exit.
 
-The Cell directory replaces the former global Workspace hash as the durable
-placement authority. A Cell can be drained without remapping existing
-Workspaces, while new Workspaces are assigned to the least-loaded active Cell.
-Within each Cell, Sandbox Manager replicas share durable instance Lease,
-activation owner and Tool operation identity in PostgreSQL. Creates use one
-stable Service, then pin subsequent operations to the returned owner URL. A
-surviving replica fences an expired owner, marks ambiguous operations
-`UNKNOWN` and reaps orphaned Cube activations without replaying their Tools.
-PostgreSQL still serializes ordinary Runs sharing one Workspace and advances
-the Workspace head with CAS.
+The Cell directory is the durable Pi Worker-capacity placement authority. A
+Cell contains a versioned Temporal Activity queue and Pi Worker pool; several
+Cells can resolve to one Sandbox Domain. Domain Tool Broker replicas share
+durable instance Lease, activation owner and Tool operation identity in
+PostgreSQL. Creates use one stable Service, then pin subsequent operations to
+the returned owner URL. A surviving replica fences an expired owner, marks
+ambiguous operations `UNKNOWN` and reaps orphaned Cube activations without
+replaying Tools. Independent Data Mover replicas coordinate each Workspace
+through PostgreSQL advisory locks. PostgreSQL still serializes ordinary Runs
+sharing one Workspace and advances the Workspace head with CAS.
 
 Kubernetes HPA/KEDA creates Pods. A provider-specific node autoscaler is needed
 to create machines for pending Pods. The strict Helm profile, preflight and
@@ -674,6 +675,7 @@ acceptance is still required before claiming measured HA.
 - [ADR-0091: Kafka-first ingest](adr/0091-kafka-first-worker-event-ingest.md)
   and [ADR-0093: canonical conversations](adr/0093-kafka-valkey-live-events-and-canonical-conversations.md)
 - [ADR-0094: Cross-component time and retention budgets](adr/0094-cross-component-time-and-retention-budgets.md)
+- [ADR-0095: Sandbox Domains and a thin Tool Broker](adr/0095-sandbox-domains-and-cube-control-plane.md)
 
 The [ADR index](adr/README.md) links the lower-level decisions behind these
 boundaries. Retired cutover designs remain in Git history, not as supported

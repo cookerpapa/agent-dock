@@ -26,7 +26,7 @@ function durationMs(value, description) {
 }
 
 function validateWorkerPolicy(policy, description) {
-  const manager = integer(policy.sandboxManagerRequestMs, `${description} Sandbox Manager timeout`);
+  const manager = integer(policy.toolBrokerRequestMs, `${description} Tool Broker timeout`);
   const capability = integer(policy.modelCapabilityTtlMs, `${description} model capability TTL`);
   const upstream = integer(policy.modelUpstreamRequestMs, `${description} upstream timeout`);
   const model = integer(policy.modelRequestMs, `${description} Pi model timeout`);
@@ -64,7 +64,7 @@ const composeStop = /stop_grace_period:\s*(\S+)/.exec(composeWorker)?.[1];
 assert.ok(composeStop, "Compose Pi Worker stop grace is missing");
 validateWorkerPolicy(
   {
-    sandboxManagerRequestMs: composeInteger("AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS"),
+    toolBrokerRequestMs: composeInteger("AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS"),
     modelCapabilityTtlMs: composeInteger("AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS"),
     modelUpstreamRequestMs: composeInteger("AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS"),
     modelRequestMs: composeInteger("AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS"),

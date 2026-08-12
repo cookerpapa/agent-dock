@@ -37,7 +37,7 @@ network configuration.
 | Temporal | durable Run orchestration and Worker matching |
 | Pi Worker pool | Agent Loop, Pi Session restore, model events |
 | Model Gateway | credential isolation and usage |
-| Sandbox Manager | Tool authority, fencing, Cube lifecycle |
+| Tool Broker | AgentDock Tool authority, fencing and Cube lifecycle adapter |
 | Cube execution plane | untrusted bash/build/test processes |
 | Data plane | PostgreSQL, object storage, Workspace checkpoints |
 | Evaluation | correctness, security, failure and load evidence |

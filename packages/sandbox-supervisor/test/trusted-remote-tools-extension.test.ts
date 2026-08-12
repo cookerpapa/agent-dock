@@ -148,7 +148,7 @@ describe("trusted remote tools extension governance", () => {
       requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
       return new Response(
         JSON.stringify({
-          managerProtocolVersion: 1,
+          toolBrokerProtocolVersion: 1,
           type: "tool_sandbox.operation_result",
           activationId: requestBody.activationId,
           operationId: requestBody.operationId,
@@ -330,7 +330,7 @@ describe("trusted remote tools extension governance", () => {
           path?: string;
         };
         const common = {
-          managerProtocolVersion: 1,
+          toolBrokerProtocolVersion: 1,
           type: "tool_sandbox.operation_result",
           activationId: request.activationId,
           operationId: request.operationId,
@@ -428,7 +428,7 @@ describe("trusted remote tools extension governance", () => {
         };
         return new Response(
           JSON.stringify({
-            managerProtocolVersion: 1,
+            toolBrokerProtocolVersion: 1,
             type: "tool_sandbox.operation_result",
             activationId: request.activationId,
             operationId: request.operationId,
@@ -508,7 +508,7 @@ describe("trusted remote tools extension governance", () => {
       };
       return new Response(
         JSON.stringify({
-          managerProtocolVersion: 1,
+          toolBrokerProtocolVersion: 1,
           type: "tool_sandbox.operation_result",
           activationId: request.activationId,
           operationId: request.operationId,
@@ -571,7 +571,7 @@ describe("trusted remote tools extension governance", () => {
         expectedSha256?: string;
       };
       const common = {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation_result",
         activationId: request.activationId,
         operationId: request.operationId,

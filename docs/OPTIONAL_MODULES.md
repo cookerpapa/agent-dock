@@ -4,7 +4,7 @@ AgentDock's default deployment is the shortest production path required for
 the conversation product:
 
 ```text
-Web → Control Plane → Temporal → Pi Worker → Sandbox Manager → Cube
+Web → Control Plane → Temporal → Pi Worker → Tool Broker → Cube
                     ↘ PostgreSQL / object storage
 ```
 

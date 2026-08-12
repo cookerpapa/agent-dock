@@ -31,7 +31,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
   AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
   AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/agent-dock-secrets/cube-egress-config-token
-  AGENT_DOCK_SANDBOX_MANAGER_URLS: http://sandbox-manager:4300
+  AGENT_DOCK_TOOL_BROKER_URLS: http://tool-broker:4300
   AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
@@ -84,8 +84,10 @@ x-bootstrap-environment: &bootstrap-environment
   AGENT_DOCK_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_TENANT_MAXIMUM_SESSIONS:-1000}
   AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS:-100}
   AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  AGENT_DOCK_SANDBOX_DOMAINS_JSON: >-
+    [{"id":"sandbox-domain-0001","displayName":"Primary sandbox domain","state":"active","toolBrokerBaseUrl":"http://tool-broker:4300","workspaceStorageKey":"workspace-domain-0001","maximumActiveSandboxes":1024}]
   AGENT_DOCK_EXECUTION_CELLS_JSON: >-
-    [{"id":"cell-0001","displayName":"Initial execution cell","state":"active","temporalTaskQueue":"agent-dock-pi-runs-cell-0001-v1","sandboxManagerBaseUrl":"http://sandbox-manager:4300","supervisorManagementBaseUrlTemplate":"${AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:?run npm run production:init first}","workspaceStorageKey":"workspace-cell-0001","capacityWeight":100}]
+    [{"id":"cell-0001","displayName":"Initial execution cell","state":"active","temporalTaskQueue":"agent-dock-pi-runs-cell-0001-v1","sandboxDomainId":"sandbox-domain-0001","supervisorManagementBaseUrlTemplate":"${AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:?run npm run production:init first}","capacityWeight":100}]
 
 x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
@@ -771,7 +773,7 @@ services:
         condition: service_healthy
       minio-bootstrap:
         condition: service_completed_successfully
-      sandbox-manager:
+      tool-broker:
         condition: service_healthy
       provider-egress-relay:
         condition: service_healthy
@@ -782,7 +784,7 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,sandbox-manager,github-gateway,minio,jaeger,postgres,temporal,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
+      NO_PROXY: 127.0.0.1,localhost,control-plane,tool-broker,github-gateway,minio,jaeger,postgres,temporal,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
       AWS_EC2_METADATA_DISABLED: "true"
@@ -791,9 +793,9 @@ services:
       AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
       AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
-      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
-      AGENT_DOCK_SANDBOX_MANAGER_URLS: http://sandbox-manager:4300
-      AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "360000"
+      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
+      AGENT_DOCK_TOOL_BROKER_URLS: http://tool-broker:4300
+      AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS: "360000"
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
@@ -851,8 +853,8 @@ services:
         target: /run/agent-dock-secrets/supervisor-management-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
-        target: /run/agent-dock-secrets/sandbox-manager-token
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
+        target: /run/agent-dock-secrets/tool-broker-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
@@ -965,19 +967,22 @@ services:
     logging: *bounded-logging
 
   workspace-data-mover:
-    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
-      dockerfile: packages/sandbox-manager/Dockerfile
+      dockerfile: packages/tool-broker/Dockerfile
       args: *application-build-args
       network: host
     restart: unless-stopped
     depends_on:
       minio-bootstrap:
         condition: service_completed_successfully
-    command: [/app/packages/sandbox-manager/src/workspace-data-mover-main.ts]
+      postgres:
+        condition: service_healthy
+    command: [/app/packages/tool-broker/src/workspace-data-mover-main.ts]
     environment:
       NODE_ENV: production
+      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST: 0.0.0.0
       AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT: "4500"
       AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
@@ -993,6 +998,10 @@ services:
       AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX: production/kopia/v1/
       AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS: "true"
     volumes:
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/agent-dock-secrets/database-url
+        read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/cube-shared/volume
         target: /data/cube-shared/volume
@@ -1014,6 +1023,7 @@ services:
     networks:
       - sandbox-control
       - object-storage
+      - database
     healthcheck:
       test:
         [
@@ -1036,11 +1046,11 @@ services:
     stop_grace_period: 45s
     logging: *bounded-logging
 
-  sandbox-manager:
-    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+  tool-broker:
+    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
-      dockerfile: packages/sandbox-manager/Dockerfile
+      dockerfile: packages/tool-broker/Dockerfile
       args: *application-build-args
       network: host
     restart: unless-stopped
@@ -1052,14 +1062,14 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
-      AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: http://sandbox-manager:4300
-      AGENT_DOCK_SANDBOX_MANAGER_HOST: 0.0.0.0
-      AGENT_DOCK_SANDBOX_MANAGER_PORT: "4300"
+      AGENT_DOCK_SANDBOX_DOMAIN_ID: sandbox-domain-0001
+      AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: http://tool-broker:4300
+      AGENT_DOCK_TOOL_BROKER_HOST: 0.0.0.0
+      AGENT_DOCK_TOOL_BROKER_PORT: "4300"
       AGENT_DOCK_SANDBOX_WARM_TTL_MS: "900000"
       AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES: "2"
       AGENT_DOCK_MAXIMUM_WARM_SANDBOXES: "4"
-      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-manager-token
+      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
       AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: http://workspace-data-mover:4500
       AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
@@ -1074,8 +1084,8 @@ services:
         target: /run/agent-dock-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-manager-token
-        target: /run/agent-dock-secrets/sandbox-manager-token
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
+        target: /run/agent-dock-secrets/tool-broker-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
@@ -1243,7 +1253,7 @@ services:
         condition: service_completed_successfully
       control-plane:
         condition: service_healthy
-      sandbox-manager:
+      tool-broker:
         condition: service_healthy
     user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
     command:

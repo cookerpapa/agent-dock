@@ -27,7 +27,7 @@ Worker can restore the next Session Run from PostgreSQL/S3.
 - the exact AgentDock Supervisor image pushed to a registry or preloaded;
 - external PostgreSQL and S3-compatible endpoints reachable on the private
   trusted network;
-- Control Plane, Sandbox Manager, provider relay, and optional GitHub Gateway
+- Control Plane, Tool Broker, provider relay, and optional GitHub Gateway
   reachable from the Worker namespace;
 - the Worker namespace and trusted service namespaces labeled:
 
@@ -54,7 +54,7 @@ kubectl -n agent-dock-workers create secret generic agent-dock-pi-worker-secrets
   --from-file=aws-credentials=/private/aws-credentials \
   --from-file=supervisor-enrollment-token=/private/supervisor-enrollment-token \
   --from-file=supervisor-management-token=/private/supervisor-management-token \
-  --from-file=sandbox-manager-token=/private/sandbox-manager-token \
+  --from-file=tool-broker-token=/private/tool-broker-token \
   --from-file=model-credential-master-key=/private/model-credential-master-key \
   --from-file=github-gateway-token=/private/github-gateway-token \
   --from-file=metrics-token=/private/metrics-token \

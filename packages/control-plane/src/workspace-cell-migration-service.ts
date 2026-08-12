@@ -381,7 +381,7 @@ export class WorkspaceCellMigrationService {
     }
     const cells = await transaction
       .selectFrom("execution_cells")
-      .select(["id", "state"])
+      .select(["id", "state", "sandbox_domain_id"])
       .where("id", "in", [sourceCellId, targetCellId].sort())
       .orderBy("id", "asc")
       .forUpdate()
@@ -400,6 +400,15 @@ export class WorkspaceCellMigrationService {
         retryable: true,
       };
     }
+    const sourceDomain = cells.find((cell) => cell.id === sourceCellId)?.sandbox_domain_id;
+    const targetDomain = cells.find((cell) => cell.id === targetCellId)?.sandbox_domain_id;
+    if (sourceDomain !== targetDomain) {
+      return {
+        code: "sandbox_domain_migration_required",
+        message: "Cross-Domain Workspace migration requires a dedicated storage transfer",
+        retryable: false,
+      };
+    }
     const activeRun = await transaction
       .selectFrom("runs")
       .select("id")
@@ -416,7 +425,7 @@ export class WorkspaceCellMigrationService {
       };
     }
     const activation = await transaction
-      .selectFrom("sandbox_manager_activations")
+      .selectFrom("tool_broker_activations")
       .select("activation_id")
       .where("tenant_id", "=", tenantId)
       .where("workspace_id", "=", workspaceId)

@@ -36,7 +36,7 @@ Trusted product:
   Temporal
   Pi Workers
   Model Gateway
-  Sandbox Manager
+  Tool Broker
   Workspace Data Mover
   Cube egress gateway
 
@@ -87,14 +87,14 @@ after its lease/fence is superseded. Authenticated steer targets the Worker
 address recorded with the current PostgreSQL assignment instead of relying on
 which Control Plane replica happened to accept the browser request.
 
-Sandbox Managers are deliberately not placed behind random load balancing.
-Workspace hashing selects a stable shard across every Session sharing that
-Workspace and for the lifetime of each warm activation.
-One unavailable shard does not make every API replica unready, but Runs mapped
-to it fail retryably until Kubernetes restores that ordinal. A replacement
-Manager never adopts ambiguous guest process state: it restores committed Pi
-and Workspace authorities and exposes the existing model-visible Sandbox reset
-boundary. Changing the ordered shard ring without draining is unsupported.
+Tool Brokers expose a stable create Service, while owner-bound follow-up calls
+use the returned replica identity rather than random load balancing.
+PostgreSQL binds each activation to its Domain and owner replica for the
+lifetime of the warm runtime. One unavailable owner does not make every Broker
+unready, but that activation fails closed until ownership expires and cleanup
+completes. A replacement Broker never adopts ambiguous guest process state: it
+restores committed Pi and Workspace authorities and exposes the existing
+model-visible Sandbox reset boundary.
 
 These controls make the release multi-node-capable; they do not remove the
 external PostgreSQL, Temporal, object-storage, RWX filesystem, Kubernetes

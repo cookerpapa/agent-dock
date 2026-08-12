@@ -18,7 +18,7 @@ Control Plane
    │ durable Run
 Trusted Pi Worker pool
    │ narrow Tool RPC
-Sandbox Manager
+Tool Broker
    │ fixed-target CubeAPI/CubeProxy relays
 CubeMaster / Cubelet
    │
@@ -186,7 +186,7 @@ fails closed when cluster evidence, template status, image digest, template
 specification or AgentDock Git revision does not match.
 
 The primary Compose overlay starts two credential-free fixed-target relays.
-The Sandbox Manager remains on internal networks, holds the Cube API key from
+The Tool Broker remains on internal networks, holds the Cube API key from
 the private file, and forces every create request to enable outbound public
 Internet while denying private/link-local/metadata ranges and public inbound
 traffic. The per-microVM Cube traffic token remains inside the trusted Provider.

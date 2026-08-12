@@ -87,10 +87,7 @@ assert.equal(
   controlPlaneEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES,
   "http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100",
 );
-assert.equal(
-  controlPlaneEnvironment.AGENT_DOCK_SANDBOX_MANAGER_URLS,
-  "http://sandbox-manager:4300",
-);
+assert.equal(controlPlaneEnvironment.AGENT_DOCK_TOOL_BROKER_URLS, "http://tool-broker:4300");
 assert.equal(
   controlPlaneEnvironment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
   "/run/agent-dock-secrets/database-notification-url",
@@ -201,23 +198,32 @@ assert.equal(web.spec.template.spec.automountServiceAccountToken, false);
 find("HorizontalPodAutoscaler", "agent-dock-web");
 find("Service", "agent-dock-web");
 
-const sandboxManagers = find("StatefulSet", "agent-dock-sandbox-manager");
-assert.equal(sandboxManagers.spec.replicas, 3);
-assert.equal(sandboxManagers.spec.podManagementPolicy, "Parallel");
-assert.equal(sandboxManagers.spec.template.spec.containers.length, 2);
-assert.equal(sandboxManagers.spec.template.spec.automountServiceAccountToken, false);
-assert.deepEqual(sandboxManagers.spec.volumeClaimTemplates[0].spec.accessModes, ["ReadWriteOnce"]);
-find("Service", "sandbox-manager");
-const sandboxManagerEnvironment = Object.fromEntries(
-  sandboxManagers.spec.template.spec.containers[0].env
+const toolBrokers = find("StatefulSet", "agent-dock-tool-broker");
+assert.equal(toolBrokers.spec.replicas, 3);
+assert.equal(toolBrokers.spec.podManagementPolicy, "Parallel");
+assert.equal(toolBrokers.spec.template.spec.containers.length, 1);
+assert.equal(toolBrokers.spec.template.spec.automountServiceAccountToken, false);
+assert.equal(toolBrokers.spec.volumeClaimTemplates, undefined);
+find("Service", "tool-broker");
+const toolBrokerEnvironment = Object.fromEntries(
+  toolBrokers.spec.template.spec.containers[0].env
     .filter((entry) => entry.value !== undefined)
     .map((entry) => [entry.name, String(entry.value)]),
 );
-assert.equal(sandboxManagerEnvironment.AGENT_DOCK_EXECUTION_CELL_ID, "cell-0001");
+assert.equal(toolBrokerEnvironment.AGENT_DOCK_SANDBOX_DOMAIN_ID, "sandbox-domain-0001");
 assert.equal(
-  sandboxManagerEnvironment.AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL,
-  "http://$(POD_NAME).agent-dock-sandbox-manager-headless:4300",
+  toolBrokerEnvironment.AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL,
+  "http://$(POD_NAME).agent-dock-tool-broker-headless:4300",
 );
+assert.equal(
+  toolBrokerEnvironment.AGENT_DOCK_WORKSPACE_DATA_MOVER_URL,
+  "http://workspace-data-mover:4500",
+);
+const dataMover = find("Deployment", "agent-dock-workspace-data-mover");
+assert.equal(dataMover.spec.replicas, 2);
+assert.equal(dataMover.spec.template.spec.containers.length, 1);
+assert.equal(dataMover.spec.template.spec.automountServiceAccountToken, false);
+find("Service", "workspace-data-mover");
 
 const workers = find("StatefulSet", "agent-dock-pi-worker-primary-v1");
 assert.equal(workers.spec.replicas, 2);
@@ -287,7 +293,7 @@ for (const resource of resources) {
 }
 
 for (const invalidArgs of [
-  ["--set", "sandboxPlane.replicas=2"],
+  ["--set", "sandboxPlane.toolBrokerReplicas=2"],
   ["--set", "controlPlane.replicas=1"],
   ["--set", "networkPolicy.externalEgressCidrs[0]=0.0.0.0/0"],
   ["--set", "unexpectedEscape=true"],
@@ -307,7 +313,7 @@ const controlOnlyResources = documents(
       "--set",
       "piWorkersEnabled=false",
       "--set",
-      "executionPlaneEnabled=false",
+      "sandboxPlaneEnabled=false",
     ]),
     "Control-only platform render",
   ),

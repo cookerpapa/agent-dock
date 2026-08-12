@@ -40,7 +40,9 @@ file outside Git. Its main restart-bound settings are:
 | `controlPlane.autoscaling` / `web.autoscaling` | HPA lower/upper bounds and CPU targets. |
 | `eventGateway.autoscaling` | KEDA Kafka-lag/CPU targets and the non-zero projector replica floor. |
 | `pi-workers.autoscaling` | KEDA Temporal backlog target, Worker lower/upper bounds and conservative scale-down windows. |
-| `sandboxPlane.replicas` | Sandbox Manager/Data Mover replica count; production requires at least three for Lease-based owner-loss detection. |
+| `sandboxPlane.domainId` | Stable Sandbox Domain binding shared by one or more execution Cells. |
+| `sandboxPlane.toolBrokerReplicas` | Tool Broker replicas; production requires at least three for Lease-based owner-loss detection. |
+| `sandboxPlane.dataMoverReplicas` | Independently scaled trusted Workspace movers sharing the Domain RWX volume. |
 | `external.database.*` | PgBouncer application URL key plus a direct PostgreSQL session URL key for `LISTEN` and migrations. |
 | `external.temporal`, `external.checkpointS3`, `external.kopiaS3` | External durable authorities shared by all replaceable application Pods. |
 | `external.eventIngest` | Internal Event Gateway service URL and dedicated Worker-ingest service-token key. |
@@ -48,9 +50,10 @@ file outside Git. Its main restart-bound settings are:
 | `external.liveEventStore` | Valkey URL Secret key used by Event Gateway replay/projectors and the live-stream compactor. The file may contain one URL or comma-separated cluster seed URLs. |
 | `networkPolicy.externalEgressCidrs` | Explicit external dependency CIDRs; the schema rejects `0.0.0.0/0`. |
 
-`AGENT_DOCK_SANDBOX_MANAGER_URLS` is the ordered, comma-separated Manager
-ring injected into Control Plane and Workers. The ordering is part of runtime
-placement identity and must not be changed while activations are live.
+`AGENT_DOCK_TOOL_BROKER_URLS` is the comma-separated Sandbox-Domain Broker
+endpoint set injected into Control Plane and Workers. Initial create requests
+may use any Ready endpoint; PostgreSQL and the create response pin a live
+activation to its exact owner for subsequent operations.
 `AGENT_DOCK_DATABASE_NOTIFICATION_URL` (normally file-backed) must bypass
 transaction-pooling PgBouncer because PostgreSQL `LISTEN` is session-scoped.
 The enterprise Chart also injects `AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG=true`,
@@ -222,7 +225,7 @@ for missing Web settings.
 | Maximum active Tool Sandboxes | 2. |
 | Maximum warm Sandboxes | 4. |
 | Maximum remote Tool execution | 5 minutes. |
-| Worker-to-Sandbox Manager request | 6 minutes. |
+| Worker-to-Tool Broker request | 6 minutes. |
 | Pi Turn timeout | 10 minutes. |
 | Model Gateway upstream request | 120 seconds. |
 | Pi model-request timeout | 150 seconds. |
@@ -231,7 +234,7 @@ for missing Web settings.
 | Pi checkpoint read-cache TTL | 10 minutes. |
 | Pi checkpoint read-cache capacity | 512 objects / 32 MiB. |
 | Compose/Kubernetes Pi Worker termination grace | 22 minutes. |
-| Sandbox Manager ownership heartbeat / lease | 5 seconds / 15 seconds. |
+| Tool Broker ownership heartbeat / lease | 5 seconds / 15 seconds. |
 | Worker Control Channel heartbeat / timeout / lease | 10 seconds / 30 seconds / 60 seconds. |
 | Valkey live replay / single-host Kafka retention | 1 hour / 24 hours. |
 
@@ -242,14 +245,14 @@ following order in Worker startup and deployment CI:
 
 ```text
 Tool execution 5m
-  < Worker-to-Manager request 6m
+  < Worker-to-Tool-Broker request 6m
 
 provider upstream 120s
   <= Pi model request 150s
   <= Pi Turn 10m
   < model Capability 15m
 
-Pi Turn 10m + Manager request 6m + settlement 5m + process margin 1m
+Pi Turn 10m + Tool Broker request 6m + settlement 5m + process margin 1m
   <= Worker termination grace 22m
 
 Valkey live replay 1h
@@ -302,7 +305,7 @@ Do not use it to bypass stale-template validation.
 The installer creates private files for:
 
 - PostgreSQL and MinIO credentials;
-- internal API, Supervisor, Sandbox Manager, Data Mover and egress tokens;
+- internal API, Supervisor, Tool Broker, Data Mover and egress tokens;
 - the model-credential encryption master key;
 - Cube API access;
 - Kopia repository and scoped object-store credentials;

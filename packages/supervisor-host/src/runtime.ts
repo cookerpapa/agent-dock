@@ -22,7 +22,7 @@ import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
-import { ReplicatedSandboxManagerClient } from "@agent-dock/sandbox-manager";
+import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
@@ -59,7 +59,7 @@ export type SupervisorHostRuntimeOptions = {
   database?: Kysely<Database>;
   objectStore: CheckpointObjectStore & { checkHealth(): Promise<void>; destroy(): void };
   provisioningClient?: SupervisorProvisioningClient;
-  sandboxManager?: SupervisorSandboxManager;
+  toolBroker?: SupervisorToolBroker;
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
   metrics?: AgentDockMetrics;
@@ -72,8 +72,8 @@ export type SupervisorTemporalWorker = {
   stop(): Promise<void>;
 };
 
-export type SupervisorSandboxManager = Pick<
-  ReplicatedSandboxManagerClient,
+export type SupervisorToolBroker = Pick<
+  ReplicatedToolBrokerClient,
   | "operationUrlFor"
   | "checkHealth"
   | "create"
@@ -138,7 +138,7 @@ export class SupervisorHostRuntime {
     destroy(): void;
   };
   readonly #provisioningClient: SupervisorProvisioningClient;
-  readonly #sandboxManager: SupervisorSandboxManager;
+  readonly #toolBroker: SupervisorToolBroker;
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
   readonly #metrics: AgentDockMetrics | undefined;
@@ -183,13 +183,13 @@ export class SupervisorHostRuntime {
         enrollmentToken: options.config.enrollmentToken,
         allowInsecureHttp: options.config.allowInsecureInternalHttp,
       });
-    this.#sandboxManager =
-      options.sandboxManager ??
-      new ReplicatedSandboxManagerClient({
-        baseUrls: options.config.sandboxManagerBaseUrls,
-        serviceToken: options.config.sandboxManagerServiceToken,
+    this.#toolBroker =
+      options.toolBroker ??
+      new ReplicatedToolBrokerClient({
+        baseUrls: options.config.toolBrokerBaseUrls,
+        serviceToken: options.config.toolBrokerServiceToken,
         allowInsecureHttp: options.config.allowInsecureInternalHttp,
-        requestTimeoutMs: options.config.sandboxManagerRequestTimeoutMs,
+        requestTimeoutMs: options.config.toolBrokerRequestTimeoutMs,
       });
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#connectionSecretGenerator =
@@ -270,7 +270,7 @@ export class SupervisorHostRuntime {
           this.#settleTerminal("owner_stopped");
         }
       },
-      assignmentInventory: this.#sandboxManager,
+      assignmentInventory: this.#toolBroker,
       artifactStore: this.#objectStore,
       steerCommand: async (command) => {
         const local = this.#localSupervisor;
@@ -298,7 +298,7 @@ export class SupervisorHostRuntime {
       await Promise.all([
         sql`select 1`.execute(this.#database),
         this.#objectStore.checkHealth(),
-        this.#sandboxManager.checkHealth(),
+        this.#toolBroker.checkHealth(),
       ]);
 
       const secret = connectionSecret(this.#connectionSecretGenerator());
@@ -348,7 +348,7 @@ export class SupervisorHostRuntime {
         database: this.#database,
         objectStore: this.#objectStore,
         importer: {
-          import: (source, signal) => this.#sandboxManager.importGitHub(source, signal),
+          import: (source, signal) => this.#toolBroker.importGitHub(source, signal),
         },
         ...(githubGateway === undefined
           ? {}
@@ -375,7 +375,7 @@ export class SupervisorHostRuntime {
       await modelGateway.start();
       this.#modelGateway = modelGateway;
       const runner = new RemoteToolSandboxTurnRunner({
-        manager: this.#sandboxManager,
+        broker: this.#toolBroker,
         runtimeIdentity: identity,
         trustedWorkspaceDirectory: this.#config.trustedWorkspaceDirectory,
         checkpointStore,
@@ -462,7 +462,7 @@ export class SupervisorHostRuntime {
         affinityTtlMs: this.#config.checkpointReadCacheTtlMs,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
         shutdownGraceMs:
-          this.#config.piTurnTimeoutMs + this.#config.sandboxManagerRequestTimeoutMs + 5 * 60_000,
+          this.#config.piTurnTimeoutMs + this.#config.toolBrokerRequestTimeoutMs + 5 * 60_000,
         ...(this.#config.temporalWorkerDeploymentName === undefined ||
         this.#config.temporalWorkerBuildId === undefined
           ? {}

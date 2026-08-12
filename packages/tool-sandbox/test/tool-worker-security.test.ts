@@ -83,7 +83,7 @@ describe("credential-free Tool Sandbox worker", () => {
 
   it("constructs a fixed subprocess environment without inheriting trusted credentials", () => {
     process.env.AGENT_DOCK_RUNTIME_API_KEY = "admg_should-never-cross";
-    process.env.AGENT_DOCK_SANDBOX_MANAGER_TOKEN = "manager-should-never-cross";
+    process.env.AGENT_DOCK_TOOL_BROKER_TOKEN = "manager-should-never-cross";
     process.env.DATABASE_URL = "postgresql://should-never-cross";
     try {
       const environment = safeToolEnvironment();
@@ -103,7 +103,7 @@ describe("credential-free Tool Sandbox worker", () => {
       expect(JSON.stringify(environment)).not.toMatch(/admg_|manager-should|postgresql:/);
     } finally {
       delete process.env.AGENT_DOCK_RUNTIME_API_KEY;
-      delete process.env.AGENT_DOCK_SANDBOX_MANAGER_TOKEN;
+      delete process.env.AGENT_DOCK_TOOL_BROKER_TOKEN;
       delete process.env.DATABASE_URL;
     }
   });

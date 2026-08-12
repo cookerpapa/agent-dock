@@ -2,7 +2,7 @@
 
 ## Supported runtime
 
-The production Sandbox Manager supports one runtime:
+The production Tool Broker supports one runtime:
 
 ```text
 CubeSandboxProvider

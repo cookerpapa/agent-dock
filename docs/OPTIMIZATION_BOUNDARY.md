@@ -136,7 +136,7 @@ Provide a core profile and optional profiles without deleting services:
 ```text
 core:
   PostgreSQL, Temporal, MinIO, Control Plane, Web, Pi Workers,
-  Sandbox Manager/Cube control and required gateways
+  Tool Broker/Cube control and required gateways
 
 observability:
   Prometheus, Jaeger, Grafana and observability ingress

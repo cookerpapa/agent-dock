@@ -1,15 +1,22 @@
 piWorkersEnabled: true
-executionPlaneEnabled: true
+sandboxPlaneEnabled: true
 globalPlaneEnabled: true
+
+sandboxDomains:
+  - id: sandbox-domain-0001
+    displayName: Primary sandbox domain
+    state: active
+    toolBrokerBaseUrl: http://tool-broker:4300
+    workspaceStorageKey: workspace-domain-0001
+    maximumActiveSandboxes: 1024
 
 executionCells:
   - id: cell-0001
     displayName: Initial execution cell
     state: active
     temporalTaskQueue: agent-dock-pi-runs-cell-0001-v1
-    sandboxManagerBaseUrl: http://sandbox-manager:4300
+    sandboxDomainId: sandbox-domain-0001
     supervisorManagementBaseUrlTemplate: http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100
-    workspaceStorageKey: workspace-cell-0001
     capacityWeight: 100
 
 global:
@@ -34,8 +41,8 @@ images:
     repository: agent-dock/web-ui
     tag: production
     pullPolicy: IfNotPresent
-  sandboxManager:
-    repository: agent-dock/sandbox-manager
+  toolBroker:
+    repository: agent-dock/tool-broker
     tag: production
     pullPolicy: IfNotPresent
 
@@ -161,8 +168,9 @@ networkPolicy:
   externalEgressCidrs: []
 
 sandboxPlane:
-  replicas: 3
-  executionCellId: cell-0001
+  domainId: sandbox-domain-0001
+  toolBrokerReplicas: 3
+  dataMoverReplicas: 2
   maximumActivePerReplica: 128
   maximumWarmPerReplica: 128
   warmTtlMs: 900000
@@ -179,7 +187,7 @@ sandboxPlane:
     domain: cube.example.com
     egressProxyHost: 10.255.255.254
     egressProxyPort: 3128
-  managerResources:
+  toolBrokerResources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "2", memory: 768Mi }
   dataMoverResources:
@@ -212,8 +220,8 @@ pi-workers:
   services:
     controlPlaneUrl: http://control-plane:3000
     eventGatewayUrl: http://event-gateway:4600
-    sandboxManagerUrls:
-      - http://sandbox-manager:4300
+    toolBrokerUrls:
+      - http://tool-broker:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""
@@ -238,7 +246,7 @@ pi-workers:
   credentials:
     supervisorEnrollmentTokenKey: supervisor-enrollment-token
     supervisorManagementTokenKey: supervisor-management-token
-    sandboxManagerTokenKey: sandbox-manager-token
+    toolBrokerTokenKey: tool-broker-token
     modelCredentialMasterKeyKey: model-credential-master-key
     githubGatewayTokenKey: github-gateway-token
     metricsTokenKey: metrics-token
@@ -248,7 +256,7 @@ pi-workers:
     externalWorkerEventLog: true
     checkpointCache: { ttlMs: 600000, maximumEntries: 512, maximumBytes: 33554432 }
     timeouts:
-      sandboxManagerRequestMs: 360000
+      toolBrokerRequestMs: 360000
       modelCapabilityTtlMs: 900000
       modelUpstreamRequestMs: 120000
       modelRequestMs: 150000

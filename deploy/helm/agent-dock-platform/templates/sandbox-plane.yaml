@@ -1,50 +1,50 @@
-{{- if .Values.executionPlaneEnabled }}
+{{- if .Values.sandboxPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 apiVersion: v1
 kind: Service
-metadata: { name: {{ $name }}-sandbox-manager-headless }
+metadata: { name: {{ $name }}-tool-broker-headless }
 spec:
   clusterIP: None
   publishNotReadyAddresses: false
-  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tool-broker }
   ports:
-    - { name: manager, port: 4300, targetPort: manager }
+    - { name: broker, port: 4300, targetPort: broker }
     - { name: metrics, port: 9466, targetPort: metrics }
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: sandbox-manager
+  name: tool-broker
   labels:
     {{- include "agent-dock-platform.labels" . | nindent 4 }}
 spec:
   selector:
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: sandbox-manager
+    app.kubernetes.io/component: tool-broker
   ports:
-    - { name: manager, port: 4300, targetPort: manager }
+    - { name: broker, port: 4300, targetPort: broker }
     - { name: metrics, port: 9466, targetPort: metrics }
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ $name }}-sandbox-manager
+  name: {{ $name }}-tool-broker
   labels:
     {{- include "agent-dock-platform.labels" . | nindent 4 }}
-    app.kubernetes.io/component: sandbox-manager
+    app.kubernetes.io/component: tool-broker
 spec:
-  serviceName: {{ $name }}-sandbox-manager-headless
-  replicas: {{ .Values.sandboxPlane.replicas }}
+  serviceName: {{ $name }}-tool-broker-headless
+  replicas: {{ .Values.sandboxPlane.toolBrokerReplicas }}
   podManagementPolicy: Parallel
   updateStrategy: { type: RollingUpdate }
-  persistentVolumeClaimRetentionPolicy: { whenDeleted: Retain, whenScaled: Retain }
   selector:
-    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tool-broker }
   template:
     metadata:
       labels:
         {{- include "agent-dock-platform.labels" . | nindent 8 }}
-        app.kubernetes.io/component: sandbox-manager
+        app.kubernetes.io/component: tool-broker
+        agent-dock.io/sandbox-domain: {{ .Values.sandboxPlane.domainId | quote }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -70,30 +70,30 @@ spec:
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
-            matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+            matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tool-broker }
       containers:
-        - name: sandbox-manager
-          image: {{ include "agent-dock-platform.image" .Values.images.sandboxManager | quote }}
-          imagePullPolicy: {{ .Values.images.sandboxManager.pullPolicy }}
+        - name: tool-broker
+          image: {{ include "agent-dock-platform.image" .Values.images.toolBroker | quote }}
+          imagePullPolicy: {{ .Values.images.toolBroker.pullPolicy }}
           ports:
-            - { name: manager, containerPort: 4300 }
+            - { name: broker, containerPort: 4300 }
             - { name: metrics, containerPort: 9466 }
           env:
             - { name: NODE_ENV, value: production }
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
-            - { name: AGENT_DOCK_EXECUTION_CELL_ID, value: {{ .Values.sandboxPlane.executionCellId | quote }} }
-            - name: AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL
-              value: {{ printf "http://$(POD_NAME).%s-sandbox-manager-headless:4300" $name | quote }}
-            - { name: AGENT_DOCK_SANDBOX_MANAGER_HOST, value: 0.0.0.0 }
-            - { name: AGENT_DOCK_SANDBOX_MANAGER_PORT, value: "4300" }
+            - { name: AGENT_DOCK_SANDBOX_DOMAIN_ID, value: {{ .Values.sandboxPlane.domainId | quote }} }
+            - name: AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL
+              value: {{ printf "http://$(POD_NAME).%s-tool-broker-headless:4300" $name | quote }}
+            - { name: AGENT_DOCK_TOOL_BROKER_HOST, value: 0.0.0.0 }
+            - { name: AGENT_DOCK_TOOL_BROKER_PORT, value: "4300" }
             - { name: AGENT_DOCK_SANDBOX_WARM_TTL_MS, value: {{ .Values.sandboxPlane.warmTtlMs | quote }} }
             - { name: AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES, value: {{ .Values.sandboxPlane.maximumActivePerReplica | quote }} }
             - { name: AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, value: {{ .Values.sandboxPlane.maximumWarmPerReplica | quote }} }
-            - { name: AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-manager-token }
+            - { name: AGENT_DOCK_TOOL_BROKER_TOKEN_FILE, value: /run/agent-dock-secrets/tool-broker-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_URL, value: http://127.0.0.1:4500 }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_URL, value: http://workspace-data-mover:4500 }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-data-mover-token }
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_CUBESANDBOX_API_URL, value: {{ .Values.sandboxPlane.cube.apiUrl | quote }} }
@@ -108,29 +108,77 @@ spec:
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_METRICS_PORT, value: "9466" }
             - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }
-          readinessProbe: { httpGet: { path: /health/ready, port: manager }, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 10 }
-          livenessProbe: { httpGet: { path: /health/live, port: manager }, periodSeconds: 10, timeoutSeconds: 3 }
+          readinessProbe: { httpGet: { path: /health/ready, port: broker }, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 10 }
+          livenessProbe: { httpGet: { path: /health/live, port: broker }, periodSeconds: 10, timeoutSeconds: 3 }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
-          resources: {{- toYaml .Values.sandboxPlane.managerResources | nindent 12 }}
+          resources: {{- toYaml .Values.sandboxPlane.toolBrokerResources | nindent 12 }}
           volumeMounts:
             - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
-            - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-manager-token, subPath: sandbox-manager-token, readOnly: true }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/tool-broker-token, subPath: tool-broker-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-materializer-token, subPath: sandbox-materializer-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/cubesandbox-api-key, subPath: cubesandbox-api-key, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
             - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: secrets
+          secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
+        - { name: tmp, emptyDir: { sizeLimit: 128Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: workspace-data-mover }
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+  ports: [{ name: data-mover, port: 4500, targetPort: data-mover }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-workspace-data-mover
+  labels:
+    {{- include "agent-dock-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workspace-data-mover
+spec:
+  replicas: {{ .Values.sandboxPlane.dataMoverReplicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+  template:
+    metadata:
+      labels:
+        {{- include "agent-dock-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: workspace-data-mover
+        agent-dock.io/sandbox-domain: {{ .Values.sandboxPlane.domainId | quote }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 600
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
         - name: workspace-data-mover
-          image: {{ include "agent-dock-platform.image" .Values.images.sandboxManager | quote }}
-          imagePullPolicy: {{ .Values.images.sandboxManager.pullPolicy }}
-          command: [node, /app/node_modules/tsx/dist/cli.mjs, --tsconfig, /app/packages/sandbox-manager/tsconfig.json, /app/packages/sandbox-manager/src/workspace-data-mover-main.ts]
+          image: {{ include "agent-dock-platform.image" .Values.images.toolBroker | quote }}
+          imagePullPolicy: {{ .Values.images.toolBroker.pullPolicy }}
+          command: [node, /app/node_modules/tsx/dist/cli.mjs, --tsconfig, /app/packages/tool-broker/tsconfig.json, /app/packages/tool-broker/src/workspace-data-mover-main.ts]
           ports: [{ name: data-mover, containerPort: 4500 }]
           env:
             - { name: NODE_ENV, value: production }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST, value: 127.0.0.1 }
+            - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT, value: "4500" }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-data-mover-token }
             - { name: AGENT_DOCK_WORKSPACE_POSIX_ROOT, value: /data/workspaces }
@@ -153,30 +201,32 @@ spec:
           resources: {{- toYaml .Values.sandboxPlane.dataMoverResources | nindent 12 }}
           volumeMounts:
             - { name: workspace-rwx, mountPath: /data/workspaces }
-            - { name: shard-state, mountPath: /var/lib/agent-dock }
+            - { name: mover-state, mountPath: /var/lib/agent-dock }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-repository-password, subPath: workspace-kopia-repository-password, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-aws-credentials, subPath: workspace-kopia-aws-credentials, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: workspace-rwx, persistentVolumeClaim: { claimName: {{ .Values.sandboxPlane.workspace.existingClaim }} } }
+        - { name: mover-state, emptyDir: { sizeLimit: {{ .Values.sandboxPlane.state.size }} } }
         - name: secrets
           secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
         - { name: tmp, emptyDir: { sizeLimit: 128Mi } }
-  volumeClaimTemplates:
-    - metadata: { name: shard-state }
-      spec:
-        accessModes: [ReadWriteOnce]
-        {{- if .Values.global.storageClassName }}
-        storageClassName: {{ .Values.global.storageClassName }}
-        {{- end }}
-        resources: { requests: { storage: {{ .Values.sandboxPlane.state.size }} } }
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
-metadata: { name: {{ $name }}-sandbox-manager }
+metadata: { name: {{ $name }}-tool-broker }
 spec:
   minAvailable: 2
   selector:
-    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tool-broker }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: {{ $name }}-workspace-data-mover }
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
 {{- end }}

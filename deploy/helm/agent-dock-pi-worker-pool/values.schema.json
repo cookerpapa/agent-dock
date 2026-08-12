@@ -154,7 +154,7 @@
       "required": [
         "controlPlaneUrl",
         "eventGatewayUrl",
-        "sandboxManagerUrls",
+        "toolBrokerUrls",
         "githubGateway",
         "providerProxyUrl",
         "otlpTracesEndpoint"
@@ -162,7 +162,7 @@
       "properties": {
         "controlPlaneUrl": { "$ref": "#/$defs/httpUrl" },
         "eventGatewayUrl": { "$ref": "#/$defs/httpUrl" },
-        "sandboxManagerUrls": {
+        "toolBrokerUrls": {
           "type": "array",
           "minItems": 1,
           "maxItems": 256,
@@ -252,7 +252,7 @@
       "required": [
         "supervisorEnrollmentTokenKey",
         "supervisorManagementTokenKey",
-        "sandboxManagerTokenKey",
+        "toolBrokerTokenKey",
         "modelCredentialMasterKeyKey",
         "githubGatewayTokenKey",
         "metricsTokenKey",
@@ -261,7 +261,7 @@
       "properties": {
         "supervisorEnrollmentTokenKey": { "$ref": "#/$defs/secretKey" },
         "supervisorManagementTokenKey": { "$ref": "#/$defs/secretKey" },
-        "sandboxManagerTokenKey": { "$ref": "#/$defs/secretKey" },
+        "toolBrokerTokenKey": { "$ref": "#/$defs/secretKey" },
         "modelCredentialMasterKeyKey": { "$ref": "#/$defs/secretKey" },
         "githubGatewayTokenKey": { "$ref": "#/$defs/secretKey" },
         "metricsTokenKey": { "$ref": "#/$defs/secretKey" },
@@ -299,14 +299,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "sandboxManagerRequestMs",
+            "toolBrokerRequestMs",
             "modelCapabilityTtlMs",
             "modelUpstreamRequestMs",
             "modelRequestMs",
             "turnMs"
           ],
           "properties": {
-            "sandboxManagerRequestMs": {
+            "toolBrokerRequestMs": {
               "type": "integer",
               "minimum": 360000,
               "maximum": 900000

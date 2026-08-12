@@ -107,8 +107,8 @@ jobs:
             dockerfile: packages/control-plane/Dockerfile
           - image: supervisor-host
             dockerfile: packages/supervisor-host/Dockerfile
-          - image: sandbox-manager
-            dockerfile: packages/sandbox-manager/Dockerfile
+          - image: tool-broker
+            dockerfile: packages/tool-broker/Dockerfile
           - image: github-gateway
             dockerfile: packages/github-gateway/Dockerfile
           - image: web-ui

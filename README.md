@@ -41,8 +41,8 @@ Trusted Pi Worker pool
   │ Pi SDK + native Session restore + model gateway
   │ leased and fenced Tool RPC
   ▼
-Sandbox Manager
-  │ Cube lifecycle + Workspace checkpoint CAS
+Sandbox Domain Tool Broker
+  │ fenced Tool authority + Cube lifecycle + Workspace checkpoint CAS
   ▼
 CubeSandbox KVM microVM
     /workspace + bash/edit/git/build/test
@@ -51,8 +51,9 @@ CubeSandbox KVM microVM
 
 The single-host profile packages this chain for one Linux/WSL2 host. The
 distributed Helm profile keeps Web, Control Plane, Event Gateway, Pi Workers
-and Sandbox Manager replicas replaceable, places Workspaces in immutable
-execution Cells and scales Pi Workers from Temporal backlog.
+and Tool Broker replicas replaceable. Lightweight execution Cells scale Pi
+Workers from Temporal backlog; one Sandbox Domain can serve several Cells and
+scale Cube compute and Workspace movement independently.
 
 ### One message through the system
 
@@ -67,7 +68,7 @@ execution Cells and scales Pi Workers from Temporal backlog.
    boundary in ordered batches, and are projected into a bounded Valkey replay
    view before SSE can expose them.
 5. If Pi calls a Tool, the Worker presents a short-lived lease/fence-bound
-   capability to Sandbox Manager. The Manager lazily creates or reuses the
+   capability to the Tool Broker. The Broker lazily creates or reuses the
    Session's Cube microVM and executes the operation there.
 6. On settlement, the canonical conversation Turn, terminal event, Pi
    checkpoint pointer, Workspace head and Run state commit together. A later

@@ -1,9 +1,11 @@
 {{- if .Values.globalPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
-{{- $sandboxManagerUrls := list -}}
+{{- $toolBrokerUrls := list -}}
 {{- $supervisorManagementUrlTemplates := list -}}
+{{- range .Values.sandboxDomains -}}
+{{- $toolBrokerUrls = append $toolBrokerUrls .toolBrokerBaseUrl -}}
+{{- end -}}
 {{- range .Values.executionCells -}}
-{{- $sandboxManagerUrls = append $sandboxManagerUrls .sandboxManagerBaseUrl -}}
 {{- $supervisorManagementUrlTemplates = append $supervisorManagementUrlTemplates .supervisorManagementBaseUrlTemplate -}}
 {{- end -}}
 apiVersion: apps/v1
@@ -74,8 +76,8 @@ spec:
             - { name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE, value: /run/agent-dock-secrets/model-credential-master-key }
             - { name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE, value: /run/agent-dock-secrets/cube-egress-config-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
-            - name: AGENT_DOCK_SANDBOX_MANAGER_URLS
-              value: {{ join "," $sandboxManagerUrls | quote }}
+            - name: AGENT_DOCK_TOOL_BROKER_URLS
+              value: {{ join "," $toolBrokerUrls | quote }}
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP, value: "true" }
             - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }

@@ -15,14 +15,16 @@ Ingress
        ├── PostgreSQL/PgBouncer (external)
        ├── direct PostgreSQL LISTEN endpoint (external)
        ├── Temporal cluster (external)
-       └── replicated Sandbox Manager Service
+       └── Sandbox Domain directory
 
 Temporal Activity Task Queue
   → KEDA
   → Pi Worker StatefulSet (2..N)
        └── exact Worker management over headless DNS
 
-Sandbox Manager replica N + Workspace Data Mover N
+Sandbox Domain
+  → replicated Tool Broker Service
+  → independent Workspace Data Mover Deployment
   → Cube API/Proxy cluster (external KVM execution plane)
   → shared RWX POSIX Workspace volume
   → Kopia object repository
@@ -30,8 +32,8 @@ Sandbox Manager replica N + Workspace Data Mover N
 
 The Chart is
 [`deploy/helm/agent-dock-platform`](../deploy/helm/agent-dock-platform).
-It deploys Web, Control Plane, Event Gateway, the trusted Manager/Data-Mover
-replica set, the Pi Worker pool, policies, bootstrap migration and autoscalers. It does **not**
+It deploys Web, Control Plane, Event Gateway, the trusted Tool Broker and
+Data-Mover replica sets, the Pi Worker pool, policies, bootstrap migration and autoscalers. It does **not**
 silently install data stores or Cube under application credentials.
 
 ## 2. Required authorities
@@ -71,7 +73,7 @@ database-notification-url
 database-url
 metrics-token
 model-credential-master-key
-sandbox-manager-token
+tool-broker-token
 sandbox-materializer-token
 supervisor-enrollment-token
 supervisor-management-token
@@ -103,9 +105,10 @@ cp deploy/helm/agent-dock-platform/values.distributed.example.yaml \
 ```
 
 Replace all image references, UUIDs, storage classes, endpoints and network
-CIDRs. Configure `global.imagePullSecrets` when the images are private. Each
-execution Cell has one stable `sandbox-manager` Service and at least three
-Manager replicas. PostgreSQL ownership rows bind a live activation to one
+CIDRs. Configure `global.imagePullSecrets` when the images are private. A
+Sandbox Domain has one stable `tool-broker` Service, at least three Broker
+replicas and an independently scaled Data Mover. Multiple execution Cells may
+use that Domain. PostgreSQL ownership rows bind a live activation to one Broker
 replica; the create response carries that replica's headless-DNS owner URL for
 all subsequent operations.
 
@@ -116,7 +119,7 @@ npm run kubernetes:distributed:render -- \
   --values /secure/operator/agent-dock-values.yaml
 ```
 
-The CI Helm gate rejects unknown values, fewer than three Manager replicas,
+The CI Helm gate rejects unknown values, fewer than three Tool Broker replicas,
 single-replica API workloads, unsafe host mounts and drift in the expected
 autoscaling/management topology.
 
@@ -155,7 +158,8 @@ cluster can bypass only that check with
 | Control Plane | CPU HPA | 3–12 | PostgreSQL/object storage remain authoritative |
 | Event Gateway | KEDA Kafka lag + CPU | 3–32 | authenticated Kafka ingest, Valkey projection and resumable SSE; Kafka partitions bound projector parallelism |
 | Pi Worker | KEDA Temporal Activity backlog | 2–32 Pods, four bounded runtime slots per Pod | no scale-to-zero; graceful Activity drain |
-| Sandbox Manager/Data Mover | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
+| Tool Broker | replicated StatefulSet | 3 replicas | DB-backed ownership; owner loss makes ambiguous Tool work `UNKNOWN` before cleanup |
+| Workspace Data Mover | replicated Deployment | 2 replicas | shared RWX volume; PostgreSQL advisory lock serializes each Workspace operation |
 | Cube control/compute | Cube's own K8s deployment | operator defined | KVM/PVM capacity and upstream preview limitations apply |
 | Kubernetes Nodes | cloud/provider node autoscaler | operator defined | Kubernetes YAML alone cannot create machines |
 
@@ -208,10 +212,10 @@ nodes. Cube guests still receive no Kubernetes, database, Temporal, model or
 object-store credentials. The platform NetworkPolicy and Cube guest egress
 policy are separate layers and both remain required.
 
-## 8. Sandbox Manager replica changes
+## 8. Tool Broker and Data Mover replica changes
 
-Manager replicas no longer form a process-local hash ring. A create may reach
-any Ready replica through the Cell Service. Reservation uses a Workspace row
+Tool Broker replicas do not form a process-local hash ring. A create may reach
+any Ready replica through the Domain Service. Reservation uses a Workspace row
 lock and a partial unique index; subsequent calls follow the returned owner
 URL. A replica heartbeat Lease fences an expired owner before another replica
 may clean its activation. An ordinary in-place rollout preserves committed
@@ -227,14 +231,14 @@ image rollout:
 6. resume admission;
 7. reconcile the old ring and then remove it.
 
-Scaling `sandboxPlane.replicas` does not remap Workspaces. If one Manager Pod is
+Scaling `sandboxPlane.toolBrokerReplicas` does not remap Workspaces. If one Broker Pod is
 lost, a surviving replica expires its DB Lease, marks running Tool operations
 unknown and claims orphan cleanup. The next Attempt restores the last committed
 Pi and Workspace state and receives the model-visible Sandbox reset boundary.
 
-Use one AgentDock release per namespace. The stable `control-plane`,
-`event-gateway` and `sandbox-manager` Services plus per-Pod headless DNS form
-the routing contract.
+Use separate releases for the global plane, each Sandbox Domain and each
+execution Cell. The stable `control-plane`, `event-gateway` and `tool-broker`
+Services plus per-Pod headless DNS form the routing contract.
 
 ## 9. What remains to prove
 
@@ -243,7 +247,7 @@ production claim additionally requires evidence for:
 
 - an Event Gateway node disappearing during active streams and browser resume;
 - Pi Worker node loss and Temporal retry on another node;
-- Sandbox Manager ordinal replacement and cold Workspace recovery;
+- Tool Broker ordinal replacement, Data Mover replacement and cold Workspace recovery;
 - Cube compute-node drain/replacement;
 - PostgreSQL, Temporal and S3 failover;
 - KEDA backlog growth and node-autoscaler provisioning at sustained load.

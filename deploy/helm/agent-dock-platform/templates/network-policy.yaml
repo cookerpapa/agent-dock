@@ -128,20 +128,54 @@ spec:
         - { protocol: TCP, port: {{ . }} }
         {{- end }}
     {{- end }}
-{{- if .Values.executionPlaneEnabled }}
+{{- if .Values.sandboxPlaneEnabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
-metadata: { name: {{ $name }}-sandbox-manager }
+metadata: { name: {{ $name }}-tool-broker }
 spec:
   podSelector:
-    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: sandbox-manager }
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tool-broker }
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - namespaceSelector:
             matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
       ports: [{ protocol: TCP, port: 4300 }, { protocol: TCP, port: 9466 }]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to:
+        - namespaceSelector:
+            matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
+      ports:
+        {{- range $trustedPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+    {{- range $externalCidrs }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+      ports:
+        {{- range $trustedPorts }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: {{ $name }}-workspace-data-mover }
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
+      ports: [{ protocol: TCP, port: 4500 }]
   egress:
     - to:
         - namespaceSelector:

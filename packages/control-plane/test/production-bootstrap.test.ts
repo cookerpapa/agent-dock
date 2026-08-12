@@ -26,15 +26,24 @@ const CONFIG: ProductionBootstrapConfig = {
   maximumSessions: 1_000,
   maximumUnsettledTurns: 100,
   maximumConcurrentTurns: 2,
+  sandboxDomains: [
+    {
+      id: "sandbox-domain-bootstrap",
+      displayName: "Bootstrap Sandbox Domain",
+      state: "active",
+      toolBrokerBaseUrl: "http://tool-broker.agent-dock-sandbox-bootstrap:4300",
+      workspaceStorageKey: "workspace-domain-bootstrap",
+      maximumActiveSandboxes: 1_024,
+    },
+  ],
   executionCells: [
     {
       id: "cell-bootstrap",
       displayName: "Bootstrap Cell",
       state: "active",
       temporalTaskQueue: "agent-dock-pi-runs-cell-bootstrap-v1",
-      sandboxManagerBaseUrl: "http://sandbox-manager.agent-dock-cell-bootstrap:4300",
+      sandboxDomainId: "sandbox-domain-bootstrap",
       supervisorManagementBaseUrlTemplate: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
-      workspaceStorageKey: "workspace-cell-bootstrap",
       capacityWeight: 200,
     },
   ],
@@ -86,6 +95,7 @@ describe.sequential("production bootstrap and configuration", () => {
       apiCredentialId: CONFIG.apiCredentialId,
       credentialBindingId: CONFIG.credentialBindingId,
       modelProfileId: CONFIG.modelProfileId,
+      sandboxDomainCount: 1,
       executionCellCount: 1,
     });
     await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toBeDefined();
@@ -114,7 +124,7 @@ describe.sequential("production bootstrap and configuration", () => {
         .selectFrom("execution_cells")
         .select([
           "temporal_task_queue",
-          "sandbox_manager_base_url",
+          "sandbox_domain_id",
           "supervisor_management_url_template",
           "capacity_weight",
         ])
@@ -122,7 +132,7 @@ describe.sequential("production bootstrap and configuration", () => {
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({
       temporal_task_queue: "agent-dock-pi-runs-cell-bootstrap-v1",
-      sandbox_manager_base_url: "http://sandbox-manager.agent-dock-cell-bootstrap:4300",
+      sandbox_domain_id: "sandbox-domain-bootstrap",
       supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
       capacity_weight: 200,
     });
@@ -238,7 +248,7 @@ describe.sequential("production bootstrap and configuration", () => {
         "cube-egress-config-token",
         `cube-egress-${"c".repeat(48)}`,
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+      AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: await secret(
         root,
         "sandbox-materializer-token",
@@ -263,7 +273,7 @@ describe.sequential("production bootstrap and configuration", () => {
         "http://{supervisorId}:4100",
         "http://{supervisorId}.cell-0002:4100",
       ],
-      sandboxManagerBaseUrls: ["http://sandbox-manager:4300/"],
+      toolBrokerBaseUrls: ["http://tool-broker:4300/"],
       host: "0.0.0.0",
       port: 3000,
       temporalAddress: "temporal:7233",

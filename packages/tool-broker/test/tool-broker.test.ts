@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-  SandboxManagerError,
+  ToolBrokerError,
   InMemorySandboxActivationStateRepository,
-  ToolSandboxManager,
-  loadSandboxManagerConfig,
+  ToolBroker,
+  loadToolBrokerConfig,
   type SandboxCreateSpec,
   type SandboxProvider,
 } from "../src/index.ts";
@@ -74,7 +74,7 @@ const environmentValidation = {
 };
 
 const createRequest: ToolSandboxCreateRequest = {
-  managerProtocolVersion: 1,
+  toolBrokerProtocolVersion: 1,
   type: "tool_sandbox.create",
   requestId: "10000000-0000-4000-8000-000000000011",
   assignment,
@@ -89,7 +89,7 @@ function providerFixture() {
   let createCount = 0;
   let stopped = false;
   const exec = vi.fn<SandboxProvider["exec"]>(async (_handle, request) => ({
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation_result",
     activationId: request.activationId,
     operationId: request.operationId,
@@ -189,7 +189,7 @@ function operation(
   operationId: string,
 ): Extract<ToolSandboxOperationRequest, { operation: "bash.exec" }> {
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId: ACTIVATION_ID,
     operationId,
@@ -204,10 +204,10 @@ function operation(
   };
 }
 
-describe("provider-backed Tool Sandbox Manager", () => {
+describe("provider-backed Tool Tool Broker", () => {
   it("keeps capabilities above the provider and binds an immutable identity handle", async () => {
     const fixture = providerFixture();
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -295,7 +295,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const fixture = providerFixture();
     const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
     const capabilities = [CAPABILITY, SECOND_CAPABILITY];
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => activationIds.shift()!,
       capabilityGenerator: () => capabilities.shift()!,
@@ -339,7 +339,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const fixture = providerFixture();
     const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
     const capabilities = [CAPABILITY, SECOND_CAPABILITY];
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => activationIds.shift()!,
       capabilityGenerator: () => capabilities.shift()!,
@@ -384,7 +384,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
 
   it("reuses one exact-session runtime across fenced attempts without reprovisioning", async () => {
     const fixture = providerFixture();
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -392,7 +392,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const first = await manager.create(createRequest);
     await manager.execute(first.capability, operation("10000000-0000-4000-8000-000000000018"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "10000000-0000-4000-8000-000000000019",
       activationId: first.activationId,
@@ -432,7 +432,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
   it("keeps a persistent runtime across the idle TTL and reuses it for the same Session", async () => {
     const fixture = providerFixture();
     let now = 1_000;
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -442,7 +442,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const first = await manager.create(createRequest);
     await manager.execute(first.capability, operation("71000000-0000-4000-8000-000000000001"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "71000000-0000-4000-8000-000000000002",
       activationId: first.activationId,
@@ -485,7 +485,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     }
     const fixture = providerFixture();
     const stateRepository = new RetiredStateRepository();
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       stateRepository,
       idGenerator: () => ACTIVATION_ID,
@@ -494,7 +494,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const created = await manager.create(createRequest);
     await manager.execute(created.capability, operation("72000000-0000-4000-8000-000000000001"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "72000000-0000-4000-8000-000000000002",
       activationId: created.activationId,
@@ -512,7 +512,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
 
   it("does not let another Session displace a persistent process world", async () => {
     const fixture = providerFixture();
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -520,7 +520,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const first = await manager.create(createRequest);
     await manager.execute(first.capability, operation("73000000-0000-4000-8000-000000000001"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "73000000-0000-4000-8000-000000000002",
       activationId: first.activationId,
@@ -561,7 +561,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       `adts_${"e".repeat(43)}`,
       `adts_${"f".repeat(43)}`,
     ];
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => activationIds.shift()!,
       capabilityGenerator: () => capabilities.shift()!,
@@ -571,7 +571,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const persistent = await manager.create(createRequest);
     await manager.execute(persistent.capability, operation("74000000-0000-4000-8000-000000000001"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "74000000-0000-4000-8000-000000000002",
       activationId: persistent.activationId,
@@ -600,7 +600,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
       activationId: ordinary.activationId,
     });
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "74000000-0000-4000-8000-000000000006",
       activationId: ordinary.activationId,
@@ -654,7 +654,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const fixture = providerFixture();
     const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
     const capabilities = [CAPABILITY, SECOND_CAPABILITY];
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => activationIds.shift()!,
       capabilityGenerator: () => capabilities.shift()!,
@@ -662,7 +662,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const first = await manager.create(createRequest);
     await manager.execute(first.capability, operation("60000000-0000-4000-8000-000000000012"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "60000000-0000-4000-8000-000000000013",
       activationId: first.activationId,
@@ -702,7 +702,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const fixture = providerFixture();
     const activationIds = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
     const capabilities = [CAPABILITY, SECOND_CAPABILITY];
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => activationIds.shift()!,
       capabilityGenerator: () => capabilities.shift()!,
@@ -712,7 +712,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const first = await manager.create(createRequest);
     await manager.execute(first.capability, operation("50000000-0000-4000-8000-000000000012"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "50000000-0000-4000-8000-000000000013",
       activationId: first.activationId,
@@ -755,7 +755,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
 
   it("releases admission when a validated physical runtime is terminated after its assignment advanced", async () => {
     const fixture = providerFixture();
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -764,7 +764,7 @@ describe("provider-backed Tool Sandbox Manager", () => {
     const created = await manager.create(createRequest);
     await manager.execute(created.capability, operation("40000000-0000-4000-8000-000000000012"));
     await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "40000000-0000-4000-8000-000000000013",
       activationId: created.activationId,
@@ -798,9 +798,9 @@ describe("provider-backed Tool Sandbox Manager", () => {
   it("revokes the capability before a provider stop failure escapes", async () => {
     const fixture = providerFixture();
     fixture.provider.stop = async () => {
-      throw new SandboxManagerError("cleanup_failed", "cleanup failed", true);
+      throw new ToolBrokerError("cleanup_failed", "cleanup failed", true);
     };
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider: fixture.provider,
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
@@ -842,11 +842,11 @@ describe("provider-backed Tool Sandbox Manager", () => {
       );
       await chmod(databaseUrlPath, 0o600);
       await expect(
-        loadSandboxManagerConfig({
+        loadToolBrokerConfig({
           DATABASE_URL_FILE: databaseUrlPath,
-          AGENT_DOCK_EXECUTION_CELL_ID: "cell-0001",
-          AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: "http://sandbox-manager-0:4300",
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
+          AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
+          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
@@ -858,8 +858,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
         }),
       ).resolves.toMatchObject({
         databaseUrl: "postgresql://agent-dock:secret@postgres:5432/agent-dock",
-        executionCellId: "cell-0001",
-        advertisedBaseUrl: "http://sandbox-manager-0:4300/",
+        sandboxDomainId: "sandbox-domain-0001",
+        advertisedBaseUrl: "http://tool-broker-0:4300/",
         maximumActiveSandboxes: 2,
         maximumWarmActivations: 4,
         cubeSandbox: {
@@ -875,13 +875,13 @@ describe("provider-backed Tool Sandbox Manager", () => {
         },
       });
       await expect(
-        loadSandboxManagerConfig({
+        loadToolBrokerConfig({
           DATABASE_URL_FILE: databaseUrlPath,
-          AGENT_DOCK_EXECUTION_CELL_ID: "cell-0001",
-          AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL: "http://sandbox-manager-0:4300",
-          AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS: "10000",
-          AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS: "5000",
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
+          AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
+          AGENT_DOCK_TOOL_BROKER_OWNERSHIP_LEASE_MS: "10000",
+          AGENT_DOCK_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS: "5000",
+          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
@@ -892,8 +892,8 @@ describe("provider-backed Tool Sandbox Manager", () => {
         }),
       ).rejects.toThrow("heartbeat must leave lease failure margin");
       await expect(
-        loadSandboxManagerConfig({
-          AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: tokenPath,
+        loadToolBrokerConfig({
+          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),

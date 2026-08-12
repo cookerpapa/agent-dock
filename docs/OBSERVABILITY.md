@@ -4,7 +4,7 @@
 
 The Control Plane assigns a stable W3C trace ID in the same transaction that
 accepts a Run. Dispatch creates an Attempt parent and propagates `traceparent`
-through the trusted Runner, Pi provider request, Tool RPC, Sandbox Manager, and
+through the trusted Runner, Pi provider request, Tool RPC, Tool Broker, and
 Sandbox Provider operations. The upstream model provider does not receive the
 platform-internal trace header.
 
@@ -39,7 +39,7 @@ observability network:
 | --- | --- | --- |
 | Control Plane | `control-plane:9464/metrics` | queue, outcomes, attempts, process |
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
-| Sandbox Manager | `sandbox-manager:9466/metrics` | Provider lifecycle, tools, process |
+| Tool Broker | `tool-broker:9466/metrics` | Provider lifecycle, tools, process |
 | Event Gateway | `event-gateway:9467/metrics` | ingest/projector and stream process signals |
 | Live Stream Compactor | `event-retention:9468/metrics` | Valkey trim/replay-floor process signals |
 

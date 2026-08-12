@@ -950,7 +950,7 @@ async function executeBash(
       throw new ToolWorkerError("tool_cancelled", "Tool command was cancelled", true);
     const output = Buffer.concat(outputChunks.map((chunk) => chunk.data));
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
       activationId: request.activationId,
       operationId: request.operationId,
@@ -978,7 +978,7 @@ async function executeOperation(
   if (request.operation === "file.read") {
     const file = await readWorkspaceFile(request.path);
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
       activationId: request.activationId,
       operationId: request.operationId,
@@ -994,7 +994,7 @@ async function executeOperation(
       request.limitLines,
     );
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
       activationId: request.activationId,
       operationId: request.operationId,
@@ -1009,7 +1009,7 @@ async function executeOperation(
   if (request.operation === "file.write") {
     const sha256 = await writeWorkspaceFile(request.path, request.content, request.expectedSha256);
     return {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation_result",
       activationId: request.activationId,
       operationId: request.operationId,
@@ -1022,7 +1022,7 @@ async function executeOperation(
   }
   if (request.operation === "file.access") await accessWorkspaceFile(request.path);
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation_result",
     activationId: request.activationId,
     operationId: request.operationId,
@@ -1039,7 +1039,7 @@ function failureResponse(
       ? error
       : new ToolWorkerError("tool_operation_failed", "Tool operation failed", true);
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation_failed",
     activationId: request.activationId,
     operationId: request.operationId,
@@ -1104,7 +1104,7 @@ export async function runToolWorker(): Promise<void> {
     error: unknown,
     identity?: { requestId?: string; operationId?: string },
   ): Promise<void> => {
-    // This stream is collected only by the trusted Sandbox Manager. Keep the
+    // This stream is collected only by the trusted Tool Broker. Keep the
     // protocol response deliberately generic, but retain an operator-facing
     // diagnostic so startup failures can be distinguished without weakening
     // the model-visible error boundary.

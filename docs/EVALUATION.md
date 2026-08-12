@@ -144,7 +144,7 @@ The checked-in reports currently record:
   Session creation was 114.20 requests/s with 831 ms p95, and reads were 236.81
   requests/s with 408 ms p95;
 - post-load RSS: Control Plane 200,962,048 bytes, Trusted Runner 167,043,072
-  bytes, Sandbox Manager 119,164,928 bytes;
+  bytes, Tool Broker 119,164,928 bytes;
 - all three Prometheus targets were up and Jaeger contained cross-service traces
   from all three trusted services.
 

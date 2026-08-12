@@ -37,9 +37,9 @@ image:
 services:
   controlPlaneUrl: http://control-plane.agent-dock-system.svc.cluster.local:3000
   eventGatewayUrl: http://event-gateway.agent-dock-system.svc.cluster.local:4600
-  sandboxManagerUrls:
-    - http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300
-    - http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300
+  toolBrokerUrls:
+    - http://tool-broker-0.agent-dock-system.svc.cluster.local:4300
+    - http://tool-broker-1.agent-dock-system.svc.cluster.local:4300
   githubGateway:
     enabled: true
     url: http://github-gateway.agent-dock-system.svc.cluster.local:4400
@@ -69,7 +69,7 @@ conversationStorage:
 credentials:
   supervisorEnrollmentTokenKey: supervisor-enrollment-token
   supervisorManagementTokenKey: supervisor-management-token
-  sandboxManagerTokenKey: sandbox-manager-token
+  toolBrokerTokenKey: tool-broker-token
   modelCredentialMasterKeyKey: model-credential-master-key
   githubGatewayTokenKey: github-gateway-token
   metricsTokenKey: metrics-token
@@ -83,7 +83,7 @@ runtime:
     maximumEntries: 512
     maximumBytes: 33554432
   timeouts:
-    sandboxManagerRequestMs: 360000
+    toolBrokerRequestMs: 360000
     modelCapabilityTtlMs: 900000
     modelUpstreamRequestMs: 120000
     modelRequestMs: 150000

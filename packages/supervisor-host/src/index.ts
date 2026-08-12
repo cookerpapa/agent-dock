@@ -32,7 +32,7 @@ export {
   type SupervisorHostRuntimeOptions,
   type SupervisorHostRuntimeState,
   type SupervisorHostTerminalReason,
-  type SupervisorSandboxManager,
+  type SupervisorToolBroker,
   type SupervisorTemporalWorker,
 } from "./runtime.ts";
 export {

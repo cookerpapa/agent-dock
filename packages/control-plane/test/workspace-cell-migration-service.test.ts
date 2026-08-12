@@ -82,15 +82,37 @@ beforeAll(async () => {
     })
     .executeTakeFirstOrThrow();
   await database
+    .insertInto("sandbox_domains")
+    .values({
+      id: "sandbox-domain-0002",
+      display_name: "Migration target domain",
+      state: "active",
+      tool_broker_base_url: "http://tool-broker-domain-0002:4300",
+      workspace_storage_key: "workspace-domain-0002",
+      maximum_active_sandboxes: 100,
+    })
+    .executeTakeFirstOrThrow();
+  await database
     .insertInto("execution_cells")
     .values({
       id: "cell-0002",
       display_name: "Migration target",
       state: "active",
       temporal_task_queue: "agent-dock-pi-runs-cell-0002-v1",
-      sandbox_manager_base_url: "http://sandbox-manager-cell-0002.test:4300",
+      sandbox_domain_id: "sandbox-domain-0001",
       supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-0002.test:4100",
-      workspace_storage_key: "workspace-cell-0002",
+      capacity_weight: 100,
+    })
+    .executeTakeFirstOrThrow();
+  await database
+    .insertInto("execution_cells")
+    .values({
+      id: "cell-0003",
+      display_name: "Cross-domain target",
+      state: "active",
+      temporal_task_queue: "agent-dock-pi-runs-cell-0003-v1",
+      sandbox_domain_id: "sandbox-domain-0002",
+      supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-0003.test:4100",
       capacity_weight: 100,
     })
     .executeTakeFirstOrThrow();
@@ -191,5 +213,37 @@ describe.sequential("drained Workspace Cell migration", () => {
       code: "cell_not_empty",
       retryable: true,
     });
+  });
+
+  it("rejects a Cell move that would silently cross Sandbox Domains", async () => {
+    await migrations.setCellState("cell-0001", "active");
+    const project = await store.createProject("cross-domain-migration");
+    const source = await database
+      .selectFrom("workspaces")
+      .innerJoin("execution_cells", "execution_cells.id", "workspaces.cell_id")
+      .select(["workspaces.cell_id", "execution_cells.sandbox_domain_id"])
+      .where("workspaces.id", "=", project.workspaceId)
+      .executeTakeFirstOrThrow();
+    const targetCellId =
+      source.sandbox_domain_id === "sandbox-domain-0002" ? "cell-0002" : "cell-0003";
+    await expect(
+      migrations.migrate({
+        tenantId: TENANT_ID,
+        workspaceId: project.workspaceId,
+        targetCellId,
+        requestedByUserId: USER_ID,
+        idempotencyKey: `cross-domain:${project.workspaceId}:${targetCellId}`,
+      }),
+    ).rejects.toMatchObject({
+      code: "sandbox_domain_migration_required",
+      retryable: false,
+    } satisfies Partial<WorkspaceCellMigrationError>);
+    await expect(
+      database
+        .selectFrom("workspaces")
+        .select("cell_id")
+        .where("id", "=", project.workspaceId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ cell_id: source.cell_id });
   });
 });

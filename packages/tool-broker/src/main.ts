@@ -1,18 +1,18 @@
-import { loadSandboxManagerConfig } from "./config.ts";
+import { loadToolBrokerConfig } from "./tool-broker-config.ts";
 import { createDatabase } from "@agent-dock/database";
 import { startServiceObservability } from "@agent-dock/observability";
 import { CubeSandboxProvider } from "./cubesandbox-sandbox-provider.ts";
-import { SandboxManagerServer } from "./server.ts";
-import { ToolSandboxManager } from "./tool-sandbox-manager.ts";
+import { ToolBrokerServer } from "./tool-broker-server.ts";
+import { ToolBroker } from "./tool-broker.ts";
 import { HttpWorkspaceDataMover } from "./workspace-data-mover.ts";
 import { PostgresSandboxActivationStateRepository } from "./activation-state-repository.ts";
 import { randomUUID } from "node:crypto";
 
-const config = await loadSandboxManagerConfig();
+const config = await loadToolBrokerConfig();
 const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
 const activationState = new PostgresSandboxActivationStateRepository({
   database,
-  cellId: config.executionCellId,
+  sandboxDomainId: config.sandboxDomainId,
   instanceId: randomUUID(),
   ownerBaseUrl: config.advertisedBaseUrl,
   leaseMs: config.ownershipLeaseMs,
@@ -20,7 +20,7 @@ const activationState = new PostgresSandboxActivationStateRepository({
 });
 await activationState.start();
 const observability = await startServiceObservability({
-  serviceName: "agent-dock-sandbox-manager",
+  serviceName: "agent-dock-tool-broker",
   defaultMetricsPort: 9466,
 });
 const cube = config.cubeSandbox;
@@ -46,7 +46,7 @@ const provider = new CubeSandboxProvider({
     serviceToken: cube.workspaceDataMoverToken,
   }),
 });
-const manager = new ToolSandboxManager({
+const broker = new ToolBroker({
   provider,
   ownerBaseUrl: config.advertisedBaseUrl,
   stateRepository: activationState,
@@ -55,19 +55,19 @@ const manager = new ToolSandboxManager({
   warmTtlMs: config.warmTtlMs,
   maximumWarmActivations: config.maximumWarmActivations,
 });
-const server = new SandboxManagerServer({
+const server = new ToolBrokerServer({
   host: config.host,
   port: config.port,
   serviceToken: config.serviceToken,
   ...(config.materializerToken === undefined
     ? {}
     : { materializerToken: config.materializerToken }),
-  manager,
+  broker,
   metrics: observability.metrics,
 });
 
 await server.listen();
-process.stdout.write("AgentDock Sandbox Manager ready\n");
+process.stdout.write("AgentDock Tool Broker ready\n");
 
 let closing: Promise<void> | undefined;
 const close = (): Promise<void> => {

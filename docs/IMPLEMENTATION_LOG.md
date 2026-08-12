@@ -7,6 +7,21 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
+
+- 将 execution Cell 收缩为 Temporal Task Queue 与 Pi Worker 容量分片；新增
+  Sandbox Domain 作为 Cube、Workspace storage 和 Tool Broker 的稳定边界，
+  多个 Cell 可以共享一个 Domain。
+- 将原 Sandbox Manager 收敛并重命名为 Tool Broker：只保留租户/Workspace
+  鉴权、Lease/Fence、Tool operation `UNKNOWN`、Workspace CAS 和 Cube 适配，
+  不再把它描述为第二套通用沙箱调度器。
+- 将 Workspace Data Mover 从 Broker sidecar 拆为独立 Deployment；共享 RWX
+  数据卷，并用 PostgreSQL advisory lock 串行化同一 Workspace 的 Kopia 搬运。
+- 企业 Stage 1/2 从“每 Cell 一套 Manager/Mover”改为一个共享 Domain，加
+  Cell 只扩 Pi Worker；Cube 管理密钥仍不进入 Worker。
+- 保留 Broker 转发 Tool payload 的安全路径；直接 Worker→CubeProxy 数据面
+  要等 activation/Attempt 级限时 grant 能维持 Fencing 与 UNKNOWN 后再启用。
+
 ## 2026-08-10 — real persistent-Cube lifecycle acceptance
 
 - Extended the Cube Provider live gate from ordinary warm reuse to the actual

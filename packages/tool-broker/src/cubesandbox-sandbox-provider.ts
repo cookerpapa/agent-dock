@@ -1,12 +1,12 @@
 import {
   isExpectedDefaultToolchain,
   parseEnvironmentToolchainReport,
-  parseSandboxManagerResponse,
+  parseToolBrokerResponse,
   parseToolSandboxOperationResponse,
   type EnvironmentValidationReport,
   type EnvironmentToolchainReport,
-  type SandboxManagerMaterializeFileRequest,
-  type SandboxManagerMaterializeFileResponse,
+  type ToolBrokerMaterializeFileRequest,
+  type ToolBrokerMaterializeFileResponse,
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
@@ -33,7 +33,7 @@ import {
 } from "./cubesandbox-runtime-client.ts";
 import { workspaceVolumeId, type WorkspaceDataMover } from "./workspace-data-mover.ts";
 import {
-  SandboxManagerError,
+  ToolBrokerError,
   type SandboxCreateSpec,
   type SandboxEffectiveIsolation,
   type SandboxHandle,
@@ -172,7 +172,7 @@ function positiveInteger(value: number | undefined, fallback: number, maximum: n
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new SandboxManagerError("cubesandbox_protocol_error", `${label} was invalid`, false);
+    throw new ToolBrokerError("cubesandbox_protocol_error", `${label} was invalid`, false);
   }
   return value as Record<string, unknown>;
 }
@@ -185,7 +185,7 @@ function stringField(value: Record<string, unknown>, name: string, maximum = 256
     field.length > maximum ||
     /[\u0000-\u001f\u007f]/.test(field)
   ) {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_protocol_error",
       "CubeSandbox runtime evidence was invalid",
       false,
@@ -197,7 +197,7 @@ function stringField(value: Record<string, unknown>, name: string, maximum = 256
 function integerField(value: Record<string, unknown>, name: string): number {
   const field = value[name];
   if (!Number.isSafeInteger(field) || (field as number) < 0) {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_protocol_error",
       "CubeSandbox runtime evidence was invalid",
       false,
@@ -209,7 +209,7 @@ function integerField(value: Record<string, unknown>, name: string): number {
 function booleanField(value: Record<string, unknown>, name: string): boolean {
   const field = value[name];
   if (typeof field !== "boolean") {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_protocol_error",
       "CubeSandbox runtime evidence was invalid",
       false,
@@ -222,7 +222,7 @@ function parseEvidence(value: unknown): CubeRuntimeEvidence {
   const candidate = record(value, "CubeSandbox runtime evidence");
   const capabilities = stringField(candidate, "effectiveCapabilities", 64).toLowerCase();
   if (!/^[0-9a-f]+$/.test(capabilities)) {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_protocol_error",
       "CubeSandbox capability evidence was invalid",
       false,
@@ -303,7 +303,7 @@ function assignmentMetadata(
     [METADATA.bindingSha256]: bindingSha256,
     [METADATA.imageRevision]: imageRevision,
     // Keep a fence-qualified immutable create record for inventory and orphan
-    // reconciliation. Later Run ownership lives in the Manager's activation
+    // reconciliation. Later Run ownership lives in the Tool Broker's activation
     // state and the guest's rotated authority, never in caller-selected labels.
     [`${ASSIGNMENT_METADATA_PREFIX}${String(assignment.fencingToken).padStart(16, "0")}`]:
       JSON.stringify(current),
@@ -405,7 +405,7 @@ function currentAssignmentMetadata(
       }
       candidates.push(parsed as unknown as CubeAssignmentMetadata);
     } catch {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_inventory_invalid",
         "CubeSandbox managed assignment metadata was invalid",
         false,
@@ -419,7 +419,7 @@ function currentAssignmentMetadata(
     candidates[1]?.fencingToken === current.fencingToken &&
     JSON.stringify(candidates[1]) !== JSON.stringify(current)
   ) {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_inventory_ambiguous",
       "CubeSandbox managed assignment metadata was ambiguous",
       false,
@@ -441,7 +441,7 @@ function assignmentFromMetadata(
   }
   const current = currentAssignmentMetadata(values);
   if (current === undefined) {
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_inventory_invalid",
       "CubeSandbox managed metadata was invalid",
       false,
@@ -588,7 +588,7 @@ export class CubeSandboxProvider implements SandboxProvider {
 
   async create(spec: SandboxCreateSpec): Promise<SandboxHandle> {
     if (this.#activations.has(spec.activationId)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_collision",
         "CubeSandbox activation identity collided",
         false,
@@ -600,7 +600,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       spec.policy.allowDockerSocket ||
       spec.policy.privileged
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_policy_unsupported",
         "CubeSandbox Provider does not support the requested policy",
         false,
@@ -618,7 +618,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         (kopiaCheckpoint.sourceSessionId === spec.assignment.sessionId &&
           spec.assignment.fencingToken <= kopiaCheckpoint.fencingToken))
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_checkpoint_binding_invalid",
         "Kopia Workspace checkpoint did not match the requested Workspace, environment or Session fence",
         false,
@@ -689,7 +689,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         toolchain.specSha256 !== spec.environment.specSha256 ||
         toolchain.recipeSha256 !== spec.environment.recipeSha256
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "environment_preflight_mismatch",
           "CubeSandbox environment did not match the accepted Run",
           false,
@@ -805,7 +805,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         toolchain.specSha256 !== spec.environment.specSha256 ||
         toolchain.recipeSha256 !== spec.environment.recipeSha256
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_checkpoint_environment_mismatch",
           "Kopia Workspace checkpoint environment did not match the accepted Run",
           false,
@@ -852,7 +852,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   async retainForWarm(handle: SandboxHandle): Promise<SandboxHandle> {
     const activation = await this.#owned(handle);
     if (activation.state !== "idle") {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_handoff_state_invalid",
         "CubeSandbox was not detached before warm retention",
         false,
@@ -874,7 +874,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       assignment.sessionId !== handle.assignment.sessionId ||
       assignment.fencingToken <= handle.assignment.fencingToken
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_rebind_identity_invalid",
         "CubeSandbox warm rebind identity was invalid",
         false,
@@ -899,7 +899,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         "CubeSandbox rebind",
       );
       if (response.rebound !== true || response.fencingToken !== assignment.fencingToken) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_rebind_invalid",
           "CubeSandbox warm rebind did not acknowledge the new fence",
           false,
@@ -913,7 +913,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         toolchain.specSha256 !== handle.environment.specSha256 ||
         toolchain.recipeSha256 !== handle.environment.recipeSha256
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_rebind_environment_mismatch",
           "CubeSandbox preserved environment did not match",
           false,
@@ -930,7 +930,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     } catch (error: unknown) {
       await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
       this.#activations.delete(handle.activationId);
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_rebind_failed",
         "CubeSandbox warm rebind failed and requires a cold restore",
         true,
@@ -945,14 +945,14 @@ export class CubeSandboxProvider implements SandboxProvider {
   ): Promise<ToolSandboxOperationResponse> {
     const activation = await this.#owned(handle);
     if (request.activationId !== handle.activationId) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "Tool operation activation identity did not match",
         false,
       );
     }
     if (activation.seenOperationIds.has(request.operationId)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_operation_replay",
         "Tool operation ID was already used",
         false,
@@ -1004,7 +1004,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       // newer Attempt and is safer than replaying arbitrary Bash.
       await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
       this.#activations.delete(handle.activationId);
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         signal?.aborted ? "tool_cancelled" : "cubesandbox_tool_result_unknown",
         signal?.aborted
           ? "Tool command was cancelled"
@@ -1024,7 +1024,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     const response = await this.exec(
       handle,
       {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation",
         activationId: handle.activationId,
         operationId: input.operationId,
@@ -1038,10 +1038,10 @@ export class CubeSandboxProvider implements SandboxProvider {
       signal,
     );
     if (response.type === "tool_sandbox.operation_failed") {
-      throw new SandboxManagerError(response.code, response.message, response.retryable);
+      throw new ToolBrokerError(response.code, response.message, response.retryable);
     }
     if (response.operation !== "file.read") {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_protocol_error",
         "CubeSandbox returned the wrong file operation",
         false,
@@ -1058,7 +1058,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     const response = await this.exec(
       handle,
       {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation",
         activationId: handle.activationId,
         operationId: input.operationId,
@@ -1073,10 +1073,10 @@ export class CubeSandboxProvider implements SandboxProvider {
       signal,
     );
     if (response.type === "tool_sandbox.operation_failed") {
-      throw new SandboxManagerError(response.code, response.message, response.retryable);
+      throw new ToolBrokerError(response.code, response.message, response.retryable);
     }
     if (response.operation !== "file.write") {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_protocol_error",
         "CubeSandbox returned the wrong file operation",
         false,
@@ -1087,11 +1087,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   async snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse> {
     const activation = await this.#owned(handle);
     if (activation.seenCaptureIds.has(requestId)) {
-      throw new SandboxManagerError(
-        "tool_capture_replay",
-        "Tool capture ID was already used",
-        false,
-      );
+      throw new ToolBrokerError("tool_capture_replay", "Tool capture ID was already used", false);
     }
     activation.seenCaptureIds.add(requestId);
     const recoverySecret = handoffSecret();
@@ -1126,7 +1122,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         }) ||
         !Array.isArray(raw.files)
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_checkpoint_prepare_invalid",
           "CubeSandbox did not prove a quiescent Workspace checkpoint",
           false,
@@ -1158,8 +1154,8 @@ export class CubeSandboxProvider implements SandboxProvider {
           recipeCommands: activation.toolchain.recipeCommands,
         }),
       );
-      const parsed = parseSandboxManagerResponse({
-        managerProtocolVersion: 1,
+      const parsed = parseToolBrokerResponse({
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.captured",
         requestId,
         activationId: handle.activationId,
@@ -1168,7 +1164,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         environment: handle.environmentValidation,
       });
       if (parsed.type !== "tool_sandbox.captured") {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_protocol_error",
           "CubeSandbox returned the wrong Kopia checkpoint response",
           false,
@@ -1189,7 +1185,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         completed.completed !== true ||
         completed.resumedToolProcesses !== frozenToolProcesses.length
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_checkpoint_completion_invalid",
           "CubeSandbox did not resume the checkpointed process boundary",
           false,
@@ -1212,7 +1208,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         } catch {
           await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
           this.#activations.delete(handle.activationId);
-          throw new SandboxManagerError(
+          throw new ToolBrokerError(
             "cubesandbox_checkpoint_recovery_failed",
             "CubeSandbox checkpoint cleanup failed and the VM was destroyed",
             true,
@@ -1243,7 +1239,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         physicalBindingSha256(handle.activationId, handle.assignment, handle.environment),
       )
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "CubeSandbox handle identity did not match",
         false,
@@ -1273,7 +1269,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         physicalBindingSha256(handle.activationId, handle.assignment, handle.environment),
       )
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "CubeSandbox inspection identity did not match",
         false,
@@ -1291,14 +1287,14 @@ export class CubeSandboxProvider implements SandboxProvider {
   }
 
   async materializeFile(
-    request: SandboxManagerMaterializeFileRequest,
+    request: ToolBrokerMaterializeFileRequest,
     signal?: AbortSignal,
-  ): Promise<SandboxManagerMaterializeFileResponse> {
+  ): Promise<ToolBrokerMaterializeFileResponse> {
     const snapshotBytes = decodeWorkspaceSnapshotBlob(request.snapshot);
     const kopia = parseKopiaWorkspaceCheckpoint(snapshotBytes);
     if (kopia !== undefined) {
       if (kopia.tenantId !== request.tenantId || kopia.workspaceId !== request.workspaceId) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "cubesandbox_checkpoint_binding_invalid",
           "Kopia Workspace checkpoint did not match the requested Workspace",
           false,
@@ -1306,14 +1302,14 @@ export class CubeSandboxProvider implements SandboxProvider {
       }
       const expected = kopia.files.find((file) => file.path === request.path);
       if (expected === undefined) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "workspace_file_not_found",
           "Workspace file was not found",
           false,
         );
       }
       if (signal?.aborted) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "snapshot_materialization_cancelled",
           "Workspace file materialization was cancelled",
           false,
@@ -1334,7 +1330,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         materialized.bytes.byteLength !== expected.sizeBytes ||
         materialized.sha256 !== expected.sha256
       ) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           signal?.aborted
             ? "snapshot_materialization_cancelled"
             : "cubesandbox_snapshot_materialization_invalid",
@@ -1345,7 +1341,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         );
       }
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "workspace.file_materialized",
         requestId: request.requestId,
         tenantId: request.tenantId,
@@ -1357,7 +1353,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         sizeBytes: expected.sizeBytes,
       };
     }
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_checkpoint_format_unsupported",
       "CubeSandbox accepts only the current Kopia Workspace checkpoint format",
       false,
@@ -1368,7 +1364,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     const activation = this.#activations.get(activationId);
     if (activation !== undefined) {
       if (!sameAssignment(activation.handle.assignment, assignment)) {
-        throw new SandboxManagerError(
+        throw new ToolBrokerError(
           "tool_sandbox_identity_mismatch",
           "CubeSandbox assignment identity did not match",
           false,
@@ -1381,7 +1377,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       metadataMatchesOrphanIdentity(instance.metadata, activationId, assignment),
     );
     if (matches.length > 1) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_inventory_ambiguous",
         "CubeSandbox activation inventory was ambiguous",
         false,
@@ -1413,7 +1409,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     );
     const current = managed?.handle.assignment ?? assignmentFromMetadata(instance);
     if (current === undefined || !sameRuntimeAssignment(instance, current, assignment)) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_assignment_identity_mismatch",
         "CubeSandbox termination identity did not match",
         false,
@@ -1430,7 +1426,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   async confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void> {
     const instance = await this.#client.read(assignment.containerName);
     if (instance !== undefined && runtimeUuid(instance.sandboxId) === assignment.containerId) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_assignment_still_alive",
         "CubeSandbox absence could not be confirmed",
         false,
@@ -1484,7 +1480,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       }
     }
     void lastError;
-    throw new SandboxManagerError(
+    throw new ToolBrokerError(
       "cubesandbox_data_plane_unavailable",
       "CubeSandbox Tool data plane did not become ready",
       true,
@@ -1505,7 +1501,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       !/^0+$/.test(evidence.effectiveCapabilities) ||
       evidence.readOnlyRootFilesystem
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "cubesandbox_isolation_mismatch",
         "CubeSandbox runtime evidence did not satisfy the required policy",
         false,
@@ -1522,7 +1518,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       activation.handle.runtimeName !== handle.runtimeName ||
       !sameAssignment(activation.handle.assignment, handle.assignment)
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "CubeSandbox handle identity did not match",
         false,
@@ -1539,7 +1535,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         activation.bindingSha256,
       )
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "CubeSandbox runtime identity did not match",
         false,
@@ -1565,7 +1561,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       handle.workspaceRoot !== "/workspace" ||
       handle.runtimeId !== runtimeUuid(handle.runtimeName)
     ) {
-      throw new SandboxManagerError(
+      throw new ToolBrokerError(
         "tool_sandbox_identity_mismatch",
         "CubeSandbox handle shape did not match",
         false,

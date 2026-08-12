@@ -14,7 +14,7 @@ COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
-COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
+COPY packages/tool-broker/package.json packages/tool-broker/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
 COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.json
@@ -38,7 +38,7 @@ LABEL org.opencontainers.image.title="AgentDock trusted Supervisor host" \
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
-COPY --from=dependencies /app/packages/sandbox-manager/node_modules /app/packages/sandbox-manager/node_modules
+COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/control-plane/package.json packages/control-plane/package.json
@@ -58,8 +58,8 @@ COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/runtime-core/src packages/runtime-core/src
-COPY packages/sandbox-manager/package.json packages/sandbox-manager/package.json
-COPY packages/sandbox-manager/src packages/sandbox-manager/src
+COPY packages/tool-broker/package.json packages/tool-broker/package.json
+COPY packages/tool-broker/src packages/tool-broker/src
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/sandbox-supervisor/src packages/sandbox-supervisor/src
 COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
@@ -70,7 +70,7 @@ COPY packages/temporal-orchestration/tsconfig.json packages/temporal-orchestrati
 COPY packages/temporal-orchestration/src packages/temporal-orchestration/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
-RUN cd /app/packages/sandbox-manager \
+RUN cd /app/packages/tool-broker \
     && node --input-type=module --eval "await import('undici')" \
     && rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack

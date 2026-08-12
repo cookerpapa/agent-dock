@@ -41,7 +41,7 @@ export const CLOUD_TOOL_EXECUTION_MODE = "sequential" as const;
 type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
   ? Omit<
       T,
-      | "managerProtocolVersion"
+      | "toolBrokerProtocolVersion"
       | "type"
       | "activationId"
       | "operationId"
@@ -349,7 +349,7 @@ function registerTrustedRemoteTools(
     }
     runtime.onToolOperationStarted?.();
     const candidate = {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation",
       activationId: runtime.activationId,
       operationId: randomUUID(),

@@ -241,9 +241,8 @@ describe.sequential("capacity-aware Temporal Worker affinity", () => {
         display_name: "Secondary test Cell",
         state: "active",
         temporal_task_queue: "agent-dock-pi-runs-cell-0002-v1",
-        sandbox_manager_base_url: "http://sandbox-manager-cell-0002.test:4300",
+        sandbox_domain_id: "sandbox-domain-0001",
         supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-0002.test:4100",
-        workspace_storage_key: "workspace-cell-0002",
         capacity_weight: 100,
       })
       .executeTakeFirstOrThrow();

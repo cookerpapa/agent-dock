@@ -117,7 +117,7 @@ function preflight(namespace, values) {
     "database-url",
     "metrics-token",
     "model-credential-master-key",
-    "sandbox-manager-token",
+    "tool-broker-token",
     "sandbox-materializer-token",
     "supervisor-enrollment-token",
     "supervisor-management-token",

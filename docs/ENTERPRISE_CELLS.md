@@ -1,58 +1,65 @@
-# Enterprise execution Cells
+# Enterprise execution Cells and Sandbox Domains
 
-AgentDock scales trusted Agent execution by adding independent execution Cells rather than by
-turning one cluster-wide Worker queue into an unbounded shared failure domain. PostgreSQL,
-Temporal, checkpoint object storage and the Web/API plane remain global authorities. Every Cell
-owns one Temporal Activity Task Queue, a replicated Sandbox Manager, a private Workspace volume
-and a KEDA-scaled Pi Worker pool.
+AgentDock separates capacity sharding from sandbox control:
+
+```text
+Global plane
+  PostgreSQL / Temporal / Kafka / Valkey / S3 / Web / Control Plane
+
+Sandbox Domain
+  Tool Broker replicas / Workspace Data Mover replicas / Cube cluster / RWX storage
+
+Execution Cell
+  versioned Temporal Activity Task Queue / Pi Worker pool
+```
+
+Several Cells may share one Sandbox Domain. Adding Pi Worker capacity therefore
+does not clone Cube credentials, Tool Broker ownership processes or Kopia Data
+Movers. Add another Domain only when Cube capacity, storage locality, compliance
+or failure isolation requires a separate boundary.
 
 The checked-in profiles are capacity envelopes, not benchmark claims:
 
-| Profile | Cells | Worker replicas per Cell | Slots per Worker | Maximum admitted Run slots |
-| --- | ---: | ---: | ---: | ---: |
-| `stage1-8-cells` | 8 | 64 | 4 | 2,048 |
-| `stage2-32-cells` | 32 | 80 | 4 | 10,240 |
+| Profile | Cells | Worker replicas per Cell | Slots per Worker | Maximum admitted Run slots | Sandbox Domains |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `stage1-8-cells` | 8 | 64 | 4 | 2,048 | 1 |
+| `stage2-32-cells` | 32 | 80 | 4 | 10,240 | 1 |
 
-An Active Run occupies one Pi SDK slot. Actual sustainable throughput still depends on model
-latency, repository size, Cube capacity, PostgreSQL/event-log throughput and workload shape. The
-profiles deliberately provision more Sandbox admission capacity than Worker slots, so the
-Sandbox Manager is not the first configured admission bottleneck.
+An Active Run occupies one Pi SDK slot. Sustainable throughput still depends
+on model latency, repository size, Tool concurrency, Cube compute capacity,
+PostgreSQL/event throughput and workload shape. Domain admission limits bound
+the total live Cube activations independently from per-Broker protection.
 
-The global event plane uses the measured-gated Kafka path. Install the Strimzi
-cluster and topic from [deploy/enterprise/kafka](../deploy/enterprise/kafka/README.md) before
-deploying either profile. PostgreSQL remains the Run/fence/sequence authority;
-Kafka carries high-frequency Worker batches, and Event Gateway replicas build
-the Valkey live replay plus PostgreSQL terminal projection consumed by SSE and
-terminal settlement. KEDA
-scales those replicas from Kafka consumer-group lag plus CPU, while retaining a
-three-replica floor if the scaler cannot read Kafka metrics.
+The enterprise event plane uses Kafka for accepted high-frequency Worker
+batches. PostgreSQL remains the Run/fence/sequence authority; Event Gateway
+projects a bounded Valkey replay suffix and canonical terminal records for SSE.
+KEDA scales Pi Workers from Temporal backlog and Event Gateways from Kafka lag.
 
-## Deployment topology
+## Deployment roles
 
-The same Helm chart has two explicit roles:
+The same Helm chart supports three explicit roles:
 
-- one global release with `globalPlaneEnabled=true` and `executionPlaneEnabled=false`;
-- one release per Cell with `globalPlaneEnabled=false` and `executionPlaneEnabled=true`.
+- one global release with `globalPlaneEnabled=true`;
+- one Sandbox Domain release with `sandboxPlaneEnabled=true`;
+- one release per execution Cell with `piWorkers.enabled=true`.
 
-The deployment command uses a three-step rollout:
+The deployment script rolls them out in this order:
 
-1. install every Cell's Sandbox Manager without Pi Workers;
-2. install or upgrade the global Control Plane, Event Gateway and Web plane;
-3. enable every Cell's Pi Worker pool.
+1. install the Sandbox Domain Tool Broker and Data Mover;
+2. install or upgrade the global plane;
+3. install or upgrade every Cell's Pi Worker pool.
 
-This order avoids a circular readiness dependency. The global Control Plane requires the Cell
-Managers to be reachable, while Pi Workers require the global Control Plane for authenticated
-enrollment.
+The Domain namespace contains the Cube credential and shared RWX Workspace
+claim. Cell namespaces contain Worker credentials but no Cube management key or
+Workspace filesystem. Every Cell route records a `sandboxDomainId` in
+PostgreSQL, while the Domain record supplies the stable Tool Broker URL and
+storage authority.
 
-Each profile also expands a distinct Cube API, proxy node and Cube domain per Cell. A real
-deployment must replace the checked-in `.example.com` templates with independently scalable Cube
-authorities; pointing every Cell at one Cube cluster would preserve routing isolation but not the
-intended compute failure-domain isolation.
-
-Each Cell namespace must already contain the configured platform Secret and one ReadWriteMany
-Workspace PVC. Secret material is intentionally not copied by the deployment script. Cell
-namespaces receive `agent-dock.io/trusted-plane=true` and a stable execution-cell label; the
-global namespace receives only the trusted-plane label.
+Cube owns generic microVM scheduling and lifecycle. AgentDock's Tool Broker is
+deliberately narrower: it validates tenant/Workspace identity, Lease and Fence,
+records Tool operation outcomes, coordinates Workspace CAS and calls Cube. The
+Data Mover is an independent, horizontally replaceable service; PostgreSQL
+advisory locks serialize restore/capture work for one Workspace across replicas.
 
 ## Commands
 
@@ -63,15 +70,16 @@ npm run enterprise:stage1:describe
 npm run enterprise:stage2:describe
 ```
 
-Render every global/Cell release and validate Helm schemas:
+Render all releases and validate Helm schemas:
 
 ```bash
 npm run enterprise:stage1:render
 npm run enterprise:stage2:render
 ```
 
-For a real cluster, copy the distributed values example outside the repository, replace all
-image and authority endpoints, create the per-namespace Secret/PVC objects, then run:
+For a real cluster, copy the distributed values example outside the repository,
+replace image and external authority endpoints, create the required Secrets and
+Domain RWX claim, then run:
 
 ```bash
 node scripts/enterprise-cells.mjs preflight \
@@ -83,33 +91,23 @@ node scripts/enterprise-cells.mjs deploy \
   --values /private/agent-dock-values.yaml
 ```
 
-The Stage 2 command is identical except for the profile path. `preflight` requires KEDA, the
-Kubernetes Metrics API, a Ready Kafka bootstrap service, all namespace-scoped credentials and RWX Workspace claims. Deployment is
-atomic per Helm release; a failed Cell does not silently mutate the directory of another Cell.
+`preflight` requires KEDA, the Kubernetes Metrics API, a Ready Kafka bootstrap
+service, namespace-scoped credentials and the Domain RWX Workspace claim.
+Deployment is atomic per Helm release.
 
-## Authorities and isolation
+## Placement, draining and recovery
 
-The global bootstrap registers all Cell routes in PostgreSQL. Once a Cell owns a Workspace, its
-Temporal queue, Sandbox Manager URL, Worker URL template and storage key are immutable through
-ordinary bootstrap reconciliation. This prevents a configuration rollout from silently routing
-an existing Workspace into a different execution boundary.
+PostgreSQL is the durable Cell and Domain directory. New Workspaces are placed
+in an active Cell; that Cell resolves to exactly one Sandbox Domain. Ordinary
+bootstrap reconciliation cannot silently move an existing Workspace across
+either boundary.
 
-Every Cell uses a distinct namespace, Worker pool identity, Temporal queue, Workspace storage key
-and POSIX volume. Kopia/object storage remains the durable checkpoint authority, so a drained
-Workspace can later be moved between Cells without treating a live VM or local PVC as the source
-of truth.
-
-## Draining and cross-Cell recovery
-
-Cross-Cell movement is an offline, checkpoint-based operation. It never transfers ownership of a
-live Cube VM. The operator first marks the source Cell `draining`, which prevents new Workspace
-placement there. A Workspace route moves only when it has no unsettled Run, no live/warm Sandbox
-activation, no active import and—when a version exists—a settled Workspace checkpoint. The
-transaction locks the Workspace and both Cell rows, advances the Workspace row-version fence,
-updates both placement counters and clears Worker affinity.
-
-Run the operation from a trusted Control Plane administration environment with
-`DATABASE_URL_FILE` configured:
+Cross-Cell movement is checkpoint based and never transfers a live Cube VM.
+The source Cell is drained, unsettled Runs and live activations are allowed to
+finish, and the Workspace route changes under a row-version fence. The current
+implementation permits this operation only when source and target Cells share a
+Sandbox Domain. Cross-Domain movement requires an explicit storage migration
+workflow and is rejected rather than copying from an ambiguous live source.
 
 ```bash
 npm run production:cell-admin -- drain \
@@ -118,8 +116,6 @@ npm run production:cell-admin -- drain \
   --actor 00000000-0000-4000-8000-000000000001
 ```
 
-Busy Workspaces remain in the draining Cell and are reported with a retryable reason. Re-run the
-command after their Runs settle. The Cell becomes `disabled` only after its Workspace count reaches
-zero. On the next Run, the destination Manager materializes the globally committed Kopia snapshot
-into the destination Cell's POSIX volume. Stale data on the old Cell is not an authority and can be
-garbage-collected after the migration audit has settled.
+The next Run can use the committed Workspace checkpoint through any healthy
+Tool Broker/Data Mover replica in that Domain. Worker affinity is only a cache
+optimization and is never required for correctness.

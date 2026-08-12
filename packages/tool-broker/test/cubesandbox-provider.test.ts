@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   CubeSandboxProvider,
-  ToolSandboxManager,
+  ToolBroker,
   type CubeSandboxCreateInput,
   type CubeSandboxDataRequest,
   type CubeSandboxInstance,
@@ -221,7 +221,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
       const operation = input.body as ToolSandboxOperationRequest;
       if (operation.operation !== "bash.exec") throw new Error("unexpected operation");
       return {
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation_result",
         activationId: operation.activationId,
         operationId: operation.operationId,
@@ -243,7 +243,7 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
 
 function operation(activationId: string): ToolSandboxOperationRequest {
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId,
     operationId: "10000000-0000-4000-8000-000000000020",
@@ -313,7 +313,7 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("preserves Manager capabilities, assignment inventory and content checkpoints", async () => {
+  it("preserves Tool Broker capabilities, assignment inventory and content checkpoints", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const workspaceDataMover = fakeWorkspaceDataMover();
     const provider = new CubeSandboxProvider({
@@ -323,14 +323,14 @@ describe("CubeSandbox Provider contract", () => {
       runtimeClient: runtime,
       workspaceDataMover,
     });
-    const manager = new ToolSandboxManager({
+    const manager = new ToolBroker({
       provider,
       imageRevision: "development",
       idGenerator: () => ACTIVATION_ID,
       capabilityGenerator: () => CAPABILITY,
     });
     const reserved = await manager.create({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000011",
       assignment,
@@ -405,7 +405,7 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("adch_");
     const materialized = await manager.materializeFile({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "workspace.materialize_file",
       requestId: "10000000-0000-4000-8000-000000000023",
       tenantId: assignment.tenantId,
@@ -418,7 +418,7 @@ describe("CubeSandbox Provider contract", () => {
       path: "result.txt",
       content: Buffer.from("cube\n").toString("base64"),
     });
-    const upgradedManager = new ToolSandboxManager({
+    const upgradedBroker = new ToolBroker({
       provider: new CubeSandboxProvider({
         templateId: "agent-dock-tool-v2",
         imageRevision: "next-deployment",
@@ -429,8 +429,8 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "next-deployment",
     });
     await expect(
-      upgradedManager.materializeFile({
-        managerProtocolVersion: 1,
+      upgradedBroker.materializeFile({
+        toolBrokerProtocolVersion: 1,
         type: "workspace.materialize_file",
         requestId: "10000000-0000-4000-8000-000000000024",
         tenantId: assignment.tenantId,
@@ -443,7 +443,7 @@ describe("CubeSandbox Provider contract", () => {
       path: "result.txt",
       content: Buffer.from("cube\n").toString("base64"),
     });
-    await upgradedManager.close();
+    await upgradedBroker.close();
     expect(workspaceDataMover.materialize).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: assignment.sessionId,
@@ -455,7 +455,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.destroyed).toEqual([]);
     expect(manager.admittedCount).toBe(1);
     const released = await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "10000000-0000-4000-8000-000000000022",
       activationId: reserved.activationId,
@@ -480,7 +480,7 @@ describe("CubeSandbox Provider contract", () => {
       fencingToken: 8,
     };
     const next = await manager.create({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.create",
       requestId: "10000000-0000-4000-8000-000000000032",
       assignment: nextAssignment,
@@ -506,7 +506,7 @@ describe("CubeSandbox Provider contract", () => {
       }),
     ]);
     const destroyed = await manager.release({
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.release",
       requestId: "10000000-0000-4000-8000-000000000034",
       activationId: next.activationId,

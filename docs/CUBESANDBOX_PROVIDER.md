@@ -9,7 +9,7 @@ run inside one KVM microVM bound to a tenant/Workspace/Session.
 ```text
 Pi SDK Tool call
   → Tool adapter
-  → Sandbox Manager (Step digest + operation ledger)
+  → Tool Broker (Step digest + operation ledger)
   → Cube API
   → Cube microVM Tool service
   → bounded result

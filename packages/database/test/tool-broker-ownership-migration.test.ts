@@ -24,23 +24,23 @@ afterAll(async () => {
   await pglite?.close();
 });
 
-describe("Sandbox Manager ownership migration", () => {
+describe("Tool Broker ownership migration", () => {
   it("creates durable replica, activation and operation ownership tables", async () => {
     const tables = await pglite.query<{ table_name: string }>(`
       select table_name
       from information_schema.tables
       where table_schema = 'public'
         and table_name in (
-          'sandbox_manager_instances',
-          'sandbox_manager_activations',
-          'sandbox_manager_operations'
+          'tool_broker_instances',
+          'tool_broker_activations',
+          'tool_broker_operations'
         )
       order by table_name
     `);
     expect(tables.rows).toEqual([
-      { table_name: "sandbox_manager_activations" },
-      { table_name: "sandbox_manager_instances" },
-      { table_name: "sandbox_manager_operations" },
+      { table_name: "tool_broker_activations" },
+      { table_name: "tool_broker_instances" },
+      { table_name: "tool_broker_operations" },
     ]);
 
     const indexes = await pglite.query<{ indexname: string }>(`
@@ -48,14 +48,14 @@ describe("Sandbox Manager ownership migration", () => {
       from pg_indexes
       where schemaname = 'public'
         and indexname in (
-          'sandbox_manager_ready_owner_url_unique',
-          'sandbox_manager_workspace_live_unique'
+          'tool_broker_ready_owner_url_unique',
+          'tool_broker_workspace_live_unique'
         )
       order by indexname
     `);
     expect(indexes.rows).toEqual([
-      { indexname: "sandbox_manager_ready_owner_url_unique" },
-      { indexname: "sandbox_manager_workspace_live_unique" },
+      { indexname: "tool_broker_ready_owner_url_unique" },
+      { indexname: "tool_broker_workspace_live_unique" },
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("Sandbox Manager ownership migration", () => {
       select indexdef
       from pg_indexes
       where schemaname = 'public'
-        and indexname = 'sandbox_manager_workspace_live_unique'
+        and indexname = 'tool_broker_workspace_live_unique'
     `);
     expect(definition.rows[0]?.indexdef).toContain("cleaning");
     expect(definition.rows[0]?.indexdef).toContain("workspace_id");
@@ -74,8 +74,8 @@ describe("Sandbox Manager ownership migration", () => {
     const constraint = await pglite.query<{ conname: string }>(`
       select conname
         from pg_constraint
-       where conrelid = 'sandbox_manager_activations'::regclass
-         and conname = 'sandbox_manager_activations_lease_id_fkey'
+       where conrelid = 'tool_broker_activations'::regclass
+         and conname = 'tool_broker_activations_lease_id_fkey'
     `);
     expect(constraint.rows).toEqual([]);
 
@@ -83,7 +83,7 @@ describe("Sandbox Manager ownership migration", () => {
       select is_nullable
         from information_schema.columns
        where table_schema = 'public'
-         and table_name = 'sandbox_manager_activations'
+         and table_name = 'tool_broker_activations'
          and column_name = 'lease_id'
     `);
     expect(column.rows).toEqual([{ is_nullable: "NO" }]);

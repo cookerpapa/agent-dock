@@ -3,8 +3,8 @@ import type {
   EnvironmentRuntimeSnapshot,
   EnvironmentValidationReport,
   SandboxCheckpointBlob,
-  SandboxManagerMaterializeFileRequest,
-  SandboxManagerMaterializeFileResponse,
+  ToolBrokerMaterializeFileRequest,
+  ToolBrokerMaterializeFileResponse,
   SupervisorRuntimeAssignment,
   ToolSandboxAssignment,
   ToolSandboxCaptureResponse,
@@ -14,13 +14,13 @@ import type {
 
 export const SANDBOX_PROVIDER_API_VERSION = 1 as const;
 
-export class SandboxManagerError extends Error {
+export class ToolBrokerError extends Error {
   readonly code: string;
   readonly retryable: boolean;
 
   constructor(code: string, safeMessage: string, retryable: boolean) {
     super(safeMessage);
-    this.name = "SandboxManagerError";
+    this.name = "ToolBrokerError";
     this.code = code;
     this.retryable = retryable;
   }
@@ -155,7 +155,7 @@ export type SandboxWriteFileInput = Readonly<{
 }>;
 
 /**
- * Provider-neutral execution contract owned by the trusted Sandbox Manager.
+ * Provider-neutral execution contract owned by the trusted Tool Broker.
  * Implementations must not expose their native SDK/client objects through a
  * handle or require the Agent Runner to know provider-specific arguments.
  */
@@ -204,10 +204,10 @@ export interface SandboxProvider {
    * rebinding the snapshot into a writable Agent execution.
    */
   materializeFile?(
-    request: SandboxManagerMaterializeFileRequest,
+    request: ToolBrokerMaterializeFileRequest,
     signal?: AbortSignal,
-  ): Promise<SandboxManagerMaterializeFileResponse>;
-  /** Used only when the Manager restarted before it could reconstruct a handle. */
+  ): Promise<ToolBrokerMaterializeFileResponse>;
+  /** Used only when the Tool Broker restarted before it could reconstruct a handle. */
   destroyActivation(activationId: string, assignment: ToolSandboxAssignment): Promise<void>;
 
   listAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]>;

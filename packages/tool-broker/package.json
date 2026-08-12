@@ -1,11 +1,11 @@
 {
-  "name": "@agent-dock/sandbox-manager",
+  "name": "@agent-dock/tool-broker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/tool-broker-client.ts"
   },
   "scripts": {
     "start": "tsx src/main.ts",

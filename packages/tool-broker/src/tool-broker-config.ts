@@ -2,11 +2,11 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
-export type SandboxManagerConfig = {
+export type ToolBrokerConfig = {
   host: string;
   port: number;
   databaseUrl: string;
-  executionCellId: string;
+  sandboxDomainId: string;
   advertisedBaseUrl: string;
   ownershipLeaseMs: number;
   ownershipHeartbeatMs: number;
@@ -35,7 +35,7 @@ export type SandboxManagerConfig = {
 function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name];
   if (value === undefined || value.trim().length === 0) {
-    throw new TypeError(`Required Sandbox Manager configuration ${name} is missing`);
+    throw new TypeError(`Required Tool Broker configuration ${name} is missing`);
   }
   return value;
 }
@@ -69,14 +69,14 @@ function integer(
 ): number {
   const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new TypeError("Sandbox Manager numeric configuration is invalid");
+    throw new TypeError("Tool Broker numeric configuration is invalid");
   }
   return parsed;
 }
 
 async function readSecret(path: string): Promise<string> {
   if (!isAbsolute(path) || path.includes("\0")) {
-    throw new TypeError("AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE must be an absolute path");
+    throw new TypeError("AGENT_DOCK_TOOL_BROKER_TOKEN_FILE must be an absolute path");
   }
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -87,11 +87,11 @@ async function readSecret(path: string): Promise<string> {
       metadata.size < 32 ||
       metadata.size > 4_096
     ) {
-      throw new TypeError("Sandbox Manager token file is not private and bounded");
+      throw new TypeError("Tool Broker token file is not private and bounded");
     }
     const value = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
     if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/.test(value)) {
-      throw new TypeError("Sandbox Manager token file is invalid");
+      throw new TypeError("Tool Broker token file is invalid");
     }
     return value;
   } finally {
@@ -132,12 +132,12 @@ async function readDatabaseUrl(path: string): Promise<string> {
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || metadata.size > 4_096) {
-      throw new TypeError("Sandbox Manager database URL file is not private and bounded");
+      throw new TypeError("Tool Broker database URL file is not private and bounded");
     }
     const value = (await handle.readFile("utf8")).replace(/\r?\n$/, "");
     const parsed = new URL(value);
     if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
-      throw new TypeError("Sandbox Manager database URL is invalid");
+      throw new TypeError("Tool Broker database URL is invalid");
     }
     return value;
   } finally {
@@ -145,9 +145,9 @@ async function readDatabaseUrl(path: string): Promise<string> {
   }
 }
 
-export async function loadSandboxManagerConfig(
+export async function loadToolBrokerConfig(
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<SandboxManagerConfig> {
+): Promise<ToolBrokerConfig> {
   if (
     environment.AGENT_DOCK_DOCKER_COMMAND !== undefined ||
     environment.AGENT_DOCK_REPOSITORY_IMPORT_NETWORK !== undefined ||
@@ -162,36 +162,36 @@ export async function loadSandboxManagerConfig(
     throw new TypeError("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME is invalid");
   }
   const ownershipLeaseMs = integer(
-    environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_LEASE_MS,
+    environment.AGENT_DOCK_TOOL_BROKER_OWNERSHIP_LEASE_MS,
     15_000,
     3_000,
     300_000,
   );
   const ownershipHeartbeatMs = integer(
-    environment.AGENT_DOCK_SANDBOX_MANAGER_OWNERSHIP_HEARTBEAT_MS,
+    environment.AGENT_DOCK_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS,
     5_000,
     1_000,
     60_000,
   );
   if (ownershipHeartbeatMs * 2 >= ownershipLeaseMs) {
-    throw new TypeError("Sandbox Manager heartbeat must leave lease failure margin");
+    throw new TypeError("Tool Broker heartbeat must leave lease failure margin");
   }
   return {
-    host: bounded(environment.AGENT_DOCK_SANDBOX_MANAGER_HOST ?? "127.0.0.1", "host", 256),
-    port: integer(environment.AGENT_DOCK_SANDBOX_MANAGER_PORT, 4_300, 1, 65_535),
+    host: bounded(environment.AGENT_DOCK_TOOL_BROKER_HOST ?? "127.0.0.1", "host", 256),
+    port: integer(environment.AGENT_DOCK_TOOL_BROKER_PORT, 4_300, 1, 65_535),
     databaseUrl: await readDatabaseUrl(required(environment, "DATABASE_URL_FILE")),
-    executionCellId: bounded(
-      required(environment, "AGENT_DOCK_EXECUTION_CELL_ID"),
-      "executionCellId",
+    sandboxDomainId: bounded(
+      required(environment, "AGENT_DOCK_SANDBOX_DOMAIN_ID"),
+      "sandboxDomainId",
       64,
     ),
     advertisedBaseUrl: serviceUrl(
-      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_ADVERTISED_URL"),
+      required(environment, "AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL"),
       "advertisedBaseUrl",
     ),
     ownershipLeaseMs,
     ownershipHeartbeatMs,
-    serviceToken: await readSecret(required(environment, "AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE")),
+    serviceToken: await readSecret(required(environment, "AGENT_DOCK_TOOL_BROKER_TOKEN_FILE")),
     ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
       ? {}
       : {

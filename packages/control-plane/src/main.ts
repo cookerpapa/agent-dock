@@ -27,7 +27,7 @@ import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
 import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
-import { ReplicatedSandboxManagerClient } from "@agent-dock/sandbox-manager/client";
+import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
@@ -146,8 +146,8 @@ export async function startControlPlane(): Promise<void> {
         leaseCoordinator: new SessionLeaseCoordinator({ database, sandboxId }),
       });
     };
-    const snapshotMaterializer = new ReplicatedSandboxManagerClient({
-      baseUrls: config.sandboxManagerBaseUrls,
+    const snapshotMaterializer = new ReplicatedToolBrokerClient({
+      baseUrls: config.toolBrokerBaseUrls,
       serviceToken: config.sandboxMaterializerToken,
       allowInsecureHttp: config.allowInsecureInternalHttp,
     });
@@ -211,7 +211,7 @@ export async function startControlPlane(): Promise<void> {
       providerSnapshotReader: {
         read: async (input) => {
           const response = await snapshotMaterializer.materializeFile({
-            managerProtocolVersion: 1,
+            toolBrokerProtocolVersion: 1,
             type: "workspace.materialize_file",
             requestId: randomUUID(),
             tenantId: input.tenantId,

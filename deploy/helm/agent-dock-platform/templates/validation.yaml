@@ -4,8 +4,8 @@
 {{- if and .Values.globalPlaneEnabled (lt (int .Values.web.replicas) 2) -}}
 {{- fail "web.replicas must be at least 2 for the distributed profile" -}}
 {{- end -}}
-{{- if and .Values.executionPlaneEnabled (lt (int .Values.sandboxPlane.replicas) 3) -}}
-{{- fail "sandboxPlane.replicas must be at least 3 for lease-based ownership failover" -}}
+{{- if and .Values.sandboxPlaneEnabled (lt (int .Values.sandboxPlane.toolBrokerReplicas) 3) -}}
+{{- fail "sandboxPlane.toolBrokerReplicas must be at least 3 for lease-based ownership failover" -}}
 {{- end -}}
 {{- if and .Values.controlPlane.autoscaling.enabled (lt (int .Values.controlPlane.autoscaling.maxReplicas) (int .Values.controlPlane.autoscaling.minReplicas)) -}}
 {{- fail "controlPlane.autoscaling.maxReplicas must be at least minReplicas" -}}
@@ -13,9 +13,12 @@
 {{- if and .Values.web.autoscaling.enabled (lt (int .Values.web.autoscaling.maxReplicas) (int .Values.web.autoscaling.minReplicas)) -}}
 {{- fail "web.autoscaling.maxReplicas must be at least minReplicas" -}}
 {{- end -}}
-{{- if and .Values.executionPlaneEnabled (not .Values.sandboxPlane.workspace.existingClaim) -}}
+{{- if and .Values.sandboxPlaneEnabled (not .Values.sandboxPlane.workspace.existingClaim) -}}
 {{- fail "sandboxPlane.workspace.existingClaim must name an existing ReadWriteMany PVC" -}}
 {{- end -}}
 {{- if lt (len .Values.executionCells) 1 -}}
 {{- fail "executionCells must contain at least one durable Cell" -}}
+{{- end -}}
+{{- if lt (len .Values.sandboxDomains) 1 -}}
+{{- fail "sandboxDomains must contain at least one Sandbox Domain" -}}
 {{- end -}}

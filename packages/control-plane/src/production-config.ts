@@ -15,7 +15,7 @@ export type ProductionControlPlaneConfig = {
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
   cubeEgressConfigToken: string;
-  sandboxManagerBaseUrls: readonly string[];
+  toolBrokerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
   advancedModulesEnabled: boolean;
   externalWorkerEventLog: boolean;
@@ -54,7 +54,17 @@ export type ProductionBootstrapConfig = {
   maximumSessions: number;
   maximumUnsettledTurns: number;
   maximumConcurrentTurns: number;
+  sandboxDomains: readonly ProductionSandboxDomainConfig[];
   executionCells: readonly ProductionExecutionCellConfig[];
+};
+
+export type ProductionSandboxDomainConfig = {
+  id: string;
+  displayName: string;
+  state: "active" | "draining" | "disabled";
+  toolBrokerBaseUrl: string;
+  workspaceStorageKey: string;
+  maximumActiveSandboxes: number;
 };
 
 export type ProductionExecutionCellConfig = {
@@ -62,11 +72,77 @@ export type ProductionExecutionCellConfig = {
   displayName: string;
   state: "active" | "draining" | "disabled";
   temporalTaskQueue: string;
-  sandboxManagerBaseUrl: string;
+  sandboxDomainId: string;
   supervisorManagementBaseUrlTemplate: string;
-  workspaceStorageKey: string;
   capacityWeight: number;
 };
+
+function sandboxDomains(value: string): readonly ProductionSandboxDomainConfig[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError("AGENT_DOCK_SANDBOX_DOMAINS_JSON must be valid JSON");
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64) {
+    throw new TypeError("AGENT_DOCK_SANDBOX_DOMAINS_JSON must contain 1 to 64 Domains");
+  }
+  const domains = parsed.map((entry, index): ProductionSandboxDomainConfig => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new TypeError(`Sandbox Domain ${String(index)} must be an object`);
+    }
+    const domain = entry as Record<string, unknown>;
+    if (
+      typeof domain.id !== "string" ||
+      !/^sandbox-domain-[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u.test(domain.id)
+    ) {
+      throw new TypeError(`Sandbox Domain ${String(index)} has an invalid ID`);
+    }
+    if (
+      typeof domain.displayName !== "string" ||
+      domain.displayName.length < 1 ||
+      domain.displayName.length > 128
+    ) {
+      throw new TypeError(`Sandbox Domain ${domain.id} has an invalid display name`);
+    }
+    if (domain.state !== "active" && domain.state !== "draining" && domain.state !== "disabled") {
+      throw new TypeError(`Sandbox Domain ${domain.id} has an invalid state`);
+    }
+    if (
+      typeof domain.toolBrokerBaseUrl !== "string" ||
+      !/^https?:\/\/[^\s]+$/u.test(domain.toolBrokerBaseUrl) ||
+      domain.toolBrokerBaseUrl.length > 2_048
+    ) {
+      throw new TypeError(`Sandbox Domain ${domain.id} has an invalid Tool Broker URL`);
+    }
+    if (
+      typeof domain.workspaceStorageKey !== "string" ||
+      !/^[A-Za-z0-9._/-]{1,128}$/u.test(domain.workspaceStorageKey)
+    ) {
+      throw new TypeError(`Sandbox Domain ${domain.id} has an invalid Workspace storage key`);
+    }
+    if (
+      typeof domain.maximumActiveSandboxes !== "number" ||
+      !Number.isSafeInteger(domain.maximumActiveSandboxes) ||
+      domain.maximumActiveSandboxes < 1 ||
+      domain.maximumActiveSandboxes > 1_000_000
+    ) {
+      throw new TypeError(`Sandbox Domain ${domain.id} has an invalid capacity`);
+    }
+    return {
+      id: domain.id,
+      displayName: domain.displayName,
+      state: domain.state,
+      toolBrokerBaseUrl: domain.toolBrokerBaseUrl,
+      workspaceStorageKey: domain.workspaceStorageKey,
+      maximumActiveSandboxes: domain.maximumActiveSandboxes,
+    };
+  });
+  if (new Set(domains.map((domain) => domain.id)).size !== domains.length) {
+    throw new TypeError("Sandbox Domain IDs must be unique");
+  }
+  return domains;
+}
 
 function required(environment: ProductionControlPlaneEnvironment, name: string): string {
   const value = environment[name];
@@ -125,9 +201,8 @@ function executionCells(value: string): readonly ProductionExecutionCellConfig[]
     const displayName = cell.displayName;
     const state = cell.state;
     const temporalTaskQueue = cell.temporalTaskQueue;
-    const sandboxManagerBaseUrl = cell.sandboxManagerBaseUrl;
+    const sandboxDomainId = cell.sandboxDomainId;
     const supervisorManagementBaseUrlTemplate = cell.supervisorManagementBaseUrlTemplate;
-    const workspaceStorageKey = cell.workspaceStorageKey;
     const capacityWeight = cell.capacityWeight;
     if (typeof id !== "string" || !/^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$/u.test(id)) {
       throw new TypeError(`Execution Cell ${String(index)} has an invalid ID`);
@@ -146,17 +221,10 @@ function executionCells(value: string): readonly ProductionExecutionCellConfig[]
       throw new TypeError(`Execution Cell ${id} has an invalid Temporal Task Queue`);
     }
     if (
-      typeof sandboxManagerBaseUrl !== "string" ||
-      !/^https?:\/\/[^\s]+$/u.test(sandboxManagerBaseUrl) ||
-      sandboxManagerBaseUrl.length > 2_048
+      typeof sandboxDomainId !== "string" ||
+      !/^sandbox-domain-[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u.test(sandboxDomainId)
     ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid Sandbox Manager URL`);
-    }
-    if (
-      typeof workspaceStorageKey !== "string" ||
-      !/^[A-Za-z0-9._/-]{1,128}$/u.test(workspaceStorageKey)
-    ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid Workspace storage key`);
+      throw new TypeError(`Execution Cell ${id} has an invalid Sandbox Domain ID`);
     }
     if (
       typeof supervisorManagementBaseUrlTemplate !== "string" ||
@@ -181,9 +249,8 @@ function executionCells(value: string): readonly ProductionExecutionCellConfig[]
       displayName,
       state,
       temporalTaskQueue,
-      sandboxManagerBaseUrl,
+      sandboxDomainId,
       supervisorManagementBaseUrlTemplate,
-      workspaceStorageKey,
       capacityWeight,
     };
   });
@@ -218,12 +285,12 @@ function managementUrls(value: string, allowInsecure: boolean): string[] {
   const values = value.split(",");
   if (values.length < 1 || values.length > 256 || values.some((entry) => entry.trim() !== entry)) {
     throw new TypeError(
-      "AGENT_DOCK_SANDBOX_MANAGER_URLS must contain 1-256 comma-separated URLs without whitespace",
+      "AGENT_DOCK_TOOL_BROKER_URLS must contain 1-256 comma-separated URLs without whitespace",
     );
   }
   const parsed = values.map((entry) => managementUrl(entry, allowInsecure));
   if (new Set(parsed).size !== parsed.length) {
-    throw new TypeError("AGENT_DOCK_SANDBOX_MANAGER_URLS must contain unique URLs");
+    throw new TypeError("AGENT_DOCK_TOOL_BROKER_URLS must contain unique URLs");
   }
   return parsed;
 }
@@ -388,8 +455,8 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN",
       allowInlineSecrets,
     ),
-    sandboxManagerBaseUrls: managementUrls(
-      required(environment, "AGENT_DOCK_SANDBOX_MANAGER_URLS"),
+    toolBrokerBaseUrls: managementUrls(
+      required(environment, "AGENT_DOCK_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,
     ),
     sandboxMaterializerToken: await secret(
@@ -557,6 +624,7 @@ export function loadProductionBootstrapConfig(
       1,
       256,
     ),
+    sandboxDomains: sandboxDomains(required(environment, "AGENT_DOCK_SANDBOX_DOMAINS_JSON")),
     executionCells: executionCells(required(environment, "AGENT_DOCK_EXECUTION_CELLS_JSON")),
   };
 }

@@ -21,7 +21,7 @@ import {
   CubeSandboxProvider,
   HttpWorkspaceDataMover,
   OfficialCubeSandboxRuntimeClient,
-  ToolSandboxManager,
+  ToolBroker,
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "../src/index.ts";
 
@@ -165,7 +165,7 @@ function createRequest(
   imageRevision: string,
 ): ToolSandboxCreateRequest {
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.create",
     requestId: randomUUID(),
     assignment: assigned,
@@ -191,7 +191,7 @@ function operation(
   timeoutMs = 10_000,
 ): ToolSandboxOperationRequest {
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId,
     operationId: randomUUID(),
@@ -397,14 +397,14 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
           ),
         }),
       });
-      const manager = new ToolSandboxManager({
+      const manager = new ToolBroker({
         provider,
         imageRevision: config.imageRevision,
         warmTtlMs: PERSISTENT_IDLE_TTL_PROOF_MS,
       });
       const activationIds = new Set<string>();
-      let first: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
-      let second: Awaited<ReturnType<ToolSandboxManager["create"]>> | undefined;
+      let first: Awaited<ReturnType<ToolBroker["create"]>> | undefined;
+      let second: Awaited<ReturnType<ToolBroker["create"]>> | undefined;
       let activeFirstAssignment = firstAssignment;
       let activeSecondAssignment = secondAssignment;
       const startedAt = performance.now();
@@ -546,7 +546,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         });
         await expect(
           manager.release({
-            managerProtocolVersion: 1,
+            toolBrokerProtocolVersion: 1,
             type: "tool_sandbox.release",
             requestId: randomUUID(),
             activationId: first.activationId,
@@ -620,7 +620,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         const warmRevision = "c".repeat(64);
         await expect(
           manager.release({
-            managerProtocolVersion: 1,
+            toolBrokerProtocolVersion: 1,
             type: "tool_sandbox.release",
             requestId: randomUUID(),
             activationId: second.activationId,

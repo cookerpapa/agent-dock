@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { KopiaWorkspaceDataMover, WorkspaceDataMoverServer } from "./workspace-data-mover.ts";
+import { createDatabase } from "@agent-dock/database";
+import { PostgresWorkspaceDataMoverLock } from "./postgres-workspace-data-mover-lock.ts";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -49,12 +51,17 @@ function parseAwsCredentials(value: string): { accessKey: string; secretAccessKe
 const aws = parseAwsCredentials(
   await secret(required("AGENT_DOCK_WORKSPACE_KOPIA_AWS_CREDENTIALS_FILE")),
 );
+const database = createDatabase({
+  connectionString: await secret(required("DATABASE_URL_FILE")),
+  maxConnections: 4,
+});
 const mover = new KopiaWorkspaceDataMover({
   workspaceRoot: required("AGENT_DOCK_WORKSPACE_POSIX_ROOT"),
   stateRoot: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT"),
   kopiaConfigPath: required("AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH"),
   kopiaCacheDirectory: required("AGENT_DOCK_WORKSPACE_KOPIA_CACHE_DIRECTORY"),
   repositoryPassword: await secret(required("AGENT_DOCK_WORKSPACE_KOPIA_REPOSITORY_PASSWORD_FILE")),
+  lock: new PostgresWorkspaceDataMoverLock(database),
   s3: {
     bucket: required("AGENT_DOCK_WORKSPACE_KOPIA_S3_BUCKET"),
     endpoint: required("AGENT_DOCK_WORKSPACE_KOPIA_S3_ENDPOINT"),
@@ -75,6 +82,7 @@ await server.listen();
 process.stdout.write("AgentDock Workspace Data Mover ready\n");
 
 let closing: Promise<void> | undefined;
-const close = (): Promise<void> => (closing ??= server.close());
-process.once("SIGTERM", () => void close());
-process.once("SIGINT", () => void close());
+const closeService = (): Promise<void> =>
+  (closing ??= server.close().finally(() => database.destroy()));
+process.once("SIGTERM", () => void closeService());
+process.once("SIGINT", () => void closeService());

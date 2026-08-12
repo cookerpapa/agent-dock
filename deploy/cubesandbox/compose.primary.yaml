@@ -1,5 +1,5 @@
 services:
-  sandbox-manager:
+  tool-broker:
     depends_on:
       cube-api-relay:
         condition: service_healthy
@@ -27,9 +27,9 @@ services:
       - cube-control
 
   cube-api-relay:
-    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
     restart: unless-stopped
-    command: [/app/packages/sandbox-manager/src/fixed-tcp-relay.ts]
+    command: [/app/packages/tool-broker/src/fixed-tcp-relay.ts]
     environment:
       AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "3000"
       AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_API_NODE_IP:?set the private CubeAPI node IP}
@@ -64,9 +64,9 @@ services:
     stop_grace_period: 10s
 
   cube-proxy-relay:
-    image: agent-dock/sandbox-manager:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
     restart: unless-stopped
-    command: [/app/packages/sandbox-manager/src/fixed-tcp-relay.ts]
+    command: [/app/packages/tool-broker/src/fixed-tcp-relay.ts]
     environment:
       AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "8080"
       AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:?set the private CubeProxy node IP}

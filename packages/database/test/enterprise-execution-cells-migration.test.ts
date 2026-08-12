@@ -28,21 +28,14 @@ describe("enterprise execution Cell migration", () => {
   it("creates one routable Cell and makes Workspace placement mandatory", async () => {
     const cells = await database
       .selectFrom("execution_cells")
-      .select([
-        "id",
-        "state",
-        "temporal_task_queue",
-        "sandbox_manager_base_url",
-        "workspace_storage_key",
-      ])
+      .select(["id", "state", "temporal_task_queue", "sandbox_domain_id"])
       .execute();
     expect(cells).toEqual([
       {
         id: "cell-0001",
         state: "active",
         temporal_task_queue: "agent-dock-pi-runs-cell-0001-v1",
-        sandbox_manager_base_url: "http://sandbox-manager:4300",
-        workspace_storage_key: "workspace-cell-0001",
+        sandbox_domain_id: "sandbox-domain-0001",
       },
     ]);
 

@@ -10,7 +10,7 @@ afterEach(async () => {
   for (const close of resources.splice(0).reverse()) await close();
 });
 
-describe("PostgreSQL Sandbox Manager ownership", () => {
+describe("PostgreSQL Tool Broker ownership", () => {
   it("fences an expired replica before a surviving owner stays Ready", async () => {
     const pglite = await PGlite.create();
     const socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
@@ -27,9 +27,9 @@ describe("PostgreSQL Sandbox Manager ownership", () => {
     let now = new Date("2026-08-09T00:00:00.000Z");
     const first = new PostgresSandboxActivationStateRepository({
       database,
-      cellId: "cell-0001",
+      sandboxDomainId: "sandbox-domain-0001",
       instanceId: "10000000-0000-4000-8000-000000000101",
-      ownerBaseUrl: "http://sandbox-manager-0:4300",
+      ownerBaseUrl: "http://tool-broker-0:4300",
       leaseMs: 3_000,
       heartbeatMs: 1_000,
       clock: () => now,
@@ -41,9 +41,9 @@ describe("PostgreSQL Sandbox Manager ownership", () => {
     now = new Date("2026-08-09T00:00:04.000Z");
     const second = new PostgresSandboxActivationStateRepository({
       database,
-      cellId: "cell-0001",
+      sandboxDomainId: "sandbox-domain-0001",
       instanceId: "10000000-0000-4000-8000-000000000102",
-      ownerBaseUrl: "http://sandbox-manager-1:4300",
+      ownerBaseUrl: "http://tool-broker-1:4300",
       leaseMs: 3_000,
       heartbeatMs: 1_000,
       clock: () => now,
@@ -55,7 +55,7 @@ describe("PostgreSQL Sandbox Manager ownership", () => {
     await expect(second.checkHealth()).resolves.toBeUndefined();
     await expect(
       database
-        .selectFrom("sandbox_manager_instances")
+        .selectFrom("tool_broker_instances")
         .select(["instance_id", "state"])
         .orderBy("instance_id")
         .execute(),

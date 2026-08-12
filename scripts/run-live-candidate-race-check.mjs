@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { classifyStructuredTestCommand } from "../packages/control-plane/src/structured-test-command.ts";
-import { OfficialCubeSandboxRuntimeClient } from "../packages/sandbox-manager/src/index.ts";
+import { OfficialCubeSandboxRuntimeClient } from "../packages/tool-broker/src/index.ts";
 import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));

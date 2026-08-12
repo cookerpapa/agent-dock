@@ -135,7 +135,7 @@ function validateManifest(value) {
     ...[
       "control-plane",
       "supervisor-host",
-      "sandbox-manager",
+      "tool-broker",
       "github-gateway",
       "web-ui",
       "provider-egress-relay",

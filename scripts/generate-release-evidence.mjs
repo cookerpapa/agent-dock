@@ -25,7 +25,7 @@ const PRODUCTION_IMAGE_NAMES = [
   "control-plane",
   "event-gateway",
   "supervisor-host",
-  "sandbox-manager",
+  "tool-broker",
   "github-gateway",
   "web-ui",
   "provider-egress-relay",

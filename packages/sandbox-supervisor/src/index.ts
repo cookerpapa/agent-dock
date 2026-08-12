@@ -140,7 +140,7 @@ export {
 export {
   RemoteToolSandboxTurnRunner,
   type RemoteToolSandboxTurnRunnerOptions,
-  type ToolSandboxManagerBoundary,
+  type ToolBrokerBoundary,
 } from "./remote-tool-sandbox-turn-runner.ts";
 export {
   type RunAttemptExecutionPhase,

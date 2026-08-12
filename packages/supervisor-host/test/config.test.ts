@@ -28,10 +28,10 @@ async function validEnvironment(root: string): Promise<Record<string, string>> {
       "timing-management",
       `manage-${"m".repeat(48)}`,
     ),
-    AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+    AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: await secret(
       root,
-      "timing-sandbox-manager",
-      `sandbox-manager-${"s".repeat(48)}`,
+      "timing-tool-broker",
+      `tool-broker-${"s".repeat(48)}`,
     ),
     AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
       root,
@@ -43,7 +43,7 @@ async function validEnvironment(root: string): Promise<Record<string, string>> {
       "timing-database",
       "postgresql://agentdock:secret@postgres:5432/agentdock",
     ),
-    AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+    AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
     AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
     AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
     AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
@@ -75,10 +75,10 @@ describe("Supervisor host production configuration", () => {
         "management",
         `manage-${"m".repeat(48)}`,
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: await secret(
         root,
-        "sandbox-manager",
-        `sandbox-manager-${"s".repeat(48)}`,
+        "tool-broker",
+        `tool-broker-${"s".repeat(48)}`,
       ),
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
         root,
@@ -90,7 +90,7 @@ describe("Supervisor host production configuration", () => {
         "database",
         "postgresql://agentdock:secret@postgres:5432/agentdock",
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+      AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
       AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
@@ -108,7 +108,7 @@ describe("Supervisor host production configuration", () => {
       temporalTaskQueue: "agent-dock-pi-runs-cell-0001-v1",
       managementPort: 4100,
       managementAdvertisedBaseUrl: "http://supervisor-production-1:4100/",
-      sandboxManagerBaseUrls: ["http://sandbox-manager:4300/"],
+      toolBrokerBaseUrls: ["http://tool-broker:4300/"],
       trustedWorkspaceDirectory: "/workspace",
       checkpointReadCacheTtlMs: 600_000,
       checkpointReadCacheMaximumEntries: 512,
@@ -136,10 +136,10 @@ describe("Supervisor host production configuration", () => {
         "management",
         `manage-${"m".repeat(48)}`,
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: await secret(
         root,
-        "sandbox-manager",
-        `sandbox-manager-${"s".repeat(48)}`,
+        "tool-broker",
+        `tool-broker-${"s".repeat(48)}`,
       ),
       AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
         root,
@@ -151,7 +151,7 @@ describe("Supervisor host production configuration", () => {
         "database",
         "postgresql://agentdock:secret@postgres:5432/agentdock",
       ),
-      AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+      AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
       AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",
@@ -179,7 +179,7 @@ describe("Supervisor host production configuration", () => {
     await expect(
       loadSupervisorHostConfig({
         ...environment,
-        AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS: "300000",
+        AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS: "300000",
       }),
     ).rejects.toThrow("maximum Tool execution");
     await expect(
@@ -221,10 +221,10 @@ describe("Supervisor host production configuration", () => {
           "management",
           `manage-${"m".repeat(48)}`,
         ),
-        AGENT_DOCK_SANDBOX_MANAGER_TOKEN_FILE: await secret(
+        AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: await secret(
           root,
-          "sandbox-manager",
-          `sandbox-manager-${"s".repeat(48)}`,
+          "tool-broker",
+          `tool-broker-${"s".repeat(48)}`,
         ),
         AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
           root,
@@ -236,7 +236,7 @@ describe("Supervisor host production configuration", () => {
           "database",
           "postgresql://agentdock:secret@postgres:5432/agentdock",
         ),
-        AGENT_DOCK_SANDBOX_MANAGER_URLS: "http://sandbox-manager:4300",
+        AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
         AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
         AGENT_DOCK_BOOT_STATE_DIRECTORY: "/var/lib/agent-dock/boot",
         AGENT_DOCK_EVENT_SPOOL_DIRECTORY: "/var/lib/agent-dock/spool",

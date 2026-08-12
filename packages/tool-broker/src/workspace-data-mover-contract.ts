@@ -68,6 +68,10 @@ export interface WorkspaceDataMover {
   close(): Promise<void>;
 }
 
+export interface WorkspaceDataMoverLock {
+  withLock<T>(volumeId: string, run: () => Promise<T>): Promise<T>;
+}
+
 export type KopiaWorkspaceDataMoverOptions = Readonly<{
   workspaceRoot: string;
   stateRoot: string;
@@ -85,6 +89,7 @@ export type KopiaWorkspaceDataMoverOptions = Readonly<{
     disableTls: boolean;
   }>;
   commandTimeoutMs?: number;
+  lock?: WorkspaceDataMoverLock;
 }>;
 
 export type VolumeState = Readonly<{

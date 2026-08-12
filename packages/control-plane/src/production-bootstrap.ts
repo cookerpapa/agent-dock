@@ -9,6 +9,7 @@ export type ProductionBootstrapResult = {
   apiCredentialId: string;
   credentialBindingId: string;
   modelProfileId: string;
+  sandboxDomainCount: number;
   executionCellCount: number;
 };
 
@@ -44,6 +45,43 @@ export async function bootstrapProductionDatabase(
   }
   const apiTokenSha256 = tenantApiTokenDigest(apiToken);
   await database.transaction().execute(async (transaction) => {
+    for (const domain of config.sandboxDomains) {
+      await transaction
+        .insertInto("sandbox_domains")
+        .values({
+          id: domain.id,
+          display_name: domain.displayName,
+          state: domain.state,
+          tool_broker_base_url: domain.toolBrokerBaseUrl,
+          workspace_storage_key: domain.workspaceStorageKey,
+          maximum_active_sandboxes: domain.maximumActiveSandboxes,
+        })
+        .onConflict((conflict) => conflict.column("id").doNothing())
+        .executeTakeFirst();
+      const existing = await transaction
+        .selectFrom("sandbox_domains")
+        .select(["tool_broker_base_url", "workspace_storage_key"])
+        .where("id", "=", domain.id)
+        .executeTakeFirstOrThrow();
+      exact(
+        existing.tool_broker_base_url === domain.toolBrokerBaseUrl,
+        `Domain ${domain.id} route`,
+      );
+      exact(
+        existing.workspace_storage_key === domain.workspaceStorageKey,
+        `Domain ${domain.id} Workspace storage route`,
+      );
+      await transaction
+        .updateTable("sandbox_domains")
+        .set({
+          display_name: domain.displayName,
+          state: domain.state,
+          maximum_active_sandboxes: domain.maximumActiveSandboxes,
+          updated_at: new Date(),
+        })
+        .where("id", "=", domain.id)
+        .executeTakeFirstOrThrow();
+    }
     for (const cell of config.executionCells) {
       await transaction
         .insertInto("execution_cells")
@@ -52,9 +90,8 @@ export async function bootstrapProductionDatabase(
           display_name: cell.displayName,
           state: cell.state,
           temporal_task_queue: cell.temporalTaskQueue,
-          sandbox_manager_base_url: cell.sandboxManagerBaseUrl,
+          sandbox_domain_id: cell.sandboxDomainId,
           supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
-          workspace_storage_key: cell.workspaceStorageKey,
           capacity_weight: cell.capacityWeight,
           assigned_workspaces: 0,
         })
@@ -64,9 +101,8 @@ export async function bootstrapProductionDatabase(
         .selectFrom("execution_cells")
         .select([
           "temporal_task_queue",
-          "sandbox_manager_base_url",
+          "sandbox_domain_id",
           "supervisor_management_url_template",
-          "workspace_storage_key",
           "assigned_workspaces",
         ])
         .where("id", "=", cell.id)
@@ -83,17 +119,10 @@ export async function bootstrapProductionDatabase(
           existing.temporal_task_queue === cell.temporalTaskQueue,
           `Cell ${cell.id} Task Queue`,
         );
-        exact(
-          existing.sandbox_manager_base_url === cell.sandboxManagerBaseUrl,
-          `Cell ${cell.id} Sandbox Manager route`,
-        );
+        exact(existing.sandbox_domain_id === cell.sandboxDomainId, `Cell ${cell.id} Domain`);
         exact(
           existing.supervisor_management_url_template === cell.supervisorManagementBaseUrlTemplate,
           `Cell ${cell.id} Supervisor management route`,
-        );
-        exact(
-          existing.workspace_storage_key === cell.workspaceStorageKey,
-          `Cell ${cell.id} Workspace storage route`,
         );
       }
       await transaction
@@ -105,9 +134,8 @@ export async function bootstrapProductionDatabase(
           ...(assignedWorkspaces === 0
             ? {
                 temporal_task_queue: cell.temporalTaskQueue,
-                sandbox_manager_base_url: cell.sandboxManagerBaseUrl,
+                sandbox_domain_id: cell.sandboxDomainId,
                 supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
-                workspace_storage_key: cell.workspaceStorageKey,
               }
             : {}),
           updated_at: new Date(),
@@ -340,6 +368,7 @@ export async function bootstrapProductionDatabase(
     apiCredentialId: config.apiCredentialId,
     credentialBindingId: config.credentialBindingId,
     modelProfileId: config.modelProfileId,
+    sandboxDomainCount: config.sandboxDomains.length,
     executionCellCount: config.executionCells.length,
   };
 }

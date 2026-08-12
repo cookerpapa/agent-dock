@@ -20,7 +20,7 @@ export const MAX_TOOL_READ_RANGE_LINES = 2_000;
 export const MAX_TOOL_OUTPUT_BYTES = 1 * 1_024 * 1_024;
 
 const ToolSandboxEnvelope = {
-  managerProtocolVersion: Type.Literal(1),
+  toolBrokerProtocolVersion: Type.Literal(1),
 };
 
 const WorkerEnvelope = {
@@ -257,7 +257,7 @@ export const ToolSandboxStopResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerGitHubImportRequestSchema = Type.Object(
+export const ToolBrokerGitHubImportRequestSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
     type: Type.Literal("workspace.github_import"),
@@ -267,7 +267,7 @@ export const SandboxManagerGitHubImportRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerGitHubImportResponseSchema = Type.Object(
+export const ToolBrokerGitHubImportResponseSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
     type: Type.Literal("workspace.github_imported"),
@@ -277,7 +277,7 @@ export const SandboxManagerGitHubImportResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerMaterializeFileRequestSchema = Type.Object(
+export const ToolBrokerMaterializeFileRequestSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
     type: Type.Literal("workspace.materialize_file"),
@@ -290,7 +290,7 @@ export const SandboxManagerMaterializeFileRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerMaterializeFileResponseSchema = Type.Object(
+export const ToolBrokerMaterializeFileResponseSchema = Type.Object(
   {
     ...ToolSandboxEnvelope,
     type: Type.Literal("workspace.file_materialized"),
@@ -306,21 +306,21 @@ export const SandboxManagerMaterializeFileResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const SandboxManagerRequestSchema = Type.Union([
+export const ToolBrokerRequestSchema = Type.Union([
   ToolSandboxCreateRequestSchema,
   ToolSandboxCaptureRequestSchema,
   ToolSandboxReleaseRequestSchema,
   ToolSandboxStopRequestSchema,
-  SandboxManagerGitHubImportRequestSchema,
+  ToolBrokerGitHubImportRequestSchema,
 ]);
 
-export const SandboxManagerResponseSchema = Type.Union([
+export const ToolBrokerResponseSchema = Type.Union([
   ToolSandboxCreateResponseSchema,
   ToolSandboxCreateRedirectResponseSchema,
   ToolSandboxCaptureResponseSchema,
   ToolSandboxReleaseResponseSchema,
   ToolSandboxStopResponseSchema,
-  SandboxManagerGitHubImportResponseSchema,
+  ToolBrokerGitHubImportResponseSchema,
 ]);
 
 const OperationEnvelope = {
@@ -577,20 +577,16 @@ export type ToolSandboxReleaseRequest = Static<typeof ToolSandboxReleaseRequestS
 export type ToolSandboxReleaseResponse = Static<typeof ToolSandboxReleaseResponseSchema>;
 export type ToolSandboxStopRequest = Static<typeof ToolSandboxStopRequestSchema>;
 export type ToolSandboxStopResponse = Static<typeof ToolSandboxStopResponseSchema>;
-export type SandboxManagerGitHubImportRequest = Static<
-  typeof SandboxManagerGitHubImportRequestSchema
+export type ToolBrokerGitHubImportRequest = Static<typeof ToolBrokerGitHubImportRequestSchema>;
+export type ToolBrokerGitHubImportResponse = Static<typeof ToolBrokerGitHubImportResponseSchema>;
+export type ToolBrokerMaterializeFileRequest = Static<
+  typeof ToolBrokerMaterializeFileRequestSchema
 >;
-export type SandboxManagerGitHubImportResponse = Static<
-  typeof SandboxManagerGitHubImportResponseSchema
+export type ToolBrokerMaterializeFileResponse = Static<
+  typeof ToolBrokerMaterializeFileResponseSchema
 >;
-export type SandboxManagerMaterializeFileRequest = Static<
-  typeof SandboxManagerMaterializeFileRequestSchema
->;
-export type SandboxManagerMaterializeFileResponse = Static<
-  typeof SandboxManagerMaterializeFileResponseSchema
->;
-export type SandboxManagerRequest = Static<typeof SandboxManagerRequestSchema>;
-export type SandboxManagerResponse = Static<typeof SandboxManagerResponseSchema>;
+export type ToolBrokerRequest = Static<typeof ToolBrokerRequestSchema>;
+export type ToolBrokerResponse = Static<typeof ToolBrokerResponseSchema>;
 export type ToolSandboxOperationRequest = Static<typeof ToolSandboxOperationRequestSchema>;
 export type ToolSandboxOperationResponse = Static<typeof ToolSandboxOperationResponseSchema>;
 export type ToolWorkerInput = Static<typeof ToolWorkerInputSchema>;
@@ -617,31 +613,31 @@ function parse<T>(schema: TSchema, value: unknown, label: string): T {
   return value as T;
 }
 
-export function parseSandboxManagerRequest(value: unknown): SandboxManagerRequest {
-  return parse(SandboxManagerRequestSchema, value, "Sandbox Manager request");
+export function parseToolBrokerRequest(value: unknown): ToolBrokerRequest {
+  return parse(ToolBrokerRequestSchema, value, "Tool Broker request");
 }
 
-export function parseSandboxManagerResponse(value: unknown): SandboxManagerResponse {
-  return parse(SandboxManagerResponseSchema, value, "Sandbox Manager response");
+export function parseToolBrokerResponse(value: unknown): ToolBrokerResponse {
+  return parse(ToolBrokerResponseSchema, value, "Tool Broker response");
 }
 
-export function parseSandboxManagerMaterializeFileRequest(
+export function parseToolBrokerMaterializeFileRequest(
   value: unknown,
-): SandboxManagerMaterializeFileRequest {
+): ToolBrokerMaterializeFileRequest {
   return parse(
-    SandboxManagerMaterializeFileRequestSchema,
+    ToolBrokerMaterializeFileRequestSchema,
     value,
-    "Sandbox Manager materialize file request",
+    "Tool Broker materialize file request",
   );
 }
 
-export function parseSandboxManagerMaterializeFileResponse(
+export function parseToolBrokerMaterializeFileResponse(
   value: unknown,
-): SandboxManagerMaterializeFileResponse {
+): ToolBrokerMaterializeFileResponse {
   return parse(
-    SandboxManagerMaterializeFileResponseSchema,
+    ToolBrokerMaterializeFileResponseSchema,
     value,
-    "Sandbox Manager materialize file response",
+    "Tool Broker materialize file response",
   );
 }
 

@@ -5,8 +5,8 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
-  parseSandboxManagerRequest,
-  parseSandboxManagerResponse,
+  parseToolBrokerRequest,
+  parseToolBrokerResponse,
   parseToolSandboxOperationRequest,
   parseToolWorkerOutput,
   ToolSandboxProtocolError,
@@ -41,8 +41,8 @@ const assignment = {
 describe("Tool Sandbox protocol", () => {
   it("parses a closed, fully fenced create request", () => {
     expect(
-      parseSandboxManagerRequest({
-        managerProtocolVersion: 1,
+      parseToolBrokerRequest({
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.create",
         requestId: "10000000-0000-4000-8000-000000000004",
         assignment,
@@ -56,22 +56,22 @@ describe("Tool Sandbox protocol", () => {
 
   it("makes physical runtime continuity explicit in create responses", () => {
     const response = {
-      managerProtocolVersion: 1,
+      toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.reserved",
       requestId: "10000000-0000-4000-8000-000000000004",
       activationId: "10000000-0000-4000-8000-000000000005",
-      ownerBaseUrl: "http://sandbox-manager-0:4300",
+      ownerBaseUrl: "http://tool-broker-0:4300",
       capability: `adts_${"x".repeat(43)}`,
       workspaceRoot: "/workspace",
       continuity: "cold_restore",
     } as const;
-    expect(parseSandboxManagerResponse(response)).toMatchObject({
+    expect(parseToolBrokerResponse(response)).toMatchObject({
       type: "tool_sandbox.reserved",
       continuity: "cold_restore",
     });
     expect(() =>
-      parseSandboxManagerResponse({
-        managerProtocolVersion: 1,
+      parseToolBrokerResponse({
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.reserved",
         requestId: response.requestId,
         activationId: response.activationId,
@@ -85,7 +85,7 @@ describe("Tool Sandbox protocol", () => {
   it("rejects unknown fields and out-of-bound operation parameters", () => {
     expect(() =>
       parseToolSandboxOperationRequest({
-        managerProtocolVersion: 1,
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.operation",
         activationId: "10000000-0000-4000-8000-000000000005",
         operationId: "10000000-0000-4000-8000-000000000006",
@@ -100,8 +100,8 @@ describe("Tool Sandbox protocol", () => {
       }),
     ).toThrow(ToolSandboxProtocolError);
     expect(() =>
-      parseSandboxManagerRequest({
-        managerProtocolVersion: 1,
+      parseToolBrokerRequest({
+        toolBrokerProtocolVersion: 1,
         type: "tool_sandbox.create",
         requestId: "10000000-0000-4000-8000-000000000007",
         assignment: { ...assignment, unexpected: true },
@@ -119,7 +119,7 @@ describe("Tool Sandbox protocol", () => {
         toolWorkerProtocolVersion: 1,
         type: "worker.operation_result",
         response: {
-          managerProtocolVersion: 1,
+          toolBrokerProtocolVersion: 1,
           type: "tool_sandbox.operation_result",
           activationId: "10000000-0000-4000-8000-000000000008",
           operationId: "10000000-0000-4000-8000-000000000009",

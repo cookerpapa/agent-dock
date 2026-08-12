@@ -41,6 +41,7 @@ import {
   type KopiaWorkspaceDataMoverOptions,
   type VolumeState,
   type WorkspaceDataMover,
+  type WorkspaceDataMoverLock,
   type WorkspaceDataMoverInitializeBaselineInput,
   type WorkspaceDataMoverMaterializeInput,
   type WorkspaceDataMoverPrepareInput,
@@ -59,6 +60,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
   readonly #repositoryPassword: string;
   readonly #s3: KopiaWorkspaceDataMoverOptions["s3"];
   readonly #commandTimeoutMs: number;
+  readonly #distributedLock: WorkspaceDataMoverLock | undefined;
   readonly #locks = new Map<string, Promise<void>>();
   #ready: Promise<void> | undefined;
 
@@ -92,6 +94,7 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     this.#repositoryPassword = options.repositoryPassword;
     this.#s3 = Object.freeze({ ...options.s3 });
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 10 * 60_000;
+    this.#distributedLock = options.lock;
     if (
       !Number.isSafeInteger(this.#commandTimeoutMs) ||
       this.#commandTimeoutMs < 1_000 ||
@@ -584,7 +587,12 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
   }
 
   #statePath(volumeId: string): string {
-    return join(this.#stateRoot, "volumes", `${volumeId}.json`);
+    return join(
+      this.#workspaceRoot,
+      `agentdock-posix-${volumeId}`,
+      VOLUME_METADATA_DIRECTORY,
+      "data-mover-state.json",
+    );
   }
 
   async #writeState(state: VolumeState): Promise<void> {
@@ -667,7 +675,9 @@ export class KopiaWorkspaceDataMover implements WorkspaceDataMover {
     this.#locks.set(volumeId, queued);
     await previous;
     try {
-      return await run();
+      return this.#distributedLock === undefined
+        ? await run()
+        : await this.#distributedLock.withLock(volumeId, run);
     } finally {
       release();
       if (this.#locks.get(volumeId) === queued) this.#locks.delete(volumeId);

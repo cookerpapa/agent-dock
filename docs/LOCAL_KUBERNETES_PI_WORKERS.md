@@ -8,7 +8,7 @@ Browser
   -> Compose Control Plane
   -> Compose PostgreSQL + Temporal + MinIO
   -> k3d/K3s Pi Worker StatefulSet
-  -> Compose Sandbox Manager
+  -> Compose Tool Broker
   -> retained host K3s / CubeSandbox KVM Tool guest
 ```
 
@@ -21,7 +21,7 @@ This hybrid profile writes Worker events directly to the shared PostgreSQL
 event store. It therefore disables the external Kafka Worker-event log even
 though the reusable Worker Helm chart keeps that distributed-deployment option
 enabled by default. The bridge also publishes a namespace-local
-`sandbox-manager` alias and excludes it from the trusted Worker HTTP proxy so a
+`tool-broker` alias and excludes it from the trusted Worker HTTP proxy so a
 Cube lease can safely call its Manager owner during checkpoint and release.
 
 ## Prerequisites

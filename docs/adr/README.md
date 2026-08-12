@@ -80,6 +80,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0094](0094-cross-component-time-and-retention-budgets.md) treats
   timeout, lease, shutdown and live-retention values as one ordered recovery
   policy and validates the relationships in startup/CI checks.
+- [ADR-0095](0095-sandbox-domains-and-cube-control-plane.md) separates
+  lightweight Pi Worker execution Cells from shared Sandbox Domains and
+  narrows the application control layer to a fenced Tool Broker.
 
 ## Maintained optional modules
 

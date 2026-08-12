@@ -36,12 +36,29 @@ for (const profile of profiles) {
   assert.equal(description.maximumRunSlots, profile.maximumRunSlots);
   assert.equal(description.maximumWorkersPerCell, profile.maximumWorkersPerCell);
   assert.ok(description.maximumSandboxAdmissions >= description.maximumRunSlots);
+  assert.equal(description.sandboxDomains, 1);
 
   const manifest = execute(["render", "--profile", profile.path]);
   assert.equal((manifest.match(/^kind: ScaledObject$/gmu) ?? []).length, profile.cells + 1);
   assert.equal(
     (manifest.match(/^kind: Deployment\nmetadata:\n  name: agent-dock-control-plane$/gmu) ?? [])
       .length,
+    1,
+  );
+  assert.equal(
+    (
+      manifest.match(
+        /^kind: StatefulSet\nmetadata:\n  name: agent-dock-sandbox-0001-tool-broker$/gmu,
+      ) ?? []
+    ).length,
+    1,
+  );
+  assert.equal(
+    (
+      manifest.match(
+        /^kind: Deployment\nmetadata:\n  name: agent-dock-sandbox-0001-workspace-data-mover$/gmu,
+      ) ?? []
+    ).length,
     1,
   );
   assert.equal(

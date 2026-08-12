@@ -15,10 +15,10 @@ scrape_configs:
           - supervisor-host-1:9465
           - agent-dock-pi-worker-local-v1-0.metrics.workers.agent-dock.local:80
           - agent-dock-pi-worker-local-v1-1.metrics.workers.agent-dock.local:80
-  - job_name: agent-dock-sandbox-manager
+  - job_name: agent-dock-tool-broker
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:
-      - targets: [sandbox-manager:9466]
+      - targets: [tool-broker:9466]
   - job_name: agent-dock-event-gateway
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:

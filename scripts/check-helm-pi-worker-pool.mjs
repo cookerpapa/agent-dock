@@ -205,8 +205,8 @@ assert.equal(
 );
 assert.equal(
   environment.NO_PROXY,
-  "127.0.0.1,localhost,sandbox-manager,.svc,.svc.cluster.local",
-  "Owner callbacks to the Sandbox Manager must bypass the trusted-plane HTTP proxy",
+  "127.0.0.1,localhost,tool-broker,.svc,.svc.cluster.local",
+  "Owner callbacks to the Tool Broker must bypass the trusted-plane HTTP proxy",
 );
 assert.equal(environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE, "agent-dock-pi-runs-cell-0001-v1");
 assert.equal(environment.AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED, "true");
@@ -221,24 +221,24 @@ assert.equal(
 assert.equal(environment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
 assert.equal(environment.AGENT_DOCK_CHECKPOINT_S3_BUCKET, "agent-dock-checkpoints");
 assert.equal(
-  environment.AGENT_DOCK_SANDBOX_MANAGER_URLS,
-  "http://sandbox-manager-0.agent-dock-system.svc.cluster.local:4300,http://sandbox-manager-1.agent-dock-system.svc.cluster.local:4300",
+  environment.AGENT_DOCK_TOOL_BROKER_URLS,
+  "http://tool-broker-0.agent-dock-system.svc.cluster.local:4300,http://tool-broker-1.agent-dock-system.svc.cluster.local:4300",
 );
 assert.equal(environment.AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL, "http://127.0.0.1:4200");
-const sandboxManagerTimeoutMs = Number(environment.AGENT_DOCK_SANDBOX_MANAGER_REQUEST_TIMEOUT_MS);
+const toolBrokerTimeoutMs = Number(environment.AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS);
 const modelCapabilityTtlMs = Number(environment.AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS);
 const modelUpstreamTimeoutMs = Number(
   environment.AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS,
 );
 const modelRequestTimeoutMs = Number(environment.AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS);
 const turnTimeoutMs = Number(environment.AGENT_DOCK_PI_TURN_TIMEOUT_MS);
-assert.ok(sandboxManagerTimeoutMs >= 360_000);
+assert.ok(toolBrokerTimeoutMs >= 360_000);
 assert.ok(modelUpstreamTimeoutMs <= modelRequestTimeoutMs);
 assert.ok(modelRequestTimeoutMs <= turnTimeoutMs);
 assert.ok(modelCapabilityTtlMs >= turnTimeoutMs + 60_000);
 assert.ok(
   pod.terminationGracePeriodSeconds * 1_000 >=
-    turnTimeoutMs + sandboxManagerTimeoutMs + 5 * 60_000 + 60_000,
+    turnTimeoutMs + toolBrokerTimeoutMs + 5 * 60_000 + 60_000,
   "Pod termination must outlive the Worker drain budget and shutdown margin",
 );
 assert.equal(
@@ -283,9 +283,9 @@ assert.deepEqual(secretMounts.map((mount) => mount.subPath).sort(), [
   "github-gateway-token",
   "metrics-token",
   "model-credential-master-key",
-  "sandbox-manager-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
+  "tool-broker-token",
   "worker-event-ingest-token",
 ]);
 assert.equal(
