@@ -124,7 +124,7 @@ const templateStepContextSha256 = templateContextSha256("step-context");
 
 function operationEnvelope(activationId, operationId, operation) {
   return {
-    managerProtocolVersion: 1,
+    toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation",
     activationId,
     operationId,
