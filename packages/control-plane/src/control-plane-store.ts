@@ -49,6 +49,7 @@ import {
 } from "@agent-dock/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { materializeConversationTurnProjections } from "@agent-dock/runtime-core/conversation-turn-projection";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -56,6 +57,7 @@ export type ControlPlaneStoreOptions = {
   defaultModelProfileId: string;
   idGenerator?: () => string;
   environmentImageRevision?: string;
+  metrics?: AgentDockMetrics;
 };
 
 export type ControlPlaneStoreErrorCode =
@@ -598,6 +600,7 @@ export class ControlPlaneStore {
   readonly #defaultModelProfileId: string;
   readonly #idGenerator: () => string;
   readonly #environmentImageRevision: string;
+  readonly #metrics: AgentDockMetrics | undefined;
 
   constructor(options: ControlPlaneStoreOptions) {
     this.#database = options.database;
@@ -605,6 +608,7 @@ export class ControlPlaneStore {
     this.#defaultModelProfileId = options.defaultModelProfileId;
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#environmentImageRevision = options.environmentImageRevision ?? "development";
+    this.#metrics = options.metrics;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(this.#environmentImageRevision)) {
       throw new TypeError("environmentImageRevision is invalid");
     }
@@ -1464,26 +1468,38 @@ export class ControlPlaneStore {
     idempotencyKey: string,
     request: AcceptTurnRequest,
   ): Promise<AcceptedTurnResource> {
-    const fingerprint = turnRequestFingerprint(request);
-    const existing = await this.#findAcceptedTurn(sessionId, idempotencyKey);
-    if (existing) {
-      return acceptedTurnResource(existing, fingerprint, true);
-    }
-
+    const startedAt = performance.now();
+    let outcome = "accepted";
     try {
-      return await this.#acceptNewTurn(sessionId, idempotencyKey, request, fingerprint);
+      const fingerprint = turnRequestFingerprint(request);
+      const existing = await this.#findAcceptedTurn(sessionId, idempotencyKey);
+      if (existing) {
+        outcome = "replayed";
+        return acceptedTurnResource(existing, fingerprint, true);
+      }
+      try {
+        return await this.#acceptNewTurn(sessionId, idempotencyKey, request, fingerprint);
+      } catch (error) {
+        if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) {
+          throw error;
+        }
+        const concurrentWinner = await this.#findAcceptedTurn(sessionId, idempotencyKey);
+        if (!concurrentWinner) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Idempotent command exists without its accepted turn",
+          );
+        }
+        outcome = "replayed";
+        return acceptedTurnResource(concurrentWinner, fingerprint, true);
+      }
     } catch (error) {
-      if (!isPostgresConstraint(error, "commands_session_idempotency_unique")) {
-        throw error;
-      }
-      const concurrentWinner = await this.#findAcceptedTurn(sessionId, idempotencyKey);
-      if (!concurrentWinner) {
-        throw new ControlPlaneStoreError(
-          "control_plane_misconfigured",
-          "Idempotent command exists without its accepted turn",
-        );
-      }
-      return acceptedTurnResource(concurrentWinner, fingerprint, true);
+      outcome = error instanceof ControlPlaneStoreError ? error.code : "failed";
+      throw error;
+    } finally {
+      this.#metrics?.turnAdmissionDuration
+        .labels(outcome)
+        .observe((performance.now() - startedAt) / 1_000);
     }
   }
 
@@ -2981,6 +2997,7 @@ export class ControlPlaneStore {
   }
 
   async #lockTenantPolicy(transaction: Transaction<Database>): Promise<TenantRuntimePolicy> {
+    const startedAt = performance.now();
     const policy = await transaction
       .selectFrom("tenant_runtime_policies")
       .select([
@@ -2992,7 +3009,10 @@ export class ControlPlaneStore {
       ])
       .where("tenant_id", "=", this.#tenantId)
       .forUpdate()
-      .executeTakeFirst();
+      .executeTakeFirst()
+      .finally(() => {
+        this.#metrics?.tenantAdmissionLockWait.observe((performance.now() - startedAt) / 1_000);
+      });
     if (policy === undefined || !policy.enabled) {
       throw new ControlPlaneStoreError(
         "control_plane_misconfigured",

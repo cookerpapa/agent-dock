@@ -18,6 +18,8 @@ export class AgentDockMetrics {
   readonly checkpointCacheEntries: Gauge;
   readonly checkpointCacheBytes: Gauge;
   readonly cancellationDuration: Histogram<"outcome">;
+  readonly turnAdmissionDuration: Histogram<"outcome">;
+  readonly tenantAdmissionLockWait: Histogram;
   readonly activeRuns: Gauge;
   readonly queuedRuns: Gauge;
   readonly sandboxActive: Gauge<"provider">;
@@ -116,6 +118,19 @@ export class AgentDockMetrics {
       name: "agent_dock_cancellation_duration_seconds",
       help: "Cancellation request to confirmed cleanup duration",
       labelNames: ["outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.turnAdmissionDuration = new Histogram({
+      name: "agent_dock_turn_admission_seconds",
+      help: "Time to idempotently admit or reject a user Turn",
+      labelNames: ["outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.tenantAdmissionLockWait = new Histogram({
+      name: "agent_dock_tenant_admission_lock_wait_seconds",
+      help: "Time waiting for the tenant quota serialization row",
       buckets: DURATION_BUCKETS,
       registers: [this.registry],
     });

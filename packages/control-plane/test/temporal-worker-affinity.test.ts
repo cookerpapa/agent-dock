@@ -1,5 +1,6 @@
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { TemporalRunWorkflowInput } from "@agent-dock/temporal-orchestration";
+import { AgentDockMetrics } from "@agent-dock/observability";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
@@ -15,6 +16,7 @@ let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
 let database: Kysely<Database>;
 let store: ControlPlaneStore;
+const metrics = new AgentDockMetrics("turn-admission-test");
 
 function workflowInput(
   accepted: Awaited<ReturnType<ControlPlaneStore["acceptTurn"]>>,
@@ -106,6 +108,7 @@ beforeAll(async () => {
     database,
     tenantId: TENANT_ID,
     defaultModelProfileId: PROFILE_ID,
+    metrics,
   });
 }, 30_000);
 
@@ -123,6 +126,12 @@ describe.sequential("Temporal Cell routing", () => {
       ...input,
       outboxId: expect.any(String),
     });
+    await expect(
+      metrics.registry.getSingleMetricAsString("agent_dock_turn_admission_seconds"),
+    ).resolves.toContain('outcome="accepted"');
+    await expect(
+      metrics.registry.getSingleMetricAsString("agent_dock_tenant_admission_lock_wait_seconds"),
+    ).resolves.toContain("_count");
   });
 
   it("removes handed-off Workflows from the bounded relay window before Worker execution", async () => {

@@ -44,6 +44,8 @@ describe("AgentDock observability primitives", () => {
   it("exports authenticated Prometheus metrics without tenant labels", async () => {
     const metrics = new AgentDockMetrics("test-service");
     metrics.runs.inc({ outcome: "completed" });
+    metrics.turnAdmissionDuration.labels("accepted").observe(0.012);
+    metrics.tenantAdmissionLockWait.observe(0.003);
     const endpoint = await startMetricsEndpoint({
       host: "127.0.0.1",
       port: 0,
@@ -59,7 +61,13 @@ describe("AgentDock observability primitives", () => {
       const body = await response.text();
       expect(response.status).toBe(200);
       expect(body).toContain('agent_dock_runs_total{outcome="completed",service="test-service"} 1');
-      expect(body).not.toContain("tenant");
+      expect(body).toContain(
+        'agent_dock_turn_admission_seconds_count{service="test-service",outcome="accepted"} 1',
+      );
+      expect(body).toContain(
+        'agent_dock_tenant_admission_lock_wait_seconds_count{service="test-service"} 1',
+      );
+      expect(body).not.toContain("tenant_id");
     } finally {
       await endpoint.close();
     }

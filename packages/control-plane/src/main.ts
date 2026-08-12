@@ -207,6 +207,7 @@ export async function startControlPlane(): Promise<void> {
       platformModelSourceTenantId: config.platformModelSourceTenantId,
       cubeEgressConfigToken: config.cubeEgressConfigToken,
       environmentImageRevision: config.environmentImageRevision,
+      metrics: observability.metrics,
       artifactReader: { get: (objectKey) => objectStore.get(objectKey) },
       providerSnapshotReader: {
         read: async (input) => {

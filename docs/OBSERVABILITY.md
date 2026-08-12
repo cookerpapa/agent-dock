@@ -37,7 +37,7 @@ observability network:
 
 | Service | Internal endpoint | Main signals |
 | --- | --- | --- |
-| Control Plane | `control-plane:9464/metrics` | queue, outcomes, attempts, process |
+| Control Plane | `control-plane:9464/metrics` | Turn admission, tenant quota-lock wait, queue, outcomes, process |
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
 | Tool Broker | `tool-broker:9466/metrics` | Provider lifecycle, tools, process |
 | Event Gateway | `event-gateway:9467/metrics` | ingest/projector and stream process signals |

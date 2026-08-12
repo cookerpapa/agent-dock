@@ -84,6 +84,7 @@ export class ControlPlaneModule {
         ? {}
         : { providerSnapshotReader: options.providerSnapshotReader }),
       ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+      ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
     });
     const controlPlaneStores = new ControlPlaneStoreFactory({
       database: options.database,

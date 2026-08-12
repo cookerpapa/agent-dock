@@ -46,6 +46,7 @@ import * as canonicalConversationsAndLiveStreams from "./044_canonical_conversat
 import * as sandboxDomainsAndToolBroker from "./045_sandbox_domains_and_tool_broker.ts";
 import * as temporalOutboxHandoff from "./046_temporal_outbox_handoff.ts";
 import * as removeTemporalWorkerAffinity from "./047_remove_temporal_worker_affinity.ts";
+import * as turnAdmissionIndex from "./048_turn_admission_index.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -97,6 +98,7 @@ export const migrationProvider: MigrationProvider = {
       "045_sandbox_domains_and_tool_broker": sandboxDomainsAndToolBroker,
       "046_temporal_outbox_handoff": temporalOutboxHandoff,
       "047_remove_temporal_worker_affinity": removeTemporalWorkerAffinity,
+      "048_turn_admission_index": turnAdmissionIndex,
     };
   },
 };
@@ -314,3 +316,8 @@ export {
   down as downRemoveTemporalWorkerAffinity,
   up as upRemoveTemporalWorkerAffinity,
 } from "./047_remove_temporal_worker_affinity.ts";
+
+export {
+  down as downTurnAdmissionIndex,
+  up as upTurnAdmissionIndex,
+} from "./048_turn_admission_index.ts";

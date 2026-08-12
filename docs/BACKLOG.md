@@ -34,7 +34,7 @@ in the implementation log or Git history, not in the active backlog.
 
 - [x] Make Temporal handoff an explicit Outbox milestone so already-started
       Workflows cannot hide later admitted Runs behind a bounded relay scan.
-- [ ] Eliminate short-interval Worker-capacity deferred churn.
+- [x] Eliminate short-interval Worker-capacity deferred churn.
 - [x] Lock the cloud recovery contract with deterministic tests covering an
       interrupted Pi Session across native Compaction/fresh-Worker restore and
       proving that post-ACK or ambiguous Tool failures are not replayed.
@@ -70,6 +70,8 @@ in the implementation log or Git history, not in the active backlog.
       operator diagnostics; never offer an automatic shell replay.
 - [x] Remove Worker-private affinity queues after comparing their small cache
       benefit with reservation, poller and deferred-Activity complexity.
+- [x] Add a partial unsettled-Turn admission index and expose admission/tenant
+      quota-lock latency without placing tenant identities in metric labels.
 - [ ] Publish a repeatable capacity report for Worker, Cube, PostgreSQL,
       Temporal and object-storage saturation.
 - [x] Hash-partition the PostgreSQL Session event log without weakening global
