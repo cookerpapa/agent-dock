@@ -2,16 +2,9 @@ export const TEMPORAL_RUN_WORKFLOW = "agentDockRunWorkflow";
 export const TEMPORAL_RUN_TASK_QUEUE = "agent-dock-pi-runs-cell-0001-v1";
 export const TEMPORAL_DEFAULT_NAMESPACE = "agent-dock";
 export const TEMPORAL_RUN_WORKFLOW_ID_PREFIX = "agent-dock-run-v1-";
-export const TEMPORAL_WORKER_AFFINITY_TASK_QUEUE_PREFIX = "agent-dock-pi-worker-v1-";
 export const TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS = 45 * 60_000;
 export const TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT = "45 minutes";
 export const TEMPORAL_RUN_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT = "3 hours";
-
-export type TemporalWorkerAffinity = {
-  reservationId: string;
-  sandboxId: string;
-  taskQueue: string;
-};
 
 export type TemporalRunWorkflowInput = {
   schemaVersion: 2;
@@ -21,7 +14,6 @@ export type TemporalRunWorkflowInput = {
   sessionId: string;
   runId: string;
   commandId: string;
-  affinity?: TemporalWorkerAffinity;
 };
 
 export type TemporalRunActivityResult =
@@ -43,12 +35,6 @@ export type TemporalRunActivityResult =
       runId: string;
       commandId: string;
       retryAfterMs: number;
-    }
-  | {
-      status: "affinity_miss";
-      runId: string;
-      commandId: string;
-      reason: "busy" | "stale" | "wrong_worker";
     };
 
 export interface TemporalRunActivities {
@@ -88,7 +74,7 @@ export function validateTemporalRunWorkflowInput(
   if (value.schemaVersion !== 2) {
     throw new TypeError("Temporal Run input schema version is unsupported");
   }
-  const input: TemporalRunWorkflowInput = {
+  return {
     schemaVersion: 2,
     cellId: cellId(value.cellId),
     taskQueue: taskQueue(value.taskQueue),
@@ -97,17 +83,6 @@ export function validateTemporalRunWorkflowInput(
     runId: uuid(value.runId, "runId"),
     commandId: uuid(value.commandId, "commandId"),
   };
-  if (value.affinity === undefined) return input;
-  const sandboxId = uuid(value.affinity.sandboxId, "affinity.sandboxId");
-  const affinity = {
-    reservationId: uuid(value.affinity.reservationId, "affinity.reservationId"),
-    sandboxId,
-    taskQueue: temporalWorkerAffinityTaskQueue(sandboxId),
-  };
-  if (value.affinity.taskQueue !== affinity.taskQueue) {
-    throw new TypeError("affinity.taskQueue does not match affinity.sandboxId");
-  }
-  return { ...input, affinity };
 }
 
 export function temporalRunWorkflowId(runId: string): string {
@@ -126,8 +101,4 @@ export function temporalRunPriority(input: TemporalRunWorkflowInput): TemporalRu
     fairnessKey: validated.tenantId,
     fairnessWeight: 1,
   };
-}
-
-export function temporalWorkerAffinityTaskQueue(sandboxId: string): string {
-  return `${TEMPORAL_WORKER_AFFINITY_TASK_QUEUE_PREFIX}${uuid(sandboxId, "sandboxId")}`;
 }

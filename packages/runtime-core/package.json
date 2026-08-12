@@ -32,7 +32,6 @@
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
     "./terminal-turn-projection": "./src/terminal-turn-projection.ts",
-    "./temporal-worker-affinity": "./src/temporal-worker-affinity.ts",
     "./worker-event-log": "./src/worker-event-log.ts"
   },
   "scripts": {

@@ -244,16 +244,6 @@ export class WorkspaceCellMigrationService {
           true,
         );
       }
-      await transaction
-        .updateTable("sessions")
-        .set({
-          worker_affinity_sandbox_id: null,
-          worker_affinity_expires_at: null,
-          updated_at: now,
-        })
-        .where("tenant_id", "=", normalized.tenantId)
-        .where("workspace_id", "=", normalized.workspaceId)
-        .execute();
       const source = await transaction
         .updateTable("execution_cells")
         .set({

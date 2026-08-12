@@ -37,9 +37,9 @@ implementations in one class.
    message, an active Workspace writer, a tenant concurrency limit or a
    Candidate Race concurrency limit blocks it. The Workflow receives
    `deferred` and waits durably.
-8. Worker-specific Temporal queues and PostgreSQL-backed capacity reservations
-   remain a soft affinity optimization. They do not authorize the Activity or
-   replace fences.
+8. Every Worker polls only its Cell queue. Temporal Activity slots are the
+   process-capacity boundary; Worker-specific queues and reservations are not
+   part of the current runtime.
 9. Claim expiry, RunAttempt supersession, Session lease, fencing token and CAS
    remain mandatory because Temporal Activity delivery is not proof that an old
    Worker stopped producing side effects.

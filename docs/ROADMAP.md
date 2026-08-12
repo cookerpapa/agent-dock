@@ -99,7 +99,7 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
   considering direct Worker-to-CubeProxy Tool payloads;
 - multi-node deployment acceptance for HPA/KEDA and external authorities;
 - object/checkpoint orphan garbage collection dashboards;
-- measured Session-affinity hit rate and queue-delay tuning;
+- measured Cell queue delay and Pi Worker slot-density tuning;
 - sustained load evidence at the target Worker/Cube capacity.
 
 ## Release quality

@@ -9,7 +9,6 @@ import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agen
 import { Client, Connection } from "@temporalio/client";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
-import { PostgresTemporalWorkerAffinity } from "@agent-dock/runtime-core/temporal-worker-affinity";
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_BATCH_SIZE = 100;
@@ -176,7 +175,6 @@ export class TemporalRunOrchestrator {
   readonly #batchSize: number;
   readonly #maximumConcurrentHandoffs: number;
   readonly #onActivity: ((activity: TemporalRunOrchestratorActivity) => void) | undefined;
-  readonly #workerAffinity: PostgresTemporalWorkerAffinity;
   #state: TemporalRunOrchestratorState = "idle";
   #connection: Connection | undefined;
   #client: Client | undefined;
@@ -197,9 +195,6 @@ export class TemporalRunOrchestrator {
       "maximumConcurrentHandoffs",
     );
     this.#onActivity = options.onActivity;
-    this.#workerAffinity = new PostgresTemporalWorkerAffinity({
-      database: this.#database,
-    });
   }
 
   get state(): TemporalRunOrchestratorState {
@@ -313,14 +308,11 @@ export class TemporalRunOrchestrator {
   async #ensureWorkflow(input: ExecuteReference): Promise<void> {
     const workflowId = temporalRunWorkflowId(input.runId);
     try {
-      const affinity = await this.#workerAffinity.reserve(input).catch(() => undefined);
       const { outboxId: _outboxId, ...workflowReference } = input;
-      const workflowInput =
-        affinity === undefined ? workflowReference : { ...workflowReference, affinity };
       await this.#client!.workflow.start(TEMPORAL_RUN_WORKFLOW, {
         workflowId,
         taskQueue: input.taskQueue,
-        args: [workflowInput],
+        args: [workflowReference],
         workflowIdReusePolicy: "ALLOW_DUPLICATE_FAILED_ONLY",
         workflowIdConflictPolicy: "USE_EXISTING",
         workflowExecutionTimeout: "7 days",

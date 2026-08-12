@@ -22,4 +22,3 @@ export * from "./session-lease-coordinator.ts";
 export * from "./structured-test-command.ts";
 export * from "./terminal-turn-event.ts";
 export * from "./terminal-turn-projection.ts";
-export * from "./temporal-worker-affinity.ts";

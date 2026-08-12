@@ -30,7 +30,7 @@ The following capabilities must remain working throughout the optimization:
 - Pi compaction, summaries, branches and tool-call semantics;
 - recovery on a different Pi Worker after a process or node failure;
 - bounded horizontal Pi Worker scaling;
-- capacity-aware, soft Session affinity with shared-queue fallback;
+- one shared Cell queue with process-wide Temporal Activity capacity;
 - different Sessions may run concurrently while one Session remains ordered.
 
 ### Execution and isolation
@@ -108,7 +108,7 @@ This refactor must preserve:
 - same-Session ordering;
 - tenant concurrency limits;
 - tenant fairness;
-- capacity-aware Session affinity and shared-queue fallback;
+- Cell queue matching and process-wide Activity capacity;
 - RunAttempt, fencing and CAS;
 - cancellation races and stale-Worker rejection.
 
@@ -173,7 +173,6 @@ same-host benchmark. See
 
 The following are not authorized by this document:
 
-- removing Worker affinity;
 - removing Candidate Race, Rewind or Review Bundle from the optional module;
 - deleting database tables for an existing capability;
 - removing a package or service rather than making it optional;

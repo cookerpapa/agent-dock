@@ -117,5 +117,5 @@ npm run production:cell-admin -- drain \
 ```
 
 The next Run can use the committed Workspace checkpoint through any healthy
-Tool Broker/Data Mover replica in that Domain. Worker affinity is only a cache
-optimization and is never required for correctness.
+Tool Broker/Data Mover replica in that Domain. Worker-local checkpoint caching
+is only an optimization and is never required for correctness.

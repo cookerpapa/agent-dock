@@ -71,7 +71,7 @@ Only implemented and measured statements should be used:
 > Temporal for durable Run orchestration and CubeSandbox KVM microVMs for
 > untrusted Tool execution. Implemented native Pi checkpoint restore,
 > leased/fenced remote Tools, versioned Workspace checkpoints, resumable event
-> streaming, capacity-aware Worker affinity and tenant-isolated product APIs.
+> streaming, bounded Worker pools and tenant-isolated product APIs.
 
 Add concurrency, latency, token and security numbers only after the
 corresponding live report is regenerated on the current commit.

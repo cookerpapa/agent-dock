@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR-0097](0097-shared-temporal-worker-capacity.md) on
+2026-08-12.
 
 ## Context
 

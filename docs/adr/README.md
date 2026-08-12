@@ -26,8 +26,6 @@ ADR numbers are stable historical identities, so gaps are intentional.
   horizontal Pi Workers and Pi-native Sessions.
 - [ADR-0056](0056-temporal-as-sole-run-scheduler.md): Temporal as the sole Run
   scheduler.
-- [ADR-0061](0061-capacity-aware-temporal-worker-affinity.md): measured,
-  capacity-aware Session affinity.
 - [ADR-0063](0063-hot-proxy-mediated-cube-web-egress.md): governed Cube egress.
 - [ADR-0067](0067-cube-posix-volumes-and-kopia-workspace-authority.md) and
   [ADR-0068](0068-session-resident-cube-and-posix-workspaces.md): durable POSIX
@@ -86,6 +84,12 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0096](0096-temporal-handoff-and-capacity-backpressure.md) makes the
   transactional Outbox end at Temporal handoff and bounds Worker-capacity
   retry churn.
+- [ADR-0097](0097-shared-temporal-worker-capacity.md) removes Worker-private
+  queues and makes the Cell queue plus Temporal Activity slots the sole Worker
+  capacity boundary.
+
+[ADR-0061](0061-capacity-aware-temporal-worker-affinity.md) is retained as the
+superseded record of the removed private-queue affinity experiment.
 
 ## Maintained optional modules
 

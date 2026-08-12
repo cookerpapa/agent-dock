@@ -329,10 +329,6 @@ export {
   type SupervisorDispatchAffinity,
 } from "./supervisor-dispatch-affinity.ts";
 export {
-  PostgresTemporalWorkerAffinity,
-  type PostgresTemporalWorkerAffinityOptions,
-} from "@agent-dock/runtime-core/temporal-worker-affinity";
-export {
   SessionEventHub,
   SessionEventSubscription,
   type SessionEventWake,

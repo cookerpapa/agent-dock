@@ -74,14 +74,13 @@ The Worker pool uses:
 
 - one Activity Task Queue per immutable Workspace execution Cell, with
   `tenantId` fairness metadata;
-- capacity-aware Worker-specific queues for soft Session affinity;
+- one process-wide Activity slot limit per Worker;
 - durable timers and retry policy;
 - explicit cancellation.
 
-Affinity is an optimization. Any Worker can restore a Session and produce the
-correct result, provided that Worker belongs to the Workspace's Cell. A
-Workspace receives its Cell once when it is created; adding Cells never remaps
-existing Workspaces.
+Any Worker can restore a Session and produce the correct result, provided that
+Worker belongs to the Workspace's Cell. A Workspace receives its Cell once when
+it is created; adding Cells never remaps existing Workspaces.
 
 Each Activity receives one exact `commandId`. The Worker-side
 `RunCommandExecutor` performs transactional eligibility and lifecycle commits

@@ -28,8 +28,8 @@ Every Worker has:
 - an independent fsynced boot ledger;
 - an independent durable event spool;
 - a declared capacity of exactly one active SDK Session;
-- a Temporal Workflow poller/common Activity poller plus one boot-specific
-  Activity poller, all sharing the same SDK execution-slot gate;
+- one Temporal Workflow/Activity poller on the Cell queue, bounded by the
+  process-wide SDK execution-slot limit;
 - an outbound authenticated management/liveness WebSocket to the Control Plane
   that does not assign production Runs;
 - a private management address validated against an operator URL template.
@@ -97,10 +97,7 @@ For a later user message:
 Control Plane commits Run/outbox and starts its Temporal Workflow
         |
         v
-reserve the prior Worker only if it is live and has a free slot
-        |
-        v
-Temporal tries that private queue, then falls back to the common queue
+Temporal matches the Activity on the Session's Cell queue
         |
         v
 Worker creates the eligible fenced RunAttempt
@@ -179,8 +176,7 @@ the narrowest process failure domain can configure one slot; operators with
 measured memory headroom can choose up to sixteen.
 
 Production replicates the complete Worker process. All replicas in one Cell
-poll that Cell's Temporal Task Queue and each also polls its own private
-soft-affinity queue:
+poll that Cell's Temporal Task Queue:
 
 ```text
 Cell Temporal Task Queue
@@ -189,15 +185,11 @@ Cell Temporal Task Queue
 └── Pi Worker N, up to configured runtime slots
 ```
 
-After a successful Run, the Session remembers that exact Worker boot for at
-most the local checkpoint-cache TTL. The next Run uses the private queue only
-after a row-locked PostgreSQL reservation proves spare capacity. Concurrent
-reservations count against the slot before Temporal delivery. The Worker then
-claims the exact reservation and rechecks one shared in-process slot gate across
-both pollers. Busy, expired, restarted, or unreachable Workers are bypassed and
-the Workflow returns immediately to the common queue. This is a cache-locality
-optimization, not ownership: no private queue may block a Session or replace
-the shared PostgreSQL/S3 recovery path.
+Temporal's Worker Activity slot limit is the only process-capacity gate. When
+all slots are active, unmatched work remains on the Cell queue and directly
+drives backlog-based autoscaling. A later Run may land on any Worker; each
+Worker keeps an opportunistic local checkpoint read cache, but correctness and
+recovery always use the shared PostgreSQL/S3 path.
 
 The supported single-host profile runs those replicas as Docker Compose
 services. Kubernetes is not required for this horizontal-scaling property:

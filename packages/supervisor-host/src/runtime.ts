@@ -458,8 +458,6 @@ export class SupervisorHostRuntime {
         cellId: this.#config.executionCellId,
         taskQueue: this.#config.temporalTaskQueue,
         identity: `${identity.supervisorId}/${identity.bootId}`,
-        sandboxId: identity.sandboxId,
-        affinityTtlMs: this.#config.checkpointReadCacheTtlMs,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
         shutdownGraceMs:
           this.#config.piTurnTimeoutMs + this.#config.toolBrokerRequestTimeoutMs + 5 * 60_000,

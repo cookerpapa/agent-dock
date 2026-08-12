@@ -68,8 +68,8 @@ in the implementation log or Git history, not in the active backlog.
       forced-stop control before enabling broad enterprise self-service.
 - [x] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
       operator diagnostics; never offer an automatic shell replay.
-- [ ] Measure Session affinity under load and keep it only while it improves
-      restore latency without starving other task queues.
+- [x] Remove Worker-private affinity queues after comparing their small cache
+      benefit with reservation, poller and deferred-Activity complexity.
 - [ ] Publish a repeatable capacity report for Worker, Cube, PostgreSQL,
       Temporal and object-storage saturation.
 - [x] Hash-partition the PostgreSQL Session event log without weakening global

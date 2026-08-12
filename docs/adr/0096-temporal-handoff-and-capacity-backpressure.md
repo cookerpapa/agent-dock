@@ -33,10 +33,10 @@ ordinary Task Queue backpressure.
 3. Workflow starts are performed with bounded concurrency. A failure before the
    handoff CAS leaves the row eligible; the next relay pass adopts the same
    deterministic Workflow and completes the handoff.
-4. Pi Worker Temporal pollers share one process-wide capacity supplier. A busy
-   process must leave work in Temporal matching whenever possible. A
-   PostgreSQL-authority deferral uses an adaptive bounded delay derived from
-   the reason rather than a fixed 250-millisecond loop.
+4. Pi Workers use one Cell poller and one process-wide Temporal Activity
+   capacity limit. A busy process leaves work in Temporal matching. A
+   PostgreSQL-authority deferral uses bounded exponential delay rather than a
+   fixed 250-millisecond loop.
 5. Temporal remains the sole post-admission backlog owner. PostgreSQL remains
    the business-state, lease and fencing authority.
 
@@ -46,7 +46,8 @@ ordinary Task Queue backpressure.
   Temporal merely because earlier Workflows have not started executing.
 - Relay restart after `workflow.start` is safe because Workflow IDs are
   deterministic and the handoff timestamp is a CAS.
-- Shared and affinity polling cannot jointly oversubscribe the Pi process.
+- Temporal cannot jointly oversubscribe the Pi process through multiple
+  independent pollers.
 - Activity retries may still observe legitimate business-state deferral, but
   their cadence is bounded and observable instead of becoming a tight loop.
 - Removing the legacy execution use of `outbox.published_at` is a separate
