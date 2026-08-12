@@ -123,6 +123,25 @@ async function psql(query) {
   ]);
 }
 
+async function runUsageEvidence(runId) {
+  const value = await psql(
+    `select count(*) || '|' ||
+            coalesce(sum(input_tokens), 0) || '|' ||
+            coalesce(sum(output_tokens), 0) || '|' ||
+            coalesce(sum(cache_read_tokens), 0) || '|' ||
+            coalesce(sum(cache_write_tokens), 0)
+       from usage_ledger
+      where run_id = ${sqlLiteral(runId)}`,
+  );
+  const [requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens] = value
+    .split("|")
+    .map(Number);
+  for (const number of [requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens]) {
+    assert(Number.isSafeInteger(number) && number >= 0, "Run usage evidence is invalid");
+  }
+  return { requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
+}
+
 function wait(delayMs, signal) {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolvePromise) => {
@@ -190,15 +209,15 @@ async function runTurn(sessionId, prompt, afterSequence = 0) {
     assert(terminal, "Turn did not publish a terminal event");
     assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal.payload));
     await waitForRun(accepted.runId);
-    const usage = await api.getRunUsage(accepted.runId);
-    assert(usage.totals.requests > 0);
-    assert(usage.totals.inputTokens > 0);
-    assert(usage.totals.outputTokens > 0);
+    const usage = await runUsageEvidence(accepted.runId);
+    assert(usage.requests > 0);
+    assert(usage.inputTokens > 0);
+    assert(usage.outputTokens > 0);
     return {
       ...accepted,
       cursor,
       text: text.join(""),
-      usage: usage.totals,
+      usage,
       settledMs: Math.round(performance.now() - submittedAt),
     };
   } finally {
