@@ -33,7 +33,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       maximum_active_sandboxes
     )
     select ${INITIAL_DOMAIN_ID}, 'Primary sandbox domain', 'active',
-           sandbox_manager_base_url, workspace_storage_key, 1024
+           'http://tool-broker:4300', 'workspace-domain-0001', 1024
       from execution_cells
      order by id
      limit 1

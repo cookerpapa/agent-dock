@@ -25,6 +25,19 @@ afterAll(async () => {
 });
 
 describe("Tool Broker ownership migration", () => {
+  it("routes the primary Domain to the current Tool Broker service", async () => {
+    const domain = await database
+      .selectFrom("sandbox_domains")
+      .select(["tool_broker_base_url", "workspace_storage_key"])
+      .where("id", "=", "sandbox-domain-0001")
+      .executeTakeFirstOrThrow();
+
+    expect(domain).toEqual({
+      tool_broker_base_url: "http://tool-broker:4300",
+      workspace_storage_key: "workspace-domain-0001",
+    });
+  });
+
   it("creates durable replica, activation and operation ownership tables", async () => {
     const tables = await pglite.query<{ table_name: string }>(`
       select table_name

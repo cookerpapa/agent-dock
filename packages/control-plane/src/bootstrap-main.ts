@@ -1,6 +1,6 @@
 import { createDatabase, runMigrations } from "@agent-dock/database";
 import { pathToFileURL } from "node:url";
-import { bootstrapProductionDatabase } from "./production-bootstrap.ts";
+import { bootstrapProductionDatabase, ProductionBootstrapError } from "./production-bootstrap.ts";
 import {
   loadProductionApiToken,
   loadProductionBootstrapConfig,
@@ -36,8 +36,14 @@ export async function runProductionBootstrap(): Promise<void> {
 
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
-  runProductionBootstrap().catch(() => {
-    process.stderr.write("AgentDock production bootstrap failed\n");
+  runProductionBootstrap().catch((error: unknown) => {
+    const failure =
+      error instanceof ProductionBootstrapError
+        ? { name: error.name, code: error.code, message: error.message }
+        : error instanceof Error
+          ? { name: error.name, message: error.message }
+          : { name: "UnknownError", message: "Unknown production bootstrap failure" };
+    process.stderr.write(`AgentDock production bootstrap failed ${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
   });
 }

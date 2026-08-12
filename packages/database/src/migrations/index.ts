@@ -48,6 +48,7 @@ import * as temporalOutboxHandoff from "./046_temporal_outbox_handoff.ts";
 import * as removeTemporalWorkerAffinity from "./047_remove_temporal_worker_affinity.ts";
 import * as turnAdmissionIndex from "./048_turn_admission_index.ts";
 import * as tenantSandboxQuota from "./049_tenant_sandbox_quota.ts";
+import * as primaryToolBrokerRoute from "./050_primary_tool_broker_route.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -101,6 +102,7 @@ export const migrationProvider: MigrationProvider = {
       "047_remove_temporal_worker_affinity": removeTemporalWorkerAffinity,
       "048_turn_admission_index": turnAdmissionIndex,
       "049_tenant_sandbox_quota": tenantSandboxQuota,
+      "050_primary_tool_broker_route": primaryToolBrokerRoute,
     };
   },
 };
@@ -328,3 +330,8 @@ export {
   down as downTenantSandboxQuota,
   up as upTenantSandboxQuota,
 } from "./049_tenant_sandbox_quota.ts";
+
+export {
+  down as downPrimaryToolBrokerRoute,
+  up as upPrimaryToolBrokerRoute,
+} from "./050_primary_tool_broker_route.ts";
