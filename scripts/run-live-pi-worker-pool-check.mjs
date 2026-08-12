@@ -388,32 +388,35 @@ const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 let stoppedWorker;
 
 try {
-  const candidateCount = workerDeployment === "kubernetes" ? 2 : 1;
-  const candidates = await Promise.all(
-    Array.from({ length: candidateCount }, async (_, index) => {
-      const marker = `PI-POOL-${suffix.toUpperCase()}-${String(index + 1)}`;
-      const project = await api.createProject(`Pi Worker pool acceptance ${suffix}-${index + 1}`);
-      const session = await api.createSession(
-        project.projectId,
-        project.workspaceId,
-        `Pi Worker pool acceptance ${suffix}-${index + 1}`,
-      );
-      const turn = await runTurn(
-        session.sessionId,
-        `Remember this marker for my next message: ${marker}. Do not call tools. Reply exactly ACK.`,
-      );
-      return {
-        marker,
-        session,
-        turn,
-        evidence: await runEvidence(turn.runId),
-      };
-    }),
-  );
-  const selected =
-    workerDeployment === "kubernetes"
-      ? candidates.find(({ evidence }) => evidence.supervisorId === kubernetesScaleDownWorker)
-      : candidates[0];
+  const candidates = [];
+  const maximumCandidates = workerDeployment === "kubernetes" ? 8 : 1;
+  let selected;
+  for (let index = 0; index < maximumCandidates && selected === undefined; index += 1) {
+    const marker = `PI-POOL-${suffix.toUpperCase()}-${String(index + 1)}`;
+    const project = await api.createProject(`Pi Worker pool acceptance ${suffix}-${index + 1}`);
+    const session = await api.createSession(
+      project.projectId,
+      project.workspaceId,
+      `Pi Worker pool acceptance ${suffix}-${index + 1}`,
+    );
+    const turn = await runTurn(
+      session.sessionId,
+      `Remember this marker for my next message: ${marker}. Do not call tools. Reply exactly ACK.`,
+    );
+    const candidate = {
+      marker,
+      session,
+      turn,
+      evidence: await runEvidence(turn.runId),
+    };
+    candidates.push(candidate);
+    if (
+      workerDeployment === "compose" ||
+      candidate.evidence.supervisorId === kubernetesScaleDownWorker
+    ) {
+      selected = candidate;
+    }
+  }
   assert(selected, "No first-turn candidate ran on the removable Kubernetes Worker");
   const { marker, session, turn: first, evidence: firstEvidence } = selected;
   stoppedWorker = await stopWorker(firstEvidence.supervisorId);
