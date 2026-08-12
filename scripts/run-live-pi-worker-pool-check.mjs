@@ -460,7 +460,18 @@ try {
     }),
   );
   const concurrentWorkerIds = [...new Set(concurrent.map(({ evidence }) => evidence.supervisorId))];
-  assert.deepEqual(concurrentWorkerIds.sort(), initialWorkers.sort());
+  assert(
+    concurrentWorkerIds.every((workerId) => initialWorkers.includes(workerId)),
+    "A concurrent Run was assigned outside the active Worker pool",
+  );
+  const observedWorkerIds = [
+    ...new Set([
+      ...candidates.map(({ evidence }) => evidence.supervisorId),
+      followUpEvidence.supervisorId,
+      ...concurrentWorkerIds,
+    ]),
+  ].sort();
+  assert.deepEqual(observedWorkerIds, [...initialWorkers].sort());
 
   const allTurns = [
     ...candidates.map(({ turn }) => turn),
@@ -488,6 +499,7 @@ try {
       runs: concurrent.length,
       workerIds: concurrent.map(({ evidence }) => evidence.supervisorId),
       distinctWorkers: concurrentWorkerIds.length,
+      observedWorkerIds,
       settledMs: concurrent.map(({ turn }) => turn.settledMs),
     },
     totalUsage,
@@ -517,7 +529,7 @@ try {
       `- Concurrent assignment: ${report.concurrency.workerIds.join(", ")}`,
       `- Real requests/input/output tokens: ${String(report.totalUsage.requests)} / ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)}`,
       "",
-      "The owning Pi Worker was stopped after the first real-model turn. The surviving Worker restored the native Pi JSONL checkpoint, answered from the previous turn, and committed a new checkpoint. Four further real-model Runs then occupied both independent Worker connections.",
+      "The owning Pi Worker was stopped after the first real-model turn. The surviving Worker restored the native Pi JSONL checkpoint, answered from the previous turn, and committed a new checkpoint. Further concurrent real-model Runs completed through the independently ready Worker pool; allocation is reported as evidence rather than assumed to be round-robin.",
       "",
     ].join("\n"),
     "utf8",
