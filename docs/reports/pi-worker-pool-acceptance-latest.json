@@ -1,38 +1,50 @@
 {
   "accepted": true,
-  "checkedAt": "2026-07-30T16:42:20.443Z",
+  "checkedAt": "2026-08-12T16:58:13.533Z",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "workerDeployment": "kubernetes",
-  "workers": ["agent-dock-pi-worker-local-v1-0", "agent-dock-pi-worker-local-v1-1"],
+  "workers": [
+    "agent-dock-pi-worker-local-v1-0",
+    "agent-dock-pi-worker-local-v1-1"
+  ],
   "failover": {
     "firstWorker": "agent-dock-pi-worker-local-v1-1",
     "followUpWorker": "agent-dock-pi-worker-local-v1-0",
     "differentWorker": true,
     "piSessionArtifactRestored": true,
     "markerRecovered": true,
-    "firstSettledMs": 1597,
-    "followUpSettledMs": 2053,
-    "candidateRuns": 2
+    "firstSettledMs": 2070,
+    "followUpSettledMs": 2441,
+    "candidateRuns": 4
   },
   "concurrency": {
     "runs": 4,
     "workerIds": [
       "agent-dock-pi-worker-local-v1-0",
       "agent-dock-pi-worker-local-v1-1",
-      "agent-dock-pi-worker-local-v1-1",
+      "agent-dock-pi-worker-local-v1-0",
       "agent-dock-pi-worker-local-v1-0"
     ],
     "distinctWorkers": 2,
-    "settledMs": [5254, 7670, 14580, 10072]
+    "observedWorkerIds": [
+      "agent-dock-pi-worker-local-v1-0",
+      "agent-dock-pi-worker-local-v1-1"
+    ],
+    "settledMs": [
+      5240,
+      11637,
+      11201,
+      5815
+    ]
   },
   "totalUsage": {
-    "requests": 7,
-    "inputTokens": 585,
-    "outputTokens": 1306,
-    "cacheReadTokens": 8960,
+    "requests": 9,
+    "inputTokens": 351,
+    "outputTokens": 1359,
+    "cacheReadTokens": 12672,
     "cacheWriteTokens": 0
   }
 }

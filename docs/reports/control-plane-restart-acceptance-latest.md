@@ -1,10 +1,10 @@
 # Control Plane restart acceptance
 
-- Checked at: 2026-08-08T08:51:27.417Z
+- Checked at: 2026-08-12T17:03:41.915Z
 - Provider/model: deepseek / deepseek-v4-flash
-- First visible / terminal sequence: 3 / 126
-- SSE reconnects: 12
+- First visible / terminal sequence: 3 / 148
+- SSE reconnects: 0
 - Run Attempts: 1
-- Elapsed: 16199 ms
+- Elapsed: 28569 ms
 
-The Control Plane container received SIGKILL after the first committed assistant delta. A replacement instance resumed SSE from the durable cursor while the original fenced Temporal Activity completed on the Pi Worker. The Run completed with one Attempt.
+The Control Plane container received SIGKILL after the first committed assistant delta. The independently hosted Event Gateway continued the durable SSE stream while a replacement Control Plane started and the original fenced Temporal Activity completed on the Pi Worker. The Run completed with one Attempt; any transport reconnects are reported rather than required.
