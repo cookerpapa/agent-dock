@@ -29,8 +29,8 @@ const runtimeDirectory = resolve(
 const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
 const secretValuesPath = resolve(runtimeDirectory, "cubesandbox/secret-values.yaml");
 const cubeMasterCliPath = resolve(runtimeDirectory, "cubesandbox/cubemastercli");
-const authorizerImage = "agent-dock/cube-api-authorizer:local";
-const cubeEgressGatewayImage = "agent-dock/cube-egress-gateway:local";
+const authorizerImageRepository = "agent-dock/cube-api-authorizer";
+const cubeEgressGatewayImageRepository = "agent-dock/cube-egress-gateway";
 const cubeEgressConfigTokenPath = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
 const k3sImageDirectory = "/var/lib/rancher/k3s/agent/images";
 const wslStableNodeIp = "10.255.255.254";
@@ -1039,6 +1039,9 @@ async function installTemplateRegistry() {
 if ((await repositoryHead(cubeRepository)) !== CUBE_COMMIT) {
   throw new Error(`CubeSandbox checkout must be pinned to ${CUBE_COMMIT}`);
 }
+const agentDockRevision = await repositoryHead(repositoryRoot);
+const authorizerImage = `${authorizerImageRepository}:${agentDockRevision}`;
+const cubeEgressGatewayImage = `${cubeEgressGatewayImageRepository}:${agentDockRevision}`;
 await capture("test", ["-r", kubeconfig]);
 await capture("test", ["-r", credentialPath]);
 await capture("test", ["-r", secretValuesPath]);
@@ -1078,7 +1081,7 @@ await run("docker", [
   "--build-arg",
   `AGENT_DOCK_VERSION=cube-primary`,
   "--build-arg",
-  `AGENT_DOCK_REVISION=${await repositoryHead(repositoryRoot)}`,
+  `AGENT_DOCK_REVISION=${agentDockRevision}`,
   "--tag",
   authorizerImage,
   ".",
@@ -1090,7 +1093,7 @@ await run("docker", [
   "--build-arg",
   "AGENT_DOCK_VERSION=cube-primary",
   "--build-arg",
-  `AGENT_DOCK_REVISION=${await repositoryHead(repositoryRoot)}`,
+  `AGENT_DOCK_REVISION=${agentDockRevision}`,
   "--tag",
   cubeEgressGatewayImage,
   ".",
@@ -1142,10 +1145,18 @@ await runKubectl(["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
 await runKubectl([
   "-n",
   "cube-system",
-  "rollout",
-  "restart",
+  "set",
+  "image",
   "deployment/agent-dock-cube-api-authorizer",
+  `authorizer=${authorizerImage}`,
+]);
+await runKubectl([
+  "-n",
+  "cube-system",
+  "set",
+  "image",
   "deployment/agent-dock-cube-egress-gateway",
+  `gateway=${cubeEgressGatewayImage}`,
 ]);
 await runKubectl([
   "-n",

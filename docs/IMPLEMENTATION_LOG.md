@@ -23,6 +23,8 @@
 - 修复 fresh install 的启动环：Cube Egress Gateway 在 Control Plane 尚未启动时
   保持 Live、Not Ready 和拒绝代理流量，并持续拉取认证配置；安装器只等待其
   进程进入 Running，产品启动后再自然转为 Ready。
+- Authorizer 与 Egress Gateway 镜像改为 Git revision 不可变标签；安装器显式
+  更新 Deployment image，不再因 K3s 已存在 `:local` 标签而继续运行旧代码。
 
 ## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
 

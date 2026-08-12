@@ -68,6 +68,10 @@ const installer = readFileSync("scripts/install-cubesandbox-k3s.mjs", "utf8");
 assert.match(installer, /ensureCubeletLoopbackCapacity\(\)/u);
 assert.match(installer, /xfs_growfs/u);
 assert.match(installer, /AGENT_DOCK_KUBECTL_BIN/u);
+assert.match(installer, /\$\{authorizerImageRepository\}:\$\{agentDockRevision\}/u);
+assert.match(installer, /\$\{cubeEgressGatewayImageRepository\}:\$\{agentDockRevision\}/u);
+assert.match(installer, /set[\s\S]+image[\s\S]+authorizer=/u);
+assert.match(installer, /set[\s\S]+image[\s\S]+gateway=/u);
 assert.ok(
   !installer.includes('capture("kubectl"') && !installer.includes('run("kubectl"'),
   "the Cube installer must not select a host kubectl through an uncontrolled PATH",
