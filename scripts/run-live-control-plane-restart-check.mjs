@@ -184,10 +184,9 @@ try {
   });
   assert(replacement, "The model did not stream before Control Plane replacement");
   await replacement;
-  assert(terminal, "The reconnected SSE stream did not publish a terminal event");
+  assert(terminal, "The durable SSE stream did not publish a terminal event");
   assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal.payload));
   assert(firstTextSequence && firstTextSequence < cursor, "SSE did not advance after replacement");
-  assert(reconnects > 0, "SSE did not observe a reconnect");
   assert(text.join("").includes(marker), "Replayed output omitted the expected marker");
   const run = await waitForCompletedRun(api, accepted.runId);
   assert.equal(run.attempts.length, 1, "Control Plane replacement created another Run Attempt");
@@ -223,7 +222,7 @@ try {
       `- Run Attempts: ${String(report.attemptCount)}`,
       `- Elapsed: ${String(report.elapsedMs)} ms`,
       "",
-      "The Control Plane container received SIGKILL after the first committed assistant delta. A replacement instance resumed SSE from the durable cursor while the original fenced Temporal Activity completed on the Pi Worker. The Run completed with one Attempt.",
+      "The Control Plane container received SIGKILL after the first committed assistant delta. The independently hosted Event Gateway continued the durable SSE stream while a replacement Control Plane started and the original fenced Temporal Activity completed on the Pi Worker. The Run completed with one Attempt; any transport reconnects are reported rather than required.",
       "",
     ].join("\n"),
   );
