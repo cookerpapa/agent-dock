@@ -6,10 +6,7 @@
     "modelId": "deepseek-v4-flash"
   },
   "workerDeployment": "kubernetes",
-  "workers": [
-    "agent-dock-pi-worker-local-v1-0",
-    "agent-dock-pi-worker-local-v1-1"
-  ],
+  "workers": ["agent-dock-pi-worker-local-v1-0", "agent-dock-pi-worker-local-v1-1"],
   "failover": {
     "firstWorker": "agent-dock-pi-worker-local-v1-1",
     "followUpWorker": "agent-dock-pi-worker-local-v1-0",
@@ -29,16 +26,8 @@
       "agent-dock-pi-worker-local-v1-0"
     ],
     "distinctWorkers": 2,
-    "observedWorkerIds": [
-      "agent-dock-pi-worker-local-v1-0",
-      "agent-dock-pi-worker-local-v1-1"
-    ],
-    "settledMs": [
-      5240,
-      11637,
-      11201,
-      5815
-    ]
+    "observedWorkerIds": ["agent-dock-pi-worker-local-v1-0", "agent-dock-pi-worker-local-v1-1"],
+    "settledMs": [5240, 11637, 11201, 5815]
   },
   "totalUsage": {
     "requests": 9,
