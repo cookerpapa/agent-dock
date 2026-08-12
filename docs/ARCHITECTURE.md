@@ -265,7 +265,8 @@ No Pi Worker or Cube runtime is created yet.
 ```text
 Browser POST prompt
   → PostgreSQL transaction: message + Run + command + outbox
-  → transactional relay starts deterministic Temporal Workflow
+  → transactional relay starts/adopts deterministic Temporal Workflow
+  → Outbox handoff CAS removes the Run from the relay backlog
   → eligible Pi Worker
   → exact-command transactional admission creates RunAttempt/fence
   → freeze model/environment/Workspace/policy as one logical Turn contract

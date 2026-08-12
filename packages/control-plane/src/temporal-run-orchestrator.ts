@@ -13,12 +13,12 @@ import { PostgresTemporalWorkerAffinity } from "@agent-dock/runtime-core/tempora
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_BATCH_SIZE = 100;
-const RECONCILIATION_INTERVAL_MS = 60_000;
-const CANCELLATION_RETRY_INTERVAL_MS = 1_000;
+const DEFAULT_MAXIMUM_CONCURRENT_HANDOFFS = 16;
 
-type ExecuteReference = TemporalRunWorkflowInput;
+type ExecuteReference = TemporalRunWorkflowInput & { outboxId: string };
 
 type CancellationReference = {
+  outboxId: string;
   runId: string;
   commandId: string;
   targetCommandId: string;
@@ -49,6 +49,7 @@ export type TemporalRunOrchestratorOptions = {
   namespace: string;
   pollIntervalMs?: number;
   batchSize?: number;
+  maximumConcurrentHandoffs?: number;
   onActivity?: (activity: TemporalRunOrchestratorActivity) => void;
 };
 
@@ -96,10 +97,29 @@ function wait(delayMs: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+async function runBounded<T>(
+  values: readonly T[],
+  concurrency: number,
+  signal: AbortSignal,
+  operation: (value: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      while (!signal.aborted) {
+        const index = next;
+        next += 1;
+        if (index >= values.length) return;
+        await operation(values[index]!);
+      }
+    }),
+  );
+}
+
 export async function listPendingTemporalRunExecutions(
   database: Kysely<Database>,
   batchSize: number,
-): Promise<TemporalRunWorkflowInput[]> {
+): Promise<ExecuteReference[]> {
   return database
     .selectFrom("outbox")
     .innerJoin("commands as command", (join) =>
@@ -126,6 +146,7 @@ export async function listPendingTemporalRunExecutions(
     )
     .innerJoin("execution_cells as cell", "cell.id", "workspace.cell_id")
     .select([
+      "outbox.id as outboxId",
       "cell.id as cellId",
       "cell.temporal_task_queue as taskQueue",
       "command.tenant_id as tenantId",
@@ -134,7 +155,7 @@ export async function listPendingTemporalRunExecutions(
       "run.id as runId",
     ])
     .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
-    .where("outbox.published_at", "is", null)
+    .where("outbox.temporal_handed_off_at", "is", null)
     .where("command.kind", "=", "turn.execute")
     .where("command.state", "in", ["pending", "dispatched"])
     .orderBy("outbox.created_at", "asc")
@@ -153,10 +174,9 @@ export class TemporalRunOrchestrator {
   readonly #namespace: string;
   readonly #pollIntervalMs: number;
   readonly #batchSize: number;
+  readonly #maximumConcurrentHandoffs: number;
   readonly #onActivity: ((activity: TemporalRunOrchestratorActivity) => void) | undefined;
   readonly #workerAffinity: PostgresTemporalWorkerAffinity;
-  readonly #started = new Map<string, number>();
-  readonly #cancelled = new Map<string, number>();
   #state: TemporalRunOrchestratorState = "idle";
   #connection: Connection | undefined;
   #client: Client | undefined;
@@ -172,6 +192,10 @@ export class TemporalRunOrchestrator {
       "pollIntervalMs",
     );
     this.#batchSize = positiveInteger(options.batchSize ?? DEFAULT_BATCH_SIZE, "batchSize");
+    this.#maximumConcurrentHandoffs = positiveInteger(
+      options.maximumConcurrentHandoffs ?? DEFAULT_MAXIMUM_CONCURRENT_HANDOFFS,
+      "maximumConcurrentHandoffs",
+    );
     this.#onActivity = options.onActivity;
     this.#workerAffinity = new PostgresTemporalWorkerAffinity({
       database: this.#database,
@@ -228,15 +252,12 @@ export class TemporalRunOrchestrator {
           this.#executionReferences(),
           this.#cancellationReferences(),
         ]);
-        for (const execution of executions) {
-          if (signal.aborted) return;
-          await this.#ensureWorkflow(execution);
-        }
-        for (const cancellation of cancellations) {
-          if (signal.aborted) return;
-          await this.#requestCancellation(cancellation);
-        }
-        this.#prune();
+        await runBounded(executions, this.#maximumConcurrentHandoffs, signal, (execution) =>
+          this.#ensureWorkflow(execution),
+        );
+        await runBounded(cancellations, this.#maximumConcurrentHandoffs, signal, (cancellation) =>
+          this.#requestCancellation(cancellation),
+        );
       } catch (error: unknown) {
         this.#observe({
           type: "orchestrator.failure",
@@ -274,9 +295,14 @@ export class TemporalRunOrchestrator {
           .onRef("run.tenant_id", "=", "target.tenant_id")
           .onRef("run.command_id", "=", "target.id"),
       )
-      .select(["run.id as runId", "cancellation.id as commandId", "target.id as targetCommandId"])
+      .select([
+        "outbox.id as outboxId",
+        "run.id as runId",
+        "cancellation.id as commandId",
+        "target.id as targetCommandId",
+      ])
       .where("outbox.topic", "=", TURN_CANCELLATION_OUTBOX_TOPIC)
-      .where("outbox.published_at", "is", null)
+      .where("outbox.temporal_handed_off_at", "is", null)
       .where("cancellation.kind", "=", "turn.cancel")
       .where("cancellation.state", "in", ["pending", "dispatched"])
       .orderBy("outbox.created_at", "asc")
@@ -285,12 +311,12 @@ export class TemporalRunOrchestrator {
   }
 
   async #ensureWorkflow(input: ExecuteReference): Promise<void> {
-    const observed = this.#started.get(input.commandId);
-    if (observed !== undefined && Date.now() - observed < RECONCILIATION_INTERVAL_MS) return;
     const workflowId = temporalRunWorkflowId(input.runId);
     try {
       const affinity = await this.#workerAffinity.reserve(input).catch(() => undefined);
-      const workflowInput = affinity === undefined ? input : { ...input, affinity };
+      const { outboxId: _outboxId, ...workflowReference } = input;
+      const workflowInput =
+        affinity === undefined ? workflowReference : { ...workflowReference, affinity };
       await this.#client!.workflow.start(TEMPORAL_RUN_WORKFLOW, {
         workflowId,
         taskQueue: input.taskQueue,
@@ -302,7 +328,7 @@ export class TemporalRunOrchestrator {
         priority: temporalRunPriority(input),
         staticSummary: "Execute one accepted AgentDock Run",
       });
-      this.#started.set(input.commandId, Date.now());
+      await this.#markTemporalHandoff(input.outboxId);
       this.#observe({
         type: "workflow.started",
         workflowId,
@@ -319,12 +345,10 @@ export class TemporalRunOrchestrator {
   }
 
   async #requestCancellation(input: CancellationReference): Promise<void> {
-    const observed = this.#cancelled.get(input.commandId);
-    if (observed !== undefined && Date.now() - observed < CANCELLATION_RETRY_INTERVAL_MS) return;
     const workflowId = temporalRunWorkflowId(input.runId);
     try {
       await this.#client!.workflow.getHandle(workflowId).cancel();
-      this.#cancelled.set(input.commandId, Date.now());
+      await this.#markTemporalHandoff(input.outboxId);
       this.#observe({
         type: "workflow.cancel_requested",
         workflowId,
@@ -340,13 +364,21 @@ export class TemporalRunOrchestrator {
     }
   }
 
-  #prune(): void {
-    const cutoff = Date.now() - RECONCILIATION_INTERVAL_MS;
-    for (const [key, observedAt] of this.#started) {
-      if (observedAt < cutoff) this.#started.delete(key);
-    }
-    for (const [key, observedAt] of this.#cancelled) {
-      if (observedAt < cutoff) this.#cancelled.delete(key);
+  async #markTemporalHandoff(outboxId: string): Promise<void> {
+    const update = await this.#database
+      .updateTable("outbox")
+      .set({ temporal_handed_off_at: new Date(), last_error: null })
+      .where("id", "=", outboxId)
+      .where("temporal_handed_off_at", "is", null)
+      .executeTakeFirst();
+    if (update.numUpdatedRows === 1n) return;
+    const existing = await this.#database
+      .selectFrom("outbox")
+      .select("temporal_handed_off_at")
+      .where("id", "=", outboxId)
+      .executeTakeFirst();
+    if (existing?.temporal_handed_off_at === null || existing === undefined) {
+      throw new Error("Temporal handoff Outbox row could not be committed");
     }
   }
 

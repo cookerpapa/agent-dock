@@ -83,6 +83,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0095](0095-sandbox-domains-and-cube-control-plane.md) separates
   lightweight Pi Worker execution Cells from shared Sandbox Domains and
   narrows the application control layer to a fenced Tool Broker.
+- [ADR-0096](0096-temporal-handoff-and-capacity-backpressure.md) makes the
+  transactional Outbox end at Temporal handoff and bounds Worker-capacity
+  retry churn.
 
 ## Maintained optional modules
 

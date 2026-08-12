@@ -170,7 +170,40 @@ describe.sequential("capacity-aware Temporal Worker affinity", () => {
   it("resolves the immutable Workspace Cell into the Temporal routing input", async () => {
     const input = await createAcceptedRun("cell-routing");
     const pending = await listPendingTemporalRunExecutions(database, 100);
-    expect(pending.find((candidate) => candidate.commandId === input.commandId)).toEqual(input);
+    expect(pending.find((candidate) => candidate.commandId === input.commandId)).toEqual({
+      ...input,
+      outboxId: expect.any(String),
+    });
+  });
+
+  it("removes handed-off Workflows from the bounded relay window before Worker execution", async () => {
+    await database
+      .updateTable("outbox")
+      .set({ temporal_handed_off_at: NOW })
+      .where("temporal_handed_off_at", "is", null)
+      .execute();
+    const first = await createAcceptedRun("handoff-first");
+    const second = await createAcceptedRun("handoff-second");
+    const third = await createAcceptedRun("handoff-third");
+    const firstWindow = await listPendingTemporalRunExecutions(database, 2);
+    const handedOff = firstWindow.filter((candidate) =>
+      [first.commandId, second.commandId, third.commandId].includes(candidate.commandId),
+    );
+    expect(handedOff).toHaveLength(2);
+    await database
+      .updateTable("outbox")
+      .set({ temporal_handed_off_at: NOW })
+      .where(
+        "id",
+        "in",
+        handedOff.map((candidate) => candidate.outboxId),
+      )
+      .execute();
+    const nextWindow = await listPendingTemporalRunExecutions(database, 100);
+    const remaining = nextWindow.filter((candidate) =>
+      [first.commandId, second.commandId, third.commandId].includes(candidate.commandId),
+    );
+    expect(remaining).toHaveLength(1);
   });
 
   it("targets a live cached Worker but never reserves beyond its remaining capacity", async () => {

@@ -44,6 +44,7 @@ import * as kafkaFirstWorkerEventLog from "./042_kafka_first_worker_event_log.ts
 import * as sessionEventHotRetention from "./043_session_event_hot_retention.ts";
 import * as canonicalConversationsAndLiveStreams from "./044_canonical_conversations_and_live_streams.ts";
 import * as sandboxDomainsAndToolBroker from "./045_sandbox_domains_and_tool_broker.ts";
+import * as temporalOutboxHandoff from "./046_temporal_outbox_handoff.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -93,6 +94,7 @@ export const migrationProvider: MigrationProvider = {
       "043_session_event_hot_retention": sessionEventHotRetention,
       "044_canonical_conversations_and_live_streams": canonicalConversationsAndLiveStreams,
       "045_sandbox_domains_and_tool_broker": sandboxDomainsAndToolBroker,
+      "046_temporal_outbox_handoff": temporalOutboxHandoff,
     };
   },
 };
@@ -301,3 +303,7 @@ export {
   down as downCanonicalConversationsAndLiveStreams,
   up as upCanonicalConversationsAndLiveStreams,
 } from "./044_canonical_conversations_and_live_streams.ts";
+export {
+  down as downTemporalOutboxHandoff,
+  up as upTemporalOutboxHandoff,
+} from "./046_temporal_outbox_handoff.ts";

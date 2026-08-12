@@ -866,6 +866,7 @@ export interface OutboxTable {
   attempts: GeneratedInteger;
   available_at: GeneratedTimestamp;
   created_at: GeneratedTimestamp;
+  temporal_handed_off_at: NullableTimestamp;
   published_at: NullableTimestamp;
   last_error: string | null;
 }

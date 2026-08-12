@@ -32,6 +32,9 @@ in the implementation log or Git history, not in the active backlog.
 
 ## Reliability and recovery
 
+- [x] Make Temporal handoff an explicit Outbox milestone so already-started
+      Workflows cannot hide later admitted Runs behind a bounded relay scan.
+- [ ] Eliminate short-interval Worker-capacity deferred churn.
 - [x] Lock the cloud recovery contract with deterministic tests covering an
       interrupted Pi Session across native Compaction/fresh-Worker restore and
       proving that post-ACK or ambiguous Tool failures are not replayed.

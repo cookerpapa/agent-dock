@@ -59,8 +59,10 @@ scale Cube compute and Workspace movement independently.
 
 1. The Control Plane authenticates the user, serializes ordinary Runs sharing
    one Session/Workspace and commits the accepted command to PostgreSQL.
-2. Temporal durably schedules the Run to an eligible Worker. A retry creates a
-   new Attempt with new ownership; it does not blindly replay a Tool.
+2. The Outbox relay starts or adopts a deterministic Temporal Workflow and
+   records that handoff separately from Worker acknowledgement. Temporal then
+   durably schedules the Run to an eligible Worker. A retry creates a new
+   Attempt with new ownership; it does not blindly replay a Tool.
 3. The Worker restores the latest Pi-native checkpoint from S3 and opens it
    with the Pi SDK, so Pi—not the browser transcript—reconstructs model
    context and compaction state.
