@@ -3383,3 +3383,19 @@
   operator command that rebuilds a fresh live read model from retained Kafka
   records above those floors. Removed obsolete event-archive runtime/schema
   metadata instead of maintaining a compatibility path.
+
+# 2026-08-12 — Bounded enterprise execution-plane admission
+
+- Added a cross-Domain tenant policy for active, warm, persistent and
+  physically ambiguous Cube activations. Tenant and Domain admission are
+  serialized in PostgreSQL, and owner-lost `UNKNOWN` runtimes remain charged
+  until reconciliation confirms cleanup.
+- Adopted `p-queue` as a narrow process-local gate for Workspace Data Mover
+  work. Kopia/POSIX concurrency, queue depth and wait time are bounded without
+  creating a second durable scheduler or replacing PostgreSQL volume locks,
+  fencing and Workspace-head CAS.
+- Exported Data Mover pressure and capacity-rejection metrics, wired the
+  service into Prometheus and added Grafana panels for active/limit, waiting,
+  rejection rate and p95 queue/execution time.
+- Added one validated timeout chain for queue wait, Kopia execution, internal
+  HTTP and process shutdown, plus migration, quota, overload and timeout tests.

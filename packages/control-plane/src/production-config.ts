@@ -54,6 +54,7 @@ export type ProductionBootstrapConfig = {
   maximumSessions: number;
   maximumUnsettledTurns: number;
   maximumConcurrentTurns: number;
+  maximumActiveSandboxes: number;
   sandboxDomains: readonly ProductionSandboxDomainConfig[];
   executionCells: readonly ProductionExecutionCellConfig[];
 };
@@ -538,6 +539,13 @@ export async function loadProductionControlPlaneConfig(
         ),
         maximumUnsettledTurns: publicTenantMaximumUnsettledTurns,
         maximumConcurrentTurns: publicTenantMaximumConcurrentTurns,
+        maximumActiveSandboxes: integerValue(
+          environment,
+          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+          2,
+          1,
+          1_000_000,
+        ),
       },
     },
   };
@@ -623,6 +631,13 @@ export function loadProductionBootstrapConfig(
       2,
       1,
       256,
+    ),
+    maximumActiveSandboxes: integerValue(
+      environment,
+      "AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+      64,
+      1,
+      1_000_000,
     ),
     sandboxDomains: sandboxDomains(required(environment, "AGENT_DOCK_SANDBOX_DOMAINS_JSON")),
     executionCells: executionCells(required(environment, "AGENT_DOCK_EXECUTION_CELLS_JSON")),

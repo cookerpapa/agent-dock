@@ -90,6 +90,11 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0098](0098-self-healing-live-event-read-model.md) verifies Valkey's
   retained read model at Event Gateway startup and serializes Kafka-backed
   repair before readiness.
+- [ADR-0099](0099-active-turn-catch-up-snapshots.md) hydrates an active Turn
+  from the projected durable prefix before resuming SSE at its watermark.
+- [ADR-0100](0100-bounded-sandbox-and-workspace-admission.md) bounds persistent
+  tenant Cube occupancy and local Workspace Data Mover pressure without adding
+  another durable scheduler.
 
 [ADR-0061](0061-capacity-aware-temporal-worker-affinity.md) is retained as the
 superseded record of the removed private-queue affinity experiment.

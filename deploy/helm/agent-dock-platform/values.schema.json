@@ -93,7 +93,8 @@
         "maximumProjects",
         "maximumSessions",
         "maximumUnsettledTurns",
-        "maximumConcurrentTurns"
+        "maximumConcurrentTurns",
+        "maximumActiveSandboxes"
       ],
       "properties": {
         "enabled": { "type": "boolean" },
@@ -107,7 +108,8 @@
         "maximumProjects": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "maximumSessions": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "maximumUnsettledTurns": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "maximumConcurrentTurns": { "type": "integer", "minimum": 1, "maximum": 256 }
+        "maximumConcurrentTurns": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maximumActiveSandboxes": { "type": "integer", "minimum": 1, "maximum": 1000000 }
       }
     },
     "controlPlane": { "$ref": "#/$defs/httpWorkload" },
@@ -282,6 +284,10 @@
         "domainId",
         "toolBrokerReplicas",
         "dataMoverReplicas",
+        "dataMoverMaximumConcurrentOperations",
+        "dataMoverMaximumQueuedOperations",
+        "dataMoverQueueWaitTimeoutMs",
+        "dataMoverCommandTimeoutMs",
         "maximumActivePerReplica",
         "maximumWarmPerReplica",
         "warmTtlMs",
@@ -295,6 +301,26 @@
         "domainId": { "$ref": "#/$defs/boundedText" },
         "toolBrokerReplicas": { "type": "integer", "minimum": 3, "maximum": 64 },
         "dataMoverReplicas": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "dataMoverMaximumConcurrentOperations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "dataMoverMaximumQueuedOperations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "dataMoverQueueWaitTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        },
+        "dataMoverCommandTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
         "maximumActivePerReplica": { "type": "integer", "minimum": 1, "maximum": 4096 },
         "maximumWarmPerReplica": { "type": "integer", "minimum": 1, "maximum": 2048 },
         "warmTtlMs": { "type": "integer", "minimum": 60000, "maximum": 86400000 },
@@ -488,8 +514,30 @@
         "resources": { "$ref": "#/$defs/resources" },
         "platformModelSourceTenantId": { "$ref": "#/$defs/uuid" },
         "platformOperatorTenantId": { "$ref": "#/$defs/uuid" },
-        "publicRegistrationEnabled": { "type": "boolean" },
+        "publicRegistration": { "$ref": "#/$defs/publicRegistration" },
         "supervisorIdPrefix": { "type": "string", "minLength": 1, "maxLength": 48 }
+      }
+    },
+    "publicRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "maximumTenants",
+        "maximumProjects",
+        "maximumSessions",
+        "maximumUnsettledTurns",
+        "maximumConcurrentTurns",
+        "maximumActiveSandboxes"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maximumTenants": { "type": "integer", "minimum": 2, "maximum": 1000000 },
+        "maximumProjects": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "maximumSessions": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "maximumUnsettledTurns": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "maximumConcurrentTurns": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maximumActiveSandboxes": { "type": "integer", "minimum": 1, "maximum": 1000000 }
       }
     },
     "temporal": {

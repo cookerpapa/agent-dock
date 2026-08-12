@@ -21,6 +21,7 @@ export type SandboxActivationReservationResult =
   | { status: "reserved" }
   | { status: "redirect"; ownerBaseUrl: string }
   | { status: "busy" }
+  | { status: "tenant_capacity" }
   | { status: "capacity" };
 
 export type SandboxOrphanedActivation = Readonly<{
@@ -219,7 +220,14 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         .selectAll()
         .where("tenant_id", "=", input.assignment.tenantId)
         .where("workspace_id", "=", input.assignment.workspaceId)
-        .where("state", "in", ["reserved", "materializing", "active", "warm", "cleaning"])
+        .where("state", "in", [
+          "reserved",
+          "materializing",
+          "active",
+          "warm",
+          "cleaning",
+          "unknown",
+        ])
         .executeTakeFirst();
       if (existing !== undefined) {
         const reusable =
@@ -270,11 +278,46 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
           "Sandbox Domain is not active",
         );
       }
+      const tenantPolicy = await transaction
+        .selectFrom("tenant_runtime_policies")
+        .select("maximum_active_sandboxes")
+        .where("tenant_id", "=", input.assignment.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (tenantPolicy === undefined) {
+        throw new SandboxActivationStateRepositoryError(
+          "state_conflict",
+          "Tenant Sandbox policy is unavailable",
+        );
+      }
+      const tenantLive = await transaction
+        .selectFrom("tool_broker_activations")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", input.assignment.tenantId)
+        .where("state", "in", [
+          "reserved",
+          "materializing",
+          "active",
+          "warm",
+          "cleaning",
+          "unknown",
+        ])
+        .executeTakeFirstOrThrow();
+      if (Number(tenantLive.count) >= tenantPolicy.maximum_active_sandboxes) {
+        return { status: "tenant_capacity" };
+      }
       const live = await transaction
         .selectFrom("tool_broker_activations")
         .select(({ fn }) => fn.countAll<string>().as("count"))
         .where("sandbox_domain_id", "=", this.#sandboxDomainId)
-        .where("state", "in", ["reserved", "materializing", "active", "warm", "cleaning"])
+        .where("state", "in", [
+          "reserved",
+          "materializing",
+          "active",
+          "warm",
+          "cleaning",
+          "unknown",
+        ])
         .executeTakeFirstOrThrow();
       if (Number(live.count) >= domain.maximum_active_sandboxes) {
         return { status: "capacity" };

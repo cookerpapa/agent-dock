@@ -8,6 +8,7 @@ const MODEL_CAPABILITY_MARGIN_MS = 60_000;
 const TEMPORAL_SETTLEMENT_GRACE_MS = 5 * 60_000;
 const PROCESS_SHUTDOWN_MARGIN_MS = 60_000;
 const LIVE_STREAM_RETENTION_MS = 60 * 60_000;
+const WORKSPACE_DATA_MOVER_HTTP_MS = 11 * 60_000;
 
 function integer(value, description) {
   const parsed = Number(value);
@@ -49,6 +50,20 @@ function validateWorkerPolicy(policy, description) {
   );
 }
 
+function validateWorkspaceDataMoverPolicy(policy, description) {
+  const queueWait = integer(policy.queueWaitMs, `${description} queue wait`);
+  const command = integer(policy.commandMs, `${description} command timeout`);
+  const termination = integer(policy.terminationGraceMs, `${description} termination grace`);
+  assert.ok(
+    queueWait + command <= WORKSPACE_DATA_MOVER_HTTP_MS,
+    `${description} can outlive its internal HTTP request budget`,
+  );
+  assert.ok(
+    termination >= WORKSPACE_DATA_MOVER_HTTP_MS + PROCESS_SHUTDOWN_MARGIN_MS,
+    `${description} process can be killed before an admitted operation drains`,
+  );
+}
+
 const composeText = readFileSync("deploy/production/compose.yaml", "utf8");
 const composeWorker = composeText.slice(
   composeText.indexOf("\n  supervisor-host:"),
@@ -74,6 +89,33 @@ validateWorkerPolicy(
   "Compose Pi Worker",
 );
 
+const composeDataMover = composeText.slice(
+  composeText.indexOf("\n  workspace-data-mover:"),
+  composeText.indexOf("\n  tool-broker:"),
+);
+assert.ok(composeDataMover.length > 0, "Compose Workspace Data Mover service is missing");
+function composeDefaultInteger(section, name) {
+  const match = new RegExp(`${name}: (?:\\$\\{[^}\\n]+:-)?(\\d+)(?:\\})?`).exec(section);
+  assert.ok(match, `Compose ${name} default is missing`);
+  return integer(match[1], `Compose ${name}`);
+}
+const composeDataMoverStop = /stop_grace_period:\s*(\S+)/.exec(composeDataMover)?.[1];
+assert.ok(composeDataMoverStop, "Compose Workspace Data Mover stop grace is missing");
+validateWorkspaceDataMoverPolicy(
+  {
+    queueWaitMs: composeDefaultInteger(
+      composeDataMover,
+      "AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS",
+    ),
+    commandMs: composeDefaultInteger(
+      composeDataMover,
+      "AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS",
+    ),
+    terminationGraceMs: durationMs(composeDataMoverStop, "Compose Workspace Data Mover stop grace"),
+  },
+  "Compose Workspace Data Mover",
+);
+
 function yaml(path) {
   const document = parseDocument(readFileSync(path, "utf8"));
   assert.equal(document.errors.length, 0, `${path} is invalid YAML`);
@@ -96,6 +138,14 @@ validateWorkerPolicy(
       platformValues["pi-workers"].lifecycle.terminationGracePeriodSeconds * 1_000,
   },
   "Platform Helm chart",
+);
+validateWorkspaceDataMoverPolicy(
+  {
+    queueWaitMs: platformValues.sandboxPlane.dataMoverQueueWaitTimeoutMs,
+    commandMs: platformValues.sandboxPlane.dataMoverCommandTimeoutMs,
+    terminationGraceMs: 720_000,
+  },
+  "Platform Helm Workspace Data Mover",
 );
 
 const composeKafkaRetention =

@@ -425,6 +425,13 @@ export class ToolBroker {
         true,
       );
     }
+    if (reservation.status === "tenant_capacity") {
+      throw new ToolBrokerError(
+        "tenant_sandbox_capacity_exhausted",
+        "Tenant has reached its active Sandbox limit",
+        true,
+      );
+    }
     this.#activations.set(activationId, {
       assignment: request.assignment,
       turnContextSha256: request.turnContextSha256,

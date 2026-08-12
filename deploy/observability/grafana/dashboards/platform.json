@@ -155,6 +155,73 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Data Mover active / limit",
+      "id": 13,
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum(agent_dock_workspace_data_mover_active)",
+          "legendFormat": "active",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(agent_dock_workspace_data_mover_limit)",
+          "legendFormat": "limit",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Data Mover waiting",
+      "id": 14,
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum(agent_dock_workspace_data_mover_waiting)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Capacity rejection rate",
+      "id": 15,
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(agent_dock_sandbox_admission_rejected_total[5m]))",
+          "legendFormat": "Sandbox {{reason}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (reason) (rate(agent_dock_workspace_data_mover_rejected_total[5m]))",
+          "legendFormat": "Data Mover {{reason}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Data Mover p95",
+      "id": 16,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 39 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_data_mover_queue_wait_seconds_bucket[5m])))",
+          "legendFormat": "{{operation}} queue",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_data_mover_operation_seconds_bucket[5m])))",
+          "legendFormat": "{{operation}} execution",
+          "refId": "B"
+        }
+      ]
     }
   ],
   "refresh": "10s",

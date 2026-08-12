@@ -31,7 +31,14 @@ export class AgentDockMetrics {
   readonly sandboxAdmissionActive: Gauge<"provider">;
   readonly sandboxAdmissionLimit: Gauge<"provider">;
   readonly sandboxAdmissionWaiting: Gauge<"provider">;
+  readonly sandboxAdmissionRejected: Counter<"reason">;
   readonly sandboxPrewarm: Gauge<"provider">;
+  readonly workspaceDataMoverActive: Gauge;
+  readonly workspaceDataMoverWaiting: Gauge;
+  readonly workspaceDataMoverLimit: Gauge;
+  readonly workspaceDataMoverQueueWait: Histogram<"operation">;
+  readonly workspaceDataMoverDuration: Histogram<"operation" | "outcome">;
+  readonly workspaceDataMoverRejected: Counter<"reason">;
 
   constructor(serviceName: string, collectProcessMetrics = false) {
     this.registry = new Registry();
@@ -200,10 +207,51 @@ export class AgentDockMetrics {
       labelNames: ["provider"],
       registers: [this.registry],
     });
+    this.sandboxAdmissionRejected = new Counter({
+      name: "agent_dock_sandbox_admission_rejected_total",
+      help: "Sandbox reservations rejected by a bounded capacity policy",
+      labelNames: ["reason"],
+      registers: [this.registry],
+    });
     this.sandboxPrewarm = new Gauge({
       name: "agent_dock_sandbox_prewarm",
       help: "Never-used clean sandboxes waiting for single-consumption claim",
       labelNames: ["provider"],
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverActive = new Gauge({
+      name: "agent_dock_workspace_data_mover_active",
+      help: "Workspace Data Mover operations currently executing",
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverWaiting = new Gauge({
+      name: "agent_dock_workspace_data_mover_waiting",
+      help: "Workspace Data Mover operations waiting for local execution admission",
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverLimit = new Gauge({
+      name: "agent_dock_workspace_data_mover_limit",
+      help: "Maximum concurrent Workspace Data Mover operations in this process",
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverQueueWait = new Histogram({
+      name: "agent_dock_workspace_data_mover_queue_wait_seconds",
+      help: "Time a Workspace Data Mover operation waits for local execution admission",
+      labelNames: ["operation"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverDuration = new Histogram({
+      name: "agent_dock_workspace_data_mover_operation_seconds",
+      help: "Workspace Data Mover operation duration after local admission",
+      labelNames: ["operation", "outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.workspaceDataMoverRejected = new Counter({
+      name: "agent_dock_workspace_data_mover_rejected_total",
+      help: "Workspace Data Mover operations rejected before execution",
+      labelNames: ["reason"],
       registers: [this.registry],
     });
   }

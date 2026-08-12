@@ -140,6 +140,7 @@ Change them only together with the Worker deployment manifests and networking.
 | `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS` | `100` | Conversation quota assigned to newly registered public tenants. | Recreate Control Plane; does not rewrite existing tenant policy rows. |
 | `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS` | `10` | Maximum queued plus active Runs assigned to newly registered public tenants. | Recreate Control Plane; does not rewrite existing tenant policy rows. |
 | `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS` | `2` | Maximum concurrently active Runs assigned to newly registered public tenants. It cannot exceed the unsettled-Run limit. | Recreate Control Plane; does not rewrite existing tenant policy rows. |
+| `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES` | `2` | Maximum active, warm, or persistent Cube Sandboxes held by a newly registered tenant across all Sandbox Domains. | Recreate Control Plane; does not rewrite existing tenant policy rows. |
 
 The bootstrap service account tenant has a separate policy surface:
 
@@ -149,9 +150,23 @@ The bootstrap service account tenant has a separate policy surface:
 | `AGENT_DOCK_TENANT_MAXIMUM_SESSIONS` | `1000` |
 | `AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS` | `100` |
 | `AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS` | `2` |
+| `AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES` | `64` |
 
 Those bootstrap values are reconciled by the database bootstrap service. They
 do not define the policy of accounts created through public registration.
+
+### Workspace Data Mover admission
+
+| Variable | Default | Purpose | Activation |
+| --- | --- | --- | --- |
+| `AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS` | `2` | Maximum Kopia/POSIX operations executing in one Data Mover replica. | Recreate Workspace Data Mover replicas. |
+| `AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS` | `32` | Maximum operations waiting in one replica before retryable overload rejection. | Recreate Workspace Data Mover replicas. |
+| `AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS` | `30000` | Maximum local admission wait before a retryable timeout. | Recreate Workspace Data Mover replicas. |
+| `AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS` | `600000` | Maximum Kopia subprocess duration. Keep it below the 660-second internal HTTP budget and 720-second graceful shutdown budget. | Recreate Workspace Data Mover replicas. |
+
+PostgreSQL volume locks remain the cross-replica correctness boundary. These
+settings bound only the CPU, memory, filesystem, and Kopia pressure inside one
+Data Mover process; they are not a second durable scheduler.
 
 ### Object storage and live events
 

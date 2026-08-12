@@ -73,6 +73,7 @@ beforeAll(async () => {
       maximumSessions: 100,
       maximumUnsettledTurns: 10,
       maximumConcurrentTurns: 1,
+      maximumActiveSandboxes: 2,
     },
     initialModel: () => resolvePlatformInitialModel(database, vault, platform.tenantId),
   });

@@ -27,3 +27,7 @@ scrape_configs:
     bearer_token_file: /run/agent-dock-secrets/metrics-token
     static_configs:
       - targets: [event-retention:9468]
+  - job_name: agent-dock-workspace-data-mover
+    bearer_token_file: /run/agent-dock-secrets/metrics-token
+    static_configs:
+      - targets: [workspace-data-mover:9469]

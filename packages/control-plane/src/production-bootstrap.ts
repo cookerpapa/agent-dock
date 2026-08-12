@@ -311,6 +311,7 @@ export async function bootstrapProductionDatabase(
         maximum_sessions: config.maximumSessions,
         maximum_unsettled_turns: config.maximumUnsettledTurns,
         maximum_concurrent_turns: config.maximumConcurrentTurns,
+        maximum_active_sandboxes: config.maximumActiveSandboxes,
       })
       .onConflict((conflict) => conflict.column("tenant_id").doNothing())
       .executeTakeFirst();
@@ -323,6 +324,7 @@ export async function bootstrapProductionDatabase(
         "maximum_sessions",
         "maximum_unsettled_turns",
         "maximum_concurrent_turns",
+        "maximum_active_sandboxes",
       ])
       .where("tenant_id", "=", config.tenantId)
       .executeTakeFirstOrThrow();
@@ -332,7 +334,8 @@ export async function bootstrapProductionDatabase(
         policy.maximum_projects === config.maximumProjects &&
         policy.maximum_sessions === config.maximumSessions &&
         policy.maximum_unsettled_turns === config.maximumUnsettledTurns &&
-        policy.maximum_concurrent_turns === config.maximumConcurrentTurns,
+        policy.maximum_concurrent_turns === config.maximumConcurrentTurns &&
+        policy.maximum_active_sandboxes === config.maximumActiveSandboxes,
       "tenant runtime policy",
     );
 

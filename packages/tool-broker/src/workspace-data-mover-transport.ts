@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import PQueue from "p-queue";
 import { fetch } from "undici";
 import {
   MAXIMUM_REQUEST_BYTES,
@@ -27,7 +29,20 @@ export type WorkspaceDataMoverServerOptions = Readonly<{
   port: number;
   serviceToken: string;
   mover: WorkspaceDataMover;
+  maximumConcurrentOperations?: number;
+  maximumQueuedOperations?: number;
+  queueWaitTimeoutMs?: number;
+  metrics?: AgentDockMetrics;
 }>;
+
+type WorkspaceDataMoverOperation = "prepare" | "initialize_baseline" | "snapshot" | "materialize";
+
+function boundedInteger(value: number, name: string, minimum: number, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new TypeError(`${name} was invalid`);
+  }
+  return value;
+}
 
 export class WorkspaceDataMoverServer {
   readonly #server: FastifyInstance;
@@ -35,6 +50,12 @@ export class WorkspaceDataMoverServer {
   readonly #port: number;
   readonly #tokenDigest: Buffer;
   readonly #mover: WorkspaceDataMover;
+  readonly #queue: PQueue;
+  readonly #maximumQueuedOperations: number;
+  readonly #queueWaitTimeoutMs: number;
+  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #shutdown = new AbortController();
+  #accepting = true;
   #address: string | undefined;
 
   constructor(options: WorkspaceDataMoverServerOptions) {
@@ -45,6 +66,28 @@ export class WorkspaceDataMoverServer {
     this.#port = options.port;
     this.#tokenDigest = digest(options.serviceToken);
     this.#mover = options.mover;
+    const concurrency = boundedInteger(
+      options.maximumConcurrentOperations ?? 2,
+      "maximumConcurrentOperations",
+      1,
+      64,
+    );
+    this.#maximumQueuedOperations = boundedInteger(
+      options.maximumQueuedOperations ?? 32,
+      "maximumQueuedOperations",
+      0,
+      4_096,
+    );
+    this.#queueWaitTimeoutMs = boundedInteger(
+      options.queueWaitTimeoutMs ?? 30_000,
+      "queueWaitTimeoutMs",
+      1,
+      600_000,
+    );
+    this.#metrics = options.metrics;
+    this.#queue = new PQueue({ concurrency });
+    this.#metrics?.workspaceDataMoverLimit.set(concurrency);
+    this.#updateQueueMetrics();
     this.#server = Fastify({
       logger: false,
       bodyLimit: MAXIMUM_REQUEST_BYTES,
@@ -60,8 +103,11 @@ export class WorkspaceDataMoverServer {
   }
 
   async close(): Promise<void> {
-    await this.#mover.close();
+    this.#accepting = false;
+    this.#shutdown.abort();
     if (this.#address !== undefined) await this.#server.close();
+    await this.#queue.onIdle();
+    await this.#mover.close();
     this.#address = undefined;
   }
 
@@ -90,15 +136,17 @@ export class WorkspaceDataMoverServer {
     });
     this.#server.post(WORKSPACE_DATA_MOVER_PREPARE_PATH, async (request, reply) => {
       try {
-        return await this.#mover.prepare(request.body as WorkspaceDataMoverPrepareInput);
+        return await this.#run("prepare", () =>
+          this.#mover.prepare(request.body as WorkspaceDataMoverPrepareInput),
+        );
       } catch (error: unknown) {
         return this.#failure(reply, error);
       }
     });
     this.#server.post(WORKSPACE_DATA_MOVER_INITIALIZE_BASELINE_PATH, async (request, reply) => {
       try {
-        return await this.#mover.initializeBaseline(
-          request.body as WorkspaceDataMoverInitializeBaselineInput,
+        return await this.#run("initialize_baseline", () =>
+          this.#mover.initializeBaseline(request.body as WorkspaceDataMoverInitializeBaselineInput),
         );
       } catch (error: unknown) {
         return this.#failure(reply, error);
@@ -106,15 +154,17 @@ export class WorkspaceDataMoverServer {
     });
     this.#server.post(WORKSPACE_DATA_MOVER_SNAPSHOT_PATH, async (request, reply) => {
       try {
-        return await this.#mover.snapshot(request.body as WorkspaceDataMoverSnapshotInput);
+        return await this.#run("snapshot", () =>
+          this.#mover.snapshot(request.body as WorkspaceDataMoverSnapshotInput),
+        );
       } catch (error: unknown) {
         return this.#failure(reply, error);
       }
     });
     this.#server.post(WORKSPACE_DATA_MOVER_MATERIALIZE_PATH, async (request, reply) => {
       try {
-        const result = await this.#mover.materialize(
-          request.body as WorkspaceDataMoverMaterializeInput,
+        const result = await this.#run("materialize", () =>
+          this.#mover.materialize(request.body as WorkspaceDataMoverMaterializeInput),
         );
         return reply
           .header("content-type", "application/octet-stream")
@@ -124,6 +174,110 @@ export class WorkspaceDataMoverServer {
         return this.#failure(reply, error);
       }
     });
+  }
+
+  async #run<T>(operation: WorkspaceDataMoverOperation, run: () => Promise<T>): Promise<T> {
+    if (!this.#accepting) {
+      this.#metrics?.workspaceDataMoverRejected.inc({ reason: "shutting_down" });
+      throw new WorkspaceDataMoverError(
+        "workspace_data_mover_shutting_down",
+        "Workspace Data Mover is shutting down",
+        true,
+      );
+    }
+    if (
+      this.#queue.pending >= this.#queue.concurrency &&
+      this.#queue.size >= this.#maximumQueuedOperations
+    ) {
+      this.#metrics?.workspaceDataMoverRejected.inc({ reason: "queue_full" });
+      throw new WorkspaceDataMoverError(
+        "workspace_data_mover_overloaded",
+        "Workspace Data Mover admission queue is full",
+        true,
+      );
+    }
+
+    const queuedAt = performance.now();
+    const admission = new AbortController();
+    let started = false;
+    const abortForShutdown = (): void => admission.abort();
+    this.#shutdown.signal.addEventListener("abort", abortForShutdown, { once: true });
+    const timeout = setTimeout(() => admission.abort(), this.#queueWaitTimeoutMs);
+    timeout.unref();
+
+    const task = this.#queue.add(
+      async () => {
+        started = true;
+        clearTimeout(timeout);
+        this.#shutdown.signal.removeEventListener("abort", abortForShutdown);
+        this.#metrics?.workspaceDataMoverQueueWait.observe(
+          { operation },
+          (performance.now() - queuedAt) / 1_000,
+        );
+        this.#updateQueueMetrics();
+        const startedAt = performance.now();
+        try {
+          const result = await run();
+          this.#metrics?.workspaceDataMoverDuration.observe(
+            { operation, outcome: "success" },
+            (performance.now() - startedAt) / 1_000,
+          );
+          return result;
+        } catch (error: unknown) {
+          this.#metrics?.workspaceDataMoverDuration.observe(
+            { operation, outcome: "failure" },
+            (performance.now() - startedAt) / 1_000,
+          );
+          throw error;
+        } finally {
+          queueMicrotask(() => this.#updateQueueMetrics());
+        }
+      },
+      { signal: admission.signal },
+    );
+    this.#updateQueueMetrics();
+
+    try {
+      const result = await task;
+      if (result === undefined) {
+        throw new WorkspaceDataMoverError(
+          "workspace_data_mover_failed",
+          "Workspace Data Mover operation returned no result",
+          true,
+        );
+      }
+      return result;
+    } catch (error: unknown) {
+      if (!started && admission.signal.aborted) {
+        const shuttingDown = this.#shutdown.signal.aborted;
+        this.#metrics?.workspaceDataMoverQueueWait.observe(
+          { operation },
+          (performance.now() - queuedAt) / 1_000,
+        );
+        this.#metrics?.workspaceDataMoverRejected.inc({
+          reason: shuttingDown ? "shutting_down" : "queue_timeout",
+        });
+        throw new WorkspaceDataMoverError(
+          shuttingDown
+            ? "workspace_data_mover_shutting_down"
+            : "workspace_data_mover_queue_timeout",
+          shuttingDown
+            ? "Workspace Data Mover is shutting down"
+            : "Workspace Data Mover admission timed out",
+          true,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      this.#shutdown.signal.removeEventListener("abort", abortForShutdown);
+      this.#updateQueueMetrics();
+    }
+  }
+
+  #updateQueueMetrics(): void {
+    this.#metrics?.workspaceDataMoverActive.set(this.#queue.pending);
+    this.#metrics?.workspaceDataMoverWaiting.set(this.#queue.size);
   }
 
   #failure(reply: FastifyReply, error: unknown): unknown {

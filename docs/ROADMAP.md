@@ -87,6 +87,8 @@ preserved in [BACKLOG.md](BACKLOG.md), ADRs and the implementation log.
       deltas in Kafka/Valkey and only terminal canonical Turns in PostgreSQL.
 - [x] Separate execution Cells from Sandbox Domains, narrow the Manager into a
       Tool Broker and scale Workspace Data Movers independently.
+- [x] Bound persistent Cube occupancy per tenant and add explicit Data Mover
+      concurrency, queue, timeout and pressure metrics.
 - [ ] Complete full CI, production migration and live browser/API acceptance.
 
 ## Next reliability milestone

@@ -175,7 +175,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: { {{ $labelKey }}: {{ $labelValue | quote }} }
-      ports: [{ protocol: TCP, port: 4500 }]
+      ports: [{ protocol: TCP, port: 4500 }, { protocol: TCP, port: 9469 }]
   egress:
     - to:
         - namespaceSelector:

@@ -59,6 +59,7 @@ bootstrap:
   maximumSessions: 1000
   maximumUnsettledTurns: 100
   maximumConcurrentTurns: 32
+  maximumActiveSandboxes: 64
 
 controlPlane:
   replicas: 3
@@ -69,7 +70,14 @@ controlPlane:
     targetCpuUtilization: 65
   platformModelSourceTenantId: "00000000-0000-4000-8000-000000000001"
   platformOperatorTenantId: "00000000-0000-4000-8000-000000000001"
-  publicRegistrationEnabled: true
+  publicRegistration:
+    enabled: true
+    maximumTenants: 32
+    maximumProjects: 10
+    maximumSessions: 100
+    maximumUnsettledTurns: 10
+    maximumConcurrentTurns: 2
+    maximumActiveSandboxes: 2
   supervisorIdPrefix: agent-dock-pi-worker-
   resources:
     requests: { cpu: 500m, memory: 1Gi }
@@ -171,6 +179,10 @@ sandboxPlane:
   domainId: sandbox-domain-0001
   toolBrokerReplicas: 3
   dataMoverReplicas: 2
+  dataMoverMaximumConcurrentOperations: 2
+  dataMoverMaximumQueuedOperations: 32
+  dataMoverQueueWaitTimeoutMs: 30000
+  dataMoverCommandTimeoutMs: 600000
   maximumActivePerReplica: 128
   maximumWarmPerReplica: 128
   warmTtlMs: 900000

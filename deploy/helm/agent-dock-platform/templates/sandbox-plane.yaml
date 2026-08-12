@@ -133,7 +133,9 @@ kind: Service
 metadata: { name: workspace-data-mover }
 spec:
   selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
-  ports: [{ name: data-mover, port: 4500, targetPort: data-mover }]
+  ports:
+    - { name: data-mover, port: 4500, targetPort: data-mover }
+    - { name: metrics, port: 9469, targetPort: metrics }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -162,7 +164,7 @@ spec:
       {{- end }}
       automountServiceAccountToken: false
       enableServiceLinks: false
-      terminationGracePeriodSeconds: 600
+      terminationGracePeriodSeconds: 720
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -174,13 +176,19 @@ spec:
           image: {{ include "agent-dock-platform.image" .Values.images.toolBroker | quote }}
           imagePullPolicy: {{ .Values.images.toolBroker.pullPolicy }}
           command: [node, /app/node_modules/tsx/dist/cli.mjs, --tsconfig, /app/packages/tool-broker/tsconfig.json, /app/packages/tool-broker/src/workspace-data-mover-main.ts]
-          ports: [{ name: data-mover, containerPort: 4500 }]
+          ports:
+            - { name: data-mover, containerPort: 4500 }
+            - { name: metrics, containerPort: 9469 }
           env:
             - { name: NODE_ENV, value: production }
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT, value: "4500" }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-data-mover-token }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS, value: {{ .Values.sandboxPlane.dataMoverMaximumConcurrentOperations | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS, value: {{ .Values.sandboxPlane.dataMoverMaximumQueuedOperations | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS, value: {{ .Values.sandboxPlane.dataMoverQueueWaitTimeoutMs | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS, value: {{ .Values.sandboxPlane.dataMoverCommandTimeoutMs | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_POSIX_ROOT, value: /data/workspaces }
             - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT, value: /var/lib/agent-dock/data-mover }
             - { name: AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH, value: /var/lib/agent-dock/data-mover/kopia/repository.config }
@@ -192,6 +200,9 @@ spec:
             - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_REGION, value: {{ .Values.external.kopiaS3.region | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX, value: {{ .Values.external.kopiaS3.prefix | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS, value: {{ .Values.external.kopiaS3.disableTls | quote }} }
+            - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
+            - { name: AGENT_DOCK_METRICS_PORT, value: "9469" }
+            - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }
           startupProbe: { httpGet: { path: /health/ready, port: data-mover }, periodSeconds: 5, failureThreshold: 60 }
           livenessProbe: { httpGet: { path: /health/live, port: data-mover }, periodSeconds: 10 }
           securityContext:
@@ -206,6 +217,7 @@ spec:
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-repository-password, subPath: workspace-kopia-repository-password, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-aws-credentials, subPath: workspace-kopia-aws-credentials, readOnly: true }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: workspace-rwx, persistentVolumeClaim: { claimName: {{ .Values.sandboxPlane.workspace.existingClaim }} } }

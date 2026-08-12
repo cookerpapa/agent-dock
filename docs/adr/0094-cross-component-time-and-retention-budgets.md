@@ -40,6 +40,10 @@ The production profiles enforce these relationships at startup or in CI:
    24 hours in the single-host profile and seven days in the enterprise
    baseline. Kafka can therefore rebuild a lost live read model before the
    canonical transcript fallback is required.
+9. Workspace Data Mover admission and execution fit within transport and
+   shutdown: `queue wait 30s + Kopia 600s <= HTTP 660s < process grace 720s`.
+   This lets a rollout reject queued work while allowing an admitted immutable
+   checkpoint operation to settle or reach its own timeout.
 
 Browser-login TTL, Cube warm-idle TTL, Pi checkpoint-cache TTL and Temporal
 history retention do not extend execution authority. Expiry of one of these

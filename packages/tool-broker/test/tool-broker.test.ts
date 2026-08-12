@@ -205,6 +205,27 @@ function operation(
 }
 
 describe("provider-backed Tool Tool Broker", () => {
+  it("rejects a new activation when the tenant holds its persistent Sandbox quota", async () => {
+    class TenantCapacityRepository extends InMemorySandboxActivationStateRepository {
+      override async reserve() {
+        return { status: "tenant_capacity" as const };
+      }
+    }
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+      stateRepository: new TenantCapacityRepository(),
+    });
+
+    await expect(manager.create(createRequest)).rejects.toMatchObject({
+      code: "tenant_sandbox_capacity_exhausted",
+      retryable: true,
+    });
+    expect(fixture.createCount).toBe(0);
+  });
+
   it("keeps capabilities above the provider and binds an immutable identity handle", async () => {
     const fixture = providerFixture();
     const manager = new ToolBroker({

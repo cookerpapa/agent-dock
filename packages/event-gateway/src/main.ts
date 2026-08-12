@@ -36,6 +36,7 @@ export async function startEventGateway(): Promise<void> {
       maximumSessions: 1,
       maximumUnsettledTurns: 1,
       maximumConcurrentTurns: 1,
+      maximumActiveSandboxes: 1,
     },
   } as const;
   const kafkaLog =

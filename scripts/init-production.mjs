@@ -581,6 +581,12 @@ const publicTenantMaximumConcurrentTurns = integerEnvironmentValue(
   1,
   256,
 );
+const publicTenantMaximumActiveSandboxes = integerEnvironmentValue(
+  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+  2,
+  1,
+  1_000_000,
+);
 if (Number(publicTenantMaximumConcurrentTurns) > Number(publicTenantMaximumUnsettledTurns)) {
   throw new Error(
     "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
@@ -674,6 +680,11 @@ const environment = [
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS=${publicTenantMaximumSessions}`,
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS=${publicTenantMaximumUnsettledTurns}`,
   `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
+  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES=${publicTenantMaximumActiveSandboxes}`,
+  "AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS=2",
+  "AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS=32",
+  "AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS=30000",
+  "AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS=600000",
   "AGENT_DOCK_CHECKPOINT_BUCKET=agent-dock-checkpoints",
   "AGENT_DOCK_CHECKPOINT_REGION=us-east-1",
   "AGENT_DOCK_WORKSPACE_KOPIA_BUCKET=agent-dock-workspace-kopia",

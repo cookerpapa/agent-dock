@@ -59,6 +59,7 @@ spec:
             - { name: AGENT_DOCK_TENANT_MAXIMUM_SESSIONS, value: {{ .Values.bootstrap.maximumSessions | quote }} }
             - { name: AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS, value: {{ .Values.bootstrap.maximumUnsettledTurns | quote }} }
             - { name: AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS, value: {{ .Values.bootstrap.maximumConcurrentTurns | quote }} }
+            - { name: AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES, value: {{ .Values.bootstrap.maximumActiveSandboxes | quote }} }
             - { name: AGENT_DOCK_EXECUTION_CELLS_JSON, value: {{ toJson .Values.executionCells | quote }} }
             - { name: AGENT_DOCK_SANDBOX_DOMAINS_JSON, value: {{ toJson .Values.sandboxDomains | quote }} }
           securityContext:

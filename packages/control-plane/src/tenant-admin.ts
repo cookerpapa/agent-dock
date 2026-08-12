@@ -98,11 +98,17 @@ export async function runTenantAdministration(
         "--maximum-sessions",
         "--maximum-unsettled-turns",
         "--maximum-concurrent-turns",
+        "--maximum-active-sandboxes",
       ]);
       const maximumProjects = optionalInteger(flags, "--maximum-projects", 1_000_000);
       const maximumSessions = optionalInteger(flags, "--maximum-sessions", 1_000_000);
       const maximumUnsettledTurns = optionalInteger(flags, "--maximum-unsettled-turns", 1_000_000);
       const maximumConcurrentTurns = optionalInteger(flags, "--maximum-concurrent-turns", 256);
+      const maximumActiveSandboxes = optionalInteger(
+        flags,
+        "--maximum-active-sandboxes",
+        1_000_000,
+      );
       const created = await createPrivateTenant(database, {
         slug: required(flags, "--slug"),
         ownerDisplayName: required(flags, "--display-name"),
@@ -114,6 +120,7 @@ export async function runTenantAdministration(
           ...(maximumSessions === undefined ? {} : { maximumSessions }),
           ...(maximumUnsettledTurns === undefined ? {} : { maximumUnsettledTurns }),
           ...(maximumConcurrentTurns === undefined ? {} : { maximumConcurrentTurns }),
+          ...(maximumActiveSandboxes === undefined ? {} : { maximumActiveSandboxes }),
         },
       });
       const { credential: generatedCredential, ...tenant } = created;

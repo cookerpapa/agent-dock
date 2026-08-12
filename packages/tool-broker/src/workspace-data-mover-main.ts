@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { KopiaWorkspaceDataMover, WorkspaceDataMoverServer } from "./workspace-data-mover.ts";
 import { createDatabase } from "@agent-dock/database";
+import { startServiceObservability } from "@agent-dock/observability";
 import { PostgresWorkspaceDataMoverLock } from "./postgres-workspace-data-mover-lock.ts";
 
 function required(name: string): string {
@@ -55,12 +56,22 @@ const database = createDatabase({
   connectionString: await secret(required("DATABASE_URL_FILE")),
   maxConnections: 4,
 });
+const observability = await startServiceObservability({
+  serviceName: "agent-dock-workspace-data-mover",
+  defaultMetricsPort: 9_469,
+});
 const mover = new KopiaWorkspaceDataMover({
   workspaceRoot: required("AGENT_DOCK_WORKSPACE_POSIX_ROOT"),
   stateRoot: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT"),
   kopiaConfigPath: required("AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH"),
   kopiaCacheDirectory: required("AGENT_DOCK_WORKSPACE_KOPIA_CACHE_DIRECTORY"),
   repositoryPassword: await secret(required("AGENT_DOCK_WORKSPACE_KOPIA_REPOSITORY_PASSWORD_FILE")),
+  commandTimeoutMs: integer(
+    "AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS",
+    600_000,
+    1_000,
+    3_600_000,
+  ),
   lock: new PostgresWorkspaceDataMoverLock(database),
   s3: {
     bucket: required("AGENT_DOCK_WORKSPACE_KOPIA_S3_BUCKET"),
@@ -77,12 +88,39 @@ const server = new WorkspaceDataMoverServer({
   port: integer("AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT", 4_500, 1, 65_535),
   serviceToken: await secret(required("AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE")),
   mover,
+  maximumConcurrentOperations: integer(
+    "AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS",
+    2,
+    1,
+    64,
+  ),
+  maximumQueuedOperations: integer(
+    "AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS",
+    32,
+    0,
+    4_096,
+  ),
+  queueWaitTimeoutMs: integer(
+    "AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS",
+    30_000,
+    1,
+    600_000,
+  ),
+  metrics: observability.metrics,
 });
-await server.listen();
+try {
+  await server.listen();
+} catch (error: unknown) {
+  await Promise.allSettled([server.close(), observability.close(), database.destroy()]);
+  throw error;
+}
 process.stdout.write("AgentDock Workspace Data Mover ready\n");
 
 let closing: Promise<void> | undefined;
 const closeService = (): Promise<void> =>
-  (closing ??= server.close().finally(() => database.destroy()));
+  (closing ??= server
+    .close()
+    .finally(() => Promise.allSettled([observability.close(), database.destroy()]))
+    .then(() => undefined));
 process.once("SIGTERM", () => void closeService());
 process.once("SIGINT", () => void closeService());

@@ -89,7 +89,13 @@ spec:
             - { name: AGENT_DOCK_TEMPORAL_TASK_QUEUE, value: {{ .Values.external.temporal.taskQueue | quote }} }
             - { name: AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID, value: {{ .Values.controlPlane.platformModelSourceTenantId | quote }} }
             - { name: AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID, value: {{ .Values.controlPlane.platformOperatorTenantId | quote }} }
-            - { name: AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED, value: {{ .Values.controlPlane.publicRegistrationEnabled | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED, value: {{ .Values.controlPlane.publicRegistration.enabled | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS, value: {{ .Values.controlPlane.publicRegistration.maximumTenants | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS, value: {{ .Values.controlPlane.publicRegistration.maximumProjects | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS, value: {{ .Values.controlPlane.publicRegistration.maximumSessions | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS, value: {{ .Values.controlPlane.publicRegistration.maximumUnsettledTurns | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS, value: {{ .Values.controlPlane.publicRegistration.maximumConcurrentTurns | quote }} }
+            - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES, value: {{ .Values.controlPlane.publicRegistration.maximumActiveSandboxes | quote }} }
             - { name: AGENT_DOCK_WEB_SESSION_COOKIE_SECURE, value: "true" }
             - { name: AWS_SHARED_CREDENTIALS_FILE, value: /run/agent-dock-secrets/aws-credentials }
             - { name: AWS_EC2_METADATA_DISABLED, value: "true" }

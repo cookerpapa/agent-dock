@@ -24,6 +24,151 @@ const identity = Object.freeze({
 });
 
 describe("trusted Workspace Data Mover", () => {
+  it("bounds concurrent Workspace I/O and rejects beyond the configured queue", async () => {
+    let releaseFirst!: () => void;
+    let firstStarted!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    let calls = 0;
+    let active = 0;
+    let maximumActive = 0;
+    const mover: WorkspaceDataMover = {
+      checkHealth: vi.fn(async () => undefined),
+      prepare: vi.fn(async () => {
+        calls += 1;
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        if (calls === 1) {
+          firstStarted();
+          await firstGate;
+        }
+        active -= 1;
+        return { restored: false };
+      }),
+      initializeBaseline: vi.fn(async () => ({ gitBaselineCommit: "a".repeat(40) })),
+      snapshot: vi.fn(async () => ({
+        snapshotId: "snapshot-bounded",
+        gitBaselineCommit: "a".repeat(40),
+        workspacePatch: { format: "unified_diff" as const, patch: "", truncated: false },
+      })),
+      materialize: vi.fn(async () => ({
+        bytes: Buffer.alloc(0),
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      })),
+      close: vi.fn(async () => undefined),
+    };
+    const server = new WorkspaceDataMoverServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: TOKEN,
+      mover,
+      maximumConcurrentOperations: 1,
+      maximumQueuedOperations: 1,
+      queueWaitTimeoutMs: 5_000,
+    });
+    const address = await server.listen();
+    const request = () =>
+      fetch(new URL("/v1/workspaces/prepare", address), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(identity),
+      });
+    try {
+      const first = request();
+      await started;
+      const second = request();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const rejected = await request();
+      expect(rejected.status).toBe(503);
+      await expect(rejected.json()).resolves.toMatchObject({
+        error: { code: "workspace_data_mover_overloaded", retryable: true },
+      });
+      releaseFirst();
+      expect((await first).status).toBe(200);
+      expect((await second).status).toBe(200);
+      expect(calls).toBe(2);
+      expect(maximumActive).toBe(1);
+    } finally {
+      releaseFirst();
+      await server.close();
+    }
+  });
+
+  it("times out queued Workspace I/O without starting it", async () => {
+    let releaseFirst!: () => void;
+    let firstStarted!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    let calls = 0;
+    const mover: WorkspaceDataMover = {
+      checkHealth: vi.fn(async () => undefined),
+      prepare: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstStarted();
+          await firstGate;
+        }
+        return { restored: false };
+      }),
+      initializeBaseline: vi.fn(async () => ({ gitBaselineCommit: "a".repeat(40) })),
+      snapshot: vi.fn(async () => ({
+        snapshotId: "snapshot-timeout",
+        gitBaselineCommit: "a".repeat(40),
+        workspacePatch: { format: "unified_diff" as const, patch: "", truncated: false },
+      })),
+      materialize: vi.fn(async () => ({
+        bytes: Buffer.alloc(0),
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      })),
+      close: vi.fn(async () => undefined),
+    };
+    const server = new WorkspaceDataMoverServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: TOKEN,
+      mover,
+      maximumConcurrentOperations: 1,
+      maximumQueuedOperations: 1,
+      queueWaitTimeoutMs: 50,
+    });
+    const address = await server.listen();
+    const request = () =>
+      fetch(new URL("/v1/workspaces/prepare", address), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(identity),
+      });
+    try {
+      const first = request();
+      await started;
+      const timedOut = await request();
+      expect(timedOut.status).toBe(503);
+      await expect(timedOut.json()).resolves.toMatchObject({
+        error: { code: "workspace_data_mover_queue_timeout", retryable: true },
+      });
+      expect(calls).toBe(1);
+      releaseFirst();
+      expect((await first).status).toBe(200);
+    } finally {
+      releaseFirst();
+      await server.close();
+    }
+  });
+
   it("keeps its authenticated API narrow and verifies materialized bytes", async () => {
     const bytes = Buffer.from("durable\n");
     const mover: WorkspaceDataMover = {

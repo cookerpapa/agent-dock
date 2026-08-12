@@ -64,6 +64,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS:-100}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS:-10}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-2}
   AGENT_DOCK_METRICS_HOST: 0.0.0.0
   AGENT_DOCK_METRICS_PORT: "9464"
   AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
@@ -84,6 +85,7 @@ x-bootstrap-environment: &bootstrap-environment
   AGENT_DOCK_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_TENANT_MAXIMUM_SESSIONS:-1000}
   AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS:-100}
   AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-64}
   AGENT_DOCK_SANDBOX_DOMAINS_JSON: >-
     [{"id":"sandbox-domain-0001","displayName":"Primary sandbox domain","state":"active","toolBrokerBaseUrl":"http://tool-broker:4300","workspaceStorageKey":"workspace-domain-0001","maximumActiveSandboxes":1024}]
   AGENT_DOCK_EXECUTION_CELLS_JSON: >-
@@ -997,6 +999,10 @@ services:
       AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST: 0.0.0.0
       AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT: "4500"
       AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS:-2}
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS:-32}
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS:-30000}
+      AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS:-600000}
       AGENT_DOCK_WORKSPACE_POSIX_ROOT: /data/cube-shared/volume
       AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT: /var/lib/agent-dock/workspace-data-mover
       AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH: /var/lib/agent-dock/workspace-data-mover/kopia/repository.config
@@ -1008,6 +1014,9 @@ services:
       AGENT_DOCK_WORKSPACE_KOPIA_S3_REGION: us-east-1
       AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX: production/kopia/v1/
       AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS: "true"
+      AGENT_DOCK_METRICS_HOST: 0.0.0.0
+      AGENT_DOCK_METRICS_PORT: "9469"
+      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
     volumes:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
@@ -1031,10 +1040,15 @@ services:
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-aws-credentials
         target: /run/agent-dock-secrets/workspace-kopia-aws-credentials
         read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/agent-dock-secrets/metrics-token
+        read_only: true
     networks:
       - sandbox-control
       - object-storage
       - database
+      - observability
     healthcheck:
       test:
         [
@@ -1054,7 +1068,7 @@ services:
     pids_limit: 128
     mem_limit: 512m
     cpus: 1.5
-    stop_grace_period: 45s
+    stop_grace_period: 12m
     logging: *bounded-logging
 
   tool-broker:

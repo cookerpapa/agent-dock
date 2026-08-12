@@ -41,6 +41,7 @@ The NestJS/Fastify Control Plane owns:
 - Project, Workspace and conversation APIs;
 - transactional Run admission and idempotency;
 - same-Session serialization and tenant quotas;
+- per-tenant persistent Sandbox quota;
 - PostgreSQL business state and event cursors;
 - immutable checkpoint pointers;
 - model/proxy configuration metadata;
@@ -672,8 +673,11 @@ PostgreSQL. Creates use one stable Service, then pin subsequent operations to
 the returned owner URL. A surviving replica fences an expired owner, marks
 ambiguous operations `UNKNOWN` and reaps orphaned Cube activations without
 replaying Tools. Independent Data Mover replicas coordinate each Workspace
-through PostgreSQL advisory locks. PostgreSQL still serializes ordinary Runs
-sharing one Workspace and advances the Workspace head with CAS.
+through PostgreSQL advisory locks. Each replica also has a bounded local
+`p-queue` execution gate for Kopia/POSIX pressure; queue admission is not a
+durable scheduler and does not replace the database lock. PostgreSQL still
+serializes ordinary Runs sharing one Workspace and advances the Workspace head
+with CAS.
 
 Kubernetes HPA/KEDA creates Pods. A provider-specific node autoscaler is needed
 to create machines for pending Pods. The strict Helm profile, preflight and
@@ -698,6 +702,8 @@ acceptance is still required before claiming measured HA.
 - [ADR-0094: Cross-component time and retention budgets](adr/0094-cross-component-time-and-retention-budgets.md)
 - [ADR-0095: Sandbox Domains and a thin Tool Broker](adr/0095-sandbox-domains-and-cube-control-plane.md)
 - [ADR-0098: Self-healing live-event read model](adr/0098-self-healing-live-event-read-model.md)
+- [ADR-0099: Active-Turn catch-up snapshots](adr/0099-active-turn-catch-up-snapshots.md)
+- [ADR-0100: Bounded Sandbox and Workspace admission](adr/0100-bounded-sandbox-and-workspace-admission.md)
 
 The [ADR index](adr/README.md) links the lower-level decisions behind these
 boundaries. Retired cutover designs remain in Git history, not as supported
