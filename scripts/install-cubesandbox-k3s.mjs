@@ -54,6 +54,8 @@ const environment = {
   NO_PROXY: noProxyEntries,
   no_proxy: noProxyEntries,
 };
+const kubectlCommand = process.env.AGENT_DOCK_KUBECTL_BIN ?? "/usr/local/bin/k3s";
+const kubectlPrefix = process.env.AGENT_DOCK_KUBECTL_BIN === undefined ? ["kubectl"] : [];
 const k3sConfigPath = "/etc/rancher/k3s/config.yaml";
 const k3sWslPreparePath = "/usr/local/libexec/agent-dock-prepare-k3s-wsl";
 const k3sServiceRouteHelperPath = "/usr/local/libexec/agent-dock-route-k3s-services";
@@ -125,6 +127,14 @@ function run(command, args, options = {}) {
     });
     if (options.input !== undefined) child.stdin.end(options.input);
   });
+}
+
+function captureKubectl(args, timeout) {
+  return capture(kubectlCommand, [...kubectlPrefix, ...args], timeout);
+}
+
+function runKubectl(args, options) {
+  return run(kubectlCommand, [...kubectlPrefix, ...args], options);
 }
 
 function canonicalImageReference(image) {
@@ -343,9 +353,7 @@ async function ensureStableWslNodeAddress() {
 
   let currentNodeIp;
   try {
-    const nodes = JSON.parse(
-      await capture("kubectl", ["get", "nodes", "-o", "json"], 5_000),
-    )?.items;
+    const nodes = JSON.parse(await captureKubectl(["get", "nodes", "-o", "json"], 5_000))?.items;
     currentNodeIp = nodes?.[0]?.status?.addresses?.find(
       (address) => address.type === "InternalIP",
     )?.address;
@@ -375,7 +383,7 @@ async function ensureStableWslNodeAddress() {
   let lastError;
   for (let attempt = 0; attempt < 90; attempt += 1) {
     try {
-      const value = JSON.parse(await capture("kubectl", ["get", "nodes", "-o", "json"], 5_000));
+      const value = JSON.parse(await captureKubectl(["get", "nodes", "-o", "json"], 5_000));
       const node = value?.items?.[0];
       const internalIp = node?.status?.addresses?.find(
         (address) => address.type === "InternalIP",
@@ -408,10 +416,10 @@ async function ensureStableWslNodeAddress() {
 
 async function restartCubeWorkloadsAfterNetworkChange() {
   for (const kind of ["deployment", "statefulset", "daemonset"]) {
-    await run("kubectl", ["-n", "cube-system", "rollout", "restart", kind]);
+    await runKubectl(["-n", "cube-system", "rollout", "restart", kind]);
   }
   const resources = (
-    await capture("kubectl", [
+    await captureKubectl([
       "-n",
       "cube-system",
       "get",
@@ -423,7 +431,7 @@ async function restartCubeWorkloadsAfterNetworkChange() {
     .split("\n")
     .filter((value) => value.length > 0);
   for (const resource of resources) {
-    await run("kubectl", ["-n", "cube-system", "rollout", "status", resource, "--timeout=600s"]);
+    await runKubectl(["-n", "cube-system", "rollout", "status", resource, "--timeout=600s"]);
   }
 }
 
@@ -473,7 +481,7 @@ async function installPosixVolumePlugin() {
   await mkdir(posixVolumeRoot, { recursive: true, mode: 0o700 });
   await chmod(posixSharedRoot, 0o700);
   await chmod(posixVolumeRoot, 0o700);
-  const pod = await capture("kubectl", [
+  const pod = await captureKubectl([
     "-n",
     "cube-system",
     "get",
@@ -485,7 +493,7 @@ async function installPosixVolumePlugin() {
   ]);
   if (pod.length < 1) throw new Error("Cubelet Pod was unavailable for plugin configuration");
   const cubeletConfig = withCubeletPosixVolumePlugin(
-    await capture("kubectl", [
+    await captureKubectl([
       "-n",
       "cube-system",
       "exec",
@@ -498,7 +506,7 @@ async function installPosixVolumePlugin() {
     ]),
   );
   const masterSecret = JSON.parse(
-    await capture("kubectl", [
+    await captureKubectl([
       "-n",
       "cube-system",
       "get",
@@ -519,7 +527,7 @@ async function installPosixVolumePlugin() {
   try {
     const cubeletConfigPath = join(temporary, "cubelet-config.toml");
     await writeFile(cubeletConfigPath, cubeletConfig, { mode: 0o600 });
-    const configMap = await capture("kubectl", [
+    const configMap = await captureKubectl([
       "-n",
       "cube-system",
       "create",
@@ -531,8 +539,8 @@ async function installPosixVolumePlugin() {
       "-o",
       "json",
     ]);
-    await run("kubectl", ["apply", "-f", "-"], { input: configMap });
-    await run("kubectl", [
+    await runKubectl(["apply", "-f", "-"], { input: configMap });
+    await runKubectl([
       "-n",
       "cube-system",
       "patch",
@@ -544,7 +552,7 @@ async function installPosixVolumePlugin() {
         data: { "conf.yaml": Buffer.from(masterConfig, "utf8").toString("base64") },
       }),
     ]);
-    await run("kubectl", [
+    await runKubectl([
       "-n",
       "cube-system",
       "patch",
@@ -589,7 +597,7 @@ async function installPosixVolumePlugin() {
         },
       }),
     ]);
-    await run("kubectl", [
+    await runKubectl([
       "-n",
       "cube-system",
       "patch",
@@ -638,7 +646,7 @@ async function installPosixVolumePlugin() {
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
-  await run("kubectl", [
+  await runKubectl([
     "-n",
     "cube-system",
     "rollout",
@@ -646,7 +654,7 @@ async function installPosixVolumePlugin() {
     "deployment/cube-master",
     "--timeout=600s",
   ]);
-  await run("kubectl", [
+  await runKubectl([
     "-n",
     "cube-system",
     "rollout",
@@ -665,7 +673,7 @@ async function assertCubePodMtu(expectedMtu) {
     "cube-master",
     "cube-proxy",
   ]) {
-    const mtu = await capture("kubectl", [
+    const mtu = await captureKubectl([
       "-n",
       "cube-system",
       "exec",
@@ -893,7 +901,7 @@ async function installTemplateRegistry() {
     const extensionsPath = join(temporary, "registry.ext");
     const serialPath = join(temporary, "cube-root-ca.srl");
 
-    const encodedCertificate = await capture("kubectl", [
+    const encodedCertificate = await captureKubectl([
       "-n",
       "cube-system",
       "get",
@@ -902,7 +910,7 @@ async function installTemplateRegistry() {
       "-o",
       "jsonpath={.data.cube-root-ca\\.crt}",
     ]);
-    const encodedKey = await capture("kubectl", [
+    const encodedKey = await captureKubectl([
       "-n",
       "cube-system",
       "get",
@@ -964,7 +972,7 @@ async function installTemplateRegistry() {
     ]);
     await run("openssl", ["verify", "-CAfile", caCertificatePath, certificatePath]);
 
-    const secret = await capture("kubectl", [
+    const secret = await captureKubectl([
       "-n",
       "cube-system",
       "create",
@@ -977,16 +985,16 @@ async function installTemplateRegistry() {
       "-o",
       "json",
     ]);
-    await run("kubectl", ["apply", "-f", "-"], { input: secret });
-    await run("kubectl", ["apply", "-f", "deploy/cubesandbox/template-registry.yaml"]);
-    await run("kubectl", [
+    await runKubectl(["apply", "-f", "-"], { input: secret });
+    await runKubectl(["apply", "-f", "deploy/cubesandbox/template-registry.yaml"]);
+    await runKubectl([
       "-n",
       "cube-system",
       "rollout",
       "restart",
       "deployment/agent-dock-cube-template-registry",
     ]);
-    await run("kubectl", [
+    await runKubectl([
       "-n",
       "cube-system",
       "rollout",
@@ -1020,6 +1028,11 @@ await capture("which", ["xfs_growfs"]);
 await capture("which", ["losetup"]);
 await capture("which", ["truncate"]);
 await capture("which", ["helm"]);
+if (kubectlCommand.startsWith("/")) {
+  await capture("test", ["-x", kubectlCommand]);
+} else {
+  await capture("which", [kubectlCommand]);
+}
 await ensureHostInotifyCapacity();
 const nodeNetwork = await ensureStableWslNodeAddress();
 await ensureSharedRootMount();
@@ -1027,8 +1040,8 @@ await ensureBpfFilesystem();
 await ensureWslK3sServiceRoute();
 await ensureCubeletLoopbackCapacity();
 
-const nodeName = assertSingleNode(await capture("kubectl", ["get", "nodes", "-o", "json"]));
-await run("kubectl", [
+const nodeName = assertSingleNode(await captureKubectl(["get", "nodes", "-o", "json"]));
+await runKubectl([
   "label",
   "node",
   nodeName,
@@ -1068,7 +1081,7 @@ await stagePinnedK3sImages("agent-dock-cube-platform-local.tar", [
 ]);
 // `kubectl apply` owns the namespace declaratively without printing any
 // credential. Generate the Secret JSON in memory and stream it to apply.
-const namespace = await capture("kubectl", [
+const namespace = await captureKubectl([
   "create",
   "namespace",
   "cube-system",
@@ -1076,8 +1089,8 @@ const namespace = await capture("kubectl", [
   "-o",
   "json",
 ]);
-await run("kubectl", ["apply", "-f", "-"], { input: namespace });
-const secret = await capture("kubectl", [
+await runKubectl(["apply", "-f", "-"], { input: namespace });
+const secret = await captureKubectl([
   "-n",
   "cube-system",
   "create",
@@ -1089,8 +1102,8 @@ const secret = await capture("kubectl", [
   "-o",
   "json",
 ]);
-await run("kubectl", ["apply", "-f", "-"], { input: secret });
-const egressSecret = await capture("kubectl", [
+await runKubectl(["apply", "-f", "-"], { input: secret });
+const egressSecret = await captureKubectl([
   "-n",
   "cube-system",
   "create",
@@ -1102,10 +1115,10 @@ const egressSecret = await capture("kubectl", [
   "-o",
   "json",
 ]);
-await run("kubectl", ["apply", "-f", "-"], { input: egressSecret });
-await run("kubectl", ["apply", "-f", "deploy/cubesandbox/authorizer.yaml"]);
-await run("kubectl", ["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
-await run("kubectl", [
+await runKubectl(["apply", "-f", "-"], { input: egressSecret });
+await runKubectl(["apply", "-f", "deploy/cubesandbox/authorizer.yaml"]);
+await runKubectl(["apply", "-f", "deploy/cubesandbox/egress-gateway.yaml"]);
+await runKubectl([
   "-n",
   "cube-system",
   "rollout",
@@ -1113,7 +1126,7 @@ await run("kubectl", [
   "deployment/agent-dock-cube-api-authorizer",
   "--timeout=180s",
 ]);
-await run("kubectl", [
+await runKubectl([
   "-n",
   "cube-system",
   "rollout",
@@ -1148,7 +1161,7 @@ await installTemplateRegistry();
 await assertCubePodMtu(nodeNetwork.podNetworkMtu);
 
 const services = JSON.parse(
-  await capture("kubectl", ["-n", "cube-system", "get", "services", "-o", "json"]),
+  await captureKubectl(["-n", "cube-system", "get", "services", "-o", "json"]),
 );
 const serviceAddress = (component, portName) => {
   const service = services.items.find(
@@ -1182,7 +1195,7 @@ await writeFile(evidencePath, `${JSON.stringify(cluster, null, 2)}\n`, { mode: 0
 const credentialOwner = await stat(credentialPath);
 await chown(evidencePath, credentialOwner.uid, credentialOwner.gid);
 await chmod(evidencePath, 0o600);
-const cliPod = await capture("kubectl", [
+const cliPod = await captureKubectl([
   "-n",
   "cube-system",
   "get",
@@ -1200,7 +1213,7 @@ const cliTemporaryDirectory = await mkdtemp(
 );
 const cliTemporaryPath = join(cliTemporaryDirectory, "cubemastercli");
 try {
-  await run("kubectl", [
+  await runKubectl([
     "-n",
     "cube-system",
     "cp",

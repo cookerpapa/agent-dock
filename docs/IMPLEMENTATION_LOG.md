@@ -18,6 +18,8 @@
   数据。
 - 模板注册在构建前和注册后执行 AgentDock 专属保留策略：排除外部模板和构建
   中模板，保护当前不可变版本，并明确报告 Cube 延迟清理错误。
+- Cube 安装器不再从 WSL PATH 误选 Windows `kubectl.exe`；默认固定使用 Linux
+  原生 `k3s kubectl`，避免客户端证书和文件路径落入另一套操作系统语义。
 
 ## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
 

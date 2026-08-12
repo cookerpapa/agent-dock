@@ -67,5 +67,10 @@ assert.equal(
 const installer = readFileSync("scripts/install-cubesandbox-k3s.mjs", "utf8");
 assert.match(installer, /ensureCubeletLoopbackCapacity\(\)/u);
 assert.match(installer, /xfs_growfs/u);
+assert.match(installer, /AGENT_DOCK_KUBECTL_BIN/u);
+assert.ok(
+  !installer.includes('capture("kubectl"') && !installer.includes('run("kubectl"'),
+  "the Cube installer must not select a host kubectl through an uncontrolled PATH",
+);
 
 process.stdout.write("cubesandbox_template_retention_check_passed\n");

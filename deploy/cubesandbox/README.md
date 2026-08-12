@@ -90,6 +90,11 @@ The installer:
 - writes private, bounded cluster evidence to
   `deploy/production/runtime/cubesandbox/cluster.json`.
 
+The local installer invokes `/usr/local/bin/k3s kubectl` by default so a WSL
+PATH entry that forwards to Windows `kubectl.exe` cannot silently select a
+different client or credential store. A native, pinned alternative can be
+supplied with `AGENT_DOCK_KUBECTL_BIN`.
+
 Do not bind Flannel to WSL's loopback device. Its 65536-byte MTU advertises an
 unusable jumbo MSS and black-holes ordinary CubeProxy responses once packets
 exceed the real path MTU.
