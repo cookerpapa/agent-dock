@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   LiveSessionEventStoreError,
+  MemoryLiveSessionEventStore,
   ValkeyLiveSessionEventStore,
 } from "../src/live-session-event-store.ts";
 
@@ -46,6 +47,24 @@ function publication(sequence: number, text: string, eventId: string): EventPubl
     },
   };
 }
+
+describe("in-memory live Session event store", () => {
+  it("resets only a tenant-owned Session stream", async () => {
+    const memory = new MemoryLiveSessionEventStore();
+    const first = publication(1, "hello", "73000000-0000-4000-8000-000000000011");
+    await memory.append({
+      tenantId: IDS.tenant,
+      sessionId: IDS.session,
+      previousSequence: 0,
+      messages: [first],
+    });
+    await expect(memory.resetSession("wrong-tenant", IDS.session)).rejects.toBeInstanceOf(
+      LiveSessionEventStoreError,
+    );
+    await memory.resetSession(IDS.tenant, IDS.session);
+    await expect(memory.readPage(IDS.tenant, IDS.session, 0, 1)).resolves.toEqual([]);
+  });
+});
 
 describe.skipIf(!existsSync("/usr/bin/redis-server"))("Valkey live Session event store", () => {
   beforeAll(async () => {
@@ -128,6 +147,16 @@ describe.skipIf(!existsSync("/usr/bin/redis-server"))("Valkey live Session event
     await store.trimThrough(IDS.tenant, IDS.session, 2);
     await expect(store.readPage(IDS.tenant, IDS.session, 0, 2)).resolves.toEqual([]);
     const third = publication(4, "after terminal gap", "73000000-0000-4000-8000-000000000004");
+    await expect(
+      store.append({
+        tenantId: IDS.tenant,
+        sessionId: IDS.session,
+        previousSequence: 3,
+        messages: [third],
+      }),
+    ).resolves.toBe(4);
+    await store.resetSession(IDS.tenant, IDS.session);
+    await expect(store.readPage(IDS.tenant, IDS.session, 0, 4)).resolves.toEqual([]);
     await expect(
       store.append({
         tenantId: IDS.tenant,

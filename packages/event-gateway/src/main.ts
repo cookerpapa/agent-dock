@@ -1,7 +1,7 @@
 import { createDatabase } from "@agent-dock/database";
 import { PostgresTenantApiAuthenticator } from "@agent-dock/control-plane/tenant-identity";
 import { WebAuthenticationService } from "@agent-dock/control-plane/web-authentication";
-import { startServiceObservability } from "@agent-dock/observability";
+import { operationalLog, startServiceObservability } from "@agent-dock/observability";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
 import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
@@ -12,6 +12,7 @@ import {
 import { LiveTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 import { pathToFileURL } from "node:url";
 import { EventGateway } from "./event-gateway.ts";
+import { repairLiveEventsIfNeeded } from "./live-event-rebuild.ts";
 import { loadEventGatewayProductionConfig } from "./production-config.ts";
 
 export async function startEventGateway(): Promise<void> {
@@ -52,6 +53,7 @@ export async function startEventGateway(): Promise<void> {
   const eventStore = new DurableEventStore({
     database,
     eventNotificationPublisher: notifications,
+    metrics: observability.metrics,
     ...(kafkaLog === undefined || liveEvents === undefined
       ? {}
       : { workerEventLog: kafkaLog, liveEventStore: liveEvents }),
@@ -109,11 +111,42 @@ export async function startEventGateway(): Promise<void> {
       });
     });
   }
-  await projector?.start();
-  await gateway.listen(config.port, config.host);
-  process.stdout.write(
-    `AgentDock Event Gateway listening on ${config.host}:${String(config.port)}\n`,
-  );
+  try {
+    if (config.autoRepairLiveEvents && config.kafka !== undefined && liveEvents !== undefined) {
+      // Advisory locks are session-scoped, so this deliberately uses the
+      // direct notification endpoint rather than transaction-pool PgBouncer.
+      const repairDatabase = createDatabase({
+        connectionString: config.databaseNotificationUrl,
+        maxConnections: 1,
+      });
+      try {
+        const report = await repairLiveEventsIfNeeded({
+          database: repairDatabase,
+          liveEvents,
+          kafka: {
+            ...config.kafka,
+            clientId: `${config.kafka.clientId}-startup-repair`,
+          },
+        });
+        operationalLog({
+          service: "agent-dock-event-gateway",
+          level: "info",
+          event: "live_event_repair_complete",
+          attributes: report,
+        });
+      } finally {
+        await repairDatabase.destroy();
+      }
+    }
+    await projector?.start();
+    await gateway.listen(config.port, config.host);
+    process.stdout.write(
+      `AgentDock Event Gateway listening on ${config.host}:${String(config.port)}\n`,
+    );
+  } catch (error: unknown) {
+    await close().catch(() => undefined);
+    throw error;
+  }
 }
 
 const entrypoint = process.argv[1];

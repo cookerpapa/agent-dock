@@ -5,6 +5,7 @@ export type EventGatewayProductionConfig = {
   port: number;
   databaseUrl: string;
   databaseNotificationUrl: string;
+  autoRepairLiveEvents: boolean;
   workerEventIngestToken?: string;
   liveEventStoreUrl?: string;
   kafka?: {
@@ -32,6 +33,13 @@ function port(value: string | undefined): number {
     throw new Error("PORT is invalid");
   }
   return parsed;
+}
+
+function boolean(value: string | undefined, fallback: boolean, name: string): boolean {
+  if (value === undefined || value.trim().length === 0) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 export async function loadEventGatewayProductionConfig(): Promise<EventGatewayProductionConfig> {
@@ -101,6 +109,11 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
     port: port(process.env.PORT),
     databaseUrl,
     databaseNotificationUrl,
+    autoRepairLiveEvents: boolean(
+      process.env.AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS,
+      true,
+      "AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS",
+    ),
     ...(kafka === undefined ? {} : { kafka }),
     ...(workerEventIngestToken === undefined ? {} : { workerEventIngestToken }),
     ...(liveEventStoreUrl === undefined ? {} : { liveEventStoreUrl }),

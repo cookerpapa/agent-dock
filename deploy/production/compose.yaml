@@ -253,7 +253,17 @@ services:
     image: valkey/valkey@sha256:a038175878d66b9d274fbf8be73c0305e93798b83917647f167e18cef3c71eec
     restart: unless-stopped
     command:
-      [valkey-server, --appendonly, "yes", --appendfsync, always, --maxmemory-policy, noeviction]
+      [
+        valkey-server,
+        --appendonly,
+        "yes",
+        --appendfsync,
+        always,
+        --maxmemory,
+        "${AGENT_DOCK_LIVE_EVENT_MAXMEMORY:-320mb}",
+        --maxmemory-policy,
+        noeviction,
+      ]
     user: "999:1000"
     volumes:
       - valkey-data:/data
@@ -615,6 +625,7 @@ services:
       AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP: agent-dock-worker-event-projector-v1
       AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
       AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE: /run/agent-dock-secrets/live-event-store-url
+      AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS: ${AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS:-true}
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9467"
       AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}

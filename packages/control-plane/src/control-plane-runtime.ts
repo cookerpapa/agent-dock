@@ -157,6 +157,7 @@ export async function createControlPlaneRuntime(
   const eventStore = new DurableEventStore({
     database: options.database,
     eventHub,
+    ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
     ...(options.sessionEventNotifications === undefined
       ? {}
       : { eventNotificationPublisher: options.sessionEventNotifications }),

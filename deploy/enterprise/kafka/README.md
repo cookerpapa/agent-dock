@@ -62,9 +62,16 @@ copied into Cube guests.
 The same Secret must contain `live-event-store-url`, pointing to an HA Valkey
 deployment with persistence and `noeviction`. Valkey is a rebuildable read
 model, not a business-state authority. Keep Kafka topic retention longer than
-AgentDock's live replay window. After total Valkey loss, stop the normal Event
+AgentDock's live replay window. Configure an explicit data-memory ceiling below
+the Pod/container limit; retain `noeviction` so saturation is visible rather
+than silently removing replay data. Event Gateway startup checks the retained
+live range and automatically rebuilds missing streams from Kafka under a
+PostgreSQL advisory lock. It will not become ready if Kafka can no longer cover
+that range.
+
+For controlled maintenance, disable automatic repair, stop the normal Event
 Gateway projector, point its configuration at a fresh empty Valkey instance,
-and run the Event Gateway image's rebuild entry point. From a source checkout:
+and run the same rebuild implementation manually. From a source checkout:
 
 ```bash
 npm run events:rebuild-live
@@ -72,4 +79,5 @@ npm run events:rebuild-live
 
 It replays only sequences above each Session's PostgreSQL replay floor and at
 or below its Kafka-accepted cursor. Restart Event Gateway after the rebuild; do
-not run it concurrently against a non-empty live read model during traffic.
+not run manual rebuild concurrently against a non-empty live read model during
+traffic.

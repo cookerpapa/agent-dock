@@ -1,6 +1,7 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 
 const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300];
+const GROUP_SIZE_BUCKETS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024];
 
 export class AgentDockMetrics {
   readonly registry: Registry;
@@ -20,6 +21,10 @@ export class AgentDockMetrics {
   readonly cancellationDuration: Histogram<"outcome">;
   readonly turnAdmissionDuration: Histogram<"outcome">;
   readonly tenantAdmissionLockWait: Histogram;
+  readonly eventDurabilityDuration: Histogram<"boundary" | "outcome">;
+  readonly eventDurabilityGroupSize: Histogram<"boundary">;
+  readonly eventProjectionDuration: Histogram<"outcome">;
+  readonly eventProjectionLag: Histogram;
   readonly activeRuns: Gauge;
   readonly queuedRuns: Gauge;
   readonly sandboxActive: Gauge<"provider">;
@@ -131,6 +136,33 @@ export class AgentDockMetrics {
     this.tenantAdmissionLockWait = new Histogram({
       name: "agent_dock_tenant_admission_lock_wait_seconds",
       help: "Time waiting for the tenant quota serialization row",
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.eventDurabilityDuration = new Histogram({
+      name: "agent_dock_event_durability_seconds",
+      help: "Time until a grouped Worker event publication crosses its durable boundary",
+      labelNames: ["boundary", "outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.eventDurabilityGroupSize = new Histogram({
+      name: "agent_dock_event_durability_group_events",
+      help: "Worker events acknowledged in one group commit",
+      labelNames: ["boundary"],
+      buckets: GROUP_SIZE_BUCKETS,
+      registers: [this.registry],
+    });
+    this.eventProjectionDuration = new Histogram({
+      name: "agent_dock_event_projection_seconds",
+      help: "Time to project one Kafka Worker-event envelope into the live read model",
+      labelNames: ["outcome"],
+      buckets: DURATION_BUCKETS,
+      registers: [this.registry],
+    });
+    this.eventProjectionLag = new Histogram({
+      name: "agent_dock_event_projection_lag_seconds",
+      help: "Age of the latest Worker event when its live projection completes",
       buckets: DURATION_BUCKETS,
       registers: [this.registry],
     });

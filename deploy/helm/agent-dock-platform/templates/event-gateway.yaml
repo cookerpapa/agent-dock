@@ -62,6 +62,7 @@ spec:
             - { name: AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE, value: /run/agent-dock-secrets/database-notification-url }
             - { name: AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE, value: /run/agent-dock-secrets/worker-event-ingest-token }
             - { name: AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE, value: /run/agent-dock-secrets/live-event-store-url }
+            - { name: AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS, value: "true" }
             - name: AGENT_DOCK_KAFKA_BROKERS
               value: {{ join "," .Values.external.kafka.brokers | quote }}
             - { name: AGENT_DOCK_WORKER_EVENT_TOPIC, value: {{ .Values.external.kafka.topic | quote }} }

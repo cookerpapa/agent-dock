@@ -75,6 +75,17 @@ end
 return through
 `;
 
+const RESET_SCRIPT = String.raw`
+local stream = KEYS[1]
+local metadata = KEYS[2]
+local tenant = ARGV[1]
+local storedTenant = redis.call('HGET', metadata, 'tenant')
+if storedTenant and storedTenant ~= tenant then
+  return redis.error_reply('live_event_tenant_conflict')
+end
+return redis.call('DEL', stream, metadata)
+`;
+
 const DEFAULT_PAGE_SIZE = 500;
 
 export type AppendLiveSessionEventsInput = Readonly<{
@@ -101,6 +112,7 @@ export interface LiveSessionEventStore {
     throughSequence: number,
   ): Promise<readonly AgentDockEvent[]>;
   trimThrough(tenantId: string, sessionId: string, throughSequence: number): Promise<void>;
+  resetSession(tenantId: string, sessionId: string): Promise<void>;
   checkHealth?(): Promise<void>;
   close?(): Promise<void>;
 }
@@ -355,6 +367,17 @@ export class ValkeyLiveSessionEventStore implements LiveSessionEventStore {
     }
   }
 
+  async resetSession(tenantId: string, sessionId: string): Promise<void> {
+    boundedIdentity(tenantId, "tenantId");
+    const [streamKey, metadataKey] = keys(sessionId);
+    await this.#connect();
+    try {
+      await this.#client.eval(RESET_SCRIPT, 2, streamKey, metadataKey, tenantId);
+    } catch (error: unknown) {
+      mappedScriptError(error);
+    }
+  }
+
   async checkHealth(): Promise<void> {
     await this.#connect();
     const response = await this.#client.ping();
@@ -460,5 +483,13 @@ export class MemoryLiveSessionEventStore implements LiveSessionEventStore {
     for (const sequence of stream.events.keys()) {
       if (sequence <= throughSequence) stream.events.delete(sequence);
     }
+  }
+
+  async resetSession(tenantId: string, sessionId: string): Promise<void> {
+    const stream = this.#streams.get(sessionId);
+    if (stream !== undefined && stream.tenantId !== tenantId) {
+      throw new LiveSessionEventStoreError("tenant_conflict", "Live event tenant is invalid");
+    }
+    this.#streams.delete(sessionId);
   }
 }

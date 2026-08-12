@@ -431,6 +431,7 @@ export class SupervisorHostRuntime {
         : new DurableEventStore({
             database: this.#database,
             eventNotificationPublisher: eventNotifications,
+            ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
           });
       const groupedEventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
       const eventProjectionBarrier = this.#config.externalWorkerEventLog

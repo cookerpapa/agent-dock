@@ -161,6 +161,8 @@ do not define the policy of accounts created through public registration.
 | `AGENT_DOCK_CHECKPOINT_REGION` | `us-east-1` | S3 region used for Pi checkpoint requests. | Must match the selected object store. |
 | `AGENT_DOCK_WORKSPACE_KOPIA_BUCKET` | `agent-dock-workspace-kopia` | Kopia repository objects for durable Workspace checkpoints. | Changing an occupied repository requires an explicit migration and recovery test. |
 | `AGENT_DOCK_WORKER_EVENT_RETENTION_MS` | `86400000` | Kafka raw Worker-event retention in the single-host topic bootstrap. | Must exceed the one-hour Valkey live replay window. Recreate the topic to change an existing topic. |
+| `AGENT_DOCK_LIVE_EVENT_MAXMEMORY` | `320mb` | Dedicated Valkey live-read-model data limit inside the 512 MiB container. | Keep `noeviction`; saturation must backpressure projection instead of silently deleting user-visible events. Recreate Valkey. |
+| `AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS` | `true` | Verify and rebuild missing retained Valkey streams from Kafka before Event Gateway becomes ready. | Uses the direct notification database URL for a session advisory lock. Set `false` only for controlled manual maintenance. |
 | `AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS` | `60000` | Idle scan interval for the Valkey compactor. | Minimum 1000 ms. Recreate Event Retention. |
 | `AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE` | `100` | Maximum terminal Turns trimmed before the Worker yields. | Tune against Valkey and PostgreSQL control-row capacity. Recreate Event Retention. |
 

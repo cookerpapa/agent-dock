@@ -87,6 +87,9 @@ ADR numbers are stable historical identities, so gaps are intentional.
 - [ADR-0097](0097-shared-temporal-worker-capacity.md) removes Worker-private
   queues and makes the Cell queue plus Temporal Activity slots the sole Worker
   capacity boundary.
+- [ADR-0098](0098-self-healing-live-event-read-model.md) verifies Valkey's
+  retained read model at Event Gateway startup and serializes Kafka-backed
+  repair before readiness.
 
 [ADR-0061](0061-capacity-aware-temporal-worker-affinity.md) is retained as the
 superseded record of the removed private-queue affinity experiment.

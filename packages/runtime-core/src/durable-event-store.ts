@@ -23,6 +23,7 @@ import type {
   WorkerEventLogPosition,
   WorkerEventProjectionSink,
 } from "./worker-event-log.ts";
+import type { AgentDockMetrics } from "@agent-dock/observability";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -56,6 +57,7 @@ export type DurableEventStoreOptions = {
   idGenerator?: () => string;
   workerEventLog?: WorkerEventLogAppender;
   liveEventStore?: LiveSessionEventStore;
+  metrics?: AgentDockMetrics;
 };
 
 export type EventReplayWindow = {
@@ -218,6 +220,7 @@ export class DurableEventStore
   readonly #workerEventLog: WorkerEventLogAppender | undefined;
   readonly #externalWorkerEventLog: boolean;
   readonly #liveEventStore: LiveSessionEventStore | undefined;
+  readonly #metrics: AgentDockMetrics | undefined;
 
   constructor(options: DurableEventStoreOptions) {
     this.#database = options.database;
@@ -228,6 +231,7 @@ export class DurableEventStore
     this.#workerEventLog = options.workerEventLog;
     this.#externalWorkerEventLog = options.workerEventLog !== undefined;
     this.#liveEventStore = options.liveEventStore;
+    this.#metrics = options.metrics;
     if (this.#externalWorkerEventLog !== (this.#liveEventStore !== undefined)) {
       throw new TypeError(
         "External Worker event log and live event store must be configured together",
@@ -244,10 +248,32 @@ export class DurableEventStore
   }
 
   async ingestGroup(values: readonly unknown[]): Promise<readonly EventAckMessage[]> {
+    const boundary = this.#externalWorkerEventLog ? "kafka" : "postgresql";
+    const startedAt = performance.now();
+    let outcome = "success";
+    try {
+      return await this.#ingestGroup(values, boundary);
+    } catch (error: unknown) {
+      outcome = "failure";
+      throw error;
+    } finally {
+      this.#metrics?.eventDurabilityDuration
+        .labels(boundary, outcome)
+        .observe((performance.now() - startedAt) / 1_000);
+    }
+  }
+
+  async #ingestGroup(
+    values: readonly unknown[],
+    boundary: "kafka" | "postgresql",
+  ): Promise<readonly EventAckMessage[]> {
     if (values.length < 1) {
       throw new DurableEventStoreError("invalid_event", "Event publication group was empty");
     }
     const prepared = values.map((value) => this.#prepare(value));
+    this.#metrics?.eventDurabilityGroupSize
+      .labels(boundary)
+      .observe(prepared.reduce((total, publication) => total + publication.publications.length, 0));
     const now = validDate(this.#clock);
     const results = await this.#database.transaction().execute(async (transaction) => {
       const ingested = await this.#ingestPreparedGroupTransaction(transaction, prepared, now);
@@ -827,6 +853,30 @@ export class DurableEventStore
   }
 
   async project(envelope: WorkerEventLogEnvelope, position: WorkerEventLogPosition): Promise<void> {
+    const startedAt = performance.now();
+    let outcome = "success";
+    try {
+      await this.#project(envelope, position);
+      const occurredAt = new Date(envelope.messages.at(-1)!.payload.event.occurredAt);
+      if (Number.isFinite(occurredAt.valueOf())) {
+        this.#metrics?.eventProjectionLag.observe(
+          Math.max(0, Date.now() - occurredAt.valueOf()) / 1_000,
+        );
+      }
+    } catch (error: unknown) {
+      outcome = "failure";
+      throw error;
+    } finally {
+      this.#metrics?.eventProjectionDuration
+        .labels(outcome)
+        .observe((performance.now() - startedAt) / 1_000);
+    }
+  }
+
+  async #project(
+    envelope: WorkerEventLogEnvelope,
+    position: WorkerEventLogPosition,
+  ): Promise<void> {
     const first = envelope.messages[0];
     const last = envelope.messages.at(-1);
     if (envelope.schemaVersion !== 1 || first === undefined || last === undefined) {
@@ -854,6 +904,13 @@ export class DurableEventStore
     }
     const now = validDate(this.#clock);
     const result = await this.#database.transaction().execute(async (transaction) => {
+      // Startup repair takes the matching exclusive session lock through the
+      // direct PostgreSQL endpoint. Shared transaction locks let all normal
+      // projectors run concurrently while making reset/rebuild race-free even
+      // when an older Event Gateway replica is still serving.
+      await sql`select pg_advisory_xact_lock_shared(hashtext('agent-dock'), hashtext('live-event-repair-v1'))`.execute(
+        transaction,
+      );
       const consumed = await transaction
         .selectFrom("worker_event_projection_offsets")
         .select("last_offset")

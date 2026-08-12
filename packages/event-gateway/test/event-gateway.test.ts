@@ -151,6 +151,7 @@ describe("Event Gateway", () => {
       vi.stubEnv("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE", ingestToken);
       vi.stubEnv("AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE", liveEventStoreUrl);
       await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
+        autoRepairLiveEvents: true,
         liveEventStoreUrl: "rediss://valkey.example:6379",
         kafka: {
           brokers: ["kafka.example:9093"],
@@ -161,6 +162,14 @@ describe("Event Gateway", () => {
           },
         },
       });
+      vi.stubEnv("AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS", "false");
+      await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
+        autoRepairLiveEvents: false,
+      });
+      vi.stubEnv("AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS", "sometimes");
+      await expect(loadEventGatewayProductionConfig()).rejects.toThrow(
+        "AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS must be true or false",
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

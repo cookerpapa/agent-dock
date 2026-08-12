@@ -63,6 +63,12 @@ Control Plane and sends only that acknowledged prefix. PostgreSQL `NOTIFY` is a
 wake-up hint; reconnect reads Valkey live events plus PostgreSQL terminal
 events. The Gateway also prepares the complete terminal Turn projection, but
 only the Control Plane's fenced lifecycle transaction can commit it.
+Before starting the normal projector, each replica verifies PostgreSQL's
+still-retained live ranges against Valkey. Replicas serialize any repair with a
+session advisory lock on the direct PostgreSQL endpoint, rebuild missing
+streams from Kafka, and refuse readiness unless a second verification passes.
+Normal projection transactions take the matching shared lock, preventing a
+rolling-start repair from racing an older projector.
 
 ### Temporal
 
@@ -534,9 +540,11 @@ committed semantic projection and exceeds the live window, the compactor trims
 the Stream through that terminal sequence, then advances the Session's
 `replay_floor_seq`. An SSE cursor below that floor receives HTTP 410 and reloads
 the semantic conversation read model. Multiple compactor replicas coordinate
-through leased PostgreSQL jobs. Kafka retention exceeds this window and the
-Event Gateway image includes an operator rebuild command for a fresh Valkey
-instance; a missing sequence fails closed instead of returning partial output.
+through leased PostgreSQL jobs. Kafka retention exceeds this window. Event
+Gateway startup automatically detects and rebuilds missing retained streams
+from Kafka under a PostgreSQL advisory lock; the operator rebuild command is a
+maintenance fallback. A missing sequence fails closed instead of returning
+partial output.
 
 ## 9. Lease and fencing
 
@@ -676,6 +684,7 @@ acceptance is still required before claiming measured HA.
   and [ADR-0093: canonical conversations](adr/0093-kafka-valkey-live-events-and-canonical-conversations.md)
 - [ADR-0094: Cross-component time and retention budgets](adr/0094-cross-component-time-and-retention-budgets.md)
 - [ADR-0095: Sandbox Domains and a thin Tool Broker](adr/0095-sandbox-domains-and-cube-control-plane.md)
+- [ADR-0098: Self-healing live-event read model](adr/0098-self-healing-live-event-read-model.md)
 
 The [ADR index](adr/README.md) links the lower-level decisions behind these
 boundaries. Retired cutover designs remain in Git history, not as supported
