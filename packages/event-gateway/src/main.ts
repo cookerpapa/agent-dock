@@ -157,8 +157,12 @@ export async function startEventGateway(): Promise<void> {
 
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
-  startEventGateway().catch(() => {
-    process.stderr.write("AgentDock Event Gateway failed to start\n");
+  startEventGateway().catch((error: unknown) => {
+    const failure =
+      error instanceof Error
+        ? { name: error.name, message: error.message }
+        : { name: "UnknownError", message: "Unknown Event Gateway startup failure" };
+    process.stderr.write(`AgentDock Event Gateway failed to start ${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
   });
 }
