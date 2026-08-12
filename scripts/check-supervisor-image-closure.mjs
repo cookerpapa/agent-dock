@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +54,47 @@ for (const name of [...closure].sort()) {
   );
 }
 
+const dockerfileCandidates = [
+  resolve(repositoryRoot, "deploy", "cubesandbox", "Dockerfile.tool"),
+  resolve(repositoryRoot, "spikes", "pi-embedded-rehydrate", "Dockerfile"),
+  ...packageDirectories
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(packagesDirectory, entry.name, "Dockerfile")),
+];
+let verifiedCopySources = 0;
+let verifiedDockerfiles = 0;
+for (const dockerfilePath of dockerfileCandidates) {
+  try {
+    await access(dockerfilePath);
+  } catch {
+    continue;
+  }
+  verifiedDockerfiles += 1;
+  const content = await readFile(dockerfilePath, "utf8");
+  for (const [index, rawLine] of content.split("\n").entries()) {
+    const line = rawLine.trim();
+    if (!line.startsWith("COPY ") || line.includes("--from=") || line.endsWith("\\")) {
+      continue;
+    }
+    const tokens = line
+      .slice("COPY ".length)
+      .split(/\s+/u)
+      .filter((token) => !token.startsWith("--"));
+    assert(tokens.length >= 2, `${dockerfilePath}:${String(index + 1)} has an invalid COPY`);
+    for (const source of tokens.slice(0, -1)) {
+      assert(
+        !source.includes("*") && !source.includes("?") && !source.startsWith("["),
+        `${dockerfilePath}:${String(index + 1)} must use an explicit local COPY source`,
+      );
+      await assert.doesNotReject(
+        access(resolve(repositoryRoot, source)),
+        `${dockerfilePath}:${String(index + 1)} references missing COPY source ${source}`,
+      );
+      verifiedCopySources += 1;
+    }
+  }
+}
+
 process.stdout.write(
-  `supervisor_image_closure_passed workspaces=${String(closure.size)} root=${rootName}\n`,
+  `supervisor_image_closure_passed workspaces=${String(closure.size)} root=${rootName} dockerfiles=${String(verifiedDockerfiles)} copy_sources=${String(verifiedCopySources)}\n`,
 );

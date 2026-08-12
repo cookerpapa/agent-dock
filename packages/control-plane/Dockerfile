@@ -56,7 +56,7 @@ COPY packages/protocol/src packages/protocol/src
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/runtime-core/src packages/runtime-core/src
 COPY packages/tool-broker/package.json packages/tool-broker/package.json
-COPY packages/tool-broker/src/client.ts packages/tool-broker/src/client.ts
+COPY packages/tool-broker/src/tool-broker-client.ts packages/tool-broker/src/tool-broker-client.ts
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/sandbox-supervisor/src packages/sandbox-supervisor/src
 COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
