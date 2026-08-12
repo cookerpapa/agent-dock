@@ -11,6 +11,75 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL Tool Broker ownership", () => {
+  it("resolves a Workspace through its execution Cell without ambiguous columns", async () => {
+    const pglite = await PGlite.create();
+    const socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
+    await socket.start();
+    const database = createDatabase({
+      connectionString: `postgresql://postgres@${socket.getServerConn()}/postgres?sslmode=disable`,
+      maxConnections: 2,
+    });
+    resources.push(async () => pglite.close());
+    resources.push(async () => socket.stop());
+    resources.push(async () => database.destroy());
+    await runMigrations(database, "up");
+
+    const tenantId = "20000000-0000-4000-8000-000000000001";
+    const projectId = "20000000-0000-4000-8000-000000000002";
+    const workspaceId = "20000000-0000-4000-8000-000000000003";
+    await database.insertInto("tenants").values({ id: tenantId, slug: "reservation" }).execute();
+    await database
+      .insertInto("projects")
+      .values({ id: projectId, tenant_id: tenantId, name: "reservation" })
+      .execute();
+    await database
+      .insertInto("workspaces")
+      .values({
+        id: workspaceId,
+        tenant_id: tenantId,
+        project_id: projectId,
+        cell_id: "cell-0001",
+        object_snapshot_key: null,
+      })
+      .execute();
+
+    const repository = new PostgresSandboxActivationStateRepository({
+      database,
+      sandboxDomainId: "sandbox-domain-0001",
+      instanceId: "20000000-0000-4000-8000-000000000004",
+      ownerBaseUrl: "http://tool-broker-0:4300",
+    });
+    resources.push(async () => repository.close());
+    await repository.start();
+
+    await expect(
+      repository.reserve({
+        activationId: "20000000-0000-4000-8000-000000000005",
+        assignment: {
+          tenantId,
+          projectId,
+          workspaceId,
+          supervisorId: "supervisor-reservation",
+          bootId: "20000000-0000-4000-8000-000000000006",
+          sandboxId: "20000000-0000-4000-8000-000000000007",
+          commandId: "command-reservation",
+          sessionId: "session-reservation",
+          turnId: "turn-reservation",
+          attemptId: "20000000-0000-4000-8000-000000000008",
+          leaseId: "20000000-0000-4000-8000-000000000009",
+          fencingToken: 1,
+        },
+        capabilitySha256: "a".repeat(64),
+        turnContextSha256: "b".repeat(64),
+        attemptContextSha256: "c".repeat(64),
+        environmentSha256: "d".repeat(64),
+      }),
+    ).rejects.toMatchObject({
+      code: "state_conflict",
+      message: "Tenant Sandbox policy is unavailable",
+    });
+  });
+
   it("fences an expired replica before a surviving owner stays Ready", async () => {
     const pglite = await PGlite.create();
     const socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });

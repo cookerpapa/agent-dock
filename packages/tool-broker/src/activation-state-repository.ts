@@ -205,8 +205,8 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         .selectFrom("workspaces")
         .innerJoin("execution_cells", "execution_cells.id", "workspaces.cell_id")
         .select("execution_cells.sandbox_domain_id as sandbox_domain_id")
-        .where("tenant_id", "=", input.assignment.tenantId)
-        .where("id", "=", input.assignment.workspaceId)
+        .where("workspaces.tenant_id", "=", input.assignment.tenantId)
+        .where("workspaces.id", "=", input.assignment.workspaceId)
         .forUpdate()
         .executeTakeFirst();
       if (workspace?.sandbox_domain_id !== this.#sandboxDomainId) {
