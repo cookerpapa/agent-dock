@@ -20,7 +20,7 @@ import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-
 import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
 import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
-import type { AgentDockMetrics } from "@agent-dock/observability";
+import { operationalLog, type AgentDockMetrics } from "@agent-dock/observability";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker";
 import {
@@ -451,6 +451,16 @@ export class SupervisorHostRuntime {
         supervisor: localSupervisor,
         leaseCoordinator,
         eventIngestor: groupedEventIngestor,
+        onUnexpectedError: (error) =>
+          operationalLog({
+            service: "agent-dock-supervisor-host",
+            level: "error",
+            event: "supervisor.execution-unexpected-failure",
+            attributes: {
+              name: error instanceof Error ? error.name : "UnknownError",
+              message: error instanceof Error ? error.message : "Unknown execution failure",
+            },
+          }),
       });
       const temporalWorker = this.#temporalWorkerFactory({
         database: this.#database,

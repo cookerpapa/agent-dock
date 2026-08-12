@@ -42,6 +42,7 @@ export type LocalSupervisorExecutionBackendOptions = {
   clock?: () => Date;
   idGenerator?: () => string;
   heartbeatIntervalMs?: number;
+  onUnexpectedError?: (error: unknown) => void;
 };
 
 type TrackedLeaseExecution = {
@@ -235,6 +236,7 @@ export class LocalSupervisorExecutionBackend
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
   readonly #heartbeatIntervalMs: number;
+  readonly #onUnexpectedError: ((error: unknown) => void) | undefined;
   readonly #trackedExecutions = new Map<string, TrackedLeaseExecution>();
   #heartbeatAbort: AbortController | undefined;
   #heartbeatTask: Promise<void> | undefined;
@@ -251,6 +253,7 @@ export class LocalSupervisorExecutionBackend
       options.heartbeatIntervalMs ?? this.#leaseCoordinator.heartbeatIntervalMs,
       "heartbeatIntervalMs",
     );
+    this.#onUnexpectedError = options.onUnexpectedError;
   }
 
   async execute(
@@ -392,7 +395,15 @@ export class LocalSupervisorExecutionBackend
           });
         }
       }
-      throw normalizeBackendError(error);
+      const normalized = normalizeBackendError(error);
+      if (normalized.code === "local_supervisor_error") {
+        try {
+          this.#onUnexpectedError?.(error);
+        } catch {
+          // Diagnostics must never replace the original execution failure.
+        }
+      }
+      throw normalized;
     }
   }
 
