@@ -65,17 +65,6 @@ const allowsStaleCubeTemplate =
 await access(environmentFile);
 if (composeOverride !== undefined) await access(composeOverride);
 
-const imageRevision =
-  process.env.AGENT_DOCK_IMAGE_REVISION ??
-  execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
-  throw new Error("AGENT_DOCK_IMAGE_REVISION must be a full lowercase Git commit");
-}
-
 const applicationSecretNames = [
   "api-token",
   "database-url",
@@ -198,10 +187,22 @@ const invalidTemplateEvidence =
   template?.formatVersion !== 1 ||
   template?.cubeCommit !== cluster?.cubeCommit ||
   !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "") ||
+  !/^[a-f0-9]{40}$/.test(template?.imageRevision ?? "") ||
   !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
   !/^[a-f0-9]{64}$/.test(template?.templateSpecSha256 ?? "");
 if (!allowsStaleCubeTemplate && invalidTemplateEvidence) {
   throw new Error("CubeSandbox READY template evidence is invalid");
+}
+const repositoryRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: repositoryRoot,
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "ignore"],
+}).trim();
+const imageRevision =
+  process.env.AGENT_DOCK_IMAGE_REVISION ??
+  (command === "build" || invalidTemplateEvidence ? repositoryRevision : template.imageRevision);
+if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
+  throw new Error("AGENT_DOCK_IMAGE_REVISION must be a full lowercase Git commit");
 }
 if (
   !allowsStaleCubeTemplate &&
