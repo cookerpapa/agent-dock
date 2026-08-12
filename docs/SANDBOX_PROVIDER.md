@@ -132,3 +132,12 @@ Automated and live checks cover:
 
 Historical runtime implementations are retained only in immutable ADR/research
 history, not as executable providers.
+
+## Template lifecycle
+
+Tool templates are immutable and tied to a committed AgentDock revision. The
+registration path keeps the selected template plus a bounded READY rollback
+window and asks CubeMaster to delete only superseded AgentDock templates.
+PENDING builds and templates outside the AgentDock registry namespace are not
+eligible. This lifecycle policy is separate from Workspace checkpoints: pruning
+a reproducible Tool image cannot delete a tenant's Pi Session or Workspace.

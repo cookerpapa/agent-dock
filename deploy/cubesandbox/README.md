@@ -77,6 +77,9 @@ sudo --preserve-env=PATH \
 The installer:
 
 - verifies `/dev/kvm`, K3s, Helm and the exact upstream checkout;
+- creates a 64 GiB loop-backed XFS Cubelet data filesystem on a fresh local
+  installation and safely grows an older, smaller AgentDock loopback image in
+  place after verifying its file, loop device, mount point and filesystem;
 - rejects an unauthenticated CubeAPI;
 - installs the pinned chart and private template registry;
 - rolls Cube components after a node-network change;
@@ -132,6 +135,15 @@ The registration command:
 5. waits for CubeMaster to report the template `READY`;
 6. records the revision, image digest, template ID and spec SHA-256 in the
    private `runtime/cubesandbox/template.json`.
+
+Before the build and after registration, the command applies an AgentDock-only
+template retention policy. It preserves the selected template and the newest
+READY rollback templates, ignores templates owned by other products and never
+deletes an in-progress build. The default is three READY templates and can be
+changed to a bounded value from 2 through 10 with
+`AGENT_DOCK_CUBE_TEMPLATE_RETENTION`. Retention failure is reported without
+invalidating a successfully registered immutable template; operators should
+resolve the reported Cube control-plane error before storage pressure grows.
 
 The image contains Node 24, Java 17, Python 3.11 and Git 2. It replaces Cube's
 inherited entrypoint so root `envd` is not started; otherwise that daemon would

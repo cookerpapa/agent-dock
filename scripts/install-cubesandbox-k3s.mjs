@@ -73,6 +73,10 @@ const posixVolumePluginSource = resolve(
 );
 const posixSharedRoot = resolve(runtimeDirectory, "state/cube-shared");
 const posixVolumeRoot = resolve(posixSharedRoot, "volume");
+const cubeletDataPath = "/data/cubelet";
+const cubeletLoopbackImagePath = "/data/cubelet-xfs.img";
+const cubeletLoopbackSize = "64G";
+const cubeletLoopbackBytes = 64 * 1_024 * 1_024 * 1_024;
 
 if (process.getuid?.() !== 0) {
   throw new Error(
@@ -750,6 +754,59 @@ async function ensureBpfFilesystem() {
   await rename(temporaryPath, k3sWslPreparePath);
 }
 
+async function ensureCubeletLoopbackCapacity() {
+  let metadata;
+  try {
+    metadata = await lstat(cubeletLoopbackImagePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${cubeletLoopbackImagePath} must be a regular file`);
+  }
+  if (metadata.size < cubeletLoopbackBytes) {
+    await run("truncate", ["--size", cubeletLoopbackSize, cubeletLoopbackImagePath]);
+  }
+
+  let mount;
+  try {
+    mount = await capture("findmnt", [
+      "--noheadings",
+      "--output",
+      "SOURCE,FSTYPE",
+      "--mountpoint",
+      cubeletDataPath,
+    ]);
+  } catch {
+    return;
+  }
+  const [source, filesystem, ...extra] = mount.split(/\s+/u);
+  if (extra.length > 0 || !/^\/dev\/loop[0-9]+$/.test(source ?? "") || filesystem !== "xfs") {
+    throw new Error(`Cubelet data mount is not a loop-backed XFS filesystem: ${mount}`);
+  }
+  const associated = (
+    await capture("losetup", [
+      "--associated",
+      cubeletLoopbackImagePath,
+      "--noheadings",
+      "--output",
+      "NAME",
+    ])
+  )
+    .split(/\s+/u)
+    .filter(Boolean);
+  if (!associated.includes(source)) {
+    throw new Error(`${source} is not backed by ${cubeletLoopbackImagePath}`);
+  }
+  await run("losetup", ["--set-capacity", source]);
+  await run("xfs_growfs", [cubeletDataPath]);
+  const verified = await lstat(cubeletLoopbackImagePath);
+  if (verified.size < cubeletLoopbackBytes) {
+    throw new Error(`Cubelet loopback image did not reach at least ${cubeletLoopbackSize}`);
+  }
+}
+
 async function ensureWslK3sServiceRoute() {
   const release = await readFile("/proc/sys/kernel/osrelease", "utf8");
   if (!release.toLowerCase().includes("microsoft-standard-wsl")) return;
@@ -959,12 +1016,16 @@ await capture("test", ["-r", secretValuesPath]);
 await capture("test", ["-r", cubeEgressConfigTokenPath]);
 await capture("test", ["-c", "/dev/kvm"]);
 await capture("which", ["mkfs.xfs"]);
+await capture("which", ["xfs_growfs"]);
+await capture("which", ["losetup"]);
+await capture("which", ["truncate"]);
 await capture("which", ["helm"]);
 await ensureHostInotifyCapacity();
 const nodeNetwork = await ensureStableWslNodeAddress();
 await ensureSharedRootMount();
 await ensureBpfFilesystem();
 await ensureWslK3sServiceRoute();
+await ensureCubeletLoopbackCapacity();
 
 const nodeName = assertSingleNode(await capture("kubectl", ["get", "nodes", "-o", "json"]));
 await run("kubectl", [
@@ -1078,6 +1139,7 @@ await run("helm", [
   "--timeout",
   "90m",
 ]);
+await ensureCubeletLoopbackCapacity();
 await installPosixVolumePlugin();
 if (nodeNetwork.changed) {
   await restartCubeWorkloadsAfterNetworkChange();

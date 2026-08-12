@@ -189,7 +189,12 @@ npm run cubesandbox:template-check
 npm run cubesandbox:live-check
 ```
 
-The registered template revision must match the Tool Broker environment.
+The registered template revision must match the Tool Broker environment. The
+local profile provisions a 64 GiB loop-backed XFS Cubelet data filesystem;
+rerunning the Cube installer validates and grows an older AgentDock loopback
+image without reformatting it. Template registration retains the current and
+newest rollback templates, so immutable image releases do not accumulate until
+the Cube storage volume is exhausted.
 The Manager fails closed if guest runtime/toolchain evidence does not match.
 
 Cube guests:

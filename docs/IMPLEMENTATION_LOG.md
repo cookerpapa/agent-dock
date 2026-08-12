@@ -7,6 +7,18 @@
 这是一份方便复习的简短记录，不写成流水账。每次只记：目标、实现、原因、
 验证结果和下一步。
 
+## 2026-08-12 — Cube 模板生命周期与数据容量
+
+- 定位生产模板注册失败的根因是 Cubelet XFS 满盘：101 个旧 AgentDock Tool
+  模板占满原 25 GiB 本地数据镜像。确认无 Active Sandbox 后，通过 CubeMaster
+  官方删除协议清理旧模板，仅保留当前版本与两份回滚模板，未触碰租户
+  Workspace 或 Pi 数据。
+- 本地 Cube 验证环境扩容至 64 GiB；安装器会在校验普通文件、Loop Device、
+  挂载点和 XFS 文件系统后安全扩展旧 AgentDock 数据镜像，不重新格式化已有
+  数据。
+- 模板注册在构建前和注册后执行 AgentDock 专属保留策略：排除外部模板和构建
+  中模板，保护当前不可变版本，并明确报告 Cube 延迟清理错误。
+
 ## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
 
 - 将 execution Cell 收缩为 Temporal Task Queue 与 Pi Worker 容量分片；新增

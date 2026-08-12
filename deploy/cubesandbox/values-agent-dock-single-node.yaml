@@ -70,4 +70,4 @@ bootstrap:
       loopback:
         enabled: true
         imagePath: /data/cubelet-xfs.img
-        size: 25G
+        size: 64G

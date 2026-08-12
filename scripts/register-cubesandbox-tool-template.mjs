@@ -7,6 +7,11 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
+import {
+  parseCubeTemplateRetention,
+  selectCubeTemplatesForDeletion,
+} from "./cubesandbox-template-retention.mjs";
+
 const CUBE_COMMIT = "8721dd151971ce3c2966482bbd32904ad98f378e";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeDirectory = resolve(
@@ -35,11 +40,20 @@ const environment = {
   PATH: `${nodeDirectory}:${process.env.PATH ?? ""}`,
 };
 function directEnvironment() {
+  const {
+    HTTP_PROXY: _httpProxy,
+    HTTPS_PROXY: _httpsProxy,
+    ALL_PROXY: _allProxy,
+    http_proxy: _lowerHttpProxy,
+    https_proxy: _lowerHttpsProxy,
+    all_proxy: _lowerAllProxy,
+    ...withoutProxy
+  } = environment;
   const directNoProxy = [directCubeMasterAddress, directRegistryAddress, "127.0.0.1", "localhost"]
     .filter((value) => value !== undefined)
     .join(",");
   return {
-    ...environment,
+    ...withoutProxy,
     NO_PROXY: [directNoProxy, environment.NO_PROXY].filter(Boolean).join(","),
     no_proxy: [directNoProxy, environment.no_proxy].filter(Boolean).join(","),
   };
@@ -313,6 +327,48 @@ async function retryReadOnlyCubeMasterCli(args, timeout, label) {
   );
 }
 
+async function currentTemplateId() {
+  let current;
+  try {
+    current = parseJson(
+      (await readPrivate(templatePath, 64 * 1_024, "Cube template evidence")).value,
+      "Cube template evidence",
+    );
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+  if (current?.formatVersion !== 1 || !/^tpl-[a-z0-9]{24}$/.test(current?.templateId ?? "")) {
+    throw new Error("Existing Cube template evidence is invalid");
+  }
+  return current.templateId;
+}
+
+async function pruneCubeTemplates(inventory, protectedTemplateIds, phase) {
+  const retention = parseCubeTemplateRetention(process.env.AGENT_DOCK_CUBE_TEMPLATE_RETENTION);
+  const selected = selectCubeTemplatesForDeletion({
+    inventory: inventory?.data,
+    protectedTemplateIds,
+    retention,
+  });
+  let deleted = 0;
+  let deferred = 0;
+  for (const template of selected) {
+    try {
+      await cubeMasterCli(["tpl", "delete", template.template_id], 120_000);
+      deleted += 1;
+    } catch (error) {
+      deferred += 1;
+      process.stderr.write(
+        `Cube template retention deferred ${template.template_id} during ${phase}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
+  process.stdout.write(
+    `${JSON.stringify({ cubeTemplateRetention: phase, retention, selected: selected.length, deleted, deferred })}\n`,
+  );
+}
+
 const revision = await repositoryHead();
 const dirty = await capture(
   "git",
@@ -411,6 +467,22 @@ if (!directManagement) {
     "--timeout=120s",
   ]);
 }
+
+const previousTemplateId = await currentTemplateId();
+const preBuildInventory = parseJson(
+  await retryReadOnlyCubeMasterCli(
+    ["tpl", "list", "--json"],
+    60_000,
+    "Cube template pre-build inventory",
+  ),
+  "Cube template pre-build inventory",
+);
+assertSuccessfulCubeResponse(preBuildInventory, "Cube template pre-build inventory");
+await pruneCubeTemplates(
+  preBuildInventory,
+  previousTemplateId === undefined ? [] : [previousTemplateId],
+  "before-build",
+);
 
 const imageTag = `${registryRepository}:${revision}`;
 await run("docker", [
@@ -580,6 +652,7 @@ const evidence = {
   registeredAt: new Date().toISOString(),
 };
 await writePrivate(templatePath, `${JSON.stringify(evidence, null, 2)}\n`, credentialOwner);
+await pruneCubeTemplates(listed, [templateId], "after-registration");
 process.stdout.write(
   `${JSON.stringify({
     registered: true,

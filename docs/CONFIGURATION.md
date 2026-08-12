@@ -121,6 +121,7 @@ npm run production:up
 | `AGENT_DOCK_HTTP_PORT` | `8080` | Host port for the Web product. | Recreate Web ingress. |
 | `AGENT_DOCK_IMAGE_VERSION` | `production` | Local image tag used by the production topology. | Rebuild/recreate services. |
 | `AGENT_DOCK_PI_WORKER_DEPLOYMENT` | `compose` | Selects `compose` or `kubernetes` Pi Workers. | Run `production:deploy`; old and new Worker modes are reconciled. |
+| `AGENT_DOCK_CUBE_TEMPLATE_RETENTION` | `3` | Number of READY AgentDock Cube Tool templates retained for the current release and bounded rollback. Accepted range is 2 through 10. | Used by template registration during `production:deploy`; does not delete another product's templates or an in-progress build. |
 | `AGENT_DOCK_SUPERVISOR_CAPACITY` | `1` | Maximum simultaneous active Runs admitted by each Compose Pi Worker process. | Recreate Pi Workers and Control Plane. |
 | `AGENT_DOCK_WEB_SESSION_COOKIE_SECURE` | `false` | Marks browser session cookies Secure. Set to `true` when the browser reaches AgentDock through HTTPS. | Recreate Control Plane. |
 | `AGENT_DOCK_WEB_SESSION_TTL_MS` | `2592000000` | Browser login lifetime in milliseconds; accepted range is one minute through 365 days. | Recreate Control Plane. |
