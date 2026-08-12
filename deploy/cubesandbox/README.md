@@ -95,6 +95,12 @@ PATH entry that forwards to Windows `kubectl.exe` cannot silently select a
 different client or credential store. A native, pinned alternative can be
 supplied with `AGENT_DOCK_KUBECTL_BIN`.
 
+The egress gateway starts fail-closed when the AgentDock Control Plane is not
+yet available: liveness succeeds, readiness and all proxy traffic remain
+disabled, and the configuration poller keeps retrying. This breaks the fresh
+installation dependency cycle without granting temporary unrestricted egress;
+readiness changes only after an authenticated configuration revision is read.
+
 Do not bind Flannel to WSL's loopback device. Its 65536-byte MTU advertises an
 unusable jumbo MSS and black-holes ordinary CubeProxy responses once packets
 exceed the real path MTU.

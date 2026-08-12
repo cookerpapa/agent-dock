@@ -20,6 +20,9 @@
   中模板，保护当前不可变版本，并明确报告 Cube 延迟清理错误。
 - Cube 安装器不再从 WSL PATH 误选 Windows `kubectl.exe`；默认固定使用 Linux
   原生 `k3s kubectl`，避免客户端证书和文件路径落入另一套操作系统语义。
+- 修复 fresh install 的启动环：Cube Egress Gateway 在 Control Plane 尚未启动时
+  保持 Live、Not Ready 和拒绝代理流量，并持续拉取认证配置；安装器只等待其
+  进程进入 Running，产品启动后再自然转为 Ready。
 
 ## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
 

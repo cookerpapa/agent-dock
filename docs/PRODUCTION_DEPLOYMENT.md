@@ -205,6 +205,11 @@ Cube guests:
 - cannot reach private, metadata or platform addresses;
 - are bounded by the fixed resource policy.
 
+During a fresh install, the Cube egress gateway can start before the Control
+Plane. It remains live but fail-closed and unready until it has fetched an
+authenticated configuration revision; the installer never enables temporary
+open egress to resolve this ordering dependency.
+
 ## Workspace persistence
 
 The active guest mounts its Session-bound Workspace volume. The trusted Data

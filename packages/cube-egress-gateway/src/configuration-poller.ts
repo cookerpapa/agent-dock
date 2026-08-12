@@ -26,7 +26,6 @@ export class CubeEgressConfigurationPoller {
 
   async start(): Promise<void> {
     if (this.#loop !== undefined) throw new Error("Cube egress configuration poller started twice");
-    await this.#refresh();
     this.#loop = this.#run();
   }
 
@@ -37,11 +36,11 @@ export class CubeEgressConfigurationPoller {
 
   async #run(): Promise<void> {
     while (!this.#abort.signal.aborted) {
+      await this.#refresh().catch(() => undefined);
+      if (this.#abort.signal.aborted) break;
       await delay(this.#pollIntervalMs, undefined, { signal: this.#abort.signal }).catch(
         () => undefined,
       );
-      if (this.#abort.signal.aborted) break;
-      await this.#refresh().catch(() => undefined);
     }
   }
 
@@ -49,7 +48,7 @@ export class CubeEgressConfigurationPoller {
     const response = await fetch(this.#controlPlaneUrl, {
       method: "GET",
       headers: { "x-agent-dock-internal-token": this.#serviceToken },
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.any([this.#abort.signal, AbortSignal.timeout(5_000)]),
     });
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);

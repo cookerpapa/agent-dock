@@ -69,6 +69,19 @@ async function throughGateway(
 }
 
 describe("Cube egress gateway", () => {
+  it("stays live but unready before its first durable configuration", async () => {
+    const gateway = createCubeEgressGateway({ poller: { current: undefined } });
+    const gatewayPort = await listen(gateway);
+    await expect(throughGateway(gatewayPort, "/health/live")).resolves.toMatchObject({
+      status: 200,
+      body: '{"status":"ok","configured":false}\n',
+    });
+    await expect(throughGateway(gatewayPort, "/health/ready")).resolves.toMatchObject({
+      status: 503,
+      body: '{"status":"not_ready","configured":false}\n',
+    });
+  });
+
   it("hot-switches new requests without restarting and keeps DNS resolution out of the proxy", async () => {
     const firstPort = await upstream("first");
     const secondPort = await upstream("second");

@@ -120,12 +120,15 @@ export function createCubeEgressGateway(options: {
         request.method === "GET" &&
         (request.url === "/health/live" || request.url === "/health/ready")
       ) {
-        const ready = options.poller.current !== undefined;
+        const live = request.url === "/health/live";
+        const ready = live || options.poller.current !== undefined;
         response.writeHead(ready ? 200 : 503, {
           "content-type": "application/json",
           "cache-control": "no-store",
         });
-        response.end(`${JSON.stringify({ status: ready ? "ok" : "not_ready" })}\n`);
+        response.end(
+          `${JSON.stringify({ status: ready ? "ok" : "not_ready", configured: options.poller.current !== undefined })}\n`,
+        );
         return;
       }
       const configuration = currentEnabled(options.poller);

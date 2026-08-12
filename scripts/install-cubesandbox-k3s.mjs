@@ -137,6 +137,27 @@ function runKubectl(args, options) {
   return run(kubectlCommand, [...kubectlPrefix, ...args], options);
 }
 
+async function waitForRunningPod(labelSelector, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pods = JSON.parse(
+      await captureKubectl([
+        "-n",
+        "cube-system",
+        "get",
+        "pods",
+        "--selector",
+        labelSelector,
+        "-o",
+        "json",
+      ]),
+    )?.items;
+    if (Array.isArray(pods) && pods.some((pod) => pod?.status?.phase === "Running")) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error(`Kubernetes Pod did not enter Running for ${labelSelector}`);
+}
+
 function canonicalImageReference(image) {
   const [name, digest] = image.split("@", 2);
   const segments = name.split("/");
@@ -1122,18 +1143,19 @@ await runKubectl([
   "-n",
   "cube-system",
   "rollout",
-  "status",
+  "restart",
   "deployment/agent-dock-cube-api-authorizer",
-  "--timeout=180s",
+  "deployment/agent-dock-cube-egress-gateway",
 ]);
 await runKubectl([
   "-n",
   "cube-system",
   "rollout",
   "status",
-  "deployment/agent-dock-cube-egress-gateway",
+  "deployment/agent-dock-cube-api-authorizer",
   "--timeout=180s",
 ]);
+await waitForRunningPod("app.kubernetes.io/name=agent-dock-cube-egress-gateway", 180_000);
 
 await run("helm", [
   "upgrade",
