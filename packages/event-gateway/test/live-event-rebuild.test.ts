@@ -6,7 +6,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { findMissingLiveEventSessions } from "../src/live-event-rebuild.ts";
+import {
+  findMissingLiveEventSessions,
+  retainedKafkaPartitionEnds,
+} from "../src/live-event-rebuild.ts";
 
 const IDS = {
   tenant: "81000000-0000-4000-8000-000000000001",
@@ -168,6 +171,16 @@ afterAll(async () => {
 });
 
 describe("live-event repair detection", () => {
+  it("does not wait for partitions whose retained Kafka range is empty", () => {
+    expect(
+      retainedKafkaPartitionEnds([
+        { partition: 0, low: "0", offset: "0" },
+        { partition: 1, low: "126", offset: "126" },
+        { partition: 2, low: "30", offset: "34" },
+      ]),
+    ).toEqual(new Map([[2, 34n]]));
+  });
+
   it("finds a missing retained range and accepts its exact materialization", async () => {
     const liveEvents = new MemoryLiveSessionEventStore();
     await expect(findMissingLiveEventSessions(database, liveEvents)).resolves.toEqual([

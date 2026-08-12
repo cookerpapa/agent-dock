@@ -40,6 +40,29 @@ type MissingLiveSession = Readonly<{
   liveThrough: number;
 }>;
 
+type KafkaTopicOffset = Readonly<{
+  partition: number;
+  offset: string;
+  low: string;
+}>;
+
+/**
+ * Returns the exclusive high watermark only for partitions that still retain
+ * at least one record. Kafka may report a non-zero high watermark after every
+ * record in a partition has expired (`low === high`). Waiting for an
+ * `eachMessage` callback in that case would block until the rebuild timeout.
+ */
+export function retainedKafkaPartitionEnds(
+  offsets: readonly KafkaTopicOffset[],
+): ReadonlyMap<number, bigint> {
+  return new Map(
+    offsets
+      .map((offset) => [offset.partition, BigInt(offset.low), BigInt(offset.offset)] as const)
+      .filter(([, low, high]) => high > low)
+      .map(([partition, _low, high]) => [partition, high] as const),
+  );
+}
+
 function safeSequence(value: string | number | bigint, description: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
@@ -168,11 +191,7 @@ export async function rebuildLiveEventsFromKafka(
   try {
     await Promise.all([admin.connect(), options.liveEvents.checkHealth?.()]);
     const topicOffsets = await admin.fetchTopicOffsets(options.kafka.topic);
-    const remaining = new Map(
-      topicOffsets
-        .map((offset) => [offset.partition, BigInt(offset.offset)] as const)
-        .filter(([, offset]) => offset > 0n),
-    );
+    const remaining = new Map(retainedKafkaPartitionEnds(topicOffsets));
     if (remaining.size === 0) return { rebuilt: true, envelopes: 0, events: 0 };
 
     let resolveComplete!: () => void;
