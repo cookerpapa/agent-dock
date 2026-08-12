@@ -7,6 +7,7 @@ import {
   type DurableEventLog,
 } from "@agent-dock/runtime-core/durable-event-store";
 import { WORKER_EVENT_INGEST_PATH } from "@agent-dock/runtime-core/http-durable-event-ingestor";
+import type { LiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
 import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
 import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
 import { SessionEventStream } from "@agent-dock/runtime-core/session-event-stream";
@@ -20,6 +21,7 @@ import { sql, type Kysely } from "kysely";
 import { createHash, timingSafeEqual } from "node:crypto";
 
 const SESSION_EVENT_PATH = "/v1/sessions/:sessionId/events";
+const LIVE_TURN_SNAPSHOT_PATH = "/v1/sessions/:sessionId/live-turn-snapshot";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type EventGatewayOptions = {
@@ -35,6 +37,7 @@ export type EventGatewayOptions = {
   workerEventIngestor?: DurableEventGroupIngestor;
   workerEventIngestToken?: string;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
+  liveTurnSnapshotSource?: LiveTurnSnapshotSource;
 };
 
 function bearerToken(value: string | undefined): string | undefined {
@@ -120,6 +123,54 @@ export class EventGateway {
       }
       await reply.code(ready ? 200 : 503).send({ status: ready ? "ready" : "not_ready" });
     });
+    const liveTurnSnapshotSource = options.liveTurnSnapshotSource;
+    if (liveTurnSnapshotSource !== undefined) {
+      this.application.get(LIVE_TURN_SNAPSHOT_PATH, async (request, reply) => {
+        let identity;
+        try {
+          identity = await authenticate(
+            request,
+            options.apiAuthenticator,
+            options.webSessionAuthenticator,
+          );
+        } catch {
+          await sendError(
+            reply,
+            503,
+            "authentication_unavailable",
+            "The AgentDock identity service is temporarily unavailable",
+          );
+          return;
+        }
+        if (identity === undefined) {
+          reply.header("www-authenticate", "Bearer");
+          await sendError(
+            reply,
+            401,
+            "authentication_required",
+            "A valid AgentDock login session or API credential is required",
+          );
+          return;
+        }
+        const sessionId = parseSessionId((request.params as { sessionId?: unknown }).sessionId);
+        if (sessionId === undefined) {
+          await sendError(reply, 400, "invalid_request", "The Session identity is invalid");
+          return;
+        }
+        try {
+          await reply
+            .code(200)
+            .send(await liveTurnSnapshotSource.read(identity.tenantId, sessionId));
+        } catch {
+          await sendError(
+            reply,
+            503,
+            "live_turn_snapshot_unavailable",
+            "The live Turn snapshot is unavailable",
+          );
+        }
+      });
+    }
     if (options.workerEventIngestor !== undefined && options.workerEventIngestToken !== undefined) {
       const expectedToken = serviceTokenDigest(options.workerEventIngestToken);
       const isAuthorizedWorker = (request: FastifyRequest): boolean => {

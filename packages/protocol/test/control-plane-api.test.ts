@@ -23,6 +23,7 @@ import {
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
+  parseLiveTurnSnapshotResource,
   parseModelConfigurationResource,
   parseReplaceModelGovernanceRequest,
   parseProjectResource,
@@ -50,6 +51,36 @@ const ENVIRONMENT_SNAPSHOT = {
 } as const;
 
 describe("control-plane public API schemas", () => {
+  it("validates an active Turn catch-up snapshot", () => {
+    expect(
+      parseLiveTurnSnapshotResource({
+        sessionId: "30000000-0000-4000-8000-000000000001",
+        replayAfterSequence: 2,
+        turn: {
+          turnId: "50000000-0000-4000-8000-000000000001",
+          transcript: {
+            schemaVersion: 1,
+            throughSequence: 2,
+            items: [
+              {
+                kind: "text",
+                text: "still running",
+                firstSequence: 1,
+                lastSequence: 2,
+              },
+            ],
+            startedSequence: null,
+            terminalSequence: null,
+            stopReason: null,
+            failure: null,
+            cancellation: null,
+            workspacePatch: null,
+          },
+        },
+      }),
+    ).toMatchObject({ replayAfterSequence: 2, turn: { transcript: { throughSequence: 2 } } });
+  });
+
   it("validates bounded candidate races and their deterministic acceptance projection", () => {
     const request = {
       baseWorkspaceVersionId: UUID,

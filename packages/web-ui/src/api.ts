@@ -6,6 +6,7 @@ import {
   parseArchiveSessionRequest,
   parseConversationDetailResource,
   parseConversationListResource,
+  parseLiveTurnSnapshotResource,
   parseControlPlaneApiError,
   parseModelConfigurationResource,
   parseCubeProxyConfigurationResource,
@@ -24,6 +25,7 @@ import {
   type ConversationDetailResource,
   type AuthSessionResource,
   type ConversationListResource,
+  type LiveTurnSnapshotResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
   type TurnSteerResource,
@@ -305,6 +307,17 @@ export class AgentDockApi {
       await request(
         this.#fetch,
         `/v1/conversations/${encodeURIComponent(sessionId)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async getLiveTurnSnapshot(sessionId: string): Promise<LiveTurnSnapshotResource> {
+    return parseLiveTurnSnapshotResource(
+      await request(
+        this.#fetch,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/live-turn-snapshot`,
         { method: "GET" },
         this.#authorizationToken,
       ),

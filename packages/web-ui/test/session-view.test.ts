@@ -163,6 +163,116 @@ describe("session transcript reducer", () => {
     ]);
   });
 
+  it("hydrates an active durable snapshot before following later SSE events", () => {
+    const conversation: ConversationDetailResource = {
+      project,
+      session: {
+        ...session,
+        state: "running",
+        updatedAt: CREATED_AT,
+        lastActiveAt: CREATED_AT,
+      },
+      turns: [
+        {
+          turnId: TURN_ID,
+          runId: accepted.runId,
+          commandId: accepted.commandId,
+          mailboxPosition: 1,
+          prompt: "Long-running repair",
+          state: "running",
+          projection: "canonical",
+          acceptedAt: CREATED_AT,
+        },
+      ],
+      historyTruncated: false,
+      replayAfterSequence: 6,
+    };
+    let state = sessionViewReducer(createInitialSessionView(), {
+      type: "conversation.loaded",
+      conversation,
+      liveSnapshot: {
+        sessionId: SESSION_ID,
+        replayAfterSequence: 9,
+        turn: {
+          turnId: TURN_ID,
+          transcript: {
+            schemaVersion: 1,
+            throughSequence: 9,
+            items: [
+              {
+                kind: "text",
+                text: "Already durable.",
+                firstSequence: 7,
+                lastSequence: 9,
+              },
+            ],
+            startedSequence: null,
+            terminalSequence: null,
+            stopReason: null,
+            failure: null,
+            cancellation: null,
+            workspacePatch: null,
+          },
+        },
+      },
+    });
+    expect(state).toMatchObject({
+      lastSequence: 9,
+      turns: [{ status: "running", items: [{ text: "Already durable." }] }],
+    });
+    state = sessionViewReducer(state, {
+      type: "stream.event",
+      event: envelope(10, { type: "assistant.text.delta", payload: { text: " Next." } }),
+    });
+    expect(state.turns[0]?.items).toEqual([
+      expect.objectContaining({ text: "Already durable. Next.", lastSequence: 10 }),
+    ]);
+  });
+
+  it("keeps a Turn accepted between the canonical and live snapshot reads", () => {
+    const liveTurnId = "20000000-0000-4000-8000-000000000009";
+    const state = sessionViewReducer(createInitialSessionView(), {
+      type: "conversation.loaded",
+      conversation: {
+        project,
+        session: {
+          ...session,
+          state: "running",
+          updatedAt: CREATED_AT,
+          lastActiveAt: CREATED_AT,
+        },
+        turns: [],
+        historyTruncated: false,
+        replayAfterSequence: 6,
+      },
+      liveSnapshot: {
+        sessionId: SESSION_ID,
+        replayAfterSequence: 8,
+        turn: {
+          turnId: liveTurnId,
+          transcript: {
+            schemaVersion: 1,
+            throughSequence: 8,
+            items: [
+              { kind: "text", text: "Cross-request race", firstSequence: 7, lastSequence: 8 },
+            ],
+            startedSequence: null,
+            terminalSequence: null,
+            stopReason: null,
+            failure: null,
+            cancellation: null,
+            workspacePatch: null,
+          },
+        },
+      },
+    });
+
+    expect(state).toMatchObject({
+      lastSequence: 8,
+      turns: [{ turnId: liveTurnId, status: "running", items: [{ text: "Cross-request race" }] }],
+    });
+  });
+
   it("hydrates a completed semantic transcript without replaying historical deltas", () => {
     const conversation: ConversationDetailResource = {
       project,

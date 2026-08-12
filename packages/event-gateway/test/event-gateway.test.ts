@@ -8,6 +8,7 @@ import type {
   DurableEventGroupIngestor,
   DurableEventLog,
 } from "@agent-dock/runtime-core/durable-event-store";
+import type { LiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
 import { DurableEventStoreError } from "@agent-dock/runtime-core/durable-event-store";
 import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import type {
@@ -269,6 +270,64 @@ describe("Event Gateway", () => {
     expect(frame).toContain("event: assistant.text.delta\n");
     expect(frame).toContain('"text":"hello"');
     abort.abort();
+  });
+
+  it("serves an authenticated, already-projected active Turn snapshot", async () => {
+    const source: LiveTurnSnapshotSource = {
+      read: (tenantId, sessionId) => {
+        if (tenantId !== TENANT_ID) throw new Error("unexpected tenant");
+        return Promise.resolve({
+          sessionId,
+          replayAfterSequence: 1,
+          turn: {
+            turnId: event.turnId!,
+            transcript: {
+              schemaVersion: 1,
+              throughSequence: 1,
+              items: [
+                {
+                  kind: "text",
+                  text: "hello",
+                  firstSequence: 1,
+                  lastSequence: 1,
+                },
+              ],
+              startedSequence: null,
+              terminalSequence: null,
+              stopReason: null,
+              failure: null,
+              cancellation: null,
+              workspacePatch: null,
+            },
+          },
+        });
+      },
+    };
+    const gateway = new EventGateway({
+      database: {} as Kysely<Database>,
+      eventLog: new StaticEventLog(),
+      apiAuthenticator: new StaticAuthenticator(API_TOKEN),
+      webSessionAuthenticator: new StaticAuthenticator("web-token"),
+      notifications: new FakeNotifications(),
+      liveTurnSnapshotSource: source,
+    });
+    running.push(gateway);
+    const unauthorized = await gateway.application.inject({
+      method: "GET",
+      url: `/v1/sessions/${SESSION_ID}/live-turn-snapshot`,
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    const response = await gateway.application.inject({
+      method: "GET",
+      url: `/v1/sessions/${SESSION_ID}/live-turn-snapshot`,
+      headers: { authorization: `Bearer ${API_TOKEN}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sessionId: SESSION_ID,
+      replayAfterSequence: 1,
+      turn: { transcript: { items: [{ text: "hello" }] } },
+    });
   });
 
   it("tells a stale SSE client to reload the semantic conversation projection", async () => {

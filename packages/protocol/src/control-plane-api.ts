@@ -912,6 +912,24 @@ export const ConversationDetailResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const LiveTurnSnapshotResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    replayAfterSequence: NonNegativeSafeIntegerSchema,
+    turn: Type.Union([
+      Type.Object(
+        {
+          turnId: UuidSchema,
+          transcript: ConversationTurnTranscriptResourceSchema,
+        },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+  },
+  { additionalProperties: false },
+);
+
 export const AcceptTurnRequestSchema = Type.Object(
   {
     prompt: Type.String({ minLength: 1, maxLength: 100_000 }),
@@ -1759,6 +1777,7 @@ export type ConversationTurnTranscriptResource = Static<
 >;
 export type ConversationTurnResource = Static<typeof ConversationTurnResourceSchema>;
 export type ConversationDetailResource = Static<typeof ConversationDetailResourceSchema>;
+export type LiveTurnSnapshotResource = Static<typeof LiveTurnSnapshotResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
 export type RunState = Static<typeof RunStateSchema>;
@@ -2216,6 +2235,10 @@ export function parseConversationListResource(value: unknown): ConversationListR
 
 export function parseConversationDetailResource(value: unknown): ConversationDetailResource {
   return parseSchema(ConversationDetailResourceSchema, value, "conversation detail resource");
+}
+
+export function parseLiveTurnSnapshotResource(value: unknown): LiveTurnSnapshotResource {
+  return parseSchema(LiveTurnSnapshotResourceSchema, value, "live Turn snapshot resource");
 }
 
 export function parseConversationTurnTranscriptResource(

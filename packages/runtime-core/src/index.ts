@@ -6,6 +6,7 @@ export * from "./grouped-durable-event-ingestor.ts";
 export * from "./http-durable-event-ingestor.ts";
 export * from "./local-supervisor-execution-backend.ts";
 export * from "./live-session-event-store.ts";
+export * from "./live-turn-snapshot.ts";
 export * from "./model-credential-runtime.ts";
 export * from "./pi-session-manifest.ts";
 export * from "./postgres-session-event-notifications.ts";

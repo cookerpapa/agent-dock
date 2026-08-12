@@ -93,7 +93,10 @@ See [Architecture](docs/ARCHITECTURE.md) and
 Anything shown through SSE has first crossed a shared durable boundary. Raw
 token deltas do not grow PostgreSQL forever: the terminal transcript is stored
 as one canonical Turn, the live Valkey suffix is trimmed after its replay
-window, and Kafka retention remains long enough to rebuild that suffix.
+window, and Kafka retention remains long enough to rebuild that suffix. When a
+browser reloads during an active Turn, Event Gateway returns a catch-up
+snapshot only through PostgreSQL's projected watermark, then SSE continues
+from that exact sequence.
 
 Pi Session JSONL is the model-context authority. Compaction, interrupted-turn
 markers and execution-world reset facts survive cold restore without AgentDock

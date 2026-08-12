@@ -69,6 +69,12 @@ session advisory lock on the direct PostgreSQL endpoint, rebuild missing
 streams from Kafka, and refuse readiness unless a second verification passes.
 Normal projection transactions take the matching shared lock, preventing a
 rolling-start repair from racing an older projector.
+When a browser reopens a Session with an active Turn, Event Gateway can
+materialize the contiguous live suffix through PostgreSQL's projected
+watermark as one catch-up snapshot. The browser hydrates that transcript and
+opens SSE after the returned sequence. If the Run settles concurrently, the
+PostgreSQL-owned terminal sequence is deliberately left to SSE. Snapshot
+failure falls back to replay from the canonical conversation boundary.
 
 ### Temporal
 
@@ -525,6 +531,13 @@ SSE merges the bounded live stream and terminal store:
 - database notification is a wake-up hint only;
 - Valkey supplies non-terminal deltas through the PostgreSQL projected cursor;
 - PostgreSQL supplies one terminal event per completed Turn.
+
+Conversation reload first reads canonical completed Turns from the Control
+Plane and may then request an active-Turn catch-up snapshot from Event Gateway.
+The snapshot never advances PostgreSQL state: it merely collapses an already
+projected, contiguous Valkey prefix into its current transcript. Its watermark
+becomes the browser's next SSE cursor, eliminating large active-Turn replay
+without weakening persisted-before-visible semantics.
 
 Only Kafka events appended to Valkey and covered by the PostgreSQL projected
 cursor reach SSE. A Worker-WAL-only or Kafka-only event is not yet visible.

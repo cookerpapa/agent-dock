@@ -92,6 +92,19 @@ export default function ChatApp() {
     setSelectedWorkspaceId((current) => current || listed.workspaces[0]?.workspaceId || "");
   }, [api]);
 
+  const loadConversation = useCallback(
+    async (sessionId: string) => {
+      const conversation = await api.getConversation(sessionId);
+      const liveSnapshot = await api.getLiveTurnSnapshot(sessionId).catch(() => undefined);
+      const replayAfterSequence =
+        liveSnapshot?.turn === null || liveSnapshot === undefined
+          ? conversation.replayAfterSequence
+          : liveSnapshot.replayAfterSequence;
+      return { conversation, liveSnapshot, replayAfterSequence };
+    },
+    [api],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void api.getIdentity().then(
@@ -163,10 +176,14 @@ export default function ChatApp() {
         update({ type: "stream.status", status });
       },
       async onCursorExpired() {
-        const detail = await api.getConversation(sessionId);
-        lastSequenceRef.current = detail.replayAfterSequence;
-        update({ type: "conversation.loaded", conversation: detail });
-        return detail.replayAfterSequence;
+        const loaded = await loadConversation(sessionId);
+        lastSequenceRef.current = loaded.replayAfterSequence;
+        update({
+          type: "conversation.loaded",
+          conversation: loaded.conversation,
+          ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
+        });
+        return loaded.replayAfterSequence;
       },
     }).catch(() => {
       if (!controller.signal.aborted) {
@@ -174,7 +191,15 @@ export default function ChatApp() {
       }
     });
     return () => controller.abort();
-  }, [api, authPhase, reconnectGeneration, refreshConversations, state.session?.sessionId, update]);
+  }, [
+    api,
+    authPhase,
+    loadConversation,
+    reconnectGeneration,
+    refreshConversations,
+    state.session?.sessionId,
+    update,
+  ]);
 
   // A Run can fail before the trusted Runner publishes its first session
   // event (for example during Sandbox provisioning). The durable Run record is
@@ -251,9 +276,13 @@ export default function ChatApp() {
     setConversationLoading(conversation.sessionId);
     update({ type: "api.error.cleared" });
     try {
-      const detail = await api.getConversation(conversation.sessionId);
-      lastSequenceRef.current = detail.replayAfterSequence;
-      update({ type: "conversation.loaded", conversation: detail });
+      const loaded = await loadConversation(conversation.sessionId);
+      lastSequenceRef.current = loaded.replayAfterSequence;
+      update({
+        type: "conversation.loaded",
+        conversation: loaded.conversation,
+        ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
+      });
       setSidebarOpen(false);
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
@@ -299,9 +328,13 @@ export default function ChatApp() {
         workspaceId = selected.workspaceId;
       }
       const session = await api.createSession(projectId, workspaceId, title, sandboxRetention);
-      const detail = await api.getConversation(session.sessionId);
-      lastSequenceRef.current = detail.replayAfterSequence;
-      update({ type: "conversation.loaded", conversation: detail });
+      const loaded = await loadConversation(session.sessionId);
+      lastSequenceRef.current = loaded.replayAfterSequence;
+      update({
+        type: "conversation.loaded",
+        conversation: loaded.conversation,
+        ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
+      });
       setWorkspacePanelOpen(false);
       await Promise.all([refreshConversations(), refreshWorkspaces()]);
       if (pendingInitialPrompt !== null) {

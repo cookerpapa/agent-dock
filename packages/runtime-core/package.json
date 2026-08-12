@@ -15,6 +15,7 @@
     "./http-durable-event-ingestor": "./src/http-durable-event-ingestor.ts",
     "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
     "./live-session-event-store": "./src/live-session-event-store.ts",
+    "./live-turn-snapshot": "./src/live-turn-snapshot.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./pi-session-manifest": "./src/pi-session-manifest.ts",
     "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",

@@ -4,6 +4,7 @@ import { WebAuthenticationService } from "@agent-dock/control-plane/web-authenti
 import { operationalLog, startServiceObservability } from "@agent-dock/observability";
 import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
 import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import { ValkeyLiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import {
   KafkaWorkerEventLog,
@@ -86,6 +87,10 @@ export async function startEventGateway(): Promise<void> {
           workerEventIngestor: eventStore,
           workerEventIngestToken: config.workerEventIngestToken!,
           terminalTurnProjectionSource: new LiveTerminalTurnProjectionSource({
+            database,
+            liveEvents: liveEvents!,
+          }),
+          liveTurnSnapshotSource: new ValkeyLiveTurnSnapshotSource({
             database,
             liveEvents: liveEvents!,
           }),

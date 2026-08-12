@@ -1021,6 +1021,7 @@ describe("Valkey Session live-stream compaction", () => {
           append: () => Promise.resolve(0),
           readPage: () => Promise.resolve([]),
           readTurn: () => Promise.resolve([]),
+          resetSession: () => Promise.resolve(),
           trimThrough: () => {
             calls += 1;
             return calls === 1

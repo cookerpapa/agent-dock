@@ -1,6 +1,7 @@
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { EventPublishMessage } from "@agent-dock/protocol";
 import { MemoryLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import { ValkeyLiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
@@ -125,6 +126,39 @@ beforeAll(async () => {
       replay_floor_seq: 0,
     })
     .execute();
+  await database
+    .insertInto("turns")
+    .values({
+      id: IDS.turn,
+      tenant_id: IDS.tenant,
+      session_id: IDS.session,
+      state: "running",
+      input_kind: "prompt",
+      input_text: "continue",
+      model_profile_id: IDS.profile,
+      provider: "agent-dock-fake",
+      model_id: "agent-dock-fake",
+      thinking_level: "off",
+      credential_binding_id: IDS.credential,
+      credential_binding_version: 1,
+    })
+    .execute();
+  await database
+    .insertInto("commands")
+    .values({
+      id: IDS.command,
+      tenant_id: IDS.tenant,
+      session_id: IDS.session,
+      turn_id: IDS.turn,
+      idempotency_key: "live-snapshot",
+      kind: "turn.execute",
+      mailbox_position: 1,
+      state: "acknowledged",
+      payload: { schemaVersion: 1 },
+      acknowledged_at: new Date(),
+      failure_code: null,
+    })
+    .execute();
 }, 30_000);
 
 afterAll(async () => {
@@ -151,5 +185,54 @@ describe("live-event repair detection", () => {
       messages: [publication(1), publication(2)],
     });
     await expect(findMissingLiveEventSessions(database, liveEvents)).resolves.toEqual([]);
+    await expect(
+      new ValkeyLiveTurnSnapshotSource({ database, liveEvents }).read(IDS.tenant, IDS.session),
+    ).resolves.toMatchObject({
+      sessionId: IDS.session,
+      replayAfterSequence: 2,
+      turn: {
+        turnId: IDS.turn,
+        transcript: {
+          throughSequence: 2,
+          items: [{ kind: "text", text: "12", firstSequence: 1, lastSequence: 2 }],
+          terminalSequence: null,
+        },
+      },
+    });
+
+    // Simulate the Run settling after the source observed the active Turn but
+    // before it read the projected cursor. The terminal event is PostgreSQL-
+    // owned and must remain available to the following SSE catch-up instead of
+    // being mistaken for a missing Valkey payload.
+    await database
+      .insertInto("session_terminal_events")
+      .values({
+        event_id: "84000000-0000-4000-8000-000000000002",
+        tenant_id: IDS.tenant,
+        session_id: IDS.session,
+        turn_id: IDS.turn,
+        agent_id: "root",
+        command_id: IDS.command,
+        seq: 2,
+        schema_version: 1,
+        type: "turn.completed",
+        payload: {},
+        occurred_at: new Date("2026-08-12T00:00:01.000Z"),
+      })
+      .execute();
+    await expect(
+      new ValkeyLiveTurnSnapshotSource({ database, liveEvents }).read(IDS.tenant, IDS.session),
+    ).resolves.toMatchObject({
+      sessionId: IDS.session,
+      replayAfterSequence: 1,
+      turn: {
+        turnId: IDS.turn,
+        transcript: {
+          throughSequence: 1,
+          items: [{ kind: "text", text: "1", firstSequence: 1, lastSequence: 1 }],
+          terminalSequence: null,
+        },
+      },
+    });
   });
 });

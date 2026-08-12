@@ -3,6 +3,7 @@ import type {
   AgentDockEvent,
   ConversationDetailResource,
   ConversationSessionResource,
+  LiveTurnSnapshotResource,
   ProjectResource,
   ProjectEnvironmentResource,
   RunResource,
@@ -100,7 +101,11 @@ export type SessionViewState = {
 
 export type SessionViewAction =
   | { type: "session.created"; project: ProjectResource; session: SessionResource }
-  | { type: "conversation.loaded"; conversation: ConversationDetailResource }
+  | {
+      type: "conversation.loaded";
+      conversation: ConversationDetailResource;
+      liveSnapshot?: LiveTurnSnapshotResource;
+    }
   | { type: "project.environment.refreshed"; environment: ProjectEnvironmentResource }
   | { type: "turn.accepted"; accepted: AcceptedTurnResource; prompt: string }
   | { type: "turn.cancellation.requested"; turnId: string }
@@ -428,7 +433,7 @@ export function sessionViewReducer(
     };
   }
   if (action.type === "conversation.loaded") {
-    return {
+    const loaded: SessionViewState = {
       ...createInitialSessionView(),
       project: action.conversation.project,
       session: action.conversation.session,
@@ -480,6 +485,43 @@ export function sessionViewReducer(
       })),
       historyTruncated: action.conversation.historyTruncated,
       connection: { phase: "offline", attempt: 0, message: "Opening durable event stream" },
+    };
+    const snapshot = action.liveSnapshot;
+    if (
+      snapshot?.turn === null ||
+      snapshot === undefined ||
+      snapshot.sessionId !== action.conversation.session.sessionId ||
+      snapshot.replayAfterSequence < loaded.lastSequence
+    ) {
+      return loaded;
+    }
+    const transcript = snapshot.turn.transcript;
+    return {
+      ...loaded,
+      lastSequence: snapshot.replayAfterSequence,
+      // Another tab can submit a Turn between the canonical conversation read
+      // and this snapshot read. Preserve the live prefix even when that Turn
+      // was not present in the earlier response.
+      turns: updateTurn(loaded.turns, snapshot.turn.turnId, (turn): TurnView => {
+        return {
+          ...turn,
+          items: transcript.items.map(transcriptItem),
+          startedSequence: transcript.startedSequence,
+          terminalSequence: transcript.terminalSequence,
+          stopReason: transcript.stopReason,
+          failure: transcript.failure,
+          cancellation: transcript.cancellation,
+          workspacePatch: transcript.workspacePatch,
+          status:
+            transcript.failure !== null
+              ? "failed"
+              : transcript.cancellation !== null
+                ? "cancelled"
+                : transcript.terminalSequence !== null
+                  ? "completed"
+                  : "running",
+        };
+      }),
     };
   }
   if (action.type === "project.environment.refreshed") {
