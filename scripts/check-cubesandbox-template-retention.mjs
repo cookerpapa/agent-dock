@@ -72,6 +72,7 @@ assert.match(installer, /\$\{authorizerImageRepository\}:\$\{agentDockRevision\}
 assert.match(installer, /\$\{cubeEgressGatewayImageRepository\}:\$\{agentDockRevision\}/u);
 assert.match(installer, /set[\s\S]+image[\s\S]+authorizer=/u);
 assert.match(installer, /set[\s\S]+image[\s\S]+gateway=/u);
+assert.match(installer, /images[\s\S]+import[\s\S]+archivePath/u);
 assert.ok(
   !installer.includes('capture("kubectl"') && !installer.includes('run("kubectl"'),
   "the Cube installer must not select a host kubectl through an uncontrolled PATH",

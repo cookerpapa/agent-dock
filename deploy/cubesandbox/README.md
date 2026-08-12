@@ -103,6 +103,9 @@ readiness changes only after an authenticated configuration revision is read.
 AgentDock-owned Cube control images are imported and referenced by the exact
 AgentDock Git revision rather than a mutable `:local` tag, so K3s cannot keep a
 stale cached Gateway or Authorizer across an idempotent reconcile.
+The import is a synchronous containerd operation followed by an inventory
+check; installation does not depend on K3s eventually noticing a mutable tar
+file in its asynchronous image-import directory.
 
 Do not bind Flannel to WSL's loopback device. Its 65536-byte MTU advertises an
 unusable jumbo MSS and black-holes ordinary CubeProxy responses once packets

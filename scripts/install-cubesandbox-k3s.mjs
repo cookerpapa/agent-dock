@@ -194,15 +194,26 @@ async function stagePinnedK3sImages(archiveName, images, timeoutMs = 10 * 60_000
     await rm(partialArchivePath, { force: true });
     await run("docker", ["image", "save", "--output", partialArchivePath, ...images]);
     await rename(partialArchivePath, archivePath);
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const imported = await listK3sImages();
-      if (images.every((image) => imported.has(canonicalImageReference(image)))) return;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+    await capture(
+      "ctr",
+      [
+        "--address",
+        "/run/k3s/containerd/containerd.sock",
+        "--namespace",
+        "k8s.io",
+        "images",
+        "import",
+        archivePath,
+      ],
+      timeoutMs,
+    );
+    const imported = await listK3sImages();
+    if (!images.every((image) => imported.has(canonicalImageReference(image)))) {
+      throw new Error(`K3s did not confirm pinned images from ${archiveName}`);
     }
-    throw new Error(`K3s did not import pinned image archive ${archiveName}`);
   } finally {
     await rm(partialArchivePath, { force: true });
+    await rm(archivePath, { force: true });
   }
 }
 

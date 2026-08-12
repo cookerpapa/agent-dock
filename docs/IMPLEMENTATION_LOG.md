@@ -25,6 +25,8 @@
   进程进入 Running，产品启动后再自然转为 Ready。
 - Authorizer 与 Egress Gateway 镜像改为 Git revision 不可变标签；安装器显式
   更新 Deployment image，不再因 K3s 已存在 `:local` 标签而继续运行旧代码。
+- 本地控制镜像通过 containerd 同步导入并校验，不再等待 K3s 异步扫描同名 tar
+  文件，消除缓存标签和文件监视时序造成的部署不确定性。
 
 ## 2026-08-12 — Sandbox Domain 与轻量 Tool Broker
 
