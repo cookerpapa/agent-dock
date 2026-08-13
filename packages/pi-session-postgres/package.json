@@ -9,6 +9,7 @@
   "dependencies": {
     "@agent-dock/database": "0.1.0",
     "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
     "kysely": "0.29.4"
   },
   "devDependencies": {

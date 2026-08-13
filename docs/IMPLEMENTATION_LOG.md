@@ -3420,3 +3420,22 @@
   rejection rate and p95 queue/execution time.
 - Added one validated timeout chain for queue wait, Kopia execution, internal
   HTTP and process shutdown, plus migration, quota, overload and timeout tests.
+
+# 2026-08-13 — Pi SessionStorage Harness experiment
+
+- Archived the complete user-visible ChatGPT architecture review (196
+  user/assistant messages) and added a repeatable importer for future daytime
+  design discussions.
+- Verified Pi 0.84.1's actual boundary: SessionStorage and SQLite fenced writer
+  leases are implemented, while AgentHarness prompt/resume execution remains
+  incomplete and no upstream contract fences external Cube effects.
+- Added an executable Pi-native DurableAgentHarness over PostgreSQL
+  SessionStorage. It restores the active compacted branch, writes Entries and
+  operation records incrementally, and shares one opaque authority across
+  Session and Tool effect boundaries.
+- Replaced the PostgreSQL branch N+1 walk with one bounded recursive CTE and
+  exposed the existing governed remote Tool set to the SessionStorage Harness
+  without duplicating Tool RPC code.
+- Kept the new Harness outside the default production adapter until compaction,
+  interruption/world-state, Workspace settlement, steer and real Cube/model
+  acceptance reach parity with the current coding-agent SDK path.

@@ -16,10 +16,9 @@ import {
   type SessionStorage,
 } from "@earendil-works/pi-agent-core";
 import { sql, type Kysely, type Transaction } from "kysely";
+import type { ExecutionAuthority } from "./execution-authority.ts";
 
-export type ExecutionAuthority = {
-  assertCurrent(database?: Transaction<Database>): Promise<void>;
-};
+export type { ExecutionAuthority } from "./execution-authority.ts";
 
 export type AgentDockPiSessionMetadata = SessionMetadata & {
   tenantId: string;
@@ -97,6 +96,7 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
   ): Promise<PostgresPiSessionStorage> {
     const storage = new PostgresPiSessionStorage(options);
     await options.database.transaction().execute(async (transaction) => {
+      await options.authority?.assertCurrent(transaction);
       await transaction
         .insertInto("pi_sessions")
         .values({
@@ -116,6 +116,38 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
           lane: "main",
           leaf_id: null,
         })
+        .executeTakeFirst();
+    });
+    return storage;
+  }
+
+  static async openOrCreate(
+    options: PostgresPiSessionStorageOptions & { createdAt?: number; parentSessionId?: string },
+  ): Promise<PostgresPiSessionStorage> {
+    const storage = new PostgresPiSessionStorage(options);
+    await options.database.transaction().execute(async (transaction) => {
+      await options.authority?.assertCurrent(transaction);
+      await transaction
+        .insertInto("pi_sessions")
+        .values({
+          tenant_id: options.tenantId,
+          id: options.sessionId,
+          created_at_ms: options.createdAt ?? Date.now(),
+          parent_session_id: options.parentSessionId ?? null,
+          next_seq: 1,
+          name: null,
+        })
+        .onConflict((conflict) => conflict.columns(["tenant_id", "id"]).doNothing())
+        .executeTakeFirst();
+      await transaction
+        .insertInto("pi_session_lanes")
+        .values({
+          tenant_id: options.tenantId,
+          session_id: options.sessionId,
+          lane: "main",
+          leaf_id: null,
+        })
+        .onConflict((conflict) => conflict.columns(["tenant_id", "session_id", "lane"]).doNothing())
         .executeTakeFirst();
     });
     return storage;
@@ -319,33 +351,119 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
     query: EntryQuery & BranchBounds & { start: string },
   ): Promise<Entry[]> {
     const maximum = limit(query.limit) ?? Number.MAX_SAFE_INTEGER;
-    const walked: Entry[] = [];
-    const visited = new Set<string>();
-    let currentId: string | null = query.start;
-    while (currentId !== null && walked.length < maximum) {
-      if (visited.has(currentId))
-        throw new SessionError("invalid_entry", "Pi Session branch contains a cycle");
-      visited.add(currentId);
-      const current = await this.getEntry(currentId);
-      if (current === undefined)
-        throw new SessionError("not_found", `Pi entry was not found: ${currentId}`);
-      const matchesCursor =
-        query.cursor === undefined ||
-        (query.order === "oldestFirst"
-          ? current.seq > query.cursor.afterSeq
-          : current.seq < query.cursor.afterSeq);
-      if (
-        matchesCursor &&
-        (query.type === undefined || current.type === query.type) &&
-        (query.customType === undefined ||
-          (current.type === "custom" && current.customType === query.customType))
-      ) {
-        walked.push(current);
-      }
-      if (current.id === query.stopAtId || current.type === query.stopAtType) break;
-      currentId = current.parentId;
+    const oldestFirst = query.order === "oldestFirst";
+    const direction = query.order === "oldestFirst" ? sql.raw("asc") : sql.raw("desc");
+    const cursorOperator = query.order === "oldestFirst" ? sql.raw(">") : sql.raw("<");
+    const result = await sql<{
+      payload: Record<string, unknown> | null;
+      seq: string | null;
+      parent_id: string | null;
+      timestamp_ms: string | null;
+      diagnostic: boolean;
+      start_missing: boolean;
+      cycle_detected: boolean;
+      parent_missing: boolean;
+    }>`
+      with recursive branch as (
+        select payload, seq, parent_id, timestamp_ms, id, type, custom_type, array[id] as path
+          from pi_session_entries
+         where tenant_id = ${this.#tenantId}::uuid
+           and session_id = ${this.#sessionId}::uuid
+           and id = ${query.start}::uuid
+        union all
+        select parent.payload,
+               parent.seq,
+               parent.parent_id,
+               parent.timestamp_ms,
+               parent.id,
+               parent.type,
+               parent.custom_type,
+               branch.path || parent.id
+          from pi_session_entries parent
+          join branch
+            on parent.tenant_id = ${this.#tenantId}::uuid
+           and parent.session_id = ${this.#sessionId}::uuid
+           and parent.id = branch.parent_id
+         where not parent.id = any(branch.path)
+           and (${oldestFirst}
+                or ((${query.stopAtId ?? null}::uuid is null or branch.id <> ${query.stopAtId ?? null}::uuid)
+                    and (${query.stopAtType ?? null}::text is null or branch.type <> ${query.stopAtType ?? null}::text)))
+      ), diagnostics as (
+        select not exists (select 1 from branch) as start_missing,
+               exists (
+                 select 1 from branch child
+                  where child.parent_id is not null
+                    and child.parent_id = any(child.path)
+               ) as cycle_detected,
+               exists (
+                 select 1 from branch child
+                  where child.parent_id is not null
+                    and not child.parent_id = any(child.path)
+                    and not exists (
+                      select 1 from pi_session_entries parent
+                       where parent.tenant_id = ${this.#tenantId}::uuid
+                         and parent.session_id = ${this.#sessionId}::uuid
+                         and parent.id = child.parent_id
+                    )
+               ) as parent_missing
+      ), boundary as (
+        select case when ${oldestFirst}
+                    then min(branch.seq)
+                    else max(branch.seq)
+               end as seq
+          from branch
+         where ((${query.stopAtId ?? null}::uuid is not null and branch.id = ${query.stopAtId ?? null}::uuid)
+             or (${query.stopAtType ?? null}::text is not null and branch.type = ${query.stopAtType ?? null}::text))
+      ), selected as (
+        select branch.payload, branch.seq, branch.parent_id, branch.timestamp_ms
+          from branch, boundary
+         where (boundary.seq is null
+                or (${oldestFirst} and branch.seq <= boundary.seq)
+                or (not ${oldestFirst} and branch.seq >= boundary.seq))
+           and (${query.type ?? null}::text is null or type = ${query.type ?? null}::text)
+           and (${query.customType ?? null}::text is null or custom_type = ${query.customType ?? null}::text)
+           and (${query.cursor?.afterSeq ?? null}::bigint is null
+                or branch.seq ${cursorOperator} ${query.cursor?.afterSeq ?? null}::bigint)
+         order by branch.seq ${direction}
+         limit ${maximum}
+      )
+      select selected.payload,
+             selected.seq,
+             selected.parent_id,
+             selected.timestamp_ms,
+             false as diagnostic,
+             diagnostics.start_missing,
+             diagnostics.cycle_detected,
+             diagnostics.parent_missing
+        from selected cross join diagnostics
+      union all
+      select null, null, null, null, true,
+             diagnostics.start_missing,
+             diagnostics.cycle_detected,
+             diagnostics.parent_missing
+        from diagnostics
+       where not exists (select 1 from selected)
+      order by diagnostic asc, seq ${direction}
+    `.execute(this.#database);
+    const diagnostics = result.rows[0]!;
+    if (diagnostics.start_missing) {
+      throw new SessionError("not_found", `Pi entry was not found: ${query.start}`);
     }
-    return query.order === "oldestFirst" ? walked.reverse() : walked;
+    if (diagnostics.cycle_detected || diagnostics.parent_missing) {
+      throw new SessionError("invalid_entry", "Pi Session branch is corrupt");
+    }
+    return result.rows
+      .filter(
+        (
+          row,
+        ): row is typeof row & {
+          payload: Record<string, unknown>;
+          seq: string;
+          timestamp_ms: string;
+        } =>
+          !row.diagnostic && row.payload !== null && row.seq !== null && row.timestamp_ms !== null,
+      )
+      .map(entryFromRow);
   }
 
   async findRecords<K extends LaneRecord["type"]>(
@@ -570,5 +688,20 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
 
 export {
   PostgresRunExecutionAuthority,
+  PostgresRunExecutionAuthorityProvider,
   type PostgresRunExecutionAuthorityOptions,
 } from "./postgres-execution-authority.ts";
+export {
+  DurableAgentHarness,
+  FixedDurableAgentExecutionAuthorityProvider,
+  type DurableAgentExecutionAuthority,
+  type DurableAgentExecutionAuthorityProvider,
+  type DurableAgentExecutionScope,
+  type DurableAgentHarnessOptions,
+  type DurableAgentRunResult,
+} from "./durable-agent-harness.ts";
+export {
+  openPostgresDurableAgentSession,
+  type OpenPostgresDurableAgentSessionOptions,
+  type PostgresDurableAgentSession,
+} from "./postgres-durable-agent-session.ts";

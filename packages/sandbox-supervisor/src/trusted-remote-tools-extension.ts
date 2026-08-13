@@ -6,6 +6,8 @@ import {
   type ToolSandboxOperationResponse,
 } from "@agent-dock/protocol";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import {
   createBashTool,
   createEditTool,
@@ -742,4 +744,76 @@ export function createTrustedRemoteToolsExtension(
 ): InlineExtension {
   const runtime = validateRuntimeConfiguration(configuration);
   return (pi) => registerTrustedRemoteTools(pi, runtime);
+}
+
+export type TrustedRemoteAgentTools = Readonly<{
+  tools: readonly AgentTool[];
+  systemPrompt(base: string): Promise<string>;
+  transformContext(messages: AgentMessage[]): Promise<AgentMessage[]>;
+  transformHeaders(headers?: ProviderHeaders): Promise<ProviderHeaders>;
+}>;
+
+/**
+ * Exposes the reviewed remote Tool implementation to Pi's lower-level
+ * Agent/SessionStorage Harness without duplicating the security-sensitive RPC
+ * code. It can disappear once upstream AgentHarness executes this path.
+ */
+export function createTrustedRemoteAgentTools(
+  configuration: TrustedRemoteToolsRuntimeConfiguration,
+): TrustedRemoteAgentTools {
+  const runtime = validateRuntimeConfiguration(configuration);
+  const handlers = new Map<string, (event: any) => unknown | Promise<unknown>>();
+  const tools: AgentTool[] = [];
+  const extensionApi = {
+    on(type: string, handler: (event: any) => unknown | Promise<unknown>) {
+      handlers.set(type, handler);
+      return () => handlers.delete(type);
+    },
+    getActiveTools() {
+      return tools.map((tool) => tool.name);
+    },
+    registerTool(tool: AgentTool) {
+      tools.push(tool);
+    },
+  } as unknown as ExtensionAPI;
+  registerTrustedRemoteTools(extensionApi, runtime);
+
+  const requireHandler = (type: string): ((event: any) => unknown | Promise<unknown>) => {
+    const handler = handlers.get(type);
+    if (handler === undefined) throw new Error(`Trusted remote Tool hook is missing: ${type}`);
+    return handler;
+  };
+
+  return {
+    tools,
+    async systemPrompt(base) {
+      const result = await requireHandler("before_agent_start")({ systemPrompt: base });
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        !("systemPrompt" in result) ||
+        typeof result.systemPrompt !== "string"
+      ) {
+        throw new Error("Trusted remote Tool system-prompt hook returned an invalid result");
+      }
+      return result.systemPrompt;
+    },
+    async transformContext(messages) {
+      const result = await requireHandler("context")({ messages });
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        !("messages" in result) ||
+        !Array.isArray(result.messages)
+      ) {
+        throw new Error("Trusted remote Tool context hook returned an invalid result");
+      }
+      return result.messages as AgentMessage[];
+    },
+    async transformHeaders(headers = {}) {
+      const mutable = { ...headers };
+      await requireHandler("before_provider_headers")({ headers: mutable });
+      return mutable;
+    },
+  };
 }

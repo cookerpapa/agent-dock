@@ -82,11 +82,13 @@ describe.sequential("PostgresPiSessionStorage", () => {
 
     const leaf = await session.getLeafId();
     expect(leaf).toBeDefined();
-    const active = await storage.findEntriesOnBranch({
-      start: leaf!,
-      stopAtType: "compaction",
-      order: "oldestFirst",
-    });
+    const active = (
+      await storage.findEntriesOnBranch({
+        start: leaf!,
+        stopAtType: "compaction",
+        order: "newestFirst",
+      })
+    ).reverse();
     expect(active.map((entry) => entry.id)).toEqual([compactId.id, leaf]);
     expect((await storage.getEntry(firstId))?.type).toBe("message");
 
@@ -139,5 +141,107 @@ describe.sequential("PostgresPiSessionStorage", () => {
     await expect(storage.setName("rejected")).rejects.toThrow("stale authority");
     expect(receivedTransaction).toBe(true);
     await expect(storage.getName()).resolves.toBe("durable session");
+  });
+
+  it("matches Pi branch ordering, bounds, filters and limits in one recursive query", async () => {
+    const sessionId = "d1000000-0000-4000-8000-000000000030";
+    const storage = await PostgresPiSessionStorage.create({
+      database,
+      tenantId: TENANT_ID,
+      sessionId,
+    });
+    await storage.appendEntry(
+      {
+        id: "d1000000-0000-4000-8000-000000000031",
+        type: "message",
+        message: { role: "user", content: "root", timestamp: 1 },
+      },
+      "main",
+    );
+    await storage.appendEntry(
+      {
+        id: "d1000000-0000-4000-8000-000000000032",
+        type: "custom",
+        customType: "note",
+        data: 1,
+      },
+      "main",
+    );
+    await storage.appendEntry(
+      {
+        id: "d1000000-0000-4000-8000-000000000033",
+        type: "compaction",
+        summary: "summary",
+        retainedTail: [],
+        tokensBefore: 2,
+      },
+      "main",
+    );
+    await storage.appendEntry(
+      {
+        id: "d1000000-0000-4000-8000-000000000034",
+        type: "custom",
+        customType: "note",
+        data: 2,
+      },
+      "main",
+    );
+    const tail = await storage.appendEntry(
+      {
+        id: "d1000000-0000-4000-8000-000000000035",
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "tail" }],
+          provider: "test",
+          model: "test",
+          api: "test",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: 2,
+        },
+      },
+      "main",
+    );
+
+    expect(
+      (
+        await storage.findEntriesOnBranch({
+          start: tail.id,
+          stopAtType: "custom",
+          order: "oldestFirst",
+        })
+      ).map((entry) => entry.id),
+    ).toEqual(["d1000000-0000-4000-8000-000000000031", "d1000000-0000-4000-8000-000000000032"]);
+    expect(
+      (
+        await storage.findEntriesOnBranch({
+          start: tail.id,
+          stopAtType: "custom",
+          order: "newestFirst",
+        })
+      ).map((entry) => entry.id),
+    ).toEqual(["d1000000-0000-4000-8000-000000000035", "d1000000-0000-4000-8000-000000000034"]);
+    expect(
+      (
+        await storage.findEntriesOnBranch({
+          start: tail.id,
+          customType: "note",
+          limit: 1,
+        })
+      ).map((entry) => entry.id),
+    ).toEqual(["d1000000-0000-4000-8000-000000000034"]);
+    await expect(
+      storage.findEntriesOnBranch({
+        start: "d1000000-0000-4000-8000-000000000039",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 });

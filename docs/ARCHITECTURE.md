@@ -52,7 +52,9 @@ still throws `HarnessNotImplemented`. Therefore the production coding adapter
 continues to use the stable Pi SDK/session-file entrypoint for model execution,
 with its Pi-native JSONL objects stored in PostgreSQL. Switching the active loop
 to `AgentHarness` is gated on an executable public upstream contract, not on a
-private fork.
+private fork. AgentDock's executable SessionStorage Harness bridge and its
+remaining production-parity gates are recorded in
+[`docs/research/2026-08-13-pi-session-storage-cloud-harness.md`](research/2026-08-13-pi-session-storage-cloud-harness.md).
 
 ### Worker Control Channel
 

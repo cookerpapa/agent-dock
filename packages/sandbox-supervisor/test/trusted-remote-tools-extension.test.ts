@@ -4,7 +4,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTrustedRemoteToolsExtension } from "../src/trusted-remote-tools-extension.ts";
+import {
+  createTrustedRemoteAgentTools,
+  createTrustedRemoteToolsExtension,
+} from "../src/trusted-remote-tools-extension.ts";
 
 const ACTIVE_TOOLS = ["read", "write", "edit", "bash"] as const;
 const TURN_CONTEXT_SHA256 = "b".repeat(64);
@@ -70,6 +73,29 @@ afterEach(() => {
 });
 
 describe("trusted remote tools extension governance", () => {
+  it("exposes the identical governed Tool set to a SessionStorage Harness", async () => {
+    const runtime = createTrustedRemoteAgentTools({
+      ...BASE_CONFIGURATION,
+      projectInstructions: "Keep the durable Harness boundary explicit.",
+    });
+    expect(runtime.tools.map((tool) => tool.name).sort()).toEqual([
+      "bash",
+      "edit",
+      "read",
+      "write",
+    ]);
+    expect(runtime.tools.every((tool) => tool.executionMode === "sequential")).toBe(true);
+    await expect(runtime.systemPrompt("Base prompt")).resolves.toContain(
+      "Keep the durable Harness boundary explicit.",
+    );
+    await expect(runtime.transformContext([])).resolves.toEqual([]);
+    await expect(runtime.transformHeaders({ "x-test": "yes" })).resolves.toMatchObject({
+      "x-test": "yes",
+      traceparent: BASE_CONFIGURATION.traceparent,
+      "x-agent-dock-step-sequence": "1",
+    });
+  });
+
   it("binds SDK tool identity from an activation-local object instead of process.env", () => {
     const registered: ToolDefinition[] = [];
     const handlers = new Map<string, (...args: never[]) => unknown>();
