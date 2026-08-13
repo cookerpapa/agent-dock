@@ -63,14 +63,12 @@ Workspace versions remain Session-local until an explicit promotion advances
 the shared Workspace head. This preserves parallel candidate evaluation
 without weakening ordinary conversation consistency.
 
-Kopia checkpoint format v2 records the Session that produced a snapshot as
-provenance, but does not bind restore to that Session. A new conversation
-restores the shared committed snapshot into its own Session-scoped POSIX
-volume. This keeps live process trees and candidate branches isolated while
-making committed `/workspace` bytes portable between conversations. The old
-Session-bound checkpoint format is deliberately unsupported during this
-pre-release cutover; incompatible development data is reset instead of
-retaining a second compatibility path.
+The persistent Volume reference records the Session that produced a revision
+as provenance, but Volume ownership is bound to tenant and Workspace. A new
+conversation on that Workspace mounts the same committed Volume while keeping
+its Pi transcript Session-scoped. Old snapshot-copy formats are deliberately
+unsupported during this pre-release cutover; incompatible development data is
+reset instead of retaining a second compatibility path.
 
 RunAttempt fencing remains Session-scoped. Restoring a checkpoint into its
 source Session therefore requires a strictly newer fence, while another

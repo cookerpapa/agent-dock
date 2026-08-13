@@ -494,6 +494,15 @@ export class SupervisorHostRuntime {
             attributes: {
               operation,
               name: error instanceof Error ? error.name : "UnknownError",
+              code:
+                typeof error === "object" &&
+                error !== null &&
+                "code" in error &&
+                typeof error.code === "string"
+                  ? error.code
+                  : "unexpected_error",
+              message:
+                error instanceof Error ? error.message : "Unexpected PostgreSQL Worker failure",
             },
           }),
       });

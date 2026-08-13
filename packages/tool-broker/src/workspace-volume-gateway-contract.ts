@@ -1,4 +1,8 @@
-import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
+import {
+  MAX_WORKSPACE_PATCH_BYTES,
+  MAX_WORKSPACE_SNAPSHOT_BYTES,
+  type WorkspacePatch,
+} from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
@@ -17,7 +21,10 @@ export const VOLUME_GENERATION_FILE = "generation";
 export const VOLUME_GIT_DIRECTORY = "git";
 export const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 export const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
-export const MAXIMUM_RESPONSE_BYTES = MAXIMUM_REQUEST_BYTES + 2 * MAX_WORKSPACE_PATCH_BYTES;
+// A snapshot response carries the bounded persistent-volume reference metadata
+// plus its bounded diff. Workspace file bytes never cross this interface.
+export const MAXIMUM_RESPONSE_BYTES =
+  MAX_WORKSPACE_SNAPSHOT_BYTES + 2 * MAX_WORKSPACE_PATCH_BYTES + MAXIMUM_REQUEST_BYTES;
 
 export const WORKSPACE_VOLUME_GATEWAY_PREPARE_PATH = "/v1/workspaces/prepare";
 export const WORKSPACE_VOLUME_GATEWAY_INITIALIZE_BASELINE_PATH =

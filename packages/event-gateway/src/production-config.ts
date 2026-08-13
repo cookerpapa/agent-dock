@@ -85,7 +85,7 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
           topic: process.env.AGENT_DOCK_WORKER_EVENT_TOPIC ?? "agent-dock-worker-events-v1",
           groupId:
             process.env.AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP ??
-            "agent-dock-worker-event-projector-v1",
+            "agent-dock-worker-event-projector-v2",
           ...(kafkaSecurity === undefined ? {} : { security: kafkaSecurity }),
         };
   const workerEventIngestToken =

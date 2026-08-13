@@ -36,6 +36,7 @@ LABEL org.opencontainers.image.title="AgentDock trusted Supervisor host" \
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
+COPY --from=dependencies /app/packages/sandbox-supervisor/node_modules /app/packages/sandbox-supervisor/node_modules
 COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./

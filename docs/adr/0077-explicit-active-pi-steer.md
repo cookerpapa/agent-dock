@@ -49,8 +49,8 @@ of an ordinary follow-up.
 - A Control Plane crash after committed delivery can produce an ambiguous HTTP
   outcome. Retrying the same idempotency key reuses the same command identity;
   no arbitrary new steer is invented.
-- Steer is meaningful only for a live Runtime. It is not placed in Temporal's
-  durable Run queue and cannot be replayed against a later Attempt.
+- Steer is meaningful only for a live Runtime. It is not placed in the
+  PostgreSQL ready-Run queue and cannot be replayed against a later Attempt.
 
 ## Rejected alternatives
 
@@ -59,7 +59,7 @@ of an ordinary follow-up.
 This destroys the already-documented queued follow-up behavior and makes user
 intent depend on timing.
 
-### Queue steer in Temporal
+### Queue steer as an ordinary Run
 
 A delayed steer aimed at a later Runtime is no longer a steer. The correct
 durable operation for that behavior is an ordinary follow-up Turn.

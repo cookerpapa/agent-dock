@@ -10,7 +10,7 @@ import {
   SandboxAssignmentInventoryError,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor";
+} from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
 import type {
   SupervisorBootIdentity,
   SupervisorOwnerBoundary,

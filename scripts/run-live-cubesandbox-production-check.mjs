@@ -377,16 +377,21 @@ async function optionalMetadata(path) {
   }
 }
 
-async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
+function persistentWorkspacePath(tenant, workspaceId, sessionId) {
   const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
   const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
   const volumePath = resolve(volumeRoot, `agentdock-posix-${volumeId}`);
-  assert(
-    volumePath.startsWith(`${volumeRoot}/`),
-    "Workspace Git evidence escaped the shared-volume root",
+  assert(volumePath.startsWith(`${volumeRoot}/`), "Workspace path escaped the shared-volume root");
+  return { volumeId, volumePath, workspacePath: resolve(volumePath, "workspace") };
+}
+
+async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
+  const { volumeId, volumePath, workspacePath } = persistentWorkspacePath(
+    tenant,
+    workspaceId,
+    sessionId,
   );
   const trustedGitPath = resolve(volumePath, ".agent-dock-runtime/git");
-  const workspacePath = resolve(volumePath, "workspace");
   const [trustedGit, workspace, workspaceGit] = await Promise.all([
     optionalMetadata(trustedGitPath),
     optionalMetadata(workspacePath),
@@ -575,8 +580,6 @@ async function runTurn(sessionId, prompt, afterSequence, expectTools) {
         events.some((event) => event.type === "tool.completed"),
         "Coding turn did not complete a Tool operation",
       );
-      assert.equal(typeof terminal.payload.workspacePatch?.patch, "string");
-      assert(terminal.payload.workspacePatch.patch.length > 0, "Coding turn had no patch");
     } else {
       assert.equal(toolCalls, 0, "Pure chat unexpectedly executed a Tool");
     }
@@ -680,11 +683,17 @@ try {
   const firstVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(firstVersions.currentVersionId !== undefined, "First coding Run did not commit Workspace");
   const firstVersionId = firstVersions.currentVersionId;
-  assert(
-    firstCoding.terminal.payload.workspacePatch.patch.includes("counting_sort"),
-    "First Workspace patch omitted counting_sort.py code",
+  const { workspacePath } = persistentWorkspacePath(
+    tenantId,
+    session.workspaceId,
+    session.sessionId,
   );
-  progress("first Workspace Volume revision and patch were verified");
+  const firstSource = await readFile(resolve(workspacePath, "counting_sort.py"), "utf8");
+  assert(
+    firstSource.includes("def counting_sort") && firstSource.includes("negative integers"),
+    "First persistent Workspace revision omitted counting_sort.py code",
+  );
+  progress("first persistent Workspace Volume revision was verified in place");
 
   const followUp = await runTurn(
     session.sessionId,
@@ -715,10 +724,10 @@ try {
   const finalVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(finalVersions.currentVersionId !== undefined);
   assert.notEqual(finalVersions.currentVersionId, firstVersionId);
-  const finalPatch = followUp.terminal.payload.workspacePatch.patch;
-  assert(finalPatch.includes("counting_sort"));
+  const finalSource = await readFile(resolve(workspacePath, "counting_sort.py"), "utf8");
+  assert(finalSource.includes("counting_sort"));
   assert(
-    followUp.terminal.payload.workspacePatch.patch.includes("4, -1, 4, 0, -1") ||
+    finalSource.includes("4, -1, 4, 0, -1") ||
       followUp.events.some(
         (event) =>
           event.type === "tool.completed" &&
@@ -855,7 +864,7 @@ try {
       settledMs: firstCoding.settledMs,
       toolCalls: firstCoding.toolCalls,
       cubeActivations: firstCoding.activations.length,
-      patchBytes: Buffer.byteLength(firstCoding.terminal.payload.workspacePatch.patch, "utf8"),
+      workspaceFileBytes: Buffer.byteLength(firstSource, "utf8"),
       usage: firstUsage,
     },
     followUpCoding: {
@@ -863,7 +872,7 @@ try {
       settledMs: followUp.settledMs,
       toolCalls: followUp.toolCalls,
       cubeActivations: followUp.activations.length,
-      patchBytes: Buffer.byteLength(followUp.terminal.payload.workspacePatch.patch, "utf8"),
+      workspaceFileBytes: Buffer.byteLength(finalSource, "utf8"),
       usage: followUpUsage,
     },
     multiRound: {
@@ -872,7 +881,7 @@ try {
       persistentSandboxPolicy: session.sandboxRetention === "persistent",
       workspaceRestored: true,
       workspaceVersions: finalVersions.versions.length,
-      finalPatchBytes: Buffer.byteLength(finalPatch, "utf8"),
+      finalWorkspaceFileBytes: Buffer.byteLength(finalSource, "utf8"),
     },
     workspaceIsolation: gitPlacement,
     multiTenant: {

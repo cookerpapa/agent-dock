@@ -39,9 +39,9 @@ to keep the service private and loopback-bound.
    Run Attempt transitions, Workspace operations, model requests, and GitHub PR
    deliveries. This is tenant-scoped operational evidence, not a complete human
    actor audit: the existing rows do not record a user actor or request IP.
-5. Add an offline coordinated backup format covering the private runtime and
-   all seven named volumes: PostgreSQL, MinIO, Supervisor boot/spool,
-   Prometheus, Grafana, and Jaeger. Encrypt the compressed payload with
+5. Add an offline coordinated backup format covering the private runtime,
+   PostgreSQL, persistent Workspace storage, Worker/event WAL and optional
+   observability state. Encrypt the compressed payload with
    AES-256-GCM and a scrypt-derived key; authenticate the format header; record
    hashes, Git revision, image version, and exact local image IDs. Restore only
    into a new empty project/runtime with matching images, verified paths and

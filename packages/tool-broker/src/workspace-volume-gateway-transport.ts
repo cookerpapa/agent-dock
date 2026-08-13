@@ -483,21 +483,53 @@ export class HttpWorkspaceVolumeGateway implements WorkspaceVolumeGateway {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.#requestTimeoutMs),
     });
-    const text = await response.text();
     if (!response.ok) {
+      await response.body?.cancel();
       throw new WorkspaceVolumeGatewayError(
         "workspace_volume_gateway_request_failed",
         "Workspace Volume Gateway request failed",
         response.status >= 500,
       );
     }
-    if (Buffer.byteLength(text, "utf8") > MAXIMUM_RESPONSE_BYTES) {
+    const declaredLength = response.headers.get("content-length");
+    if (
+      declaredLength !== null &&
+      (!/^(0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > MAXIMUM_RESPONSE_BYTES)
+    ) {
+      await response.body?.cancel();
       throw new WorkspaceVolumeGatewayError(
         "workspace_volume_gateway_response_invalid",
         "Workspace Volume Gateway response was invalid",
         false,
       );
     }
-    return JSON.parse(text) as unknown;
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    const reader = response.body?.getReader();
+    if (reader !== undefined) {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        totalBytes += chunk.value.byteLength;
+        if (totalBytes > MAXIMUM_RESPONSE_BYTES) {
+          await reader.cancel();
+          throw new WorkspaceVolumeGatewayError(
+            "workspace_volume_gateway_response_invalid",
+            "Workspace Volume Gateway response was invalid",
+            false,
+          );
+        }
+        chunks.push(chunk.value);
+      }
+    }
+    try {
+      return JSON.parse(Buffer.concat(chunks, totalBytes).toString("utf8")) as unknown;
+    } catch {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_volume_gateway_response_invalid",
+        "Workspace Volume Gateway response was invalid",
+        false,
+      );
+    }
   }
 }

@@ -8,10 +8,7 @@ import {
   parseEnvironmentValidationReport,
 } from "@agent-dock/protocol";
 import {
-  PINNED_PI_CODING_AGENT_VERSION,
-  PiTurnError,
   validatePiSessionSnapshot,
-  validateWorkspaceSnapshot,
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
@@ -19,7 +16,12 @@ import {
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,
-} from "@agent-dock/sandbox-supervisor";
+} from "@agent-dock/sandbox-supervisor/sandbox-checkpoint";
+import {
+  PINNED_PI_CODING_AGENT_VERSION,
+  PiTurnError,
+} from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
+import { validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor/workspace-snapshot";
 import { createHash, randomUUID } from "node:crypto";
 import { workspaceSnapshotFileCount } from "@agent-dock/workspace-runtime";
 import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";

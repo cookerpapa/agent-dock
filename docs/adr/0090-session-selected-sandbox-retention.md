@@ -44,7 +44,7 @@ reused without waiting for the periodic reaper.
 `persistent` is a runtime-retention policy, not a claim of VM-state durability.
 Cancellation, ambiguous Tool completion, failed checkpoint, environment or
 Workspace revision mismatch, Manager shutdown, Cube/node failure and operator
-cleanup may destroy the Cube. The committed POSIX/Kopia Workspace and Pi-native
+cleanup may destroy the Cube. The persistent POSIX Workspace and Pi-native
 Session remain recoverable, and the existing reset harness makes the changed
 execution world visible to the model. Process memory, sockets and PTYs are not
 restored after those failures.

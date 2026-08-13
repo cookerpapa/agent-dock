@@ -305,10 +305,6 @@ export {
 } from "./platform-runtime-settings.ts";
 
 export {
-  validateSupervisorDispatchAffinity,
-  type SupervisorDispatchAffinity,
-} from "./supervisor-dispatch-affinity.ts";
-export {
   SessionEventHub,
   SessionEventSubscription,
   type SessionEventWake,

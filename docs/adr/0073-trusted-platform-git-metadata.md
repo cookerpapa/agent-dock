@@ -52,18 +52,16 @@ For a fresh activation:
    GIT_WORK_TREE=<envelope>/workspace
    ```
 
-At a checkpoint boundary, Cube freezes the exact user-process identities,
-flushes `/workspace`, and returns only the bounded file index. While that
-boundary remains frozen, the Volume Gateway computes the cumulative binary Patch
-through the external Git directory and snapshots the complete envelope with
-Kopia. The Manager then completes the checkpoint and resumes the frozen
-processes.
+At a checkpoint boundary, Cube freezes the exact user-process identities and
+flushes `/workspace`. While that boundary remains frozen, the Volume Gateway
+computes the cumulative binary Patch through the external Git directory and a
+content-hashed file index over the persistent Volume. The Manager then commits
+the bounded Volume reference and resumes the frozen processes.
 
 The Git baseline commit is carried in the Volume Gateway state and immutable
-Workspace checkpoint reference. Restore validates the expected baseline
-before exposing the Workspace to a new Cube. The checkpoint reference advances
-to `agent-dock.workspace-kopia-snapshot.v4`; v3 references and physical
-Volumes are rejected rather than migrated in place.
+Workspace reference. Reattachment validates the expected baseline before
+exposing the Workspace to a new Cube. Old checkpoint references and physical
+Volume layouts are rejected rather than migrated in place.
 
 Root `.git` is no longer reserved as platform state. If a user explicitly runs
 `git init` or clones a repository inside `/workspace`, that repository remains
@@ -81,7 +79,7 @@ for product source changes.
   Git commands continue to work in repositories the user creates or clones.
 - Environment validation checks the writable Workspace boundary instead of
   assuming that `/workspace` itself is a user-visible Git repository.
-- Existing development Workspace heads, Kopia references and POSIX Volumes
+- Existing development Workspace heads, old checkpoint references and POSIX Volumes
   from v3 must be discarded at deployment cutover.
 
 ## Acceptance
@@ -89,7 +87,7 @@ for product source changes.
 1. Cube sees no platform `.git` file or directory under `/workspace`;
 2. the trusted envelope contains a valid external Git baseline;
 3. edits, deletions and new files produce the same bounded binary Patch;
-4. external Git metadata survives Kopia snapshot and cold restore;
+4. external Git metadata survives source-Cube destruction and fresh-Cube reattachment;
 5. a missing or mismatched baseline fails closed before Tool execution;
 6. a user-created nested repository remains usable and is not treated as
    platform metadata; and

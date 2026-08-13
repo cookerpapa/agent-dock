@@ -170,8 +170,8 @@ production topology prove all of the following:
 9. control-plane scale `1 -> 2 -> 1`, a control-plane restart, and a fresh
    Supervisor boot preserve both tenants' isolation, events, and checkpoints;
 10. the default production deployment upgrades without deleting PostgreSQL,
-    MinIO, boot, or spool volumes, all services become healthy, and only Web is
-    published on loopback.
+    Worker/event WAL or persistent Workspace volumes, all services become
+    healthy, and only Web is published on loopback.
 
 ## Consequences
 

@@ -52,7 +52,7 @@ external:
     brokers:
       - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
     topic: agent-dock-worker-events-v1
-    projectorGroupId: agent-dock-worker-event-projector-v1
+    projectorGroupId: agent-dock-worker-event-projector-v2
   liveEventStore:
     urlSecretKey: live-event-store-url
   providerProxyUrl: https://provider-proxy.example.com:3129

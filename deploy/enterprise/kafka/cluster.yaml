@@ -136,7 +136,7 @@ spec:
       - resource: { type: topic, name: agent-dock-worker-events-v1, patternType: literal }
         operations: [Read, Write, Describe]
         host: "*"
-      - resource: { type: group, name: agent-dock-worker-event-projector-v1, patternType: literal }
+      - resource: { type: group, name: agent-dock-worker-event-projector-v2, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       - resource: { type: cluster, name: kafka-cluster, patternType: literal }

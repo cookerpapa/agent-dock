@@ -72,9 +72,10 @@ This suffix is a recovery bridge, not a competing transcript authority.
 
 ### Timeouts
 
-The Temporal Activity start-to-close timeout must exceed the maximum configured
-Pi Turn timeout plus bounded restore, Sandbox settlement, checkpoint and
-cleanup allowance. Configuration validation rejects an unsafe relationship.
+The PostgreSQL command lease is renewed throughout execution, while Worker
+graceful shutdown must exceed the maximum configured Pi Turn timeout plus
+bounded restore, Sandbox settlement, checkpoint and cleanup allowance.
+Configuration validation rejects an unsafe relationship.
 
 ## Consequences
 

@@ -413,7 +413,7 @@ services:
       AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE: /run/agent-dock-secrets/database-url
       AGENT_DOCK_KAFKA_BROKERS: kafka:9092
       AGENT_DOCK_WORKER_EVENT_TOPIC: agent-dock-worker-events-v1
-      AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP: agent-dock-worker-event-projector-v1
+      AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP: agent-dock-worker-event-projector-v2
       AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
       AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE: /run/agent-dock-secrets/live-event-store-url
       AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS: ${AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS:-true}
@@ -584,7 +584,7 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
+      NO_PROXY: 127.0.0.1,localhost,control-plane,event-gateway,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
       AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000

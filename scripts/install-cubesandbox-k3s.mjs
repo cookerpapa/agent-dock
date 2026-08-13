@@ -512,6 +512,12 @@ function withCubeMasterPosixVolumePlugin(config) {
 async function installPosixVolumePlugin() {
   await mkdir(posixVolumeRoot, { recursive: true, mode: 0o700 });
   await chmod(posixSharedRoot, 0o700);
+  // A hostPath bind mount keeps the original inode alive when an operator
+  // atomically replaces or moves the runtime directory. Put the resolved
+  // directory identity on both Pod templates so re-running the installer
+  // recreates CubeMaster/Cubelet instead of silently retaining a stale mount.
+  const sharedRootMetadata = await stat(posixSharedRoot);
+  const sharedRootIdentity = `${String(sharedRootMetadata.dev)}-${String(sharedRootMetadata.ino)}`;
   await chmod(posixVolumeRoot, 0o700);
   const pod = await captureKubectl([
     "-n",
@@ -595,6 +601,11 @@ async function installPosixVolumePlugin() {
       JSON.stringify({
         spec: {
           template: {
+            metadata: {
+              annotations: {
+                "agent-dock.io/posix-shared-root-identity": sharedRootIdentity,
+              },
+            },
             spec: {
               containers: [
                 {
@@ -640,6 +651,11 @@ async function installPosixVolumePlugin() {
       JSON.stringify({
         spec: {
           template: {
+            metadata: {
+              annotations: {
+                "agent-dock.io/posix-shared-root-identity": sharedRootIdentity,
+              },
+            },
             spec: {
               containers: [
                 {
@@ -656,6 +672,10 @@ async function installPosixVolumePlugin() {
                       mountPath: "/opt/cube-image/Cubelet/config/config.toml",
                       subPath: "cubelet-config.toml",
                       readOnly: true,
+                    },
+                    {
+                      name: "data-cube-shared",
+                      mountPath: "/data/cube-shared",
                     },
                   ],
                 },

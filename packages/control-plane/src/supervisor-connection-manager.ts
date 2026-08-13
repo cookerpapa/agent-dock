@@ -12,7 +12,7 @@ import {
   type SupervisorRegisterMessage,
   type SupervisorRegisteredMessage,
 } from "@agent-dock/protocol";
-import { PINNED_PI_CODING_AGENT_VERSION } from "@agent-dock/sandbox-supervisor";
+import { PINNED_PI_CODING_AGENT_VERSION } from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
 import { createHash } from "node:crypto";
 import type { Kysely, Transaction } from "kysely";
 import type { SandboxRetirementResult } from "./assignment-reconciler.ts";

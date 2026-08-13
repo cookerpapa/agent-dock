@@ -21,7 +21,7 @@ CubeSandbox is the sole production Tool runtime:
 
 ```text
 Browser / REST / SSE
-        -> Control Plane / Temporal
+        -> Control Plane / PostgreSQL ready queue
         -> trusted Pi Worker pool
         -> authenticated Tool RPC
         -> trusted Sandbox Manager
@@ -31,17 +31,17 @@ Browser / REST / SSE
 
 1. Cube owns physical placement and lifecycle. AgentDock owns tenants, Sessions,
    Runs/Attempts, leases, fences, Tool replay policy and terminal commits.
-2. Pi, provider credentials, PostgreSQL, object-store credentials and
-   conversation state remain outside Cube. The guest contains only fixed
+2. Pi, provider credentials, PostgreSQL credentials and conversation state
+   remain outside Cube. The guest contains only fixed
    toolchains and its assigned `/workspace`.
 3. CubeAPI is private and protected through its upstream authorization callback
    using an AgentDock-owned constant-time authorizer. The trusted Manager has
    only the closed management permissions it requires.
 4. Chat-only Runs do not create a microVM. The first Tool call activates Cube;
    ADR-0068 governs exact-Session warm retention, rebinding and idle cleanup.
-5. The Cube Volume Plugin supplies the live POSIX Workspace. Kopia/object
-   storage plus PostgreSQL CAS/fencing provide durable Workspace checkpoints as
-   defined by ADR-0067 and ADR-0072.
+5. The Cube Volume Plugin supplies the persistent POSIX Workspace. PostgreSQL
+   CAS/fencing commits its immutable Volume reference and Workspace head as
+   defined by ADR-0072 and ADR-0101; no per-Run Workspace copy is made.
 6. Public guest egress is mediated by the fixed Cube egress gateway in ADR-0063;
    platform/private destinations and metadata remain denied.
 7. Repository acquisition for the default product happens as ordinary Tool work

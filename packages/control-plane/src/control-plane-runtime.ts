@@ -1,5 +1,5 @@
 import type { Database } from "@agent-dock/database";
-import type { SandboxAssignmentInventory } from "@agent-dock/sandbox-supervisor";
+import type { SandboxAssignmentInventory } from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { Kysely } from "kysely";
 

@@ -4,9 +4,9 @@ Status: accepted
 
 ## Context
 
-Run execution and cancellation are now owned by exact-command Temporal
-Activities, but the Supervisor WebSocket retained unreachable code for an older
-remote execution dispatcher. The default Control Plane also constructed
+Run execution and cancellation are owned by the PostgreSQL ready queue and
+shared Pi Worker pool. The Supervisor WebSocket previously retained unreachable
+code for an older remote execution dispatcher. The default Control Plane also constructed
 research services and exposed unfinished API/client workflows that the Web
 product did not complete.
 
@@ -14,9 +14,9 @@ product did not complete.
 
 1. The Supervisor WebSocket is the Worker Control Channel. It carries
    registration, heartbeat, durable event delivery and active Pi steer only.
-2. Temporal is the only Run execution/cancellation transport. The old remote
+2. PostgreSQL is the only Run queue and execution authority. The old remote
    Supervisor execution backend and its execute/cancel command handlers are
-   deleted.
+   deleted; the WebSocket cannot dispatch a Run.
 3. Candidate Race, Rewind, Review Bundle, model governance/usage and Project
    Environment APIs move to one explicitly enabled advanced controller.
 4. The core deployment defaults that module off. Observability and GitHub

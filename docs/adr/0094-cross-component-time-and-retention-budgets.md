@@ -41,14 +41,14 @@ The production profiles enforce these relationships at startup or in CI:
    baseline. Kafka can therefore rebuild a lost live read model before the
    canonical transcript fallback is required.
 9. Workspace Volume Gateway admission and execution fit within transport and
-   shutdown: `queue wait 30s + Kopia 600s <= HTTP 660s < process grace 720s`.
-   This lets a rollout reject queued work while allowing an admitted immutable
-   checkpoint operation to settle or reach its own timeout.
+   shutdown: `queue wait 30s + index/patch capture 600s <= HTTP 660s < process
+   grace 720s`. This lets a rollout reject queued work while allowing an
+   admitted immutable reference operation to settle or reach its own timeout.
 
-Browser-login TTL, Cube warm-idle TTL, Pi checkpoint-cache TTL and Temporal
-history retention do not extend execution authority. Expiry of one of these
-cache/product windows may reduce convenience or cause a cold restore, but it
-must not make a stale lease valid or delete the committed Pi/Workspace head.
+Browser-login TTL, Cube warm-idle TTL and replay/cache retention do not extend
+execution authority. Expiry of one of these product windows may reduce
+convenience or cause a cold restore, but it must not make a stale lease valid or
+delete the committed Pi/Workspace head.
 
 ## Consequences
 
@@ -60,5 +60,5 @@ must not make a stale lease valid or delete the committed Pi/Workspace head.
   and deployment termination grace. Operators should change the chain as one
   reviewed policy, not override one value in isolation.
 - Retention remains layered: Kafka/Valkey contain live delivery data,
-  PostgreSQL contains canonical Turns and cursors, and S3/Kopia contain Pi and
-  Workspace checkpoints.
+  PostgreSQL contains canonical Turns, Pi Session/checkpoint state and cursors,
+  while persistent Cube Volumes contain Workspace bytes.

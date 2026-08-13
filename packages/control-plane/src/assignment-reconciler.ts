@@ -13,7 +13,7 @@ import {
 import type {
   SandboxAssignmentInventory,
   SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor";
+} from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";

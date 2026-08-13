@@ -39,6 +39,10 @@ export async function up(db: Kysely<Database>): Promise<void> {
   await sql`drop index execution_cells_sandbox_domain_idx`.execute(db);
   await sql`drop table execution_cells`.execute(db);
   await sql`alter table outbox drop column temporal_handed_off_at`.execute(db);
+  // Kafka offsets are coordinates inside one physical log epoch. The runtime
+  // simplification is a destructive event-plane cutover, so old projector
+  // coordinates must never be compared with a rebuilt or truncated topic.
+  await sql`delete from worker_event_projection_offsets`.execute(db);
 
   await db.schema
     .createIndex("outbox_run_queue_ready")

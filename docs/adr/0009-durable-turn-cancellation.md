@@ -1,6 +1,6 @@
 # ADR-0009: Durable Turn cancellation and execution-stop confirmation
 
-- Status: accepted, amended for Temporal and the Pi SDK
+- Status: accepted, amended for the PostgreSQL Worker pool and Pi SDK
 - Date: 2026-07-19
 
 ## Context
@@ -15,8 +15,9 @@ Workspace.
 1. The public cancellation endpoint requires an idempotency key. HTTP `202`
    means intent is durable, not that execution has stopped.
 2. A cancellation targets the exact execute command, RunAttempt, lease and
-   fence. Temporal signals the active Workflow/Activity; PostgreSQL rejects a
-   stale or already-settled target.
+   fence. PostgreSQL durably changes the command intent; the Worker observes
+   cancellation while renewing the same authority. A stale or already-settled
+   target is rejected.
 3. The Worker aborts the Pi SDK model loop and cancels the active Tool RPC. The
    Tool boundary terminates the process group; if absence cannot be proven, the
    exact Cube activation is destroyed.
@@ -33,8 +34,8 @@ Workspace.
 ## Consequences
 
 - Browser retries do not send duplicate cancellation intent.
-- Cancellation can interrupt a blocked model or Tool Activity without a second
-  PostgreSQL polling scheduler.
+- Cancellation can interrupt a blocked model or Tool execution without adding
+  another scheduler.
 - Lease/fence checks prevent an old Worker from cancelling or settling newer
   work.
 - Process absence remains an execution-plane fact, not an HTTP inference.

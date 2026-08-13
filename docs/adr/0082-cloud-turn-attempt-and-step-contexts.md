@@ -11,9 +11,9 @@ ADR-0080 introduced one immutable credential-free execution snapshot for a
 RunAttempt. ADR-0081 then added a fresh sampling Step before every Pi provider
 request. The RunAttempt snapshot currently mixes two kinds of state:
 
-- logical Turn state that must remain stable when Temporal retries the same
-  accepted Run, such as model, environment, Workspace base revision, Tool
-  policy and budgets;
+- logical Turn state that must remain stable when a replacement Worker claims
+  another Attempt for the same accepted Run, such as model, environment,
+  Workspace base revision, Tool policy and budgets;
 - physical ownership state that must change when another Worker takes over,
   such as Attempt, command, Worker boot, lease and fencing identities.
 

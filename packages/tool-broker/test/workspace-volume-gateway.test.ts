@@ -3,7 +3,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PersistentVolumeWorkspaceVolumeGateway, workspaceVolumeId } from "../src/index.ts";
+import {
+  HttpWorkspaceVolumeGateway,
+  PersistentVolumeWorkspaceVolumeGateway,
+  WorkspaceVolumeGatewayServer,
+  workspaceVolumeId,
+  type WorkspaceVolumeGateway,
+} from "../src/index.ts";
 
 const roots: string[] = [];
 
@@ -83,5 +89,58 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
     await expect(mover.prepare({ ...first, tenantId: "tenant-other" })).rejects.toMatchObject({
       code: "workspace_data_binding_invalid",
     });
+  });
+});
+
+describe("HttpWorkspaceVolumeGateway", () => {
+  it("transports a bounded large Workspace index without copying file bytes", async () => {
+    const files = Array.from({ length: 3_500 }, (_, index) => ({
+      path: `src/generated/file-${index.toString().padStart(5, "0")}.ts`,
+      executable: false,
+      sizeBytes: 16,
+      sha256: index.toString(16).padStart(64, "0"),
+    }));
+    const gateway: WorkspaceVolumeGateway = {
+      async checkHealth() {},
+      async prepare() {
+        return { attached: true };
+      },
+      async initializeBaseline() {
+        return { gitBaselineCommit: "1".repeat(40) };
+      },
+      async snapshot() {
+        return {
+          volumeRevision: "2".repeat(64),
+          gitBaselineCommit: "1".repeat(40),
+          workspacePatch: { format: "unified_diff" as const, patch: "", truncated: false },
+          files,
+        };
+      },
+      async materialize() {
+        return { bytes: new Uint8Array(), sha256: createHash("sha256").digest("hex") };
+      },
+      async close() {},
+    };
+    const serviceToken = "v".repeat(48);
+    const server = new WorkspaceVolumeGatewayServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken,
+      gateway,
+    });
+    const address = await server.listen();
+    const client = new HttpWorkspaceVolumeGateway({ baseUrl: address, serviceToken });
+    try {
+      const snapshot = await client.snapshot({
+        ...identity("session-large-index"),
+        activationId: randomUUID(),
+        fencingToken: 1,
+        bindingSha256: "3".repeat(64),
+      });
+      expect(snapshot.files).toHaveLength(files.length);
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });

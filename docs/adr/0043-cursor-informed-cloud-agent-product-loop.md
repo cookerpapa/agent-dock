@@ -36,7 +36,7 @@ The source analysis remains in
 
 - Advanced experiments remain available without making the default system look
   like several products combined.
-- Core deployment and review can focus on Pi, Temporal, durable events, Cube and
-  Workspace recovery.
+- Core deployment and review can focus on Pi, PostgreSQL durable execution,
+  durable events, Cube and Workspace recovery.
 - Historical gVisor/Helm/prewarm implementation details are retained only in Git
   history and acceptance reports; they are not supported runtime choices.

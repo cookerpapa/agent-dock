@@ -54,6 +54,14 @@ for (const name of [...closure].sort()) {
   );
 }
 
+for (const runtimeDependency of ["sandbox-supervisor", "tool-broker"]) {
+  const dependencyNodeModulesCopy = `COPY --from=dependencies /app/packages/${runtimeDependency}/node_modules /app/packages/${runtimeDependency}/node_modules`;
+  assert(
+    dockerfile.includes(dependencyNodeModulesCopy),
+    `Supervisor image must preserve nested production dependencies for ${runtimeDependency}`,
+  );
+}
+
 const dockerfileCandidates = [
   resolve(repositoryRoot, "deploy", "cubesandbox", "Dockerfile.tool"),
   resolve(repositoryRoot, "spikes", "pi-embedded-rehydrate", "Dockerfile"),

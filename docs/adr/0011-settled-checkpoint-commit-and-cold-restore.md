@@ -1,124 +1,53 @@
 # ADR-0011: Settled checkpoint commit and cold restore
 
-- Status: Accepted
+- Status: accepted, rewritten by ADR-0101
 - Date: 2026-07-19
-- Extended by: [ADR-0021](0021-s3-compatible-settled-checkpoint-storage.md)
 
 ## Context
 
-The Phase 1 Docker activation deliberately starts with a fresh image fixture and
-starts Pi with `--no-session`. This proves isolation and event delivery, but a
-second turn with the same AgentDock session ID would lose both the Pi message
-tree and the modified workspace. Keeping one container or Pi process alive per
-stored session would preserve that state only by coupling durable identity to
-idle compute.
+A cold Session must resume Pi's native conversation and the Workspace without
+keeping one Pi process or Cube alive forever. A public completion event must not
+become visible before the state needed by the next Run is committed.
 
-ADR-0003 makes object storage authoritative for settled Pi and workspace
-snapshots, and semantic rehydration is the baseline recovery
-tier. The missing detail is the commit boundary. Pi currently publishes
-`turn.completed` before its caller regains control. Uploading a snapshot only
-after that event is durably acknowledged creates a contradictory failure mode:
-the transcript can say completed while the dispatcher later marks the turn
-failed because no recoverable checkpoint exists.
+Pi Session state and Workspace state have different durability owners:
 
-The checkpoint transport also crosses the sandbox boundary. A restored
-workspace can contain attacker-controlled paths and bytes, while a stale
-supervisor must not replace a newer session snapshot after losing its lease.
+- Pi-native Session entries and compacted branches are stored through the
+  PostgreSQL Session/checkpoint boundary;
+- the persistent Cube Volume owns Workspace bytes;
+- PostgreSQL stores the immutable Workspace reference, file index and current
+  version pointer, not another copy of the Workspace.
 
 ## Decision
 
-1. A checkpoint is created only at a settled successful turn boundary. Failed
-   and cancelled turns do not advance the last settled checkpoint.
-2. Successful completion uses this order:
-   `Pi settles -> worker captures checkpoint -> trusted host validates and
-   durably stores checkpoint -> worker receives checkpoint ACK -> worker
-   publishes turn.completed -> control plane durably ACKs the terminal event`.
-   Therefore a checkpoint-store failure produces no public completed event.
-3. The Docker worker protocol gains a private checkpoint publish/ACK exchange.
-   Snapshot bytes never enter public AgentDock events, SSE, Docker arguments,
-   container environment, or logs. The exchange is closed, size bounded,
-   content hashed, and tied to command/session/turn/lease/fence identity.
-4. The trusted host loads the latest checkpoint before starting an activation.
-   The worker receives an opaque pair of bounded blobs over stdin, restores
-   them inside the disposable filesystem, and starts Pi with an explicit
-   session JSONL path. No host bind mount is introduced.
-5. Pi JSONL remains Pi's conversation authority. The runner may persist an
-   explicit session file inside its temporary runtime only when settled
-   checkpointing is enabled. The file is read after Pi's settled event and is
-   removed with the rest of the activation after its checkpoint is committed.
-6. The initial workspace snapshot format is a canonical manifest of regular
-   files, relative POSIX paths, executable bits, content lengths, hashes, and
-   base64 content. Symlinks, special files, duplicate/non-canonical paths,
-   `.git` paths, invalid UTF-8 metadata, oversized files, too many files, and
-   hash/length mismatches are rejected. Restore starts from the trusted fixture
-   Git baseline, replaces its non-`.git` working tree with the manifest, and
-   leaves the baseline commit intact so the final diff remains cumulative.
-7. A checkpoint store is a replaceable trusted-host interface. Its load returns
-   an opaque revision plus bytes; save performs compare-and-swap against that
-   revision. The control-plane implementation writes objects first, then in one
-   PostgreSQL transaction verifies the current unexpired lease/fence, inserts
-   artifact metadata, and stages both session snapshot pointers. The durable
-   `turn.completed` event is the commit marker: cold load accepts the pointed
-   pair only when it belongs to the latest completed event, otherwise it falls
-   back to the most recent artifact pair that does. Thus a worker crash between
-   checkpoint ACK and terminal publication cannot make a failed turn the
-   recovery authority. An object written before a failed transaction is
-   unreferenced and may be deleted or collected later; it never becomes
-   authoritative merely by existing.
-8. The development object-store adapter uses a private host directory with
-   atomic file publication and hash verification. It exercises the same
-   checkpoint-store contract but is not claimed to survive host loss. MinIO/S3
-   is a later adapter, not a different recovery model. ADR-0021 subsequently
-   adds that adapter without changing this commit/recovery protocol.
-9. The current slice is intentionally bounded: at most 2 MiB of Pi JSONL, 2 MiB
-   of workspace manifest, 512 regular files, 512 KiB per file, and 512 UTF-8
-   bytes per relative path. Larger repositories require an archive/object
-   streaming format rather than raising JSONL transport limits without
-   measurement.
-10. Cold restore is semantic, not process-memory recovery. Open file handles,
-    child processes, shell state, network connections, and a tool call that was
-    in flight are not restored. Recovery returns to the most recent successful
-    turn.
+1. Successful settlement prepares the Pi checkpoint and a bounded persistent
+   Volume reference before publishing completion.
+2. The Control Plane commits the terminal event, Run/Attempt state, Pi
+   checkpoint head and Workspace version/head in one fenced PostgreSQL
+   transaction. A failure before that transaction cannot expose a completed
+   Run.
+3. Pi JSONL/SessionStorage remains Pi's conversation authority. AgentDock never
+   reconstructs a competing mutable `messages[]` from browser text.
+4. Workspace bytes remain on the Workspace's persistent Cube Volume across
+   warm reuse and fresh Cube activation. The checkpoint carries only provider
+   identity, volume revision, external Git baseline, bounded file metadata and
+   integrity hashes.
+5. A replacement Worker loads the latest committed Pi checkpoint. A replacement
+   Cube mounts the same tenant/workspace-bound persistent Volume and validates
+   its generation and revision before Tool execution.
+6. Lease, fencing token and Workspace-head compare-and-swap prevent an old
+   Attempt from advancing either state head.
+7. Cold restore is semantic and filesystem durable, not process-memory
+   recovery. Open descriptors, shell state, child processes, sockets and an
+   in-flight Tool operation are not restored.
+8. Failed or cancelled Runs preserve the interruption boundary defined by
+   ADR-0079/ADR-0080 without falsely advancing the successful Workspace head.
 
 ## Consequences
 
-- A stored AgentDock session consumes no Pi process, thread, or container while
-  idle, yet its next turn can see prior messages and workspace modifications.
-- The terminal transcript and recoverable state share an explicit ordering
-  guarantee instead of relying on best-effort post-completion upload.
-- Checkpoint persistence adds latency to the successful turn boundary and needs
-  object-store health before completion can be acknowledged.
-- The custom manifest is safe and testable for the small Java fixture but is
-  not a generic large-repository packaging format.
-- Content hashes detect corruption, while lease/fence validation and revision
-  compare-and-swap prevent stale checkpoint replacement. They do not make
-  arbitrary external tool side effects exactly once.
-
-## Rejected alternatives
-
-### Keep the container warm for each session
-
-This preserves incidental process state but makes idle resource consumption
-scale with stored conversations and turns a cache into the recovery authority.
-
-### Upload after `turn.completed`
-
-This permits a durable completed transcript without a durable continuation
-point. A failed upload would force either a false success or contradictory
-terminal state.
-
-### Bind-mount a host checkpoint directory
-
-This expands the untrusted container's filesystem authority and bypasses the
-object-store restoration path that production needs.
-
-### Persist snapshot blobs in PostgreSQL
-
-PostgreSQL owns pointers and transactional metadata, not large cold bytes.
-Moving blobs into the control database would contradict the existing ownership
-model and make later S3/MinIO adoption a migration rather than an adapter.
-
-### Archive the whole workspace with unrestricted `tar`
-
-Blind extraction must handle traversal, links, devices, ownership, and archive
-bombs. The first bounded manifest rejects those classes explicitly.
+- Idle Sessions consume no dedicated Pi process.
+- Persistent Workspaces are not copied into PostgreSQL or object storage on
+  every Run.
+- A warm Cube may preserve processes for product convenience, while correctness
+  depends only on committed Pi state and the persistent Volume.
+- Arbitrary shell side effects retain honest at-most-once-start semantics; the
+  design does not claim process checkpoint/restore or exactly-once Bash.
