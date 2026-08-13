@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   findMissingLiveEventSessions,
   retainedKafkaPartitionEnds,
-} from "../src/live-event-rebuild.ts";
+} from "../src/live-event-repair-state.ts";
 
 const IDS = {
   tenant: "81000000-0000-4000-8000-000000000001",

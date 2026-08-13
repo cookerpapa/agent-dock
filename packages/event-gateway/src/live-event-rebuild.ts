@@ -1,11 +1,21 @@
 import type { Database } from "@agent-dock/database";
 import type { LiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { parseWorkerEventLogEnvelope } from "@agent-dock/runtime-core/worker-event-log";
+import { parseWorkerEventLogEnvelope } from "@agent-dock/runtime-core/worker-event-envelope";
 import { KafkaJS } from "@confluentinc/kafka-javascript";
 import { sql, type Kysely } from "kysely";
+import {
+  findMissingLiveEventSessions,
+  mapConcurrent,
+  retainedKafkaPartitionEnds,
+  safeKafkaSequence,
+} from "./live-event-repair-state.ts";
+
+export {
+  findMissingLiveEventSessions,
+  retainedKafkaPartitionEnds,
+} from "./live-event-repair-state.ts";
 
 const { Kafka, logLevel } = KafkaJS;
-const PAGE_SIZE = 500;
 
 export type LiveEventRebuildKafkaConfiguration = Readonly<{
   brokers: readonly string[];
@@ -33,44 +43,6 @@ export type LiveEventRepairReport = Readonly<{
   rebuild?: LiveEventRebuildReport;
 }>;
 
-type MissingLiveSession = Readonly<{
-  tenantId: string;
-  sessionId: string;
-  replayFloor: number;
-  liveThrough: number;
-}>;
-
-type KafkaTopicOffset = Readonly<{
-  partition: number;
-  offset: string;
-  low: string;
-}>;
-
-/**
- * Returns the exclusive high watermark only for partitions that still retain
- * at least one record. Kafka may report a non-zero high watermark after every
- * record in a partition has expired (`low === high`). Waiting for an
- * `eachMessage` callback in that case would block until the rebuild timeout.
- */
-export function retainedKafkaPartitionEnds(
-  offsets: readonly KafkaTopicOffset[],
-): ReadonlyMap<number, bigint> {
-  return new Map(
-    offsets
-      .map((offset) => [offset.partition, BigInt(offset.low), BigInt(offset.offset)] as const)
-      .filter(([, low, high]) => high > low)
-      .map(([partition, _low, high]) => [partition, high] as const),
-  );
-}
-
-function safeSequence(value: string | number | bigint, description: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new Error(`${description} is outside the non-negative safe integer range`);
-  }
-  return parsed;
-}
-
 function kafkaClient(configuration: LiveEventRebuildKafkaConfiguration) {
   return new Kafka({
     "bootstrap.servers": configuration.brokers.join(","),
@@ -85,88 +57,6 @@ function kafkaClient(configuration: LiveEventRebuildKafkaConfiguration) {
           "ssl.ca.pem": configuration.security.ca,
         }),
   });
-}
-
-async function mapConcurrent<T>(
-  values: readonly T[],
-  concurrency: number,
-  operation: (value: T) => Promise<void>,
-): Promise<void> {
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-      while (true) {
-        const index = next;
-        next += 1;
-        if (index >= values.length) return;
-        await operation(values[index]!);
-      }
-    }),
-  );
-}
-
-/** Finds durable live ranges whose first retained event is absent from Valkey. */
-export async function findMissingLiveEventSessions(
-  database: Kysely<Database>,
-  liveEvents: LiveSessionEventStore,
-): Promise<readonly MissingLiveSession[]> {
-  const missing: MissingLiveSession[] = [];
-  let afterSessionId: string | undefined;
-  while (true) {
-    let query = database
-      .selectFrom("sessions as session_row")
-      .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
-      .leftJoin("session_terminal_events as terminal", (join) =>
-        join
-          .onRef("terminal.tenant_id", "=", "session_row.tenant_id")
-          .onRef("terminal.session_id", "=", "session_row.id")
-          .onRef("terminal.seq", "=", "cursor.last_projected_seq"),
-      )
-      .select([
-        "session_row.id as sessionId",
-        "session_row.tenant_id as tenantId",
-        "cursor.replay_floor_seq as replayFloor",
-        "cursor.last_projected_seq as projectedThrough",
-        "terminal.seq as terminalSequence",
-      ])
-      .whereRef("cursor.last_projected_seq", ">", "cursor.replay_floor_seq")
-      .orderBy("session_row.id", "asc")
-      .limit(PAGE_SIZE);
-    if (afterSessionId !== undefined) query = query.where("session_row.id", ">", afterSessionId);
-    const rows = await query.execute();
-    if (rows.length === 0) break;
-    const candidates = rows
-      .map((row): MissingLiveSession | undefined => {
-        const replayFloor = safeSequence(row.replayFloor, "Replay floor");
-        const projectedThrough = safeSequence(row.projectedThrough, "Projected sequence");
-        const terminalSequence =
-          row.terminalSequence === null
-            ? undefined
-            : safeSequence(row.terminalSequence, "Terminal sequence");
-        const liveThrough =
-          terminalSequence === projectedThrough ? projectedThrough - 1 : projectedThrough;
-        return liveThrough <= replayFloor
-          ? undefined
-          : { tenantId: row.tenantId, sessionId: row.sessionId, replayFloor, liveThrough };
-      })
-      .filter((value): value is MissingLiveSession => value !== undefined);
-    await mapConcurrent(candidates, 16, async (candidate) => {
-      try {
-        const first = await liveEvents.readPage(
-          candidate.tenantId,
-          candidate.sessionId,
-          candidate.replayFloor,
-          candidate.liveThrough,
-          1,
-        );
-        if (first[0]?.seq !== candidate.replayFloor + 1) missing.push(candidate);
-      } catch {
-        missing.push(candidate);
-      }
-    });
-    afterSessionId = rows.at(-1)!.sessionId;
-  }
-  return missing;
 }
 
 /** Replays only the still-retained per-Session suffix from Kafka into Valkey. */
@@ -229,8 +119,8 @@ export async function rebuildLiveEventsFromKafka(
                 ? undefined
                 : {
                     tenantId: row.tenantId,
-                    replayFloor: safeSequence(row.replayFloor, "Replay floor"),
-                    persistedThrough: safeSequence(row.persistedThrough, "Persisted sequence"),
+                    replayFloor: safeKafkaSequence(row.replayFloor, "Replay floor"),
+                    persistedThrough: safeKafkaSequence(row.persistedThrough, "Persisted sequence"),
                   };
             cursorCache.set(sessionId, cursor);
           }

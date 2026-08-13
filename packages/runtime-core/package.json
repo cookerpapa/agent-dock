@@ -33,6 +33,7 @@
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
     "./terminal-turn-projection": "./src/terminal-turn-projection.ts",
+    "./worker-event-envelope": "./src/worker-event-envelope.ts",
     "./worker-event-log": "./src/worker-event-log.ts"
   },
   "scripts": {
