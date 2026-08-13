@@ -81,7 +81,6 @@ export type OrchestrationState =
 export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "cancelled";
 export type OrchestrationAcceptanceVerdict = "passed" | "failed";
 export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
-export type ExecutionCellState = "active" | "draining" | "disabled";
 export type SandboxDomainState = "active" | "draining" | "disabled";
 export type SandboxRetentionPolicy = "ephemeral" | "persistent";
 
@@ -92,38 +91,9 @@ export interface SandboxDomainTable {
   tool_broker_base_url: string;
   workspace_storage_key: string;
   maximum_active_sandboxes: GeneratedInteger;
-  created_at: GeneratedTimestamp;
-  updated_at: GeneratedTimestamp;
-}
-
-export interface ExecutionCellTable {
-  id: string;
-  display_name: string;
-  state: ExecutionCellState;
-  temporal_task_queue: string;
-  sandbox_domain_id: string;
-  supervisor_management_url_template: string;
-  capacity_weight: GeneratedInteger;
   assigned_workspaces: GeneratedInt8;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
-}
-
-export interface WorkspaceCellMigrationTable {
-  id: string;
-  tenant_id: string;
-  workspace_id: string;
-  source_cell_id: string;
-  target_cell_id: string;
-  requested_by_user_id: string;
-  idempotency_key: string;
-  state: "requested" | "completed" | "failed";
-  workspace_version_id: string | null;
-  base_row_version: Int8;
-  result_row_version: NullableInt8;
-  failure_code: string | null;
-  requested_at: GeneratedTimestamp;
-  settled_at: NullableTimestamp;
 }
 
 export type ToolBrokerInstanceState = "ready" | "stopped" | "lost";
@@ -316,7 +286,7 @@ export interface WorkspaceTable {
   id: string;
   tenant_id: string;
   project_id: string;
-  cell_id: string;
+  sandbox_domain_id: string;
   object_snapshot_key: string | null;
   current_workspace_version_id: GeneratedNullable<string>;
   row_version: GeneratedInt8;
@@ -854,7 +824,6 @@ export interface OutboxTable {
   attempts: GeneratedInteger;
   available_at: GeneratedTimestamp;
   created_at: GeneratedTimestamp;
-  temporal_handed_off_at: NullableTimestamp;
   published_at: NullableTimestamp;
   last_error: string | null;
 }
@@ -1113,10 +1082,73 @@ export interface PlatformRuntimeSettingChangeTable {
   created_at: GeneratedTimestamp;
 }
 
+export interface PiSessionTable {
+  tenant_id: string;
+  id: string;
+  created_at_ms: Int8;
+  parent_session_id: string | null;
+  next_seq: GeneratedInt8;
+  name: string | null;
+}
+
+export interface PiSessionLaneTable {
+  tenant_id: string;
+  session_id: string;
+  lane: string;
+  leaf_id: string | null;
+}
+
+export interface PiSessionEntryTable {
+  tenant_id: string;
+  session_id: string;
+  id: string;
+  seq: Int8;
+  parent_id: string | null;
+  type: string;
+  custom_type: string | null;
+  timestamp_ms: Int8;
+  payload: JsonObject;
+}
+
+export interface PiSessionRecordTable {
+  tenant_id: string;
+  session_id: string;
+  id: string;
+  seq: Int8;
+  lane: string;
+  type: string;
+  run_id: string | null;
+  operation_kind: string | null;
+  timestamp_ms: Int8;
+  payload: JsonObject;
+}
+
+export interface PiSessionLabelTable {
+  tenant_id: string;
+  session_id: string;
+  target_id: string;
+  label: string;
+  updated_seq: Int8;
+}
+
+export interface PiSessionLogTable {
+  tenant_id: string;
+  session_id: string;
+  seq: Int8;
+  kind: string;
+  payload: JsonObject;
+}
+
+export interface CheckpointObjectTable {
+  object_key: string;
+  bytes: Uint8Array;
+  sha256: string;
+  size_bytes: Int8;
+  created_at: GeneratedTimestamp;
+}
+
 export interface Database {
   sandbox_domains: SandboxDomainTable;
-  execution_cells: ExecutionCellTable;
-  workspace_cell_migrations: WorkspaceCellMigrationTable;
   tool_broker_instances: ToolBrokerInstanceTable;
   tool_broker_activations: ToolBrokerActivationTable;
   tool_broker_operations: ToolBrokerOperationTable;
@@ -1177,6 +1209,13 @@ export interface Database {
   context_compactions: ContextCompactionTable;
   platform_runtime_settings: PlatformRuntimeSettingsTable;
   platform_runtime_setting_changes: PlatformRuntimeSettingChangeTable;
+  pi_sessions: PiSessionTable;
+  pi_session_lanes: PiSessionLaneTable;
+  pi_session_entries: PiSessionEntryTable;
+  pi_session_records: PiSessionRecordTable;
+  pi_session_labels: PiSessionLabelTable;
+  pi_session_log: PiSessionLogTable;
+  checkpoint_objects: CheckpointObjectTable;
   github_app_installations: GitHubAppInstallationTable;
   github_repositories: GitHubRepositoryTable;
   github_pull_request_deliveries: GitHubPullRequestDeliveryTable;

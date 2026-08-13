@@ -10,7 +10,7 @@ import {
 /**
  * Test-only convenience for suites that create several accepted commands.
  *
- * Production code must never use this helper: Temporal selects the command and
+ * Production code must never use this helper: the PostgreSQL Worker queue selects the command and
  * calls dispatchCommand(commandId). The helper tries accepted commands in
  * durable creation order so older state-machine tests do not need to duplicate
  * command lookup boilerplate.

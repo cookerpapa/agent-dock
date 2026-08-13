@@ -8,7 +8,7 @@ import {
 
 const TURN_COUNT = 120;
 const RESTORE_SAMPLES = 100;
-const PI_VERSION = "0.80.10";
+const PI_VERSION = "0.84.1";
 const encoder = new TextEncoder();
 
 function line(value) {

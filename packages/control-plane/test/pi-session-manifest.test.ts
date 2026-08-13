@@ -34,9 +34,9 @@ function digest(bytes: Uint8Array): string {
 describe("Pi session manifest v3", () => {
   it("stores append-only suffixes and reconstructs byte-identical Pi JSONL", async () => {
     const firstBytes = session("one");
-    const first = preparePiSessionManifest(firstBytes, "0.80.10");
+    const first = preparePiSessionManifest(firstBytes, "0.84.1");
     const secondBytes = session("one", "two");
-    const second = preparePiSessionManifest(secondBytes, "0.80.10", {
+    const second = preparePiSessionManifest(secondBytes, "0.84.1", {
       manifest: first.manifest,
       manifestSha256: first.manifestSha256,
     });
@@ -59,11 +59,11 @@ describe("Pi session manifest v3", () => {
   });
 
   it("keeps one bounded tail object instead of adding one segment per small Turn", () => {
-    let previous = preparePiSessionManifest(session("one"), "0.80.10");
+    let previous = preparePiSessionManifest(session("one"), "0.84.1");
     for (let index = 2; index <= 120; index += 1) {
       const next = preparePiSessionManifest(
         session(...Array.from({ length: index }, (_, offset) => `turn-${String(offset)}`)),
-        "0.80.10",
+        "0.84.1",
         { manifest: previous.manifest, manifestSha256: previous.manifestSha256 },
       );
       expect(next.manifest.segments).toHaveLength(1);
@@ -73,9 +73,9 @@ describe("Pi session manifest v3", () => {
 
   it("rebases non-append Pi output and keeps small append chains consolidated", () => {
     const firstBytes = session("one");
-    const first = preparePiSessionManifest(firstBytes, "0.80.10");
+    const first = preparePiSessionManifest(firstBytes, "0.84.1");
     const rewritten = session("different");
-    const rebase = preparePiSessionManifest(rewritten, "0.80.10", {
+    const rebase = preparePiSessionManifest(rewritten, "0.84.1", {
       manifest: first.manifest,
       manifestSha256: first.manifestSha256,
     });
@@ -85,7 +85,7 @@ describe("Pi session manifest v3", () => {
     let previous = first;
     for (let index = 2; index <= PI_SESSION_MANIFEST_MAX_SEGMENTS + 4; index += 1) {
       const nextBytes = session(...Array.from({ length: index }, (_, offset) => String(offset)));
-      const next = preparePiSessionManifest(nextBytes, "0.80.10", {
+      const next = preparePiSessionManifest(nextBytes, "0.84.1", {
         manifest: previous.manifest,
         manifestSha256: previous.manifestSha256,
       });
@@ -96,7 +96,7 @@ describe("Pi session manifest v3", () => {
 
   it("compresses and restores a Session larger than the former 2 MiB envelope", async () => {
     const bytes = session("x".repeat(3 * 1_024 * 1_024));
-    const prepared = preparePiSessionManifest(bytes, "0.80.10");
+    const prepared = preparePiSessionManifest(bytes, "0.84.1");
     expect(bytes.byteLength).toBeGreaterThan(2 * 1_024 * 1_024);
     expect(prepared.manifest.segments.every((entry) => entry.encoding === "gzip")).toBe(true);
     expect(
@@ -117,7 +117,7 @@ describe("Pi session manifest v3", () => {
 
   it("rejects malformed manifests and corrupt, missing, or reordered segments", async () => {
     const bytes = session("one", "two");
-    const prepared = preparePiSessionManifest(bytes, "0.80.10");
+    const prepared = preparePiSessionManifest(bytes, "0.84.1");
     expect(decodePiSessionManifest(prepared.manifestBytes)).toEqual(prepared.manifest);
 
     const malformed = Buffer.from(

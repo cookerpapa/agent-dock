@@ -131,15 +131,15 @@ afterAll(async () => {
 });
 
 describe.sequential("global tenant scheduling", () => {
-  it("dispatches only the command named by a Temporal Activity while preserving Session FIFO", async () => {
+  it("dispatches only the command claimed by a Worker while preserving Session FIFO", async () => {
     const store = await seedTenant({
       tenantId: "90000000-0000-4000-8000-000000000001",
       bindingId: "90000000-0000-4000-8000-000000000002",
       profileId: "90000000-0000-4000-8000-000000000003",
-      slug: "temporal-target",
+      slug: "fair-target",
       maximumConcurrentTurns: 1,
     });
-    const turns = await createQueuedTurns(store, 2, "temporal-target");
+    const turns = await createQueuedTurns(store, 2, "fair-target");
     const executed: string[] = [];
     const dispatcher = new RunCommandExecutor({
       database,
@@ -147,7 +147,7 @@ describe.sequential("global tenant scheduling", () => {
         async execute(request, lifecycle) {
           executed.push(request.commandId);
           await lifecycle.started();
-          return { stopReason: "temporal-target-test" };
+          return { stopReason: "fair-target-test" };
         },
       },
     });

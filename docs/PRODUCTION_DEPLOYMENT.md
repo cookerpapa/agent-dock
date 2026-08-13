@@ -1,369 +1,59 @@
-# Production deployment
+# One-host production deployment
 
-## Supported topology
-
-The local production profile is a self-hosted, loopback-only deployment:
-
-```text
-127.0.0.1:8080
-  → Web ingress
-  → Control Plane / Temporal / Pi Workers
-  → Tool Broker
-  → CubeSandbox KVM execution plane
-```
-
-Persistent business state lives in PostgreSQL and MinIO. Cube/POSIX/Kopia
-provides Workspace execution and checkpoint storage. Only the Web ingress is
-published to the host.
-
-## Prerequisites
-
-- Linux or WSL2 with KVM available;
-- Docker Engine and Compose;
-- Node.js 24 and npm 11;
-- the CubeSandbox source/cluster expected by
-  `scripts/install-cubesandbox-k3s.mjs`;
-- enough disk for images, PostgreSQL, MinIO and Workspace checkpoints.
-
-Verify KVM before installation:
-
-```bash
-test -r /dev/kvm -a -w /dev/kvm
-```
-
-## First deployment
-
-On a fresh Debian/Ubuntu x86_64 Linux host or WSL2 distribution with systemd
-and KVM enabled, use the idempotent installer:
+The supported one-host profile targets x86_64 Debian/Ubuntu or WSL2 with
+systemd, KVM and enough CPU/RAM for Cube microVMs.
 
 ```bash
 ./install.sh
 ```
 
-It checksum-verifies pinned Node.js, Helm and K3s installer artifacts,
-installs/reuses Docker and single-node K3s, checks out the pinned CubeSandbox
-source, reconciles Cube, registers the Tool template and deploys the product.
-It asks once before host changes; use `--yes` for unattended execution. It
-does not accept model credentials or account passwords.
-
-Useful modes:
+The installer pins the host tools, prepares Cube/K3s and Volume Plugin,
+generates private runtime secrets, builds images, migrates PostgreSQL and starts
+the application. It is resumable and supports a read-only preflight:
 
 ```bash
-./install.sh --print-plan
 ./install.sh --check-only
-./install.sh --pi-workers compose
-./install.sh --pi-workers kubernetes
 ```
 
-`--check-only` is strictly read-only. Resume a failed installation by running
-the same command: private runtime material, tool caches, K3s resources, Cube
-Helm resources and Compose services are reconciled instead of blindly
-recreated.
+Open `http://127.0.0.1:8080`, register the designated administrator and set the
+model provider/key in the administrator page.
 
-For an already prepared host, the individual commands remain available:
+## Services
 
-```bash
-npm ci --ignore-scripts
-npm run dependencies:harden
-npm run cubesandbox:init
-npm run cubesandbox:cluster-install
-npm run production:deploy
-```
+The default topology includes PostgreSQL, Kafka, Valkey, Event Gateway,
+Control Plane, two trusted Pi Workers, Tool Broker, persistent Workspace Volume
+gateway, Cube integration, provider proxy and Web. Observability and GitHub
+experiments are optional profiles.
 
-`production:deploy`:
+Temporal, MinIO and Kopia are not installed.
 
-1. creates/validates the private production runtime directory;
-2. creates/validates Cube credentials;
-3. builds production images;
-4. registers the current Cube Tool template;
-5. starts the product services;
-6. starts Kubernetes Pi Workers when that deployment mode is selected.
-
-Open:
-
-```text
-http://127.0.0.1:8080
-```
-
-## Runtime configuration
-
-See the [configuration reference](CONFIGURATION.md) for the complete supported
-administrator/operator settings, defaults, activation behavior, generated
-identity and secret boundaries.
-
-Private runtime configuration is stored under:
-
-```text
-deploy/production/runtime/
-├── .env
-├── deployment.json
-├── cubesandbox/
-└── secrets/
-```
-
-The directory is ignored by Git and must remain mode `0700`; secret files must
-remain `0600`.
-
-Important non-secret settings include:
-
-```text
-AGENT_DOCK_HTTP_BIND_ADDRESS=127.0.0.1
-AGENT_DOCK_HTTP_PORT=8080
-AGENT_DOCK_API_CREDENTIAL_ID=<bootstrap-api-credential-uuid>
-AGENT_DOCK_PI_WORKER_DEPLOYMENT=compose|kubernetes
-AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true|false
-AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32
-AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID=<dedicated-admin-tenant-uuid>
-```
-
-The Sandbox Provider is fixed to `cubesandbox`. Supplying another Provider
-causes startup/deployment validation to fail.
-
-## Accounts and administrator
-
-Public registration creates ordinary tenant owners. Tenant ownership never
-grants platform settings authority.
-
-Create a dedicated administrator account through the normal registration
-endpoint, then put its tenant UUID in:
-
-```text
-AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID
-```
-
-After Control Plane restart, that account lands on the administrator settings
-page. Existing tenant owners remain ordinary product users.
-
-The administrator can hot-update:
-
-- Pi Worker model/provider credential;
-- selected model;
-- Cube outbound upstream proxy.
-
-Those updates are versioned in PostgreSQL. New Runs/connections consume the
-latest committed configuration without a cluster restart.
-
-## Registration policy
-
-Self-registration is bounded:
-
-```text
-AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true
-AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=32
-```
-
-Use `false` for a closed private deployment. Existing accounts continue to
-work.
-
-## Pi Worker deployment
-
-Compose mode is the simplest single-host profile:
-
-```text
-AGENT_DOCK_PI_WORKER_DEPLOYMENT=compose
-```
-
-Kubernetes mode uses the versioned Worker Pool Helm chart and supports replica
-scaling:
-
-```text
-AGENT_DOCK_PI_WORKER_DEPLOYMENT=kubernetes
-```
-
-Commands:
-
-```bash
-npm run kubernetes:pi-workers:up
-npm run kubernetes:pi-workers:status
-npm run kubernetes:pi-workers:check
-```
-
-Pi Workers do not execute untrusted Tools locally. Adding Worker replicas
-increases Agent Loop/model concurrency; Cube capacity is governed separately.
-
-## Cube execution plane
-
-```bash
-npm run cubesandbox:ps
-npm run cubesandbox:template-check
-npm run cubesandbox:live-check
-```
-
-The registered template revision must match the Tool Broker environment. The
-local profile provisions a 64 GiB loop-backed XFS Cubelet data filesystem;
-rerunning the Cube installer validates and grows an older AgentDock loopback
-image without reformatting it. Template registration retains the current and
-newest rollback templates, so immutable image releases do not accumulate until
-the Cube storage volume is exhausted.
-The Manager fails closed if guest runtime/toolchain evidence does not match.
-
-Cube guests:
-
-- receive no platform/model credential;
-- use `/workspace` for tenant files;
-- route proxy-aware Web traffic through the Cube egress gateway;
-- cannot reach private, metadata or platform addresses;
-- are bounded by the fixed resource policy.
-
-During a fresh install, the Cube egress gateway can start before the Control
-Plane. It remains live but fail-closed and unready until it has fetched an
-authenticated configuration revision; the installer never enables temporary
-open egress to resolve this ordering dependency.
-
-## Workspace persistence
-
-The active guest mounts its Session-bound Workspace volume. The trusted Data
-Mover creates immutable Kopia checkpoints and advances the PostgreSQL Workspace
-head under fence/base-revision CAS.
-
-Deleting a conversation does not delete its Workspace. Runtime eviction
-destroys the guest but retains the committed Workspace. A new activation
-restores that head.
-
-Do not treat Cube RAM/process state as the durable recovery authority.
-
-## Routine operations
+## Operations
 
 ```bash
 npm run production:ps
 npm run production:logs
 npm run production:config
-npm run production:build
-npm run production:up
 npm run production:down
+npm run production:backup
+npm run production:restore
 ```
 
-The default command set starts the 15-service core topology. Prometheus,
-Jaeger, Grafana, their loopback ingress and their volume bootstrap are an
-explicit profile:
+Backups contain PostgreSQL, the generated runtime configuration, Worker WAL/PVC
+state and the local persistent Workspace Volume directory. On distributed
+storage, use the storage backend's snapshot/backup mechanism in addition to the
+PostgreSQL backup.
 
-```bash
-npm run production:config:observability
-npm run production:up:observability
-```
-
-The application metrics endpoints remain available inside the trusted
-observability network in the core profile, but OTLP export is disabled unless
-the profile is enabled or `AGENT_DOCK_OTLP_TRACES_ENDPOINT` is set explicitly.
-This keeps tracing pluggable without making the local dashboards a product
-startup dependency.
-
-`production:down` stops services but preserves named data volumes. Do not use a
-volume-deleting Compose command unless an explicit destructive reset is
-intended.
-
-## Health
-
-Check:
-
-- Web/Control Plane health endpoint;
-- Temporal frontend and Worker registrations;
-- PostgreSQL and MinIO readiness;
-- Tool Broker health;
-- Cube API/Proxy/Cubelet health;
-- Pi Worker pool status;
-- egress gateway configuration revision.
-
-The browser Workspace inspector reads only committed directory APIs. It does
-not depend on administrative diagnostics or live Sandbox inspection.
-
-## Backup
-
-Stop application writers before a cold backup:
-
-```bash
-npm run production:down
-npm run production:backup -- --output /absolute/private/path/agent-dock.adbackup
-```
-
-The backup contains encrypted/checksummed production state and image evidence.
-Keep its passphrase and artifact outside the repository.
-
-Restore only into an empty, intended runtime:
-
-```bash
-npm run production:restore -- \
-  --input /absolute/private/path/agent-dock.adbackup
-```
-
-After restore:
-
-```bash
-npm run production:deploy
-npm run production:check
-```
-
-## Upgrade
-
-1. create a verified backup;
-2. fetch/build the intended commit;
-3. run zero-token CI;
-4. run `production:deploy` (includes migrations and template registration);
-5. inspect service/Worker/Cube health;
-6. run live acceptance.
-
-Database migrations are append-only engineering history. Do not edit a
-migration already applied to a persistent database.
-
-## Verification
-
-Zero-token:
-
-```bash
-npm run format:check
-npm run build
-npm run check
-npm run security:audit
-npm run production:config
-npm run production:config:observability
-```
-
-Real Cube/model path:
+## Acceptance
 
 ```bash
 npm run production:check
+npm run production:worker-pool-check
+npm run production:control-plane-restart-check
 ```
 
-The live path must verify:
+The first command requires explicit live-model/Cube acknowledgement and consumes
+tokens. It verifies pure chat without Cube, multi-round Tool use, persistent
+Volume reuse across a fresh KVM, tenant isolation and cleanup.
 
-- account/session/Workspace APIs;
-- pure chat without Cube activation;
-- Tool execution inside Cube;
-- public proxy egress and private/platform denial;
-- Pi checkpoint and multi-round restore;
-- Workspace checkpoint and file inspection;
-- cancellation/fencing;
-- runtime cleanup;
-- persisted token usage when a real model is enabled.
-
-## Troubleshooting
-
-### Browser returns no answer
-
-Inspect, in order:
-
-```bash
-npm run production:ps
-docker compose --env-file deploy/production/runtime/.env \
-  -f deploy/production/compose.yaml logs --tail=200 control-plane supervisor-host
-npm run kubernetes:pi-workers:status
-```
-
-Then inspect the Run/Attempt terminal failure in PostgreSQL/Control Plane
-events. Do not infer the cause only from the browser message.
-
-### Tool call cannot access the public Web
-
-Check:
-
-- administrator Cube proxy setting;
-- Cube egress gateway health;
-- WSL mirrored networking/upstream proxy reachability;
-- the Tool process honors `HTTP_PROXY`/`HTTPS_PROXY`;
-- target address is not in a denied class.
-
-### Workspace inspector fails
-
-Verify the Session has a committed Workspace version and the immutable
-materializer/Data Mover is healthy. The directory UI intentionally does not
-inspect a live guest or operational endpoints.
+The generated runtime directory contains credentials and must remain mode 0700;
+individual secrets must remain private regular files. Do not commit it.

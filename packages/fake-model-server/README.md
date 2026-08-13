@@ -39,7 +39,7 @@ for a real provider.
 npm test --workspace @agent-dock/fake-model-server
 ```
 
-The contract suite sends real HTTP/SSE requests through the pinned Pi `0.80.10`
+The contract suite sends real HTTP/SSE requests through the pinned Pi `0.84.1`
 OpenAI adapter. It checks text deltas, fragmented tool arguments, the follow-up
 after a tool result, the complete Java repair loop, provider error mapping,
 request timeout, explicit abort, malformed SSE, and mid-stream disconnect.

@@ -7,7 +7,7 @@ import {
 } from "@agent-dock/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
-  parseKopiaWorkspaceCheckpoint,
+  parsePersistentVolumeReference,
 } from "@agent-dock/workspace-runtime";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ import {
   type CubeSandboxInstance,
   type CubeSandboxRuntimeClient,
 } from "../src/index.ts";
-import type { WorkspaceDataMover } from "../src/workspace-data-mover.ts";
+import type { WorkspaceVolumeGateway } from "../src/workspace-volume-gateway.ts";
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const CAPABILITY = `adts_${"c".repeat(43)}`;
@@ -66,14 +66,27 @@ const toolchain = {
   recipeCommands: [],
 };
 
-function fakeWorkspaceDataMover(): WorkspaceDataMover {
+function fakeWorkspaceVolumeGateway(): WorkspaceVolumeGateway {
+  const volumes = new Set<string>();
   return {
     checkHealth: vi.fn(async () => undefined),
-    prepare: vi.fn(async () => ({ restored: false })),
+    prepare: vi.fn(async ({ volumeId }) => {
+      const attached = volumes.has(volumeId);
+      volumes.add(volumeId);
+      return { attached };
+    }),
     initializeBaseline: vi.fn(async () => ({ gitBaselineCommit: "b".repeat(40) })),
     snapshot: vi.fn(async () => ({
-      snapshotId: "a".repeat(32),
+      volumeRevision: "a".repeat(64),
       gitBaselineCommit: "b".repeat(40),
+      files: [
+        {
+          path: "result.txt",
+          executable: false,
+          sizeBytes: 5,
+          sha256: createHash("sha256").update("cube\n").digest("hex"),
+        },
+      ],
       workspacePatch: {
         format: "unified_diff" as const,
         patch: "diff --git a/result.txt b/result.txt\n",
@@ -266,7 +279,7 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     await provider.checkHealth();
     expect(runtime.healthChecks).toBe(1);
@@ -292,7 +305,7 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     await expect(
       provider.create({
@@ -315,13 +328,13 @@ describe("CubeSandbox Provider contract", () => {
 
   it("preserves Tool Broker capabilities, assignment inventory and content checkpoints", async () => {
     const runtime = new FakeCubeRuntimeClient();
-    const workspaceDataMover = fakeWorkspaceDataMover();
+    const workspaceVolumeGateway = fakeWorkspaceVolumeGateway();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover,
+      workspaceVolumeGateway,
     });
     const manager = new ToolBroker({
       provider,
@@ -342,7 +355,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.creates).toHaveLength(0);
     const response = await manager.execute(reserved.capability, operation(reserved.activationId));
     expect(response).toMatchObject({ operation: "bash.exec", exitCode: 0 });
-    expect(workspaceDataMover.initializeBaseline).toHaveBeenCalledWith(
+    expect(workspaceVolumeGateway.initializeBaseline).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: assignment.tenantId,
         workspaceId: assignment.workspaceId,
@@ -374,12 +387,12 @@ describe("CubeSandbox Provider contract", () => {
     if (captured.type !== "tool_sandbox.captured") {
       throw new Error("CubeSandbox capture response was missing");
     }
-    const checkpoint = parseKopiaWorkspaceCheckpoint(
+    const checkpoint = parsePersistentVolumeReference(
       decodeWorkspaceSnapshotBlob(captured.workspace),
     );
     expect(checkpoint).toMatchObject({
       providerId: "cubesandbox",
-      snapshotId: "a".repeat(32),
+      volumeRevision: "a".repeat(64),
       activationId: reserved.activationId,
       tenantId: assignment.tenantId,
       workspaceId: assignment.workspaceId,
@@ -424,7 +437,7 @@ describe("CubeSandbox Provider contract", () => {
         imageRevision: "next-deployment",
         webProxy: WEB_PROXY,
         runtimeClient: new FakeCubeRuntimeClient(),
-        workspaceDataMover: fakeWorkspaceDataMover(),
+        workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
       }),
       imageRevision: "next-deployment",
     });
@@ -444,10 +457,9 @@ describe("CubeSandbox Provider contract", () => {
       content: Buffer.from("cube\n").toString("base64"),
     });
     await upgradedBroker.close();
-    expect(workspaceDataMover.materialize).toHaveBeenCalledWith(
+    expect(workspaceVolumeGateway.materialize).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: assignment.sessionId,
-        snapshotId: "a".repeat(32),
         path: "result.txt",
       }),
     );
@@ -521,13 +533,13 @@ describe("CubeSandbox Provider contract", () => {
 
   it("cold-restores a shared Workspace checkpoint into another Session with an independent fence", async () => {
     const runtime = new FakeCubeRuntimeClient();
-    const workspaceDataMover = fakeWorkspaceDataMover();
+    const workspaceVolumeGateway = fakeWorkspaceVolumeGateway();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover,
+      workspaceVolumeGateway,
     });
     const first = await provider.create({
       activationId: ACTIVATION_ID,
@@ -586,13 +598,11 @@ describe("CubeSandbox Provider contract", () => {
       ),
     ).toBe(true);
     await expect(provider.inspect(restored)).resolves.toMatchObject({ state: "running" });
-    expect(workspaceDataMover.prepare).toHaveBeenLastCalledWith(
+    expect(workspaceVolumeGateway.prepare).toHaveBeenLastCalledWith(
       expect.objectContaining({
         tenantId: assignment.tenantId,
         workspaceId: assignment.workspaceId,
         sessionId: nextAssignment.sessionId,
-        snapshotId: "a".repeat(32),
-        gitBaselineCommit: "b".repeat(40),
       }),
     );
     const initialize = runtime.requests.find(
@@ -606,14 +616,14 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("uses only Kopia checkpoints for a Cube Workspace", async () => {
+  it("captures a lightweight persistent Volume reference for a Cube Workspace", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,
@@ -628,9 +638,9 @@ describe("CubeSandbox Provider contract", () => {
       throw new Error("CubeSandbox capture response was missing");
     }
     expect(
-      parseKopiaWorkspaceCheckpoint(decodeWorkspaceSnapshotBlob(captured.workspace)),
+      parsePersistentVolumeReference(decodeWorkspaceSnapshotBlob(captured.workspace)),
     ).toMatchObject({
-      snapshotId: "a".repeat(32),
+      volumeRevision: "a".repeat(64),
       tenantId: assignment.tenantId,
       workspaceId: assignment.workspaceId,
       sourceSessionId: assignment.sessionId,
@@ -639,14 +649,14 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
-  it("rejects a Kopia checkpoint before restore when tenant or fence is stale", async () => {
+  it("rejects a persistent Volume reference when tenant or fence is stale", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,
@@ -673,7 +683,7 @@ describe("CubeSandbox Provider contract", () => {
         workspaceRestore: captured.workspace,
         policy: provider.defaultPolicy,
       }),
-    ).rejects.toMatchObject({ code: "cubesandbox_checkpoint_binding_invalid" });
+    ).rejects.toMatchObject({ code: "cubesandbox_volume_reference_invalid" });
     await expect(
       provider.create({
         activationId: "20000000-0000-4000-8000-000000000048",
@@ -683,19 +693,19 @@ describe("CubeSandbox Provider contract", () => {
         workspaceRestore: captured.workspace,
         policy: provider.defaultPolicy,
       }),
-    ).rejects.toMatchObject({ code: "cubesandbox_checkpoint_binding_invalid" });
+    ).rejects.toMatchObject({ code: "cubesandbox_volume_reference_invalid" });
     expect(runtime.creates).toHaveLength(1);
     await provider.destroy(handle);
     await provider.close();
   });
 
-  it("restores a portable Workspace checkpoint after the Tool image is upgraded", async () => {
+  it("reattaches the persistent Workspace Volume after the Tool image is upgraded", async () => {
     const originalProvider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: new FakeCubeRuntimeClient(),
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const originalHandle = await originalProvider.create({
       activationId: ACTIVATION_ID,
@@ -715,13 +725,13 @@ describe("CubeSandbox Provider contract", () => {
     await originalProvider.close();
 
     const upgradedRuntime = new FakeCubeRuntimeClient("next-deployment");
-    const upgradedDataMover = fakeWorkspaceDataMover();
+    const upgradedDataMover = fakeWorkspaceVolumeGateway();
     const upgradedProvider = new CubeSandboxProvider({
       templateId: "agent-dock-tool-v2",
       imageRevision: "next-deployment",
       webProxy: WEB_PROXY,
       runtimeClient: upgradedRuntime,
-      workspaceDataMover: upgradedDataMover,
+      workspaceVolumeGateway: upgradedDataMover,
     });
     const upgradedAssignment = {
       ...assignment,
@@ -739,7 +749,6 @@ describe("CubeSandbox Provider contract", () => {
       expect.objectContaining({
         tenantId: assignment.tenantId,
         workspaceId: assignment.workspaceId,
-        snapshotId: "a".repeat(32),
       }),
     );
     expect(upgradedRuntime.creates).toHaveLength(1);
@@ -763,7 +772,7 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,
@@ -799,7 +808,7 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,
@@ -856,7 +865,7 @@ describe("CubeSandbox Provider contract", () => {
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
-      workspaceDataMover: fakeWorkspaceDataMover(),
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
     });
     const handle = await provider.create({
       activationId: ACTIVATION_ID,

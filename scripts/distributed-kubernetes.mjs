@@ -92,7 +92,7 @@ function preflight(namespace, values) {
     );
   }
   if (optional("kubectl", ["get", "crd", "scaledobjects.keda.sh"]).status !== 0) {
-    fail("KEDA is required because Pi Workers scale from the Temporal Activity Task Queue");
+    fail("KEDA is required because Pi Workers scale from the PostgreSQL Run backlog");
   }
   if (optional("kubectl", ["get", "apiservice", "v1beta1.metrics.k8s.io"]).status !== 0) {
     fail("Kubernetes Metrics API is required by the Web and Control Plane HPAs");
@@ -110,7 +110,6 @@ function preflight(namespace, values) {
   );
   const requiredSecretKeys = [
     "api-token",
-    "aws-credentials",
     "cube-egress-config-token",
     "cubesandbox-api-key",
     "database-notification-url",
@@ -123,9 +122,7 @@ function preflight(namespace, values) {
     "supervisor-management-token",
     "worker-event-ingest-token",
     "live-event-store-url",
-    "workspace-data-mover-token",
-    "workspace-kopia-aws-credentials",
-    "workspace-kopia-repository-password",
+    "workspace-volume-gateway-token",
     "kafka-ca.crt",
     "kafka-username",
     "kafka-password",
@@ -137,7 +134,7 @@ function preflight(namespace, values) {
     run("kubectl", ["get", "pvc", workspaceClaim, "-n", namespace, "-o", "json"]),
   );
   if (!claim.spec?.accessModes?.includes("ReadWriteMany")) {
-    fail(`PVC ${workspaceClaim} must support ReadWriteMany for distributed Data Movers`);
+    fail(`PVC ${workspaceClaim} must support ReadWriteMany for distributed Volume Gateways`);
   }
   process.stdout.write(
     `Distributed preflight passed: ${readyNodes.length} Ready nodes, external authorities and shared workspace contract present.\n`,

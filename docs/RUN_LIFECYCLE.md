@@ -1,250 +1,78 @@
 # Run lifecycle
 
-## Durable acceptance
+## Admission
 
-The public request returns `202` only after PostgreSQL commits the prompt Turn,
-execute Command, mailbox position, idempotency fingerprint, immutable Project
-environment snapshot, immutable Workspace source-set snapshot, and outbox
-record. The source-set snapshot is the only repository input used by the
-Runner; later Project metadata cannot redirect an accepted Run to another
-repository or commit.
-An HTTP retry with the same key and body returns the same Turn. The same key with
-a different body is rejected.
+`POST /sessions/{id}/messages` authenticates tenant ownership and writes the
+user message, Turn, Run, command and Run-queue Outbox row in one PostgreSQL
+transaction. The idempotency key prevents a retry from creating another Run.
+Same-Session mutating Runs remain serialized and tenant quota is checked while
+holding the relevant database lock.
 
-```text
-Run: queued -> claimed -> provisioning -> restoring? -> running
-     -> checkpointing -> completed
-                      \-> cancel_requested -> cancelled
-     \-> queued (a failed pre-ACK Attempt only)
+## Claim and execution
 
-Attempt terminal alternatives: failed | timed_out | superseded
-```
+All Pi Workers scan the same ready Outbox. PostgreSQL sends a notification to
+reduce idle latency, but a one-second poll is the recovery path. Candidate rows
+are ordered by tenant scheduling time, availability and creation time.
 
-AgentDock does not claim exactly-once execution for shell commands or external
-side effects.
+`RunCommandExecutor` transactionally rechecks:
 
-## Attempt identity and claim
+- the command and Run are still eligible;
+- this is the Session's next runnable message;
+- tenant and Workspace concurrency allow execution;
+- cancellation has not won;
+- no current Attempt already owns the Run.
 
-The Control Plane's outbox relay starts one deterministic Temporal Workflow per
-accepted Run. Temporal assigns its Activity to one capacity-bounded Pi Worker;
-the Activity then claims only the named PostgreSQL command, creates an
-immutable-numbered `RunAttempt`, and obtains:
+It creates a RunAttempt with a bounded claim lease. The Worker heartbeats that
+claim and obtains an opaque execution authority containing the current Attempt
+and fence. The raw authority is not placed in model context or Cube.
 
-```text
-runId / attemptId / attemptNumber
-commandId / turnId
-leaseId
-fencingToken
-lease expiry
-Supervisor boot and Temporal Worker identity
-```
+## Pi and Tools
 
-`attemptId` is independent from `leaseId`. Lease acquisition binds the exact
-current Attempt to sandbox, lease, and fence in PostgreSQL before execution ACK.
-A retry before durable acknowledgement terminates the old Attempt and creates a
-new one. Once execution is acknowledged, a crash is ambiguous and the Run fails
-instead of blindly replaying commands.
+The Worker opens Pi's native Session state and appends the accepted user
+message. Pi may perform multiple model sampling steps. Pure chat never contacts
+Cube.
 
-## Durable Workflow start
+For a Tool call, the Worker sends the Tool Broker a server-generated capability
+bound to tenant, Workspace, Session, Run, Attempt, fence and Step. The Broker
+checks current authority, lazily creates/rebinds Cube, attaches the stable
+Workspace Volume and executes exactly one admitted operation.
 
-1. The relay starts `agent-dock-run-v1-{runId}` with only tenant, Session, Run
-   and command UUIDs. `USE_EXISTING` makes outbox redelivery idempotent.
-2. Temporal resolves the Workspace's immutable Cell and matches
-   `executeRunCommand` to that Cell's Activity Task Queue.
-3. The Activity's exact PostgreSQL claim rechecks Session FIFO, tenant
-   concurrency, Run state and command identity. Ineligible work returns
-   `deferred`; the Workflow waits on a durable timer.
-4. The selected Supervisor acquires the lease/fence and commits
-   `ACKNOWLEDGED/RUNNING` before starting Pi.
-5. Trusted Runner freezes one credential-free logical Turn context containing
-   accepted identity, model, environment, budget, Workspace revision and
-   Tool/network policy. It separately freezes the exact command, Worker,
-   Attempt, lease and fence into a physical Attempt context, then durably
-   advances that Attempt through restore/run/checkpoint phases.
-6. `ToolSandboxManager` reserves one logical activation and rotating capability;
-   it does not create a microVM.
-7. Trusted Runner creates a pinned embedded Pi SDK session with only the fixed
-   remote-tool implementation.
-8. Pi's public `context` hook captures a fresh Cloud Step before every provider
-   request. All Tools emitted by that response carry its sequence and digest;
-   the Manager rejects stale or conflicting Step bindings.
-9. The first actual Tool operation makes the Provider create/restore/attest the
-   Cube KVM microVM. Before the first repository command, the worker verifies the
-   accepted image revision and expected Node.js/Java/Python/Git toolchain, then
-   executes the accepted environment version's bounded setup and verification
-   recipe. A chat-only Run skips this step entirely.
+A Tool transport retry may reattach to the same operation identity. It must not
+start a second arbitrary shell operation. If start/result cannot be proven, the
+result is `UNKNOWN`.
 
-Cold or queued sessions own no Pi process, Tool Sandbox, socket, thread, or
-per-session timer.
+## Events and terminal commit
 
-## Environment candidate lifecycle
+Pi events first enter the Worker WAL, then cross the authenticated Kafka batch
+boundary. The Valkey projector advances PostgreSQL's projected watermark only
+after it builds the contiguous live read model. SSE exposes no later prefix.
 
-Environment mutation never edits an active version in place:
+On successful settlement, the Worker prepares the complete assistant message,
+Pi Session mutation and bounded Workspace Volume revision. The terminal
+transaction validates the current Attempt/fence, writes canonical conversation
+state, advances the Workspace revision if applicable, commits the terminal
+event and settles the Run.
+
+## Cancellation and failure
+
+Cancellation revokes authority before trying to interrupt model/Tool work.
+Expired or superseded Workers cannot mutate Pi SessionStorage, execute another
+Tool or commit terminal state. A caught interruption writes Pi's minimal
+abort/reset boundary. A hard Worker loss is reconciled from already durable
+public events plus a factual interruption marker; no Tool result is invented.
+
+Cube loss discards processes, memory, sockets and PTYs. The persistent Workspace
+Volume survives and can attach to a fresh KVM. The next Pi step is told only
+when the execution world materially changed.
+
+## Delivery semantics
 
 ```text
-owner creates recipe -> pending/inactive
-pending -> fresh Cube validation Run -> validated/inactive
-validated + expected-active CAS -> active
-failed -> inert history (create a new candidate)
-older validated + expected-active CAS -> rollback target becomes active
+Run queue              at-least-once wakeup + transactional claim
+Pi Session mutation    current authority + transaction
+Tool start              no blind retry; UNKNOWN if ambiguous
+Workspace revision      fence + expected revision
+terminal Run commit     idempotent current-Attempt transaction
+Cube create/delete      idempotent reconcile
+live event batch        at-least-once + sequence/event-id dedupe
 ```
-
-Every create, validation request, activation and rollback appends an actor-bound
-operation. The validation Run snapshots the candidate rather than the active
-version, so Manager policy, physical image evidence, automatic recipe commands,
-Pi Tool routing and Workspace checkpointing are tested together. An environment
-identity mismatch or recipe failure is terminal and cannot be hidden by silently
-falling back to the active version.
-
-## Active execution
-
-Pi's Agent Loop and conversation state remain trusted. `read/write/edit/bash`
-cross Tool RPC. The Manager validates the activation capability and unique
-operation ID plus the frozen logical Turn digest, current Attempt digest and
-sampling-Step digest before the Provider sends a closed
-worker request. An operation ID names one execution. A reconnect with the same
-request attaches to its running or retained result; changed reuse is rejected.
-The guest sequences stdout/stderr observations and signs the reconstructed
-bytes with SHA-256. The trusted adapter verifies sequence and digest before
-bounded output returns to Pi. If a read/bash result crosses the context
-allowance, its full Provider-bounded bytes are persisted as a fenced Tool
-Artifact before the `tool.completed` event exposes the Artifact ID.
-
-Before every provider call, the trusted Model Gateway locks the tenant policy,
-verifies the current RunAttempt and reserves request/token/cost capacity across
-the Run plus tenant day/month windows. Budget denial happens before provider
-egress. A selected fallback reuses that reservation; completion snapshots the
-actual provider/model/rates/tokens/cost. The Pi process is also bounded by the
-Turn's wall-clock and remaining Tool-call snapshot.
-
-Temporal Activity heartbeats prove that the Worker is still polling and allow
-timely cancellation delivery. A separate shared Supervisor heartbeat renews
-only the exact current PostgreSQL lease/fence, current RunAttempt, boot,
-command lifecycle and event cursor. Losing either authority aborts execution;
-Temporal retry still cannot bypass the newer PostgreSQL fence.
-
-Pi's first text delta is emitted immediately. Later adjacent text deltas for the
-same content block are coalesced for at most 50 ms or 2 KiB. Every public event
-is fsynced to the bounded local spool before an asynchronous publisher sends up
-to 64 contiguous events in one envelope. The Control Plane commits a batch in
-one PostgreSQL transaction and returns one cumulative ACK. Pi therefore does
-not wait for a database transaction after every provider token. The Supervisor
-asserts an explicit barrier receipt with no pending events and
-`acknowledgedThroughSeq == highestProducedSeq` before it returns a private
-prepared result for terminal settlement.
-
-## Checkpoint commit
-
-At `agent_settled`:
-
-1. If a Tool was used, the Cube Provider closes the current Tool Worker,
-   briefly freezes the remaining UID 1000 processes, flushes the
-   Volume-Plugin-backed POSIX Workspace, and captures a content-hashed file
-   index. While the guest remains frozen, the trusted Data Mover computes the
-   cumulative Git patch from its external baseline, creates an immutable
-   encrypted Kopia snapshot, and returns only a bounded
-   Session/volume/environment/fence-bound reference. The guest supervisor then
-   resumes the exact PID/start-time identities. Cube-native references are not
-   accepted. Otherwise no Workspace capture/version or physical environment
-   validation is created.
-2. Trusted Runner captures stable Pi JSONL.
-3. Content hashes and bounded manifests are validated.
-4. Pi bytes and the bounded Workspace reference are conditionally written to
-   the checkpoint bucket. Workspace file bytes are already in Kopia's
-   content-addressed object repository under a separate least-privilege
-   credential.
-5. PostgreSQL always stages the new Pi conversation pointer. A Tool-using Run
-   additionally stages an immutable Workspace version and append-only
-   environment validation bound to the current Run/Attempt, parent version,
-   artifact hashes, lease, and fence.
-6. The Worker returns a private prepared result. It does not publish a public
-   terminal event.
-7. One terminal settlement transaction advances the checkpoint and current
-   Workspace-version pointers with session-version/Run/Attempt/lease/fence CAS,
-   settles the staged version, records the Attempt revision, materializes the
-   semantic transcript and inserts `turn.completed`. A failure abandons the
-   staged version and restores the previous settled pointers. The event and
-   business/checkpoint state commit or roll back together.
-8. Manager revokes the Run capability. A successful exact-Session warm release
-   retains the running guest for the bounded idle TTL, but no Tool Worker or
-   prior Run authority remains. A later Run must present a higher fence and
-   rotates the handoff secret before a fresh Tool Worker starts. Failure,
-   cancellation, timeout, identity mismatch or ambiguous checkpoint/rebind
-   destroys the activation. Every terminal path confirms either an idle
-   Session-bound runtime or runtime absence.
-
-If failure occurs before the terminal marker, the next activation restores the
-previous settled Pi/workspace pair. Uploaded but uncommitted objects are not
-treated as current state.
-
-The successful terminal transaction also creates one immutable Review Bundle
-for the current Attempt. Its canonical manifest links the final assistant text,
-Workspace/patch identities, changed paths, tests, bounded Artifact metadata,
-environment/source snapshots, Attempt history and usage. The database rejects
-update/delete and every read verifies the stored SHA-256. Object-store keys and
-active HTML are not part of the public manifest.
-
-Rollback never edits a historical version. An idle Session moves its current
-pointer to an existing settled version under an expected-current-version CAS;
-the next activation restores that version. A fork creates a new cold Session
-from an immutable version. Both write tenant-scoped operation audit records.
-
-## Attempt-aware rewind
-
-An explicit rewind is not an automatic shell retry. It is allowed only for the
-latest terminal Run and exact current Attempt while the Session is idle. The
-source Run recorded its conversation sequence, Workspace version and Pi
-snapshot before execution. One actor-bound transaction restores those bases and
-appends a replacement Turn/Command/Run with the same immutable prompt, model,
-environment and repository set.
-
-The source events and Attempts remain durable but project as `superseded`; the
-replacement Run projects as `canonical` with a link to the rewind boundary.
-Browser reconnect reconstructs that projection from PostgreSQL. A Sandbox warm
-cache whose committed Workspace revision differs from the restored base cannot
-be reused. Older non-latest work must use the separate Workspace fork operation
-rather than pretending process state can be rewound.
-
-## Cancellation
-
-Cancellation is its own durable command. The outbox relay requests cancellation
-of the exact Temporal Workflow. Temporal delivers Activity cancellation to the
-Worker that owns the live Pi SDK session; that Worker invokes the exact local
-cancellation dispatcher, aborts Pi's model request and the active Tool RPC.
-Bash receives process-group termination; Provider cleanup then removes and
-confirms absence of the entire Tool Sandbox. Only after that proof may
-`turn.cancelled` settle the Turn and release capacity.
-
-Natural completion wins if it commits before cancellation's linearization
-point. A cleanup failure fails closed and retains/quarantines capacity for
-reconciliation.
-
-## Crash and restart behavior
-
-| Failure | Behavior |
-| --- | --- |
-| Browser disconnect | reconnect with `Last-Event-ID`; replay durable suffix |
-| Control Plane replica loss | another relay adopts the deterministic existing Workflow ID |
-| Temporal service loss | accepted Runs remain in PostgreSQL; persisted Workflow history resumes after service recovery |
-| Supervisor management socket loss | same boot reconnects for liveness; it is not the Run-matching channel |
-| Pi Worker loss before durable start | Temporal schedules an infrastructure retry and PostgreSQL creates only an eligible fenced Attempt |
-| Runner loss after ACK | fenced as ambiguous; no arbitrary tool replay; canonical public events newer than the last Pi checkpoint become a bounded semantic recovery suffix |
-| Short Tool HTTP disconnect while Manager/guest remain alive | reattach to the identical operation ID/request and return the original execution result |
-| Tool operation ledger or Cube loss | mark the Tool result `UNKNOWN`, destroy uncertain runtime state and never replay arbitrary Bash |
-| Manager/Provider loss | host retirement inventories exact labels and confirms absence |
-| Source Cube VM or local POSIX copy destroyed after checkpoint | Data Mover restores the committed Kopia snapshot, then the next higher-fence Attempt creates a fresh base-template VM |
-| Cube execution node/disk loss | recover on a node that mounts the shared POSIX path; the Kopia repository, not the node copy, is authoritative |
-| Kopia repository/object-store loss | fail closed on the previous Workspace head; recover the coordinated MinIO/Kopia backup before admitting work |
-| Tool Sandbox exit | active operation fails; capability is revoked; runtime is removed |
-| Event ACK loss | Supervisor file spool redelivers the identical event/batch; cumulative sequence ACK deduplicates it |
-| Checkpoint upload interruption | previous settled revision remains authoritative |
-| Old Attempt resumes late | current-attempt/lease/fence checks reject its phase, checkpoint, and terminal writes |
-
-## Terminal invariant
-
-Every terminal path revokes the per-Attempt capability and proves exact
-Provider absence. Orphan cleanup matches Supervisor, boot, sandbox, command,
-session, turn, lease, fence and Cube runtime identity before destruction.
-Temporal completion is not the application commit marker: the fenced
-PostgreSQL terminal state, committed checkpoint head and durable terminal event
-remain authoritative.

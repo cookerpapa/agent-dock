@@ -11,7 +11,6 @@ app.kubernetes.io/part-of: agent-dock
 app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 agent-dock.io/worker-pool: {{ .Values.workerPool.name | quote }}
-agent-dock.io/worker-build-id: {{ .Values.temporal.workerBuildId | quote }}
 {{- end -}}
 
 {{- define "agent-dock-pi-worker-pool.selectorLabels" -}}

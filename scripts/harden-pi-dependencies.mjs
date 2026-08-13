@@ -1,29 +1,47 @@
-import { cpSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const piRoot = join(repositoryRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+const piRoots = [
+  join(repositoryRoot, "node_modules", "@earendil-works", "pi-coding-agent"),
+  join(
+    repositoryRoot,
+    "packages",
+    "sandbox-supervisor",
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+  ),
+  join(
+    repositoryRoot,
+    "spikes",
+    "pi-embedded-rehydrate",
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+  ),
+].filter((path) => existsSync(path));
 const checkOnly = process.argv.slice(2).includes("--check");
 
-const securityPatches = [
+const patchSpecs = [
   {
     name: "brace-expansion",
     sourcePackage: "pi-security-brace-expansion",
     version: "5.0.9",
-    targetRoot: join(piRoot, "node_modules", "brace-expansion"),
+    packageName: "brace-expansion",
   },
   {
     name: "undici",
     sourcePackage: "pi-security-undici",
     version: "8.10.0",
-    targetRoot: join(piRoot, "node_modules", "undici"),
+    packageName: "undici",
   },
   {
     name: "protobufjs",
     sourcePackage: "pi-security-protobufjs",
     version: "7.6.5",
-    targetRoot: join(piRoot, "node_modules", "protobufjs"),
+    packageName: "protobufjs",
   },
   {
     name: "find-my-way",
@@ -39,6 +57,14 @@ const securityPatches = [
     ),
   },
 ];
+const securityPatches = [
+  ...piRoots.flatMap((piRoot) =>
+    patchSpecs
+      .filter((spec) => "packageName" in spec)
+      .map((spec) => ({ ...spec, targetRoot: join(piRoot, "node_modules", spec.packageName) })),
+  ),
+  ...patchSpecs.filter((spec) => !("packageName" in spec)),
+];
 
 function readPackageVersion(packageRoot) {
   try {
@@ -52,14 +78,16 @@ function readPackageVersion(packageRoot) {
   }
 }
 
-const piVersion = readPackageVersion(piRoot);
-if (piVersion === null) {
+const piVersions = [...new Set(piRoots.map(readPackageVersion))];
+if (piVersions.length === 0) {
   console.log("pi_dependency_hardening_skipped package_not_installed");
   process.exit(0);
 }
 
-if (piVersion !== "0.80.10") {
-  throw new Error(`Pi dependency hardening has not been reviewed for pi-coding-agent ${piVersion}`);
+if (piVersions.length !== 1 || piVersions[0] !== "0.84.1") {
+  throw new Error(
+    `Pi dependency hardening has not been reviewed for pi-coding-agent ${piVersions.join(",")}`,
+  );
 }
 
 function inspectPatches() {
@@ -127,7 +155,7 @@ if (incorrectPatches.length > 0) {
 }
 
 console.log(
-  `pi_dependency_hardening_passed pi=${piVersion} ${installedPatches
+  `pi_dependency_hardening_passed pi=${piVersions[0]} roots=${String(piRoots.length)} ${installedPatches
     .map((securityPatch) => `${securityPatch.name}=${securityPatch.actualVersion}`)
     .join(" ")}`,
 );

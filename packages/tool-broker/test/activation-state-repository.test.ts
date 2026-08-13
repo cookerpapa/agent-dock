@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL Tool Broker ownership", () => {
-  it("resolves a Workspace through its execution Cell without ambiguous columns", async () => {
+  it("resolves a Workspace through its Sandbox Domain without ambiguous columns", async () => {
     const pglite = await PGlite.create();
     const socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
     await socket.start();
@@ -38,7 +38,7 @@ describe("PostgreSQL Tool Broker ownership", () => {
         id: workspaceId,
         tenant_id: tenantId,
         project_id: projectId,
-        cell_id: "cell-0001",
+        sandbox_domain_id: "sandbox-domain-0001",
         object_snapshot_key: null,
       })
       .execute();

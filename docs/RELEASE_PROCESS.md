@@ -105,13 +105,9 @@ Cube-template checks. It does not pretend to execute the KVM- and
 credential-dependent `production:check`; that gate remains an explicit release
 precondition on the deployment host.
 
-The Temporal 1.21.1 native core bridge currently embeds
-`quinn-proto@0.11.14`, including on the upstream SDK main branch. AgentDock
-does not expose a QUIC listener, so the affected unauthenticated QUIC stream
-reassembly path is unreachable. `.trivyignore.yaml` contains a purl-scoped
-exception expiring on 2026-08-31. All other fixable HIGH/CRITICAL findings
-remain release blockers, and the exception must be removed when Temporal
-publishes a bridge with `quinn-proto@0.11.15` or newer.
+No package receives a scheduler-specific vulnerability exception. Every
+fixable HIGH/CRITICAL finding remains a release blocker unless a narrow,
+time-bounded exception is added with its reachable attack path documented.
 
 ## Release limitations
 

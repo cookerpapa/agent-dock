@@ -1,11 +1,4 @@
 export {
-  WorkspaceCellMigrationError,
-  WorkspaceCellMigrationService,
-  type WorkspaceCellMigrationInput,
-  type WorkspaceCellMigrationResult,
-  type WorkspaceCellMigrationServiceOptions,
-} from "./workspace-cell-migration-service.ts";
-export {
   PostgresTenantApiAuthenticator,
   bindTenantRequestIdentity,
   generateTenantApiCredential,
@@ -128,12 +121,6 @@ export {
   type PreviousPiSessionManifest,
 } from "@agent-dock/runtime-core/pi-session-manifest";
 export {
-  createS3CheckpointObjectStoreFromEnvironment,
-  S3CheckpointObjectStore,
-  type S3CheckpointEnvironment,
-  type S3CheckpointObjectStoreOptions,
-} from "@agent-dock/runtime-core/s3-checkpoint-object-store";
-export {
   SessionLiveStreamCompactionError,
   SessionLiveStreamCompactionService,
   type SessionLiveStreamCompactionOptions,
@@ -226,13 +213,6 @@ export {
   type TurnExecutionRequest,
   type TurnExecutionResult,
 } from "@agent-dock/runtime-core/run-command-executor";
-export {
-  listPendingTemporalRunExecutions,
-  TemporalRunOrchestrator,
-  type TemporalRunOrchestratorActivity,
-  type TemporalRunOrchestratorOptions,
-  type TemporalRunOrchestratorState,
-} from "./temporal-run-orchestrator.ts";
 export {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,

@@ -35,17 +35,17 @@ agentdock-posix-<volume-id>/
     └── user files
 ```
 
-Only `workspace/` is mounted into Cube. The trusted Workspace Data Mover alone
+Only `workspace/` is mounted into Cube. The trusted Workspace Volume Gateway alone
 can access `.agent-dock-runtime/git`.
 
 For a fresh activation:
 
-1. the Data Mover creates an empty envelope and generation;
+1. the Volume Gateway creates an empty envelope and generation;
 2. Cube materializes the accepted seed and executes the deployment-owned
    environment recipe;
 3. before the Sandbox handle becomes available to Agent Tools, the Sandbox
-   Manager asks the Data Mover to create the external baseline;
-4. the Data Mover invokes Git with explicit trusted paths:
+   Manager asks the Volume Gateway to create the external baseline;
+4. the Volume Gateway invokes Git with explicit trusted paths:
 
    ```text
    GIT_DIR=<envelope>/.agent-dock-runtime/git
@@ -54,12 +54,12 @@ For a fresh activation:
 
 At a checkpoint boundary, Cube freezes the exact user-process identities,
 flushes `/workspace`, and returns only the bounded file index. While that
-boundary remains frozen, the Data Mover computes the cumulative binary Patch
+boundary remains frozen, the Volume Gateway computes the cumulative binary Patch
 through the external Git directory and snapshots the complete envelope with
 Kopia. The Manager then completes the checkpoint and resumes the frozen
 processes.
 
-The Git baseline commit is carried in the Data Mover state and immutable
+The Git baseline commit is carried in the Volume Gateway state and immutable
 Workspace checkpoint reference. Restore validates the expected baseline
 before exposing the Workspace to a new Cube. The checkpoint reference advances
 to `agent-dock.workspace-kopia-snapshot.v4`; v3 references and physical

@@ -355,7 +355,7 @@ export class RunCommandExecutor {
   }
 
   /**
-   * Executes exactly one durable command selected by Temporal. This component
+   * Executes exactly one durable command selected by the PostgreSQL Worker queue. This component
    * owns transactional admission and lifecycle commits; it never chooses
    * between tenants, Sessions, or Runs.
    */
@@ -1487,9 +1487,8 @@ export class RunCommandExecutor {
         const outboxUpdate = await transaction
           .updateTable("outbox")
           .set({
-            // Temporal owns the retry timer. The durable command becomes
-            // eligible immediately after this transaction; the Workflow
-            // controls when its next Activity attempt is scheduled.
+            // PostgreSQL owns the retry timestamp. The durable command becomes
+            // eligible after available_at, when any Worker may claim it.
             available_at: now,
             last_error: failure.code,
           })

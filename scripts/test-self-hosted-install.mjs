@@ -34,6 +34,16 @@ const installerSource = await readFile(installer, "utf8");
 assert.match(installerSource, /\/healthz/u);
 assert.doesNotMatch(installerSource, /health_url=.*\/health(?:["'])/u);
 
+const composeWrapper = await readFile(
+  fileURLToPath(new URL("production-compose.mjs", import.meta.url)),
+  "utf8",
+);
+assert.match(
+  composeWrapper,
+  /new Set\(\["build", "down"/u,
+  "production image build must not require a template that it is about to create",
+);
+
 await assert.rejects(
   execute("bash", [installer, "--print-plan", "--pi-workers", "invalid"], {
     cwd: repositoryRoot,

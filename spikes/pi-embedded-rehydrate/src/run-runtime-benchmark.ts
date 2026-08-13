@@ -163,7 +163,7 @@ try {
     `${JSON.stringify(
       {
         result: "passed",
-        piVersion: "0.80.10",
+        piVersion: "0.84.1",
         sampleCount: SAMPLE_COUNT,
         modelCalls: 0,
         sdkActivationIncludingExtensionCommandAndDispose: sdk,

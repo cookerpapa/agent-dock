@@ -10,7 +10,6 @@ export type ProductionBootstrapResult = {
   credentialBindingId: string;
   modelProfileId: string;
   sandboxDomainCount: number;
-  executionCellCount: number;
 };
 
 export class ProductionBootstrapError extends Error {
@@ -80,67 +79,6 @@ export async function bootstrapProductionDatabase(
           updated_at: new Date(),
         })
         .where("id", "=", domain.id)
-        .executeTakeFirstOrThrow();
-    }
-    for (const cell of config.executionCells) {
-      await transaction
-        .insertInto("execution_cells")
-        .values({
-          id: cell.id,
-          display_name: cell.displayName,
-          state: cell.state,
-          temporal_task_queue: cell.temporalTaskQueue,
-          sandbox_domain_id: cell.sandboxDomainId,
-          supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
-          capacity_weight: cell.capacityWeight,
-          assigned_workspaces: 0,
-        })
-        .onConflict((conflict) => conflict.column("id").doNothing())
-        .executeTakeFirst();
-      const existing = await transaction
-        .selectFrom("execution_cells")
-        .select([
-          "temporal_task_queue",
-          "sandbox_domain_id",
-          "supervisor_management_url_template",
-          "assigned_workspaces",
-        ])
-        .where("id", "=", cell.id)
-        .executeTakeFirstOrThrow();
-      const assignedWorkspaces = Number(existing.assigned_workspaces);
-      if (!Number.isSafeInteger(assignedWorkspaces) || assignedWorkspaces < 0) {
-        throw new ProductionBootstrapError(
-          "bootstrap_cell_invalid",
-          `Execution Cell ${cell.id} has an invalid Workspace count`,
-        );
-      }
-      if (assignedWorkspaces > 0) {
-        exact(
-          existing.temporal_task_queue === cell.temporalTaskQueue,
-          `Cell ${cell.id} Task Queue`,
-        );
-        exact(existing.sandbox_domain_id === cell.sandboxDomainId, `Cell ${cell.id} Domain`);
-        exact(
-          existing.supervisor_management_url_template === cell.supervisorManagementBaseUrlTemplate,
-          `Cell ${cell.id} Supervisor management route`,
-        );
-      }
-      await transaction
-        .updateTable("execution_cells")
-        .set({
-          display_name: cell.displayName,
-          state: cell.state,
-          capacity_weight: cell.capacityWeight,
-          ...(assignedWorkspaces === 0
-            ? {
-                temporal_task_queue: cell.temporalTaskQueue,
-                sandbox_domain_id: cell.sandboxDomainId,
-                supervisor_management_url_template: cell.supervisorManagementBaseUrlTemplate,
-              }
-            : {}),
-          updated_at: new Date(),
-        })
-        .where("id", "=", cell.id)
         .executeTakeFirstOrThrow();
     }
     await transaction
@@ -372,6 +310,5 @@ export async function bootstrapProductionDatabase(
     credentialBindingId: config.credentialBindingId,
     modelProfileId: config.modelProfileId,
     sandboxDomainCount: config.sandboxDomains.length,
-    executionCellCount: config.executionCells.length,
   };
 }

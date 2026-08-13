@@ -3,14 +3,14 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "global",
     "workerPool",
     "autoscaling",
     "lifecycle",
     "management",
     "image",
     "services",
-    "temporal",
-    "conversationStorage",
+    "database",
     "credentials",
     "runtime",
     "state",
@@ -22,33 +22,16 @@
     "serviceAccount"
   ],
   "properties": {
-    "global": {
-      "type": "object",
-      "additionalProperties": true
-    },
+    "global": { "type": "object", "additionalProperties": true },
     "workerPool": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "replicas", "capacity", "executionCellId", "clusterDomain"],
+      "required": ["name", "replicas", "capacity", "clusterDomain"],
       "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32,
-          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-        },
+        "name": { "$ref": "#/$defs/dnsLabel" },
         "replicas": { "type": "integer", "minimum": 2, "maximum": 256 },
-        "capacity": { "type": "integer", "minimum": 1, "maximum": 16 },
-        "executionCellId": {
-          "type": "string",
-          "pattern": "^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$"
-        },
-        "clusterDomain": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 253,
-          "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
-        }
+        "capacity": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "clusterDomain": { "$ref": "#/$defs/domain" }
       }
     },
     "autoscaling": {
@@ -60,7 +43,7 @@
         "maxReplicas",
         "pollingIntervalSeconds",
         "cooldownSeconds",
-        "targetQueueSize",
+        "targetQueuedRunsPerReplica",
         "scaleDownStabilizationSeconds",
         "scaleDownPeriodSeconds"
       ],
@@ -70,12 +53,8 @@
         "maxReplicas": { "type": "integer", "minimum": 2, "maximum": 256 },
         "pollingIntervalSeconds": { "type": "integer", "minimum": 2, "maximum": 300 },
         "cooldownSeconds": { "type": "integer", "minimum": 60, "maximum": 7200 },
-        "targetQueueSize": { "type": "integer", "minimum": 1, "maximum": 100 },
-        "scaleDownStabilizationSeconds": {
-          "type": "integer",
-          "minimum": 300,
-          "maximum": 7200
-        },
+        "targetQueuedRunsPerReplica": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "scaleDownStabilizationSeconds": { "type": "integer", "minimum": 300, "maximum": 7200 },
         "scaleDownPeriodSeconds": { "type": "integer", "minimum": 60, "maximum": 1800 }
       }
     },
@@ -84,11 +63,7 @@
       "additionalProperties": false,
       "required": ["terminationGracePeriodSeconds"],
       "properties": {
-        "terminationGracePeriodSeconds": {
-          "type": "integer",
-          "minimum": 960,
-          "maximum": 3600
-        }
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 960, "maximum": 3600 }
       }
     },
     "management": {
@@ -102,21 +77,9 @@
           "required": ["enabled", "className", "hostSuffix", "scheme"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "className": {
-              "type": "string",
-              "maxLength": 63,
-              "pattern": "^$|^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
-            },
-            "hostSuffix": {
-              "type": "string",
-              "minLength": 3,
-              "maxLength": 190,
-              "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])$"
-            },
-            "scheme": {
-              "type": "string",
-              "enum": ["http", "https"]
-            }
+            "className": { "type": "string", "maxLength": 63 },
+            "hostSuffix": { "$ref": "#/$defs/domain" },
+            "scheme": { "enum": ["http", "https"] }
           }
         }
       }
@@ -126,26 +89,10 @@
       "additionalProperties": false,
       "required": ["repository", "tag", "digest", "pullPolicy"],
       "properties": {
-        "repository": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 512,
-          "pattern": "^[A-Za-z0-9._:/-]+$"
-        },
-        "tag": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[A-Za-z0-9_.-]+$"
-        },
-        "digest": {
-          "type": "string",
-          "pattern": "^$|^sha256:[0-9a-f]{64}$"
-        },
-        "pullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
-        }
+        "repository": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "tag": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "digest": { "type": "string", "pattern": "^$|^sha256:[0-9a-f]{64}$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
       }
     },
     "services": {
@@ -175,75 +122,18 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["enabled", "url"],
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "url": { "$ref": "#/$defs/httpUrl" }
-          }
+          "properties": { "enabled": { "type": "boolean" }, "url": { "$ref": "#/$defs/httpUrl" } }
         }
       }
     },
-    "temporal": {
+    "database": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["address", "namespace", "taskQueue", "workerDeploymentName", "workerBuildId"],
-      "properties": {
-        "address": { "$ref": "#/$defs/boundedText" },
-        "namespace": { "$ref": "#/$defs/boundedText" },
-        "taskQueue": { "$ref": "#/$defs/boundedText" },
-        "workerDeploymentName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 127,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-        },
-        "workerBuildId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 255,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]*$"
-        }
-      }
-    },
-    "conversationStorage": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["existingSecret", "databaseUrlKey", "awsCredentialsKey", "s3"],
+      "required": ["existingSecret", "urlKey", "notificationUrlKey"],
       "properties": {
         "existingSecret": { "$ref": "#/$defs/dnsLabel" },
-        "databaseUrlKey": { "$ref": "#/$defs/secretKey" },
-        "awsCredentialsKey": { "$ref": "#/$defs/secretKey" },
-        "s3": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "bucket",
-            "region",
-            "endpoint",
-            "keyPrefix",
-            "forcePathStyle",
-            "allowInsecureEndpoint",
-            "maxAttempts"
-          ],
-          "properties": {
-            "bucket": {
-              "type": "string",
-              "minLength": 3,
-              "maxLength": 63,
-              "pattern": "^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
-            },
-            "region": { "$ref": "#/$defs/boundedText" },
-            "endpoint": { "$ref": "#/$defs/httpUrl" },
-            "keyPrefix": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 512,
-              "pattern": "^[A-Za-z0-9._/-]+$"
-            },
-            "forcePathStyle": { "type": "boolean" },
-            "allowInsecureEndpoint": { "type": "boolean" },
-            "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 10 }
-          }
-        }
+        "urlKey": { "$ref": "#/$defs/secretKey" },
+        "notificationUrlKey": { "$ref": "#/$defs/secretKey" }
       }
     },
     "credentials": {
@@ -287,12 +177,8 @@
           "required": ["ttlMs", "maximumEntries", "maximumBytes"],
           "properties": {
             "ttlMs": { "type": "integer", "minimum": 1000, "maximum": 3600000 },
-            "maximumEntries": { "type": "integer", "minimum": 1, "maximum": 16384 },
-            "maximumBytes": {
-              "type": "integer",
-              "minimum": 1024,
-              "maximum": 536870912
-            }
+            "maximumEntries": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "maximumBytes": { "type": "integer", "minimum": 1048576, "maximum": 1073741824 }
           }
         },
         "timeouts": {
@@ -306,31 +192,11 @@
             "turnMs"
           ],
           "properties": {
-            "toolBrokerRequestMs": {
-              "type": "integer",
-              "minimum": 360000,
-              "maximum": 900000
-            },
-            "modelCapabilityTtlMs": {
-              "type": "integer",
-              "minimum": 61000,
-              "maximum": 3600000
-            },
-            "modelUpstreamRequestMs": {
-              "type": "integer",
-              "minimum": 1000,
-              "maximum": 300000
-            },
-            "modelRequestMs": {
-              "type": "integer",
-              "minimum": 1000,
-              "maximum": 300000
-            },
-            "turnMs": {
-              "type": "integer",
-              "minimum": 1000,
-              "maximum": 900000
-            }
+            "toolBrokerRequestMs": { "$ref": "#/$defs/positiveMs" },
+            "modelCapabilityTtlMs": { "$ref": "#/$defs/positiveMs" },
+            "modelUpstreamRequestMs": { "$ref": "#/$defs/positiveMs" },
+            "modelRequestMs": { "$ref": "#/$defs/positiveMs" },
+            "turnMs": { "$ref": "#/$defs/positiveMs" }
           }
         },
         "repositoryImport": {
@@ -338,8 +204,8 @@
           "additionalProperties": false,
           "required": ["leaseMs", "waitMs"],
           "properties": {
-            "leaseMs": { "type": "integer", "minimum": 1000, "maximum": 900000 },
-            "waitMs": { "type": "integer", "minimum": 1000, "maximum": 900000 }
+            "leaseMs": { "$ref": "#/$defs/positiveMs" },
+            "waitMs": { "$ref": "#/$defs/positiveMs" }
           }
         }
       }
@@ -349,29 +215,17 @@
       "additionalProperties": false,
       "required": ["storageClassName", "accessModes", "size"],
       "properties": {
-        "storageClassName": {
-          "type": "string",
-          "maxLength": 253,
-          "pattern": "^$|^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
-        },
+        "storageClassName": { "type": "string", "maxLength": 253 },
         "accessModes": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 1,
-          "items": { "type": "string", "enum": ["ReadWriteOncePod", "ReadWriteOnce"] }
+          "maxItems": 2,
+          "items": { "enum": ["ReadWriteOnce", "ReadWriteOncePod"] }
         },
         "size": { "$ref": "#/$defs/quantity" }
       }
     },
-    "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["requests", "limits"],
-      "properties": {
-        "requests": { "$ref": "#/$defs/resources" },
-        "limits": { "$ref": "#/$defs/resources" }
-      }
-    },
+    "resources": { "type": "object" },
     "ephemeral": {
       "type": "object",
       "additionalProperties": false,
@@ -392,87 +246,38 @@
           "additionalProperties": false,
           "required": ["key", "value"],
           "properties": {
-            "key": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 253,
-              "pattern": "^[A-Za-z0-9./_-]+$"
-            },
-            "value": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 63,
-              "pattern": "^[A-Za-z0-9._-]+$"
-            }
+            "key": { "type": "string", "minLength": 1 },
+            "value": { "type": "string", "minLength": 1 }
           }
         },
         "trustedTcpPorts": {
           "type": "array",
-          "minItems": 1,
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "uniqueItems": true
         },
         "externalEgressCidrs": {
           "type": "array",
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/(?:[0-9]|[12][0-9]|3[0-2])$"
-          }
+          "items": { "type": "string", "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$" },
+          "uniqueItems": true
         }
       }
     },
     "disruptionBudget": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["minAvailable"],
-      "properties": {
-        "minAvailable": { "type": "integer", "minimum": 1, "maximum": 63 }
-      }
+      "properties": { "minAvailable": { "type": "integer", "minimum": 1, "maximum": 255 } }
     },
     "placement": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["nodeSelector", "tolerations"],
-      "properties": {
-        "nodeSelector": {
-          "type": "object",
-          "maxProperties": 16,
-          "additionalProperties": { "type": "string", "maxLength": 256 }
-        },
-        "tolerations": {
-          "type": "array",
-          "maxItems": 16,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "key": { "type": "string", "maxLength": 253 },
-              "operator": { "type": "string", "enum": ["Equal", "Exists"] },
-              "value": { "type": "string", "maxLength": 63 },
-              "effect": {
-                "type": "string",
-                "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
-              },
-              "tolerationSeconds": { "type": "integer", "minimum": 0 }
-            }
-          }
-        }
-      }
+      "properties": { "nodeSelector": { "type": "object" }, "tolerations": { "type": "array" } }
     },
     "serviceAccount": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["create", "name"],
       "properties": {
         "create": { "type": "boolean" },
-        "name": {
-          "type": "string",
-          "maxLength": 63,
-          "pattern": "^$|^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
-        }
+        "name": { "type": "string", "maxLength": 63 }
       }
     }
   },
@@ -481,7 +286,13 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 63,
-      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+      "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?$"
     },
     "secretKey": {
       "type": "string",
@@ -489,38 +300,9 @@
       "maxLength": 253,
       "pattern": "^[A-Za-z0-9._-]+$"
     },
-    "boundedText": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 255,
-      "pattern": "^[ -~]+$"
-    },
-    "httpUrl": {
-      "type": "string",
-      "minLength": 8,
-      "maxLength": 1024,
-      "pattern": "^https?://[^\\s]+$"
-    },
-    "optionalHttpUrl": {
-      "type": "string",
-      "maxLength": 1024,
-      "pattern": "^$|^https?://[^\\s]+$"
-    },
-    "quantity": {
-      "type": "string",
-      "pattern": "^[1-9][0-9]*(Ki|Mi|Gi|Ti)$"
-    },
-    "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["cpu", "memory"],
-      "properties": {
-        "cpu": {
-          "type": "string",
-          "pattern": "^([1-9][0-9]*m|[1-9][0-9]*)$"
-        },
-        "memory": { "$ref": "#/$defs/quantity" }
-      }
-    }
+    "httpUrl": { "type": "string", "pattern": "^https?://[^[:space:]]+$" },
+    "optionalHttpUrl": { "type": "string", "pattern": "^$|^https?://[^[:space:]]+$" },
+    "positiveMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
+    "quantity": { "type": "string", "pattern": "^[0-9]+(?:Ki|Mi|Gi|Ti)?$" }
   }
 }

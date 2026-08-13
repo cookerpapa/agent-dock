@@ -92,7 +92,7 @@ function registration(
       supervisorVersion: "0.1.0",
       pi: {
         packageName: "@earendil-works/pi-coding-agent",
-        version: options.piVersion ?? "0.80.10",
+        version: options.piVersion ?? "0.84.1",
       },
       supportedProtocolVersions: [1],
       capabilities: [...(options.capabilities ?? ["event.replay", "pi.sdk"])],

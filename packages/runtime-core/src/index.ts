@@ -15,7 +15,6 @@ export * from "./run-attempt-runtime.ts";
 export * from "./run-attempt-state.ts";
 export * from "./run-cancellation-executor.ts";
 export * from "./run-command-executor.ts";
-export * from "./s3-checkpoint-object-store.ts";
 export * from "./session-event-hub.ts";
 export * from "./session-event-notifications.ts";
 export * from "./session-event-retention.ts";

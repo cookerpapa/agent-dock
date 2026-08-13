@@ -27,9 +27,6 @@ export type ProductionControlPlaneConfig = {
   allowInsecureInternalHttp: boolean;
   host: string;
   port: number;
-  temporalAddress: string;
-  temporalNamespace: string;
-  temporalTaskQueue: string;
   platformModelSourceTenantId: string;
   platformOperatorTenantId: string;
   environmentImageRevision: string;
@@ -56,7 +53,6 @@ export type ProductionBootstrapConfig = {
   maximumConcurrentTurns: number;
   maximumActiveSandboxes: number;
   sandboxDomains: readonly ProductionSandboxDomainConfig[];
-  executionCells: readonly ProductionExecutionCellConfig[];
 };
 
 export type ProductionSandboxDomainConfig = {
@@ -66,16 +62,6 @@ export type ProductionSandboxDomainConfig = {
   toolBrokerBaseUrl: string;
   workspaceStorageKey: string;
   maximumActiveSandboxes: number;
-};
-
-export type ProductionExecutionCellConfig = {
-  id: string;
-  displayName: string;
-  state: "active" | "draining" | "disabled";
-  temporalTaskQueue: string;
-  sandboxDomainId: string;
-  supervisorManagementBaseUrlTemplate: string;
-  capacityWeight: number;
 };
 
 function sandboxDomains(value: string): readonly ProductionSandboxDomainConfig[] {
@@ -181,87 +167,6 @@ function integerValue(
     throw new TypeError(`${name} must be an integer from ${String(minimum)} to ${String(maximum)}`);
   }
   return parsed;
-}
-
-function executionCells(value: string): readonly ProductionExecutionCellConfig[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new TypeError("AGENT_DOCK_EXECUTION_CELLS_JSON must be valid JSON");
-  }
-  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64) {
-    throw new TypeError("AGENT_DOCK_EXECUTION_CELLS_JSON must contain 1 to 64 Cells");
-  }
-  const cells = parsed.map((entry, index): ProductionExecutionCellConfig => {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new TypeError(`Execution Cell ${String(index)} must be an object`);
-    }
-    const cell = entry as Record<string, unknown>;
-    const id = cell.id;
-    const displayName = cell.displayName;
-    const state = cell.state;
-    const temporalTaskQueue = cell.temporalTaskQueue;
-    const sandboxDomainId = cell.sandboxDomainId;
-    const supervisorManagementBaseUrlTemplate = cell.supervisorManagementBaseUrlTemplate;
-    const capacityWeight = cell.capacityWeight;
-    if (typeof id !== "string" || !/^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$/u.test(id)) {
-      throw new TypeError(`Execution Cell ${String(index)} has an invalid ID`);
-    }
-    if (typeof displayName !== "string" || displayName.length < 1 || displayName.length > 128) {
-      throw new TypeError(`Execution Cell ${id} has an invalid display name`);
-    }
-    if (state !== "active" && state !== "draining" && state !== "disabled") {
-      throw new TypeError(`Execution Cell ${id} has an invalid state`);
-    }
-    if (
-      typeof temporalTaskQueue !== "string" ||
-      temporalTaskQueue.length < 1 ||
-      temporalTaskQueue.length > 255
-    ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid Temporal Task Queue`);
-    }
-    if (
-      typeof sandboxDomainId !== "string" ||
-      !/^sandbox-domain-[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u.test(sandboxDomainId)
-    ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid Sandbox Domain ID`);
-    }
-    if (
-      typeof supervisorManagementBaseUrlTemplate !== "string" ||
-      supervisorManagementBaseUrlTemplate.split("{supervisorId}").length !== 2 ||
-      !/^https?:\/\/[^\s]+$/u.test(
-        supervisorManagementBaseUrlTemplate.replace("{supervisorId}", "worker-validation"),
-      ) ||
-      supervisorManagementBaseUrlTemplate.length > 2_048
-    ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid Supervisor management template`);
-    }
-    if (
-      typeof capacityWeight !== "number" ||
-      !Number.isSafeInteger(capacityWeight) ||
-      capacityWeight < 1 ||
-      capacityWeight > 1_000_000
-    ) {
-      throw new TypeError(`Execution Cell ${id} has an invalid capacity weight`);
-    }
-    return {
-      id,
-      displayName,
-      state,
-      temporalTaskQueue,
-      sandboxDomainId,
-      supervisorManagementBaseUrlTemplate,
-      capacityWeight,
-    };
-  });
-  if (new Set(cells.map((cell) => cell.id)).size !== cells.length) {
-    throw new TypeError("Execution Cell IDs must be unique");
-  }
-  if (new Set(cells.map((cell) => cell.temporalTaskQueue)).size !== cells.length) {
-    throw new TypeError("Execution Cell Temporal Task Queues must be unique");
-  }
-  return cells;
 }
 
 function managementUrl(value: string, allowInsecure: boolean): string {
@@ -483,21 +388,6 @@ export async function loadProductionControlPlaneConfig(
     allowInsecureInternalHttp,
     host: bounded(environment.HOST ?? "127.0.0.1", "HOST"),
     port: integerValue(environment, "PORT", 3000, 1, 65_535),
-    temporalAddress: bounded(
-      required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
-      "AGENT_DOCK_TEMPORAL_ADDRESS",
-      512,
-    ),
-    temporalNamespace: bounded(
-      environment.AGENT_DOCK_TEMPORAL_NAMESPACE ?? "agent-dock",
-      "AGENT_DOCK_TEMPORAL_NAMESPACE",
-      255,
-    ),
-    temporalTaskQueue: bounded(
-      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-cell-0001-v1",
-      "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
-      255,
-    ),
     platformModelSourceTenantId,
     platformOperatorTenantId,
     environmentImageRevision: bounded(
@@ -640,6 +530,5 @@ export function loadProductionBootstrapConfig(
       1_000_000,
     ),
     sandboxDomains: sandboxDomains(required(environment, "AGENT_DOCK_SANDBOX_DOMAINS_JSON")),
-    executionCells: executionCells(required(environment, "AGENT_DOCK_EXECUTION_CELLS_JSON")),
   };
 }

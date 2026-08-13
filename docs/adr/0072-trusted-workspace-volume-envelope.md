@@ -7,7 +7,7 @@
 ## Context
 
 The Cube POSIX Volume previously mounted its physical root directly at
-`/workspace`. The trusted Data Mover stored
+`/workspace`. The trusted Volume Gateway stored
 `.agent-dock-runtime/generation` in that root so the marker was carried by the
 same Kopia snapshot as the mutable Workspace.
 
@@ -35,12 +35,12 @@ agentdock-posix-<volume-id>/
     └── user files
 ```
 
-The trusted Workspace Data Mover and Kopia snapshot the envelope root. The Cube
+The trusted Workspace Volume Gateway and Kopia snapshot the envelope root. The Cube
 Volume Plugin exposes only the `workspace/` child as the guest's `/workspace`
 mount. The sibling metadata directory is therefore absent from the untrusted
 guest filesystem rather than hidden by an application-level path filter.
 
-The Data Mover must validate all three facts before reusing or publishing a
+The Volume Gateway must validate all three facts before reusing or publishing a
 Volume:
 
 1. the trusted sidecar matches the requested immutable snapshot;

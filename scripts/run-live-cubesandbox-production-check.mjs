@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -209,85 +209,6 @@ async function runUsageEvidence(runId) {
   return { requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costMicrousd };
 }
 
-function decodeTemporalPayloads(value, decoded = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) decodeTemporalPayloads(item, decoded);
-    return decoded;
-  }
-  if (typeof value !== "object" || value === null) return decoded;
-  if (Array.isArray(value.payloads)) {
-    for (const payload of value.payloads) {
-      if (typeof payload?.data === "string") {
-        decoded.push(Buffer.from(payload.data, "base64").toString("utf8"));
-      }
-    }
-  }
-  for (const child of Object.values(value)) decodeTemporalPayloads(child, decoded);
-  return decoded;
-}
-
-async function temporalWorkflowEvidence(accepted) {
-  const workflowId = `agent-dock-run-v1-${accepted.runId}`;
-  const history = parseJson(
-    await capture(
-      process.execPath,
-      [
-        "scripts/production-compose.mjs",
-        "exec",
-        "-T",
-        "temporal",
-        "temporal",
-        "workflow",
-        "show",
-        "--namespace",
-        "agent-dock",
-        "--workflow-id",
-        workflowId,
-        "--address",
-        "127.0.0.1:7233",
-        "--output",
-        "json",
-      ],
-      30_000,
-    ),
-    "Temporal Workflow history",
-  );
-  const decoded = decodeTemporalPayloads(history);
-  const allowedKeys = new Set([
-    "schemaVersion",
-    "cellId",
-    "taskQueue",
-    "tenantId",
-    "sessionId",
-    "runId",
-    "commandId",
-    "status",
-    "attempt",
-    "failureCode",
-    "retryAfterMs",
-    "reason",
-    "affinity",
-  ]);
-  for (const payload of decoded) {
-    assert(Buffer.byteLength(payload, "utf8") <= 2_048);
-    const parsed = parseJson(payload, "Temporal Workflow payload");
-    assert(
-      Object.keys(parsed).every((key) => allowedKeys.has(key)),
-      `Temporal history contains a forbidden payload field: ${Object.keys(parsed).join(",")}`,
-    );
-  }
-  assert(decoded.some((payload) => payload.includes(accepted.runId)));
-  assert(
-    history.events.some((event) => event.eventType === "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"),
-  );
-  return {
-    workflowId,
-    historyEvents: history.events.length,
-    decodedPayloads: decoded.length,
-    boundedReferencesOnly: true,
-  };
-}
-
 function wait(delayMs, signal) {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolvePromise) => {
@@ -489,24 +410,6 @@ async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
     trustedMetadataSibling: true,
     userWorkspaceGitEntryAbsent: true,
   };
-}
-
-async function eraseLocalWorkspaceCopy(tenant, workspaceId, sessionId) {
-  const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
-  const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
-  const volumePath = resolve(volumeRoot, `agentdock-posix-${volumeId}`);
-  assert(
-    volumePath.startsWith(`${volumeRoot}/`),
-    "Local Workspace fault target escaped the shared-volume root",
-  );
-  const metadata = await lstat(volumePath);
-  assert(metadata.isDirectory() && !metadata.isSymbolicLink());
-  const entries = await readdir(volumePath);
-  for (const entry of entries) {
-    assert(entry !== "." && entry !== ".." && !entry.includes("/"));
-    await rm(resolve(volumePath, entry), { recursive: true, force: true });
-  }
-  return { volumeId, removedEntries: entries.length };
 }
 
 async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
@@ -781,7 +684,7 @@ try {
     firstCoding.terminal.payload.workspacePatch.patch.includes("counting_sort"),
     "First Workspace patch omitted counting_sort.py code",
   );
-  progress("first Workspace checkpoint and patch were verified");
+  progress("first Workspace Volume revision and patch were verified");
 
   const followUp = await runTurn(
     session.sessionId,
@@ -875,47 +778,41 @@ try {
     largeSession.sessionId,
     [
       "Use bash and work in the current empty workspace.",
-      "Shallow-clone https://github.com/temporalio/temporal into a directory named temporal.",
-      "Count regular files under temporal and require the count to be greater than 512.",
+      "Shallow-clone https://github.com/TencentCloud/CubeSandbox into a directory named cubesandbox-source.",
+      "Count regular files under cubesandbox-source and require the count to be greater than 512.",
       "Write checkpoint-marker.txt in the workspace root containing exactly LARGE-CHECKPOINT-OK.",
       "Do not delete or compact the cloned repository, and report the measured file count.",
     ].join(" "),
     0,
     true,
   );
-  progress("large Workspace Run completed and committed its checkpoint");
+  progress("large Workspace Run completed and committed its persistent Volume revision");
   const largeFirstUsage = await runUsageEvidence(largeFirst.accepted.runId);
   const largeFirstWorkspace = await workspaceVersionEvidence(largeFirst.accepted.runId);
   assert(
     largeFirstWorkspace.fileCount > 512,
-    "Large-workspace Run did not cross the portable checkpoint boundary",
+    "Large-workspace Run did not cross the bounded revision-reference threshold",
   );
   assert(
     largeFirstWorkspace.artifactBytes <= 32 * 1_024 * 1_024,
-    "Cube checkpoint reference exceeded its bounded transport",
+    "Cube persistent Volume reference exceeded its bounded transport",
   );
   await terminateWarmCubeSession(largeFirst.accepted.runId, largeSession.sessionId);
   await waitForNoCubeSession(largeSession.sessionId);
-  const localCopyFault = await eraseLocalWorkspaceCopy(
-    tenantId,
-    largeSession.workspaceId,
-    largeSession.sessionId,
-  );
-  assert(localCopyFault.removedEntries > 0, "Workspace fault injection removed no local data");
-  progress("source Cube and local POSIX Workspace copy were removed");
+  progress("source Cube was removed while its persistent Workspace Volume remained authoritative");
 
   const largeFollowUp = await runTurn(
     largeSession.sessionId,
     [
-      "Continue from the existing large Workspace checkpoint and make exactly one bash Tool call.",
+      "Continue from the existing persistent Workspace Volume and make exactly one bash Tool call.",
       "Do not clone the repository again.",
-      "In that one command: read checkpoint-marker.txt and require it to equal LARGE-CHECKPOINT-OK; count regular files under the existing temporal directory and require the count to be greater than 512; write restore-proof.txt containing the marker and measured count; then read restore-proof.txt back.",
+      "In that one command: read checkpoint-marker.txt and require it to equal LARGE-CHECKPOINT-OK; count regular files under the existing cubesandbox-source directory and require the count to be greater than 512; write restore-proof.txt containing the marker and measured count; then read restore-proof.txt back.",
       "After that Tool result, do not call another Tool and reply exactly RESTORE-VERIFIED.",
     ].join(" "),
     largeFirst.cursor,
     true,
   );
-  progress("large Workspace cold-restored into a fresh Cube KVM");
+  progress("large persistent Workspace Volume attached to a fresh Cube KVM");
   const largeFollowUpUsage = await runUsageEvidence(largeFollowUp.accepted.runId);
   const largeFollowUpWorkspace = await workspaceVersionEvidence(largeFollowUp.accepted.runId);
   assert(largeFollowUpWorkspace.fileCount > 512);
@@ -934,15 +831,6 @@ try {
 
   await waitForRunningCubeSession(session.sessionId);
   await waitForNoCubeSession(foreignSession.sessionId);
-  const temporalWorkflows = await Promise.all(
-    [
-      chat.accepted,
-      firstCoding.accepted,
-      followUp.accepted,
-      largeFirst.accepted,
-      largeFollowUp.accepted,
-    ].map((accepted) => temporalWorkflowEvidence(accepted)),
-  );
   const usage = totalUsage(
     chatUsage,
     firstUsage,
@@ -992,17 +880,20 @@ try {
       lowerLevelCubeTenantGate: 2,
     },
     largeWorkspace: {
-      source: "github.com/temporalio/temporal",
+      source: "github.com/TencentCloud/CubeSandbox",
       firstRunId: largeFirst.accepted.runId,
       followUpRunId: largeFollowUp.accepted.runId,
       firstFileCount: largeFirstWorkspace.fileCount,
       restoredFileCount: largeFollowUpWorkspace.fileCount,
-      checkpointReferenceBytes: largeFirstWorkspace.artifactBytes,
+      volumeReferenceBytes: largeFirstWorkspace.artifactBytes,
       sourceSandboxDestroyed: true,
-      localPosixCopyErased: true,
-      localPosixEntriesErased: localCopyFault.removedEntries,
-      volumeId: localCopyFault.volumeId,
-      restoredFromKopia: true,
+      persistentVolumeRetained: true,
+      volumeId: workspaceVolumeId({
+        tenantId,
+        workspaceId: largeSession.workspaceId,
+        sessionId: largeSession.sessionId,
+      }),
+      restoredFromPersistentVolume: true,
       freshCubeMicroVm: true,
       higherFenceActivation: true,
       firstUsage: largeFirstUsage,
@@ -1014,10 +905,10 @@ try {
       semanticItems,
       replayAfterSequence: conversation.replayAfterSequence,
     },
-    temporal: {
-      scheduler: "Temporal",
-      taskQueue: "agent-dock-pi-runs-cell-0001-v1",
-      workflows: temporalWorkflows,
+    scheduler: {
+      authority: "PostgreSQL",
+      queue: "outbox",
+      workerPool: "shared",
     },
     totalUsage: usage,
     cleanup: {
@@ -1061,15 +952,15 @@ try {
         `- Persistent Sandbox policy / archive cleanup: ${String(report.multiRound.persistentSandboxPolicy)} / ${String(report.cleanup.persistentArchiveReaped)}`,
         `- Workspace restored across Runs: ${String(report.multiRound.workspaceRestored)}`,
         `- Trusted Git metadata sibling / user .git absent: ${String(report.workspaceIsolation.trustedMetadataSibling)} / ${String(report.workspaceIsolation.userWorkspaceGitEntryAbsent)}`,
-        `- Large Workspace files / checkpoint reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.checkpointReferenceBytes)} bytes`,
+        `- Large Workspace files / Volume reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.volumeReferenceBytes)} bytes`,
         `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
         `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
-        `- Temporal Workflows / bounded-reference histories: ${String(report.temporal.workflows.length)} / ${String(report.temporal.workflows.filter((workflow) => workflow.boundedReferencesOnly).length)}`,
+        `- Scheduler / Worker pool: ${report.scheduler.authority} / ${report.scheduler.workerPool}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. A persistent conversation propagated its retention policy through the complete product path, and two coding Runs reused one running Session-bound Cube KVM guest through a checkpoint boundary with rotated Tool authority and higher-fence rebind. Archiving that conversation caused the retained Cube to be reaped. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run cloned the Temporal repository beyond the portable checkpoint limit; after explicit source-VM destruction and deletion of its local POSIX Workspace copy, its follow-up restored the marker and repository from the committed Kopia snapshot into a fresh Cube VM under a higher-fence activation. All Runs completed through Temporal with bounded-reference histories. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. A persistent conversation propagated its retention policy through the complete product path, and two coding Runs reused one running Session-bound Cube KVM guest with rotated Tool authority and higher-fence rebind. Archiving that conversation caused the retained Cube to be reaped. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run cloned a large repository; after explicit source-VM destruction, its follow-up attached the same persistent Workspace Volume to a fresh Cube VM under a higher-fence activation. All Runs completed through the shared PostgreSQL queue and horizontally scalable Pi Worker pool. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

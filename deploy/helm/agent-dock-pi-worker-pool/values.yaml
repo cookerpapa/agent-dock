@@ -2,10 +2,9 @@ global:
   imagePullSecrets: []
 
 workerPool:
-  name: primary-v1
+  name: primary
   replicas: 2
   capacity: 4
-  executionCellId: cell-0001
   clusterDomain: cluster.local
 
 autoscaling:
@@ -14,7 +13,7 @@ autoscaling:
   maxReplicas: 32
   pollingIntervalSeconds: 5
   cooldownSeconds: 900
-  targetQueueSize: 1
+  targetQueuedRunsPerReplica: 4
   scaleDownStabilizationSeconds: 900
   scaleDownPeriodSeconds: 600
 
@@ -38,33 +37,17 @@ services:
   controlPlaneUrl: http://control-plane.agent-dock-system.svc.cluster.local:3000
   eventGatewayUrl: http://event-gateway.agent-dock-system.svc.cluster.local:4600
   toolBrokerUrls:
-    - http://tool-broker-0.agent-dock-system.svc.cluster.local:4300
-    - http://tool-broker-1.agent-dock-system.svc.cluster.local:4300
+    - http://tool-broker.agent-dock-system.svc.cluster.local:4300
   githubGateway:
-    enabled: true
+    enabled: false
     url: http://github-gateway.agent-dock-system.svc.cluster.local:4400
   providerProxyUrl: http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129
   otlpTracesEndpoint: ""
 
-temporal:
-  address: temporal.agent-dock-system.svc.cluster.local:7233
-  namespace: agent-dock
-  taskQueue: agent-dock-pi-runs-cell-0001-v1
-  workerDeploymentName: agent-dock-pi-workers
-  workerBuildId: development
-
-conversationStorage:
+database:
   existingSecret: agent-dock-pi-worker-secrets
-  databaseUrlKey: database-url
-  awsCredentialsKey: aws-credentials
-  s3:
-    bucket: agent-dock-checkpoints
-    region: us-east-1
-    endpoint: http://minio.agent-dock-system.svc.cluster.local:9000
-    keyPrefix: production/v1
-    forcePathStyle: true
-    allowInsecureEndpoint: true
-    maxAttempts: 4
+  urlKey: database-url
+  notificationUrlKey: database-notification-url
 
 credentials:
   supervisorEnrollmentTokenKey: supervisor-enrollment-token
@@ -94,17 +77,12 @@ runtime:
 
 state:
   storageClassName: ""
-  accessModes:
-    - ReadWriteOncePod
+  accessModes: [ReadWriteOncePod]
   size: 1Gi
 
 resources:
-  requests:
-    cpu: 500m
-    memory: 1Gi
-  limits:
-    cpu: "2"
-    memory: 4Gi
+  requests: { cpu: 500m, memory: 1Gi }
+  limits: { cpu: "2", memory: 4Gi }
 
 ephemeral:
   workspaceSizeLimit: 128Mi
@@ -115,17 +93,7 @@ networkPolicy:
   trustedNamespaceLabel:
     key: agent-dock.io/trusted-plane
     value: "true"
-  trustedTcpPorts:
-    - 443
-    - 3000
-    - 3129
-    - 4300
-    - 4400
-    - 4318
-    - 4600
-    - 5432
-    - 7233
-    - 9000
+  trustedTcpPorts: [443, 3000, 3129, 4300, 4400, 4318, 4600, 5432]
   externalEgressCidrs: []
 
 disruptionBudget:

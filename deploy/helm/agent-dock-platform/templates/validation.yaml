@@ -16,9 +16,6 @@
 {{- if and .Values.sandboxPlaneEnabled (not .Values.sandboxPlane.workspace.existingClaim) -}}
 {{- fail "sandboxPlane.workspace.existingClaim must name an existing ReadWriteMany PVC" -}}
 {{- end -}}
-{{- if lt (len .Values.executionCells) 1 -}}
-{{- fail "executionCells must contain at least one durable Cell" -}}
-{{- end -}}
 {{- if lt (len .Values.sandboxDomains) 1 -}}
 {{- fail "sandboxDomains must contain at least one Sandbox Domain" -}}
 {{- end -}}

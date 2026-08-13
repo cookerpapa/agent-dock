@@ -7,14 +7,14 @@ import {
   captureWorkspaceSnapshot,
   captureWorkspaceIndex,
   collectExternalGitWorkspacePatch,
-  createKopiaWorkspaceCheckpoint,
+  createPersistentVolumeReference,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   createWorkspaceSnapshot,
   mergeWorkspaceSnapshots,
   initializeExternalGitWorkspaceBaseline,
   parseWorkspaceSnapshot,
-  parseKopiaWorkspaceCheckpoint,
+  parsePersistentVolumeReference,
   restoreWorkspaceSnapshot,
   workspaceSnapshotMetadata,
 } from "../src/index.ts";
@@ -183,14 +183,14 @@ describe("shared workspace runtime", () => {
     expect(link?.sha256).not.toBe(target?.sha256);
   });
 
-  it("round-trips a Workspace-portable Kopia checkpoint without embedding file bytes", () => {
-    const checkpoint = createKopiaWorkspaceCheckpoint({
-      snapshotId: "k1234567890abcdef",
+  it("round-trips a persistent Workspace Volume reference without embedding file bytes", () => {
+    const checkpoint = createPersistentVolumeReference({
       volumeId: `adw-${"a".repeat(48)}`,
+      volumeRevision: "f".repeat(64),
       activationId: "10000000-0000-4000-8000-000000000001",
-      tenantId: "tenant-kopia",
-      workspaceId: "workspace-kopia",
-      sourceSessionId: "session-kopia",
+      tenantId: "tenant-volume",
+      workspaceId: "workspace-volume",
+      sourceSessionId: "session-volume",
       bindingSha256: "b".repeat(64),
       fencingToken: 9,
       imageRevision: "development",
@@ -206,11 +206,11 @@ describe("shared workspace runtime", () => {
       ],
       recipeCommands: [],
     });
-    expect(parseKopiaWorkspaceCheckpoint(checkpoint)).toMatchObject({
-      snapshotId: "k1234567890abcdef",
-      tenantId: "tenant-kopia",
-      workspaceId: "workspace-kopia",
-      sourceSessionId: "session-kopia",
+    expect(parsePersistentVolumeReference(checkpoint)).toMatchObject({
+      volumeRevision: "f".repeat(64),
+      tenantId: "tenant-volume",
+      workspaceId: "workspace-volume",
+      sourceSessionId: "session-volume",
       fencingToken: 9,
       totalSizeBytes: 7,
     });
@@ -224,16 +224,16 @@ describe("shared workspace runtime", () => {
       unknown
     >;
     withUnexpectedField.untrusted = true;
-    expect(() =>
-      parseKopiaWorkspaceCheckpoint(Buffer.from(JSON.stringify(withUnexpectedField))),
-    ).toThrow(/shape/);
+    expect(
+      parsePersistentVolumeReference(Buffer.from(JSON.stringify(withUnexpectedField))),
+    ).toBeUndefined();
 
     const previousLayout = {
       ...(JSON.parse(Buffer.from(checkpoint).toString("utf8")) as Record<string, unknown>),
-      format: "agent-dock.workspace-kopia-snapshot.v2",
+      format: "agent-dock.workspace-volume-reference.v0",
     };
-    expect(() =>
-      parseKopiaWorkspaceCheckpoint(Buffer.from(JSON.stringify(previousLayout))),
-    ).toThrow(/unsupported/);
+    expect(
+      parsePersistentVolumeReference(Buffer.from(JSON.stringify(previousLayout))),
+    ).toBeUndefined();
   });
 });

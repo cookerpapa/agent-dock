@@ -5,7 +5,7 @@ Date: 2026-08-12
 ## Question
 
 Can AgentDock delete its Sandbox Manager, and should every execution Cell own
-one Manager/Data Mover stack?
+one Manager/Volume Gateway stack?
 
 ## Primary-source findings
 

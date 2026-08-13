@@ -22,8 +22,8 @@ import {
   SupervisorHostRuntime,
   type SupervisorHostConfig,
   type SupervisorToolBroker,
-  type SupervisorTemporalWorker,
-  type TemporalPiWorkerOptions,
+  type SupervisorRunWorker,
+  type PostgresPiWorkerOptions,
 } from "../src/index.ts";
 
 const CONTROL_PLANE_ID = "90000000-0000-4000-8000-000000000001";
@@ -36,8 +36,8 @@ let socketServer: PGLiteSocketServer;
 let database: Kysely<Database>;
 let connectionString: string;
 
-function temporalWorker(): SupervisorTemporalWorker {
-  let state: SupervisorTemporalWorker["state"] = "idle";
+function runWorker(): SupervisorRunWorker {
+  let state: SupervisorRunWorker["state"] = "idle";
   return {
     get state() {
       return state;
@@ -174,10 +174,10 @@ describe("SupervisorHostRuntime", () => {
     });
     gateway.install(server);
     const address = await server.listen({ host: "127.0.0.1", port: 0 });
-    const temporalWorkerOptions: TemporalPiWorkerOptions[] = [];
-    const temporalWorkerFactory = (options: TemporalPiWorkerOptions): SupervisorTemporalWorker => {
-      temporalWorkerOptions.push(options);
-      return temporalWorker();
+    const runWorkerOptions: PostgresPiWorkerOptions[] = [];
+    const runWorkerFactory = (options: PostgresPiWorkerOptions): SupervisorRunWorker => {
+      runWorkerOptions.push(options);
+      return runWorker();
     };
     const baseConfig: SupervisorHostConfig = {
       supervisorId: SUPERVISOR_ID,
@@ -189,16 +189,11 @@ describe("SupervisorHostRuntime", () => {
       toolBrokerServiceToken: `tool-broker-${"s".repeat(48)}`,
       modelCredentialMasterKey: Buffer.alloc(32, 7).toString("base64url"),
       databaseUrl: connectionString,
+      databaseNotificationUrl: connectionString,
       managementHost: "127.0.0.1",
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
       maxConcurrentSessions: 4,
-      temporalAddress: "temporal.test:7233",
-      temporalNamespace: "agent-dock-test",
-      executionCellId: "cell-test",
-      temporalTaskQueue: "agent-dock-pi-runs-test",
-      temporalWorkerDeploymentName: "agent-dock-pi-workers",
-      temporalWorkerBuildId: "runtime-test-build",
       toolBrokerBaseUrls: ["http://tool-broker.test:4300/"],
       toolBrokerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
@@ -228,7 +223,7 @@ describe("SupervisorHostRuntime", () => {
           database,
           objectStore: objectStore(),
           toolBroker: toolBroker(),
-          temporalWorkerFactory,
+          runWorkerFactory,
         }),
     ).toThrow("Pi SDK Worker runtime capacity must be between 1 and 16");
     let first: SupervisorHostRuntime | undefined;
@@ -239,7 +234,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         toolBroker: toolBroker(),
-        temporalWorkerFactory,
+        runWorkerFactory,
       });
       await first.start();
       expect(first.state).toBe("ready");
@@ -253,7 +248,7 @@ describe("SupervisorHostRuntime", () => {
         database,
         objectStore: objectStore(),
         toolBroker: toolBroker(),
-        temporalWorkerFactory,
+        runWorkerFactory,
       });
       await second.start();
       expect(second.state).toBe("ready");
@@ -274,20 +269,8 @@ describe("SupervisorHostRuntime", () => {
         .where("revoked_at", "is", null)
         .executeTakeFirstOrThrow();
       expect(activeCredential.boot_id).toBe(secondIdentity.bootId);
-      expect(temporalWorkerOptions).toHaveLength(2);
-      expect(temporalWorkerOptions.map((options) => options.shutdownGraceMs)).toEqual([
-        660_000, 660_000,
-      ]);
-      expect(temporalWorkerOptions.map((options) => options.workerDeployment)).toEqual([
-        {
-          deploymentName: "agent-dock-pi-workers",
-          buildId: "runtime-test-build",
-        },
-        {
-          deploymentName: "agent-dock-pi-workers",
-          buildId: "runtime-test-build",
-        },
-      ]);
+      expect(runWorkerOptions).toHaveLength(2);
+      expect(runWorkerOptions.map((options) => options.maximumConcurrentRuns)).toEqual([4, 4]);
 
       const ledger = JSON.parse(await readFile(join(root, "boot", "boot-ledger.json"), "utf8")) as {
         state: { history: Array<{ bootId: string; status: string }> };

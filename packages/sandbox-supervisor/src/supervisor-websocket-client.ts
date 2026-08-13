@@ -74,7 +74,7 @@ export type SupervisorWebSocketClientOptions = {
   maxBufferedSendBytes?: number;
   /**
    * A retryable Control Channel break is not an execution-ownership loss when
-   * the Run renews its PostgreSQL lease through the Temporal execution path.
+   * the Run renews its PostgreSQL lease through the Worker execution path.
    * Standalone clients keep the historical fail-closed default; the
    * reconnecting production client explicitly suspends transport revocation.
    */

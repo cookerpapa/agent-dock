@@ -59,12 +59,10 @@ const composeNetworks = {
   api: "agent-dock-production_api",
   management: "agent-dock-production_management",
   database: "agent-dock-production_database",
-  objectStorage: "agent-dock-production_object-storage",
   sandboxControl: "agent-dock-production_sandbox-control",
   modelEgress: "agent-dock-production_model-egress",
   githubControl: "agent-dock-production_github-control",
   observability: "agent-dock-production_observability",
-  temporal: "agent-dock-production_temporal",
 };
 
 const bridgeTargets = [
@@ -97,18 +95,6 @@ const bridgeTargets = [
     composeService: "postgres",
     network: composeNetworks.database,
     port: 5432,
-  },
-  {
-    name: "minio",
-    composeService: "minio",
-    network: composeNetworks.objectStorage,
-    port: 9000,
-  },
-  {
-    name: "temporal",
-    composeService: "temporal",
-    network: composeNetworks.temporal,
-    port: 7233,
   },
 ];
 const optionalBridgeTargets = [
@@ -680,7 +666,7 @@ async function applyWorkerSecret(githubGatewayEnabled) {
   databaseUrl.port = "5432";
   const data = {
     "database-url": Buffer.from(`${databaseUrl.toString()}\n`).toString("base64"),
-    "aws-credentials": await source("aws-credentials"),
+    "database-notification-url": Buffer.from(`${databaseUrl.toString()}\n`).toString("base64"),
     "supervisor-enrollment-token": await source("supervisor-enrollment-token"),
     "supervisor-management-token": await source("supervisor-management-token"),
     "tool-broker-token": await source("tool-broker-token"),
@@ -807,17 +793,12 @@ async function switchControlPlaneToKubernetes(runtimeEnvironment, revision) {
     supervisorManagementUrlTemplate:
       runtimeEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
       "http://{supervisorId}:4100",
-    bootstrapSupervisorManagementUrlTemplate:
-      runtimeEnvironment.AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE ??
-      runtimeEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
-      "http://{supervisorId}:4100",
   };
   await writePrivate(switchStatePath, `${JSON.stringify(previous, null, 2)}\n`);
   await replaceRuntimeEnvironment({
     AGENT_DOCK_PI_WORKER_DEPLOYMENT: "kubernetes",
     AGENT_DOCK_SUPERVISOR_ID_PREFIX: workerPrefix,
     AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: `http://{supervisorId}.${managementHostSuffix}`,
-    AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE: `http://{supervisorId}.${managementHostSuffix}`,
   });
   await stopAndRemoveComposeWorkers();
   await productionCompose(
@@ -833,8 +814,6 @@ async function restoreComposeWorkers(previous) {
     AGENT_DOCK_PI_WORKER_DEPLOYMENT: previous.piWorkerDeployment,
     AGENT_DOCK_SUPERVISOR_ID_PREFIX: previous.supervisorIdPrefix,
     AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: previous.supervisorManagementUrlTemplate,
-    AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:
-      previous.bootstrapSupervisorManagementUrlTemplate ?? previous.supervisorManagementUrlTemplate,
   });
   await productionCompose(
     ["up", "--detach", "--no-deps", "control-plane"],
@@ -944,17 +923,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "image.pullPolicy=Never",
     "--set",
-    "temporal.address=temporal.agent-dock-system.svc.cluster.local:7233",
-    "--set",
-    "temporal.namespace=agent-dock",
-    "--set",
-    "temporal.taskQueue=agent-dock-pi-runs-cell-0001-v1",
-    "--set",
-    "temporal.workerDeploymentName=agent-dock-pi-workers",
-    "--set",
     "runtime.externalWorkerEventLog=true",
-    "--set-string",
-    `temporal.workerBuildId=${revision}`,
     "--set",
     "services.controlPlaneUrl=http://control-plane.agent-dock-system.svc.cluster.local:3000",
     "--set",
@@ -968,17 +937,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set-string",
     `services.otlpTracesEndpoint=${otlpTracesEndpoint}`,
     "--set",
-    "conversationStorage.existingSecret=agent-dock-pi-worker-secrets",
-    "--set",
-    `conversationStorage.s3.bucket=${runtimeEnvironment.AGENT_DOCK_CHECKPOINT_BUCKET ?? "agent-dock-checkpoints"}`,
-    "--set",
-    `conversationStorage.s3.region=${runtimeEnvironment.AGENT_DOCK_CHECKPOINT_REGION ?? "us-east-1"}`,
-    "--set",
-    "conversationStorage.s3.endpoint=http://minio.agent-dock-system.svc.cluster.local:9000",
-    "--set",
-    "conversationStorage.s3.forcePathStyle=true",
-    "--set",
-    "conversationStorage.s3.allowInsecureEndpoint=true",
+    "database.existingSecret=agent-dock-pi-worker-secrets",
     "--set",
     "state.storageClassName=local-path",
     "--set",
@@ -1008,74 +967,6 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     `agent-dock.io/worker-pool=${poolName}`,
     "--timeout=7m",
   ]);
-}
-
-async function temporalDeploymentDescription() {
-  const temporal = await composeContainer("temporal");
-  const output = await capture("docker", [
-    "exec",
-    temporal,
-    "temporal",
-    "worker",
-    "deployment",
-    "describe",
-    "--address",
-    "127.0.0.1:7233",
-    "--namespace",
-    "agent-dock",
-    "--name",
-    "agent-dock-pi-workers",
-    "--output",
-    "json",
-  ]);
-  return JSON.parse(output);
-}
-
-function temporalDeploymentContainsBuild(deployment, revision) {
-  return deployment.versionSummaries?.some((version) => version.BuildID === revision) === true;
-}
-
-async function currentTemporalBuildId() {
-  const deployment = await temporalDeploymentDescription().catch(() => undefined);
-  const buildId = deployment?.routingConfig?.currentVersionBuildID;
-  return typeof buildId === "string" && buildId.length > 0 ? buildId : undefined;
-}
-
-async function setTemporalCurrentVersion(revision) {
-  const temporal = await composeContainer("temporal");
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    const deployment = await temporalDeploymentDescription().catch(() => undefined);
-    if (deployment !== undefined && temporalDeploymentContainsBuild(deployment, revision)) break;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
-  }
-  const deployment = await temporalDeploymentDescription().catch(() => undefined);
-  if (deployment === undefined || !temporalDeploymentContainsBuild(deployment, revision)) {
-    throw new Error("Kubernetes Pi Worker Build ID did not register with Temporal");
-  }
-  await run("docker", [
-    "exec",
-    temporal,
-    "temporal",
-    "worker",
-    "deployment",
-    "set-current-version",
-    "--address",
-    "127.0.0.1:7233",
-    "--namespace",
-    "agent-dock",
-    "--deployment-name",
-    "agent-dock-pi-workers",
-    "--build-id",
-    revision,
-    "--yes",
-  ]);
-  const confirmationDeadline = Date.now() + 30_000;
-  while (Date.now() < confirmationDeadline) {
-    if ((await currentTemporalBuildId()) === revision) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
-  }
-  throw new Error("Temporal did not confirm the promoted Kubernetes Pi Worker Build ID");
 }
 
 async function currentHelmRevision() {
@@ -1168,7 +1059,7 @@ async function waitForWorkerEnrollment(postgres, timeoutMs = 120_000) {
   throw new Error(`Expected ${workerReplicas} enrolled Kubernetes Workers, found ${enrolled}`);
 }
 
-async function checkDeployment(expectedRevision, { requireCurrent = true, emit = true } = {}) {
+async function checkDeployment(expectedRevision, { emit = true } = {}) {
   await ensureK3d();
   const runtimeEnvironment = await readRuntimeEnvironment();
   if (runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT !== "kubernetes") {
@@ -1240,13 +1131,6 @@ async function checkDeployment(expectedRevision, { requireCurrent = true, emit =
   await waitForWorkerEnrollment(postgres);
 
   const revision = expectedRevision ?? (await repositoryRevision());
-  const deployment = await temporalDeploymentDescription();
-  if (!temporalDeploymentContainsBuild(deployment, revision)) {
-    throw new Error("Temporal Worker Deployment does not contain the expected Build ID");
-  }
-  if (requireCurrent && deployment.routingConfig?.currentVersionBuildID !== revision) {
-    throw new Error("Temporal Worker Deployment is not routing new Runs to the expected Build ID");
-  }
 
   if (emit)
     process.stdout.write(
@@ -1275,15 +1159,13 @@ async function up() {
   const { tag } = await buildAndImportWorkerImage(revision);
   const upgradingKubernetes = runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes";
   const previousHelmRevision = upgradingKubernetes ? await currentHelmRevision() : undefined;
-  const previousTemporalBuildId = await currentTemporalBuildId();
   let previous;
   try {
     if (!upgradingKubernetes) {
       previous = await switchControlPlaneToKubernetes(runtimeEnvironment, revision);
     }
     await deployWorkerPool(revision, tag, resolvedTargets, runtimeEnvironment);
-    await checkDeployment(revision, { requireCurrent: false, emit: false });
-    await setTemporalCurrentVersion(revision);
+    await checkDeployment(revision, { emit: false });
     await checkDeployment(revision);
   } catch (error) {
     if (previous !== undefined) {
@@ -1293,13 +1175,6 @@ async function up() {
     } else if (previousHelmRevision !== undefined) {
       await rollbackKubernetesWorkerPool(previousHelmRevision).catch((rollbackError) => {
         process.stderr.write(`Automatic Kubernetes rollback failed: ${String(rollbackError)}\n`);
-      });
-    }
-    if (previousTemporalBuildId !== undefined) {
-      await setTemporalCurrentVersion(previousTemporalBuildId).catch((rollbackError) => {
-        process.stderr.write(
-          `Automatic Temporal routing rollback failed: ${String(rollbackError)}\n`,
-        );
       });
     }
     throw error;

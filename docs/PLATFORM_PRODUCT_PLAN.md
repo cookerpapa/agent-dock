@@ -34,12 +34,12 @@ network configuration.
 | --- | --- |
 | Web | authentication, conversation and Workspace UX |
 | Control Plane | tenancy, admission, state, idempotency, API |
-| Temporal | durable Run orchestration and Worker matching |
-| Pi Worker pool | Agent Loop, Pi Session restore, model events |
+| PostgreSQL queue | durable Run admission, FIFO and Worker claiming |
+| Pi Worker pool | Agent Loop, Pi Session state and model events |
 | Model Gateway | credential isolation and usage |
 | Tool Broker | AgentDock Tool authority, fencing and Cube lifecycle adapter |
 | Cube execution plane | untrusted bash/build/test processes |
-| Data plane | PostgreSQL, object storage, Workspace checkpoints |
+| Data plane | PostgreSQL conversation state, persistent Cube Volumes |
 | Evaluation | correctness, security, failure and load evidence |
 
 ## Product invariants
@@ -67,11 +67,11 @@ network configuration.
 
 Only implemented and measured statements should be used:
 
-> Built a self-hosted multi-tenant Cloud Coding Agent on the Pi SDK, using
-> Temporal for durable Run orchestration and CubeSandbox KVM microVMs for
-> untrusted Tool execution. Implemented native Pi checkpoint restore,
-> leased/fenced remote Tools, versioned Workspace checkpoints, resumable event
-> streaming, bounded Worker pools and tenant-isolated product APIs.
+> Built a self-hosted multi-tenant Cloud Coding Agent on the Pi SDK, using a
+> PostgreSQL-backed Worker queue and CubeSandbox KVM microVMs for untrusted
+> Tool execution. Implemented leased/fenced remote Tools, durable Pi Session
+> state, persistent Workspace Volumes, resumable event streaming, bounded
+> Worker pools and tenant-isolated product APIs.
 
 Add concurrency, latency, token and security numbers only after the
 corresponding live report is regenerated on the current commit.

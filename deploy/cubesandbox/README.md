@@ -233,9 +233,9 @@ protocols do not gain an implicit direct route through that gateway.
 
 ## Lifecycle and rollback
 
-Cube is not a data authority. The installer loads the `agentdock-posix` binary
-Volume Plugin into CubeMaster and Cubelet. Each deterministic Session-bound
-physical Volume is a trusted envelope:
+Cube compute instances are not data authorities. The installer loads the
+`agentdock-posix` binary Volume Plugin into CubeMaster and Cubelet. Each
+deterministic Workspace-bound physical Volume is a trusted envelope:
 
 ```text
 agentdock-posix-<volume-id>/
@@ -245,28 +245,28 @@ agentdock-posix-<volume-id>/
 └── workspace/
 ```
 
-Cube mounts only `workspace/` at `/workspace`. After the guest is sealed and
-flushed, the trusted Workspace Data Mover snapshots the complete envelope into
-its dedicated Kopia repository. PostgreSQL Fence/CAS publishes only the
-current Attempt's immutable reference as the Workspace head. The guest cannot
+Cube mounts only `workspace/` at `/workspace`. The trusted Workspace Volume
+Gateway validates and indexes that persistent Volume in place. PostgreSQL
+Fence/CAS publishes only the current Attempt's revision metadata as the
+Workspace head. The guest cannot
 list or mutate the sibling generation marker or AgentDock's external Git
 baseline.
 
 The bundled single-node profile maps
 `runtime/state/cube-shared/volume` at `/data/cube-shared/volume`. A multi-node
 operator must replace that local path with the same POSIX shared filesystem on
-CubeMaster, every Cubelet and the Data Mover. Kopia's S3 target must be
-off-node or replicated before claiming whole-host recovery.
+CubeMaster, every Cubelet and the Volume Gateway. That filesystem must provide
+the replication and backup policy required by the deployment's recovery claim.
 
-Conversation state and content-verified Workspace checkpoints commit through
-PostgreSQL/object storage. For an exact Session, the root-owned Tool supervisor
+Conversation state and content-verified Workspace revision metadata commit
+through PostgreSQL. For an exact Session, the root-owned Tool supervisor
 closes the old Run's Tool Worker, briefly freezes user processes while the
-trusted Data Mover snapshots `/workspace`, resumes those exact process
+trusted Volume Gateway flushes and indexes `/workspace`, resumes those exact process
 identities, and retains the running VM for the bounded warm TTL. A later
 higher-fence Run rotates the private handoff secret and starts a fresh Tool
 Worker. Failed, cancelled, timed-out or ambiguous transitions destroy the
-guest; a later Run restores the committed Kopia snapshot into the POSIX volume
-before a fresh base-template guest starts.
+guest; a later Run attaches the same persistent Volume to a fresh base-template
+guest.
 
 Operational inspection and teardown remain available even if the source
 revision has advanced beyond the last registered template:

@@ -41,23 +41,10 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
   AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
   AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:-http://{supervisorId}:4100}
-  AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
-  AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
-  AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
-  AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-cell-0001-v1
   AGENT_DOCK_ADVANCED_MODULES_ENABLED: ${AGENT_DOCK_ADVANCED_MODULES_ENABLED:-false}
   AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG: "true"
   AGENT_DOCK_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
   AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
-  AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
-  AWS_EC2_METADATA_DISABLED: "true"
-  AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
-  AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
-  AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
-  AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX: production/v1
-  AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
-  AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
-  AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
   AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: ${AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED:-true}
   AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
   AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
@@ -88,8 +75,6 @@ x-bootstrap-environment: &bootstrap-environment
   AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-64}
   AGENT_DOCK_SANDBOX_DOMAINS_JSON: >-
     [{"id":"sandbox-domain-0001","displayName":"Primary sandbox domain","state":"active","toolBrokerBaseUrl":"http://tool-broker:4300","workspaceStorageKey":"workspace-domain-0001","maximumActiveSandboxes":1024}]
-  AGENT_DOCK_EXECUTION_CELLS_JSON: >-
-    [{"id":"cell-0001","displayName":"Initial execution cell","state":"active","temporalTaskQueue":"agent-dock-pi-runs-cell-0001-v1","sandboxDomainId":"sandbox-domain-0001","supervisorManagementBaseUrlTemplate":"${AGENT_DOCK_BOOTSTRAP_SUPERVISOR_MANAGEMENT_URL_TEMPLATE:?run npm run production:init first}","capacityWeight":100}]
 
 x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
@@ -123,10 +108,6 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
     target: /run/agent-dock-secrets/worker-event-ingest-token
-    read_only: true
-  - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
-    target: /run/agent-dock-secrets/aws-credentials
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
@@ -290,192 +271,6 @@ services:
     stop_grace_period: 30s
     logging: *bounded-logging
 
-  temporal:
-    image: temporalio/auto-setup@sha256:5b3502a3b685f9eff1b925af90c57c9e3dbeccbef367cc28a2a9712c63379312
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    entrypoint: [/bin/bash, -eu, -o, pipefail, -c]
-    command:
-      - |
-        export POSTGRES_PWD="$$(cat /run/agent-dock-secrets/postgres-password)"
-        exec /etc/temporal/entrypoint.sh autosetup
-    environment:
-      DB: postgres12
-      DB_PORT: "5432"
-      POSTGRES_USER: agent_dock
-      POSTGRES_SEEDS: postgres
-      DEFAULT_NAMESPACE: agent-dock
-      DEFAULT_NAMESPACE_RETENTION: 30d
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/production-sql.yaml
-      BIND_ON_IP: 0.0.0.0
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-    volumes:
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/postgres-password
-        target: /run/agent-dock-secrets/postgres-password
-        read_only: true
-      - type: bind
-        source: ../temporal/dynamicconfig
-        target: /etc/temporal/config/dynamicconfig
-        read_only: true
-    networks:
-      - database
-      - temporal
-    healthcheck:
-      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 20s
-    init: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    mem_limit: 1g
-    cpus: 2.0
-    stop_grace_period: 30s
-    logging: *bounded-logging
-
-  minio:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    restart: unless-stopped
-    entrypoint: [/bin/sh, -eu, -c]
-    command:
-      - |
-        export MINIO_ROOT_USER="$$(cat /run/agent-dock-secrets/minio-root-user)"
-        export MINIO_ROOT_PASSWORD="$$(cat /run/agent-dock-secrets/minio-root-password)"
-        exec minio server /data --address :9000 --console-address :9001
-    volumes:
-      - minio-data:/data
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-user
-        target: /run/agent-dock-secrets/minio-root-user
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-password
-        target: /run/agent-dock-secrets/minio-root-password
-        read_only: true
-    networks:
-      - object-storage
-    healthcheck:
-      test: [CMD, curl, --fail, --silent, http://127.0.0.1:9000/minio/health/live]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-      - /root/.minio:rw,noexec,nosuid,nodev,size=16m,mode=0700
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_OVERRIDE
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 256
-    mem_limit: 768m
-    cpus: 1.5
-    stop_grace_period: 30s
-    logging: *bounded-logging
-
-  minio-bootstrap:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    restart: "no"
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: [/bin/sh, -eu, -c]
-    command:
-      - |
-        export MC_HOST_agentdock="http://$$(cat /run/agent-dock-secrets/minio-root-user):$$(cat /run/agent-dock-secrets/minio-root-password)@minio:9000"
-        bucket=${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
-        {
-          IFS= read -r credential_profile
-          IFS=' ' read -r access_label access_equals application_access_key
-          IFS=' ' read -r secret_label secret_equals application_secret_key
-        } < /run/agent-dock-secrets/aws-credentials
-        test "$${credential_profile}" = '[default]'
-        test "$${access_label}" = 'aws_access_key_id'
-        test "$${access_equals}" = '='
-        test -n "$${application_access_key}"
-        test "$${secret_label}" = 'aws_secret_access_key'
-        test "$${secret_equals}" = '='
-        test -n "$${application_secret_key}"
-        mc mb --ignore-existing "agentdock/$${bucket}"
-        mc anonymous set none "agentdock/$${bucket}"
-        printf '%s\n' \
-          '{"Version":"2012-10-17","Statement":[' \
-          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::$${bucket}\"]}," \
-          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$${bucket}/*\"]}" \
-          ']}' > /tmp/agent-dock-checkpoint-policy.json
-        mc admin policy create agentdock agent-dock-checkpoint-read-write /tmp/agent-dock-checkpoint-policy.json >/dev/null
-        printf '%s\n%s\n' "$${application_access_key}" "$${application_secret_key}" | mc admin user add agentdock >/dev/null
-        mc admin policy attach agentdock agent-dock-checkpoint-read-write --user "$${application_access_key}" >/dev/null
-        mc stat "agentdock/$${bucket}" >/dev/null
-        kopia_bucket=${AGENT_DOCK_WORKSPACE_KOPIA_BUCKET:-agent-dock-workspace-kopia}
-        {
-          IFS= read -r kopia_credential_profile
-          IFS=' ' read -r kopia_access_label kopia_access_equals kopia_access_key
-          IFS=' ' read -r kopia_secret_label kopia_secret_equals kopia_secret_key
-        } < /run/agent-dock-secrets/workspace-kopia-aws-credentials
-        test "$${kopia_credential_profile}" = '[default]'
-        test "$${kopia_access_label}" = 'aws_access_key_id'
-        test "$${kopia_access_equals}" = '='
-        test -n "$${kopia_access_key}"
-        test "$${kopia_secret_label}" = 'aws_secret_access_key'
-        test "$${kopia_secret_equals}" = '='
-        test -n "$${kopia_secret_key}"
-        mc mb --ignore-existing "agentdock/$${kopia_bucket}"
-        mc anonymous set none "agentdock/$${kopia_bucket}"
-        printf '%s\n' \
-          '{"Version":"2012-10-17","Statement":[' \
-          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\",\"s3:ListBucketMultipartUploads\"],\"Resource\":[\"arn:aws:s3:::$${kopia_bucket}\"]}," \
-          "{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:DeleteObject\",\"s3:AbortMultipartUpload\",\"s3:ListMultipartUploadParts\"],\"Resource\":[\"arn:aws:s3:::$${kopia_bucket}/*\"]}" \
-          ']}' > /tmp/agent-dock-workspace-kopia-policy.json
-        mc admin policy create agentdock agent-dock-workspace-kopia-read-write /tmp/agent-dock-workspace-kopia-policy.json >/dev/null
-        printf '%s\n%s\n' "$${kopia_access_key}" "$${kopia_secret_key}" | mc admin user add agentdock >/dev/null
-        mc admin policy attach agentdock agent-dock-workspace-kopia-read-write --user "$${kopia_access_key}" >/dev/null
-        mc stat "agentdock/$${kopia_bucket}" >/dev/null
-    volumes:
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-user
-        target: /run/agent-dock-secrets/minio-root-user
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/minio-root-password
-        target: /run/agent-dock-secrets/minio-root-password
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
-        target: /run/agent-dock-secrets/aws-credentials
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-aws-credentials
-        target: /run/agent-dock-secrets/workspace-kopia-aws-credentials
-        read_only: true
-    networks:
-      - object-storage
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
-      - /root/.mc:rw,noexec,nosuid,nodev,size=16m,mode=0700
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_OVERRIDE
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    mem_limit: 128m
-    cpus: 0.5
-    logging: *bounded-logging
-
   database-bootstrap:
     image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
@@ -512,10 +307,6 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
-      minio-bootstrap:
-        condition: service_completed_successfully
-      temporal:
-        condition: service_healthy
       event-gateway:
         condition: service_healthy
     environment: *control-plane-runtime-environment
@@ -525,10 +316,8 @@ services:
       - api
       - database
       - management
-      - object-storage
       - sandbox-control
       - observability
-      - temporal
     healthcheck:
       test:
         [
@@ -784,8 +573,6 @@ services:
     depends_on:
       control-plane:
         condition: service_healthy
-      minio-bootstrap:
-        condition: service_completed_successfully
       tool-broker:
         condition: service_healthy
       provider-egress-relay:
@@ -797,10 +584,8 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,tool-broker,github-gateway,minio,jaeger,postgres,temporal,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
+      NO_PROXY: 127.0.0.1,localhost,control-plane,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AWS_SHARED_CREDENTIALS_FILE: /run/agent-dock-secrets/aws-credentials
-      AWS_EC2_METADATA_DISABLED: "true"
       AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
       AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
       AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
@@ -814,10 +599,6 @@ services:
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1:4100
       AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
-      AGENT_DOCK_TEMPORAL_ADDRESS: temporal:7233
-      AGENT_DOCK_TEMPORAL_NAMESPACE: agent-dock
-      AGENT_DOCK_EXECUTION_CELL_ID: cell-0001
-      AGENT_DOCK_TEMPORAL_TASK_QUEUE: agent-dock-pi-runs-cell-0001-v1
       AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
       AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state
@@ -839,13 +620,6 @@ services:
       AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "300000"
       AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
       AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
-      AGENT_DOCK_CHECKPOINT_S3_BUCKET: ${AGENT_DOCK_CHECKPOINT_BUCKET:-agent-dock-checkpoints}
-      AGENT_DOCK_CHECKPOINT_S3_REGION: ${AGENT_DOCK_CHECKPOINT_REGION:-us-east-1}
-      AGENT_DOCK_CHECKPOINT_S3_ENDPOINT: http://minio:9000
-      AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX: production/v1
-      AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE: "true"
-      AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT: "true"
-      AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS: "4"
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9465"
       AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
@@ -878,10 +652,6 @@ services:
         target: /run/agent-dock-secrets/github-gateway-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/aws-credentials
-        target: /run/agent-dock-secrets/aws-credentials
-        read_only: true
-      - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
         target: /run/agent-dock-secrets/metrics-token
         read_only: true
@@ -894,12 +664,10 @@ services:
         aliases:
           - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
       database: {}
-      object-storage: {}
       sandbox-control: {}
       model-egress: {}
       github-control: {}
       observability: {}
-      temporal: {}
       api: {}
     healthcheck:
       test:
@@ -938,12 +706,10 @@ services:
         aliases: !override
           - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2
       database: {}
-      object-storage: {}
       sandbox-control: {}
       model-egress: {}
       github-control: {}
       observability: {}
-      temporal: {}
       api: {}
 
   supervisor-volume-bootstrap:
@@ -979,7 +745,7 @@ services:
     cpus: 0.25
     logging: *bounded-logging
 
-  workspace-data-mover:
+  workspace-volume-gateway:
     image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
     build:
       context: ../..
@@ -988,32 +754,19 @@ services:
       network: host
     restart: unless-stopped
     depends_on:
-      minio-bootstrap:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    command: [/app/packages/tool-broker/src/workspace-data-mover-main.ts]
+    command: [/app/packages/tool-broker/src/workspace-volume-gateway-main.ts]
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST: 0.0.0.0
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT: "4500"
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS:-2}
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS:-32}
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS:-30000}
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS:-600000}
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_HOST: 0.0.0.0
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_PORT: "4500"
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/workspace-volume-gateway-token
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS:-2}
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS:-32}
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS:-30000}
       AGENT_DOCK_WORKSPACE_POSIX_ROOT: /data/cube-shared/volume
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT: /var/lib/agent-dock/workspace-data-mover
-      AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH: /var/lib/agent-dock/workspace-data-mover/kopia/repository.config
-      AGENT_DOCK_WORKSPACE_KOPIA_CACHE_DIRECTORY: /var/lib/agent-dock/workspace-data-mover/kopia/cache
-      AGENT_DOCK_WORKSPACE_KOPIA_REPOSITORY_PASSWORD_FILE: /run/agent-dock-secrets/workspace-kopia-repository-password
-      AGENT_DOCK_WORKSPACE_KOPIA_AWS_CREDENTIALS_FILE: /run/agent-dock-secrets/workspace-kopia-aws-credentials
-      AGENT_DOCK_WORKSPACE_KOPIA_S3_BUCKET: ${AGENT_DOCK_WORKSPACE_KOPIA_BUCKET:-agent-dock-workspace-kopia}
-      AGENT_DOCK_WORKSPACE_KOPIA_S3_ENDPOINT: minio:9000
-      AGENT_DOCK_WORKSPACE_KOPIA_S3_REGION: us-east-1
-      AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX: production/kopia/v1/
-      AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS: "true"
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9469"
       AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
@@ -1026,19 +779,8 @@ services:
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/cube-shared/volume
         target: /data/cube-shared/volume
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/workspace-data-mover
-        target: /var/lib/agent-dock/workspace-data-mover
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-data-mover-token
-        target: /run/agent-dock-secrets/workspace-data-mover-token
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-repository-password
-        target: /run/agent-dock-secrets/workspace-kopia-repository-password
-        read_only: true
-      - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-kopia-aws-credentials
-        target: /run/agent-dock-secrets/workspace-kopia-aws-credentials
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
+        target: /run/agent-dock-secrets/workspace-volume-gateway-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
@@ -1046,7 +788,6 @@ services:
         read_only: true
     networks:
       - sandbox-control
-      - object-storage
       - database
       - observability
     healthcheck:
@@ -1080,7 +821,7 @@ services:
       network: host
     restart: unless-stopped
     depends_on:
-      workspace-data-mover:
+      workspace-volume-gateway:
         condition: service_healthy
       database-bootstrap:
         condition: service_completed_successfully
@@ -1096,8 +837,9 @@ services:
       AGENT_DOCK_MAXIMUM_WARM_SANDBOXES: "4"
       AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: http://workspace-data-mover:4500
-      AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: /run/agent-dock-secrets/workspace-data-mover-token
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: http://workspace-volume-gateway:4500
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/workspace-volume-gateway-token
+      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS:-660000}
       AGENT_DOCK_IMAGE_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
       AGENT_DOCK_METRICS_HOST: 0.0.0.0
       AGENT_DOCK_METRICS_PORT: "9466"
@@ -1117,8 +859,8 @@ services:
         target: /run/agent-dock-secrets/sandbox-materializer-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-data-mover-token
-        target: /run/agent-dock-secrets/workspace-data-mover-token
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
+        target: /run/agent-dock-secrets/workspace-volume-gateway-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
@@ -1444,8 +1186,6 @@ networks:
     internal: true
   management:
     internal: true
-  object-storage:
-    internal: true
   sandbox-control:
     internal: true
   github-control:
@@ -1455,8 +1195,6 @@ networks:
   provider-egress: {}
   observability:
     internal: true
-  temporal:
-    internal: true
   event-log:
     internal: true
   live-events:
@@ -1465,7 +1203,6 @@ networks:
 
 volumes:
   postgres-data: {}
-  minio-data: {}
   kafka-data: {}
   valkey-data: {}
   supervisor-boot: {}

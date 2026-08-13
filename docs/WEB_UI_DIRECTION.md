@@ -5,7 +5,7 @@
 AgentDock uses a familiar conversation product shell: account entry first, a
 left conversation list, a right conversation, and an anchored composer. Inside
 the transcript and optional Workspace inspector it retains the restrained visual
-language of Pi's `/export` HTML. The pinned Pi `0.80.10` export templates and the
+language of Pi's `/export` HTML. The pinned Pi `0.84.1` export templates and the
 owner's earlier Pi Session Tree Browser were reviewed as local, read-only design
 references. No private session transcript was inspected or copied.
 
@@ -88,16 +88,14 @@ duplicates, and reconnects with bounded backoff. Public REST resources are also
 validated before they enter React state. No raw Pi object, credential reference,
 provider token, or API body is logged.
 
-The one-command demo uses the supported persistent production topology. After
-each successful turn, the trusted host stores Pi JSONL and the committed
-Workspace checkpoint before completion is published. A follow-up restores Pi
-state on any eligible Worker and reuses or restores the Session's Cube
-activation. The composer remains
+The one-command demo uses the supported persistent production topology. The
+trusted Worker commits Pi Session state to PostgreSQL before completion is
+published. A follow-up can run on any eligible Worker and reuses the Session's
+persistent Cube Volume and, when still warm, its Cube activation. The composer remains
 available during an active turn: another prompt is visibly queued as a separate
 follow-up, receives and displays its durable mailbox position, and never implies
-that it steered the running model loop. S3-compatible checkpoint storage
-remains below the UI and never exposes object keys or raw storage credentials to
-the browser.
+that it steered the running model loop. Storage identities and platform
+credentials never enter browser-visible contracts.
 
 ## Implemented Workspace directory
 

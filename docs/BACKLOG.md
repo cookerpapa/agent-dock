@@ -1,147 +1,51 @@
 # Backlog
 
-This file tracks work that is still relevant to the current Cube + Temporal +
-Pi SDK product. Completed migration plans and retired runtime experiments belong
-in the implementation log or Git history, not in the active backlog.
-
-## Deployment ergonomics
-
-- [x] Provide an idempotent, checksum-pinned one-command self-hosted installer
-      with read-only preflight, resumable phases, Cube/K3s bootstrap and
-      post-deployment health verification.
-- [x] Publish one configuration reference that separates administrator hot
-      settings, supported operator settings, fixed production policy,
-      generated identity and secrets.
-- [x] Provide a strict distributed Helm profile, preflight/deploy command,
-      migration hook, explicit external-authority contract and workload
-      autoscaling policies.
+This backlog covers the current PostgreSQL + Pi SDK + Cube persistent-Volume
+architecture. Temporal, Cells, MinIO/Kopia and alternate Sandbox runtimes are
+retired and remain only in Git history or explicitly superseded ADRs.
 
 ## Release verification
 
-- [ ] Keep the zero-token CI gate green: formatting, strict TypeScript,
-      unit/integration tests, package builds and deployment configuration.
-- [ ] Re-run the live Cube/KVM acceptance suite after Cube, K3s, template,
-      Volume Plugin or egress changes.
-- [x] Extend the real Cube/KVM gate to prove persistent Session retention across
-      the ordinary idle TTL and a higher-fence Run boundary, then verify archive
-      cleanup and zero orphaned guests.
-- [ ] Re-run a bounded real-model multi-turn acceptance after Pi/model/provider
-      integration changes.
-- [ ] Keep generated acceptance reports tied to the exact commit and deployment
-      configuration that produced them.
+- [ ] Keep formatting, typecheck, unit/integration, build, Helm and security
+      gates green.
+- [ ] Run a clean self-hosted install after every deployment contract change.
+- [ ] Re-run real-model pure-chat and multi-round coding acceptance after Pi or
+      provider changes.
+- [ ] Verify Cube destruction followed by attachment of the same persistent
+      Workspace Volume to a fresh KVM.
 
-## Reliability and recovery
+## Reliability
 
-- [x] Make Temporal handoff an explicit Outbox milestone so already-started
-      Workflows cannot hide later admitted Runs behind a bounded relay scan.
-- [x] Eliminate short-interval Worker-capacity deferred churn.
-- [x] Lock the cloud recovery contract with deterministic tests covering an
-      interrupted Pi Session across native Compaction/fresh-Worker restore and
-      proving that post-ACK or ambiguous Tool failures are not replayed.
-- [x] Separate stable logical Turn state from rotating Attempt ownership, bind
-      Tool RPC to both digests, recover short transport disconnects by
-      operation identity, order Bash output and require an explicit durable
-      event barrier before terminal settlement.
-- [x] Capture a Step at every logical Pi sampling boundary, reject stale Tool
-      Steps and preserve minimal environment/Sandbox/policy deltas through Pi
-      Compaction and fresh-Worker restore.
-- [x] Persist Step/sampling-attempt identity across model request accounting,
-      durable events, Tool boundaries and traces without exposing provider
-      failure payloads.
-- [x] Enable Pi-native bounded transient-model retry within one frozen Step;
-      independently budget attempts, interrupt backoff on cancellation and
-      prove that the resulting Tool executes only once.
-- [x] Add an explicit project settlement gate that queues at most one Pi-native
-      verification follow-up after mutating Tools and remains disabled by
-      default.
-- [x] Measure Pi sibling-Tool concurrency against the Cube guest admission
-      contract and retain explicit model-order serialization until a
-      multi-operation guest protocol proves a real benefit.
-- [ ] Add sustained fault injection for Pi Worker loss, Temporal Activity
-      retry, Control Channel reconnect, Cube node loss and object-store outage.
-- [x] Add real process-level `SIGKILL` tests for Control Plane replacement and
-      Worker-WAL recovery; a retryable Control Channel gap no longer revokes a
-      healthy PostgreSQL-leased Agent Loop.
-- [ ] Expand orphan reconciliation and retention tests for Cube activations,
-      POSIX volumes, Kopia snapshots, Pi checkpoints and quarantined Worker WALs.
-- [ ] Add an operator-visible persistent-Cube capacity dashboard and explicit
-      forced-stop control before enabling broad enterprise self-service.
-- [x] Make ambiguous Tool execution (`UNKNOWN`) explicit in the browser and
-      operator diagnostics; never offer an automatic shell replay.
-- [x] Remove Worker-private affinity queues after comparing their small cache
-      benefit with reservation, poller and deferred-Activity complexity.
-- [x] Add a partial unsettled-Turn admission index and expose admission/tenant
-      quota-lock latency without placing tenant identities in metric labels.
-- [x] Add a cross-Domain per-tenant persistent-Sandbox quota and fail capacity
-      closed while an owner-lost activation remains physically ambiguous.
-- [x] Bound each Workspace Data Mover replica with an adopted concurrency queue,
-      retryable overload/timeout semantics and tenant-free pressure metrics.
-- [ ] Publish a repeatable capacity report for Worker, Cube, PostgreSQL,
-      Temporal and object-storage saturation.
-- [x] Hash-partition the PostgreSQL Session event log without weakening global
-      Event-ID idempotency or resumable per-Session sequence order.
-- [x] Move authenticated resumable SSE connections onto a dedicated Event
-      Gateway that can scale independently from REST/Run admission.
-- [x] Measure active concurrent streaming Sessions against PostgreSQL commit
-      rate, WAL bytes, connection-pool wait and SSE delivery lag before adding
-      an external event broker or terminal-delta retention compaction.
-- [x] Add the gated Kafka Worker-event path behind `DurableEventLog`, including
-      authenticated Kafka-first ingest, Session-keyed ordering, idempotent
-      replay projection and a terminal projection barrier. PostgreSQL remains
-      authoritative for business settlement and projection cursors without
-      duplicating the raw event payload in a transfer Outbox.
-- [x] Keep raw deltas out of PostgreSQL: project Kafka batches into a bounded
-      Valkey live view, commit one complete terminal Turn projection, and make
-      expired SSE cursors reload that canonical conversation explicitly.
-- [ ] Run sustained multi-node Kafka broker/projector loss and partition-rebalance
-      acceptance before publishing a measured Stage 2 throughput claim.
+- [ ] Add process-level tests for two Workers racing the same ready command and
+      prove one current Attempt/fence produces effects.
+- [ ] Prove lost `NOTIFY`, duplicate wakeup and Worker restart do not lose or
+      duplicate a Run.
+- [ ] Exercise PostgreSQL/PgBouncer failover while direct notification
+      connections reconnect.
+- [ ] Validate transaction-scoped SessionStorage authority through native Pi
+      compaction and cross-Worker recovery.
+- [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
+- [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
 
-## Deployment
+## Distributed deployment
 
-- [ ] Validate the existing horizontal Pi Worker manifests on more than one
-      physical node with external PostgreSQL, S3-compatible storage and
-      Temporal.
-- [ ] Run the complete distributed Helm profile on at least three physical
-      nodes and record HPA, KEDA, node-autoscaler, Tool Broker replacement and
-      Data Mover replacement
+- [ ] Validate HPA/KEDA and node autoscaling on at least three physical nodes.
+- [ ] Validate shared PostgreSQL queue fairness at target tenant concurrency.
+- [ ] Validate RWX storage behavior, quotas and failure recovery for the chosen
+      production CSI/Volume backend.
+- [ ] Record Tool Broker, persistent Volume gateway and Cube compute-node drain
       evidence.
-- [ ] Design and validate an activation/Attempt-scoped, expiring Cube data-plane
-      grant before bypassing the Tool Broker for Tool payload transport.
-- [ ] Validate Cube compute-node drain, replacement and Workspace recovery from
-      committed Kopia state.
-- [ ] Replace workstation-specific network/proxy assumptions with explicit
-      operator configuration in a multi-node deployment guide.
-- [ ] Remove the remaining local Quinn/UDP test exception once the execution
-      environment can run that integration test normally.
 
 ## Security and operations
 
-- [ ] Add an enterprise egress mode with destination allowlists and searchable
-      network audit records; keep private networks and metadata denied.
-- [ ] Define a separate isolation policy before enabling project/user Pi
-      extensions in trusted Workers.
-- [ ] Before hostile public-SaaS use, add abuse controls, account recovery,
-      billing/quotas, incident response and multi-node disaster recovery.
-- [ ] Periodically verify that default Sandbox guests contain no model,
-      database, object-store, Temporal, Kubernetes or Cube management secrets.
+- [ ] Add an enterprise egress allowlist and searchable network audit trail.
+- [ ] Add tenant/session hard deletion and PostgreSQL/Kafka/Volume retention.
+- [ ] Add backup/restore coverage for PostgreSQL and Workspace storage as two
+      explicit authorities.
+- [ ] Define a separate trust policy before enabling user Pi extensions.
 
-## Optional backend modules
+## Optional modules
 
-The following maintained modules are intentionally disabled by default. They
-are not deleted, but must not lengthen the core path when disabled:
-
-- Candidate Race and parallel candidate evaluation;
-- Attempt rewind and immutable Review Bundles;
-- model, usage, context and Project-environment governance;
-- the standalone GitHub Gateway repository-import experiment.
-
-Promotion into the default product requires a complete UI/API workflow,
-measured benefit, deployment ownership and an amended ADR.
-
-## Retired scope
-
-Docker/gVisor Tool runtimes, per-Run Cube pause/snapshot designs, the old remote
-WebSocket execution dispatcher and removed browser surfaces are not backlog
-items. Reintroducing an alternate runtime, Preview, structured Diff, Artifact or
-test navigation, Fork/Rollback, GitHub App/PR delivery, organization/RBAC or
-audit-search UI requires a new product decision and acceptance suite.
+Candidate Race, review bundles, GitHub delivery and advanced governance remain
+default-off experiments. Promotion requires a complete user workflow, measured
+benefit and an amended architecture decision.

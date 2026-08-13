@@ -9,12 +9,12 @@ Accepted on 2026-08-12.
 Agent Run quotas alone do not bound execution-plane occupancy. A persistent or
 warm Cube can outlive its creating Run, so one tenant can exhaust a shared
 Sandbox Domain even while its concurrent-Run count is low. Workspace restore,
-snapshot and materialization are also I/O-heavy Kopia/POSIX operations. A Data
-Mover replica that accepts an unbounded number of these requests can exhaust
+indexing and materialization are also I/O-heavy POSIX operations. A Volume
+Gateway replica that accepts an unbounded number of these requests can exhaust
 memory, subprocesses and storage throughput before Kubernetes adds capacity.
 
-The solution must not introduce another durable scheduler. Temporal remains
-the Run scheduler, PostgreSQL remains the tenant/Sandbox/Workspace authority,
+The solution must not introduce another durable scheduler. PostgreSQL remains
+the Run, tenant, Sandbox and Workspace authority,
 and PostgreSQL advisory locks remain the cross-replica per-volume exclusion
 boundary.
 
@@ -30,16 +30,16 @@ boundary.
 3. Public-registration and bootstrap tenants receive separate defaults. The
    quota is configurable through the same administrative policy surface as Run
    quotas; no tenant identity is added to metric labels.
-4. Each Workspace Data Mover replica uses the maintained `p-queue` package as a
+4. Each Workspace Volume Gateway replica uses the maintained `p-queue` package as a
    process-local execution gate. Concurrency, queued request count and queue
    wait are bounded. Queue-full and queue-timeout responses are retryable and
-   do not start Kopia.
+   do not begin Volume I/O.
 5. The local queue is not durable and performs no distributed ownership. A
    request admitted by another replica still uses the PostgreSQL volume lock,
    fencing and Workspace-head CAS before it can commit an effect.
-6. Data Mover active, waiting, limit, wait, duration and rejection metrics are
+6. Volume Gateway active, waiting, limit, wait, duration and rejection metrics are
    exported without tenant labels. The ordered default budgets are 30 seconds
-   for queue admission, 600 seconds for Kopia, 660 seconds for the internal
+   for queue admission, 600 seconds for Volume I/O, 660 seconds for the internal
    HTTP request and 720 seconds for process termination grace.
 
 ## Consequences
@@ -50,7 +50,7 @@ boundary.
   confirms and removes the old runtime.
 - Storage overload becomes explicit backpressure instead of unbounded local
   work and cascading timeouts.
-- Data Mover replicas can still scale horizontally; the local limit is tuned
+- Volume Gateway replicas can still scale horizontally; the local limit is tuned
   against each replica's CPU, memory and storage bandwidth.
 - A retryable rejection can delay Workspace restore/checkpoint, but it cannot
   weaken fencing or create a second Workspace authority.

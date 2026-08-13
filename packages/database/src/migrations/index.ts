@@ -50,6 +50,9 @@ import * as turnAdmissionIndex from "./048_turn_admission_index.ts";
 import * as tenantSandboxQuota from "./049_tenant_sandbox_quota.ts";
 import * as primaryToolBrokerRoute from "./050_primary_tool_broker_route.ts";
 import * as bootstrapTenantSandboxQuota from "./051_bootstrap_tenant_sandbox_quota.ts";
+import * as postgresRunQueue from "./052_postgres_run_queue.ts";
+import * as piSessionStorage from "./053_pi_session_storage.ts";
+import * as postgresCheckpointObjects from "./054_postgres_checkpoint_objects.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -105,6 +108,9 @@ export const migrationProvider: MigrationProvider = {
       "049_tenant_sandbox_quota": tenantSandboxQuota,
       "050_primary_tool_broker_route": primaryToolBrokerRoute,
       "051_bootstrap_tenant_sandbox_quota": bootstrapTenantSandboxQuota,
+      "052_postgres_run_queue": postgresRunQueue,
+      "053_pi_session_storage": piSessionStorage,
+      "054_postgres_checkpoint_objects": postgresCheckpointObjects,
     };
   },
 };
@@ -220,11 +226,6 @@ export {
 } from "./022_horizontal_supervisor_pool.ts";
 
 export {
-  down as downTemporalWorkerAffinity,
-  up as upTemporalWorkerAffinity,
-} from "./023_temporal_worker_affinity.ts";
-
-export {
   down as downHotPlatformRuntimeSettings,
   up as upHotPlatformRuntimeSettings,
 } from "./024_hot_platform_runtime_settings.ts";
@@ -265,11 +266,6 @@ export {
 } from "./032_model_sampling_step_identity.ts";
 
 export {
-  down as downEnterpriseExecutionCells,
-  up as upEnterpriseExecutionCells,
-} from "./033_enterprise_execution_cells.ts";
-
-export {
   down as downToolBrokerOwnership,
   up as upToolBrokerOwnership,
 } from "./034_sandbox_manager_ownership.ts";
@@ -290,14 +286,6 @@ export {
 } from "./036_faster_event_identity_registration.ts";
 
 export {
-  down as downExecutionCellWorkerRoutes,
-  up as upExecutionCellWorkerRoutes,
-} from "./037_execution_cell_worker_routes.ts";
-export {
-  down as downWorkspaceCellMigrations,
-  up as upWorkspaceCellMigrations,
-} from "./038_workspace_cell_migrations.ts";
-export {
   down as downExternalWorkerEventLog,
   up as upExternalWorkerEventLog,
 } from "./039_external_worker_event_log.ts";
@@ -313,16 +301,6 @@ export {
   down as downCanonicalConversationsAndLiveStreams,
   up as upCanonicalConversationsAndLiveStreams,
 } from "./044_canonical_conversations_and_live_streams.ts";
-export {
-  down as downTemporalOutboxHandoff,
-  up as upTemporalOutboxHandoff,
-} from "./046_temporal_outbox_handoff.ts";
-
-export {
-  down as downRemoveTemporalWorkerAffinity,
-  up as upRemoveTemporalWorkerAffinity,
-} from "./047_remove_temporal_worker_affinity.ts";
-
 export {
   down as downTurnAdmissionIndex,
   up as upTurnAdmissionIndex,

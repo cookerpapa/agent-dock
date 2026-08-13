@@ -242,8 +242,8 @@ export class RunCancellationExecutor {
   }
 
   /**
-   * Executes the cancellation for one exact execution command. Temporal uses
-   * this on the same Activity Worker that owns the live Pi runtime.
+   * Executes the cancellation for one exact execution command. The queue routes
+   * it only to the Worker that owns the live Pi runtime.
    */
   async dispatchTargetCommand(targetCommandId: string): Promise<RunCancellationExecutionResult> {
     if (

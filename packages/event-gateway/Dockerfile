@@ -12,7 +12,6 @@ COPY packages/observability/package.json packages/observability/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
-COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
     && npm rebuild @confluentinc/kafka-javascript \
@@ -52,8 +51,6 @@ COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/runtime-core/src packages/runtime-core/src
 COPY packages/sandbox-supervisor/package.json packages/sandbox-supervisor/package.json
 COPY packages/sandbox-supervisor/src packages/sandbox-supervisor/src
-COPY packages/temporal-orchestration/package.json packages/temporal-orchestration/package.json
-COPY packages/temporal-orchestration/src packages/temporal-orchestration/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN rm -rf /usr/local/lib/node_modules/npm \

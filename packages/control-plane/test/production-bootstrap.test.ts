@@ -37,17 +37,6 @@ const CONFIG: ProductionBootstrapConfig = {
       maximumActiveSandboxes: 1_024,
     },
   ],
-  executionCells: [
-    {
-      id: "cell-bootstrap",
-      displayName: "Bootstrap Cell",
-      state: "active",
-      temporalTaskQueue: "agent-dock-pi-runs-cell-bootstrap-v1",
-      sandboxDomainId: "sandbox-domain-bootstrap",
-      supervisorManagementBaseUrlTemplate: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
-      capacityWeight: 200,
-    },
-  ],
 };
 const API_TOKEN = `adk_${CONFIG.apiCredentialId}.${"a".repeat(43)}`;
 
@@ -97,7 +86,6 @@ describe.sequential("production bootstrap and configuration", () => {
       credentialBindingId: CONFIG.credentialBindingId,
       modelProfileId: CONFIG.modelProfileId,
       sandboxDomainCount: 1,
-      executionCellCount: 1,
     });
     await expect(bootstrapProductionDatabase(database, CONFIG, API_TOKEN)).resolves.toBeDefined();
     const counts = await Promise.all([
@@ -122,20 +110,13 @@ describe.sequential("production bootstrap and configuration", () => {
     expect(counts.map((rows) => rows.length)).toEqual([1, 1, 1, 1, 1]);
     await expect(
       database
-        .selectFrom("execution_cells")
-        .select([
-          "temporal_task_queue",
-          "sandbox_domain_id",
-          "supervisor_management_url_template",
-          "capacity_weight",
-        ])
-        .where("id", "=", "cell-bootstrap")
+        .selectFrom("sandbox_domains")
+        .select(["workspace_storage_key", "maximum_active_sandboxes"])
+        .where("id", "=", "sandbox-domain-bootstrap")
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({
-      temporal_task_queue: "agent-dock-pi-runs-cell-bootstrap-v1",
-      sandbox_domain_id: "sandbox-domain-bootstrap",
-      supervisor_management_url_template: "http://{supervisorId}.agent-dock-cell-bootstrap:4100",
-      capacity_weight: 200,
+      workspace_storage_key: "workspace-domain-bootstrap",
+      maximum_active_sandboxes: 1_024,
     });
 
     await database
@@ -256,7 +237,6 @@ describe.sequential("production bootstrap and configuration", () => {
         `materializer-${"s".repeat(48)}`,
       ),
       AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
-      AGENT_DOCK_TEMPORAL_ADDRESS: "temporal:7233",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
       AGENT_DOCK_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",
       AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:
@@ -277,9 +257,6 @@ describe.sequential("production bootstrap and configuration", () => {
       toolBrokerBaseUrls: ["http://tool-broker:4300/"],
       host: "0.0.0.0",
       port: 3000,
-      temporalAddress: "temporal:7233",
-      temporalNamespace: "agent-dock",
-      temporalTaskQueue: "agent-dock-pi-runs-cell-0001-v1",
       advancedModulesEnabled: false,
       platformModelSourceTenantId: CONFIG.tenantId,
       platformOperatorTenantId: CONFIG.tenantId,

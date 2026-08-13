@@ -1,12 +1,12 @@
-import { createKopiaWorkspaceCheckpoint } from "@agent-dock/workspace-runtime";
+import { createPersistentVolumeReference } from "@agent-dock/workspace-runtime";
 import { describe, expect, it } from "vitest";
 import { projectInstructionsFromSnapshot } from "../src/remote-tool-sandbox-turn-runner.ts";
 
 describe("trusted project instruction extraction", () => {
-  it("defers Kopia-backed Workspace bytes until the Tool Sandbox restores them", () => {
-    const checkpoint = createKopiaWorkspaceCheckpoint({
-      snapshotId: "0123456789abcdef0123456789abcdef",
+  it("defers persistent Volume bytes until the Tool Sandbox attaches them", () => {
+    const checkpoint = createPersistentVolumeReference({
       volumeId: `adw-${"a".repeat(48)}`,
+      volumeRevision: "e".repeat(64),
       activationId: "10000000-0000-4000-8000-000000000001",
       tenantId: "tenant-project-instructions-test",
       workspaceId: "workspace-project-instructions-test",

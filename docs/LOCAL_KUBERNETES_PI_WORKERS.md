@@ -1,119 +1,29 @@
-# Local single-node Kubernetes Pi Workers
+# Local Kubernetes Pi Workers
 
-This profile moves only the trusted Pi Worker pool into a Docker-managed,
-single-node k3d/K3s cluster:
+This development profile moves the trusted Pi Worker pool from Compose into a
+single-node k3d cluster while leaving the rest of the one-host topology in
+Compose.
 
 ```text
-Browser
-  -> Compose Control Plane
-  -> Compose PostgreSQL + Temporal + MinIO
-  -> k3d/K3s Pi Worker StatefulSet
-  -> Compose Tool Broker
-  -> retained host K3s / CubeSandbox KVM Tool guest
+k3d Pi Workers -> bridged Control Plane/PostgreSQL/Event Gateway/Tool Broker
 ```
 
-It deliberately does not move conversation state into Kubernetes. PostgreSQL
-stores product/control state, MinIO stores Pi JSONL segments/manifests, and a
-Worker PVC stores only that Worker replica's boot ledger and unacknowledged
-event spool.
-
-This hybrid profile writes Worker events directly to the shared PostgreSQL
-event store. It therefore disables the external Kafka Worker-event log even
-though the reusable Worker Helm chart keeps that distributed-deployment option
-enabled by default. The bridge also publishes a namespace-local
-`tool-broker` alias and excludes it from the trusted Worker HTTP proxy so a
-Cube lease can safely call its Manager owner during checkpoint and release.
-
-## Prerequisites
-
-- the existing production Compose stack and Cube plane are healthy;
-- Docker is available to the current user;
-- no Run is active during the short cutover;
-- at least 4 GiB of Docker memory is available for the k3d server and two
-  bounded-capacity Workers; the default is four runtime slots per Pod.
-
-No root K3s credential or passwordless sudo is required. The pinned k3d binary
-is fetched from the official release and checksum-verified automatically.
-
-## Cut over
+Workers consume the same PostgreSQL Run queue as Compose Workers. The cutover
+refuses to proceed while a Run is active, switches Control Plane management
+routes, deploys the Helm pool and verifies enrollment/readiness. No Temporal
+Build ID or S3 checkpoint route is involved.
 
 ```bash
 npm run kubernetes:pi-workers:up
-```
-
-The command:
-
-1. refuses a dirty source tree or non-terminal Run;
-2. creates the pinned single-node cluster and private kubeconfig, imports the
-   version-matched K3s system images through Docker's configured registry
-   transport, and waits for DNS, storage and private ingress readiness;
-3. joins the k3d server to the narrow Compose networks;
-4. creates selector-free Services and EndpointSlices for trusted dependencies;
-5. builds and imports an exact-revision Supervisor image;
-6. saves the current Control Plane Worker policy;
-7. stops/removes Compose Workers and recreates only the Control Plane;
-8. installs two Kubernetes Worker replicas and explicitly waits for both
-   application readiness probes;
-9. waits until Temporal observes the exact Worker Build ID, then makes it
-   current;
-10. verifies Control Plane management reachability, enrollment and Temporal
-    version metadata.
-
-The explicit system-image import matters on developer machines whose Docker
-daemon can reach public registries through a desktop proxy but whose nested
-k3d node cannot. A Helm release being accepted is not treated as readiness:
-the cutover does not commit until the Kubernetes system plane, Worker Pods and
-Temporal registration are all ready.
-
-The operator also migrates the immutable StatefulSet claim template emitted by
-the first local chart revision. It recreates only the drained controller and
-Pods; retained Worker PVCs and all external conversation state remain intact.
-
-Each Kubernetes Secret key is mounted as an individual read-only `subPath`
-file. The trusted Worker can therefore retain its `O_NOFOLLOW`, owner/mode and
-size checks instead of weakening secret-file validation to accommodate
-Kubernetes projected-volume symlinks. Secret rotation requires a controlled
-Worker rollout.
-
-Inspect without exposing credentials:
-
-```bash
 npm run kubernetes:pi-workers:status
 npm run kubernetes:pi-workers:check
-```
-
-Re-running `up` while Kubernetes is already active performs a drained in-place
-Worker revision upgrade without overwriting the original Compose rollback
-state. If the new revision fails its readiness or Temporal gates, the operator
-rolls the Helm release and Pods back to the previously deployed revision.
-Traffic promotion happens only after the Pod, management-route, enrollment and
-Temporal-registration gates pass. If a failure occurs after promotion, the
-operator restores both the previous Helm revision and Temporal current Build
-ID, so routing cannot remain pointed at an unavailable Worker revision.
-
-The local kubeconfig and switch state are private runtime files under
-`deploy/production/runtime/kubernetes/` and are excluded from Git.
-
-## Roll back
-
-Wait for all Runs to settle, then:
-
-```bash
 npm run kubernetes:pi-workers:down
 ```
 
-This restores the saved Compose enrollment policy, starts two Compose Workers
-and deletes the disposable k3d cluster. Committed conversations and Workspaces
-remain in PostgreSQL/MinIO.
+Each Worker receives a pooled database URL plus a direct notification URL.
+Conversation correctness remains in PostgreSQL; local Worker PVCs contain only
+boot identity and unacknowledged event WAL.
 
-## Scope
-
-Passing this profile proves the Kubernetes control/data path on one machine. It
-does not prove:
-
-- node-loss rescheduling;
-- multi-node `ReadWriteOncePod` storage attachment;
-- PostgreSQL, S3 or Temporal high availability;
-- cross-zone networking or capacity.
-
-Those remain separate multi-node acceptance evidence.
+This profile validates packaging and horizontal Worker behavior, not
+multi-node availability. Use the distributed chart for external PostgreSQL,
+Kafka, Valkey, Workspace storage and Cube failure testing.

@@ -12,6 +12,6 @@ dependencies:
     repository: file://../agent-dock-pi-worker-pool
     condition: piWorkersEnabled
 annotations:
-  agent-dock.io/scheduler: temporal
+  agent-dock.io/scheduler: postgresql-run-queue
   agent-dock.io/tool-runtime: cubesandbox-kvm
-  agent-dock.io/state-authority: external-postgresql-s3-kopia
+  agent-dock.io/state-authority: postgresql-and-persistent-cube-volume

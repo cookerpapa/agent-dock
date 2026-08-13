@@ -141,7 +141,7 @@ for (const [name, vulnerability] of Object.entries(auditReport.vulnerabilities ?
     remediated.push({
       name,
       advisoryUrls: [...lockMetadataRemediations.get("undici").advisoryUrls],
-      installedVersion: "0.80.10",
+      installedVersion: "0.84.1",
       reason:
         "The aggregate finding is caused only by undici, whose installed nested package is replaced and verified after npm ci",
     });

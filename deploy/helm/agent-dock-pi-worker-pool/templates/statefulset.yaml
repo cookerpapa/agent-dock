@@ -39,7 +39,7 @@ spec:
   minReadySeconds: 5
   revisionHistoryLimit: 5
   updateStrategy:
-    type: OnDelete
+    type: RollingUpdate
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
@@ -51,8 +51,7 @@ spec:
       labels:
         {{- include "agent-dock-pi-worker-pool.labels" . | nindent 8 }}
       annotations:
-        agent-dock.io/conversation-authority: external-postgresql-and-s3
-        agent-dock.io/temporal-worker-deployment: {{ .Values.temporal.workerDeploymentName | quote }}
+        agent-dock.io/durable-authority: postgresql
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -130,12 +129,10 @@ spec:
             {{- end }}
             - name: NO_PROXY
               value: {{ printf "127.0.0.1,localhost,tool-broker,.svc,.svc.%s" .Values.workerPool.clusterDomain | quote }}
-            - name: AWS_SHARED_CREDENTIALS_FILE
-              value: /run/agent-dock-secrets/aws-credentials
-            - name: AWS_EC2_METADATA_DISABLED
-              value: "true"
             - name: DATABASE_URL_FILE
               value: /run/agent-dock-secrets/database-url
+            - name: DATABASE_NOTIFICATION_URL_FILE
+              value: /run/agent-dock-secrets/database-notification-url
             - name: AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG
               value: {{ .Values.runtime.externalWorkerEventLog | quote }}
             {{- if .Values.runtime.externalWorkerEventLog }}
@@ -174,20 +171,6 @@ spec:
               {{- end }}
             - name: AGENT_DOCK_SUPERVISOR_CAPACITY
               value: {{ .Values.workerPool.capacity | quote }}
-            - name: AGENT_DOCK_EXECUTION_CELL_ID
-              value: {{ .Values.workerPool.executionCellId | quote }}
-            - name: AGENT_DOCK_TEMPORAL_ADDRESS
-              value: {{ .Values.temporal.address | quote }}
-            - name: AGENT_DOCK_TEMPORAL_NAMESPACE
-              value: {{ .Values.temporal.namespace | quote }}
-            - name: AGENT_DOCK_TEMPORAL_TASK_QUEUE
-              value: {{ .Values.temporal.taskQueue | quote }}
-            - name: AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED
-              value: "true"
-            - name: AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME
-              value: {{ .Values.temporal.workerDeploymentName | quote }}
-            - name: AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID
-              value: {{ .Values.temporal.workerBuildId | quote }}
             - name: AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY
               value: /workspace
             - name: AGENT_DOCK_BOOT_STATE_DIRECTORY
@@ -226,20 +209,6 @@ spec:
             - name: AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE
               value: /run/agent-dock-secrets/github-gateway-token
             {{- end }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_BUCKET
-              value: {{ .Values.conversationStorage.s3.bucket | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_REGION
-              value: {{ .Values.conversationStorage.s3.region | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_ENDPOINT
-              value: {{ .Values.conversationStorage.s3.endpoint | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX
-              value: {{ .Values.conversationStorage.s3.keyPrefix | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE
-              value: {{ .Values.conversationStorage.s3.forcePathStyle | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT
-              value: {{ .Values.conversationStorage.s3.allowInsecureEndpoint | quote }}
-            - name: AGENT_DOCK_CHECKPOINT_S3_MAX_ATTEMPTS
-              value: {{ .Values.conversationStorage.s3.maxAttempts | quote }}
             - name: AGENT_DOCK_METRICS_HOST
               value: 0.0.0.0
             - name: AGENT_DOCK_METRICS_PORT
@@ -296,8 +265,8 @@ spec:
               subPath: database-url
               readOnly: true
             - name: secrets
-              mountPath: /run/agent-dock-secrets/aws-credentials
-              subPath: aws-credentials
+              mountPath: /run/agent-dock-secrets/database-notification-url
+              subPath: database-notification-url
               readOnly: true
             - name: secrets
               mountPath: /run/agent-dock-secrets/supervisor-enrollment-token
@@ -342,13 +311,13 @@ spec:
             sizeLimit: {{ .Values.ephemeral.temporarySizeLimit }}
         - name: secrets
           secret:
-            secretName: {{ .Values.conversationStorage.existingSecret }}
+            secretName: {{ .Values.database.existingSecret }}
             defaultMode: 288
             items:
-              - key: {{ .Values.conversationStorage.databaseUrlKey }}
+              - key: {{ .Values.database.urlKey }}
                 path: database-url
-              - key: {{ .Values.conversationStorage.awsCredentialsKey }}
-                path: aws-credentials
+              - key: {{ .Values.database.notificationUrlKey }}
+                path: database-notification-url
               - key: {{ .Values.credentials.supervisorEnrollmentTokenKey }}
                 path: supervisor-enrollment-token
               - key: {{ .Values.credentials.supervisorManagementTokenKey }}

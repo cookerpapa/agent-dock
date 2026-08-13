@@ -850,9 +850,9 @@ describe("provider-backed Tool Tool Broker", () => {
       const cubeKeyPath = join(directory, "cube-api-key");
       await writeFile(cubeKeyPath, `${"k".repeat(48)}\n`, { mode: 0o600 });
       await chmod(cubeKeyPath, 0o600);
-      const workspaceDataMoverTokenPath = join(directory, "workspace-data-mover-token");
-      await writeFile(workspaceDataMoverTokenPath, `${"m".repeat(48)}\n`, { mode: 0o600 });
-      await chmod(workspaceDataMoverTokenPath, 0o600);
+      const workspaceVolumeGatewayTokenPath = join(directory, "workspace-volume-gateway-token");
+      await writeFile(workspaceVolumeGatewayTokenPath, `${"m".repeat(48)}\n`, { mode: 0o600 });
+      await chmod(workspaceVolumeGatewayTokenPath, 0o600);
       const databaseUrlPath = join(directory, "database-url");
       await writeFile(
         databaseUrlPath,
@@ -874,8 +874,8 @@ describe("provider-backed Tool Tool Broker", () => {
           AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
           AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
           AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: "https",
-          AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: "http://workspace-data-mover:4500",
-          AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
+          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
+          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
         }),
       ).resolves.toMatchObject({
         databaseUrl: "postgresql://agent-dock:secret@postgres:5432/agent-dock",
@@ -891,8 +891,8 @@ describe("provider-backed Tool Tool Broker", () => {
           proxyPort: 443,
           proxyScheme: "https",
           sandboxDomain: "cube.app",
-          workspaceDataMoverUrl: "http://workspace-data-mover:4500",
-          workspaceDataMoverToken: "m".repeat(48),
+          workspaceVolumeGatewayUrl: "http://workspace-volume-gateway:4500",
+          workspaceVolumeGatewayToken: "m".repeat(48),
         },
       });
       await expect(
@@ -908,8 +908,8 @@ describe("provider-backed Tool Tool Broker", () => {
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
           AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
           AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
-          AGENT_DOCK_WORKSPACE_DATA_MOVER_URL: "http://workspace-data-mover:4500",
-          AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE: workspaceDataMoverTokenPath,
+          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
+          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
         }),
       ).rejects.toThrow("heartbeat must leave lease failure margin");
       await expect(

@@ -158,17 +158,17 @@
     },
     {
       "type": "stat",
-      "title": "Data Mover active / limit",
+      "title": "Volume Gateway active / limit",
       "id": 13,
       "gridPos": { "h": 5, "w": 8, "x": 0, "y": 34 },
       "targets": [
         {
-          "expr": "sum(agent_dock_workspace_data_mover_active)",
+          "expr": "sum(agent_dock_workspace_volume_gateway_active)",
           "legendFormat": "active",
           "refId": "A"
         },
         {
-          "expr": "sum(agent_dock_workspace_data_mover_limit)",
+          "expr": "sum(agent_dock_workspace_volume_gateway_limit)",
           "legendFormat": "limit",
           "refId": "B"
         }
@@ -176,12 +176,12 @@
     },
     {
       "type": "stat",
-      "title": "Data Mover waiting",
+      "title": "Volume Gateway waiting",
       "id": 14,
       "gridPos": { "h": 5, "w": 8, "x": 8, "y": 34 },
       "targets": [
         {
-          "expr": "sum(agent_dock_workspace_data_mover_waiting)",
+          "expr": "sum(agent_dock_workspace_volume_gateway_waiting)",
           "refId": "A"
         }
       ]
@@ -198,26 +198,26 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (reason) (rate(agent_dock_workspace_data_mover_rejected_total[5m]))",
-          "legendFormat": "Data Mover {{reason}}",
+          "expr": "sum by (reason) (rate(agent_dock_workspace_volume_gateway_rejected_total[5m]))",
+          "legendFormat": "Volume Gateway {{reason}}",
           "refId": "B"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Data Mover p95",
+      "title": "Volume Gateway p95",
       "id": 16,
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 39 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_data_mover_queue_wait_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_volume_gateway_queue_wait_seconds_bucket[5m])))",
           "legendFormat": "{{operation}} queue",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_data_mover_operation_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_volume_gateway_operation_seconds_bucket[5m])))",
           "legendFormat": "{{operation}} execution",
           "refId": "B"
         }

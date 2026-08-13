@@ -44,10 +44,10 @@ import {
 } from "./management-server.ts";
 import { TenantModelGateway } from "./model-gateway.ts";
 import {
-  TemporalPiWorker,
-  type TemporalPiWorkerOptions,
-  type TemporalPiWorkerState,
-} from "./temporal-pi-worker.ts";
+  PostgresPiWorker,
+  type PostgresPiWorkerOptions,
+  type PostgresPiWorkerState,
+} from "./postgres-pi-worker.ts";
 import { SupervisorProvisioningClient } from "./provisioning-client.ts";
 import { GatewayGitHubWorkspaceImporter, PostgresWorkspaceSeedResolver } from "./workspace-seed.ts";
 
@@ -63,11 +63,11 @@ export type SupervisorHostRuntimeOptions = {
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
   metrics?: AgentDockMetrics;
-  temporalWorkerFactory?: (options: TemporalPiWorkerOptions) => SupervisorTemporalWorker;
+  runWorkerFactory?: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
 };
 
-export type SupervisorTemporalWorker = {
-  readonly state: TemporalPiWorkerState;
+export type SupervisorRunWorker = {
+  readonly state: PostgresPiWorkerState;
   start(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -142,7 +142,7 @@ export class SupervisorHostRuntime {
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
   readonly #metrics: AgentDockMetrics | undefined;
-  readonly #temporalWorkerFactory: (options: TemporalPiWorkerOptions) => SupervisorTemporalWorker;
+  readonly #runWorkerFactory: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
   readonly #ownerStoppedPromise: Promise<void>;
   readonly #resolveOwnerStopped: () => void;
   readonly #terminalPromise: Promise<SupervisorHostTerminalReason>;
@@ -153,7 +153,7 @@ export class SupervisorHostRuntime {
   #client: ReconnectingSupervisorWebSocketClient | undefined;
   #managementServer: SupervisorManagementServer | undefined;
   #modelGateway: TenantModelGateway | undefined;
-  #temporalWorker: SupervisorTemporalWorker | undefined;
+  #runWorker: SupervisorRunWorker | undefined;
   #closing: Promise<void> | undefined;
   #ownerStopSettled = false;
   #terminalSettled = false;
@@ -195,8 +195,8 @@ export class SupervisorHostRuntime {
     this.#connectionSecretGenerator =
       options.connectionSecretGenerator ?? (() => randomBytes(32).toString("base64url"));
     this.#metrics = options.metrics;
-    this.#temporalWorkerFactory =
-      options.temporalWorkerFactory ?? ((workerOptions) => new TemporalPiWorker(workerOptions));
+    this.#runWorkerFactory =
+      options.runWorkerFactory ?? ((workerOptions) => new PostgresPiWorker(workerOptions));
     let resolveOwnerStopped!: () => void;
     this.#ownerStoppedPromise = new Promise((resolvePromise) => {
       resolveOwnerStopped = resolvePromise;
@@ -255,13 +255,13 @@ export class SupervisorHostRuntime {
       readiness: () =>
         this.#state === "ready" &&
         client?.state === "connected" &&
-        this.#temporalWorker?.state === "running",
+        this.#runWorker?.state === "running",
       stopCurrentBoot: async () => {
         if (this.#state === "draining" || this.#state === "stopped") return;
         this.#state = "draining";
         client?.setAcceptingAssignments(false);
         this.#localSupervisor?.revokeAllAssignments();
-        await this.#temporalWorker?.stop();
+        await this.#runWorker?.stop();
         await client?.stop();
         await this.#localSupervisor?.waitUntilAssignmentsSettled();
         if (!this.#ownerStopSettled) {
@@ -414,7 +414,7 @@ export class SupervisorHostRuntime {
         runtime: localSupervisor,
       });
       // The WebSocket remains a liveness/ownership and management channel.
-      // Temporal is the sole production authority that assigns Run work.
+      // PostgreSQL is the sole production authority that assigns Run work.
       client.setAcceptingAssignments(false);
       this.#client = client;
       await client.start();
@@ -462,25 +462,12 @@ export class SupervisorHostRuntime {
             },
           }),
       });
-      const temporalWorker = this.#temporalWorkerFactory({
+      const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
+      const runWorker = this.#runWorkerFactory({
         database: this.#database,
-        address: this.#config.temporalAddress,
-        namespace: this.#config.temporalNamespace,
-        cellId: this.#config.executionCellId,
-        taskQueue: this.#config.temporalTaskQueue,
-        identity: `${identity.supervisorId}/${identity.bootId}`,
+        notificationConnectionString: this.#config.databaseNotificationUrl,
+        identity: runWorkerIdentity,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
-        shutdownGraceMs:
-          this.#config.piTurnTimeoutMs + this.#config.toolBrokerRequestTimeoutMs + 5 * 60_000,
-        ...(this.#config.temporalWorkerDeploymentName === undefined ||
-        this.#config.temporalWorkerBuildId === undefined
-          ? {}
-          : {
-              workerDeployment: {
-                deploymentName: this.#config.temporalWorkerDeploymentName,
-                buildId: this.#config.temporalWorkerBuildId,
-              },
-            }),
         commandExecutor: new RunCommandExecutor({
           database: this.#database,
           backend: localBackend,
@@ -488,7 +475,7 @@ export class SupervisorHostRuntime {
           eventNotificationPublisher: eventNotifications,
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
           ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
-          claimOwnerId: `temporal:${identity.supervisorId}:${identity.bootId}`,
+          claimOwnerId: runWorkerIdentity,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
         cancellationExecutor: new RunCancellationExecutor({
@@ -499,9 +486,19 @@ export class SupervisorHostRuntime {
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
           ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
         }),
+        onFailure: (operation, error) =>
+          operationalLog({
+            service: "agent-dock-supervisor-host",
+            level: "error",
+            event: "postgres-run-worker.failure",
+            attributes: {
+              operation,
+              name: error instanceof Error ? error.name : "UnknownError",
+            },
+          }),
       });
-      this.#temporalWorker = temporalWorker;
-      await temporalWorker.start();
+      this.#runWorker = runWorker;
+      await runWorker.start();
       this.#state = "ready";
       void client.waitUntilStopped().then((result) => this.#observeClientStop(result));
     } catch (error: unknown) {
@@ -525,10 +522,10 @@ export class SupervisorHostRuntime {
   async #close(): Promise<void> {
     if (this.#state !== "failed") this.#state = "draining";
     this.#client?.setAcceptingAssignments(false);
-    // A Kubernetes scale-in is a drain, not a fencing event. Stop Temporal
-    // polling first and give the active Activity its bounded settlement window;
+    // A Kubernetes scale-in is a drain, not a fencing event. Stop queue
+    // polling first and give the active Runs their bounded settlement window;
     // owner replacement still uses stopCurrentBoot(), which revokes immediately.
-    await this.#temporalWorker?.stop().catch(() => undefined);
+    await this.#runWorker?.stop().catch(() => undefined);
     await this.#localSupervisor?.waitUntilAssignmentsSettled().catch(() => undefined);
     await this.#client?.stop().catch(() => undefined);
     await this.#managementServer?.close().catch(() => undefined);

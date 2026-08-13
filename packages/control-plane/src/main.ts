@@ -10,7 +10,7 @@ import {
   RoutedHttpSupervisorOwnerBoundary,
 } from "./http-supervisor-management.ts";
 import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
-import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/s3-checkpoint-object-store";
+import { PostgresCheckpointObjectStore } from "@agent-dock/runtime-core/postgres-checkpoint-object-store";
 import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
 import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
 import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
@@ -26,7 +26,6 @@ import { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-crede
 import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
-import { TemporalRunOrchestrator } from "./temporal-run-orchestrator.ts";
 import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
 
@@ -59,9 +58,8 @@ export async function startControlPlane(): Promise<void> {
     // transaction pool in distributed deployments.
     connectionString: config.databaseNotificationUrl,
   });
-  const objectStore = createS3CheckpointObjectStoreFromEnvironment();
+  const objectStore = new PostgresCheckpointObjectStore(database);
   let runtime: ControlPlaneRuntime | undefined;
-  let temporalOrchestrator: TemporalRunOrchestrator | undefined;
   let closing = false;
   try {
     await verifyBootstrap(database);
@@ -89,19 +87,6 @@ export async function startControlPlane(): Promise<void> {
       platformOperatorTenantId: config.platformOperatorTenantId,
     });
     await objectStore.checkHealth();
-    temporalOrchestrator = new TemporalRunOrchestrator({
-      database,
-      address: config.temporalAddress,
-      namespace: config.temporalNamespace,
-      onActivity: (activity) =>
-        operationalLog({
-          service: "agent-dock-control-plane",
-          level: activity.type === "orchestrator.failure" ? "error" : "info",
-          event: activity.type,
-          attributes: { ...activity },
-        }),
-    });
-    await temporalOrchestrator.start();
     const managementClients = new Map<string, HttpSupervisorManagementClient>();
     const resolveManagementClient = async (identity: {
       supervisorId: string;
@@ -165,12 +150,7 @@ export async function startControlPlane(): Promise<void> {
       webSessionAuthenticator: webAuthentication,
       readiness: async () => {
         if (runtime?.state !== "running") return false;
-        await Promise.all([
-          sql`select 1`.execute(database),
-          temporalOrchestrator?.checkHealth() ??
-            Promise.reject(new Error("Temporal orchestration is unavailable")),
-          snapshotMaterializer.checkHealth(),
-        ]);
+        await Promise.all([sql`select 1`.execute(database), snapshotMaterializer.checkHealth()]);
         return true;
       },
     });
@@ -246,7 +226,6 @@ export async function startControlPlane(): Promise<void> {
     const close = async (): Promise<void> => {
       if (closing) return;
       closing = true;
-      await temporalOrchestrator?.stop();
       await runtime?.close();
       objectStore.destroy();
       await database.destroy();
@@ -261,7 +240,6 @@ export async function startControlPlane(): Promise<void> {
     process.once("SIGTERM", closeAfterSignal);
   } catch (error: unknown) {
     closing = true;
-    await temporalOrchestrator?.stop().catch(() => undefined);
     await runtime?.close().catch(() => undefined);
     await notifications.stop().catch(() => undefined);
     objectStore.destroy();

@@ -61,7 +61,7 @@ if (unsupportedOptionalProfiles.length > 0) {
 }
 const allowsStaleCubeTemplate =
   recreatesOnlyControlPlane ||
-  new Set(["down", "stop", "kill", "rm", "ps", "logs", "exec"]).has(command);
+  new Set(["build", "down", "stop", "kill", "rm", "ps", "logs", "exec"]).has(command);
 await access(environmentFile);
 if (composeOverride !== undefined) await access(composeOverride);
 
@@ -76,9 +76,7 @@ const applicationSecretNames = [
   "model-credential-master-key",
   "tool-broker-token",
   "sandbox-materializer-token",
-  "workspace-data-mover-token",
-  "workspace-kopia-repository-password",
-  "workspace-kopia-aws-credentials",
+  "workspace-volume-gateway-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",
   ...(!allowsStaleCubeTemplate ? ["cubesandbox-api-key"] : []),
@@ -102,7 +100,7 @@ if (
   throw new Error("Production application secrets must share one private non-root owner");
 }
 for (const [relativePath, label] of [
-  ["state/workspace-data-mover", "Workspace Data Mover"],
+  ["state/workspace-volume-gateway", "Workspace Volume Gateway"],
   ["state/cube-shared", "Cube shared Workspace"],
   ["state/cube-shared/volume", "Cube shared Workspace volume"],
 ]) {

@@ -60,17 +60,17 @@ export {
   type ToolBrokerServerOptions,
 } from "./tool-broker-server.ts";
 export {
-  HttpWorkspaceDataMover,
-  KopiaWorkspaceDataMover,
-  WorkspaceDataMoverError,
-  WorkspaceDataMoverServer,
+  HttpWorkspaceVolumeGateway,
+  PersistentVolumeWorkspaceVolumeGateway,
+  WorkspaceVolumeGatewayError,
+  WorkspaceVolumeGatewayServer,
   workspaceVolumeId,
-  type WorkspaceDataMover,
-  type WorkspaceDataMoverIdentity,
-  type WorkspaceDataMoverInitializeBaselineInput,
-  type WorkspaceDataMoverMaterializeInput,
-  type WorkspaceDataMoverLock,
-  type WorkspaceDataMoverPrepareInput,
-  type WorkspaceDataMoverSnapshotInput,
-} from "./workspace-data-mover.ts";
-export { PostgresWorkspaceDataMoverLock } from "./workspace-data-mover.ts";
+  type WorkspaceVolumeGateway,
+  type WorkspaceVolumeGatewayIdentity,
+  type WorkspaceVolumeGatewayInitializeBaselineInput,
+  type WorkspaceVolumeGatewayMaterializeInput,
+  type WorkspaceVolumeGatewayLock,
+  type WorkspaceVolumeGatewayPrepareInput,
+  type WorkspaceVolumeGatewaySnapshotInput,
+} from "./workspace-volume-gateway.ts";
+export { PostgresWorkspaceVolumeGatewayLock } from "./workspace-volume-gateway.ts";

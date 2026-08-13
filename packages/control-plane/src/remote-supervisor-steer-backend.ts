@@ -104,7 +104,7 @@ function normalizeSteerError(error: unknown, committed: boolean): TurnSteerBacke
 
 /**
  * The Supervisor WebSocket is a Worker control channel. Run execution and
- * cancellation are owned by Temporal Activities and the local runtime; only
+ * cancellation are owned by the claimed Worker execution and local runtime; only
  * an in-flight steer needs to cross this channel.
  */
 export class RemoteSupervisorSteerBackend implements TurnSteerBackend {

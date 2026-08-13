@@ -4,7 +4,7 @@ import { startServiceObservability } from "@agent-dock/observability";
 import { CubeSandboxProvider } from "./cubesandbox-sandbox-provider.ts";
 import { ToolBrokerServer } from "./tool-broker-server.ts";
 import { ToolBroker } from "./tool-broker.ts";
-import { HttpWorkspaceDataMover } from "./workspace-data-mover.ts";
+import { HttpWorkspaceVolumeGateway } from "./workspace-volume-gateway.ts";
 import { PostgresSandboxActivationStateRepository } from "./activation-state-repository.ts";
 import { randomUUID } from "node:crypto";
 
@@ -41,9 +41,10 @@ const provider = new CubeSandboxProvider({
     host: cube.egressProxyHost,
     port: cube.egressProxyPort,
   },
-  workspaceDataMover: new HttpWorkspaceDataMover({
-    baseUrl: cube.workspaceDataMoverUrl,
-    serviceToken: cube.workspaceDataMoverToken,
+  workspaceVolumeGateway: new HttpWorkspaceVolumeGateway({
+    baseUrl: cube.workspaceVolumeGatewayUrl,
+    serviceToken: cube.workspaceVolumeGatewayToken,
+    requestTimeoutMs: cube.workspaceVolumeGatewayRequestTimeoutMs,
   }),
 });
 const broker = new ToolBroker({

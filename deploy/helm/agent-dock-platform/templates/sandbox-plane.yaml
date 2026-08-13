@@ -93,8 +93,9 @@ spec:
             - { name: AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, value: {{ .Values.sandboxPlane.maximumWarmPerReplica | quote }} }
             - { name: AGENT_DOCK_TOOL_BROKER_TOKEN_FILE, value: /run/agent-dock-secrets/tool-broker-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_URL, value: http://workspace-data-mover:4500 }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-data-mover-token }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL, value: http://workspace-volume-gateway:4500 }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-volume-gateway-token }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS, value: {{ .Values.sandboxPlane.volumeGatewayRequestTimeoutMs | quote }} }
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }
             - { name: AGENT_DOCK_CUBESANDBOX_API_URL, value: {{ .Values.sandboxPlane.cube.apiUrl | quote }} }
             - { name: AGENT_DOCK_CUBESANDBOX_API_KEY_FILE, value: /run/agent-dock-secrets/cubesandbox-api-key }
@@ -119,7 +120,7 @@ spec:
             - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/tool-broker-token, subPath: tool-broker-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-materializer-token, subPath: sandbox-materializer-token, readOnly: true }
-            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-volume-gateway-token, subPath: workspace-volume-gateway-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/cubesandbox-api-key, subPath: cubesandbox-api-key, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
             - { name: tmp, mountPath: /tmp }
@@ -130,32 +131,32 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: workspace-data-mover }
+metadata: { name: workspace-volume-gateway }
 spec:
-  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-volume-gateway }
   ports:
-    - { name: data-mover, port: 4500, targetPort: data-mover }
+    - { name: volume-gateway, port: 4500, targetPort: volume-gateway }
     - { name: metrics, port: 9469, targetPort: metrics }
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ $name }}-workspace-data-mover
+  name: {{ $name }}-workspace-volume-gateway
   labels:
     {{- include "agent-dock-platform.labels" . | nindent 4 }}
-    app.kubernetes.io/component: workspace-data-mover
+    app.kubernetes.io/component: workspace-volume-gateway
 spec:
-  replicas: {{ .Values.sandboxPlane.dataMoverReplicas }}
+  replicas: {{ .Values.sandboxPlane.volumeGatewayReplicas }}
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   selector:
-    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-volume-gateway }
   template:
     metadata:
       labels:
         {{- include "agent-dock-platform.labels" . | nindent 8 }}
-        app.kubernetes.io/component: workspace-data-mover
+        app.kubernetes.io/component: workspace-volume-gateway
         agent-dock.io/sandbox-domain: {{ .Values.sandboxPlane.domainId | quote }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
@@ -172,56 +173,43 @@ spec:
         fsGroup: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
-        - name: workspace-data-mover
+        - name: workspace-volume-gateway
           image: {{ include "agent-dock-platform.image" .Values.images.toolBroker | quote }}
           imagePullPolicy: {{ .Values.images.toolBroker.pullPolicy }}
-          command: [node, /app/node_modules/tsx/dist/cli.mjs, --tsconfig, /app/packages/tool-broker/tsconfig.json, /app/packages/tool-broker/src/workspace-data-mover-main.ts]
+          command: [node, /app/node_modules/tsx/dist/cli.mjs, --tsconfig, /app/packages/tool-broker/tsconfig.json, /app/packages/tool-broker/src/workspace-volume-gateway-main.ts]
           ports:
-            - { name: data-mover, containerPort: 4500 }
+            - { name: volume-gateway, containerPort: 4500 }
             - { name: metrics, containerPort: 9469 }
           env:
             - { name: NODE_ENV, value: production }
             - { name: DATABASE_URL_FILE, value: /run/agent-dock-secrets/database-url }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_HOST, value: 0.0.0.0 }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_PORT, value: "4500" }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-data-mover-token }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_CONCURRENT_OPERATIONS, value: {{ .Values.sandboxPlane.dataMoverMaximumConcurrentOperations | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_MAXIMUM_QUEUED_OPERATIONS, value: {{ .Values.sandboxPlane.dataMoverMaximumQueuedOperations | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS, value: {{ .Values.sandboxPlane.dataMoverQueueWaitTimeoutMs | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS, value: {{ .Values.sandboxPlane.dataMoverCommandTimeoutMs | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_HOST, value: 0.0.0.0 }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_PORT, value: "4500" }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-volume-gateway-token }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS, value: {{ .Values.sandboxPlane.volumeGatewayMaximumConcurrentOperations | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS, value: {{ .Values.sandboxPlane.volumeGatewayMaximumQueuedOperations | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS, value: {{ .Values.sandboxPlane.volumeGatewayQueueWaitTimeoutMs | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_POSIX_ROOT, value: /data/workspaces }
-            - { name: AGENT_DOCK_WORKSPACE_DATA_MOVER_STATE_ROOT, value: /var/lib/agent-dock/data-mover }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_CONFIG_PATH, value: /var/lib/agent-dock/data-mover/kopia/repository.config }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_CACHE_DIRECTORY, value: /var/lib/agent-dock/data-mover/kopia/cache }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_REPOSITORY_PASSWORD_FILE, value: /run/agent-dock-secrets/workspace-kopia-repository-password }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_AWS_CREDENTIALS_FILE, value: /run/agent-dock-secrets/workspace-kopia-aws-credentials }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_BUCKET, value: {{ .Values.external.kopiaS3.bucket | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_ENDPOINT, value: {{ .Values.external.kopiaS3.endpoint | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_REGION, value: {{ .Values.external.kopiaS3.region | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_PREFIX, value: {{ .Values.external.kopiaS3.prefix | quote }} }
-            - { name: AGENT_DOCK_WORKSPACE_KOPIA_S3_DISABLE_TLS, value: {{ .Values.external.kopiaS3.disableTls | quote }} }
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_METRICS_PORT, value: "9469" }
             - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }
-          startupProbe: { httpGet: { path: /health/ready, port: data-mover }, periodSeconds: 5, failureThreshold: 60 }
-          livenessProbe: { httpGet: { path: /health/live, port: data-mover }, periodSeconds: 10 }
+          startupProbe: { httpGet: { path: /health/ready, port: volume-gateway }, periodSeconds: 5, failureThreshold: 60 }
+          livenessProbe: { httpGet: { path: /health/live, port: volume-gateway }, periodSeconds: 10 }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
-          resources: {{- toYaml .Values.sandboxPlane.dataMoverResources | nindent 12 }}
+          resources: {{- toYaml .Values.sandboxPlane.volumeGatewayResources | nindent 12 }}
           volumeMounts:
             - { name: workspace-rwx, mountPath: /data/workspaces }
-            - { name: mover-state, mountPath: /var/lib/agent-dock }
+            - { name: gateway-state, mountPath: /var/lib/agent-dock }
             - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
-            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-data-mover-token, subPath: workspace-data-mover-token, readOnly: true }
-            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-repository-password, subPath: workspace-kopia-repository-password, readOnly: true }
-            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-kopia-aws-credentials, subPath: workspace-kopia-aws-credentials, readOnly: true }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-volume-gateway-token, subPath: workspace-volume-gateway-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: workspace-rwx, persistentVolumeClaim: { claimName: {{ .Values.sandboxPlane.workspace.existingClaim }} } }
-        - { name: mover-state, emptyDir: { sizeLimit: {{ .Values.sandboxPlane.state.size }} } }
+        - { name: gateway-state, emptyDir: { sizeLimit: {{ .Values.sandboxPlane.state.size }} } }
         - name: secrets
           secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
         - { name: tmp, emptyDir: { sizeLimit: 128Mi } }
@@ -236,9 +224,9 @@ spec:
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
-metadata: { name: {{ $name }}-workspace-data-mover }
+metadata: { name: {{ $name }}-workspace-volume-gateway }
 spec:
   minAvailable: 1
   selector:
-    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-data-mover }
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: workspace-volume-gateway }
 {{- end }}

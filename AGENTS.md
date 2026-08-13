@@ -32,8 +32,12 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Persist commands before acknowledging them.
 - Use idempotency keys, leases, and fencing tokens for distributed mutations.
 - Preserve per-session ordering without dedicating a process or OS thread to a cold session.
-- Treat Pi session JSONL as conversation history, PostgreSQL as control state,
-  and object storage as durable artifact/snapshot storage.
+- Treat Pi's PostgreSQL `SessionStorage` as conversation authority and
+  PostgreSQL as the sole Run/control authority. The stable JSONL adapter is a
+  temporary upstream-compatibility boundary backed by PostgreSQL, not S3.
+- Treat the persistent Cube Volume as the sole Workspace byte authority. Do
+  not add a second per-Run archive/checkpoint head without measured recovery
+  requirements and a new ADR.
 - Do not claim exactly-once semantics for arbitrary shell commands or external side effects.
 - Do not run untrusted tools in the control-plane or trusted Agent Runner process.
 - Keep activation authorization and identity fencing in the provider-neutral
@@ -73,9 +77,9 @@ system, policy engine, telemetry pipeline, or storage protocol:
    and a home-grown replacement as competing schedulers, workflow histories, or
    checkpoint heads after cutover.
 6. Keep large transcripts, tool output, Workspace bytes, credentials, and model
-   payloads out of workflow-engine histories. Durable workflows carry bounded
-   IDs, hashes, status, and immutable object references; PostgreSQL/S3 retain
-   the corresponding product state and bytes.
+   payloads out of queue rows. PostgreSQL queue records carry bounded command
+   references; PostgreSQL SessionStorage and persistent Cube Volumes own the
+   corresponding durable data.
 
 ## Vibe-coding discipline
 

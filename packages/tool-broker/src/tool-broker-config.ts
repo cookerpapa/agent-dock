@@ -27,8 +27,9 @@ export type ToolBrokerConfig = {
     egressProxyHost: string;
     egressProxyPort: number;
     requestTimeoutMs: number;
-    workspaceDataMoverUrl: string;
-    workspaceDataMoverToken: string;
+    workspaceVolumeGatewayUrl: string;
+    workspaceVolumeGatewayToken: string;
+    workspaceVolumeGatewayRequestTimeoutMs: number;
   };
 };
 
@@ -263,13 +264,19 @@ export async function loadToolBrokerConfig(
         1_000,
         300_000,
       ),
-      workspaceDataMoverUrl: bounded(
-        required(environment, "AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
-        "AGENT_DOCK_WORKSPACE_DATA_MOVER_URL",
+      workspaceVolumeGatewayUrl: bounded(
+        required(environment, "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL"),
+        "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL",
         2_048,
       ),
-      workspaceDataMoverToken: await readSecret(
-        required(environment, "AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE"),
+      workspaceVolumeGatewayToken: await readSecret(
+        required(environment, "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
+      ),
+      workspaceVolumeGatewayRequestTimeoutMs: integer(
+        environment.AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS,
+        660_000,
+        1_000,
+        900_000,
       ),
     },
   };

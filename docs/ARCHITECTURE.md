@@ -1,710 +1,157 @@
 # Architecture
 
-## 1. Product boundary
+## Product boundary
 
-AgentDock is a multi-tenant cloud product around the Pi SDK. Pi owns the Agent
-Loop, native Session tree, model messages, compaction and Tool selection.
-AgentDock owns everything required to execute that loop durably and safely:
+Pi owns the Agent Loop, model messages, compaction and Tool selection.
+AgentDock owns durable admission, multi-tenancy, Worker execution authority,
+remote Tool routing, Workspace lifetime, streaming and recovery.
 
-- browser authentication and tenant isolation;
-- conversations, Workspaces and durable Run admission;
-- scheduling, retries, cancellation, leases and fencing;
-- model credential isolation and usage;
-- remote Tool execution;
-- Workspace checkpointing and recovery;
-- streaming events, audit and observability.
+CubeSandbox KVM is the only untrusted execution runtime. PostgreSQL is the only
+business/Run-state authority. There is no second workflow scheduler.
 
-CubeSandbox is the only untrusted execution runtime in the current product.
+## Components
 
-## 2. Components
+### Web and Control Plane
 
-### Web
+The Web product provides authentication, conversations, named Workspaces,
+resumable output, file browsing and administrator settings. The Control Plane
+commits each idempotent message and its Run command in one PostgreSQL
+transaction. It enforces tenant quota and same-Session serialization.
 
-The React Web product exposes:
+### PostgreSQL Run queue
 
-- login/registration;
-- conversation list and transcript;
-- named Workspace selection/creation for a new conversation;
-- resumable SSE output;
-- a committed `/workspace` directory browser;
-- a dedicated platform-administrator settings page.
+Ready command Outbox rows are the Worker queue. All Pi Workers query the same
+queue. `FOR UPDATE`/transactional state transitions in `RunCommandExecutor`
+make competing scans and duplicate wakeups harmless. `LISTEN/NOTIFY` is a
+best-effort wakeup hint with periodic polling as the correctness fallback.
 
-The browser never receives a model credential, Cube API key, Tool capability or
-object-store credential.
+The queue retains the existing domain protocol:
 
-### Control Plane
+```text
+Run -> RunAttempt -> claim lease -> execution authority/fence -> terminal commit
+```
 
-The NestJS/Fastify Control Plane owns:
+Tenant scheduling timestamps order the bounded candidate scan so one tenant
+cannot permanently occupy every free Worker slot. KEDA uses only the count of
+ready queue rows to scale Workers; it does not own delivery semantics.
 
-- tenant/user/browser-session authentication;
-- platform-administrator authorization;
-- Project, Workspace and conversation APIs;
-- transactional Run admission and idempotency;
-- same-Session serialization and tenant quotas;
-- per-tenant persistent Sandbox quota;
-- PostgreSQL business state and event cursors;
-- immutable checkpoint pointers;
-- model/proxy configuration metadata;
-- Temporal Workflow creation and cancellation.
+### Trusted Pi Worker pool
 
-PostgreSQL is the business-state and sequence/fence source of truth. Temporal is
-the durable execution engine, not the business database; Kafka is the
-high-frequency Worker-event durability boundary, not a Run-state authority.
+Workers are horizontally replaceable. A Worker slot claims one Run, opens the
+Pi Session, calls the model and delegates Tools. Cold Sessions have no process
+or thread.
 
-### Event Gateway
+Pi 0.84's official `SessionStorage` interface is implemented by
+`@agent-dock/pi-session-postgres`. It stores Pi entries, lanes, records, labels
+and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
+Every mutation checks an opaque `ExecutionAuthority` inside the same database
+transaction as the write.
 
-The Event Gateway is the browser-facing, horizontally scalable read path for
-long-lived resumable SSE connections. In the enterprise profile its replicas
-also expose an authenticated internal Worker-event ingest endpoint, append
-accepted batches directly to Kafka and consume the shared projector group. Pi
-Workers never receive Kafka or Valkey credentials. The projector builds a
-bounded Valkey Stream read model and only then advances PostgreSQL's projected
-cursor. The Gateway authenticates the same browser/API credentials as the
-Control Plane and sends only that acknowledged prefix. PostgreSQL `NOTIFY` is a
-wake-up hint; reconnect reads Valkey live events plus PostgreSQL terminal
-events. The Gateway also prepares the complete terminal Turn projection, but
-only the Control Plane's fenced lifecycle transaction can commit it.
-Before starting the normal projector, each replica verifies PostgreSQL's
-still-retained live ranges against Valkey. Replicas serialize any repair with a
-session advisory lock on the direct PostgreSQL endpoint, rebuild missing
-streams from Kafka, and refuse readiness unless a second verification passes.
-Normal projection transactions take the matching shared lock, preventing a
-rolling-start repair from racing an older projector.
-When a browser reopens a Session with an active Turn, Event Gateway can
-materialize the contiguous live suffix through PostgreSQL's projected
-watermark as one catch-up snapshot. The browser hydrates that transcript and
-opens SSE after the returned sequence. If the Run settles concurrently, the
-PostgreSQL-owned terminal sequence is deliberately left to SSE. Snapshot
-failure falls back to replay from the canonical conversation boundary.
-
-### Temporal
-
-Every accepted Run starts one Workflow. Workflow code contains deterministic
-orchestration only. Model calls, Tool execution, checkpoint I/O and database
-mutation are Activities.
-
-The Worker pool uses:
-
-- one Activity Task Queue per immutable Workspace execution Cell, with
-  `tenantId` fairness metadata;
-- one process-wide Activity slot limit per Worker;
-- durable timers and retry policy;
-- explicit cancellation.
-
-Any Worker can restore a Session and produce the correct result, provided that
-Worker belongs to the Workspace's Cell. A Workspace receives its Cell once when
-it is created; adding Cells never remaps existing Workspaces.
-
-Each Activity receives one exact `commandId`. The Worker-side
-`RunCommandExecutor` performs transactional eligibility and lifecycle commits
-for that command; it has no API for polling or selecting another tenant,
-Session or Run. PostgreSQL mailbox/Workspace/quota checks can defer the exact
-command, while Temporal remains responsible for Task matching, cross-tenant
-fairness and retry timers. Temporal cancellation reaches the owning Activity;
-its `RunCancellationExecutor` can claim only a cancellation record that targets
-that Activity's exact command.
-
-### Trusted Pi Worker
-
-A Worker slot executes one active Run:
-
-1. resolve the current committed Pi checkpoint;
-2. read immutable JSONL segments from its bounded cache or object storage;
-3. reconstruct the exact native Pi Session file;
-4. open it through the Pi SDK;
-5. append the new user prompt;
-6. stream model and Tool events;
-7. commit the new Pi checkpoint after successful `agent_settled`, or an
-   explicitly typed interrupted checkpoint after terminal failure/cancellation;
-8. return a private prepared result to the Control Plane;
-9. dispose the in-memory AgentSession.
-
-The Worker does not run user Bash locally. It has no Cube control credential,
-container runtime socket or writable shared tenant filesystem.
+Upstream Pi 0.84 exposes `AgentHarness`, but its `prompt/resume` execution path
+still throws `HarnessNotImplemented`. Therefore the production coding adapter
+continues to use the stable Pi SDK/session-file entrypoint for model execution,
+with its Pi-native JSONL objects stored in PostgreSQL. Switching the active loop
+to `AgentHarness` is gated on an executable public upstream contract, not on a
+private fork.
 
 ### Worker Control Channel
 
-The authenticated Supervisor WebSocket is a narrow control channel. It carries
-registration, heartbeat, durable event batches/ACKs and fenced active Pi steer.
-It does not dispatch Run execution or cancellation. Temporal Activity task
-matching starts exact-command execution on a Pi Worker, while cancellation
-travels through Temporal and the exact cancellation executor. Keeping those
-paths out of WebSocket removes the former duplicate execution authority.
-
-A retryable Control Channel break does not revoke an already running Temporal
-Activity. The Worker reconnects and re-registers while the active execution
-continues only under its direct PostgreSQL Lease heartbeat and existing fence.
-An explicit Worker shutdown, non-retryable protocol/authentication failure or
-lost durable Lease still fails closed. Active steer is unavailable during the
-transport gap.
+The authenticated Supervisor WebSocket carries registration, heartbeat,
+durable event ACKs and active steer. It is not a second Run dispatcher. A brief
+channel disconnect does not revoke a healthy database lease; an expired lease,
+stale fence or non-retryable identity failure fails closed.
 
 ### Model Gateway
 
-The trusted model gateway resolves the deployment-owned model configuration,
-injects the provider credential, enforces request identity and records usage.
-Only the trusted Runner can reach it. The Cube guest cannot.
+The model gateway is local to the trusted Worker boundary. It injects provider
+credentials, binds model requests to Run/Step identity and records usage. Cube
+cannot reach or authenticate to it.
 
-### Tool Broker
+### Tool Broker and Cube
 
-The Tool Broker is the only AgentDock component that controls Cube. Its API is
-narrow and authenticated. Cube owns generic microVM placement and lifecycle;
-the Broker keeps only AgentDock-specific authority. It:
+The Broker validates opaque Tool authority, resolves a Workspace's Sandbox
+Domain and reconciles Cube lifecycle. Pi cannot choose a Sandbox ID, image,
+mount, runtime class, resource limit or network policy.
 
-- validates Tool leases and fencing tokens;
-- binds every reservation and operation to one stable logical Turn digest and
-  one rotating Attempt digest, then admits monotonically advancing
-  per-sampling Step digests;
-- maps a logical activation to one exact Cube microVM;
-- creates, rebinds, inspects, stops and destroys that runtime;
-- forwards bounded, identity-recoverable Tool requests;
-- coordinates trusted Workspace checkpoints;
-- reconciles orphan runtime inventory.
+Cube mounts only the `workspace/` child of a trusted persistent Volume. The
+guest contains normal development tools but no platform credential. The trusted
+Volume envelope holds generation and Git baseline metadata outside the guest's
+view.
 
-Pi and the browser cannot choose a Sandbox ID, runtime, image, mount, network
-policy or resource policy.
+### Persistent Workspace Volume gateway
 
-### Cube execution plane
+The service historically named Workspace Volume Gateway is now a narrow trusted
+Volume gateway. It does not copy Workspaces to Kopia or object storage. It:
 
-CubeMaster/Cubelet schedule a KVM microVM from the deployment-owned template.
-The guest contains:
+- prepares and verifies the stable tenant/Workspace Volume identity;
+- initializes an empty/imported Workspace once;
+- captures a bounded file/hash index and external Git patch;
+- reads selected current files for the UI without following symlink escapes;
+- serializes operations with a process lock and PostgreSQL advisory lock.
 
-- `/workspace`;
-- `bash`, `git`, Node.js, Java and Python;
-- the minimal AgentDock Tool service;
-- no platform or model credentials.
+Stopping a Cube loses its processes and memory. A new Cube attaches the same
+persistent Volume, so files and dependencies remain. A Workspace revision is a
+reference to that authority, not a historical byte-for-byte backup.
 
-HTTP/HTTPS egress is routed through the Cube egress gateway. The gateway can
-use a hot-configured host proxy, but it rejects private, link-local, metadata
-and platform addresses.
+### Event Gateway
 
-### Workspace Data Mover
+Workers batch events into a local WAL and send authenticated ordered batches.
+Kafka is the durable high-frequency stream. A projector builds the bounded
+Valkey SSE view, then advances PostgreSQL's projected watermark. The browser is
+shown only the acknowledged prefix.
 
-The Data Mover is trusted and separate from the guest Tool authority. It
-connects the Cube Volume Plugin/POSIX Workspace to immutable Kopia checkpoints.
-PostgreSQL CAS advances the Workspace-owned head only if tenant, Workspace,
-RunAttempt, base revision and fence still match. Ordinary conversations share
-that head but retain independent Pi checkpoints. Explicit Fork/Candidate-Race
-Sessions use isolated branch heads until promotion.
+At terminal settlement, PostgreSQL stores one canonical complete Turn and the
+terminal sequence. Raw deltas age out of Kafka/Valkey rather than permanently
+doubling conversation storage. Valkey can be rebuilt from retained Kafka; it is
+not an authority.
 
-The physical POSIX Volume is a trusted envelope containing a generation
-marker, AgentDock's external Git baseline and a `workspace/` child. Kopia
-snapshots the complete envelope, while the Cube Volume Plugin mounts only the
-`workspace/` child at `/workspace`. The trusted Data Mover computes the
-cumulative Patch with explicit `GIT_DIR`/`GIT_WORK_TREE` paths while Cube
-processes are frozen. Platform checkpoint and review metadata is therefore
-outside the untrusted guest's filesystem view.
-
-Cube runtime lifetime and Workspace lifetime are independent.
-
-## 3. State ownership
+## State ownership
 
 | State | Authority |
 | --- | --- |
-| tenants, users, roles, browser sessions | PostgreSQL |
-| conversations and titles | PostgreSQL |
-| Workspace identity and current revision | PostgreSQL |
-| Runs, Attempts, leases and fences | PostgreSQL |
-| Workflow timers/retry history | Temporal |
-| Pi native Session bytes | compressed, content-addressed immutable object segments |
-| active Pi `messages[]` | Pi SDK memory for one active Run |
-| Workspace checkpoint bytes | immutable Kopia/object storage |
-| live process tree | one Cube microVM |
-| Worker event durability and ordering | Session-keyed Kafka log |
-| bounded live SSE replay | Valkey Streams, rebuilt from retained Kafka records |
-| event high-water/replay floor and terminal Turns | PostgreSQL cursors and canonical conversation projections |
-| browser SSE connections and replay cursors | stateless Event Gateway replicas |
-| UI transcript projection | PostgreSQL-derived read model |
-
-The rendered browser transcript is not used to reconstruct Pi context during
-normal execution. After an uncatchable Worker death, canonical PostgreSQL
-public semantics newer than the Pi checkpoint form one hidden Pi recovery
-entry; the browser's local rendering is never an authority.
-
-## 4. Workspace and conversation model
-
-```text
-Tenant
-└── Workspace (durable /workspace directory)
-    ├── Conversation A (Pi Session A)
-    ├── Conversation B (Pi Session B)
-    └── Workspace revisions
-```
-
-A new conversation requires a title and either:
-
-- an existing Workspace; or
-- a new named empty Workspace.
-
-Deleting a conversation archives only that Session. It disappears from tenant
-listing and direct conversation reads, while the shared Workspace and durable
-audit/checkpoint records remain.
-
-The Workspace row owns the authoritative committed version. A newly created
-ordinary conversation starts from that version with no Pi checkpoint. Claims
-for ordinary conversations sharing one Workspace are serialized under a
-Workspace row lock, then rebased to the latest committed head. Completion uses
-base-version CAS, so a stale Attempt cannot overwrite a newer directory.
-
-Committed Kopia checkpoints are tenant/Workspace scoped and carry their source
-Session only as provenance. On a cold Run, the current Workspace head is
-restored into that conversation's own Session-scoped POSIX volume. Ordinary
-conversations therefore share committed directory state without sharing live
-processes or uncommitted writes; explicit candidate branches retain the same
-physical isolation.
-
-Fencing tokens are monotonic within one Session ownership sequence, not
-globally comparable across conversations. A same-Session restore must advance
-the checkpoint's fence; a different Session may reuse the same numeric value
-while the Workspace-head revision CAS prevents stale cross-conversation
-commits.
-
-## 5. New conversation flow
-
-```text
-Browser
-  → POST /projects (only when creating a new Workspace)
-  → POST /projects/:projectId/sessions {workspaceId, title}
-  → Control Plane commits the cold Session
-  → Browser opens the conversation
-```
-
-No Pi Worker or Cube runtime is created yet.
-
-## 6. Run flow
-
-### Pure chat
-
-```text
-Browser POST prompt
-  → PostgreSQL transaction: message + Run + command + outbox
-  → transactional relay starts/adopts deterministic Temporal Workflow
-  → Outbox handoff CAS removes the Run from the relay backlog
-  → eligible Pi Worker
-  → exact-command transactional admission creates RunAttempt/fence
-  → freeze model/environment/Workspace/policy as one logical Turn contract
-  → bind command/Worker/lease/fence as one Attempt contract
-  → Pi checkpoint restore
-  → capture a fresh Cloud Step before each model request
-  → bind each provider transport attempt beneath that Step
-  → model stream
-  → batched durable events + SSE
-  → Pi native checkpoint commit
-  → private prepared result
-  → atomic terminal event + Run commit
-```
-
-Cube is never contacted.
-
-### Tool-using Run
-
-```text
-Pi context hook captures Step N and its semantic WorldState
-  → model emits Tool Call from Step N
-  → Pi serializes sibling remote Tools in model order
-  → Worker sends Turn + Attempt digests and Step N sequence/digest
-  → Tool Broker validates Turn contract, Attempt/fence ownership and rejects stale Steps
-  → ensure exact Session Cube activation
-  → restore current Workspace if activation is cold
-  → execute Tool in guest
-  → return bounded stdout/stderr/result
-  → Pi continues its Agent Loop
-  → checkpoint dirty Workspace with CAS
-  → commit final Pi checkpoint and Run
-```
-
-Text reads use bounded line ranges, so a large source file does not have to
-cross Tool RPC in full. Edits first read a content digest and then submit that
-expected digest; the guest writes and fsyncs a same-directory temporary file,
-checks for a stale revision and atomically renames it over the destination.
-Readers therefore observe the old or new file, never a partially written file.
-
-The Cube Tool service returns stdout and stderr as one monotonically sequenced
-observation stream with a digest over the reconstructed bytes. The trusted
-adapter rejects gaps or corruption before output enters Pi context. Large Bash
-output is then truncated once into a head/tail preview for Pi. The full raw
-output is stored as a trusted Artifact and the preview includes the Artifact
-identity plus a concrete recovery instruction.
-
-One Cube activation admits one cancellable Tool operation at a time. All four
-remote Tools therefore declare Pi's public sequential execution mode. This
-does not prevent different Runs or isolated candidate activations from running
-in parallel; it prevents sibling Tools from racing one shared process and
-Workspace state. See ADR-0085.
-
-`operationId` identifies an execution rather than an HTTP request. A brief
-Worker-to-Manager or Manager-to-Cube transport break can reattach to the same
-bounded operation ledger entry and obtain the original result. A changed
-request under the same ID is rejected. Loss of the Manager ledger, Tool service
-or VM still yields `UNKNOWN`; arbitrary Bash is never started again.
-
-Every model request carries the current Cloud Step sequence/digest and a
-separate sampling-attempt number. A transient provider retry reuses the frozen
-Step because no Tool or world-state transition occurred; normal post-Tool and
-post-compaction requests advance to a new Step. The Model Gateway records the
-identity in its request ledger and trace, while durable sampling events bind
-the resulting Tool boundaries to the same Step. Provider error text is not
-copied into public events.
-
-Production uses Pi's native agent-level transient retry with two retries and a
-500 ms exponential-backoff base delay. The provider SDK itself receives
-`maxRetries: 0`, so no hidden HTTP retry can bypass the Model Gateway ledger.
-Cancellation interrupts Pi's backoff. A failed sampling attempt cannot have
-started a Tool; if a later successful attempt emits a Tool call, that operation
-still follows the normal operation-ID and `UNKNOWN` rules and is never replayed
-by the model retry mechanism.
-
-Projects can opt into one bounded settlement gate by naming an offline
-environment verification command `settlement-gate`. If `write`, `edit` or
-`bash` may have changed the Workspace and that exact verification was not
-observed succeeding, a trusted Pi extension queues one hidden native follow-up.
-The model then runs and interprets the command through normal remote Tools; the
-platform never executes project code in the Worker and never repeats the gate.
-Projects without the named command pay no gate latency or model cost.
-
-The first Tool call pays cold activation cost. An eligible warm activation can
-serve later Tools/Run follow-ups for the same tenant/Workspace/Session. The
-Session's durable retention policy controls the idle boundary: `ephemeral`
-activations use the bounded fifteen-minute/LRU cache, while `persistent`
-activations are excluded from ordinary TTL and LRU reclamation until the
-conversation is archived. Persistent mode still uses lazy activation, rotates
-Tool capability and fencing on every Run, and is destroyed on ambiguous
-execution, failed checkpoint or execution-plane loss. It preserves process
-continuity during normal idle time, not VM-state durability across failure.
-
-## 7. Pi compaction and restore
-
-Pi writes its native append-only Session tree, including compaction records.
-After `agent_settled`, the Worker:
-
-1. validates the complete native JSONL and splits it into bounded 8 MiB raw
-   chunks;
-2. gzip-compresses and uploads missing content-addressed segments; an
-   append-only Session reuses its complete previous chunks without downloading
-   the prior JSONL and replaces only its bounded trailing chunk;
-3. writes a new immutable manifest;
-4. advances the PostgreSQL checkpoint head under the current fence.
-
-On another Worker:
-
-```text
-PostgreSQL checkpoint head
-  → immutable manifest
-  → four-at-a-time bounded cache/object-store segment reads
-  → reconstructed session.jsonl
-  → Pi SessionManager.open()
-  → Pi reconstructs effective model context
-```
-
-Compacted Sessions therefore behave exactly as Pi defines. AgentDock does not
-flatten or invent a replacement `messages[]`.
-
-### Interrupted Runs
-
-A started Run that fails or is cancelled does not advance the Workspace head.
-The Worker does preserve Pi's native Session branch and appends a hidden,
-model-visible `agent-dock.run_interrupted` marker before storing an
-`pi_interrupted_session_snapshot`. If Pi failed before recording the accepted
-prompt, the Worker appends that user message first. In this catchable path it
-uses Pi-native assistant and Tool entries rather than converting browser deltas
-into a second assistant message.
-
-The next Run therefore restores:
-
-```text
-last committed Pi branch
-  → accepted interrupted user prompt
-  → any native Pi error/aborted assistant and Tool results
-  → explicit interruption marker
-  → next user prompt
-```
-
-The marker is the model-visible interrupted-Turn boundary. It records that Tool
-side effects may be partial and background processes may still be active. It
-does not expose failure codes, Run/Attempt identity or a prescribed recovery
-procedure to the model. The next model call decides how to respond from that
-fact and the user's new prompt. Pre-execution dispatch failures do not create
-this checkpoint and may be retried without changing the conversation head.
-
-Catchable provider failures preserve Pi's native aborted/error assistant
-message. An integration test disconnects the provider after publishing
-`partial-before-disconnect` and proves that the same visible text is present in
-the interrupted Pi JSONL checkpoint. AgentDock still does not synthesize an
-assistant message from browser deltas: Pi-native state is the authority.
-
-If the Worker is killed by `SIGKILL`, OOM or node loss, it cannot append that
-native interruption marker. The next Worker then restores the latest committed
-Pi checkpoint and appends one hidden, model-visible semantic recovery suffix
-derived from canonical PostgreSQL Turn projections newer than the checkpoint.
-The suffix contains the accepted prompt, public assistant text, Tool
-boundaries/results and canonical failure/cancellation state. An in-flight Tool
-is marked `unknown`; raw thinking is never reconstructed. The bridge describes
-what was durably observed but does not prescribe a recovery strategy. The next
-Pi checkpoint absorbs this one-time bridge, so Pi JSONL remains the conversation
-authority.
-
-Pi JSONL also keeps a typed, versioned and hidden
-`agent-dock.runtime_world_state` custom entry that does not participate in
-model context. It records only facts that can affect later reasoning: Sandbox
-availability/continuity, environment fingerprint, committed Workspace revision
-and Tool-policy fingerprint. The Tool Broker reservation reports whether
-the exact Session runtime is a `warm_reuse` or a `cold_restore`. If a previously
-active Cube is no longer available, the Worker appends one short model-visible
-`<sandbox_reset>` fact before the next prompt:
-
-```text
-The committed Workspace is preserved, but running processes and in-memory
-environment state were not carried forward.
-```
-
-The hidden state entry prevents the same loss from being announced on every
-pure-chat Run. A later Tool-using Run records the newly active Cube, allowing a
-future real replacement to produce a new one-time marker. Activation IDs and
-lifecycle reason codes remain outside model context.
-
-The Pi `context` extension hook runs immediately before every provider request.
-At a new logical sampling boundary AgentDock captures an immutable Step
-containing the exact active remote Tool registry and current typed runtime world
-state; a scheduled provider retry reuses that Step with another sampling
-attempt. Consecutive identical states do not add Session entries. In addition
-to a lost active Cube,
-an environment-image change or Tool/network-policy change produces one short
-hidden custom message. Worker handoff alone is not model-visible when the same
-warm Cube remains continuous.
-
-### Active steer
-
-An ordinary prompt submitted during a Run remains a queued follow-up. The
-separate steer endpoint persists one `turn.steer` command, resolves the exact
-active RunAttempt and sends a fenced two-phase `command.turn.steer` to the
-Worker that owns its Pi Runtime. Commit invokes Pi's public
-`session.steer(text)` API. The current Tool batch finishes first; Pi consumes
-the steer before its next model call. A settled Run rejects steer instead of
-turning it into another Turn.
-
-Steer is the only Control Plane initiated command on the Worker Control
-Channel. The two-phase prepare/commit exchange binds it to the current lease
-and fence; reconnecting or stale Workers cannot apply it to another Attempt.
-
-## 8. Event delivery
-
-Pi non-terminal events first enter a private append-only Worker WAL. The first
-text delta is flushed promptly; later adjacent deltas from the same content
-block are coalesced for at most 50 ms or 2 KiB. Tool/message/terminal boundaries
-flush pending text immediately. A bounded asynchronous publisher sends a
-contiguous batch after at most 20 ms, 64 events or 512 KiB.
-
-The deterministic local test adapter can write the suffix directly to the
-partitioned PostgreSQL event table. Both production profiles send the suffix
-to Event Gateway through a service-authenticated HTTP contract. Event Gateway
-validates the current Session/lease/fence and appends directly to Kafka with
-`sessionId` as the partition key. Kafka `acks=all` is the first shared durable
-payload boundary; PostgreSQL retains only bounded sequence cursors at ingest,
-so the event payload is not written to a transfer Outbox and then written
-again to the replay table.
-
-The Kafka consumer group projects batches idempotently into a Valkey Stream
-using the Session sequence as its explicit ID. After that append succeeds,
-`last_projected_seq` and the consumed Kafka partition offset commit in one
-PostgreSQL transaction; the Kafka group offset advances only afterward. A lost
-response or failed database commit may cause replay, but exact Session-event
-redelivery is harmless and conflicting content fails closed.
-The Worker cannot publish `turn.completed`, `turn.failed` or `turn.cancelled`;
-its private `command.result` is only a prepared result.
-
-Before returning that prepared result, the Worker crosses an explicit durable
-barrier: the local spool must have no pending event and its cumulative ACK must
-equal the highest sequence produced by the Run. Terminal settlement therefore
-cannot overtake a non-terminal event still buffered at the Worker.
-
-Terminal settlement first waits until the projected cursor equals the
-Worker-acknowledged cursor. Event Gateway reads the complete current Turn from
-Valkey and prepares its canonical transcript. The Control Plane revalidates the
-cursor and creates the public terminal event in the same PostgreSQL transaction
-that settles Run/Attempt/command/turn/session state, advances checkpoint and
-Workspace heads, stores the complete transcript and emits the database wake
-notification. A browser terminal event therefore cannot get ahead of canonical
-business/checkpoint state.
-
-SSE merges the bounded live stream and terminal store:
-
-- event IDs are sequence numbers;
-- `Last-Event-ID` resumes from the committed suffix;
-- database notification is a wake-up hint only;
-- Valkey supplies non-terminal deltas through the PostgreSQL projected cursor;
-- PostgreSQL supplies one terminal event per completed Turn.
-
-Conversation reload first reads canonical completed Turns from the Control
-Plane and may then request an active-Turn catch-up snapshot from Event Gateway.
-The snapshot never advances PostgreSQL state: it merely collapses an already
-projected, contiguous Valkey prefix into its current transcript. Its watermark
-becomes the browser's next SSE cursor, eliminating large active-Turn replay
-without weakening persisted-before-visible semantics.
-
-Only Kafka events appended to Valkey and covered by the PostgreSQL projected
-cursor reach SSE. A Worker-WAL-only or Kafka-only event is not yet visible.
-Public text and Tool facts already shown are therefore durable in Kafka and
-available from the live read model; terminal Turns survive independently in
-the PostgreSQL semantic projection.
-Successful/catchable Runs preserve them in Pi's native Session; an uncatchable
-crash uses the bounded one-time recovery bridge described above so they also
-affect Pi's next effective model context.
-
-The Valkey read model is intentionally bounded. Once a terminal Turn has a
-committed semantic projection and exceeds the live window, the compactor trims
-the Stream through that terminal sequence, then advances the Session's
-`replay_floor_seq`. An SSE cursor below that floor receives HTTP 410 and reloads
-the semantic conversation read model. Multiple compactor replicas coordinate
-through leased PostgreSQL jobs. Kafka retention exceeds this window. Event
-Gateway startup automatically detects and rebuilds missing retained streams
-from Kafka under a PostgreSQL advisory lock; the operator rebuild command is a
-maintenance fallback. A missing sequence fails closed instead of returning
-partial output.
-
-## 9. Lease and fencing
-
-A lease expresses current ownership. A fencing token prevents a stale owner
-from committing side effects.
-
-The token increases when:
-
-- an Attempt is retried;
-- ownership moves to another Worker;
-- cancellation invalidates the current Attempt;
-- a lease expires and recovery begins.
-
-Every mutating Tool request, checkpoint head update, terminal Run commit and
-runtime handoff checks the current fence. A paused or partitioned old Worker
-can resume its process, but its requests are rejected.
-
-Tool commands with ambiguous completion are not blindly replayed. They become
-`UNKNOWN` or force runtime destruction/recovery according to the Tool policy.
-
-## 10. Administrator model
-
-Tenant roles (`owner`, `member`, `viewer`) apply only inside one tenant.
-Platform administration is a separate identity flag derived from the
-deployment-owned operator tenant ID.
-
-The platform administrator:
-
-- lands directly on the settings page;
-- can update model/provider configuration;
-- can update the Cube egress proxy origin;
-- does not inherit ordinary user conversation UI by virtue of administration.
-
-Configuration records are versioned in PostgreSQL. New connections/Runs read
-the latest value without a cluster restart; already-running work retains its
-immutable start snapshot.
-
-## 11. Failure and recovery
-
-- Duplicate browser submission: idempotency key returns the original Run.
-- Worker crash before Tool execution: Temporal retries on another Worker.
-- Worker crash with possible Tool side effect: old fence is revoked and the
-  runtime is destroyed unless exact execution state is known.
-- Short Tool transport disconnect: reattach to the same operation ID and
-  recover the original running/result promise without replay.
-- Tool operation ledger, Tool service or Cube loss: expose `UNKNOWN`, destroy
-  uncertain runtime state and do not replay the command.
-- Worker hard crash after durable output but before Pi JSONL persistence:
-  restore the prior Pi checkpoint plus the bounded semantic recovery suffix;
-  do not synthesize raw thinking or replay unknown Tool side effects.
-- Cube loss: restore the committed Workspace into a fresh activation.
-- object upload succeeds but DB commit fails: immutable orphan is garbage
-  collected later.
-- DB commit succeeds but ACK is lost: commit ID/fence returns the prior result.
-- stale runtime cleanup: inventory identity and physical runtime ID must match
-  before destruction.
-
-## 12. Deployment topology
-
-The single-node development/production profile runs:
-
-- Web ingress;
-- Control Plane;
-- PostgreSQL;
-- MinIO;
-- Temporal;
-- Pi Workers (Compose or Kubernetes deployment);
-- Tool Broker;
-- Cube control/execution plane;
-- Cube egress gateway;
-- trusted Workspace Data Mover;
-- optional observability stack.
-
-The default production profile contains 15 core services. Prometheus, Jaeger,
-Grafana, their volume bootstrap and loopback ingress are enabled together by
-the `observability` profile. Core services do not require an OTLP collector to
-be ready.
-
-The distributed Kubernetes profile replaces local authorities with external HA
-PostgreSQL/PgBouncer, Temporal, S3/Kopia, a shared RWX POSIX volume and a Cube
-cluster:
-
-```text
-Ingress
-  → Web Deployment (HPA)
-  → Control Plane Deployment (HPA)
-       ├── PgBouncer transaction URL
-       ├── direct PostgreSQL LISTEN URL
-       └── Temporal Workflow client
-
-Workspace execution Cell directory (PostgreSQL)
-  → Cell-specific Temporal versioned Activity backlog
-  → KEDA
-  → Pi Worker StatefulSet (four runtime slots per Pod by default)
-
-Sandbox Domain directory (PostgreSQL)
-  → shared Tool Broker StatefulSet
-  → independent Workspace Data Mover Deployment
-  → Cube control/compute cluster
-```
-
-Any Control Plane replica can send steer to the exact active Worker through its
-StatefulSet headless DNS identity; WebSocket connection locality is not an
-execution-routing authority. Pi Worker termination stops Temporal polling and
-drains the active Activity before Pod exit.
-
-The Cell directory is the durable Pi Worker-capacity placement authority. A
-Cell contains a versioned Temporal Activity queue and Pi Worker pool; several
-Cells can resolve to one Sandbox Domain. Domain Tool Broker replicas share
-durable instance Lease, activation owner and Tool operation identity in
-PostgreSQL. Creates use one stable Service, then pin subsequent operations to
-the returned owner URL. A surviving replica fences an expired owner, marks
-ambiguous operations `UNKNOWN` and reaps orphaned Cube activations without
-replaying Tools. Independent Data Mover replicas coordinate each Workspace
-through PostgreSQL advisory locks. Each replica also has a bounded local
-`p-queue` execution gate for Kopia/POSIX pressure; queue admission is not a
-durable scheduler and does not replace the database lock. PostgreSQL still
-serializes ordinary Runs sharing one Workspace and advances the Workspace head
-with CAS.
-
-Kubernetes HPA/KEDA creates Pods. A provider-specific node autoscaler is needed
-to create machines for pending Pods. The strict Helm profile, preflight and
-operator procedure are in
-[Distributed deployment](DISTRIBUTED_DEPLOYMENT.md). Multi-node failure
-acceptance is still required before claiming measured HA.
-
-## 13. Current architectural decisions
-
-- [ADR-0053: CubeSandbox primary runtime](adr/0053-cubesandbox-primary-execution-plane.md)
-- [ADR-0056: Temporal as sole Run scheduler](adr/0056-temporal-as-sole-run-scheduler.md)
-- [ADR-0067: durable Workspace](adr/0067-cube-posix-volumes-and-kopia-workspace-authority.md)
-  and [ADR-0068: Session-resident Cube](adr/0068-session-resident-cube-and-posix-workspaces.md)
-- [ADR-0070: Atomic terminal events and hard-crash recovery suffix](adr/0070-atomic-terminal-events-and-crash-recovery-suffix.md)
-- [ADR-0071: SDK-only Pi runtime](adr/0071-sdk-only-pi-runtime-and-current-format-only-restores.md)
-- [ADR-0080: Frozen cloud steps and recoverable Tool execution](adr/0080-cloud-step-and-recoverable-tool-execution.md)
-- [ADR-0087: Committed stream batching and Pi context](adr/0087-committed-stream-batching-and-model-context.md)
-- [ADR-0088: Distributed Kubernetes topology and demand scaling](adr/0088-distributed-kubernetes-and-demand-scaling.md)
-- [ADR-0089: Enterprise execution Cells](adr/0089-enterprise-cells-and-durable-event-log.md)
-- [ADR-0091: Kafka-first ingest](adr/0091-kafka-first-worker-event-ingest.md)
-  and [ADR-0093: canonical conversations](adr/0093-kafka-valkey-live-events-and-canonical-conversations.md)
-- [ADR-0094: Cross-component time and retention budgets](adr/0094-cross-component-time-and-retention-budgets.md)
-- [ADR-0095: Sandbox Domains and a thin Tool Broker](adr/0095-sandbox-domains-and-cube-control-plane.md)
-- [ADR-0098: Self-healing live-event read model](adr/0098-self-healing-live-event-read-model.md)
-- [ADR-0099: Active-Turn catch-up snapshots](adr/0099-active-turn-catch-up-snapshots.md)
-- [ADR-0100: Bounded Sandbox and Workspace admission](adr/0100-bounded-sandbox-and-workspace-admission.md)
-
-The [ADR index](adr/README.md) links the lower-level decisions behind these
-boundaries. Retired cutover designs remain in Git history, not as supported
-runtime choices.
+| tenants, users, sessions, quotas | PostgreSQL |
+| Runs, Attempts, leases, fences, ready queue | PostgreSQL |
+| Pi Session entries/compaction/operation records | PostgreSQL SessionStorage |
+| transitional Pi-native JSONL objects | PostgreSQL immutable object table |
+| canonical completed conversation | PostgreSQL |
+| retained high-frequency Worker events | Kafka |
+| bounded live SSE replay | Valkey, rebuildable from Kafka |
+| Workspace bytes | persistent Cube Volume |
+| Workspace revision/reference and Git baseline | PostgreSQL + trusted Volume envelope |
+| live process tree | one Cube KVM only |
+| active in-memory `messages[]` | Pi SDK for one active Run |
+
+## First and later messages
+
+For the first message, the Control Plane creates/uses a Workspace and Pi
+Session, then queues the Run. Pure conversation stays entirely in the trusted
+plane. If Pi chooses a Tool, the Broker lazily creates Cube and mounts the
+Workspace Volume.
+
+For a later message, any Worker can resume the same Pi Session from PostgreSQL.
+Pi reconstructs the active model context and respects its native compaction
+boundary. If the previous Cube is still warm it is rebound under a newer fence;
+otherwise a new KVM mounts the same persistent Volume. Process state is not
+claimed as durable.
+
+## Failure rules
+
+- queue delivery is at-least-once; state commits are idempotent/fenced;
+- arbitrary shell start is not exactly-once and is never blindly replayed;
+- stale Workers cannot mutate Pi SessionStorage, execute Tools, commit a
+  terminal Run or advance a Workspace revision;
+- cancellation revokes authority before process termination;
+- visible live events are durable before SSE; successful terminal messages are
+  Pi-native and canonical before completion;
+- interruption and Sandbox reset boundaries are minimal model-visible facts,
+  not fabricated Tool outcomes;
+- Cube/process loss preserves files only; the next model is told when the
+  execution world materially changed.
+
+## Scaling
+
+Control Plane, Event Gateway, Pi Worker and Tool Broker are independent
+replica sets. PostgreSQL/PgBouncer, Kafka, Valkey, Workspace storage and Cube
+are external authorities. Scaling the Worker pool adds Agent Loop slots;
+scaling Cube compute adds concurrent Tool environments. No Cell abstraction or
+per-Worker affinity is required for correctness.

@@ -222,7 +222,7 @@ try {
       `- Run Attempts: ${String(report.attemptCount)}`,
       `- Elapsed: ${String(report.elapsedMs)} ms`,
       "",
-      "The Control Plane container received SIGKILL after the first committed assistant delta. The independently hosted Event Gateway continued the durable SSE stream while a replacement Control Plane started and the original fenced Temporal Activity completed on the Pi Worker. The Run completed with one Attempt; any transport reconnects are reported rather than required.",
+      "The Control Plane container received SIGKILL after the first committed assistant delta. The independently hosted Event Gateway continued the durable SSE stream while a replacement Control Plane started and the original fenced Worker execution completed. The Run completed with one Attempt; any transport reconnects are reported rather than required.",
       "",
     ].join("\n"),
   );

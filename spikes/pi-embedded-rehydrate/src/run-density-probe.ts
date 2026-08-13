@@ -110,7 +110,7 @@ try {
     `${JSON.stringify(
       {
         result: "passed",
-        piVersion: "0.80.10",
+        piVersion: "0.84.1",
         workerPid: process.pid,
         logicalSessions: LOGICAL_SESSION_COUNT,
         concurrentlyActiveSessions: ACTIVE_SESSION_COUNT,

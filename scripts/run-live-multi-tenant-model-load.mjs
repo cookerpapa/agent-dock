@@ -488,7 +488,7 @@ await writeFile(
     `- Persisted event payload bytes: ${String(report.streaming.persistedPayloadBytes)}`,
     `- Real requests/input/output/cache-read tokens: ${String(report.usage.requests)} / ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)} / ${String(report.usage.cacheReadTokens)}`,
     "",
-    "Every tenant used an independent API credential, Project, Workspace, Session and Pi checkpoint. All first and follow-up Runs were submitted concurrently through the same Temporal Task Queue and two capacity-one Pi Workers. The follow-up restored only its own marker, foreign Session reads returned 404, no Tool Sandbox was activated, and every Run completed with one Attempt.",
+    "Every tenant used an independent API credential, Project, Workspace, Session and Pi checkpoint. All first and follow-up Runs were submitted concurrently through the shared PostgreSQL queue and two capacity-one Pi Workers. The follow-up restored only its own marker, foreign Session reads returned 404, no Tool Sandbox was activated, and every Run completed with one Attempt.",
     "",
   ].join("\n"),
   "utf8",

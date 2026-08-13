@@ -23,10 +23,6 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
   subPath: {{ .Values.external.database.notificationSecretKey }}
   readOnly: true
 - name: platform-secrets
-  mountPath: /run/agent-dock-secrets/aws-credentials
-  subPath: aws-credentials
-  readOnly: true
-- name: platform-secrets
   mountPath: /run/agent-dock-secrets/supervisor-enrollment-token
   subPath: supervisor-enrollment-token
   readOnly: true

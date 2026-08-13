@@ -1647,8 +1647,8 @@ describe.sequential("single-user durable turn intake API", () => {
       publishedAt: null,
     });
 
-    // Temporal owns the retry timer. Once that timer fires, the exact original
-    // command becomes eligible without a second PostgreSQL retry schedule.
+    // The PostgreSQL available_at timestamp owns the retry delay. Once it is
+    // reached, the exact original command becomes eligible again.
     now = new Date(now.valueOf() + 11);
     await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toMatchObject({
       status: "completed",
@@ -1794,7 +1794,7 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(durable.publishedAt).not.toBeNull();
     expect(backend.records).toHaveLength(1);
 
-    // A repeated Temporal Activity delivery observes the committed terminal
+    // A repeated Worker delivery observes the committed terminal
     // state. It must not create another Attempt or invoke the backend again.
     await expect(dispatcher.dispatchCommand(accepted.commandId)).resolves.toEqual({
       status: "idle",

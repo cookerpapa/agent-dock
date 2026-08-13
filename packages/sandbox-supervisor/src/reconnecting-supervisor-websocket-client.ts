@@ -82,7 +82,7 @@ function clientOptions(
     registration: options.registration,
     runtime: options.runtime,
     // A retryable WebSocket break suspends only the management transport. The
-    // active Temporal execution independently renews its fenced PostgreSQL
+    // active Worker execution independently renews its fenced PostgreSQL
     // lease and may continue while this wrapper reconnects.
     revokeRuntimeOnRetryableDisconnect: false,
   };

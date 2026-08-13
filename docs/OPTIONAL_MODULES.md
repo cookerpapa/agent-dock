@@ -4,8 +4,8 @@ AgentDock's default deployment is the shortest production path required for
 the conversation product:
 
 ```text
-Web → Control Plane → Temporal → Pi Worker → Tool Broker → Cube
-                    ↘ PostgreSQL / object storage
+Web → Control Plane → PostgreSQL queue → Pi Worker → Tool Broker → Cube
+                    ↘ PostgreSQL / Kafka / Valkey
 ```
 
 The default Control Plane exposes authentication, model/proxy settings,
@@ -28,8 +28,8 @@ This registers:
 - Project Environment history/validation;
 - operational summary and audit data APIs.
 
-The module reuses the same tenant boundary, PostgreSQL state, Temporal
-execution and Cube isolation. Disabling it removes controllers and providers;
+The module reuses the same tenant boundary, PostgreSQL execution state and
+Cube isolation. Disabling it removes controllers and providers;
 it is not a UI feature flag and no dormant route remains reachable.
 
 ## Observability

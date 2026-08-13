@@ -66,15 +66,15 @@ result is `UNKNOWN` and the activation is destroyed rather than replayed.
 
 ## Workspace
 
-The Workspace is a Session-bound Cube Volume/POSIX directory. It remains
+The Workspace is a Workspace-bound Cube Volume/POSIX directory. It remains
 mounted while the activation is warm. At a commit boundary:
 
 1. stop accepting old-fence Tool operations;
 2. quiesce the Tool mutation boundary;
 3. flush the Workspace;
-4. create an immutable Kopia checkpoint through the trusted Data Mover;
+4. capture a bounded persistent-Volume revision through the trusted gateway;
 5. CAS the PostgreSQL Workspace head;
-6. return the activation to `IDLE_WARM` or destroy it.
+6. return the activation to `IDLE_WARM` or destroy it while retaining the Volume.
 
 Background processes can remain alive during a warm idle window. They are not
 promised across activation destruction or failure.

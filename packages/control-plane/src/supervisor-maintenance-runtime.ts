@@ -79,8 +79,8 @@ function abortableWait(delayMs: number, signal: AbortSignal): Promise<void> {
 /**
  * Reconciles remote Supervisor connections and orphaned assignments.
  *
- * Run assignment intentionally does not live here: Temporal is the sole
- * scheduler, while this loop only converges infrastructure state.
+ * Run assignment intentionally does not live here: the PostgreSQL Worker queue
+ * is the sole scheduler, while this loop only converges infrastructure state.
  */
 export class SupervisorMaintenanceRuntime {
   readonly #maintenanceRunner: SupervisorMaintenanceRunner;

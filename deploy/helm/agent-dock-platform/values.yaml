@@ -10,15 +10,6 @@ sandboxDomains:
     workspaceStorageKey: workspace-domain-0001
     maximumActiveSandboxes: 1024
 
-executionCells:
-  - id: cell-0001
-    displayName: Initial execution cell
-    state: active
-    temporalTaskQueue: agent-dock-pi-runs-cell-0001-v1
-    sandboxDomainId: sandbox-domain-0001
-    supervisorManagementBaseUrlTemplate: http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100
-    capacityWeight: 100
-
 global:
   clusterDomain: cluster.local
   existingSecret: agent-dock-platform-secrets
@@ -132,10 +123,6 @@ external:
     secretKey: database-url
     notificationSecretKey: database-notification-url
     apiTokenSecretKey: api-token
-  temporal:
-    address: temporal-frontend.temporal.svc.cluster.local:7233
-    namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-cell-0001-v1
   kafka:
     brokers:
       - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
@@ -148,19 +135,6 @@ external:
       passwordSecretKey: kafka-password
   liveEventStore:
     urlSecretKey: live-event-store-url
-  checkpointS3:
-    endpoint: https://s3.example.com
-    region: us-east-1
-    bucket: agent-dock-checkpoints
-    keyPrefix: production/v1
-    forcePathStyle: false
-    allowInsecureEndpoint: false
-  kopiaS3:
-    endpoint: s3.example.com
-    region: us-east-1
-    bucket: agent-dock-workspace-kopia
-    prefix: production/kopia/v1/
-    disableTls: false
   providerProxyUrl: https://provider-proxy.example.com:3129
   otlpTracesEndpoint: ""
 
@@ -170,19 +144,19 @@ networkPolicy:
     key: agent-dock.io/trusted-plane
     value: "true"
   trustedTcpPorts:
-    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 6379, 7233, 9000, 9093, 9464, 9465, 9466, 9467]
-  # Add the explicit CIDRs of external PostgreSQL/PgBouncer, Temporal, S3,
-  # provider proxy, Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
+    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 6379, 9093, 9464, 9465, 9466, 9467]
+  # Add explicit CIDRs for PostgreSQL/PgBouncer, Kafka, provider proxy,
+  # Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
   externalEgressCidrs: []
 
 sandboxPlane:
   domainId: sandbox-domain-0001
   toolBrokerReplicas: 3
-  dataMoverReplicas: 2
-  dataMoverMaximumConcurrentOperations: 2
-  dataMoverMaximumQueuedOperations: 32
-  dataMoverQueueWaitTimeoutMs: 30000
-  dataMoverCommandTimeoutMs: 600000
+  volumeGatewayReplicas: 2
+  volumeGatewayMaximumConcurrentOperations: 2
+  volumeGatewayMaximumQueuedOperations: 32
+  volumeGatewayQueueWaitTimeoutMs: 30000
+  volumeGatewayRequestTimeoutMs: 660000
   maximumActivePerReplica: 128
   maximumWarmPerReplica: 128
   warmTtlMs: 900000
@@ -202,7 +176,7 @@ sandboxPlane:
   toolBrokerResources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "2", memory: 768Mi }
-  dataMoverResources:
+  volumeGatewayResources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "2", memory: 1Gi }
 
@@ -211,7 +185,6 @@ pi-workers:
     name: primary-v1
     replicas: 2
     capacity: 4
-    executionCellId: cell-0001
     clusterDomain: cluster.local
   autoscaling:
     enabled: true
@@ -219,7 +192,7 @@ pi-workers:
     maxReplicas: 32
     pollingIntervalSeconds: 5
     cooldownSeconds: 900
-    targetQueueSize: 1
+    targetQueuedRunsPerReplica: 4
     scaleDownStabilizationSeconds: 900
     scaleDownPeriodSeconds: 600
   lifecycle:
@@ -237,24 +210,10 @@ pi-workers:
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""
-  temporal:
-    address: temporal-frontend.temporal.svc.cluster.local:7233
-    namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-cell-0001-v1
-    workerDeploymentName: agent-dock-pi-workers
-    workerBuildId: development
-  conversationStorage:
+  database:
     existingSecret: agent-dock-platform-secrets
-    databaseUrlKey: database-url
-    awsCredentialsKey: aws-credentials
-    s3:
-      bucket: agent-dock-checkpoints
-      region: us-east-1
-      endpoint: https://s3.example.com
-      keyPrefix: production/v1
-      forcePathStyle: false
-      allowInsecureEndpoint: false
-      maxAttempts: 4
+    urlKey: database-url
+    notificationUrlKey: database-notification-url
   credentials:
     supervisorEnrollmentTokenKey: supervisor-enrollment-token
     supervisorManagementTokenKey: supervisor-management-token

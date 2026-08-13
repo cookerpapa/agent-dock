@@ -1,12 +1,8 @@
 {{- if .Values.globalPlaneEnabled }}
 {{- $name := include "agent-dock-platform.name" . -}}
 {{- $toolBrokerUrls := list -}}
-{{- $supervisorManagementUrlTemplates := list -}}
 {{- range .Values.sandboxDomains -}}
 {{- $toolBrokerUrls = append $toolBrokerUrls .toolBrokerBaseUrl -}}
-{{- end -}}
-{{- range .Values.executionCells -}}
-{{- $supervisorManagementUrlTemplates = append $supervisorManagementUrlTemplates .supervisorManagementBaseUrlTemplate -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -83,10 +79,7 @@ spec:
             - { name: AGENT_DOCK_SUPERVISOR_ID_PREFIX, value: {{ .Values.controlPlane.supervisorIdPrefix | quote }} }
             - { name: AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY, value: {{ (index .Values "pi-workers").workerPool.capacity | quote }} }
             - name: AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES
-              value: {{ join "," $supervisorManagementUrlTemplates | quote }}
-            - { name: AGENT_DOCK_TEMPORAL_ADDRESS, value: {{ .Values.external.temporal.address | quote }} }
-            - { name: AGENT_DOCK_TEMPORAL_NAMESPACE, value: {{ .Values.external.temporal.namespace | quote }} }
-            - { name: AGENT_DOCK_TEMPORAL_TASK_QUEUE, value: {{ .Values.external.temporal.taskQueue | quote }} }
+              value: {{ printf "http://{supervisorId}.agent-dock-pi-worker-%s.%s.svc.%s:4100" (index .Values "pi-workers").workerPool.name .Release.Namespace .Values.global.clusterDomain | quote }}
             - { name: AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID, value: {{ .Values.controlPlane.platformModelSourceTenantId | quote }} }
             - { name: AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID, value: {{ .Values.controlPlane.platformOperatorTenantId | quote }} }
             - { name: AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED, value: {{ .Values.controlPlane.publicRegistration.enabled | quote }} }
@@ -97,14 +90,6 @@ spec:
             - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS, value: {{ .Values.controlPlane.publicRegistration.maximumConcurrentTurns | quote }} }
             - { name: AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES, value: {{ .Values.controlPlane.publicRegistration.maximumActiveSandboxes | quote }} }
             - { name: AGENT_DOCK_WEB_SESSION_COOKIE_SECURE, value: "true" }
-            - { name: AWS_SHARED_CREDENTIALS_FILE, value: /run/agent-dock-secrets/aws-credentials }
-            - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_BUCKET, value: {{ .Values.external.checkpointS3.bucket | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_REGION, value: {{ .Values.external.checkpointS3.region | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_ENDPOINT, value: {{ .Values.external.checkpointS3.endpoint | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_KEY_PREFIX, value: {{ .Values.external.checkpointS3.keyPrefix | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_FORCE_PATH_STYLE, value: {{ .Values.external.checkpointS3.forcePathStyle | quote }} }
-            - { name: AGENT_DOCK_CHECKPOINT_S3_ALLOW_INSECURE_ENDPOINT, value: {{ .Values.external.checkpointS3.allowInsecureEndpoint | quote }} }
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_METRICS_PORT, value: "9464" }
             - { name: AGENT_DOCK_METRICS_TOKEN_FILE, value: /run/agent-dock-secrets/metrics-token }

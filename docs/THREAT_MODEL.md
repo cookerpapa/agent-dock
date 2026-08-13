@@ -1,191 +1,65 @@
 # Threat model
 
-## Security claim
+## Scope
 
-AgentDock executes model-generated and repository-controlled commands inside a
-tenant-bound CubeSandbox KVM microVM. The trusted Agent Loop, provider
-credential, database, object store and orchestration credentials remain
-outside that guest.
+AgentDock is a self-hosted multi-tenant Coding Agent for controlled enterprise
+or private deployments. Model-generated commands and repository code are
+untrusted. Platform operators, trusted Worker images and external durable
+services are inside the administrative trust boundary.
 
-This is a bounded self-hosted multi-tenant design. It is not a claim that one
-single-node host can survive compromise of its host kernel, KVM, Cube control
-plane or administrator account.
+It is not claimed as a hostile public-SaaS boundary without additional abuse,
+identity recovery, billing and incident-response controls.
 
-## Assets
+## Primary boundaries
 
-- model/provider credentials;
-- tenant conversation and Pi Session state;
-- Workspace source and artifacts;
-- database/object-store credentials;
-- Cube and orchestration control authority;
-- host and other tenants' compute/data;
-- usage, audit and configuration records.
+### Trusted Agent versus untrusted execution
 
-## Trust zones
+Pi, model credentials, PostgreSQL access and Tool capabilities remain in the
+trusted Worker. CubeSandbox KVM executes `read/write/edit/bash` and receives no
+platform credential. The Worker has no Cube API credential; the Tool Broker has
+no model credential.
 
-```text
-Untrusted:
-  browser input
-  prompts/model output
-  repositories/dependencies
-  commands and processes in Cube
+### Tenant and stale-Worker isolation
 
-Trusted product:
-  Web ingress
-  Control Plane
-  Temporal
-  Pi Workers
-  Model Gateway
-  Tool Broker
-  Workspace Data Mover
-  Cube egress gateway
+Every product read/write includes tenant ownership. Tool and Session mutation
+boundaries additionally validate current Run, Attempt, claim lease and fencing
+token. A paused or partitioned old Worker cannot resume useful effects after a
+new Attempt takes ownership.
 
-Infrastructure TCB:
-  PostgreSQL / object storage
-  Cube control plane / KVM / host kernel
-  deployment administrator
-```
+### Durable authorities
 
-## Main threats and controls
+PostgreSQL owns Runs and Pi Sessions, Kafka owns retained live events, and the
+persistent Cube Volume owns Workspace bytes. Valkey and Worker caches are
+rebuildable. There is no competing workflow or checkpoint head.
 
-### Tenant data access
+## Key threats and controls
 
-Every API query is scoped by authenticated tenant identity. Foreign UUIDs
-return `404`. Workspace activation identity includes tenant and Workspace.
-Cross-tenant tests place canaries in separate Workspaces and attempt direct
-reads from the other guest.
+| Threat | Control |
+| --- | --- |
+| shell escapes container boundary | Cube KVM hardware boundary and hardened template |
+| Cube reads platform secrets | no secret mounts/service account/platform route |
+| cross-tenant Workspace access | stable tenant/Workspace Volume identity and broker checks |
+| stale Worker mutation | transaction-scoped authority and monotonically increasing fence |
+| duplicate queue delivery | idempotent command plus transactional RunAttempt claim |
+| ambiguous shell result | `UNKNOWN`; no automatic replay |
+| SSRF/data exfiltration to internal network | governed egress proxy and deny network policy |
+| path/symlink escape | rooted/O_NOFOLLOW trusted Volume operations |
+| infinite output/process/resource use | byte, timeout, PID, CPU, memory and disk limits |
+| browser observes non-durable output | Kafka ACK and projected watermark before SSE |
+| Valkey loss | rebuild from retained Kafka |
+| Cube loss | process world reset marker plus same persistent Workspace Volume |
+| secret leakage in events | bounded schemas and redaction; credentials never enter model context |
 
-### Stale Worker side effects
+Public network mode can still upload the current tenant's code to public
+destinations. KVM isolation protects the platform and other tenants; it is not
+a data-loss-prevention system. Enterprise deployments should add explicit
+destination allowlists and audit.
 
-RunAttempts carry a lease and monotonically increasing fencing token. Tool
-execution, checkpoint CAS, terminal commit and runtime handoff validate the
-current token. A recovered old Worker cannot regain authority by retaining a
-process or network connection.
+## Not guaranteed
 
-### Credential theft from user code
-
-Cube receives no model, database, object-store, Temporal, Cube API or platform
-credential. Tool capabilities are not included in model messages or persisted
-inside `/workspace`. The guest cannot route to platform networks.
-
-### Host discovery and escape
-
-The guest sees its own kernel/process/filesystem environment. KVM reduces the
-direct host-kernel syscall surface. The template uses fixed devices, identity
-and resources, and exposes no host mount or runtime socket.
-
-Residual risk remains for Cube/VMM/KVM/host vulnerabilities. Production
-hardening should place the Cube execution plane on dedicated hosts and keep the
-host patched.
-
-### Distributed replacement and partial failure
-
-Web and Control Plane replicas are replaceable because PostgreSQL, Temporal and
-object storage remain authoritative. Pi Workers stop Temporal polling before
-termination and receive a bounded drain window; a lost Worker cannot commit
-after its lease/fence is superseded. Authenticated steer targets the Worker
-address recorded with the current PostgreSQL assignment instead of relying on
-which Control Plane replica happened to accept the browser request.
-
-Tool Brokers expose a stable create Service, while owner-bound follow-up calls
-use the returned replica identity rather than random load balancing.
-PostgreSQL binds each activation to its Domain and owner replica for the
-lifetime of the warm runtime. One unavailable owner does not make every Broker
-unready, but that activation fails closed until ownership expires and cleanup
-completes. A replacement Broker never adopts ambiguous guest process state: it
-restores committed Pi and Workspace authorities and exposes the existing
-model-visible Sandbox reset boundary.
-
-These controls make the release multi-node-capable; they do not remove the
-external PostgreSQL, Temporal, object-storage, RWX filesystem, Kubernetes
-control-plane or Cube clusters from the infrastructure TCB.
-
-### Network exfiltration and SSRF
-
-Public Web traffic crosses the trusted egress gateway. The gateway rejects
-private, loopback, link-local, metadata, reserved and platform destinations
-after DNS resolution. Public egress intentionally permits source/data
-exfiltration to public hosts; operators who require stronger confidentiality
-must use a domain allowlist policy.
-
-### Resource exhaustion
-
-The Provider bounds CPU, memory, processes, open files, Workspace size,
-temporary storage, command time, Run wall-clock time and output. Tenant quotas
-and global Tool admission protect shared capacity. Orphan reconciliation and
-idle expiry reclaim ordinary runtimes. A user-selected persistent Cube is
-excluded from idle/LRU reclamation and therefore consumes an admission slot
-until its conversation is archived or the execution plane explicitly destroys
-it; when all slots are pinned, later Tool Runs wait rather than evicting another
-tenant's persistent process world.
-
-### Path and archive attacks
-
-Tool file APIs normalize paths beneath `/workspace`, reject absolute/traversal
-and symlink escape, bound file sizes and validate immutable checkpoint hashes.
-The Data Mover never accepts an arbitrary host path from the model or browser.
-Pi Session segments are content-addressed and validated against both stored and
-reconstructed SHA-256 digests before use. Live events use explicit Session
-sequence IDs in Valkey and reject gaps/conflicting replay. They are trimmed only
-after the terminal semantic projection exists; replay-floor advancement occurs
-only after the trim succeeds. Missing live data makes SSE unavailable instead
-of returning a partial transcript.
-
-### Duplicate/ambiguous side effects
-
-HTTP admission and checkpoint commits are idempotent. Arbitrary Bash is not
-automatically treated as retry-safe. A Tool operation ID is bound to one frozen
-logical Turn context, one current Attempt context, one per-sampling Cloud Step
-and one exact request. Short transport reconnects attach to the same
-in-memory execution ledger rather than start another command. Conflicting
-request reuse fails closed. If the Manager ledger, Tool service or Cube is
-lost, the operation is marked unknown and the activation is destroyed and
-restored from the last committed Workspace.
-
-### Forged or prematurely visible terminal state
-
-The Worker event channel rejects `turn.completed`, `turn.failed` and
-`turn.cancelled`. A Worker can return only a private prepared result. The
-Control Plane creates the public terminal event inside the same transaction as
-Run/Attempt settlement, checkpoint/Workspace-head CAS and semantic projection.
-A crash or notification failure therefore rolls back both the terminal event
-and canonical state.
-
-After an uncatchable Worker loss, only canonical public projections newer than
-the last Pi checkpoint can enter the hidden recovery suffix. Raw model thinking
-is excluded and in-flight Tool outcomes are marked unknown, preventing
-untrusted partial output from becoming a claim that a side effect completed.
-
-### Browser/admin confusion
-
-Tenant `owner` grants only tenant authority. A separate
-`platformAdministrator` identity controls deployment-wide model and proxy
-settings and lands on a dedicated page. The operator tenant ID comes from
-deployment configuration.
-
-## Data retention
-
-Conversation deletion is a soft archive. It removes the Session from ordinary
-listing/direct conversation reads but retains the Pi checkpoint, semantic
-conversation projection and Workspace audit history. Raw deltas age out of the
-bounded Kafka/Valkey window after the complete terminal projection commits;
-that is a storage-tier transition, not user-data deletion. A future
-hard-deletion/garbage-collection worker must erase database metadata and all
-referenced immutable objects under explicit tenant/legal policy. The browser
-delete action does not silently erase a shared Workspace.
-
-## Required evidence
-
-Before a release:
-
-1. run unit/integration/type checks;
-2. run the real Cube template/provider gate;
-3. verify no platform credential appears in guest `env` or `/proc`;
-4. verify private/platform routes are denied and public proxy egress works;
-5. verify cross-tenant Workspace access fails;
-6. verify time/output/process limits and cancellation;
-7. verify stale fences cannot execute Tools or commit checkpoints;
-8. verify completed/failed/cancelled Runs leave the expected warm or destroyed
-   runtime state and no orphan resources.
-
-Historical threat models and ADRs describe superseded designs only.
+- exactly-once arbitrary shell or external side effects;
+- process/memory/socket survival after Cube destruction;
+- historical Workspace rollback without a storage-backend snapshot policy;
+- safety from a Cube/KVM/hypervisor escape vulnerability;
+- multi-node disaster recovery unless PostgreSQL, Kafka and Workspace storage
+  are deployed and tested for it.

@@ -3,7 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { GitHubGatewayClient, GitHubGatewayRequest } from "@agent-dock/github-gateway";
 import {
-  createKopiaWorkspaceCheckpoint,
+  createPersistentVolumeReference,
   createWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
@@ -115,7 +115,7 @@ async function seed(): Promise<void> {
       id: IDS.workspace,
       tenant_id: IDS.tenant,
       project_id: IDS.project,
-      cell_id: "cell-0001",
+      sandbox_domain_id: "sandbox-domain-0001",
     })
     .execute();
   await database
@@ -338,11 +338,11 @@ describe.sequential("versioned Workspace service", () => {
     });
   });
 
-  it("lists and compares Kopia versions without pretending their file bytes are portable", async () => {
+  it("lists persistent Volume revisions without pretending their file bytes are portable", async () => {
     const readme = Buffer.from("provider-native\n");
-    const checkpoint = createKopiaWorkspaceCheckpoint({
-      snapshotId: "kopia-snapshot-version-three",
+    const checkpoint = createPersistentVolumeReference({
       volumeId: `adw-${"f".repeat(48)}`,
+      volumeRevision: "e".repeat(64),
       activationId: "20000000-0000-4000-8000-000000000001",
       tenantId: IDS.tenant,
       workspaceId: IDS.workspace,

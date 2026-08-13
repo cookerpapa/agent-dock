@@ -36,7 +36,7 @@
 - 将原 Sandbox Manager 收敛并重命名为 Tool Broker：只保留租户/Workspace
   鉴权、Lease/Fence、Tool operation `UNKNOWN`、Workspace CAS 和 Cube 适配，
   不再把它描述为第二套通用沙箱调度器。
-- 将 Workspace Data Mover 从 Broker sidecar 拆为独立 Deployment；共享 RWX
+- 将 Workspace Volume Gateway 从 Broker sidecar 拆为独立 Deployment；共享 RWX
   数据卷，并用 PostgreSQL advisory lock 串行化同一 Workspace 的 Kopia 搬运。
 - 企业 Stage 1/2 从“每 Cell 一套 Manager/Mover”改为一个共享 Domain，加
   Cell 只扩 Pi Worker；Cube 管理密钥仍不进入 Worker。
@@ -2857,7 +2857,7 @@
   activations receive one deterministic tenant/Workspace/Session volume through
   the `agentdock-posix` plugin; browsers, models and Tool code cannot select a
   host path, volume driver or repository.
-- Added a separately authenticated trusted Workspace Data Mover. It alone
+- Added a separately authenticated trusted Workspace Volume Gateway. It alone
   mounts the POSIX root and receives a dedicated Kopia repository password and
   least-privilege S3 credential. Its API is limited to exact-volume prepare,
   quiescent snapshot and hash-verified bounded single-file materialization.
@@ -2893,7 +2893,7 @@
   the handoff secret under a strictly higher fence and starts a fresh Worker.
 - Checkpointing is now a two-phase trusted protocol. The guest closes the Tool
   Worker, records and freezes exact UID-1000 PID/start-time identities, flushes
-  and indexes `/workspace`, the trusted Data Mover creates an immutable Kopia
+  and indexes `/workspace`, the trusted Volume Gateway creates an immutable Kopia
   snapshot, and the guest resumes only those identities. Any ambiguous cleanup
   destroys the VM.
 - The live POSIX Volume remains the interactive execution copy. Its trusted
@@ -2931,7 +2931,7 @@
   compatibility branches.
 - Portable source restoration preserves the trusted runtime directory while
   replacing user files. This is required for empty/GitHub source seeds, whose
-  restore step runs after the Data Mover establishes the volume generation.
+  restore step runs after the Volume Gateway establishes the volume generation.
 
 ## 2026-07-27 — Pi Tool batch serialization
 
@@ -3113,11 +3113,11 @@
   trusted Volume envelope at `.agent-dock-runtime/git`. Cube continues to
   mount only the sibling `workspace/` directory.
 - Removed platform Git initialization and Patch collection from the untrusted
-  Tool Worker and Cube Tool service. The trusted Workspace Data Mover now
+  Tool Worker and Cube Tool service. The trusted Workspace Volume Gateway now
   establishes the baseline before Agent Tools become available and computes
   the cumulative binary Patch while the Cube process boundary is frozen.
 - Bound restore to the expected baseline commit and advanced the immutable
-  Workspace reference and Data Mover state to v4. Older development
+  Workspace reference and Volume Gateway state to v4. Older development
   checkpoints are intentionally unsupported.
 - Replaced the environment recipe's root `git status` assumption with a
   writable `/workspace` boundary check and added a database migration for
@@ -3289,7 +3289,7 @@
 # 2026-08-09 — Distributed Kubernetes application plane and demand scaling
 
 - Added a strict umbrella Helm Chart for multi-node-capable Web, Control Plane,
-  Pi Worker and trusted Sandbox Manager/Data Mover deployment. The release
+  Pi Worker and trusted Sandbox Manager/Volume Gateway deployment. The release
   consumes external PostgreSQL/PgBouncer, Temporal, S3/Kopia, RWX Workspace
   storage and Cube authorities instead of hiding single-node data services in
   application Pods.
@@ -3411,11 +3411,11 @@
   physically ambiguous Cube activations. Tenant and Domain admission are
   serialized in PostgreSQL, and owner-lost `UNKNOWN` runtimes remain charged
   until reconciliation confirms cleanup.
-- Adopted `p-queue` as a narrow process-local gate for Workspace Data Mover
+- Adopted `p-queue` as a narrow process-local gate for Workspace Volume Gateway
   work. Kopia/POSIX concurrency, queue depth and wait time are bounded without
   creating a second durable scheduler or replacing PostgreSQL volume locks,
   fencing and Workspace-head CAS.
-- Exported Data Mover pressure and capacity-rejection metrics, wired the
+- Exported Volume Gateway pressure and capacity-rejection metrics, wired the
   service into Prometheus and added Grafana panels for active/limit, waiting,
   rejection rate and p95 queue/execution time.
 - Added one validated timeout chain for queue wait, Kopia execution, internal

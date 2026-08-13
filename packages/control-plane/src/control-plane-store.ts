@@ -149,7 +149,7 @@ type WorkspaceRepositorySourceRow = {
   sourcePrivate: boolean | null;
 };
 
-type AssignedExecutionCell = {
+type AssignedSandboxDomain = {
   id: string;
 };
 
@@ -692,14 +692,14 @@ export class ControlPlaneStore {
           .values({ id: projectId, tenant_id: this.#tenantId, name: request.name })
           .returning(["id", "name", "created_at"])
           .executeTakeFirstOrThrow();
-        const executionCell = await this.#assignExecutionCell(transaction);
+        const sandboxDomain = await this.#assignSandboxDomain(transaction);
         await transaction
           .insertInto("workspaces")
           .values({
             id: workspaceId,
             tenant_id: this.#tenantId,
             project_id: project.id,
-            cell_id: executionCell.id,
+            sandbox_domain_id: sandboxDomain.id,
             object_snapshot_key: null,
           })
           .executeTakeFirstOrThrow();
@@ -854,41 +854,41 @@ export class ControlPlaneStore {
     }
   }
 
-  async #assignExecutionCell(transaction: Transaction<Database>): Promise<AssignedExecutionCell> {
-    const cell = await transaction
-      .selectFrom("execution_cells")
-      .select(["id", "assigned_workspaces", "capacity_weight"])
+  async #assignSandboxDomain(transaction: Transaction<Database>): Promise<AssignedSandboxDomain> {
+    const domain = await transaction
+      .selectFrom("sandbox_domains")
+      .select(["id", "assigned_workspaces", "maximum_active_sandboxes"])
       .where("state", "=", "active")
       .orderBy(
-        sql<number>`(${sql.ref("assigned_workspaces")}::numeric / ${sql.ref("capacity_weight")})`,
+        sql<number>`(${sql.ref("assigned_workspaces")}::numeric / ${sql.ref("maximum_active_sandboxes")})`,
         "asc",
       )
       .orderBy("id", "asc")
       .limit(1)
       .forUpdate()
       .executeTakeFirst();
-    if (cell === undefined) {
+    if (domain === undefined) {
       throw new ControlPlaneStoreError(
         "control_plane_misconfigured",
-        "No active execution Cell is available",
+        "No active Sandbox Domain is available",
       );
     }
     const updated = await transaction
-      .updateTable("execution_cells")
+      .updateTable("sandbox_domains")
       .set({
         assigned_workspaces: sql<string>`${sql.ref("assigned_workspaces")} + 1`,
         updated_at: new Date(),
       })
-      .where("id", "=", cell.id)
+      .where("id", "=", domain.id)
       .where("state", "=", "active")
       .executeTakeFirst();
     if (updated.numUpdatedRows !== 1n) {
       throw new ControlPlaneStoreError(
         "conflict",
-        "Execution Cell changed while assigning the Workspace",
+        "Sandbox Domain changed while assigning the Workspace",
       );
     }
-    return { id: cell.id };
+    return { id: domain.id };
   }
 
   async createSession(

@@ -10,7 +10,6 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
-import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,10 +20,8 @@ import {
   FileCheckpointObjectStore,
   PI_SESSION_MANIFEST_MEDIA_TYPE,
   PostgresSandboxCheckpointStore,
-  S3CheckpointObjectStore,
   SessionLiveStreamCompactionService,
   decodePiSessionManifest,
-  type S3CheckpointObjectStoreOptions,
 } from "../src/index.ts";
 import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 
@@ -199,7 +196,7 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       id: IDS.workspace,
       tenant_id: IDS.tenant,
       project_id: IDS.project,
-      cell_id: "cell-0001",
+      sandbox_domain_id: "sandbox-domain-0001",
       object_snapshot_key: null,
     })
     .execute();
@@ -1055,150 +1052,4 @@ describe("Valkey Session live-stream compaction", () => {
       await isolatedPglite.close().catch(() => undefined);
     }
   }, 30_000);
-});
-
-type S3IntegrationConfiguration = {
-  options: S3CheckpointObjectStoreOptions;
-  physicalPrefix: string;
-  credentials: {
-    accessKeyId: string;
-    secretAccessKey: string;
-  };
-};
-
-function s3IntegrationConfiguration(): S3IntegrationConfiguration {
-  const endpoint = process.env.AGENT_DOCK_TEST_S3_ENDPOINT;
-  const bucket = process.env.AGENT_DOCK_TEST_S3_BUCKET;
-  const accessKeyId = process.env.AGENT_DOCK_TEST_S3_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AGENT_DOCK_TEST_S3_SECRET_ACCESS_KEY;
-  const physicalPrefix = process.env.AGENT_DOCK_TEST_S3_KEY_PREFIX;
-  if (
-    endpoint === undefined ||
-    bucket === undefined ||
-    accessKeyId === undefined ||
-    secretAccessKey === undefined ||
-    physicalPrefix === undefined
-  ) {
-    throw new Error("S3 checkpoint integration environment is incomplete");
-  }
-  const credentials = { accessKeyId, secretAccessKey };
-  return {
-    physicalPrefix,
-    credentials,
-    options: {
-      endpoint,
-      bucket,
-      region: "us-east-1",
-      keyPrefix: physicalPrefix,
-      forcePathStyle: true,
-      allowInsecureEndpoint: endpoint.startsWith("http://"),
-      credentials,
-      maxAttempts: 2,
-    },
-  };
-}
-
-const s3IntegrationEnabled = process.env.AGENT_DOCK_TEST_S3_ENDPOINT !== undefined;
-
-describe.skipIf(!s3IntegrationEnabled)("S3-compatible settled checkpoint store", () => {
-  it("restores through a fresh adapter and detects immutable conflicts and remote corruption", async () => {
-    const configuration = s3IntegrationConfiguration();
-    const isolatedPglite = await PGlite.create();
-    const isolatedSocket = new PGLiteSocketServer({
-      db: isolatedPglite,
-      host: "127.0.0.1",
-      port: 0,
-    });
-    let isolatedDatabase: Kysely<Database> | undefined;
-    let readerObjectStore: S3CheckpointObjectStore | undefined;
-    let rawClient: S3Client | undefined;
-    try {
-      rawClient = new S3Client({
-        endpoint: configuration.options.endpoint!,
-        region: configuration.options.region,
-        forcePathStyle: true,
-        credentials: configuration.credentials,
-        maxAttempts: 1,
-      });
-      await rawClient.send(new CreateBucketCommand({ Bucket: configuration.options.bucket }));
-      await isolatedSocket.start();
-      isolatedDatabase = createDatabase({
-        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
-        maxConnections: 2,
-      });
-      await runMigrations(isolatedDatabase, "up");
-      await seed(isolatedDatabase);
-
-      const writerObjectStore = new S3CheckpointObjectStore(configuration.options);
-      let savedRevision: string;
-      let savedWorkspaceRevision: string;
-      try {
-        const writer = new PostgresSandboxCheckpointStore({
-          database: isolatedDatabase,
-          objectStore: writerObjectStore,
-          idGenerator: (() => {
-            let sequence = 0;
-            return () => `70000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
-          })(),
-        });
-        const saved = await writer.save(command(1), null, {
-          piSession: piSession("remote"),
-          workspace: workspace("remote"),
-          environment: ENVIRONMENT_VALIDATION,
-        });
-        savedRevision = saved.revision;
-        if (saved.workspaceRevision === undefined) {
-          throw new Error("Settled Workspace checkpoint did not return its content revision");
-        }
-        savedWorkspaceRevision = saved.workspaceRevision;
-        await writerObjectStore.put("probes/immutable.bin", Buffer.from("first"));
-        await insertCompletedEvent(1, isolatedDatabase);
-      } finally {
-        writerObjectStore.destroy();
-      }
-
-      readerObjectStore = new S3CheckpointObjectStore(configuration.options);
-      await expect(
-        readerObjectStore.put("probes/immutable.bin", Buffer.from("replacement")),
-      ).rejects.toMatchObject({ code: "checkpoint_object_exists", retryable: false });
-      await expect(readerObjectStore.get("probes/immutable.bin")).resolves.toEqual(
-        Buffer.from("first"),
-      );
-
-      const reader = new PostgresSandboxCheckpointStore({
-        database: isolatedDatabase,
-        objectStore: readerObjectStore,
-      });
-      await expect(reader.load(command(1))).resolves.toEqual({
-        revision: savedRevision,
-        piSession: piSession("remote"),
-        workspace: workspace("remote"),
-        workspaceRevision: savedWorkspaceRevision,
-      });
-
-      const session = await isolatedDatabase
-        .selectFrom("sessions")
-        .select("pi_session_snapshot_key")
-        .where("id", "=", IDS.session)
-        .executeTakeFirstOrThrow();
-      expect(session.pi_session_snapshot_key).not.toBeNull();
-      await rawClient.send(
-        new PutObjectCommand({
-          Bucket: configuration.options.bucket,
-          Key: `${configuration.physicalPrefix}/${session.pi_session_snapshot_key!}`,
-          Body: Buffer.from("corrupt"),
-        }),
-      );
-      await expect(reader.load(command(1))).rejects.toMatchObject({
-        code: "checkpoint_corrupt",
-        retryable: false,
-      });
-    } finally {
-      rawClient?.destroy();
-      readerObjectStore?.destroy();
-      await isolatedDatabase?.destroy();
-      await isolatedSocket.stop().catch(() => undefined);
-      await isolatedPglite.close().catch(() => undefined);
-    }
-  }, 60_000);
 });

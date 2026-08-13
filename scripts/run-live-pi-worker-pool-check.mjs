@@ -262,48 +262,7 @@ async function activeWorkers() {
           );
           return { supervisorId, workerIdentity: `${supervisorId}/${bootId}` };
         });
-  if (workerDeployment === "kubernetes") {
-    // Deployment-versioned Temporal queues intentionally omit poller identity
-    // from this CLI response. Kubernetes readiness is reached only after the
-    // Temporal Worker starts, while the active owner connection below proves
-    // the same boot is still enrolled in the Control Plane.
-    return connected.map(({ supervisorId }) => supervisorId);
-  }
-  const taskQueue = JSON.parse(
-    await capture(process.execPath, [
-      "scripts/production-compose.mjs",
-      "exec",
-      "-T",
-      "temporal",
-      "temporal",
-      "task-queue",
-      "describe",
-      "--namespace",
-      "agent-dock",
-      "--task-queue",
-      "agent-dock-pi-runs-cell-0001-v1",
-      "--address",
-      "127.0.0.1:7233",
-      "--output",
-      "json",
-    ]),
-  );
-  const activityPollers = new Set(
-    taskQueue.pollers
-      .filter((poller) => poller.taskQueueType === "activity")
-      .map((poller) => poller.identity),
-  );
-  const workflowPollers = new Set(
-    taskQueue.pollers
-      .filter((poller) => poller.taskQueueType === "workflow")
-      .map((poller) => poller.identity),
-  );
-  return connected
-    .filter(
-      ({ workerIdentity }) =>
-        activityPollers.has(workerIdentity) && workflowPollers.has(workerIdentity),
-    )
-    .map(({ supervisorId }) => supervisorId);
+  return connected.map(({ supervisorId }) => supervisorId);
 }
 
 async function waitForWorkers(expectedCount) {

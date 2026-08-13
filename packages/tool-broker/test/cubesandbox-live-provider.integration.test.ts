@@ -8,7 +8,7 @@ import {
 } from "@agent-dock/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
-  parseKopiaWorkspaceCheckpoint,
+  parsePersistentVolumeReference,
 } from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -19,7 +19,7 @@ import { release as hostKernelRelease } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   CubeSandboxProvider,
-  HttpWorkspaceDataMover,
+  HttpWorkspaceVolumeGateway,
   OfficialCubeSandboxRuntimeClient,
   ToolBroker,
   type OfficialCubeSandboxRuntimeClientOptions,
@@ -390,10 +390,10 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         imageRevision: config.imageRevision,
         webProxy: config.webProxy,
         runtime: config.runtime,
-        workspaceDataMover: new HttpWorkspaceDataMover({
-          baseUrl: required("AGENT_DOCK_WORKSPACE_DATA_MOVER_URL"),
+        workspaceVolumeGateway: new HttpWorkspaceVolumeGateway({
+          baseUrl: required("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL"),
           serviceToken: await readPrivateKey(
-            required("AGENT_DOCK_WORKSPACE_DATA_MOVER_TOKEN_FILE"),
+            required("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
           ),
         }),
       });
@@ -497,7 +497,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
                 first.activationId,
                 "test ! -S /var/run/docker.sock; " +
                   "test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token; " +
-                  "if env | grep -Ei '(OPENAI|DEEPSEEK|DATABASE_URL|POSTGRES|MINIO|KUBECONFIG|CUBE_API_KEY)'; then exit 92; fi",
+                  "if env | grep -Ei '(OPENAI|DEEPSEEK|DATABASE_URL|POSTGRES|KUBECONFIG|CUBE_API_KEY)'; then exit 92; fi",
               ),
             ),
           ),
@@ -531,7 +531,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         if (captured.type !== "tool_sandbox.captured") {
           throw new Error("CubeSandbox live Workspace capture was missing");
         }
-        const checkpoint = parseKopiaWorkspaceCheckpoint(
+        const checkpoint = parsePersistentVolumeReference(
           decodeWorkspaceSnapshotBlob(captured.workspace),
         );
         expect(checkpoint).toMatchObject({

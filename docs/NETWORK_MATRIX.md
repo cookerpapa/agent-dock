@@ -1,99 +1,26 @@
-# Network and credential matrix
+# Network matrix
 
-## Default rule
+| Source | Destination | Allowed | Purpose |
+| --- | --- | --- | --- |
+| Browser | Web/Control Plane/Event Gateway | yes | product API and SSE |
+| Control Plane | PostgreSQL | yes | product/Run authority |
+| Control Plane | Event Gateway | yes | live projection coordination |
+| Pi Worker | PostgreSQL | yes | queue, Session and lifecycle state |
+| Pi Worker | Event Gateway | yes | authenticated event batches |
+| Pi Worker | Tool Broker | yes | fenced Tool RPC |
+| Pi Worker | provider proxy/model provider | yes | model requests |
+| Event Gateway | PostgreSQL/Kafka/Valkey | yes | ingest, projection, replay |
+| Tool Broker | PostgreSQL | yes | activation and authority state |
+| Tool Broker | Cube API | yes | KVM lifecycle |
+| Volume gateway | PostgreSQL/RWX Workspace storage | yes | revision/Volume coordination |
+| Cube guest | egress proxy | optional | governed public HTTP/HTTPS |
+| Cube guest | platform services/internal/metadata | no | no route/credential |
+| Cube guest | other Workspace Volumes | no | mount isolation |
 
-Only an explicitly required connection is allowed. User code never joins a
-platform service network.
+The Sandbox default is deny-all. Public mode routes HTTP/HTTPS through the Cube
+egress gateway, which blocks loopback, RFC1918, link-local, metadata, Kubernetes
+and platform destinations. Allowing public egress does not grant direct access
+to the trusted cluster network.
 
-| Source | Destination | Allowed | Credential |
-| --- | --- | ---: | --- |
-| Browser | Web ingress | yes | browser session cookie |
-| Web ingress | Control Plane | yes | trusted internal route |
-| Control Plane | PostgreSQL | yes | DB credential |
-| Control Plane | PostgreSQL direct session endpoint | yes | DB credential; `LISTEN`/migration only |
-| Control Plane | Temporal | yes | internal namespace |
-| Event Gateway | Kafka brokers | yes | TLS + SCRAM-SHA-512, topic/group-scoped ACL |
-| Event Gateway | Valkey | yes | private URL/TLS identity; live replay only |
-| Event Gateway | PostgreSQL | yes | sequence validation, cursor and terminal-event credential |
-| Live Stream Compactor | Valkey + PostgreSQL | yes | private URL + DB credential |
-| Control Plane | Event Gateway internal projection | yes | dedicated service token |
-| Control Plane | MinIO/S3 | yes | object-store credential |
-| Control Plane | exact Pi Worker management endpoint | yes | management service token |
-| Control Plane | Tool Broker Service | yes | materializer credential |
-| Pi Worker | Control Plane management channel | yes | Worker boot credential |
-| Pi Worker | Event Gateway internal ingest | yes | dedicated service token; no Kafka credential |
-| Pi Worker | Model Gateway | yes | short-lived Run capability |
-| Pi Worker | Tool Broker | yes | service identity + Tool lease |
-| Tool Broker | Cube API/Proxy | yes | Cube API credential |
-| Tool Broker | independent Data Mover | yes | Data Mover service credential |
-| Data Mover | Cube Volume/POSIX storage | yes | deployment identity |
-| Data Mover | object storage | yes | scoped checkpoint credential |
-| Cube guest | Cube egress gateway | yes | no platform credential |
-| Cube guest | public HTTP/HTTPS | via gateway | none |
-| Cube guest | private/link-local/metadata networks | no | none |
-| Cube guest | Control Plane/PostgreSQL/Temporal/MinIO/Model Gateway | no | none |
-| Cube guest | Cube control API | no | none |
-| Cube guest | another tenant Workspace | no | none |
-
-## Trusted product plane
-
-Control Plane, Event Gateway, Kafka, Valkey, Temporal, PostgreSQL, object storage, model gateway and Worker
-management use private deployment networks. Their credentials are injected only
-into the service that needs them.
-
-The Worker does not receive the Cube API key. The Tool Broker does not
-receive the model provider key.
-
-In the distributed profile, NetworkPolicy starts from denied ingress/egress.
-In-cluster authorities must live in a namespace carrying the explicitly
-reviewed trusted-plane label; external PostgreSQL, Temporal, S3, Cube, proxy
-and OTLP addresses must use concrete operator-supplied CIDRs. Private image
-registry access is a node/runtime concern and is authenticated with
-`imagePullSecrets`, not with a credential mounted into application containers.
-
-## Cube egress
-
-The guest receives proxy environment variables pointing to the trusted gateway.
-The gateway may connect directly or through the administrator-configured
-upstream WSL/host proxy.
-
-The gateway denies:
-
-```text
-loopback
-RFC1918
-carrier-grade NAT
-link-local
-cloud metadata
-multicast/reserved/test ranges
-platform service destinations
-```
-
-DNS rebinding is mitigated by resolving and validating the actual target
-address at connection time. Redirects remain subject to the same validation.
-
-## Credential placement
-
-| Credential | Stored/used by | Must not enter |
-| --- | --- | --- |
-| model API key | encrypted DB + Model Gateway | browser, Cube |
-| DB credential | Control Plane/trusted services | browser, Cube |
-| object-store credential | Control Plane/Data Mover/Worker as scoped | browser, Cube |
-| Temporal credential/config | Control Plane/Workers | browser, Cube |
-| Cube API key | Tool Broker | browser, Pi prompt, Cube guest |
-| browser password hash | authentication store | logs, browser response |
-| Tool lease/handoff secret | Worker/Manager/guest Tool service | model context, Workspace |
-
-## Hot proxy configuration
-
-The platform administrator updates the proxy origin through a versioned Control
-Plane API. The Cube egress gateway reloads the latest committed configuration
-for new connections. Existing connections retain their already-established
-route; no cluster restart is required.
-
-## Evidence
-
-Live acceptance attempts to reach every denied platform/private destination
-from inside the guest, verifies public HTTPS through the gateway, checks the
-guest environment for credentials, and proves a second tenant cannot read the
-first tenant's Workspace.
+Kubernetes NetworkPolicy must be enforced by the selected CNI. External CIDRs
+must be explicit; `0.0.0.0/0` is not a valid trusted-plane escape hatch.

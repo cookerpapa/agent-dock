@@ -5,7 +5,7 @@ import { chmod, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 import type { WorkspaceSnapshotFileMetadata } from "./workspace-index.ts";
-import { parseKopiaWorkspaceCheckpoint } from "./kopia-workspace-checkpoint.ts";
+import { parsePersistentVolumeReference } from "./persistent-volume-reference.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
 export const MAX_WORKSPACE_SNAPSHOT_FILES = 512;
@@ -164,7 +164,7 @@ export async function captureWorkspaceSnapshot(workspaceDirectory: string): Prom
 }
 
 export function parseWorkspaceSnapshot(snapshot: Uint8Array): WorkspaceSnapshotFileContent[] {
-  if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) {
+  if (parsePersistentVolumeReference(snapshot) !== undefined) {
     throw snapshotError("Provider Workspace checkpoint does not contain portable file bytes");
   }
   if (snapshot.byteLength < 1 || snapshot.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {
@@ -319,13 +319,13 @@ export async function restoreWorkspaceSnapshot(
 }
 
 export function validateWorkspaceSnapshot(snapshot: Uint8Array): void {
-  if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) return;
+  if (parsePersistentVolumeReference(snapshot) !== undefined) return;
   parseWorkspaceSnapshot(snapshot);
 }
 
 export function workspaceSnapshotMetadata(snapshot: Uint8Array): WorkspaceSnapshotMetadata[] {
-  const kopia = parseKopiaWorkspaceCheckpoint(snapshot);
-  if (kopia !== undefined) return kopia.files.map((file) => ({ ...file }));
+  const volume = parsePersistentVolumeReference(snapshot);
+  if (volume !== undefined) return volume.files.map((file) => ({ ...file }));
   return parseWorkspaceSnapshot(snapshot).map((file) => ({
     path: file.path,
     executable: file.executable,

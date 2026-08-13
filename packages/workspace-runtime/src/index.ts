@@ -28,12 +28,12 @@ export {
   validateWorkspaceFileList,
 } from "./workspace-index.ts";
 export {
-  KOPIA_WORKSPACE_CHECKPOINT_FORMAT,
-  createKopiaWorkspaceCheckpoint,
-  parseKopiaWorkspaceCheckpoint,
-  type CreateKopiaWorkspaceCheckpointInput,
-  type KopiaWorkspaceCheckpoint,
-} from "./kopia-workspace-checkpoint.ts";
+  PERSISTENT_VOLUME_REFERENCE_FORMAT,
+  createPersistentVolumeReference,
+  parsePersistentVolumeReference,
+  type CreatePersistentVolumeReferenceInput,
+  type PersistentVolumeReference,
+} from "./persistent-volume-reference.ts";
 
 export {
   collectExternalGitWorkspacePatch,

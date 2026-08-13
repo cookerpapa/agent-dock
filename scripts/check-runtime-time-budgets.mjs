@@ -5,10 +5,10 @@ import { parseAllDocuments, parseDocument } from "yaml";
 const MAX_TOOL_EXECUTION_MS = 5 * 60_000;
 const TOOL_TRANSPORT_MARGIN_MS = 60_000;
 const MODEL_CAPABILITY_MARGIN_MS = 60_000;
-const TEMPORAL_SETTLEMENT_GRACE_MS = 5 * 60_000;
+const WORKER_SETTLEMENT_GRACE_MS = 5 * 60_000;
 const PROCESS_SHUTDOWN_MARGIN_MS = 60_000;
 const LIVE_STREAM_RETENTION_MS = 60 * 60_000;
-const WORKSPACE_DATA_MOVER_HTTP_MS = 11 * 60_000;
+const WORKSPACE_VOLUME_GATEWAY_HTTP_MS = 11 * 60_000;
 
 function integer(value, description) {
   const parsed = Number(value);
@@ -45,21 +45,21 @@ function validateWorkerPolicy(policy, description) {
     `${description} model capability can expire before its Turn boundary`,
   );
   assert.ok(
-    termination >= turn + manager + TEMPORAL_SETTLEMENT_GRACE_MS + PROCESS_SHUTDOWN_MARGIN_MS,
-    `${description} process can be killed before its Temporal Activity drain completes`,
+    termination >= turn + manager + WORKER_SETTLEMENT_GRACE_MS + PROCESS_SHUTDOWN_MARGIN_MS,
+    `${description} process can be killed before its fenced Run drain completes`,
   );
 }
 
-function validateWorkspaceDataMoverPolicy(policy, description) {
+function validateWorkspaceVolumeGatewayPolicy(policy, description) {
   const queueWait = integer(policy.queueWaitMs, `${description} queue wait`);
-  const command = integer(policy.commandMs, `${description} command timeout`);
+  const request = integer(policy.requestMs, `${description} request timeout`);
   const termination = integer(policy.terminationGraceMs, `${description} termination grace`);
   assert.ok(
-    queueWait + command <= WORKSPACE_DATA_MOVER_HTTP_MS,
-    `${description} can outlive its internal HTTP request budget`,
+    queueWait < request,
+    `${description} queue can consume its complete HTTP request budget`,
   );
   assert.ok(
-    termination >= WORKSPACE_DATA_MOVER_HTTP_MS + PROCESS_SHUTDOWN_MARGIN_MS,
+    termination >= request + PROCESS_SHUTDOWN_MARGIN_MS,
     `${description} process can be killed before an admitted operation drains`,
   );
 }
@@ -90,30 +90,38 @@ validateWorkerPolicy(
 );
 
 const composeDataMover = composeText.slice(
-  composeText.indexOf("\n  workspace-data-mover:"),
+  composeText.indexOf("\n  workspace-volume-gateway:"),
   composeText.indexOf("\n  tool-broker:"),
 );
-assert.ok(composeDataMover.length > 0, "Compose Workspace Data Mover service is missing");
+const composeToolBroker = composeText.slice(
+  composeText.indexOf("\n  tool-broker:"),
+  composeText.indexOf("\n  github-gateway:"),
+);
+assert.ok(composeDataMover.length > 0, "Compose Workspace Volume Gateway service is missing");
+assert.ok(composeToolBroker.length > 0, "Compose Tool Broker service is missing");
 function composeDefaultInteger(section, name) {
   const match = new RegExp(`${name}: (?:\\$\\{[^}\\n]+:-)?(\\d+)(?:\\})?`).exec(section);
   assert.ok(match, `Compose ${name} default is missing`);
   return integer(match[1], `Compose ${name}`);
 }
 const composeDataMoverStop = /stop_grace_period:\s*(\S+)/.exec(composeDataMover)?.[1];
-assert.ok(composeDataMoverStop, "Compose Workspace Data Mover stop grace is missing");
-validateWorkspaceDataMoverPolicy(
+assert.ok(composeDataMoverStop, "Compose Workspace Volume Gateway stop grace is missing");
+validateWorkspaceVolumeGatewayPolicy(
   {
     queueWaitMs: composeDefaultInteger(
       composeDataMover,
-      "AGENT_DOCK_WORKSPACE_DATA_MOVER_QUEUE_WAIT_TIMEOUT_MS",
+      "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS",
     ),
-    commandMs: composeDefaultInteger(
-      composeDataMover,
-      "AGENT_DOCK_WORKSPACE_DATA_MOVER_COMMAND_TIMEOUT_MS",
+    requestMs: composeDefaultInteger(
+      composeToolBroker,
+      "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS",
     ),
-    terminationGraceMs: durationMs(composeDataMoverStop, "Compose Workspace Data Mover stop grace"),
+    terminationGraceMs: durationMs(
+      composeDataMoverStop,
+      "Compose Workspace Volume Gateway stop grace",
+    ),
   },
-  "Compose Workspace Data Mover",
+  "Compose Workspace Volume Gateway",
 );
 
 function yaml(path) {
@@ -139,13 +147,13 @@ validateWorkerPolicy(
   },
   "Platform Helm chart",
 );
-validateWorkspaceDataMoverPolicy(
+validateWorkspaceVolumeGatewayPolicy(
   {
-    queueWaitMs: platformValues.sandboxPlane.dataMoverQueueWaitTimeoutMs,
-    commandMs: platformValues.sandboxPlane.dataMoverCommandTimeoutMs,
+    queueWaitMs: platformValues.sandboxPlane.volumeGatewayQueueWaitTimeoutMs,
+    requestMs: platformValues.sandboxPlane.volumeGatewayRequestTimeoutMs,
     terminationGraceMs: 720_000,
   },
-  "Platform Helm Workspace Data Mover",
+  "Platform Helm Workspace Volume Gateway",
 );
 
 const composeKafkaRetention =

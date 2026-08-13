@@ -107,12 +107,13 @@ operation ID. Identical reconnects attach to one bounded execution ledger;
 conflicting reuse fails closed. Lazy activation, proxy configuration and Cube
 lifecycle remain invisible to Pi.
 
-## Checkpoints
+## Persistent Workspace Volume
 
-The guest filesystem is not the durable authority. The trusted Data Mover
-flushes the Session-bound Cube Volume/POSIX Workspace and creates an immutable
-Kopia checkpoint. PostgreSQL advances the Workspace head only through
-base-revision CAS under the current fence.
+The microVM root/process world is not durable. The Workspace's stable Cube
+Volume is. The trusted Volume gateway flushes the Volume and captures a bounded
+identity/file/hash/Git reference; PostgreSQL advances the Workspace revision
+only through base-revision CAS under the current fence. No per-Run archive copy
+is created.
 
 ## Acceptance
 

@@ -1,10 +1,8 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS } from "@agent-dock/temporal-orchestration";
 
 const MAX_SECRET_BYTES = 16 * 1_024;
-const TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS = 5 * 60_000;
 const MAX_REMOTE_TOOL_EXECUTION_MS = 5 * 60_000;
 const REMOTE_TOOL_TRANSPORT_MARGIN_MS = 60_000;
 const MODEL_CAPABILITY_EXPIRY_MARGIN_MS = 60_000;
@@ -21,16 +19,11 @@ export type SupervisorHostConfig = {
   toolBrokerServiceToken: string;
   modelCredentialMasterKey: string;
   databaseUrl: string;
+  databaseNotificationUrl: string;
   managementHost: string;
   managementPort: number;
   managementAdvertisedBaseUrl: string;
   maxConcurrentSessions: number;
-  temporalAddress: string;
-  temporalNamespace: string;
-  executionCellId: string;
-  temporalTaskQueue: string;
-  temporalWorkerDeploymentName?: string;
-  temporalWorkerBuildId?: string;
   toolBrokerBaseUrls: readonly string[];
   toolBrokerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
@@ -269,24 +262,6 @@ export async function loadSupervisorHostConfig(
         ),
       }
     : {};
-  const temporalWorkerVersioningEnabled = booleanValue(
-    environment,
-    "AGENT_DOCK_TEMPORAL_WORKER_VERSIONING_ENABLED",
-  );
-  const temporalWorkerDeployment = temporalWorkerVersioningEnabled
-    ? {
-        temporalWorkerDeploymentName: bounded(
-          required(environment, "AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME"),
-          "AGENT_DOCK_TEMPORAL_WORKER_DEPLOYMENT_NAME",
-          127,
-        ),
-        temporalWorkerBuildId: bounded(
-          required(environment, "AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID"),
-          "AGENT_DOCK_TEMPORAL_WORKER_BUILD_ID",
-          255,
-        ),
-      }
-    : {};
   const toolBrokerRequestTimeoutMs = integerValue(
     environment,
     "AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS",
@@ -353,14 +328,10 @@ export async function loadSupervisorHostConfig(
   if (repositoryImportWaitMs < repositoryImportLeaseMs) {
     throw new TypeError("Repository import wait must not expire before its ownership lease");
   }
-  if (
-    piTurnTimeoutMs + toolBrokerRequestTimeoutMs + TEMPORAL_ACTIVITY_SETTLEMENT_GRACE_MS >
-    TEMPORAL_RUN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS
-  ) {
-    throw new TypeError(
-      "Pi Turn timeout plus Tool Broker timeout exceeds the Temporal Activity settlement budget",
-    );
-  }
+  const databaseUrl = await secret(environment, "DATABASE_URL", allowInlineSecrets);
+  const databaseNotificationUrl =
+    (await optionalSecret(environment, "DATABASE_NOTIFICATION_URL", allowInlineSecrets)) ??
+    databaseUrl;
   return {
     supervisorId: bounded(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
@@ -393,7 +364,8 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
       allowInlineSecrets,
     ),
-    databaseUrl: await secret(environment, "DATABASE_URL", allowInlineSecrets),
+    databaseUrl,
+    databaseNotificationUrl,
     externalWorkerEventLog,
     ...workerEventIngest,
     managementHost: bounded(
@@ -414,27 +386,6 @@ export async function loadSupervisorHostConfig(
       "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
     maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 4, 1, 16),
-    temporalAddress: bounded(
-      required(environment, "AGENT_DOCK_TEMPORAL_ADDRESS"),
-      "AGENT_DOCK_TEMPORAL_ADDRESS",
-      512,
-    ),
-    temporalNamespace: bounded(
-      environment.AGENT_DOCK_TEMPORAL_NAMESPACE ?? "agent-dock",
-      "AGENT_DOCK_TEMPORAL_NAMESPACE",
-      255,
-    ),
-    executionCellId: bounded(
-      environment.AGENT_DOCK_EXECUTION_CELL_ID ?? "cell-0001",
-      "AGENT_DOCK_EXECUTION_CELL_ID",
-      64,
-    ),
-    temporalTaskQueue: bounded(
-      environment.AGENT_DOCK_TEMPORAL_TASK_QUEUE ?? "agent-dock-pi-runs-cell-0001-v1",
-      "AGENT_DOCK_TEMPORAL_TASK_QUEUE",
-      255,
-    ),
-    ...temporalWorkerDeployment,
     toolBrokerBaseUrls: internalServiceBaseUrls(
       required(environment, "AGENT_DOCK_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,

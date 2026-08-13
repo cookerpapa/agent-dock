@@ -55,7 +55,7 @@ export type PiTurnRuntimeOptions = {
   resolveWorkspaceDirectory: (command: ExecuteTurnCommandMessage) => Promise<string> | string;
 };
 
-export const PINNED_PI_CODING_AGENT_VERSION = "0.80.10";
+export const PINNED_PI_CODING_AGENT_VERSION = "0.84.1";
 
 export class PiTurnError extends Error {
   readonly code: string;

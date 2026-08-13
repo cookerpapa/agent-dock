@@ -48,10 +48,6 @@ web:
     tlsSecretName: agent-dock-web-tls
 
 external:
-  temporal:
-    address: temporal-frontend.temporal.svc.cluster.local:7233
-    namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-cell-0001-v1
   kafka:
     brokers:
       - agent-dock-kafka-bootstrap.agent-dock-eventing.svc.cluster.local:9093
@@ -59,19 +55,6 @@ external:
     projectorGroupId: agent-dock-worker-event-projector-v1
   liveEventStore:
     urlSecretKey: live-event-store-url
-  checkpointS3:
-    endpoint: https://s3.example.com
-    region: ap-east-1
-    bucket: agent-dock-checkpoints
-    keyPrefix: production/v1
-    forcePathStyle: false
-    allowInsecureEndpoint: false
-  kopiaS3:
-    endpoint: s3.example.com
-    region: ap-east-1
-    bucket: agent-dock-workspace-kopia
-    prefix: production/kopia/v1/
-    disableTls: false
   providerProxyUrl: https://provider-proxy.example.com:3129
 
 networkPolicy:
@@ -87,7 +70,7 @@ sandboxPlane:
   # route a create to any healthy replica; the owner URL pins later operations.
   domainId: sandbox-domain-0001
   toolBrokerReplicas: 3
-  dataMoverReplicas: 2
+  volumeGatewayReplicas: 2
   workspace:
     existingClaim: agent-dock-workspaces-rwx
   cube:
@@ -106,12 +89,6 @@ pi-workers:
     tag: git-sha-0123456789abcdef
     digest: ""
     pullPolicy: IfNotPresent
-  temporal:
-    address: temporal-frontend.temporal.svc.cluster.local:7233
-    namespace: agent-dock
-    taskQueue: agent-dock-pi-runs-cell-0001-v1
-    workerDeploymentName: agent-dock-pi-workers
-    workerBuildId: git-sha-0123456789abcdef
   services:
     controlPlaneUrl: http://control-plane:3000
     toolBrokerUrls:
@@ -119,18 +96,10 @@ pi-workers:
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""
-  conversationStorage:
+  database:
     existingSecret: agent-dock-platform-secrets
-    databaseUrlKey: database-url
-    awsCredentialsKey: aws-credentials
-    s3:
-      bucket: agent-dock-checkpoints
-      region: ap-east-1
-      endpoint: https://s3.example.com
-      keyPrefix: production/v1
-      forcePathStyle: false
-      allowInsecureEndpoint: false
-      maxAttempts: 4
+    urlKey: database-url
+    notificationUrlKey: database-notification-url
   state:
     storageClassName: replicated-rwo
     accessModes: [ReadWriteOncePod]
@@ -142,7 +111,7 @@ pi-workers:
   networkPolicy:
     enabled: true
     trustedNamespaceLabel: { key: agent-dock.io/trusted-plane, value: "true" }
-    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 7233, 9000]
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432]
     externalEgressCidrs:
       - 203.0.113.16/28
       - 198.51.100.32/28

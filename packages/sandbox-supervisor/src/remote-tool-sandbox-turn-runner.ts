@@ -11,7 +11,7 @@ import {
 import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
-  parseKopiaWorkspaceCheckpoint,
+  parsePersistentVolumeReference,
   parseWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { stat } from "node:fs/promises";
@@ -58,11 +58,10 @@ export function projectInstructionsFromSnapshot(
   snapshot: Uint8Array | undefined,
 ): string | undefined {
   if (snapshot === undefined) return undefined;
-  if (parseKopiaWorkspaceCheckpoint(snapshot) !== undefined) {
-    // Provider-native checkpoints intentionally contain only a bounded file
-    // index and recovery authority. Their file bytes are available only after
-    // the Tool Sandbox has restored the snapshot, so they cannot be inspected
-    // in the trusted Runner before lazy activation.
+  if (parsePersistentVolumeReference(snapshot) !== undefined) {
+    // The persistent-volume reference contains a bounded file index, not file
+    // bytes. The trusted Runner reads project instructions only after the
+    // volume is attached through the Tool boundary.
     return undefined;
   }
   const file = parseWorkspaceSnapshot(snapshot).find((entry) => entry.path === "AGENTS.md");

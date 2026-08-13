@@ -129,13 +129,13 @@ Session-resident Cube microVM
         |-- user background processes across Runs
         `-- /workspace -> Cube Volume Plugin -> POSIX backend
                                              |
-                                             `-> trusted Kopia Data Mover
+                                             `-> trusted Kopia Volume Gateway
                                                  -> S3-compatible repository
 ```
 
 At checkpoint, the root Tool supervisor closes the Tool Worker, stops the
 remaining uid-1000 processes, flushes and indexes `/workspace`, and keeps the
-process identities frozen while the trusted host-side Data Mover snapshots the
+process identities frozen while the trusted host-side Volume Gateway snapshots the
 Volume. The Manager then sends a commit/abort acknowledgement; the supervisor
 resumes only the same PID/start-time identities and remains detached until the
 next higher-fence rebind.

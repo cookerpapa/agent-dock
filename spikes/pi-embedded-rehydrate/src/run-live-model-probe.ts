@@ -162,7 +162,7 @@ try {
     `${JSON.stringify(
       {
         result: "passed",
-        piVersion: "0.80.10",
+        piVersion: "0.84.1",
         provider,
         model: modelId,
         thinkingLevel,

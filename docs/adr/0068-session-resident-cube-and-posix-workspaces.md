@@ -74,12 +74,12 @@ same identities, the Sandbox is not eligible for warm retention.
 ### Workspace durability
 
 The plugin-backed POSIX Volume is the live mutable Workspace. The trusted Kopia
-Data Mover creates immutable recovery points in S3-compatible storage.
+Volume Gateway creates immutable recovery points in S3-compatible storage.
 PostgreSQL remains the only canonical WorkspaceVersion-head authority and
 publishes a snapshot only after the existing RunAttempt fence and base-version
 CAS succeed.
 
-The Data Mover may reuse an exact-Session live Volume only when its trusted
+The Volume Gateway may reuse an exact-Session live Volume only when its trusted
 sidecar base equals the requested committed Kopia snapshot **and** the
 sidecar's random volume generation equals the protected generation marker
 carried inside that live Volume and its Kopia snapshot. This preserves writes
@@ -93,7 +93,7 @@ content. It is excluded from Tool file paths, Workspace indexes, portable
 snapshots and Git patches. A Kopia snapshot without the current generation
 marker is invalid; no legacy fallback is supported.
 
-Kopia remains behind the `WorkspaceDataMover` boundary. A deployment backed by
+Kopia remains behind the `WorkspaceVolumeGateway` boundary. A deployment backed by
 CephFS may later add a CephFS checkpoint provider without changing Pi, Tool
 RPC, Cube or PostgreSQL ownership.
 

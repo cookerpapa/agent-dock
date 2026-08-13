@@ -12,7 +12,7 @@ Supervisor WebSocket transport.
 - Pi checkpoint manifests, object storage and bounded read cache;
 - durable event ingestion and cross-replica notifications;
 - conversation projection and terminal-event construction;
-- model credential runtime and Temporal affinity metadata;
+- model credential runtime metadata;
 - immutable Review Bundle and structured test evidence primitives.
 
 ## Dependency direction

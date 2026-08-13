@@ -13,9 +13,4 @@ export {
   type TtlCheckpointObjectStoreOptions,
   type TtlCheckpointObjectStoreSnapshot,
 } from "./checkpoint-object-cache.ts";
-export {
-  createS3CheckpointObjectStoreFromEnvironment,
-  S3CheckpointObjectStore,
-  type S3CheckpointEnvironment,
-  type S3CheckpointObjectStoreOptions,
-} from "./s3-checkpoint-object-store.ts";
+export { PostgresCheckpointObjectStore } from "./postgres-checkpoint-object-store.ts";

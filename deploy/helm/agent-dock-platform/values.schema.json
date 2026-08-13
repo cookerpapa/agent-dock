@@ -7,7 +7,6 @@
     "sandboxPlaneEnabled",
     "globalPlaneEnabled",
     "sandboxDomains",
-    "executionCells",
     "global",
     "images",
     "bootstrap",
@@ -29,12 +28,6 @@
       "minItems": 1,
       "maxItems": 64,
       "items": { "$ref": "#/$defs/sandboxDomain" }
-    },
-    "executionCells": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": { "$ref": "#/$defs/executionCell" }
     },
     "global": {
       "type": "object",
@@ -154,11 +147,8 @@
       "required": [
         "eventIngest",
         "database",
-        "temporal",
         "kafka",
         "liveEventStore",
-        "checkpointS3",
-        "kopiaS3",
         "providerProxyUrl",
         "otlpTracesEndpoint"
       ],
@@ -182,7 +172,6 @@
             "apiTokenSecretKey": { "$ref": "#/$defs/secretKey" }
           }
         },
-        "temporal": { "$ref": "#/$defs/temporal" },
         "kafka": {
           "type": "object",
           "additionalProperties": false,
@@ -215,19 +204,6 @@
           "additionalProperties": false,
           "required": ["urlSecretKey"],
           "properties": { "urlSecretKey": { "$ref": "#/$defs/secretKey" } }
-        },
-        "checkpointS3": { "$ref": "#/$defs/s3" },
-        "kopiaS3": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["endpoint", "region", "bucket", "prefix", "disableTls"],
-          "properties": {
-            "endpoint": { "$ref": "#/$defs/boundedText" },
-            "region": { "$ref": "#/$defs/boundedText" },
-            "bucket": { "$ref": "#/$defs/bucket" },
-            "prefix": { "$ref": "#/$defs/path" },
-            "disableTls": { "type": "boolean" }
-          }
         },
         "providerProxyUrl": { "$ref": "#/$defs/httpUrl" },
         "otlpTracesEndpoint": { "$ref": "#/$defs/optionalHttpUrl" }
@@ -283,11 +259,11 @@
       "required": [
         "domainId",
         "toolBrokerReplicas",
-        "dataMoverReplicas",
-        "dataMoverMaximumConcurrentOperations",
-        "dataMoverMaximumQueuedOperations",
-        "dataMoverQueueWaitTimeoutMs",
-        "dataMoverCommandTimeoutMs",
+        "volumeGatewayReplicas",
+        "volumeGatewayMaximumConcurrentOperations",
+        "volumeGatewayMaximumQueuedOperations",
+        "volumeGatewayQueueWaitTimeoutMs",
+        "volumeGatewayRequestTimeoutMs",
         "maximumActivePerReplica",
         "maximumWarmPerReplica",
         "warmTtlMs",
@@ -295,28 +271,28 @@
         "state",
         "cube",
         "toolBrokerResources",
-        "dataMoverResources"
+        "volumeGatewayResources"
       ],
       "properties": {
         "domainId": { "$ref": "#/$defs/boundedText" },
         "toolBrokerReplicas": { "type": "integer", "minimum": 3, "maximum": 64 },
-        "dataMoverReplicas": { "type": "integer", "minimum": 1, "maximum": 64 },
-        "dataMoverMaximumConcurrentOperations": {
+        "volumeGatewayReplicas": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "volumeGatewayMaximumConcurrentOperations": {
           "type": "integer",
           "minimum": 1,
           "maximum": 64
         },
-        "dataMoverMaximumQueuedOperations": {
+        "volumeGatewayMaximumQueuedOperations": {
           "type": "integer",
           "minimum": 0,
           "maximum": 4096
         },
-        "dataMoverQueueWaitTimeoutMs": {
+        "volumeGatewayQueueWaitTimeoutMs": {
           "type": "integer",
           "minimum": 1,
           "maximum": 600000
         },
-        "dataMoverCommandTimeoutMs": {
+        "volumeGatewayRequestTimeoutMs": {
           "type": "integer",
           "minimum": 1000,
           "maximum": 3600000
@@ -361,44 +337,12 @@
           }
         },
         "toolBrokerResources": { "$ref": "#/$defs/resources" },
-        "dataMoverResources": { "$ref": "#/$defs/resources" }
+        "volumeGatewayResources": { "$ref": "#/$defs/resources" }
       }
     },
     "pi-workers": { "type": "object" }
   },
   "$defs": {
-    "executionCell": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "displayName",
-        "state",
-        "temporalTaskQueue",
-        "sandboxDomainId",
-        "supervisorManagementBaseUrlTemplate",
-        "capacityWeight"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^cell-[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$"
-        },
-        "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "state": { "type": "string", "enum": ["active", "draining", "disabled"] },
-        "temporalTaskQueue": { "$ref": "#/$defs/boundedText" },
-        "sandboxDomainId": {
-          "type": "string",
-          "pattern": "^sandbox-domain-[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$"
-        },
-        "supervisorManagementBaseUrlTemplate": {
-          "type": "string",
-          "pattern": "^https?://[^\\s]*\\{supervisorId\\}[^\\s]*$",
-          "maxLength": 2048
-        },
-        "capacityWeight": { "type": "integer", "minimum": 1, "maximum": 1000000 }
-      }
-    },
     "sandboxDomain": {
       "type": "object",
       "additionalProperties": false,
@@ -540,35 +484,6 @@
         "maximumActiveSandboxes": { "type": "integer", "minimum": 1, "maximum": 1000000 }
       }
     },
-    "temporal": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["address", "namespace", "taskQueue"],
-      "properties": {
-        "address": { "$ref": "#/$defs/boundedText" },
-        "namespace": { "$ref": "#/$defs/boundedText" },
-        "taskQueue": { "$ref": "#/$defs/boundedText" }
-      }
-    },
-    "s3": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "endpoint",
-        "region",
-        "bucket",
-        "keyPrefix",
-        "forcePathStyle",
-        "allowInsecureEndpoint"
-      ],
-      "properties": {
-        "endpoint": { "$ref": "#/$defs/httpUrl" },
-        "region": { "$ref": "#/$defs/boundedText" },
-        "bucket": { "$ref": "#/$defs/bucket" },
-        "keyPrefix": { "$ref": "#/$defs/path" },
-        "forcePathStyle": { "type": "boolean" },
-        "allowInsecureEndpoint": { "type": "boolean" }
-      }
-    }
+    "unused": { "type": "null" }
   }
 }

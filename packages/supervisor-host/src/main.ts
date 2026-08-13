@@ -1,4 +1,5 @@
-import { createS3CheckpointObjectStoreFromEnvironment } from "@agent-dock/runtime-core/checkpoint-runtime";
+import { createDatabase } from "@agent-dock/database";
+import { PostgresCheckpointObjectStore } from "@agent-dock/runtime-core/checkpoint-runtime";
 import { startServiceObservability } from "@agent-dock/observability";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -34,9 +35,14 @@ export async function startSupervisorHost(): Promise<void> {
     serviceName: "agent-dock-trusted-runner",
     defaultMetricsPort: 9465,
   });
-  const objectStore = createS3CheckpointObjectStoreFromEnvironment();
+  const database = createDatabase({
+    connectionString: config.databaseUrl,
+    maxConnections: Math.max(4, config.maxConcurrentSessions * 4),
+  });
+  const objectStore = new PostgresCheckpointObjectStore(database);
   const runtime = new SupervisorHostRuntime({
     config,
+    database,
     objectStore,
     metrics: observability.metrics,
   });
@@ -54,6 +60,7 @@ export async function startSupervisorHost(): Promise<void> {
     }
     await runtime.close();
     await observability.close();
+    await database.destroy();
     if (reason === "connection_failed") {
       process.stderr.write(
         `AgentDock Supervisor host failed code=${runtime.terminalFailureCode ?? "supervisor_connection_failed"}\n`,
@@ -63,6 +70,7 @@ export async function startSupervisorHost(): Promise<void> {
   } catch (error: unknown) {
     await runtime.close().catch(() => undefined);
     await observability.close().catch(() => undefined);
+    await database.destroy().catch(() => undefined);
     throw error;
   }
 }
