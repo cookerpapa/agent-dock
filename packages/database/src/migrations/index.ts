@@ -53,6 +53,8 @@ import * as bootstrapTenantSandboxQuota from "./051_bootstrap_tenant_sandbox_quo
 import * as postgresRunQueue from "./052_postgres_run_queue.ts";
 import * as piSessionStorage from "./053_pi_session_storage.ts";
 import * as postgresCheckpointObjects from "./054_postgres_checkpoint_objects.ts";
+import * as unlimitedDefaultDailyTokens from "./055_unlimited_default_daily_tokens.ts";
+import * as codingRunModelRequestLimit from "./056_coding_run_model_request_limit.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -111,6 +113,8 @@ export const migrationProvider: MigrationProvider = {
       "052_postgres_run_queue": postgresRunQueue,
       "053_pi_session_storage": piSessionStorage,
       "054_postgres_checkpoint_objects": postgresCheckpointObjects,
+      "055_unlimited_default_daily_tokens": unlimitedDefaultDailyTokens,
+      "056_coding_run_model_request_limit": codingRunModelRequestLimit,
     };
   },
 };
@@ -320,3 +324,13 @@ export {
   down as downBootstrapTenantSandboxQuota,
   up as upBootstrapTenantSandboxQuota,
 } from "./051_bootstrap_tenant_sandbox_quota.ts";
+
+export {
+  down as downUnlimitedDefaultDailyTokens,
+  up as upUnlimitedDefaultDailyTokens,
+} from "./055_unlimited_default_daily_tokens.ts";
+
+export {
+  down as downCodingRunModelRequestLimit,
+  up as upCodingRunModelRequestLimit,
+} from "./056_coding_run_model_request_limit.ts";

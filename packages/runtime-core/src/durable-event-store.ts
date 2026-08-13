@@ -113,6 +113,12 @@ function validDate(clock: () => Date): Date {
   return value;
 }
 
+function postgresRetryable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "40P01" || code === "40001";
+}
+
 function safeInteger(value: string | number | bigint, name: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
@@ -255,6 +261,13 @@ export class DurableEventStore
       return await this.#ingestGroup(values, boundary);
     } catch (error: unknown) {
       outcome = "failure";
+      if (postgresRetryable(error)) {
+        throw new DurableEventStoreError(
+          "event_store_invariant",
+          "Durable event transaction was interrupted by a transient database conflict",
+          true,
+        );
+      }
       throw error;
     } finally {
       this.#metrics?.eventDurabilityDuration

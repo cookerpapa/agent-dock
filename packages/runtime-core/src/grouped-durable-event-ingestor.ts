@@ -19,6 +19,8 @@ export type GroupedDurableEventIngestorOptions = {
   maximumGroupSize?: number;
   maximumDelayMs?: number;
   maximumQueuedPublications?: number;
+  maximumRetryAttempts?: number;
+  retryBaseDelayMs?: number;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -37,6 +39,19 @@ function shardHash(value: string): number {
   return hash >>> 0;
 }
 
+function wait(delayMs: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs));
+}
+
+function retryable(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "retryable" in error &&
+    (error as { retryable?: unknown }).retryable === true
+  );
+}
+
 /**
  * Groups independent Session event batches behind one durable-store call while
  * retaining a stable shard per Session. This becomes one PostgreSQL commit in
@@ -50,6 +65,8 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
   readonly #maximumGroupSize: number;
   readonly #maximumDelayMs: number;
   readonly #maximumQueuedPublications: number;
+  readonly #maximumRetryAttempts: number;
+  readonly #retryBaseDelayMs: number;
   #queuedPublications = 0;
 
   constructor(options: GroupedDurableEventIngestorOptions) {
@@ -61,6 +78,11 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
       options.maximumQueuedPublications ?? 16_384,
       "maximumQueuedPublications",
     );
+    this.#maximumRetryAttempts = positiveInteger(
+      options.maximumRetryAttempts ?? 3,
+      "maximumRetryAttempts",
+    );
+    this.#retryBaseDelayMs = positiveInteger(options.retryBaseDelayMs ?? 25, "retryBaseDelayMs");
     this.#shards = Array.from({ length: shardCount }, () => ({
       queue: [],
       drainPromise: undefined,
@@ -129,7 +151,7 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
         const group = shard.queue.splice(0, this.#maximumGroupSize);
         this.#queuedPublications -= group.length;
         try {
-          const acknowledgements = await this.#store.ingestGroup(
+          const acknowledgements = await this.#ingestWithRetry(
             group.map((publication) => publication.value),
           );
           if (acknowledgements.length !== group.length) {
@@ -139,12 +161,7 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
             publication.resolve(acknowledgements[index]!);
           }
         } catch (error: unknown) {
-          const retryable =
-            typeof error === "object" &&
-            error !== null &&
-            "retryable" in error &&
-            (error as { retryable?: unknown }).retryable === true;
-          if (retryable) {
+          if (retryable(error)) {
             for (const publication of group) publication.reject(error);
             continue;
           }
@@ -168,6 +185,17 @@ export class GroupedDurableEventIngestor implements DurableEventIngestor {
       }
     } finally {
       this.#clearTimer(shard);
+    }
+  }
+
+  async #ingestWithRetry(values: readonly unknown[]): Promise<readonly EventAckMessage[]> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.#store.ingestGroup(values);
+      } catch (error: unknown) {
+        if (!retryable(error) || attempt >= this.#maximumRetryAttempts) throw error;
+        await wait(this.#retryBaseDelayMs * 2 ** (attempt - 1));
+      }
     }
   }
 }

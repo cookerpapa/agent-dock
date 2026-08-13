@@ -122,11 +122,41 @@ describe("GroupedDurableEventIngestor", () => {
       shardCount: 1,
       maximumGroupSize: 2,
       maximumDelayMs: 100,
+      maximumRetryAttempts: 3,
+      retryBaseDelayMs: 1,
     });
 
     const results = await Promise.allSettled(messages.map((message) => ingestor.ingest(message)));
     expect(results.every((result) => result.status === "rejected")).toBe(true);
-    expect(store.ingestGroup).toHaveBeenCalledOnce();
+    expect(store.ingestGroup).toHaveBeenCalledTimes(3);
     expect(store.ingest).not.toHaveBeenCalled();
+  });
+
+  it("retries the same durable event identities after a transient group failure", async () => {
+    const message = publication(globalThis.crypto.randomUUID());
+    let attempts = 0;
+    const store: DurableEventGroupIngestor = {
+      ingest: vi.fn(async (value: unknown) => acknowledgement(value as EventPublishMessage)),
+      ingestGroup: vi.fn(async (values: readonly unknown[]) => {
+        attempts += 1;
+        if (attempts === 1) throw new HttpDurableEventIngestError(503, "temporary deadlock");
+        return values.map((value) => acknowledgement(value as EventPublishMessage));
+      }),
+    };
+    const ingestor = new GroupedDurableEventIngestor({
+      store,
+      shardCount: 1,
+      maximumGroupSize: 1,
+      maximumDelayMs: 100,
+      maximumRetryAttempts: 3,
+      retryBaseDelayMs: 1,
+    });
+
+    await expect(ingestor.ingest(message)).resolves.toMatchObject({
+      payload: { acknowledgedThroughSeq: 1 },
+    });
+    expect(store.ingestGroup).toHaveBeenCalledTimes(2);
+    expect(store.ingestGroup).toHaveBeenNthCalledWith(1, [message]);
+    expect(store.ingestGroup).toHaveBeenNthCalledWith(2, [message]);
   });
 });

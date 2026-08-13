@@ -72,7 +72,10 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   capability: string;
   turnContextSha256: string;
   attemptContextSha256: string;
-  captureStepContext: (activeTools: readonly string[]) => Readonly<{
+  captureStepContext: (
+    activeTools: readonly string[],
+    purpose?: "agent" | "context_maintenance",
+  ) => Readonly<{
     step: FrozenCloudStep;
     modelMessages: readonly PiWorldStateModelMessage[];
     samplingAttempt: number;
@@ -292,11 +295,10 @@ function registerTrustedRemoteTools(
   let remainingToolCalls = runtime.remainingToolCalls;
   let currentStep: FrozenCloudStep | undefined;
   let currentSamplingAttempt: number | undefined;
+  let currentSamplingHeadersIssued = false;
 
-  pi.on("context", (event) => {
-    currentStep = undefined;
-    currentSamplingAttempt = undefined;
-    const captured = runtime.captureStepContext(pi.getActiveTools());
+  const captureStep = (purpose: "agent" | "context_maintenance") => {
+    const captured = runtime.captureStepContext(pi.getActiveTools(), purpose);
     if (
       captured.step.context.turnContextSha256 !== runtime.turnContextSha256 ||
       captured.step.context.attemptContextSha256 !== runtime.attemptContextSha256 ||
@@ -306,6 +308,14 @@ function registerTrustedRemoteTools(
     }
     currentStep = captured.step;
     currentSamplingAttempt = captured.samplingAttempt;
+    currentSamplingHeadersIssued = false;
+    return captured;
+  };
+
+  pi.on("context", (event) => {
+    currentStep = undefined;
+    currentSamplingAttempt = undefined;
+    const captured = captureStep("agent");
     const messages = [...event.messages];
     for (const message of captured.modelMessages) {
       const alreadyPresent = messages.some(
@@ -613,6 +623,11 @@ function registerTrustedRemoteTools(
   pi.on("before_provider_headers", async (event) => {
     if (runtime.traceparent !== undefined) event.headers.traceparent = runtime.traceparent;
     if (runtime.tracestate !== undefined) event.headers.tracestate = runtime.tracestate;
+    // Pi compaction and branch-summary requests use ModelRuntime directly and
+    // therefore do not pass through the Agent `context` hook. Give each such
+    // maintenance request a fresh governed sampling identity instead of
+    // reusing the preceding Agent Step and colliding in the request ledger.
+    if (currentSamplingHeadersIssued) captureStep("context_maintenance");
     if (currentStep === undefined || currentSamplingAttempt === undefined) {
       throw new Error("Model request preceded its Cloud Step capture");
     }
@@ -624,6 +639,7 @@ function registerTrustedRemoteTools(
         samplingAttempt: currentSamplingAttempt,
       }),
     );
+    currentSamplingHeadersIssued = true;
   });
 
   const readTool = createReadTool(WORKSPACE_ROOT);

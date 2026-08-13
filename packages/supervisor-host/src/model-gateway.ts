@@ -399,7 +399,7 @@ export class TenantModelGateway {
       60 * 60_000,
     );
     this.#maximumRequestsPerTurn = positiveInteger(
-      options.maximumRequestsPerTurn ?? 32,
+      options.maximumRequestsPerTurn ?? 128,
       "maximumRequestsPerTurn",
       256,
     );
@@ -587,7 +587,11 @@ export class TenantModelGateway {
         modelId: model.modelId,
         baseUrl: `${this.#advertisedBaseUrl}/v1`,
         capability,
-        reasoning: false,
+        // DeepSeek V4 defaults to thinking mode. Pi must model it as a
+        // reasoning-capable provider even when this Turn requests `off`, so
+        // its DeepSeek compatibility adapter sends `thinking.type=disabled`
+        // instead of silently accepting the provider default.
+        reasoning: true,
         contextWindow: 128_000,
         maxTokens: 8_192,
         requestTimeoutMs: this.#piRequestTimeoutMs,

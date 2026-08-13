@@ -811,7 +811,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
                 .onRef("terminal.session_id", "=", "artifact.session_id")
                 .onRef("terminal.id", "=", "artifact.turn_id"),
             )
-            .leftJoin("session_events as terminal_event", (join) =>
+            .leftJoin("session_terminal_events as terminal_event", (join) =>
               join
                 .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
                 .onRef("terminal_event.session_id", "=", "artifact.session_id")
@@ -855,7 +855,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             .onRef("terminal.session_id", "=", "artifact.session_id")
             .onRef("terminal.id", "=", "artifact.turn_id"),
         )
-        .leftJoin("session_events as terminal_event", (join) =>
+        .leftJoin("session_terminal_events as terminal_event", (join) =>
           join
             .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
             .onRef("terminal_event.session_id", "=", "artifact.session_id")
@@ -913,7 +913,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     } else if (session.workspaceKey !== null) {
       workspace = await transaction
         .selectFrom("artifacts as artifact")
-        .innerJoin("session_events as terminal", (join) =>
+        .innerJoin("session_terminal_events as terminal", (join) =>
           join
             .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
             .onRef("terminal.session_id", "=", "artifact.session_id")
@@ -930,7 +930,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     if (session.currentVersionId === null && workspace === undefined) {
       workspace = await transaction
         .selectFrom("artifacts as artifact")
-        .innerJoin("session_events as terminal", (join) =>
+        .innerJoin("session_terminal_events as terminal", (join) =>
           join
             .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
             .onRef("terminal.session_id", "=", "artifact.session_id")

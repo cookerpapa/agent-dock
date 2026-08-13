@@ -625,7 +625,7 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(governance.statusCode).toBe(200);
     expect(governance.json()).toMatchObject({
       limits: {
-        maximumModelRequestsPerRun: 32,
+        maximumModelRequestsPerRun: 128,
         maximumToolCallsPerRun: 128,
       },
       fallback: { enabled: false },

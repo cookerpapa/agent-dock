@@ -594,6 +594,52 @@ export class SupervisorConnectionManager {
       );
     }
     this.#validateAuthority(authority, parsed.payload);
+    if (parsed.payload.sessions.length === 0) {
+      const now = validDate(this.#clock);
+      const expiresAt = new Date(now.valueOf() + this.#heartbeatTimeoutMs);
+      const updated = await this.#database
+        .updateTable("supervisor_connections")
+        .set({
+          accepting_assignments: parsed.payload.acceptingAssignments,
+          last_heartbeat_at: now,
+          expires_at: expiresAt,
+        })
+        .where("connection_id", "=", parsed.payload.connectionId)
+        .where("sandbox_id", "=", authority.sandboxId)
+        .where("supervisor_id", "=", authority.supervisorId)
+        .where("boot_id", "=", authority.bootId)
+        .where("transport_id", "=", authority.transportId)
+        .where("control_plane_instance_id", "=", this.#controlPlaneInstanceId)
+        .where("state", "=", "active")
+        .where("expires_at", ">", now)
+        .executeTakeFirst();
+      if (updated.numUpdatedRows !== 1n) {
+        throw new SupervisorConnectionManagerError(
+          "stale_connection",
+          "Supervisor connection authority is stale",
+          false,
+        );
+      }
+      const acknowledgement = parseControlToSupervisorMessage({
+        protocolVersion: 1,
+        messageId: this.#idGenerator(),
+        sentAt: now.toISOString(),
+        type: "supervisor.heartbeat.ack",
+        payload: {
+          acknowledgedMessageId: parsed.messageId,
+          connectionId: parsed.payload.connectionId,
+          leaseRenewals: [],
+        },
+      });
+      if (acknowledgement.type !== "supervisor.heartbeat.ack") {
+        throw new SupervisorConnectionManagerError(
+          "heartbeat_ack_invariant",
+          "Supervisor heartbeat acknowledgement was invalid",
+          false,
+        );
+      }
+      return acknowledgement;
+    }
     const coordinator = await this.leaseCoordinator(parsed.payload.connectionId, authority);
     try {
       return await coordinator.renewFromHeartbeat(parsed);

@@ -546,6 +546,21 @@ export class SupervisorHostRuntime {
 
   #observeClientStop(result: ReconnectingSupervisorWebSocketClientStop): void {
     if (this.#state === "draining" || this.#state === "stopped") return;
+    operationalLog({
+      service: "agent-dock-supervisor-host",
+      level: result.reason === "terminal_failure" ? "error" : "info",
+      event: "worker-control-channel.stopped",
+      attributes: {
+        reason: result.reason,
+        failureCode: result.failureCode ?? "none",
+        connectionAttempts: result.connectionAttempts,
+        successfulConnections: result.successfulConnections,
+        closeCode: result.lastClose?.code ?? -1,
+        closeReason: result.lastClose?.reason ?? "none",
+        closeRetryable: result.lastClose?.retryable ?? false,
+        initiatedByClient: result.lastClose?.initiatedByClient ?? false,
+      },
+    });
     if (result.reason === "terminal_failure") {
       this.#terminalFailureCode = result.failureCode ?? "supervisor_connection_failed";
       this.#state = "failed";

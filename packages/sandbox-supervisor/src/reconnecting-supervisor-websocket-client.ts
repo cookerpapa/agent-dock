@@ -15,6 +15,7 @@ const DEFAULT_STABLE_CONNECTION_MS = 30_000;
 const DEFAULT_ASSIGNMENT_TEARDOWN_TIMEOUT_MS = 30_000;
 
 export interface ReconnectingSupervisorControlRuntime extends SupervisorControlRuntime {
+  readonly activeSessionCount: number;
   waitUntilAssignmentsSettled(): Promise<void>;
   recoverPendingEvents(
     publishEvent: Parameters<NonNullable<SupervisorControlRuntime["recoverPendingEvents"]>>[0],
@@ -76,11 +77,32 @@ function boundedMultiplier(value: number): number {
 function clientOptions(
   options: ReconnectingSupervisorWebSocketClientOptions,
 ): SupervisorWebSocketClientOptions {
+  const runtime: SupervisorControlRuntime = {
+    createHeartbeat(identity, acceptingAssignments) {
+      const heartbeat = options.runtime.createHeartbeat(identity, acceptingAssignments);
+      return {
+        ...heartbeat,
+        payload: { ...heartbeat.payload, sessions: [] },
+      };
+    },
+    applyHeartbeatAcknowledgement(heartbeat, acknowledgement) {
+      return options.runtime.applyHeartbeatAcknowledgement(heartbeat, acknowledgement);
+    },
+    prepareSteer(value) {
+      return options.runtime.prepareSteer(value);
+    },
+    revokeAllAssignments() {
+      return options.runtime.revokeAllAssignments();
+    },
+    recoverPendingEvents(publishEvent) {
+      return options.runtime.recoverPendingEvents(publishEvent);
+    },
+  };
   const result: SupervisorWebSocketClientOptions = {
     url: options.url,
     authorizationHeader: options.authorizationHeader,
     registration: options.registration,
-    runtime: options.runtime,
+    runtime,
     // A retryable WebSocket break suspends only the management transport. The
     // active Worker execution independently renews its fenced PostgreSQL
     // lease and may continue while this wrapper reconnects.
@@ -264,7 +286,13 @@ export class ReconnectingSupervisorWebSocketClient {
       let startFailure: { code: string; message: string; retryable: boolean } | undefined;
       try {
         registration = await connection.start();
-        await connection.recoverPendingEvents();
+        // A retryable control-channel reconnect can overlap a PostgreSQL-owned
+        // Run. Its active WAL is not recovery input, and the connection is not
+        // an execution lease authority. The normal publisher drains that WAL;
+        // settled spools are recovered when the Worker is otherwise idle.
+        if (this.#runtime.activeSessionCount === 0) {
+          await connection.recoverPendingEvents();
+        }
         connection.setAcceptingAssignments(this.#acceptingAssignments);
         connectedAt = Date.now();
         this.#successfulConnections += 1;

@@ -18,7 +18,7 @@
     "platform-security-find-my-way": "npm:find-my-way@9.7.0"
   },
   "overrides": {
-    "nanoid": "3.3.17"
+    "nanoid": "3.3.18"
   },
   "scripts": {
     "postinstall": "node scripts/harden-pi-dependencies.mjs",
@@ -76,6 +76,7 @@
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
     "production:control-plane-restart-check": "node scripts/run-live-control-plane-restart-check.mjs",
     "production:multi-tenant-model-load": "node scripts/run-live-multi-tenant-model-load.mjs",
+    "production:long-context-check": "node scripts/run-live-long-context-compaction-check.mjs",
     "production:parallel-check": "node scripts/run-live-candidate-race-check.mjs",
     "production:backup": "node scripts/production-backup.mjs",
     "production:restore": "node scripts/production-restore.mjs",

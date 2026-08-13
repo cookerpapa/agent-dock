@@ -1,5 +1,6 @@
 import {
   parseControlToSupervisorMessage,
+  parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
   type SupervisorRegisteredMessage,
@@ -9,6 +10,7 @@ import {
   ReconnectingSupervisorWebSocketClient,
   SupervisorWebSocketClientError,
   type ReconnectingSupervisorControlRuntime,
+  type SupervisorControlRuntime,
   type SupervisorWebSocketClientClose,
   type SupervisorWebSocketConnection,
 } from "../src/index.ts";
@@ -64,6 +66,7 @@ function close(
 
 class FakeConnection implements SupervisorWebSocketConnection {
   readonly assignmentStates: boolean[] = [];
+  recoveryCalls = 0;
   readonly #recovery = deferred<void>();
   readonly #started = deferred<SupervisorRegisteredMessage>();
   readonly #closed = deferred<SupervisorWebSocketClientClose>();
@@ -80,6 +83,7 @@ class FakeConnection implements SupervisorWebSocketConnection {
   }
 
   async recoverPendingEvents() {
+    this.recoveryCalls += 1;
     await this.#recovery.promise;
     return {
       scannedSpools: 1,
@@ -146,11 +150,13 @@ class FakeConnection implements SupervisorWebSocketConnection {
 
 function runtime(
   options: {
+    activeSessionCount?: number;
     waitUntilAssignmentsSettled?: () => Promise<void>;
     revokeAllAssignments?: () => void;
   } = {},
 ): ReconnectingSupervisorControlRuntime {
   return {
+    activeSessionCount: options.activeSessionCount ?? 0,
     createHeartbeat() {
       throw new Error("Fake connection does not request heartbeats");
     },
@@ -183,6 +189,7 @@ function reconnecting(options: {
   assignmentTeardownTimeoutMs?: number;
 }) {
   const connections: FakeConnection[] = [];
+  const connectionRuntimes: SupervisorControlRuntime[] = [];
   const client = new ReconnectingSupervisorWebSocketClient({
     url: "ws://127.0.0.1:65535/internal/v1/supervisor",
     authorizationHeader: `Bearer agent-dock-${"x".repeat(48)}`,
@@ -194,13 +201,14 @@ function reconnecting(options: {
     stableConnectionMs: 10_000,
     assignmentTeardownTimeoutMs: options.assignmentTeardownTimeoutMs ?? 100,
     random: () => 0,
-    connectionFactory() {
+    connectionFactory(connectionOptions) {
+      connectionRuntimes.push(connectionOptions.runtime);
       const connection = new FakeConnection();
       connections.push(connection);
       return connection;
     },
   });
-  return { client, connections };
+  return { client, connections, connectionRuntimes };
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
@@ -216,6 +224,7 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     let revocations = 0;
     const harness = reconnecting({
       runtime: runtime({
+        activeSessionCount: 1,
         revokeAllAssignments() {
           revocations += 1;
         },
@@ -226,9 +235,9 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     await waitFor(() => harness.connections.length === 1);
     const firstId = globalThis.crypto.randomUUID();
     harness.connections[0]!.connect(firstId);
-    await waitFor(() => harness.connections[0]!.assignmentStates.length === 1);
-    expect(harness.connections[0]!.assignmentStates).toEqual([false]);
-    harness.connections[0]!.finishRecovery();
+    await waitFor(() => harness.connections[0]!.assignmentStates.length === 2);
+    expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
+    expect(harness.connections[0]!.recoveryCalls).toBe(0);
     expect((await started).payload.connectionId).toBe(firstId);
     expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
 
@@ -238,8 +247,8 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     expect(harness.connections[1]!.assignmentStates).toEqual([false]);
     const secondId = globalThis.crypto.randomUUID();
     harness.connections[1]!.connect(secondId);
-    harness.connections[1]!.finishRecovery();
     await waitFor(() => harness.client.successfulConnections === 2);
+    expect(harness.connections[1]!.recoveryCalls).toBe(0);
     expect(harness.client.connectionId).toBe(secondId);
     expect(harness.client.successfulConnections).toBe(2);
 
@@ -249,6 +258,56 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
       successfulConnections: 2,
     });
     expect(revocations).toBe(1);
+  });
+
+  it("keeps PostgreSQL Run leases out of Worker Control Channel heartbeats", async () => {
+    const source: ReconnectingSupervisorControlRuntime = {
+      ...runtime(),
+      createHeartbeat(identity, acceptingAssignments = false) {
+        const heartbeat = parseSupervisorToControlMessage({
+          protocolVersion: 1,
+          messageId: globalThis.crypto.randomUUID(),
+          sentAt: new Date().toISOString(),
+          type: "supervisor.heartbeat",
+          payload: {
+            ...identity,
+            acceptingAssignments,
+            maxConcurrentSessions: 2,
+            sessions: [
+              {
+                sessionId: globalThis.crypto.randomUUID(),
+                turnId: globalThis.crypto.randomUUID(),
+                state: "running",
+                leaseId: globalThis.crypto.randomUUID(),
+                fencingToken: 7,
+                lastProducedSeq: 2,
+                lastAcknowledgedSeq: 1,
+              },
+            ],
+          },
+        });
+        if (heartbeat.type !== "supervisor.heartbeat") throw new Error("Expected heartbeat");
+        return heartbeat;
+      },
+    };
+    const harness = reconnecting({ runtime: source });
+    const started = harness.client.start();
+    await waitFor(() => harness.connections.length === 1);
+    const controlRuntime = harness.connectionRuntimes[0]!;
+    const heartbeat = controlRuntime.createHeartbeat(
+      {
+        supervisorId: IDENTITY.supervisorId,
+        bootId: IDENTITY.bootId,
+        connectionId: globalThis.crypto.randomUUID(),
+      },
+      false,
+    );
+    expect(heartbeat.payload.sessions).toEqual([]);
+
+    harness.connections[0]!.connect(globalThis.crypto.randomUUID());
+    harness.connections[0]!.finishRecovery();
+    await started;
+    await harness.client.stop();
   });
 
   it("does not retry rejected authentication", async () => {

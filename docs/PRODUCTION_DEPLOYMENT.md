@@ -49,11 +49,17 @@ PostgreSQL backup.
 npm run production:check
 npm run production:worker-pool-check
 npm run production:control-plane-restart-check
+AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1 npm run production:long-context-check
 ```
 
 The first command requires explicit live-model/Cube acknowledgement and consumes
 tokens. It verifies pure chat without Cube, multi-round Tool use, persistent
 Volume reuse across a fresh KVM, tenant isolation and cleanup.
+
+The long-context gate is intentionally expensive. It runs real coding tasks
+until Pi compacts its native Session, verifies early-context recall and
+post-compaction Tool use, and then stops the owning Worker to prove recovery on
+another Worker.
 
 The generated runtime directory contains credentials and must remain mode 0700;
 individual secrets must remain private regular files. Do not commit it.

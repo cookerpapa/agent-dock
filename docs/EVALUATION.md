@@ -96,6 +96,28 @@ with one Attempt each and persisted 255 semantic events, including 207
 coalesced assistant text events. This is functional concurrency evidence, not
 a claim that six tenants saturate PostgreSQL.
 
+## Long-context compaction
+
+```bash
+AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1 \
+  npm run production:long-context-check
+```
+
+This sustained gate creates one persistent Cube Workspace and asks the real
+model to implement and test successive sorting, searching, tree and graph
+modules. It does not stop at a token estimate: it requires Pi to emit a
+completed native compaction, recalls an invariant from the first coding Turn,
+continues tool-driven coding after compaction, stops the owning Pi Worker and
+requires another Worker to restore the compacted Session while rebinding the
+same persistent Cube runtime.
+
+The latest run completed 11 coding Turns before threshold compaction reduced
+the estimated context from 120,984 to 23,524 tokens in 18.923 seconds. It then
+completed recall, post-compaction coding and cross-Worker coding. The run used
+150 real model attempts (147 completed; three transient upstream failures were
+recovered) and the final Pi JSONL was 768,395 bytes across 311 lines. See
+[the acceptance report](reports/long-context-compaction-acceptance-latest.md).
+
 ## Sandbox security
 
 ```bash

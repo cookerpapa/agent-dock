@@ -72,6 +72,12 @@ function wait(delayMs: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function postgresRetryCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return code === "40P01" || code === "40001" ? code : undefined;
+}
+
 function validDate(clock: () => Date): Date {
   const value = clock();
   if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
@@ -520,10 +526,19 @@ export class LocalSupervisorExecutionBackend
       const identity = await this.#leaseCoordinator.heartbeatIdentity();
       while (!signal.aborted && this.#trackedExecutions.size > 0) {
         const heartbeat = this.#supervisor.createHeartbeat(identity);
-        const result = this.#supervisor.applyHeartbeatAcknowledgement(
-          heartbeat,
-          await this.#leaseCoordinator.renewFromHeartbeat(heartbeat),
-        );
+        let acknowledgement;
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            acknowledgement = await this.#leaseCoordinator.renewFromHeartbeat(heartbeat);
+            break;
+          } catch (error: unknown) {
+            if (postgresRetryCode(error) === undefined || attempt >= 5 || signal.aborted) {
+              throw error;
+            }
+            await wait(25 * attempt, signal);
+          }
+        }
+        const result = this.#supervisor.applyHeartbeatAcknowledgement(heartbeat, acknowledgement);
         if (result.revokedAssignments !== result.revokedSessionIds.length) {
           throw new LocalSandboxSupervisorError(
             "invalid_heartbeat_result",
@@ -536,8 +551,9 @@ export class LocalSupervisorExecutionBackend
         }
         await wait(this.#heartbeatIntervalMs, signal);
       }
-    } catch {
+    } catch (error: unknown) {
       if (signal.aborted) return;
+      this.#onUnexpectedError?.(error);
       const failure = this.#leaseRenewalFailure();
       this.#heartbeatFailure = failure;
       await this.#leaseCoordinator.quarantineSandbox().catch(() => undefined);

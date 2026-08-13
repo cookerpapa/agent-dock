@@ -2320,7 +2320,7 @@ export class ControlPlaneStore {
               .select("id")
               .where("tenant_id", "=", this.#tenantId)
               .where("session_id", "=", session.id)
-              .where("kind", "=", "pi_session_snapshot")
+              .where("kind", "in", ["pi_session_snapshot", "pi_interrupted_session_snapshot"])
               .where("object_key", "=", session.pi_session_snapshot_key)
               .executeTakeFirst();
       if (session.pi_session_snapshot_key !== null && piSessionBaseArtifact === undefined) {

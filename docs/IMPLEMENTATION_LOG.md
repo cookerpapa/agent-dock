@@ -3439,3 +3439,23 @@
 - Kept the new Harness outside the default production adapter until compaction,
   interruption/world-state, Workspace settlement, steer and real Cube/model
   acceptance reach parity with the current coding-agent SDK path.
+
+# 2026-08-14 — Real long-context Pi compaction acceptance
+
+- Added an opt-in production gate that grows one native Pi Session through
+  real sorting, searching, tree and graph coding tasks instead of synthetic
+  chat padding. Every round must use Cube tools and run deterministic tests.
+- The gate found and fixed three real-load defects: DeepSeek V4 reasoning
+  compatibility during Pi maintenance sampling, reuse of a sampling identity
+  by internal compaction requests, and transient PostgreSQL event-ingest
+  deadlocks being escalated into a fatal Worker control-channel failure.
+- Aligned the database, Compose, Helm and Worker-side model-request ceiling at
+  128. The previous 32-request deployment cap could reject a valid long coding
+  Turn even after the tenant policy had been raised.
+- Real `deepseek-v4-flash` acceptance completed 11 coding Turns before Pi
+  threshold compaction reduced 120,984 estimated tokens to 23,524 in 18.923
+  seconds. Early-marker recall, post-compaction coding and Worker-1 to Worker-2
+  recovery all succeeded while rebinding the same persistent Cube runtime.
+- The accepted run made 150 real model attempts (147 completed and three
+  transient upstream failures recovered), ended with a 768,395-byte native Pi
+  JSONL and cleaned up the acceptance Session, API credential and retained KVM.

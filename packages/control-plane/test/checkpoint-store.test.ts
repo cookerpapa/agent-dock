@@ -419,21 +419,18 @@ async function insertCompletedEvent(
   targetDatabase: Kysely<Database> = database,
 ): Promise<void> {
   await targetDatabase
-    .insertInto("session_events")
+    .insertInto("session_terminal_events")
     .values({
       event_id: `60000000-0000-4000-8000-00000000000${String(turn)}`,
       tenant_id: IDS.tenant,
       session_id: IDS.session,
       turn_id: turn === 1 ? IDS.turn1 : IDS.turn2,
-      agent_node_id: null,
       agent_id: "root",
-      command_id: null,
+      command_id: turn === 1 ? IDS.command1 : IDS.command2,
       seq: turn,
       schema_version: 1,
       type: "turn.completed",
       payload: { stopReason: "stop" },
-      lease_id: turn === 1 ? IDS.lease1 : IDS.lease2,
-      fencing_token: turn,
       occurred_at: new Date(),
     })
     .execute();

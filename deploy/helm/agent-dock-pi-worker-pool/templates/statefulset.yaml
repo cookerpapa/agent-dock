@@ -192,7 +192,7 @@ spec:
             - name: AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS
               value: {{ .Values.runtime.timeouts.modelCapabilityTtlMs | quote }}
             - name: AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN
-              value: "32"
+              value: "128"
             - name: AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS
               value: {{ .Values.runtime.timeouts.modelUpstreamRequestMs | quote }}
             - name: AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS

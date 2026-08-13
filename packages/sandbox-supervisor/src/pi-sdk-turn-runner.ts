@@ -56,6 +56,7 @@ export type PiSdkTurnRunnerOptions = {
     stepWorldState: PiStepWorldStateController | undefined;
     captureSamplingStep: (
       createFresh: () => Omit<PiSamplingStepCapture, "samplingAttempt">,
+      options?: Readonly<{ publishEvent?: boolean }>,
     ) => PiSamplingStepCapture;
   }) => readonly InlineExtension[];
   /** Pi-native retries for transient provider failures. Provider/SDK retries remain disabled. */
@@ -273,6 +274,29 @@ async function createModelRuntime(
         id: config.modelId,
         name: config.modelId,
         reasoning: config.reasoning ?? false,
+        ...(config.provider === "deepseek" && config.reasoning === true
+          ? {
+              thinkingLevelMap: {
+                minimal: "high",
+                low: "high",
+                medium: "high",
+                high: "high",
+                xhigh: "max",
+                max: "max",
+              },
+              // The trusted gateway intentionally hides the provider URL from
+              // Pi. Declare DeepSeek's partial OpenAI contract explicitly so
+              // URL-based detection does not emit OpenAI-only request fields.
+              compat: {
+                supportsStore: false,
+                supportsDeveloperRole: false,
+                supportsStrictMode: false,
+                maxTokensField: "max_tokens" as const,
+                requiresReasoningContentOnAssistantMessages: true,
+                thinkingFormat: "deepseek" as const,
+              },
+            }
+          : {}),
         input: ["text"],
         contextWindow: config.contextWindow ?? 16_384,
         maxTokens: config.maxTokens ?? 1_024,
@@ -655,20 +679,22 @@ export class PiSdkTurnRunner {
                 this.#options.createInlineExtensions?.({
                   toolOutputDirectory,
                   stepWorldState,
-                  captureSamplingStep: (createFresh) => {
+                  captureSamplingStep: (createFresh, captureOptions) => {
                     const captured = samplingSteps.capture(createFresh);
                     const identity = {
                       stepSequence: captured.step.context.sequence,
                       stepSha256: captured.step.sha256,
                       samplingAttempt: captured.samplingAttempt,
                     } as const;
-                    eventChain = eventChain
-                      .then(() =>
-                        publishEvent(eventMessage(eventAdapter.samplingStarted(identity))),
-                      )
-                      .catch((error: unknown) => {
-                        fail(error instanceof Error ? error : new Error(String(error)));
-                      });
+                    if (captureOptions?.publishEvent !== false) {
+                      eventChain = eventChain
+                        .then(() =>
+                          publishEvent(eventMessage(eventAdapter.samplingStarted(identity))),
+                        )
+                        .catch((error: unknown) => {
+                          fail(error instanceof Error ? error : new Error(String(error)));
+                        });
+                    }
                     return captured;
                   },
                 }) ??

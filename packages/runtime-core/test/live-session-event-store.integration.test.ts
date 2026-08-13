@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   LiveSessionEventStoreError,
@@ -99,7 +100,18 @@ describe.skipIf(!existsSync("/usr/bin/redis-server"))("Valkey live Session event
       );
     });
     store = new ValkeyLiveSessionEventStore({ url: `redis://127.0.0.1:${String(port)}` });
-    await store.checkHealth();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        await store.checkHealth();
+        lastError = undefined;
+        break;
+      } catch (error: unknown) {
+        lastError = error;
+        await delay(20);
+      }
+    }
+    if (lastError !== undefined) throw lastError;
   });
 
   afterAll(async () => {

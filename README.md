@@ -116,10 +116,15 @@ configure the model. Useful operations:
 npm run production:ps
 npm run production:logs
 npm run production:check
+npm run production:long-context-check
 npm run production:backup
 ```
 
-`production:check` consumes real model tokens and exercises Cube KVM.
+`production:check` consumes real model tokens and exercises Cube KVM. The
+long-context gate additionally requires
+`AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1`; it runs sustained coding Turns until Pi
+performs native compaction, then verifies post-compaction coding and
+cross-Worker recovery.
 
 ## Kubernetes deployment
 

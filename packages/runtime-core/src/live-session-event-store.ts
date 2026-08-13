@@ -395,7 +395,13 @@ export class ValkeyLiveSessionEventStore implements LiveSessionEventStore {
 
   #connect(): Promise<void> {
     if (this.#closed) return Promise.reject(new Error("Valkey live-event store is closed"));
-    if (this.#connected === undefined) this.#connected = this.#client.connect();
+    if (this.#connected === undefined) {
+      const connection = this.#client.connect();
+      this.#connected = connection;
+      void connection.catch(() => {
+        if (!this.#closed && this.#connected === connection) this.#connected = undefined;
+      });
+    }
     return this.#connected;
   }
 }

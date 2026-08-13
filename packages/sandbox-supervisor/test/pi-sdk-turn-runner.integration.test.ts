@@ -164,6 +164,50 @@ async function waitFor(
 }
 
 describe("PiSdkTurnRunner integration", () => {
+  it("maps an off Pi thinking level to DeepSeek non-thinking mode", async () => {
+    const fakeModel = new FakeModelServer();
+    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-deepseek-thinking-test-"));
+    try {
+      await fakeModel.start();
+      await new PiSdkTurnRunner({
+        resolveWorkspaceDirectory: () => workspace,
+        resolveModelRuntime: () => ({
+          provider: "deepseek",
+          modelId: "deepseek-v4-flash",
+          baseUrl: fakeModel.baseUrl,
+          api: "openai-completions",
+          apiKey: FAKE_MODEL_API_KEY,
+          reasoning: true,
+        }),
+      }).run(
+        {
+          ...command,
+          payload: {
+            ...command.payload,
+            model: {
+              ...command.payload.model,
+              provider: "deepseek",
+              modelId: "deepseek-v4-flash",
+              thinkingLevel: "off",
+            },
+          },
+        },
+        () => undefined,
+      );
+
+      expect(fakeModel.observations).toHaveLength(1);
+      expect(fakeModel.observations[0]?.thinkingType).toBe("disabled");
+      expect(fakeModel.observations[0]).toMatchObject({
+        storePresent: false,
+        developerMessageCount: 0,
+        strictToolCount: 0,
+      });
+    } finally {
+      await fakeModel.stop();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("runs one bounded Pi follow-up for an explicit project settlement gate", async () => {
     const fakeModel = new FakeModelServer({ defaultScenario: "settlement_gate" });
     const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-sdk-settlement-gate-test-"));

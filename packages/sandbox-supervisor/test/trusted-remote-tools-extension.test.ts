@@ -96,6 +96,29 @@ describe("trusted remote tools extension governance", () => {
     });
   });
 
+  it("assigns fresh governed identities to Pi context-maintenance requests", async () => {
+    const purposes: Array<string | undefined> = [];
+    const capture = createStepCapture();
+    const runtime = createTrustedRemoteAgentTools({
+      ...BASE_CONFIGURATION,
+      captureStepContext: (activeTools, purpose) => {
+        purposes.push(purpose);
+        return capture(activeTools);
+      },
+    });
+
+    await runtime.transformContext([]);
+    const agentHeaders = await runtime.transformHeaders();
+    const compactionHeaders = await runtime.transformHeaders();
+    await runtime.transformContext([]);
+    const resumedAgentHeaders = await runtime.transformHeaders();
+
+    expect(purposes).toEqual(["agent", "context_maintenance", "agent"]);
+    expect(agentHeaders["x-agent-dock-step-sequence"]).toBe("1");
+    expect(compactionHeaders["x-agent-dock-step-sequence"]).toBe("2");
+    expect(resumedAgentHeaders["x-agent-dock-step-sequence"]).toBe("3");
+  });
+
   it("binds SDK tool identity from an activation-local object instead of process.env", () => {
     const registered: ToolDefinition[] = [];
     const handlers = new Map<string, (...args: never[]) => unknown>();

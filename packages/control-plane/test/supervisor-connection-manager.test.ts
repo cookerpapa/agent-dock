@@ -534,6 +534,43 @@ describe.sequential("durable supervisor registration and health management", () 
     ]);
   });
 
+  it("renews a control-only heartbeat without entering Session lease coordination", async () => {
+    let now = testTime(1);
+    const connectionManager = manager({ clock: () => new Date(now) });
+    const transportAuthority = authority();
+    await provisionSandbox(transportAuthority);
+    const registered = await connectionManager.register(
+      registration(transportAuthority),
+      transportAuthority,
+    );
+    const before = await database
+      .selectFrom("supervisor_connections")
+      .select("expires_at")
+      .where("connection_id", "=", registered.payload.connectionId)
+      .executeTakeFirstOrThrow();
+
+    now = new Date(now.valueOf() + 10_000);
+    const acknowledgement = await connectionManager.heartbeat(
+      heartbeat({
+        authority: transportAuthority,
+        connectionId: registered.payload.connectionId,
+        acceptingAssignments: false,
+      }),
+      transportAuthority,
+    );
+
+    expect(acknowledgement.payload.leaseRenewals).toEqual([]);
+    const after = await database
+      .selectFrom("supervisor_connections")
+      .select(["accepting_assignments", "expires_at"])
+      .where("connection_id", "=", registered.payload.connectionId)
+      .executeTakeFirstOrThrow();
+    expect(after.accepting_assignments).toBe(false);
+    expect(new Date(after.expires_at).valueOf()).toBeGreaterThan(
+      new Date(before.expires_at).valueOf(),
+    );
+  });
+
   it("fences an older boot while admitting its separately provisioned replacement", async () => {
     const now = testTime(2);
     const connectionManager = manager({ clock: () => new Date(now) });

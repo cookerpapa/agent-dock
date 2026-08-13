@@ -37,6 +37,13 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
   // result. Pi's partial tool output is intentionally not persisted yet.
   "tool_execution_update",
   "auto_retry_end",
+  // Pi 0.84 emits these around retryable compaction/branch-summary requests.
+  // The governed model-request ledger already records every attempt; these
+  // transient UI lifecycle events carry no additional canonical conversation
+  // state and therefore stay out of the public AgentDock event stream.
+  "summarization_retry_scheduled",
+  "summarization_retry_attempt_start",
+  "summarization_retry_finished",
 ]);
 
 const DEFAULT_MAXIMUM_TOOL_OUTPUT_BYTES = 65_536;
@@ -621,7 +628,7 @@ export class PiAgentEventAdapter {
     return {
       kind: "invalid",
       sourceType: value.type,
-      reason: "No reviewed AgentDock v1 mapping exists for this Pi event type",
+      reason: `No reviewed AgentDock v1 mapping exists for Pi event type: ${value.type.slice(0, 128)}`,
     };
   }
 

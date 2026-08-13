@@ -310,6 +310,7 @@ describe.sequential("tenant model gateway", () => {
         kind: "openai_compatible_gateway",
         provider: "deepseek",
         modelId: "deepseek-v4-flash",
+        reasoning: true,
       },
     });
     expect(JSON.stringify(lease)).not.toContain(PROVIDER_SECRET);

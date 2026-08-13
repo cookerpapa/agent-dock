@@ -569,6 +569,59 @@ describe.sequential("versioned Workspace service", () => {
     expect(requests.filter((entry) => entry.type === "pull_request.deliver")).toHaveLength(1);
   });
 
+  it("accepts a follow-up from the durable Pi checkpoint of an interrupted Run", async () => {
+    const store = new ControlPlaneStore({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+      idGenerator: randomUUID,
+    });
+    const project = await store.createProject(`interrupted-${randomUUID()}`);
+    const conversation = await store.createSession(
+      project.projectId,
+      project.workspaceId,
+      "Interrupted conversation",
+      "ephemeral",
+    );
+    const artifactId = randomUUID();
+    const objectKey = `checkpoints/${conversation.sessionId}/interrupted-pi.jsonl`;
+    const bytes = Buffer.from('{"type":"session","version":3}\n');
+    await database
+      .insertInto("artifacts")
+      .values({
+        id: artifactId,
+        tenant_id: IDS.tenant,
+        session_id: conversation.sessionId,
+        turn_id: null,
+        run_id: null,
+        kind: "pi_interrupted_session_snapshot",
+        object_key: objectKey,
+        sha256: hash(bytes),
+        size_bytes: bytes.byteLength,
+        file_name: "session.jsonl",
+        media_type: "application/x-ndjson",
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .updateTable("sessions")
+      .set({ pi_session_snapshot_key: objectKey })
+      .where("tenant_id", "=", IDS.tenant)
+      .where("id", "=", conversation.sessionId)
+      .executeTakeFirstOrThrow();
+
+    const accepted = await store.acceptTurn(conversation.sessionId, "resume-interrupted", {
+      prompt: "Inspect the interrupted state and continue.",
+    });
+    await expect(
+      database
+        .selectFrom("runs")
+        .select("pi_session_base_artifact_id")
+        .where("tenant_id", "=", IDS.tenant)
+        .where("id", "=", accepted.runId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ pi_session_base_artifact_id: artifactId });
+  });
+
   it("forks idempotently, rolls back with CAS, archives, and blocks archived turns", async () => {
     const fork = await service.fork(IDS.tenant, "fork-version-one", IDS.session, {
       versionId: IDS.version1,

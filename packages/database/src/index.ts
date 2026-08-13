@@ -96,6 +96,10 @@ export {
   upToolBrokerOwnership,
   upSandboxDomainsAndToolBroker,
   upPartitionedSessionEventLog,
+  upUnlimitedDefaultDailyTokens,
+  downUnlimitedDefaultDailyTokens,
+  upCodingRunModelRequestLimit,
+  downCodingRunModelRequestLimit,
 } from "./migrations/index.ts";
 
 export {

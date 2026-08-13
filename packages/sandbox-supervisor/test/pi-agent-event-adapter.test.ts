@@ -224,7 +224,7 @@ describe("PiAgentEventAdapter", () => {
     expect(adapter.adapt({ type: "future_pi_event", raw: "must-not-pass" })).toEqual({
       kind: "invalid",
       sourceType: "future_pi_event",
-      reason: "No reviewed AgentDock v1 mapping exists for this Pi event type",
+      reason: "No reviewed AgentDock v1 mapping exists for Pi event type: future_pi_event",
     });
   });
 
@@ -396,6 +396,32 @@ describe("PiAgentEventAdapter", () => {
       },
     });
     expect(JSON.stringify(completed)).not.toContain("private compacted transcript");
+  });
+
+  it("reviews Pi summarization retry lifecycle without publishing transient UI state", () => {
+    const adapter = createAdapter();
+    adapter.adapt({ type: "agent_start" });
+
+    expect(
+      adapter.adapt({
+        type: "summarization_retry_scheduled",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 500,
+        errorMessage: "provider detail must not pass",
+      }),
+    ).toEqual({ kind: "ignored", sourceType: "summarization_retry_scheduled" });
+    expect(
+      adapter.adapt({
+        type: "summarization_retry_attempt_start",
+        source: "compaction",
+        reason: "threshold",
+      }),
+    ).toEqual({ kind: "ignored", sourceType: "summarization_retry_attempt_start" });
+    expect(adapter.adapt({ type: "summarization_retry_finished" })).toEqual({
+      kind: "ignored",
+      sourceType: "summarization_retry_finished",
+    });
   });
 
   it("bounds persisted tool output", () => {

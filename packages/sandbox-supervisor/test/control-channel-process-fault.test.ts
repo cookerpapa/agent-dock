@@ -113,6 +113,7 @@ describe("Control Channel process fault", () => {
       settleAssignments = resolvePromise;
     });
     const runtime: ReconnectingSupervisorControlRuntime = {
+      activeSessionCount: 0,
       createHeartbeat(identity, acceptingAssignments = false) {
         const message = parseSupervisorToControlMessage({
           protocolVersion: 1,
@@ -197,6 +198,7 @@ describe("Control Channel process fault", () => {
     let revocations = 0;
     let recoveries = 0;
     const runtime: ReconnectingSupervisorControlRuntime = {
+      activeSessionCount: 0,
       createHeartbeat(identity, acceptingAssignments = false) {
         const message = parseSupervisorToControlMessage({
           protocolVersion: 1,

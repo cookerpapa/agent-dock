@@ -429,7 +429,7 @@ export async function loadSupervisorHostConfig(
     modelGatewayMaximumRequestsPerTurn: integerValue(
       environment,
       "AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN",
-      32,
+      128,
       1,
       256,
     ),

@@ -33,6 +33,11 @@ export type FakeModelRequestObservation = {
   model: string;
   messageCount: number;
   toolCount: number;
+  thinkingType?: "enabled" | "disabled";
+  storePresent: boolean;
+  developerMessageCount: number;
+  strictToolCount: number;
+  maxTokensField?: "max_tokens" | "max_completion_tokens";
   authorizationPresent: boolean;
   responseStatus: number | null;
   completion: FakeModelRequestCompletion;
@@ -53,6 +58,10 @@ type ChatCompletionRequest = {
   model: string;
   messages: unknown[];
   tools?: unknown[];
+  thinking?: { type: "enabled" | "disabled" };
+  store?: unknown;
+  max_tokens?: unknown;
+  max_completion_tokens?: unknown;
   stream: true;
 };
 
@@ -233,10 +242,20 @@ function parseChatCompletionRequest(value: unknown): ChatCompletionRequest {
   if (value.tools !== undefined && !Array.isArray(value.tools)) {
     throw new SafeHttpError(400, "tools must be an array when present");
   }
+  const thinking = value.thinking;
+  if (
+    thinking !== undefined &&
+    (!isRecord(thinking) || (thinking.type !== "enabled" && thinking.type !== "disabled"))
+  ) {
+    throw new SafeHttpError(400, "thinking.type must be enabled or disabled when present");
+  }
   return {
     model: value.model,
     messages: value.messages,
     ...(Array.isArray(value.tools) ? { tools: value.tools } : {}),
+    ...(isRecord(thinking) && (thinking.type === "enabled" || thinking.type === "disabled")
+      ? { thinking: { type: thinking.type } }
+      : {}),
     stream: true,
   };
 }
@@ -529,6 +548,15 @@ export class FakeModelServer {
     const payload = parseChatCompletionRequest(await readJsonBody(request, this.#maxRequestBytes));
     const sequence = ++this.#requestSequence;
     const requestId = `chatcmpl-agentdock-${String(sequence).padStart(4, "0")}`;
+    const developerMessageCount = payload.messages.filter(
+      (message) => isRecord(message) && message.role === "developer",
+    ).length;
+    const strictToolCount = (payload.tools ?? []).filter(
+      (tool) =>
+        isRecord(tool) &&
+        isRecord(tool.function) &&
+        Object.prototype.hasOwnProperty.call(tool.function, "strict"),
+    ).length;
     const observation: MutableObservation = {
       requestId,
       scenario,
@@ -537,6 +565,15 @@ export class FakeModelServer {
       model: payload.model,
       messageCount: payload.messages.length,
       toolCount: payload.tools?.length ?? 0,
+      ...(payload.thinking === undefined ? {} : { thinkingType: payload.thinking.type }),
+      storePresent: Object.prototype.hasOwnProperty.call(payload, "store"),
+      developerMessageCount,
+      strictToolCount,
+      ...(Object.prototype.hasOwnProperty.call(payload, "max_tokens")
+        ? { maxTokensField: "max_tokens" as const }
+        : Object.prototype.hasOwnProperty.call(payload, "max_completion_tokens")
+          ? { maxTokensField: "max_completion_tokens" as const }
+          : {}),
       authorizationPresent: true,
       responseStatus: scenario === "timeout" ? null : scenario === "rate_limit" ? 429 : 200,
       completion: scenario === "timeout" ? "pending" : "completed",
