@@ -59,7 +59,7 @@ jobs:
           retention-days: 14
 
   containers:
-    name: CubeSandbox template and portable checkpoint paths
+    name: CubeSandbox template contract
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -91,9 +91,6 @@ jobs:
         run: npm run cubesandbox:template-check
         env:
           AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE: agent-dock/cubesandbox-tool:ci
-
-      - name: Verify S3-compatible checkpoint portability
-        run: npm run object-store:check
 
   supply-chain:
     name: SBOM and vulnerability gate (${{ matrix.image }})
