@@ -1,12 +1,7 @@
 import type { Database } from "@agent-dock/database";
 import { SessionError } from "@earendil-works/pi-agent-core";
 import type { Kysely, Transaction } from "kysely";
-import type { ExecutionAuthority } from "./execution-authority.ts";
-import type {
-  DurableAgentExecutionAuthority,
-  DurableAgentExecutionAuthorityProvider,
-  DurableAgentExecutionScope,
-} from "./durable-agent-harness.ts";
+import type { ActiveExecutionAuthority } from "./execution-authority.ts";
 
 export type PostgresRunExecutionAuthorityOptions = {
   database: Kysely<Database>;
@@ -27,10 +22,8 @@ function positiveInteger(value: number, name: string): number {
   return value;
 }
 
-/** Opaque Harness authority checked at each durable Pi Session effect boundary. */
-export class PostgresRunExecutionAuthority
-  implements ExecutionAuthority, DurableAgentExecutionAuthority
-{
+/** Opaque Run authority checked at each durable Pi Session effect boundary. */
+export class PostgresRunExecutionAuthority implements ActiveExecutionAuthority {
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
   readonly #sessionId: string;
@@ -136,29 +129,5 @@ export class PostgresRunExecutionAuthority
         return;
       }
     }
-  }
-}
-
-/** Creates the one opaque authority owned by a DurableAgentHarness Run. */
-export class PostgresRunExecutionAuthorityProvider implements DurableAgentExecutionAuthorityProvider {
-  readonly #options: PostgresRunExecutionAuthorityOptions;
-
-  constructor(options: PostgresRunExecutionAuthorityOptions) {
-    this.#options = options;
-  }
-
-  async acquire(scope: DurableAgentExecutionScope): Promise<PostgresRunExecutionAuthority> {
-    if (
-      scope.tenantId !== this.#options.tenantId ||
-      scope.sessionId !== this.#options.sessionId ||
-      scope.runId !== this.#options.runId ||
-      scope.attemptId !== this.#options.attemptId
-    ) {
-      throw new SessionError("storage", "Pi Harness execution scope did not match its authority");
-    }
-    const authority = new PostgresRunExecutionAuthority(this.#options);
-    await authority.assertCurrent();
-    authority.start();
-    return authority;
   }
 }

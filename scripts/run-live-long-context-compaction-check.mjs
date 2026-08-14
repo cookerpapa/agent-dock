@@ -328,33 +328,60 @@ async function runEvidence(runId) {
             coalesce(attempt.sandbox_id::text, '') || '|' ||
             coalesce(activation.activation_id::text, '') || '|' ||
             coalesce(activation.runtime_id, '') || '|' ||
-            coalesce(artifact.size_bytes, 0) || '|' ||
-            coalesce((convert_from(object.bytes, 'UTF8')::jsonb ->> 'totalSizeBytes')::bigint, 0) || '|' ||
-            coalesce((convert_from(object.bytes, 'UTF8')::jsonb ->> 'totalLineCount')::bigint, 0)
+            coalesce(pi.total_bytes, 0) || '|' ||
+            coalesce(pi.total_entries, 0) || '|' ||
+            coalesce(pi.active_bytes, 0) || '|' ||
+            coalesce(pi.active_entries, 0)
        from runs run
        join run_attempts attempt on attempt.id = run.current_attempt_id
        join sandboxes sandbox on sandbox.id = attempt.sandbox_id
        left join tool_broker_activations activation
-         on activation.attempt_id = attempt.id
+        on activation.attempt_id = attempt.id
         and activation.session_id = run.session_id
-       left join sessions session_row on session_row.id = run.session_id
-       left join artifacts artifact on artifact.object_key = session_row.pi_session_snapshot_key
-       left join checkpoint_objects object on object.object_key = session_row.pi_session_snapshot_key
+       left join lateral (
+         select coalesce(sum(pg_column_size(entry.payload)), 0)::bigint as total_bytes,
+                count(*)::bigint as total_entries,
+                coalesce(sum(pg_column_size(entry.payload)) filter (
+                  where entry.seq >= coalesce(compaction.latest_seq, 0)
+                ), 0)::bigint as active_bytes,
+                count(*) filter (
+                  where entry.seq >= coalesce(compaction.latest_seq, 0)
+                )::bigint as active_entries
+           from pi_session_entries entry
+           cross join lateral (
+             select max(candidate.seq) as latest_seq
+               from pi_session_entries candidate
+              where candidate.tenant_id = run.tenant_id
+                and candidate.session_id = run.session_id
+                and candidate.type = 'compaction'
+           ) compaction
+          where entry.tenant_id = run.tenant_id
+            and entry.session_id = run.session_id
+       ) pi on true
       where run.id = ${sqlLiteral(runId)}
       order by activation.created_at desc nulls last
       limit 1`,
   );
-  const [supervisorId, sandboxId, activationId, runtimeId, manifestBytes, jsonlBytes, jsonlLines] =
-    row.split("|");
+  const [
+    supervisorId,
+    sandboxId,
+    activationId,
+    runtimeId,
+    sessionBytes,
+    sessionEntries,
+    activeContextBytes,
+    activeContextEntries,
+  ] = row.split("|");
   assert(supervisorId, `Run ${runId} has no Worker assignment`);
   return {
     supervisorId,
     sandboxId: sandboxId || undefined,
     activationId: activationId || undefined,
     runtimeId: runtimeId || undefined,
-    manifestBytes: Number(manifestBytes),
-    jsonlBytes: Number(jsonlBytes),
-    jsonlLines: Number(jsonlLines),
+    sessionBytes: Number(sessionBytes),
+    sessionEntries: Number(sessionEntries),
+    activeContextBytes: Number(activeContextBytes),
+    activeContextEntries: Number(activeContextEntries),
   };
 }
 
@@ -755,13 +782,15 @@ try {
       firstTextMs: turn.firstTextMs,
       settledMs: turn.settledMs,
       usage,
-      sessionJsonlBytes: evidence.jsonlBytes,
-      sessionJsonlLines: evidence.jsonlLines,
+      sessionBytes: evidence.sessionBytes,
+      sessionEntries: evidence.sessionEntries,
+      activeContextBytes: evidence.activeContextBytes,
+      activeContextEntries: evidence.activeContextEntries,
       eventCompactions: turn.eventCompactions,
     };
     rounds.push(round);
     progress(
-      `round ${String(index + 1)} ${task[0]}: input(max/sum)=${String(usage.maximumRequestInputTokens)}/${String(usage.inputTokens)}, output=${String(usage.outputTokens)}, tools=${String(turn.toolCalls)}, firstResponse=${String(turn.firstResponseMs)}ms, settled=${String(turn.settledMs)}ms, jsonl=${String(evidence.jsonlBytes)}B`,
+      `round ${String(index + 1)} ${task[0]}: input(max/sum)=${String(usage.maximumRequestInputTokens)}/${String(usage.inputTokens)}, output=${String(usage.outputTokens)}, tools=${String(turn.toolCalls)}, firstResponse=${String(turn.firstResponseMs)}ms, settled=${String(turn.settledMs)}ms, active-context=${String(evidence.activeContextBytes)}B/${String(evidence.activeContextEntries)} entries`,
     );
     completedCompaction = compactions.find(
       (compaction) => compaction.runId === turn.runId && compaction.state === "completed",
@@ -894,7 +923,7 @@ try {
       workers: initialWorkers,
       scheduler: "postgresql-run-queue",
       sandbox: "CubeSandbox KVM",
-      sessionRuntime: "Pi SDK 0.84.1 JSONL compatibility path",
+      sessionRuntime: "Pi SDK 0.84.1 PostgreSQL SessionStorage runtime",
     },
     model: {
       provider: model.provider,
@@ -930,8 +959,10 @@ try {
         firstTextMs: recall.firstTextMs,
         settledMs: recall.settledMs,
         usage: recallUsage,
-        sessionJsonlBytes: recallEvidence.jsonlBytes,
-        sessionJsonlLines: recallEvidence.jsonlLines,
+        sessionBytes: recallEvidence.sessionBytes,
+        sessionEntries: recallEvidence.sessionEntries,
+        activeContextBytes: recallEvidence.activeContextBytes,
+        activeContextEntries: recallEvidence.activeContextEntries,
       },
       coding: {
         runId: postCompaction.runId,
@@ -954,8 +985,10 @@ try {
         firstTextMs: crossWorker.firstTextMs,
         settledMs: crossWorker.settledMs,
         usage: crossWorkerUsage,
-        sessionJsonlBytes: crossWorkerEvidence.jsonlBytes,
-        sessionJsonlLines: crossWorkerEvidence.jsonlLines,
+        sessionBytes: crossWorkerEvidence.sessionBytes,
+        sessionEntries: crossWorkerEvidence.sessionEntries,
+        activeContextBytes: crossWorkerEvidence.activeContextBytes,
+        activeContextEntries: crossWorkerEvidence.activeContextEntries,
       },
     },
     totalUsage,
@@ -987,7 +1020,8 @@ try {
         `- Same persistent Cube runtime rebound: ${String(report.postCompaction.crossWorker.sameCubeRuntimeRebound)}`,
         `- Real model attempts/completed/recovered failures: ${String(report.totalUsage.modelAttempts)} / ${String(report.totalUsage.modelRequests)} / ${String(report.totalUsage.recoveredRequestFailures)}`,
         `- Real input/output/cache-read/cache-write tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)} / ${String(report.totalUsage.cacheWriteTokens)}`,
-        `- Final Pi JSONL logical bytes/lines: ${String(report.postCompaction.crossWorker.sessionJsonlBytes)} / ${String(report.postCompaction.crossWorker.sessionJsonlLines)}`,
+        `- Final Pi SessionStorage bytes/entries: ${String(report.postCompaction.crossWorker.sessionBytes)} / ${String(report.postCompaction.crossWorker.sessionEntries)}`,
+        `- Final active context bytes/entries: ${String(report.postCompaction.crossWorker.activeContextBytes)} / ${String(report.postCompaction.crossWorker.activeContextEntries)}`,
         "",
         "The workload used real multi-round Python coding tasks, remote Tool calls, deterministic tests and a persistent CubeSandbox KVM. Pi completed native threshold/overflow compaction, retained an early conversation invariant, continued coding after compaction, and restored the compacted native Session on a different Worker while rebinding the same persistent Cube runtime.",
         "",

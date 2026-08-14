@@ -1,39 +1,36 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-12T16:58:13.533Z",
-  "model": {
-    "provider": "deepseek",
-    "modelId": "deepseek-v4-flash"
-  },
-  "workerDeployment": "kubernetes",
-  "workers": ["agent-dock-pi-worker-local-v1-0", "agent-dock-pi-worker-local-v1-1"],
+  "checkedAt": "2026-08-14T15:29:51.585Z",
+  "model": { "provider": "deepseek", "modelId": "deepseek-v4-flash" },
+  "workerDeployment": "compose",
+  "workers": ["agent-dock-worker-1", "agent-dock-worker-2"],
   "failover": {
-    "firstWorker": "agent-dock-pi-worker-local-v1-1",
-    "followUpWorker": "agent-dock-pi-worker-local-v1-0",
+    "firstWorker": "agent-dock-worker-1",
+    "followUpWorker": "agent-dock-worker-2",
     "differentWorker": true,
-    "piSessionArtifactRestored": true,
+    "postgresSessionRestored": true,
     "markerRecovered": true,
-    "firstSettledMs": 2070,
-    "followUpSettledMs": 2441,
-    "candidateRuns": 4
+    "firstSettledMs": 3916,
+    "followUpSettledMs": 2779,
+    "candidateRuns": 1
   },
   "concurrency": {
     "runs": 4,
     "workerIds": [
-      "agent-dock-pi-worker-local-v1-0",
-      "agent-dock-pi-worker-local-v1-1",
-      "agent-dock-pi-worker-local-v1-0",
-      "agent-dock-pi-worker-local-v1-0"
+      "agent-dock-worker-2",
+      "agent-dock-worker-1",
+      "agent-dock-worker-1",
+      "agent-dock-worker-2"
     ],
     "distinctWorkers": 2,
-    "observedWorkerIds": ["agent-dock-pi-worker-local-v1-0", "agent-dock-pi-worker-local-v1-1"],
-    "settledMs": [5240, 11637, 11201, 5815]
+    "observedWorkerIds": ["agent-dock-worker-1", "agent-dock-worker-2"],
+    "settledMs": [10782, 4778, 8932, 6176]
   },
   "totalUsage": {
-    "requests": 9,
-    "inputTokens": 351,
-    "outputTokens": 1359,
-    "cacheReadTokens": 12672,
+    "requests": 6,
+    "inputTokens": 278,
+    "outputTokens": 996,
+    "cacheReadTokens": 6144,
     "cacheWriteTokens": 0
   }
 }

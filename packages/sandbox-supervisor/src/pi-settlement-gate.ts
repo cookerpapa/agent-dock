@@ -1,4 +1,5 @@
 import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
 export const SETTLEMENT_GATE_COMMAND_ID = "settlement-gate" as const;
@@ -146,4 +147,80 @@ export function createPiSettlementGateExtension(input: PiSettlementGatePolicy): 
       );
     });
   };
+}
+
+/** Thin-runtime equivalent of the extension settlement gate. */
+export class PiSettlementGateController {
+  readonly #policy: PiSettlementGatePolicy;
+  readonly #verificationCalls = new Set<string>();
+  #mutationObserved = false;
+  #verificationSucceeded = false;
+  #lastStopReason: string | undefined;
+  #used = false;
+
+  constructor(input: PiSettlementGatePolicy) {
+    this.#policy = validatePolicy(input);
+  }
+
+  observe(event: AgentEvent): void {
+    if (event.type === "tool_execution_start") {
+      if (event.toolName === "write" || event.toolName === "edit") {
+        this.#mutationObserved = true;
+        return;
+      }
+      if (event.toolName !== "bash") return;
+      this.#mutationObserved = true;
+      if (
+        isRecord(event.args) &&
+        typeof event.args.command === "string" &&
+        isConfiguredVerification(event.args.command, this.#policy)
+      ) {
+        this.#verificationCalls.add(event.toolCallId);
+      }
+      return;
+    }
+    if (event.type === "tool_execution_end") {
+      if (this.#verificationCalls.delete(event.toolCallId) && !event.isError) {
+        this.#verificationSucceeded = true;
+      }
+      return;
+    }
+    if (event.type === "message_end" && isRecord(event.message)) {
+      const reason = event.message.stopReason;
+      if (typeof reason === "string") this.#lastStopReason = reason;
+    }
+  }
+
+  prepareFollowUp(): AgentMessage | undefined {
+    if (
+      this.#used ||
+      !this.#mutationObserved ||
+      this.#verificationSucceeded ||
+      this.#lastStopReason === undefined ||
+      this.#lastStopReason === "error" ||
+      this.#lastStopReason === "aborted"
+    ) {
+      return undefined;
+    }
+    this.#used = true;
+    const cwd = this.#policy.cwd === "." ? "/workspace" : `/workspace/${this.#policy.cwd}`;
+    return {
+      role: "custom",
+      customType: PI_SETTLEMENT_GATE_CUSTOM_TYPE,
+      content: [
+        {
+          type: "text",
+          text: [
+            "A project-defined verification step is still required before this Run settles.",
+            `Run the configured command from ${cwd}, inspect its result, and address any failure before the final response.`,
+            `Command: ${this.#policy.command}`,
+            `Timeout: ${String(Math.ceil(this.#policy.timeoutMs / 1_000))} seconds`,
+          ].join("\n"),
+        },
+      ],
+      display: false,
+      details: { schemaVersion: 1 },
+      timestamp: Date.now(),
+    } as AgentMessage;
+  }
 }

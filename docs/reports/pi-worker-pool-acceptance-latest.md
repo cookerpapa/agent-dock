@@ -1,14 +1,14 @@
 # Pi Worker pool production acceptance
 
-- Checked at: 2026-08-12T16:58:13.533Z
+- Checked at: 2026-08-14T15:29:51.585Z
 - Provider/model: deepseek / deepseek-v4-flash
-- Worker deployment: kubernetes
-- Active Workers: agent-dock-pi-worker-local-v1-0, agent-dock-pi-worker-local-v1-1
-- Cross-Worker restore: agent-dock-pi-worker-local-v1-1 -> agent-dock-pi-worker-local-v1-0
-- Pi session artifact restored: true
+- Worker deployment: compose
+- Active Workers: agent-dock-worker-1, agent-dock-worker-2
+- Cross-Worker restore: agent-dock-worker-1 -> agent-dock-worker-2
+- PostgreSQL Pi Session restored: true
 - Previous-turn marker recovered: true
 - Concurrent Runs / distinct Workers: 4 / 2
-- Concurrent assignment: agent-dock-pi-worker-local-v1-0, agent-dock-pi-worker-local-v1-1, agent-dock-pi-worker-local-v1-0, agent-dock-pi-worker-local-v1-0
-- Real requests/input/output tokens: 9 / 351 / 1359
+- Concurrent assignment: agent-dock-worker-2, agent-dock-worker-1, agent-dock-worker-1, agent-dock-worker-2
+- Real requests/input/output tokens: 6 / 278 / 996
 
-The owning Pi Worker was stopped after the first real-model turn. The surviving Worker restored the native Pi JSONL checkpoint, answered from the previous turn, and committed a new checkpoint. Further concurrent real-model Runs completed through the independently ready Worker pool; allocation is reported as evidence rather than assumed to be round-robin.
+The owning Pi Worker was stopped after the first real-model Turn. The surviving Worker rebuilt Pi's active model context directly from PostgreSQL SessionStorage, recovered the previous-turn marker and appended the follow-up incrementally. Further concurrent real-model Runs completed through the independently ready Worker pool; allocation is reported as evidence rather than assumed to be round-robin.

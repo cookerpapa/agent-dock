@@ -60,8 +60,38 @@ export type SavedToolOutputArtifact = {
   sizeBytes: number;
 };
 
+/**
+ * Small schema bridge for Workspace versions that still require a Pi artifact
+ * foreign key. Model context lives in PostgreSQL SessionStorage; this object is
+ * never used to reconstruct messages and remains constant-size.
+ */
+export function encodePostgresSessionReference(input: {
+  sessionId: string;
+  leafId: string | null;
+}): Uint8Array {
+  const timestamp = new Date().toISOString();
+  return Buffer.from(
+    `${JSON.stringify({ type: "session", version: 3, id: input.sessionId, timestamp, cwd: "/workspace" })}\n${JSON.stringify(
+      {
+        type: "custom_message",
+        id: globalThis.crypto.randomUUID(),
+        parentId: null,
+        timestamp,
+        customType: "agent-dock.postgres_session_reference",
+        content: "Conversation context is stored in PostgreSQL SessionStorage.",
+        display: false,
+        details: { schemaVersion: 1, leafId: input.leafId },
+      },
+    )}\n`,
+    "utf8",
+  );
+}
+
 export interface SandboxCheckpointStore {
-  load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined>;
+  load(
+    command: ExecuteTurnCommandMessage,
+    options?: Readonly<{ includeConversation?: boolean }>,
+  ): Promise<LoadedSandboxCheckpoint | undefined>;
   saveConversation(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
@@ -144,6 +174,7 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
   const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let hasAssistant = false;
   let hasInterruptionMarker = false;
+  let hasPostgresSessionReference = false;
   let lineStart = 0;
   let parsedLines = 0;
   for (let index = 0; index < buffer.byteLength; index += 1) {
@@ -187,10 +218,16 @@ export function validatePiSessionSnapshot(bytes: Uint8Array): void {
     if (parsed.type === "custom_message" && parsed.customType === "agent-dock.run_interrupted") {
       hasInterruptionMarker = true;
     }
+    if (
+      parsed.type === "custom_message" &&
+      parsed.customType === "agent-dock.postgres_session_reference"
+    ) {
+      hasPostgresSessionReference = true;
+    }
     parsedLines += 1;
   }
   if (parsedLines < 2) throw checkpointError("Pi session snapshot is not settled");
-  if (!hasAssistant && !hasInterruptionMarker) {
+  if (!hasAssistant && !hasInterruptionMarker && !hasPostgresSessionReference) {
     throw checkpointError("Pi session snapshot has no assistant message or interruption boundary");
   }
 }

@@ -41,6 +41,31 @@ export class PiSamplingStepController {
     return Object.freeze({ ...this.#active, samplingAttempt: 1 });
   }
 
+  async captureAsync(
+    createFresh: () => Promise<Omit<PiSamplingStepCapture, "samplingAttempt">>,
+  ): Promise<PiSamplingStepCapture> {
+    if (this.#scheduledSamplingAttempt !== undefined) {
+      if (this.#active === undefined) {
+        throw new Error("Pi scheduled a model retry before one Cloud Step was captured");
+      }
+      const samplingAttempt = this.#scheduledSamplingAttempt;
+      this.#scheduledSamplingAttempt = undefined;
+      return Object.freeze({ ...this.#active, samplingAttempt });
+    }
+    const fresh = await createFresh();
+    if (
+      this.#active !== undefined &&
+      fresh.step.context.sequence <= this.#active.step.context.sequence
+    ) {
+      throw new Error("Cloud Step sequence did not advance for a new model sampling boundary");
+    }
+    this.#active = Object.freeze({
+      step: fresh.step,
+      modelMessages: Object.freeze([...fresh.modelMessages]),
+    });
+    return Object.freeze({ ...this.#active, samplingAttempt: 1 });
+  }
+
   scheduleRetry(retryAttempt: number): void {
     if (!Number.isSafeInteger(retryAttempt) || retryAttempt < 1) {
       throw new Error("Pi model retry attempt was invalid");

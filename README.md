@@ -55,16 +55,18 @@ Run/Attempt lease and monotonically increasing fence decide whether it may
 produce effects. PostgreSQL `NOTIFY` only removes polling latency; losing a
 notification cannot lose a Run.
 
-Pi's native `SessionStorage` port has a PostgreSQL implementation that stores
-entries, lanes, operation records, labels and compaction boundaries directly.
-AgentDock also implements the complete Pi 0.84.1 `AgentHarness` surface over
-those public primitives: Agent Runs, queues, lanes, Hooks, compaction,
-navigation, deferred responses and crash recovery share one opaque execution
-authority with remote Tools. It remains a staged adapter until real-model/Cube
-and Workspace-settlement parity is complete; the default production adapter
-still restores Pi-native JSONL from the same PostgreSQL object table. No S3
-download is involved, and the browser transcript is never used to synthesize
-model context.
+Pi's native `SessionStorage` port stores entries, operation records and
+compaction boundaries directly in PostgreSQL. The production Worker uses a
+thin cloud runtime around Pi's public `Agent`, Session and compaction
+primitives: it reads only the newest compaction plus the active suffix and
+appends complete messages incrementally. It does not download a lifetime
+`session.jsonl`, synthesize model context from the browser transcript or
+reimplement Pi's unused generic Harness surface.
+
+The same opaque execution authority fences both Session mutations and remote
+Tool admission. Lease and fence representations stay out of model messages and
+Tool arguments, while unfinished Tool effects are recorded as unknown instead
+of being replayed blindly.
 
 The first Tool call attaches the Workspace's stable Cube Volume to a fresh or
 warm KVM. Stopping a Cube loses processes, sockets and memory, but not files.

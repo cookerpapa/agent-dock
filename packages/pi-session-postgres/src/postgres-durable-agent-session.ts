@@ -1,17 +1,19 @@
 import type { Database } from "@agent-dock/database";
 import type { Session } from "@earendil-works/pi-agent-core";
 import type { Kysely } from "kysely";
-import {
-  FixedDurableAgentExecutionAuthorityProvider,
-  type DurableAgentExecutionAuthorityProvider,
-  type DurableAgentExecutionScope,
-} from "./durable-agent-harness.ts";
 import { PostgresRunExecutionAuthority } from "./postgres-execution-authority.ts";
 import { PostgresPiSessionStorage } from "./index.ts";
 
+export type CloudAgentExecutionScope = Readonly<{
+  tenantId: string;
+  sessionId: string;
+  runId: string;
+  attemptId: string;
+}>;
+
 export type OpenPostgresDurableAgentSessionOptions = Readonly<{
   database: Kysely<Database>;
-  scope: DurableAgentExecutionScope;
+  scope: CloudAgentExecutionScope;
   claimOwnerId: string;
   fencingToken: number;
   pollIntervalMs?: number;
@@ -20,12 +22,12 @@ export type OpenPostgresDurableAgentSessionOptions = Readonly<{
 
 export type PostgresDurableAgentSession = Readonly<{
   session: Session;
-  authorityProvider: DurableAgentExecutionAuthorityProvider;
+  authority: PostgresRunExecutionAuthority;
 }>;
 
 /**
- * Constructs a Pi Session and Harness provider around the exact same
- * PostgreSQL execution authority, closing the check/use race at durable writes.
+ * Opens a Pi Session and the exact same opaque authority used by Session writes
+ * and remote Tool effects.
  */
 export async function openPostgresDurableAgentSession(
   options: OpenPostgresDurableAgentSessionOptions,
@@ -52,7 +54,7 @@ export async function openPostgresDurableAgentSession(
     });
     return {
       session: storage.asSession(),
-      authorityProvider: new FixedDurableAgentExecutionAuthorityProvider(options.scope, authority),
+      authority,
     };
   } catch (error: unknown) {
     await authority.close();

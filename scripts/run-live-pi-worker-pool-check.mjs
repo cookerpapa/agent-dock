@@ -391,11 +391,6 @@ try {
   const followUpEvidence = await runEvidence(followUp.runId);
   assert.notEqual(followUpEvidence.supervisorId, firstEvidence.supervisorId);
   assert(followUp.text.includes(marker), `Restored conversation omitted marker: ${followUp.text}`);
-  assert(
-    followUpEvidence.baseArtifactId.length > 0,
-    "Cross-Worker follow-up did not restore a Pi session artifact",
-  );
-
   await restoreWorker(stoppedWorker);
   stoppedWorker = undefined;
 
@@ -449,7 +444,7 @@ try {
       firstWorker: firstEvidence.supervisorId,
       followUpWorker: followUpEvidence.supervisorId,
       differentWorker: firstEvidence.supervisorId !== followUpEvidence.supervisorId,
-      piSessionArtifactRestored: followUpEvidence.baseArtifactId.length > 0,
+      postgresSessionRestored: followUp.text.includes(marker),
       markerRecovered: followUp.text.includes(marker),
       firstSettledMs: first.settledMs,
       followUpSettledMs: followUp.settledMs,
@@ -483,13 +478,13 @@ try {
       `- Worker deployment: ${report.workerDeployment}`,
       `- Active Workers: ${report.workers.join(", ")}`,
       `- Cross-Worker restore: ${report.failover.firstWorker} -> ${report.failover.followUpWorker}`,
-      `- Pi session artifact restored: ${String(report.failover.piSessionArtifactRestored)}`,
+      `- PostgreSQL Pi Session restored: ${String(report.failover.postgresSessionRestored)}`,
       `- Previous-turn marker recovered: ${String(report.failover.markerRecovered)}`,
       `- Concurrent Runs / distinct Workers: ${String(report.concurrency.runs)} / ${String(report.concurrency.distinctWorkers)}`,
       `- Concurrent assignment: ${report.concurrency.workerIds.join(", ")}`,
       `- Real requests/input/output tokens: ${String(report.totalUsage.requests)} / ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)}`,
       "",
-      "The owning Pi Worker was stopped after the first real-model turn. The surviving Worker restored the native Pi JSONL checkpoint, answered from the previous turn, and committed a new checkpoint. Further concurrent real-model Runs completed through the independently ready Worker pool; allocation is reported as evidence rather than assumed to be round-robin.",
+      "The owning Pi Worker was stopped after the first real-model Turn. The surviving Worker rebuilt Pi's active model context directly from PostgreSQL SessionStorage, recovered the previous-turn marker and appended the follow-up incrementally. Further concurrent real-model Runs completed through the independently ready Worker pool; allocation is reported as evidence rather than assumed to be round-robin.",
       "",
     ].join("\n"),
     "utf8",

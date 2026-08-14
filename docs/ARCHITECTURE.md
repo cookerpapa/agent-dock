@@ -47,21 +47,20 @@ and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
 Every mutation checks an opaque `ExecutionAuthority` inside the same database
 transaction as the write.
 
-Upstream Pi 0.84.1 exposes the `AgentHarness` contract and its public Agent,
-Session, compaction and branch-summary primitives, while the published
-`AgentHarness` class still throws `HarnessNotImplemented`. AgentDock therefore
-implements an executable `DurableAgentHarness` adapter in its own package
-without patching Pi. It covers the complete 0.84.1 surface, including Agent
-Runs, queues, Hooks, lanes, compaction/navigation, deferred responses and
-effect-aware Tool recovery, with one opaque authority spanning Session writes
-and remote Tool admission.
+The production coding adapter is a deliberately thin `CloudAgentRuntime`. It
+loads only the newest native compaction plus its active suffix, constructs one
+Pi `Agent` for the active Run, and appends complete user, assistant and Tool
+result entries back to PostgreSQL. It reuses Pi's public Agent Loop and
+compaction primitives rather than recreating the generic `AgentHarness`
+surface. No historical `session.jsonl` is downloaded, rewritten or used as
+model-context authority.
 
-The default production coding adapter still uses the stable Pi SDK/session-file
-entrypoint, with Pi-native JSONL compatibility objects stored in PostgreSQL.
-Cutover is gated on Workspace/conversation terminal-commit parity plus real
-model/Cube and cross-Worker acceptance, not merely API completeness. The
-adapter and remaining parity gates are recorded in
-[`docs/research/2026-08-13-pi-session-storage-cloud-harness.md`](research/2026-08-13-pi-session-storage-cloud-harness.md).
+The runtime keeps only the cloud behavior the product needs: automatic
+compaction, model retry, active steer, reviewed event mapping, remote Tools,
+world-state changes and terminal Workspace settlement. A Tool intent is
+written before its effect. If a Worker disappears before the Tool result is
+known, the next Run records an unknown-effect result and interruption fact
+instead of replaying arbitrary shell or file mutations.
 
 ### Worker Control Channel
 
@@ -121,7 +120,6 @@ not an authority.
 | tenants, users, sessions, quotas | PostgreSQL |
 | Runs, Attempts, leases, fences, ready queue | PostgreSQL |
 | Pi Session entries/compaction/operation records | PostgreSQL SessionStorage |
-| transitional Pi-native JSONL objects | PostgreSQL immutable object table |
 | canonical completed conversation | PostgreSQL |
 | retained high-frequency Worker events | Kafka |
 | bounded live SSE replay | Valkey, rebuildable from Kafka |
@@ -152,8 +150,9 @@ claimed as durable.
 - cancellation revokes authority before process termination;
 - visible live events are durable before SSE; successful terminal messages are
   Pi-native and canonical before completion;
-- interruption and Sandbox reset boundaries are minimal model-visible facts,
-  not fabricated Tool outcomes;
+- interruption and Sandbox reset boundaries are minimal model-visible facts;
+  an unfinished Tool becomes an explicit unknown effect, never a fabricated
+  success or an automatic replay;
 - Cube/process loss preserves files only; the next model is told when the
   execution world materially changed.
 

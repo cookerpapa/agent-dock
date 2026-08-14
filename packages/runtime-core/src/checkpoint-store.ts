@@ -244,20 +244,23 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     this.#idGenerator = options.idGenerator ?? randomUUID;
   }
 
-  async load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined> {
+  async load(
+    command: ExecuteTurnCommandMessage,
+    options?: Readonly<{ includeConversation?: boolean }>,
+  ): Promise<LoadedSandboxCheckpoint | undefined> {
     const metadata = await this.#database.transaction().execute(async (transaction) => {
       return this.#loadMetadata(transaction, command, validDate(this.#clock));
     });
-    const recoverySuffix = await this.#loadRecoverySuffix(
-      command,
-      metadata?.piSessionThroughSequence ?? 0,
-    );
+    const includeConversation = options?.includeConversation ?? true;
+    const recoverySuffix = includeConversation
+      ? await this.#loadRecoverySuffix(command, metadata?.piSessionThroughSequence ?? 0)
+      : undefined;
     if (metadata === undefined) {
       return recoverySuffix === undefined ? undefined : { recoverySuffix };
     }
 
     const [piState, workspace] = await Promise.all([
-      metadata.piSession === undefined
+      !includeConversation || metadata.piSession === undefined
         ? Promise.resolve(undefined)
         : this.#loadPiSession(command, metadata.piSession),
       metadata.workspace === undefined

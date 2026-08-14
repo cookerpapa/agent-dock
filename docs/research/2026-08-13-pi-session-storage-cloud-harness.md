@@ -2,6 +2,10 @@
 
 Date: 2026-08-13
 
+Status: historical experiment. ADR-0103 replaced the complete Harness adapter
+with the smaller production `CloudAgentRuntime`; the code described in the
+"Implemented adapter" section was deliberately removed.
+
 ## Question
 
 Can AgentDock stop restoring a complete `session.jsonl` for every Run, and can
@@ -37,9 +41,9 @@ Primary upstream references:
 - <https://github.com/earendil-works/pi/blob/dev/packages/agent/src/harness/agent-harness.ts>
 - <https://github.com/earendil-works/pi/tree/dev/packages/agent/src/harness/session>
 
-## Implemented adapter
+## Historical implemented adapter
 
-`@agent-dock/pi-session-postgres` now contains an executable
+The experiment added an executable
 `DurableAgentHarness` built only from Pi's public primitives. It:
 
 1. acquires one opaque `DurableAgentExecutionAuthority` for each operation;
@@ -74,7 +78,7 @@ The reviewed remote `read/write/edit/bash` implementation is shared with the
 new Harness through `createTrustedRemoteAgentTools`; it does not duplicate or
 weaken the Tool RPC policy.
 
-Automated evidence covers:
+Its automated evidence covered:
 
 - a second Harness instance restores a prior multi-round Session directly from
   PostgreSQL;
@@ -89,25 +93,29 @@ Automated evidence covers:
 - lane configuration remains lane-local;
 - the authority is closed at every terminal or rejected path.
 
-## Production migration boundary
+The generic Harness implementation and its tests were then removed under
+ADR-0103. The PostgreSQL SessionStorage, bounded recursive branch read,
+execution authority and reviewed remote Tools were retained.
 
-The adapter is intentionally not yet the default production Pi adapter. Its Pi
-runtime surface is complete, but the current coding adapter still owns cloud
-product semantics outside Pi: interrupted-turn/world-state projection,
-Workspace settlement in the terminal transaction, model sampling identity and
-the production Kafka/Valkey/SSE event mapping.
+## Production outcome
 
-The migration gate is feature parity plus a real-model/Cube acceptance run,
-not merely compiling a new class. Until that gate passes, production continues
-to use Pi's stable coding-agent SDK JSONL entrypoint. This avoids trading lower
-restore traffic for weaker crash or Tool semantics.
+Production now uses the smaller `CloudAgentRuntime`: Pi's public `Agent`,
+PostgreSQL SessionStorage and native compaction primitives plus AgentDock's
+interruption/world-state projection, Workspace settlement, sampling identity,
+model retry and Kafka/Valkey/SSE event mapping. It no longer downloads or
+rewrites lifetime JSONL conversation snapshots.
+
+The migration gate was feature parity plus real model/Cube acceptance, not
+merely compiling a new class. Multi-round coding, native threshold Compaction,
+post-compaction recall/coding and cross-Worker restoration all passed before
+the production cutover was declared complete.
 
 ## Intended final shape
 
 ```text
-PostgreSQL Run claim
+PostgreSQL Run claim / opaque authority
         ↓
-DurableAgentHarness.acquireAuthority()
+CloudAgentRuntime
         ├── Pi SessionStorage writes (same transaction checks)
         ├── model/agent cancellation signal
         └── Cube Tool effect admission
@@ -119,6 +127,6 @@ one bounded recursive branch query
 Pi-native active context in Worker memory
 ```
 
-No lease ID or fencing token enters model context. The Harness and providers
+No lease ID or fencing token enters model context. The runtime and providers
 hold opaque authority; PostgreSQL and Tool Broker remain the components that
 validate the concrete claim/fence at their true effect boundaries.

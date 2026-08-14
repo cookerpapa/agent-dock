@@ -1,12 +1,12 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-13T18:33:39.394Z",
-  "revision": "5dc43d2fa4182bbb6b7b994723d8d9e8b3e26b4b",
+  "checkedAt": "2026-08-14T15:23:57.775Z",
+  "revision": "c83b6df2df418f0be215cb76c14aca421e2b14ee",
   "topology": {
     "workers": ["agent-dock-worker-1", "agent-dock-worker-2"],
     "scheduler": "postgresql-run-queue",
     "sandbox": "CubeSandbox KVM",
-    "sessionRuntime": "Pi SDK 0.84.1 JSONL compatibility path"
+    "sessionRuntime": "Pi SDK 0.84.1 PostgreSQL SessionStorage runtime"
   },
   "model": {
     "provider": "deepseek",
@@ -16,1557 +16,1738 @@
     "compactionKeepRecentTokens": 20000
   },
   "session": {
-    "sessionId": "c4ec8589-a3fb-4b18-b7a9-677bebd6804b",
-    "workspaceId": "bb133357-04bf-41d0-b5fc-dce3c0a8d73f",
-    "marker": "ALGO-LAB-MSRUCRPA-D9436DB7",
+    "sessionId": "5aa0c510-863e-4f96-ba8b-1e28d107991d",
+    "workspaceId": "8aaafb33-e96a-4a39-8744-93c7444c73e9",
+    "marker": "ALGO-LAB-MST2YQQD-BEB128F8",
     "codingTurnsUntilCompaction": 11,
-    "finalWorkspaceVersionId": "5b5be1cf-7fcd-475a-91e4-d0a5411fa604",
-    "visibleFilesOnFirstPage": 53
+    "finalWorkspaceVersionId": "3148f73c-08f2-4015-b3e0-3ff753cf9b67",
+    "visibleFilesOnFirstPage": 51
   },
   "rounds": [
     {
       "round": 1,
       "task": "elementary sorting",
-      "runId": "4322e6d6-951a-40f4-a3c5-2790f25b5f23",
-      "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 10,
-      "firstResponseMs": 2191,
-      "firstTextMs": 2191,
-      "settledMs": 44071,
+      "runId": "990d8dea-9059-486f-92af-a5edd1c4bfe7",
+      "worker": "agent-dock-worker-1",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 11,
+      "firstResponseMs": 3577,
+      "firstTextMs": 6714,
+      "settledMs": 37834,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 172,
-            "outputTokens": 63,
+            "inputTokens": 202,
+            "outputTokens": 104,
+            "cacheReadTokens": 1024,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 1226
+          },
+          {
+            "sequence": 2,
+            "inputTokens": 123,
+            "outputTokens": 71,
+            "cacheReadTokens": 1280,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 1403
+          },
+          {
+            "sequence": 3,
+            "inputTokens": 164,
+            "outputTokens": 259,
             "cacheReadTokens": 1408,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 1580
+            "contextInputTokens": 1572
           },
           {
-            "sequence": 2,
-            "inputTokens": 170,
-            "outputTokens": 186,
-            "cacheReadTokens": 1536,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 1706
-          },
-          {
-            "sequence": 3,
-            "inputTokens": 131,
-            "outputTokens": 219,
+            "sequence": 4,
+            "inputTokens": 91,
+            "outputTokens": 907,
             "cacheReadTokens": 1792,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 1923
-          },
-          {
-            "sequence": 4,
-            "inputTokens": 119,
-            "outputTokens": 1081,
-            "cacheReadTokens": 2048,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 2167
+            "contextInputTokens": 1883
           },
           {
             "sequence": 5,
-            "inputTokens": 80,
-            "outputTokens": 2068,
-            "cacheReadTokens": 3200,
+            "inputTokens": 1030,
+            "outputTokens": 1375,
+            "cacheReadTokens": 1792,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 3280
+            "contextInputTokens": 2822
           },
           {
             "sequence": 6,
-            "inputTokens": 131,
-            "outputTokens": 92,
+            "inputTokens": 132,
+            "outputTokens": 71,
+            "cacheReadTokens": 4096,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 4228
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 644,
+            "outputTokens": 370,
+            "cacheReadTokens": 4224,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 4868
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 406,
+            "outputTokens": 65,
+            "cacheReadTokens": 4864,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 5270
+          },
+          {
+            "sequence": 9,
+            "inputTokens": 504,
+            "outputTokens": 141,
             "cacheReadTokens": 5248,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 5379
-          },
-          {
-            "sequence": 7,
-            "inputTokens": 1095,
-            "outputTokens": 503,
-            "cacheReadTokens": 5376,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 6471
-          },
-          {
-            "sequence": 8,
-            "inputTokens": 94,
-            "outputTokens": 63,
-            "cacheReadTokens": 6912,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 7006
-          },
-          {
-            "sequence": 9,
-            "inputTokens": 719,
-            "outputTokens": 229,
-            "cacheReadTokens": 7040,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 7759
+            "contextInputTokens": 5752
           },
           {
             "sequence": 10,
-            "inputTokens": 395,
-            "outputTokens": 181,
-            "cacheReadTokens": 7936,
+            "inputTokens": 207,
+            "outputTokens": 225,
+            "cacheReadTokens": 5888,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 8331
-          },
-          {
-            "sequence": 11,
-            "inputTokens": 84,
-            "outputTokens": 309,
-            "cacheReadTokens": 8448,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 8532
+            "contextInputTokens": 6095
           }
         ],
-        "attemptCount": 11,
-        "requestCount": 11,
+        "attemptCount": 10,
+        "requestCount": 10,
         "recoveredFailures": [],
-        "inputTokens": 3190,
-        "outputTokens": 4994,
-        "cacheReadTokens": 50944,
+        "inputTokens": 3503,
+        "outputTokens": 3588,
+        "cacheReadTokens": 31616,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 8532
+        "maximumRequestInputTokens": 6095
       },
-      "sessionJsonlBytes": 39625,
-      "sessionJsonlLines": 27,
+      "sessionBytes": 24255,
+      "sessionEntries": 24,
+      "activeContextBytes": 24255,
+      "activeContextEntries": 24,
       "eventCompactions": []
     },
     {
       "round": 2,
       "task": "divide-and-conquer sorting",
-      "runId": "f8cd900d-b053-4064-9e02-cc45dd29f0b5",
+      "runId": "73da0eb3-9db0-4bbe-bd1a-02849c226b3c",
       "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 7,
-      "firstResponseMs": 1470,
-      "firstTextMs": 1470,
-      "settledMs": 40559,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 8,
+      "firstResponseMs": 2268,
+      "firstTextMs": 4895,
+      "settledMs": 50996,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 180,
-            "outputTokens": 75,
-            "cacheReadTokens": 8832,
+            "inputTokens": 219,
+            "outputTokens": 93,
+            "cacheReadTokens": 6272,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 9012
+            "contextInputTokens": 6491
           },
           {
             "sequence": 2,
-            "inputTokens": 289,
-            "outputTokens": 1745,
-            "cacheReadTokens": 8960,
+            "inputTokens": 1123,
+            "outputTokens": 1891,
+            "cacheReadTokens": 6528,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 9249
+            "contextInputTokens": 7651
           },
           {
             "sequence": 3,
-            "inputTokens": 148,
-            "outputTokens": 1840,
-            "cacheReadTokens": 10880,
+            "inputTokens": 104,
+            "outputTokens": 1942,
+            "cacheReadTokens": 9472,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 11028
+            "contextInputTokens": 9576
           },
           {
             "sequence": 4,
-            "inputTokens": 101,
-            "outputTokens": 73,
-            "cacheReadTokens": 12800,
+            "inputTokens": 1446,
+            "outputTokens": 220,
+            "cacheReadTokens": 9472,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 12901
+            "contextInputTokens": 10918
           },
           {
             "sequence": 5,
-            "inputTokens": 1002,
-            "outputTokens": 477,
-            "cacheReadTokens": 12928,
+            "inputTokens": 37,
+            "outputTokens": 1919,
+            "cacheReadTokens": 11136,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 13930
+            "contextInputTokens": 11173
           },
           {
             "sequence": 6,
-            "inputTokens": 105,
-            "outputTokens": 104,
-            "cacheReadTokens": 14336,
+            "inputTokens": 1989,
+            "outputTokens": 67,
+            "cacheReadTokens": 11136,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 14441
+            "contextInputTokens": 13125
           },
           {
             "sequence": 7,
-            "inputTokens": 823,
-            "outputTokens": 212,
-            "cacheReadTokens": 14464,
+            "inputTokens": 505,
+            "outputTokens": 180,
+            "cacheReadTokens": 13184,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 15287
+            "contextInputTokens": 13689
           },
           {
             "sequence": 8,
-            "inputTokens": 142,
-            "outputTokens": 339,
-            "cacheReadTokens": 15488,
+            "inputTokens": 95,
+            "outputTokens": 331,
+            "cacheReadTokens": 13824,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 15630
+            "contextInputTokens": 13919
           }
         ],
         "attemptCount": 8,
         "requestCount": 8,
         "recoveredFailures": [],
-        "inputTokens": 2790,
-        "outputTokens": 4865,
-        "cacheReadTokens": 98688,
+        "inputTokens": 5518,
+        "outputTokens": 6643,
+        "cacheReadTokens": 81024,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 15630
+        "maximumRequestInputTokens": 13919
       },
-      "sessionJsonlBytes": 74780,
-      "sessionJsonlLines": 44,
+      "sessionBytes": 50522,
+      "sessionEntries": 42,
+      "activeContextBytes": 50522,
+      "activeContextEntries": 42,
       "eventCompactions": []
     },
     {
       "round": 3,
       "task": "distribution sorting",
-      "runId": "bd883668-545c-445a-afcf-ea3a2b7485e3",
-      "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 6,
-      "firstResponseMs": 1872,
-      "firstTextMs": 1872,
-      "settledMs": 49921,
+      "runId": "891b2ceb-cf96-46ee-bb2c-861fc4c1ec7d",
+      "worker": "agent-dock-worker-1",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 8,
+      "firstResponseMs": 1775,
+      "firstTextMs": 1775,
+      "settledMs": 60717,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 255,
-            "outputTokens": 70,
-            "cacheReadTokens": 15872,
+            "inputTokens": 200,
+            "outputTokens": 61,
+            "cacheReadTokens": 14208,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 16127
+            "contextInputTokens": 14408
           },
           {
             "sequence": 2,
-            "inputTokens": 143,
-            "outputTokens": 1706,
-            "cacheReadTokens": 16128,
+            "inputTokens": 66,
+            "outputTokens": 1387,
+            "cacheReadTokens": 14464,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 16271
+            "contextInputTokens": 14530
           },
           {
             "sequence": 3,
-            "inputTokens": 89,
-            "outputTokens": 1388,
-            "cacheReadTokens": 17920,
+            "inputTokens": 1485,
+            "outputTokens": 629,
+            "cacheReadTokens": 14464,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 18009
+            "contextInputTokens": 15949
           },
           {
             "sequence": 4,
-            "inputTokens": 101,
-            "outputTokens": 2294,
-            "cacheReadTokens": 19328,
+            "inputTokens": 99,
+            "outputTokens": 2299,
+            "cacheReadTokens": 16512,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 19429
+            "contextInputTokens": 16611
           },
           {
             "sequence": 5,
-            "inputTokens": 122,
-            "outputTokens": 63,
-            "cacheReadTokens": 21632,
+            "inputTokens": 125,
+            "outputTokens": 1324,
+            "cacheReadTokens": 18816,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 21754
+            "contextInputTokens": 18941
           },
           {
             "sequence": 6,
-            "inputTokens": 928,
-            "outputTokens": 197,
-            "cacheReadTokens": 21760,
+            "inputTokens": 73,
+            "outputTokens": 834,
+            "cacheReadTokens": 20224,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 22688
+            "contextInputTokens": 20297
           },
           {
             "sequence": 7,
-            "inputTokens": 252,
-            "outputTokens": 405,
-            "cacheReadTokens": 22784,
+            "inputTokens": 43,
+            "outputTokens": 151,
+            "cacheReadTokens": 21120,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 23036
+            "contextInputTokens": 21163
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 779,
+            "outputTokens": 166,
+            "cacheReadTokens": 21248,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 22027
+          },
+          {
+            "sequence": 9,
+            "inputTokens": 160,
+            "outputTokens": 272,
+            "cacheReadTokens": 22144,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 22304
           }
         ],
-        "attemptCount": 7,
-        "requestCount": 7,
+        "attemptCount": 9,
+        "requestCount": 9,
         "recoveredFailures": [],
-        "inputTokens": 1890,
-        "outputTokens": 6123,
-        "cacheReadTokens": 135424,
+        "inputTokens": 3030,
+        "outputTokens": 7123,
+        "cacheReadTokens": 163200,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 23036
+        "maximumRequestInputTokens": 22304
       },
-      "sessionJsonlBytes": 109195,
-      "sessionJsonlLines": 59,
+      "sessionBytes": 79784,
+      "sessionEntries": 61,
+      "activeContextBytes": 79784,
+      "activeContextEntries": 61,
       "eventCompactions": []
     },
     {
       "round": 4,
       "task": "search primitives",
-      "runId": "e31ece1e-8d7a-4d8e-8748-144a631dda42",
-      "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 5,
-      "firstResponseMs": 1833,
-      "firstTextMs": 1833,
-      "settledMs": 39826,
+      "runId": "f071cc27-0cf0-4772-94e4-686d3ac0d9d6",
+      "worker": "agent-dock-worker-1",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 18,
+      "firstResponseMs": 1707,
+      "firstTextMs": 1707,
+      "settledMs": 103634,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 176,
-            "outputTokens": 70,
-            "cacheReadTokens": 23424,
+            "inputTokens": 207,
+            "outputTokens": 60,
+            "cacheReadTokens": 22528,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 23600
+            "contextInputTokens": 22735
           },
           {
             "sequence": 2,
-            "inputTokens": 205,
-            "outputTokens": 1521,
-            "cacheReadTokens": 23552,
+            "inputTokens": 85,
+            "outputTokens": 1630,
+            "cacheReadTokens": 22784,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 23757
+            "contextInputTokens": 22869
           },
           {
             "sequence": 3,
-            "inputTokens": 92,
-            "outputTokens": 2692,
-            "cacheReadTokens": 25216,
+            "inputTokens": 81,
+            "outputTokens": 4283,
+            "cacheReadTokens": 24448,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 25308
+            "contextInputTokens": 24529
           },
           {
             "sequence": 4,
-            "inputTokens": 125,
-            "outputTokens": 152,
-            "cacheReadTokens": 27904,
+            "inputTokens": 41,
+            "outputTokens": 1075,
+            "cacheReadTokens": 28800,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 28029
+            "contextInputTokens": 28841
           },
           {
             "sequence": 5,
-            "inputTokens": 832,
-            "outputTokens": 204,
-            "cacheReadTokens": 28160,
+            "inputTokens": 122,
+            "outputTokens": 69,
+            "cacheReadTokens": 29824,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 28992
+            "contextInputTokens": 29946
           },
           {
             "sequence": 6,
-            "inputTokens": 350,
-            "outputTokens": 538,
-            "cacheReadTokens": 29184,
+            "inputTokens": 1460,
+            "outputTokens": 1483,
+            "cacheReadTokens": 29952,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 29534
+            "contextInputTokens": 31412
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 163,
+            "outputTokens": 441,
+            "cacheReadTokens": 32768,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 32931
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 429,
+            "outputTokens": 217,
+            "cacheReadTokens": 33280,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 33709
+          },
+          {
+            "sequence": 9,
+            "inputTokens": 62,
+            "outputTokens": 459,
+            "cacheReadTokens": 33920,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 33982
+          },
+          {
+            "sequence": 10,
+            "inputTokens": 23,
+            "outputTokens": 141,
+            "cacheReadTokens": 34432,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 34455
+          },
+          {
+            "sequence": 11,
+            "inputTokens": 371,
+            "outputTokens": 140,
+            "cacheReadTokens": 34432,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 34803
+          },
+          {
+            "sequence": 12,
+            "inputTokens": 592,
+            "outputTokens": 617,
+            "cacheReadTokens": 34816,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 35408
+          },
+          {
+            "sequence": 13,
+            "inputTokens": 97,
+            "outputTokens": 221,
+            "cacheReadTokens": 35968,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 36065
+          },
+          {
+            "sequence": 14,
+            "inputTokens": 109,
+            "outputTokens": 454,
+            "cacheReadTokens": 36224,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 36333
+          },
+          {
+            "sequence": 15,
+            "inputTokens": 82,
+            "outputTokens": 124,
+            "cacheReadTokens": 36736,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 36818
+          },
+          {
+            "sequence": 16,
+            "inputTokens": 94,
+            "outputTokens": 988,
+            "cacheReadTokens": 36864,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 36958
+          },
+          {
+            "sequence": 17,
+            "inputTokens": 88,
+            "outputTokens": 74,
+            "cacheReadTokens": 37888,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 37976
+          },
+          {
+            "sequence": 18,
+            "inputTokens": 442,
+            "outputTokens": 158,
+            "cacheReadTokens": 38016,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 38458
+          },
+          {
+            "sequence": 19,
+            "inputTokens": 140,
+            "outputTokens": 355,
+            "cacheReadTokens": 38528,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 38668
           }
         ],
-        "attemptCount": 6,
-        "requestCount": 6,
+        "attemptCount": 19,
+        "requestCount": 19,
         "recoveredFailures": [],
-        "inputTokens": 1780,
-        "outputTokens": 5177,
-        "cacheReadTokens": 157440,
+        "inputTokens": 4688,
+        "outputTokens": 12989,
+        "cacheReadTokens": 622208,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 29534
+        "maximumRequestInputTokens": 38668
       },
-      "sessionJsonlBytes": 138307,
-      "sessionJsonlLines": 72,
+      "sessionBytes": 132848,
+      "sessionEntries": 100,
+      "activeContextBytes": 132848,
+      "activeContextEntries": 100,
       "eventCompactions": []
     },
     {
       "round": 5,
       "task": "order statistics",
-      "runId": "025bbe5d-3f59-4e6d-8ad0-b9105d5031d4",
+      "runId": "176fd567-1efb-476d-a6ed-2e9253913479",
       "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 24,
-      "firstResponseMs": 1845,
-      "firstTextMs": 1845,
-      "settledMs": 105422,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 21,
+      "firstResponseMs": 2390,
+      "firstTextMs": 2390,
+      "settledMs": 84722,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 284,
-            "outputTokens": 70,
-            "cacheReadTokens": 29952,
+            "inputTokens": 275,
+            "outputTokens": 61,
+            "cacheReadTokens": 38912,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 30236
+            "contextInputTokens": 39187
           },
           {
             "sequence": 2,
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cacheReadTokens": 0,
+            "inputTokens": 163,
+            "outputTokens": 2147,
+            "cacheReadTokens": 39168,
             "cacheWriteTokens": 0,
-            "state": "failed",
-            "failureCode": "stream_failed",
-            "contextInputTokens": 0
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 39331
           },
           {
             "sequence": 3,
-            "inputTokens": 66,
-            "outputTokens": 2097,
-            "cacheReadTokens": 30336,
+            "inputTokens": 38,
+            "outputTokens": 425,
+            "cacheReadTokens": 41472,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 30402
+            "contextInputTokens": 41510
           },
           {
             "sequence": 4,
-            "inputTokens": 147,
-            "outputTokens": 2642,
-            "cacheReadTokens": 32384,
+            "inputTokens": 112,
+            "outputTokens": 121,
+            "cacheReadTokens": 41856,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 32531
+            "contextInputTokens": 41968
           },
           {
             "sequence": 5,
-            "inputTokens": 131,
-            "outputTokens": 62,
-            "cacheReadTokens": 35072,
+            "inputTokens": 638,
+            "outputTokens": 132,
+            "cacheReadTokens": 41984,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 35203
+            "contextInputTokens": 42622
           },
           {
             "sequence": 6,
-            "inputTokens": 8065,
-            "outputTokens": 647,
-            "cacheReadTokens": 35200,
+            "inputTokens": 334,
+            "outputTokens": 219,
+            "cacheReadTokens": 42752,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 43265
+            "contextInputTokens": 43086
           },
           {
             "sequence": 7,
-            "inputTokens": 39,
-            "outputTokens": 66,
-            "cacheReadTokens": 43904,
+            "inputTokens": 74,
+            "outputTokens": 105,
+            "cacheReadTokens": 43264,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 43943
+            "contextInputTokens": 43338
           },
           {
             "sequence": 8,
-            "inputTokens": 670,
-            "outputTokens": 346,
-            "cacheReadTokens": 43904,
+            "inputTokens": 753,
+            "outputTokens": 129,
+            "cacheReadTokens": 43392,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 44574
+            "contextInputTokens": 44145
           },
           {
             "sequence": 9,
-            "inputTokens": 171,
-            "outputTokens": 713,
-            "cacheReadTokens": 44800,
+            "inputTokens": 152,
+            "outputTokens": 418,
+            "cacheReadTokens": 44160,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 44971
+            "contextInputTokens": 44312
           },
           {
             "sequence": 10,
-            "inputTokens": 141,
-            "outputTokens": 96,
-            "cacheReadTokens": 45568,
+            "inputTokens": 91,
+            "outputTokens": 2607,
+            "cacheReadTokens": 44672,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 45709
+            "contextInputTokens": 44763
           },
           {
             "sequence": 11,
-            "inputTokens": 592,
-            "outputTokens": 173,
-            "cacheReadTokens": 45696,
+            "inputTokens": 40,
+            "outputTokens": 322,
+            "cacheReadTokens": 47360,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 46288
+            "contextInputTokens": 47400
           },
           {
             "sequence": 12,
-            "inputTokens": 310,
-            "outputTokens": 259,
-            "cacheReadTokens": 46336,
+            "inputTokens": 137,
+            "outputTokens": 74,
+            "cacheReadTokens": 47616,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 46646
+            "contextInputTokens": 47753
           },
           {
             "sequence": 13,
-            "inputTokens": 71,
-            "outputTokens": 1083,
-            "cacheReadTokens": 46848,
+            "inputTokens": 957,
+            "outputTokens": 183,
+            "cacheReadTokens": 47744,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 46919
+            "contextInputTokens": 48701
           },
           {
             "sequence": 14,
-            "inputTokens": 33,
-            "outputTokens": 785,
-            "cacheReadTokens": 48000,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 48033
-          },
-          {
-            "sequence": 15,
-            "inputTokens": 98,
-            "outputTokens": 123,
+            "inputTokens": 169,
+            "outputTokens": 104,
             "cacheReadTokens": 48768,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 48866
+            "contextInputTokens": 48937
+          },
+          {
+            "sequence": 15,
+            "inputTokens": 80,
+            "outputTokens": 401,
+            "cacheReadTokens": 49024,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 49104
           },
           {
             "sequence": 16,
-            "inputTokens": 540,
-            "outputTokens": 856,
-            "cacheReadTokens": 48896,
+            "inputTokens": 454,
+            "outputTokens": 102,
+            "cacheReadTokens": 49408,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 49436
+            "contextInputTokens": 49862
           },
           {
             "sequence": 17,
-            "inputTokens": 147,
-            "outputTokens": 102,
-            "cacheReadTokens": 50176,
+            "inputTokens": 275,
+            "outputTokens": 462,
+            "cacheReadTokens": 49920,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 50323
+            "contextInputTokens": 50195
           },
           {
             "sequence": 18,
-            "inputTokens": 611,
-            "outputTokens": 297,
-            "cacheReadTokens": 50304,
+            "inputTokens": 130,
+            "outputTokens": 365,
+            "cacheReadTokens": 50560,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 50915
+            "contextInputTokens": 50690
           },
           {
             "sequence": 19,
-            "inputTokens": 43,
-            "outputTokens": 63,
-            "cacheReadTokens": 51200,
+            "inputTokens": 144,
+            "outputTokens": 100,
+            "cacheReadTokens": 50944,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 51243
+            "contextInputTokens": 51088
           },
           {
             "sequence": 20,
-            "inputTokens": 130,
-            "outputTokens": 83,
-            "cacheReadTokens": 51200,
+            "inputTokens": 183,
+            "outputTokens": 94,
+            "cacheReadTokens": 51072,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 51330
+            "contextInputTokens": 51255
           },
           {
             "sequence": 21,
-            "inputTokens": 217,
-            "outputTokens": 249,
+            "inputTokens": 48,
+            "outputTokens": 111,
             "cacheReadTokens": 51328,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 51545
+            "contextInputTokens": 51376
           },
           {
             "sequence": 22,
-            "inputTokens": 113,
-            "outputTokens": 88,
-            "cacheReadTokens": 51712,
+            "inputTokens": 67,
+            "outputTokens": 360,
+            "cacheReadTokens": 51456,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 51825
-          },
-          {
-            "sequence": 23,
-            "inputTokens": 939,
-            "outputTokens": 317,
-            "cacheReadTokens": 51840,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 52779
-          },
-          {
-            "sequence": 24,
-            "inputTokens": 135,
-            "outputTokens": 64,
-            "cacheReadTokens": 52992,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 53127
-          },
-          {
-            "sequence": 25,
-            "inputTokens": 100,
-            "outputTokens": 227,
-            "cacheReadTokens": 53120,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 53220
-          },
-          {
-            "sequence": 26,
-            "inputTokens": 199,
-            "outputTokens": 458,
-            "cacheReadTokens": 53376,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 53575
+            "contextInputTokens": 51523
           }
         ],
-        "attemptCount": 26,
-        "requestCount": 25,
-        "recoveredFailures": [{ "sequence": 2, "failureCode": "stream_failed" }],
-        "inputTokens": 13992,
-        "outputTokens": 11966,
-        "cacheReadTokens": 1142912,
+        "attemptCount": 22,
+        "requestCount": 22,
+        "recoveredFailures": [],
+        "inputTokens": 5314,
+        "outputTokens": 9042,
+        "cacheReadTokens": 1016832,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 53575
+        "maximumRequestInputTokens": 51523
       },
-      "sessionJsonlBytes": 268932,
-      "sessionJsonlLines": 124,
+      "sessionBytes": 190329,
+      "sessionEntries": 145,
+      "activeContextBytes": 190329,
+      "activeContextEntries": 145,
       "eventCompactions": []
     },
     {
       "round": 6,
       "task": "linear data structures",
-      "runId": "358024c0-f694-4ba4-b131-6e3c03cfda1c",
-      "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 10,
-      "firstResponseMs": 2714,
-      "firstTextMs": 2714,
-      "settledMs": 78075,
+      "runId": "2377e829-5574-4c47-abfe-229521e5e407",
+      "worker": "agent-dock-worker-2",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 8,
+      "firstResponseMs": 2877,
+      "firstTextMs": 2877,
+      "settledMs": 72119,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 186,
-            "outputTokens": 69,
-            "cacheReadTokens": 54016,
+            "inputTokens": 212,
+            "outputTokens": 62,
+            "cacheReadTokens": 51840,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 54202
+            "contextInputTokens": 52052
           },
           {
             "sequence": 2,
-            "inputTokens": 234,
-            "outputTokens": 2953,
-            "cacheReadTokens": 54144,
+            "inputTokens": 112,
+            "outputTokens": 2709,
+            "cacheReadTokens": 52096,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 54378
+            "contextInputTokens": 52208
           },
           {
             "sequence": 3,
-            "inputTokens": 147,
-            "outputTokens": 462,
-            "cacheReadTokens": 57216,
+            "inputTokens": 37,
+            "outputTokens": 3889,
+            "cacheReadTokens": 54912,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 57363
+            "contextInputTokens": 54949
           },
           {
             "sequence": 4,
-            "inputTokens": 130,
-            "outputTokens": 3898,
-            "cacheReadTokens": 57728,
+            "inputTokens": 117,
+            "outputTokens": 929,
+            "cacheReadTokens": 58752,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 57858
+            "contextInputTokens": 58869
           },
           {
             "sequence": 5,
-            "inputTokens": 91,
-            "outputTokens": 255,
+            "inputTokens": 54,
+            "outputTokens": 75,
+            "cacheReadTokens": 59776,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 59830
+          },
+          {
+            "sequence": 6,
+            "inputTokens": 1086,
+            "outputTokens": 392,
+            "cacheReadTokens": 59904,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 60990
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 102,
+            "outputTokens": 202,
+            "cacheReadTokens": 61312,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 61414
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 81,
+            "outputTokens": 173,
+            "cacheReadTokens": 61568,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 61649
+          },
+          {
+            "sequence": 9,
+            "inputTokens": 194,
+            "outputTokens": 414,
             "cacheReadTokens": 61696,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 61787
-          },
-          {
-            "sequence": 6,
-            "inputTokens": 122,
-            "outputTokens": 67,
-            "cacheReadTokens": 61952,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 62074
-          },
-          {
-            "sequence": 7,
-            "inputTokens": 601,
-            "outputTokens": 897,
-            "cacheReadTokens": 62080,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 62681
-          },
-          {
-            "sequence": 8,
-            "inputTokens": 122,
-            "outputTokens": 870,
-            "cacheReadTokens": 63488,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 63610
-          },
-          {
-            "sequence": 9,
-            "inputTokens": 128,
-            "outputTokens": 106,
-            "cacheReadTokens": 64384,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 64512
-          },
-          {
-            "sequence": 10,
-            "inputTokens": 263,
-            "outputTokens": 144,
-            "cacheReadTokens": 64384,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 64647
-          },
-          {
-            "sequence": 11,
-            "inputTokens": 148,
-            "outputTokens": 515,
-            "cacheReadTokens": 64768,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 64916
+            "contextInputTokens": 61890
           }
         ],
-        "attemptCount": 11,
-        "requestCount": 11,
+        "attemptCount": 9,
+        "requestCount": 9,
         "recoveredFailures": [],
-        "inputTokens": 2172,
-        "outputTokens": 10236,
-        "cacheReadTokens": 665856,
+        "inputTokens": 1995,
+        "outputTokens": 8845,
+        "cacheReadTokens": 521856,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 64916
+        "maximumRequestInputTokens": 61890
       },
-      "sessionJsonlBytes": 332000,
-      "sessionJsonlLines": 147,
+      "sessionBytes": 219512,
+      "sessionEntries": 164,
+      "activeContextBytes": 219512,
+      "activeContextEntries": 164,
       "eventCompactions": []
     },
     {
       "round": 7,
       "task": "binary trees",
-      "runId": "091bfdf6-1861-43a8-9291-f852b778c2d9",
-      "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 11,
-      "firstResponseMs": 2506,
-      "firstTextMs": 2506,
-      "settledMs": 77885,
+      "runId": "a8f63d3c-9628-45fa-aea8-59f4f40d14d0",
+      "worker": "agent-dock-worker-2",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 7,
+      "firstResponseMs": 3216,
+      "firstTextMs": 3216,
+      "settledMs": 60320,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 196,
-            "outputTokens": 69,
+            "inputTokens": 269,
+            "outputTokens": 61,
+            "cacheReadTokens": 62208,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 62477
+          },
+          {
+            "sequence": 2,
+            "inputTokens": 180,
+            "outputTokens": 2544,
+            "cacheReadTokens": 62464,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 62644
+          },
+          {
+            "sequence": 3,
+            "inputTokens": 2628,
+            "outputTokens": 290,
+            "cacheReadTokens": 62592,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 65220
+          },
+          {
+            "sequence": 4,
+            "inputTokens": 135,
+            "outputTokens": 346,
             "cacheReadTokens": 65408,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 65604
-          },
-          {
-            "sequence": 2,
-            "inputTokens": 128,
-            "outputTokens": 1922,
-            "cacheReadTokens": 65664,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 65792
-          },
-          {
-            "sequence": 3,
-            "inputTokens": 34,
-            "outputTokens": 2909,
-            "cacheReadTokens": 67712,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 67746
-          },
-          {
-            "sequence": 4,
-            "inputTokens": 158,
-            "outputTokens": 134,
-            "cacheReadTokens": 70528,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 70686
+            "contextInputTokens": 65543
           },
           {
             "sequence": 5,
-            "inputTokens": 553,
-            "outputTokens": 2607,
+            "inputTokens": 259,
+            "outputTokens": 3450,
+            "cacheReadTokens": 65792,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 66051
+          },
+          {
+            "sequence": 6,
+            "inputTokens": 156,
+            "outputTokens": 74,
+            "cacheReadTokens": 69376,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 69532
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 1137,
+            "outputTokens": 251,
+            "cacheReadTokens": 69504,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 70641
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 157,
+            "outputTokens": 384,
             "cacheReadTokens": 70784,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 71337
-          },
-          {
-            "sequence": 6,
-            "inputTokens": 121,
-            "outputTokens": 406,
-            "cacheReadTokens": 73856,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 73977
-          },
-          {
-            "sequence": 7,
-            "inputTokens": 47,
-            "outputTokens": 230,
-            "cacheReadTokens": 74368,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 74415
-          },
-          {
-            "sequence": 8,
-            "inputTokens": 331,
-            "outputTokens": 415,
-            "cacheReadTokens": 74624,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 74955
-          },
-          {
-            "sequence": 9,
-            "inputTokens": 138,
-            "outputTokens": 264,
-            "cacheReadTokens": 75264,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 75402
-          },
-          {
-            "sequence": 10,
-            "inputTokens": 51,
-            "outputTokens": 65,
-            "cacheReadTokens": 75648,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 75699
-          },
-          {
-            "sequence": 11,
-            "inputTokens": 145,
-            "outputTokens": 144,
-            "cacheReadTokens": 75648,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 75793
-          },
-          {
-            "sequence": 12,
-            "inputTokens": 167,
-            "outputTokens": 514,
-            "cacheReadTokens": 75904,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 76071
+            "contextInputTokens": 70941
           }
         ],
-        "attemptCount": 12,
-        "requestCount": 12,
+        "attemptCount": 8,
+        "requestCount": 8,
         "recoveredFailures": [],
-        "inputTokens": 2069,
-        "outputTokens": 9679,
-        "cacheReadTokens": 865408,
+        "inputTokens": 4921,
+        "outputTokens": 7400,
+        "cacheReadTokens": 528128,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 76071
+        "maximumRequestInputTokens": 70941
       },
-      "sessionJsonlBytes": 394395,
-      "sessionJsonlLines": 172,
+      "sessionBytes": 244532,
+      "sessionEntries": 181,
+      "activeContextBytes": 244532,
+      "activeContextEntries": 181,
       "eventCompactions": []
     },
     {
       "round": 8,
       "task": "balanced trees",
-      "runId": "8023ec3f-3aa4-43b4-81d2-90631e145099",
+      "runId": "329a70fe-f9e4-4081-9836-bc1afdf3e467",
       "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 6,
-      "firstResponseMs": 2538,
-      "firstTextMs": 2538,
-      "settledMs": 51634,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 7,
+      "firstResponseMs": 4239,
+      "firstTextMs": 4239,
+      "settledMs": 65704,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 208,
-            "outputTokens": 69,
-            "cacheReadTokens": 76544,
+            "inputTokens": 196,
+            "outputTokens": 66,
+            "cacheReadTokens": 71296,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 76752
+            "contextInputTokens": 71492
           },
           {
             "sequence": 2,
-            "inputTokens": 152,
-            "outputTokens": 2332,
-            "cacheReadTokens": 76800,
+            "inputTokens": 124,
+            "outputTokens": 3013,
+            "cacheReadTokens": 71552,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 76952
+            "contextInputTokens": 71676
           },
           {
             "sequence": 3,
-            "inputTokens": 84,
-            "outputTokens": 798,
+            "inputTokens": 97,
+            "outputTokens": 2793,
+            "cacheReadTokens": 74624,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 74721
+          },
+          {
+            "sequence": 4,
+            "inputTokens": 105,
+            "outputTokens": 74,
+            "cacheReadTokens": 77440,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 77545
+          },
+          {
+            "sequence": 5,
+            "inputTokens": 960,
+            "outputTokens": 661,
+            "cacheReadTokens": 77568,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 78528
+          },
+          {
+            "sequence": 6,
+            "inputTokens": 117,
+            "outputTokens": 106,
+            "cacheReadTokens": 79104,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 79221
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 854,
+            "outputTokens": 147,
             "cacheReadTokens": 79232,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 79316
+            "contextInputTokens": 80086
           },
           {
-            "sequence": 4,
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cacheReadTokens": 0,
-            "cacheWriteTokens": 0,
-            "state": "failed",
-            "failureCode": "upstream_network_error",
-            "contextInputTokens": 0
-          },
-          {
-            "sequence": 5,
-            "inputTokens": 19,
-            "outputTokens": 2552,
+            "sequence": 8,
+            "inputTokens": 154,
+            "outputTokens": 417,
             "cacheReadTokens": 80128,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 80147
-          },
-          {
-            "sequence": 6,
-            "inputTokens": 42,
-            "outputTokens": 67,
-            "cacheReadTokens": 82688,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 82730
-          },
-          {
-            "sequence": 7,
-            "inputTokens": 814,
-            "outputTokens": 143,
-            "cacheReadTokens": 82688,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 83502
-          },
-          {
-            "sequence": 8,
-            "inputTokens": 204,
-            "outputTokens": 517,
-            "cacheReadTokens": 83584,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 83788
+            "contextInputTokens": 80282
           }
         ],
         "attemptCount": 8,
-        "requestCount": 7,
-        "recoveredFailures": [{ "sequence": 4, "failureCode": "upstream_network_error" }],
-        "inputTokens": 1523,
-        "outputTokens": 6478,
-        "cacheReadTokens": 561664,
+        "requestCount": 8,
+        "recoveredFailures": [],
+        "inputTokens": 2607,
+        "outputTokens": 7277,
+        "cacheReadTokens": 610944,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 83788
+        "maximumRequestInputTokens": 80282
       },
-      "sessionJsonlBytes": 433102,
-      "sessionJsonlLines": 188,
+      "sessionBytes": 269612,
+      "sessionEntries": 198,
+      "activeContextBytes": 269612,
+      "activeContextEntries": 198,
       "eventCompactions": []
     },
     {
       "round": 9,
       "task": "priority structures",
-      "runId": "9ab904d9-2ac3-463d-b8e2-bf1afe437d0a",
+      "runId": "5e87b023-60f6-4887-94c9-78d413ab2d75",
       "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 11,
-      "firstResponseMs": 2582,
-      "firstTextMs": 2582,
-      "settledMs": 86256,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 20,
+      "firstResponseMs": 4214,
+      "firstTextMs": 4214,
+      "settledMs": 130066,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 247,
-            "outputTokens": 69,
+            "inputTokens": 225,
+            "outputTokens": 61,
+            "cacheReadTokens": 80640,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 80865
+          },
+          {
+            "sequence": 2,
+            "inputTokens": 160,
+            "outputTokens": 2371,
+            "cacheReadTokens": 80896,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 81056
+          },
+          {
+            "sequence": 3,
+            "inputTokens": 131,
+            "outputTokens": 422,
+            "cacheReadTokens": 83328,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 83459
+          },
+          {
+            "sequence": 4,
+            "inputTokens": 74,
+            "outputTokens": 358,
+            "cacheReadTokens": 83840,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 83914
+          },
+          {
+            "sequence": 5,
+            "inputTokens": 81,
+            "outputTokens": 305,
             "cacheReadTokens": 84224,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 84471
-          },
-          {
-            "sequence": 2,
-            "inputTokens": 203,
-            "outputTokens": 3475,
-            "cacheReadTokens": 84480,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 84683
-          },
-          {
-            "sequence": 3,
-            "inputTokens": 126,
-            "outputTokens": 1274,
-            "cacheReadTokens": 88064,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 88190
-          },
-          {
-            "sequence": 4,
-            "inputTokens": 153,
-            "outputTokens": 2746,
-            "cacheReadTokens": 89344,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 89497
-          },
-          {
-            "sequence": 5,
-            "inputTokens": 114,
-            "outputTokens": 374,
-            "cacheReadTokens": 92160,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 92274
+            "contextInputTokens": 84305
           },
           {
             "sequence": 6,
-            "inputTokens": 137,
-            "outputTokens": 217,
-            "cacheReadTokens": 92544,
+            "inputTokens": 68,
+            "outputTokens": 3178,
+            "cacheReadTokens": 84608,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 92681
+            "contextInputTokens": 84676
           },
           {
             "sequence": 7,
-            "inputTokens": 130,
-            "outputTokens": 67,
-            "cacheReadTokens": 92800,
+            "inputTokens": 77,
+            "outputTokens": 847,
+            "cacheReadTokens": 87808,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 92930
+            "contextInputTokens": 87885
           },
           {
             "sequence": 8,
-            "inputTokens": 889,
-            "outputTokens": 1604,
-            "cacheReadTokens": 92928,
+            "inputTokens": 60,
+            "outputTokens": 270,
+            "cacheReadTokens": 88704,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 93817
+            "contextInputTokens": 88764
           },
           {
             "sequence": 9,
-            "inputTokens": 93,
-            "outputTokens": 342,
-            "cacheReadTokens": 95360,
+            "inputTokens": 106,
+            "outputTokens": 75,
+            "cacheReadTokens": 88960,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 95453
+            "contextInputTokens": 89066
           },
           {
             "sequence": 10,
-            "inputTokens": 83,
-            "outputTokens": 166,
-            "cacheReadTokens": 95744,
+            "inputTokens": 854,
+            "outputTokens": 1871,
+            "cacheReadTokens": 89088,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 95827
+            "contextInputTokens": 89942
           },
           {
             "sequence": 11,
-            "inputTokens": 150,
-            "outputTokens": 143,
-            "cacheReadTokens": 95872,
+            "inputTokens": 70,
+            "outputTokens": 611,
+            "cacheReadTokens": 91776,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 96022
+            "contextInputTokens": 91846
           },
           {
             "sequence": 12,
-            "inputTokens": 189,
-            "outputTokens": 593,
+            "inputTokens": 73,
+            "outputTokens": 700,
+            "cacheReadTokens": 92416,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 92489
+          },
+          {
+            "sequence": 13,
+            "inputTokens": 37,
+            "outputTokens": 390,
+            "cacheReadTokens": 93184,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 93221
+          },
+          {
+            "sequence": 14,
+            "inputTokens": 75,
+            "outputTokens": 75,
+            "cacheReadTokens": 93568,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 93643
+          },
+          {
+            "sequence": 15,
+            "inputTokens": 834,
+            "outputTokens": 1582,
+            "cacheReadTokens": 93696,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 94530
+          },
+          {
+            "sequence": 16,
+            "inputTokens": 156,
+            "outputTokens": 96,
+            "cacheReadTokens": 96000,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 96156
+          },
+          {
+            "sequence": 17,
+            "inputTokens": 410,
+            "outputTokens": 84,
             "cacheReadTokens": 96128,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 96317
+            "contextInputTokens": 96538
+          },
+          {
+            "sequence": 18,
+            "inputTokens": 214,
+            "outputTokens": 440,
+            "cacheReadTokens": 96512,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 96726
+          },
+          {
+            "sequence": 19,
+            "inputTokens": 46,
+            "outputTokens": 76,
+            "cacheReadTokens": 97152,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 97198
+          },
+          {
+            "sequence": 20,
+            "inputTokens": 271,
+            "outputTokens": 223,
+            "cacheReadTokens": 97152,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 97423
+          },
+          {
+            "sequence": 21,
+            "inputTokens": 159,
+            "outputTokens": 424,
+            "cacheReadTokens": 97536,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 97695
           }
         ],
-        "attemptCount": 12,
-        "requestCount": 12,
+        "attemptCount": 21,
+        "requestCount": 21,
         "recoveredFailures": [],
-        "inputTokens": 2514,
-        "outputTokens": 11070,
-        "cacheReadTokens": 1099648,
+        "inputTokens": 4181,
+        "outputTokens": 14459,
+        "cacheReadTokens": 1897216,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 96317
+        "maximumRequestInputTokens": 97695
       },
-      "sessionJsonlBytes": 502864,
-      "sessionJsonlLines": 213,
+      "sessionBytes": 329587,
+      "sessionEntries": 241,
+      "activeContextBytes": 329587,
+      "activeContextEntries": 241,
       "eventCompactions": []
     },
     {
       "round": 10,
       "task": "hashing and probabilistic structures",
-      "runId": "1162dfdd-c553-4a74-95a5-fe4b0f4d86b7",
+      "runId": "92169fa8-f13d-4b7c-a0ce-46928acdcc8e",
       "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 10,
-      "firstResponseMs": 2818,
-      "firstTextMs": 2818,
-      "settledMs": 89573,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 15,
+      "firstResponseMs": 4097,
+      "firstTextMs": 4097,
+      "settledMs": 121814,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 190,
-            "outputTokens": 69,
-            "cacheReadTokens": 96896,
+            "inputTokens": 247,
+            "outputTokens": 64,
+            "cacheReadTokens": 98048,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 97086
+            "contextInputTokens": 98295
           },
           {
             "sequence": 2,
-            "inputTokens": 158,
-            "outputTokens": 3893,
-            "cacheReadTokens": 97152,
+            "inputTokens": 197,
+            "outputTokens": 3706,
+            "cacheReadTokens": 98304,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 97310
+            "contextInputTokens": 98501
           },
           {
             "sequence": 3,
-            "inputTokens": 113,
-            "outputTokens": 1246,
-            "cacheReadTokens": 101120,
+            "inputTokens": 93,
+            "outputTokens": 408,
+            "cacheReadTokens": 102144,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 101233
+            "contextInputTokens": 102237
           },
           {
             "sequence": 4,
-            "inputTokens": 110,
-            "outputTokens": 226,
-            "cacheReadTokens": 102400,
+            "inputTokens": 148,
+            "outputTokens": 323,
+            "cacheReadTokens": 102528,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 102510
+            "contextInputTokens": 102676
           },
           {
             "sequence": 5,
-            "inputTokens": 111,
-            "outputTokens": 3024,
-            "cacheReadTokens": 102656,
+            "inputTokens": 180,
+            "outputTokens": 3129,
+            "cacheReadTokens": 102912,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 102767
+            "contextInputTokens": 103092
           },
           {
             "sequence": 6,
-            "inputTokens": 92,
-            "outputTokens": 470,
-            "cacheReadTokens": 105728,
+            "inputTokens": 138,
+            "outputTokens": 323,
+            "cacheReadTokens": 106112,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 105820
+            "contextInputTokens": 106250
           },
           {
             "sequence": 7,
-            "inputTokens": 0,
-            "outputTokens": 0,
-            "cacheReadTokens": 0,
+            "inputTokens": 107,
+            "outputTokens": 266,
+            "cacheReadTokens": 106496,
             "cacheWriteTokens": 0,
-            "state": "failed",
-            "failureCode": "stream_failed",
-            "contextInputTokens": 0
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 106603
           },
           {
             "sequence": 8,
-            "inputTokens": 80,
-            "outputTokens": 65,
-            "cacheReadTokens": 106240,
+            "inputTokens": 147,
+            "outputTokens": 73,
+            "cacheReadTokens": 106752,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 106320
+            "contextInputTokens": 106899
           },
           {
             "sequence": 9,
-            "inputTokens": 906,
-            "outputTokens": 816,
-            "cacheReadTokens": 106368,
+            "inputTokens": 111,
+            "outputTokens": 483,
+            "cacheReadTokens": 106880,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 107274
+            "contextInputTokens": 106991
           },
           {
             "sequence": 10,
-            "inputTokens": 88,
-            "outputTokens": 63,
-            "cacheReadTokens": 108032,
+            "inputTokens": 106,
+            "outputTokens": 166,
+            "cacheReadTokens": 107392,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 108120
+            "contextInputTokens": 107498
           },
           {
             "sequence": 11,
-            "inputTokens": 53,
-            "outputTokens": 156,
-            "cacheReadTokens": 108160,
+            "inputTokens": 44,
+            "outputTokens": 301,
+            "cacheReadTokens": 107648,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 108213
+            "contextInputTokens": 107692
           },
           {
             "sequence": 12,
-            "inputTokens": 240,
-            "outputTokens": 659,
-            "cacheReadTokens": 108288,
+            "inputTokens": 106,
+            "outputTokens": 771,
+            "cacheReadTokens": 107904,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 108528
+            "contextInputTokens": 108010
+          },
+          {
+            "sequence": 13,
+            "inputTokens": 139,
+            "outputTokens": 116,
+            "cacheReadTokens": 108672,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 108811
+          },
+          {
+            "sequence": 14,
+            "inputTokens": 507,
+            "outputTokens": 93,
+            "cacheReadTokens": 108800,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 109307
+          },
+          {
+            "sequence": 15,
+            "inputTokens": 767,
+            "outputTokens": 171,
+            "cacheReadTokens": 109312,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 110079
+          },
+          {
+            "sequence": 16,
+            "inputTokens": 91,
+            "outputTokens": 466,
+            "cacheReadTokens": 110208,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 110299
           }
         ],
-        "attemptCount": 12,
-        "requestCount": 11,
-        "recoveredFailures": [{ "sequence": 7, "failureCode": "stream_failed" }],
-        "inputTokens": 2141,
-        "outputTokens": 10687,
-        "cacheReadTokens": 1143040,
+        "attemptCount": 16,
+        "requestCount": 16,
+        "recoveredFailures": [],
+        "inputTokens": 3128,
+        "outputTokens": 10859,
+        "cacheReadTokens": 1690112,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 108528
+        "maximumRequestInputTokens": 110299
       },
-      "sessionJsonlBytes": 570525,
-      "sessionJsonlLines": 237,
+      "sessionBytes": 378927,
+      "sessionEntries": 274,
+      "activeContextBytes": 378927,
+      "activeContextEntries": 274,
       "eventCompactions": []
     },
     {
       "round": 11,
       "task": "graph representations and traversal",
-      "runId": "22c34e59-ae2d-4bc9-aa2f-edd08664f656",
+      "runId": "fd581ac6-bb21-48de-ab42-8de4243b44c3",
       "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 9,
-      "firstResponseMs": 2973,
-      "firstTextMs": 2973,
-      "settledMs": 98578,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 8,
+      "firstResponseMs": 4169,
+      "firstTextMs": 4169,
+      "settledMs": 92712,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 171,
-            "outputTokens": 69,
-            "cacheReadTokens": 109184,
+            "inputTokens": 213,
+            "outputTokens": 61,
+            "cacheReadTokens": 110720,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 109355
+            "contextInputTokens": 110933
           },
           {
             "sequence": 2,
-            "inputTokens": 276,
-            "outputTokens": 3289,
-            "cacheReadTokens": 109312,
+            "inputTokens": 169,
+            "outputTokens": 2757,
+            "cacheReadTokens": 110976,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 109588
+            "contextInputTokens": 111145
           },
           {
             "sequence": 3,
-            "inputTokens": 142,
-            "outputTokens": 676,
-            "cacheReadTokens": 112768,
+            "inputTokens": 78213,
+            "outputTokens": 1503,
+            "cacheReadTokens": 0,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 112910
+            "contextInputTokens": 78213
           },
           {
             "sequence": 4,
-            "inputTokens": 84,
-            "outputTokens": 3503,
-            "cacheReadTokens": 113536,
+            "inputTokens": 11517,
+            "outputTokens": 518,
+            "cacheReadTokens": 0,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 113620
+            "contextInputTokens": 11517
           },
           {
             "sequence": 5,
-            "inputTokens": 34,
-            "outputTokens": 863,
-            "cacheReadTokens": 117120,
+            "inputTokens": 24401,
+            "outputTokens": 1058,
+            "cacheReadTokens": 1024,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 117154
+            "contextInputTokens": 25425
           },
           {
             "sequence": 6,
-            "inputTokens": 33,
-            "outputTokens": 67,
-            "cacheReadTokens": 118016,
+            "inputTokens": 149,
+            "outputTokens": 548,
+            "cacheReadTokens": 26368,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 118049
+            "contextInputTokens": 26517
           },
           {
             "sequence": 7,
-            "inputTokens": 1302,
-            "outputTokens": 529,
-            "cacheReadTokens": 118016,
+            "inputTokens": 258,
+            "outputTokens": 3488,
+            "cacheReadTokens": 27008,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 119318
+            "contextInputTokens": 27266
           },
           {
             "sequence": 8,
-            "inputTokens": 71,
-            "outputTokens": 167,
-            "cacheReadTokens": 119808,
+            "inputTokens": 65,
+            "outputTokens": 373,
+            "cacheReadTokens": 30720,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 119879
+            "contextInputTokens": 30785
           },
           {
             "sequence": 9,
-            "inputTokens": 139,
-            "outputTokens": 143,
-            "cacheReadTokens": 119936,
+            "inputTokens": 86,
+            "outputTokens": 82,
+            "cacheReadTokens": 31104,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 120075
+            "contextInputTokens": 31190
           },
           {
             "sequence": 10,
-            "inputTokens": 195,
-            "outputTokens": 597,
-            "cacheReadTokens": 120192,
+            "inputTokens": 1354,
+            "outputTokens": 154,
+            "cacheReadTokens": 31232,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 120387
+            "contextInputTokens": 32586
           },
           {
             "sequence": 11,
-            "inputTokens": 87296,
-            "outputTokens": 1800,
-            "cacheReadTokens": 0,
+            "inputTokens": 149,
+            "outputTokens": 442,
+            "cacheReadTokens": 32640,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 87296
-          },
-          {
-            "sequence": 12,
-            "inputTokens": 534,
-            "outputTokens": 267,
-            "cacheReadTokens": 0,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 534
+            "contextInputTokens": 32789
           }
         ],
-        "attemptCount": 12,
-        "requestCount": 12,
+        "attemptCount": 11,
+        "requestCount": 11,
         "recoveredFailures": [],
-        "inputTokens": 90277,
-        "outputTokens": 11970,
-        "cacheReadTokens": 1157888,
+        "inputTokens": 116574,
+        "outputTokens": 10984,
+        "cacheReadTokens": 401792,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 120387
+        "maximumRequestInputTokens": 111145
       },
-      "sessionJsonlBytes": 640089,
-      "sessionJsonlLines": 259,
+      "sessionBytes": 451998,
+      "sessionEntries": 294,
+      "activeContextBytes": 64245,
+      "activeContextEntries": 14,
       "eventCompactions": [
         {
           "reason": "threshold",
           "status": "completed",
           "willRetry": false,
-          "tokensBefore": 120984,
-          "estimatedTokensAfter": 23524,
-          "firstKeptEntryId": "da93ec7c",
-          "summarySha256": "aa2e076e7ba3cea8ba2c437a527f77dc8235c7273cc92b96f2f5c57e8e14263f",
+          "tokensBefore": 113920,
+          "estimatedTokensAfter": 22667,
+          "summarySha256": "c30eaeedc48652dfbe94045db3cc2445f84bc97f96bd6c390b68e2a82a4d6676",
           "summaryVersion": 1
         }
       ]
@@ -1574,508 +1755,493 @@
   ],
   "compactions": [
     {
-      "runId": "22c34e59-ae2d-4bc9-aa2f-edd08664f656",
+      "runId": "fd581ac6-bb21-48de-ab42-8de4243b44c3",
       "reason": "threshold",
       "state": "completed",
-      "tokensBefore": 120984,
-      "estimatedTokensAfter": 23524,
-      "durationMs": 18923
+      "tokensBefore": 113920,
+      "estimatedTokensAfter": 22667,
+      "durationMs": 18294
     }
   ],
   "compaction": {
-    "runId": "22c34e59-ae2d-4bc9-aa2f-edd08664f656",
+    "runId": "fd581ac6-bb21-48de-ab42-8de4243b44c3",
     "reason": "threshold",
     "state": "completed",
-    "tokensBefore": 120984,
-    "estimatedTokensAfter": 23524,
-    "durationMs": 18923,
+    "tokensBefore": 113920,
+    "estimatedTokensAfter": 22667,
+    "durationMs": 18294,
     "triggeringRun": {
       "round": 11,
       "task": "graph representations and traversal",
-      "runId": "22c34e59-ae2d-4bc9-aa2f-edd08664f656",
+      "runId": "fd581ac6-bb21-48de-ab42-8de4243b44c3",
       "worker": "agent-dock-worker-2",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 9,
-      "firstResponseMs": 2973,
-      "firstTextMs": 2973,
-      "settledMs": 98578,
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 8,
+      "firstResponseMs": 4169,
+      "firstTextMs": 4169,
+      "settledMs": 92712,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 171,
-            "outputTokens": 69,
-            "cacheReadTokens": 109184,
+            "inputTokens": 213,
+            "outputTokens": 61,
+            "cacheReadTokens": 110720,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 109355
+            "contextInputTokens": 110933
           },
           {
             "sequence": 2,
-            "inputTokens": 276,
-            "outputTokens": 3289,
-            "cacheReadTokens": 109312,
+            "inputTokens": 169,
+            "outputTokens": 2757,
+            "cacheReadTokens": 110976,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 109588
+            "contextInputTokens": 111145
           },
           {
             "sequence": 3,
-            "inputTokens": 142,
-            "outputTokens": 676,
-            "cacheReadTokens": 112768,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 112910
-          },
-          {
-            "sequence": 4,
-            "inputTokens": 84,
-            "outputTokens": 3503,
-            "cacheReadTokens": 113536,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 113620
-          },
-          {
-            "sequence": 5,
-            "inputTokens": 34,
-            "outputTokens": 863,
-            "cacheReadTokens": 117120,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 117154
-          },
-          {
-            "sequence": 6,
-            "inputTokens": 33,
-            "outputTokens": 67,
-            "cacheReadTokens": 118016,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 118049
-          },
-          {
-            "sequence": 7,
-            "inputTokens": 1302,
-            "outputTokens": 529,
-            "cacheReadTokens": 118016,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 119318
-          },
-          {
-            "sequence": 8,
-            "inputTokens": 71,
-            "outputTokens": 167,
-            "cacheReadTokens": 119808,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 119879
-          },
-          {
-            "sequence": 9,
-            "inputTokens": 139,
-            "outputTokens": 143,
-            "cacheReadTokens": 119936,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 120075
-          },
-          {
-            "sequence": 10,
-            "inputTokens": 195,
-            "outputTokens": 597,
-            "cacheReadTokens": 120192,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 120387
-          },
-          {
-            "sequence": 11,
-            "inputTokens": 87296,
-            "outputTokens": 1800,
+            "inputTokens": 78213,
+            "outputTokens": 1503,
             "cacheReadTokens": 0,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 87296
+            "contextInputTokens": 78213
           },
           {
-            "sequence": 12,
-            "inputTokens": 534,
-            "outputTokens": 267,
+            "sequence": 4,
+            "inputTokens": 11517,
+            "outputTokens": 518,
             "cacheReadTokens": 0,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 534
-          }
-        ],
-        "attemptCount": 12,
-        "requestCount": 12,
-        "recoveredFailures": [],
-        "inputTokens": 90277,
-        "outputTokens": 11970,
-        "cacheReadTokens": 1157888,
-        "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 120387
-      },
-      "sessionJsonlBytes": 640089,
-      "sessionJsonlLines": 259,
-      "eventCompactions": [
-        {
-          "reason": "threshold",
-          "status": "completed",
-          "willRetry": false,
-          "tokensBefore": 120984,
-          "estimatedTokensAfter": 23524,
-          "firstKeptEntryId": "da93ec7c",
-          "summarySha256": "aa2e076e7ba3cea8ba2c437a527f77dc8235c7273cc92b96f2f5c57e8e14263f",
-          "summaryVersion": 1
-        }
-      ]
-    },
-    "preCompactionMaximumInputTokens": 108528,
-    "triggeringRunMaximumInputTokens": 120387
-  },
-  "postCompaction": {
-    "recall": {
-      "runId": "32416e3a-867a-4fc3-a798-7ed566a4b620",
-      "markerRecovered": true,
-      "worker": "agent-dock-worker-2",
-      "firstResponseMs": 3634,
-      "firstTextMs": 3634,
-      "settledMs": 5418,
-      "usage": {
-        "requests": [
-          {
-            "sequence": 1,
-            "inputTokens": 26162,
-            "outputTokens": 14,
-            "cacheReadTokens": 1280,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 27442
-          }
-        ],
-        "attemptCount": 1,
-        "requestCount": 1,
-        "recoveredFailures": [],
-        "inputTokens": 26162,
-        "outputTokens": 14,
-        "cacheReadTokens": 1280,
-        "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 27442
-      },
-      "sessionJsonlBytes": 641484,
-      "sessionJsonlLines": 262
-    },
-    "coding": {
-      "runId": "069716d8-257b-4c9a-af85-8b99455f4674",
-      "worker": "agent-dock-worker-1",
-      "runtimeId": "eab77532-c7f1-5b41-b122-000c59b668dc",
-      "toolCalls": 10,
-      "firstResponseMs": 3809,
-      "firstTextMs": 3809,
-      "settledMs": 59774,
-      "usage": {
-        "requests": [
-          {
-            "sequence": 1,
-            "inputTokens": 193,
-            "outputTokens": 112,
-            "cacheReadTokens": 27392,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 27585
-          },
-          {
-            "sequence": 2,
-            "inputTokens": 566,
-            "outputTokens": 262,
-            "cacheReadTokens": 27648,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 28214
-          },
-          {
-            "sequence": 3,
-            "inputTokens": 381,
-            "outputTokens": 430,
-            "cacheReadTokens": 28416,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 28797
-          },
-          {
-            "sequence": 4,
-            "inputTokens": 229,
-            "outputTokens": 652,
-            "cacheReadTokens": 29184,
-            "cacheWriteTokens": 0,
-            "state": "completed",
-            "upstreamStatus": 200,
-            "contextInputTokens": 29413
+            "contextInputTokens": 11517
           },
           {
             "sequence": 5,
-            "inputTokens": 1789,
-            "outputTokens": 2596,
-            "cacheReadTokens": 29952,
+            "inputTokens": 24401,
+            "outputTokens": 1058,
+            "cacheReadTokens": 1024,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 31741
+            "contextInputTokens": 25425
           },
           {
             "sequence": 6,
-            "inputTokens": 67,
-            "outputTokens": 1229,
-            "cacheReadTokens": 34304,
+            "inputTokens": 149,
+            "outputTokens": 548,
+            "cacheReadTokens": 26368,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 34371
+            "contextInputTokens": 26517
           },
           {
             "sequence": 7,
-            "inputTokens": 51,
-            "outputTokens": 918,
-            "cacheReadTokens": 35584,
+            "inputTokens": 258,
+            "outputTokens": 3488,
+            "cacheReadTokens": 27008,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 35635
+            "contextInputTokens": 27266
           },
           {
             "sequence": 8,
-            "inputTokens": 106,
-            "outputTokens": 83,
-            "cacheReadTokens": 36480,
+            "inputTokens": 65,
+            "outputTokens": 373,
+            "cacheReadTokens": 30720,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 36586
+            "contextInputTokens": 30785
           },
           {
             "sequence": 9,
-            "inputTokens": 98,
-            "outputTokens": 86,
-            "cacheReadTokens": 36608,
+            "inputTokens": 86,
+            "outputTokens": 82,
+            "cacheReadTokens": 31104,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 36706
+            "contextInputTokens": 31190
           },
           {
             "sequence": 10,
-            "inputTokens": 481,
-            "outputTokens": 180,
-            "cacheReadTokens": 36736,
+            "inputTokens": 1354,
+            "outputTokens": 154,
+            "cacheReadTokens": 31232,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 37217
+            "contextInputTokens": 32586
           },
           {
             "sequence": 11,
-            "inputTokens": 441,
-            "outputTokens": 547,
-            "cacheReadTokens": 37376,
+            "inputTokens": 149,
+            "outputTokens": 442,
+            "cacheReadTokens": 32640,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 37817
+            "contextInputTokens": 32789
           }
         ],
         "attemptCount": 11,
         "requestCount": 11,
         "recoveredFailures": [],
-        "inputTokens": 4402,
-        "outputTokens": 7095,
-        "cacheReadTokens": 359680,
+        "inputTokens": 116574,
+        "outputTokens": 10984,
+        "cacheReadTokens": 401792,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 37817
-      }
+        "maximumRequestInputTokens": 111145
+      },
+      "sessionBytes": 451998,
+      "sessionEntries": 294,
+      "activeContextBytes": 64245,
+      "activeContextEntries": 14,
+      "eventCompactions": [
+        {
+          "reason": "threshold",
+          "status": "completed",
+          "willRetry": false,
+          "tokensBefore": 113920,
+          "estimatedTokensAfter": 22667,
+          "summarySha256": "c30eaeedc48652dfbe94045db3cc2445f84bc97f96bd6c390b68e2a82a4d6676",
+          "summaryVersion": 1
+        }
+      ]
     },
-    "crossWorker": {
-      "runId": "b1bc2b06-8c1c-428a-a7a3-bd7814eeef37",
-      "from": "agent-dock-worker-1",
-      "to": "agent-dock-worker-2",
-      "differentWorker": true,
-      "sameCubeRuntimeRebound": true,
-      "toolCalls": 12,
-      "firstResponseMs": 3036,
-      "firstTextMs": 3036,
-      "settledMs": 54785,
+    "preCompactionMaximumInputTokens": 110299,
+    "triggeringRunMaximumInputTokens": 111145
+  },
+  "postCompaction": {
+    "recall": {
+      "runId": "ab063194-0071-45f6-94cb-0696ba788a43",
+      "markerRecovered": true,
+      "worker": "agent-dock-worker-2",
+      "firstResponseMs": 4750,
+      "firstTextMs": 4750,
+      "settledMs": 4837,
       "usage": {
         "requests": [
           {
             "sequence": 1,
-            "inputTokens": 208,
-            "outputTokens": 78,
-            "cacheReadTokens": 38272,
+            "inputTokens": 110,
+            "outputTokens": 15,
+            "cacheReadTokens": 33152,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 38480
+            "contextInputTokens": 33262
+          }
+        ],
+        "attemptCount": 1,
+        "requestCount": 1,
+        "recoveredFailures": [],
+        "inputTokens": 110,
+        "outputTokens": 15,
+        "cacheReadTokens": 33152,
+        "cacheWriteTokens": 0,
+        "maximumRequestInputTokens": 33262
+      },
+      "sessionBytes": 453894,
+      "sessionEntries": 297,
+      "activeContextBytes": 66141,
+      "activeContextEntries": 17
+    },
+    "coding": {
+      "runId": "f3ff9d57-c49c-49f0-a416-8f086424633b",
+      "worker": "agent-dock-worker-2",
+      "runtimeId": "10edfa73-cdc1-531b-9c8a-d86671130da9",
+      "toolCalls": 15,
+      "firstResponseMs": 5071,
+      "firstTextMs": 5071,
+      "settledMs": 68201,
+      "usage": {
+        "requests": [
+          {
+            "sequence": 1,
+            "inputTokens": 255,
+            "outputTokens": 107,
+            "cacheReadTokens": 33152,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 33407
           },
           {
             "sequence": 2,
-            "inputTokens": 1054,
-            "outputTokens": 96,
-            "cacheReadTokens": 38528,
+            "inputTokens": 306,
+            "outputTokens": 271,
+            "cacheReadTokens": 33408,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 39582
+            "contextInputTokens": 33714
           },
           {
             "sequence": 3,
-            "inputTokens": 2479,
-            "outputTokens": 814,
-            "cacheReadTokens": 39552,
+            "inputTokens": 812,
+            "outputTokens": 620,
+            "cacheReadTokens": 33920,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 42031
+            "contextInputTokens": 34732
           },
           {
             "sequence": 4,
-            "inputTokens": 128,
-            "outputTokens": 1108,
-            "cacheReadTokens": 42752,
+            "inputTokens": 1972,
+            "outputTokens": 2119,
+            "cacheReadTokens": 34688,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 42880
+            "contextInputTokens": 36660
           },
           {
             "sequence": 5,
-            "inputTokens": 119,
-            "outputTokens": 784,
-            "cacheReadTokens": 43904,
+            "inputTokens": 2205,
+            "outputTokens": 102,
+            "cacheReadTokens": 36608,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 44023
+            "contextInputTokens": 38813
           },
           {
             "sequence": 6,
-            "inputTokens": 42,
-            "outputTokens": 205,
-            "cacheReadTokens": 44800,
+            "inputTokens": 667,
+            "outputTokens": 767,
+            "cacheReadTokens": 38912,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 44842
+            "contextInputTokens": 39579
           },
           {
             "sequence": 7,
-            "inputTokens": 154,
-            "outputTokens": 177,
-            "cacheReadTokens": 44928,
+            "inputTokens": 61,
+            "outputTokens": 112,
+            "cacheReadTokens": 40320,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 45082
+            "contextInputTokens": 40381
           },
           {
             "sequence": 8,
-            "inputTokens": 911,
-            "outputTokens": 1096,
-            "cacheReadTokens": 45184,
+            "inputTokens": 266,
+            "outputTokens": 188,
+            "cacheReadTokens": 40448,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 46095
+            "contextInputTokens": 40714
           },
           {
             "sequence": 9,
-            "inputTokens": 121,
-            "outputTokens": 75,
-            "cacheReadTokens": 47104,
+            "inputTokens": 142,
+            "outputTokens": 287,
+            "cacheReadTokens": 40832,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 47225
+            "contextInputTokens": 40974
           },
           {
             "sequence": 10,
-            "inputTokens": 752,
-            "outputTokens": 546,
-            "cacheReadTokens": 47232,
+            "inputTokens": 80,
+            "outputTokens": 145,
+            "cacheReadTokens": 41216,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 47984
+            "contextInputTokens": 41296
           },
           {
             "sequence": 11,
-            "inputTokens": 53,
-            "outputTokens": 69,
-            "cacheReadTokens": 48512,
+            "inputTokens": 149,
+            "outputTokens": 939,
+            "cacheReadTokens": 41344,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 48565
+            "contextInputTokens": 41493
           },
           {
             "sequence": 12,
-            "inputTokens": 229,
-            "outputTokens": 164,
-            "cacheReadTokens": 48512,
+            "inputTokens": 97,
+            "outputTokens": 117,
+            "cacheReadTokens": 42368,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 48741
+            "contextInputTokens": 42465
           },
           {
             "sequence": 13,
-            "inputTokens": 83,
-            "outputTokens": 482,
+            "inputTokens": 667,
+            "outputTokens": 154,
+            "cacheReadTokens": 42496,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 43163
+          },
+          {
+            "sequence": 14,
+            "inputTokens": 102,
+            "outputTokens": 464,
+            "cacheReadTokens": 43264,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 43366
+          }
+        ],
+        "attemptCount": 14,
+        "requestCount": 14,
+        "recoveredFailures": [],
+        "inputTokens": 7781,
+        "outputTokens": 6392,
+        "cacheReadTokens": 542976,
+        "cacheWriteTokens": 0,
+        "maximumRequestInputTokens": 43366
+      }
+    },
+    "crossWorker": {
+      "runId": "22347230-37d0-4b20-a400-4450e97b3fb1",
+      "from": "agent-dock-worker-2",
+      "to": "agent-dock-worker-1",
+      "differentWorker": true,
+      "sameCubeRuntimeRebound": true,
+      "toolCalls": 9,
+      "firstResponseMs": 6737,
+      "firstTextMs": 8072,
+      "settledMs": 39805,
+      "usage": {
+        "requests": [
+          {
+            "sequence": 1,
+            "inputTokens": 171,
+            "outputTokens": 111,
+            "cacheReadTokens": 43776,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 43947
+          },
+          {
+            "sequence": 2,
+            "inputTokens": 2049,
+            "outputTokens": 109,
+            "cacheReadTokens": 44032,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 46081
+          },
+          {
+            "sequence": 3,
+            "inputTokens": 981,
+            "outputTokens": 568,
+            "cacheReadTokens": 46080,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 47061
+          },
+          {
+            "sequence": 4,
+            "inputTokens": 48,
+            "outputTokens": 1135,
+            "cacheReadTokens": 47616,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 47664
+          },
+          {
+            "sequence": 5,
+            "inputTokens": 66,
+            "outputTokens": 183,
+            "cacheReadTokens": 48768,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 48834
+          },
+          {
+            "sequence": 6,
+            "inputTokens": 156,
+            "outputTokens": 615,
             "cacheReadTokens": 48896,
             "cacheWriteTokens": 0,
             "state": "completed",
             "upstreamStatus": 200,
-            "contextInputTokens": 48979
+            "contextInputTokens": 49052
+          },
+          {
+            "sequence": 7,
+            "inputTokens": 37,
+            "outputTokens": 106,
+            "cacheReadTokens": 49664,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 49701
+          },
+          {
+            "sequence": 8,
+            "inputTokens": 986,
+            "outputTokens": 242,
+            "cacheReadTokens": 49792,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 50778
+          },
+          {
+            "sequence": 9,
+            "inputTokens": 166,
+            "outputTokens": 378,
+            "cacheReadTokens": 50944,
+            "cacheWriteTokens": 0,
+            "state": "completed",
+            "upstreamStatus": 200,
+            "contextInputTokens": 51110
           }
         ],
-        "attemptCount": 13,
-        "requestCount": 13,
+        "attemptCount": 9,
+        "requestCount": 9,
         "recoveredFailures": [],
-        "inputTokens": 6333,
-        "outputTokens": 5694,
-        "cacheReadTokens": 578176,
+        "inputTokens": 4660,
+        "outputTokens": 3447,
+        "cacheReadTokens": 429568,
         "cacheWriteTokens": 0,
-        "maximumRequestInputTokens": 48979
+        "maximumRequestInputTokens": 51110
       },
-      "sessionJsonlBytes": 768395,
-      "sessionJsonlLines": 311
+      "sessionBytes": 524224,
+      "sessionEntries": 347,
+      "activeContextBytes": 136471,
+      "activeContextEntries": 67
     }
   },
   "totalUsage": {
-    "modelRequests": 147,
-    "modelAttempts": 150,
-    "recoveredRequestFailures": 3,
-    "inputTokens": 161235,
-    "outputTokens": 106048,
-    "cacheReadTokens": 8018048,
+    "modelRequests": 165,
+    "modelAttempts": 165,
+    "recoveredRequestFailures": 0,
+    "inputTokens": 168010,
+    "outputTokens": 109063,
+    "cacheReadTokens": 8570624,
     "cacheWriteTokens": 0
   }
 }

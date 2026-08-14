@@ -75,13 +75,21 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   captureStepContext: (
     activeTools: readonly string[],
     purpose?: "agent" | "context_maintenance",
-  ) => Readonly<{
-    step: FrozenCloudStep;
-    modelMessages: readonly PiWorldStateModelMessage[];
-    samplingAttempt: number;
-  }>;
-  onToolOperationStarted?: () => void;
-  onToolOperationUnavailable?: () => void;
+  ) =>
+    | Readonly<{
+        step: FrozenCloudStep;
+        modelMessages: readonly PiWorldStateModelMessage[];
+        samplingAttempt: number;
+      }>
+    | Promise<
+        Readonly<{
+          step: FrozenCloudStep;
+          modelMessages: readonly PiWorldStateModelMessage[];
+          samplingAttempt: number;
+        }>
+      >;
+  onToolOperationStarted?: () => void | Promise<void>;
+  onToolOperationUnavailable?: () => void | Promise<void>;
   remainingToolCalls: number;
   maximumToolOutputBytes: number;
   toolOutputDirectory: string;
@@ -288,17 +296,24 @@ function errorForPi(error: unknown, timeoutSeconds?: number): Error {
   return new Error("Tool Sandbox request failed");
 }
 
+type TrustedRemoteToolBindings = Readonly<{
+  transformContext(
+    messages: readonly AgentMessage[],
+    purpose: "agent" | "context_maintenance",
+  ): Promise<AgentMessage[]>;
+}>;
+
 function registerTrustedRemoteTools(
   pi: ExtensionAPI,
   runtime: TrustedRemoteToolsRuntimeConfiguration,
-): void {
+): TrustedRemoteToolBindings {
   let remainingToolCalls = runtime.remainingToolCalls;
   let currentStep: FrozenCloudStep | undefined;
   let currentSamplingAttempt: number | undefined;
   let currentSamplingHeadersIssued = false;
 
-  const captureStep = (purpose: "agent" | "context_maintenance") => {
-    const captured = runtime.captureStepContext(pi.getActiveTools(), purpose);
+  const captureStep = async (purpose: "agent" | "context_maintenance") => {
+    const captured = await runtime.captureStepContext(pi.getActiveTools(), purpose);
     if (
       captured.step.context.turnContextSha256 !== runtime.turnContextSha256 ||
       captured.step.context.attemptContextSha256 !== runtime.attemptContextSha256 ||
@@ -312,10 +327,13 @@ function registerTrustedRemoteTools(
     return captured;
   };
 
-  pi.on("context", (event) => {
+  const transformContext = async (
+    event: { messages: readonly AgentMessage[] },
+    purpose: "agent" | "context_maintenance",
+  ): Promise<AgentMessage[]> => {
     currentStep = undefined;
     currentSamplingAttempt = undefined;
-    const captured = captureStep("agent");
+    const captured = await captureStep(purpose);
     const messages = [...event.messages];
     for (const message of captured.modelMessages) {
       const alreadyPresent = messages.some(
@@ -338,8 +356,9 @@ function registerTrustedRemoteTools(
         });
       }
     }
-    return { messages };
-  });
+    return messages;
+  };
+  pi.on("context", async (event) => ({ messages: await transformContext(event, "agent") }));
 
   const consumeToolCall = (): void => {
     if (remainingToolCalls < 1) {
@@ -359,7 +378,7 @@ function registerTrustedRemoteTools(
         false,
       );
     }
-    runtime.onToolOperationStarted?.();
+    await runtime.onToolOperationStarted?.();
     const candidate = {
       toolBrokerProtocolVersion: 1,
       type: "tool_sandbox.operation",
@@ -402,7 +421,7 @@ function registerTrustedRemoteTools(
       try {
         const failure = parseInternalServiceError(value).error;
         if (failure.code === "cubesandbox_tool_result_unknown") {
-          runtime.onToolOperationUnavailable?.();
+          await runtime.onToolOperationUnavailable?.();
         }
         throw new RemoteToolError(failure.code, failure.message, failure.retryable);
       } catch (error: unknown) {
@@ -427,7 +446,7 @@ function registerTrustedRemoteTools(
     }
     if (parsed.type === "tool_sandbox.operation_failed") {
       if (parsed.code === "cubesandbox_tool_result_unknown") {
-        runtime.onToolOperationUnavailable?.();
+        await runtime.onToolOperationUnavailable?.();
       }
       throwFailure(parsed);
     }
@@ -627,7 +646,7 @@ function registerTrustedRemoteTools(
     // therefore do not pass through the Agent `context` hook. Give each such
     // maintenance request a fresh governed sampling identity instead of
     // reusing the preceding Agent Step and colliding in the request ledger.
-    if (currentSamplingHeadersIssued) captureStep("context_maintenance");
+    if (currentSamplingHeadersIssued) await captureStep("context_maintenance");
     if (currentStep === undefined || currentSamplingAttempt === undefined) {
       throw new Error("Model request preceded its Cloud Step capture");
     }
@@ -753,26 +772,33 @@ function registerTrustedRemoteTools(
     consumeToolCall();
     return { operations: bashOperations(randomUUID()) };
   });
+  return {
+    transformContext: (messages, purpose) => transformContext({ messages }, purpose),
+  };
 }
 
 export function createTrustedRemoteToolsExtension(
   configuration: TrustedRemoteToolsRuntimeConfiguration,
 ): InlineExtension {
   const runtime = validateRuntimeConfiguration(configuration);
-  return (pi) => registerTrustedRemoteTools(pi, runtime);
+  return (pi) => {
+    registerTrustedRemoteTools(pi, runtime);
+  };
 }
 
 export type TrustedRemoteAgentTools = Readonly<{
   tools: readonly AgentTool[];
   systemPrompt(base: string): Promise<string>;
-  transformContext(messages: AgentMessage[]): Promise<AgentMessage[]>;
+  transformContext(
+    messages: AgentMessage[],
+    purpose?: "agent" | "context_maintenance",
+  ): Promise<AgentMessage[]>;
   transformHeaders(headers?: ProviderHeaders): Promise<ProviderHeaders>;
 }>;
 
 /**
- * Exposes the reviewed remote Tool implementation to Pi's lower-level
- * Agent/SessionStorage Harness without duplicating the security-sensitive RPC
- * code. It can disappear once upstream AgentHarness executes this path.
+ * Exposes the reviewed remote Tool implementation to Pi's lower-level native
+ * Agent runtime without duplicating the security-sensitive RPC code.
  */
 export function createTrustedRemoteAgentTools(
   configuration: TrustedRemoteToolsRuntimeConfiguration,
@@ -792,7 +818,7 @@ export function createTrustedRemoteAgentTools(
       tools.push(tool);
     },
   } as unknown as ExtensionAPI;
-  registerTrustedRemoteTools(extensionApi, runtime);
+  const bindings = registerTrustedRemoteTools(extensionApi, runtime);
 
   const requireHandler = (type: string): ((event: any) => unknown | Promise<unknown>) => {
     const handler = handlers.get(type);
@@ -814,17 +840,8 @@ export function createTrustedRemoteAgentTools(
       }
       return result.systemPrompt;
     },
-    async transformContext(messages) {
-      const result = await requireHandler("context")({ messages });
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        !("messages" in result) ||
-        !Array.isArray(result.messages)
-      ) {
-        throw new Error("Trusted remote Tool context hook returned an invalid result");
-      }
-      return result.messages as AgentMessage[];
+    async transformContext(messages, purpose = "agent") {
+      return bindings.transformContext(messages, purpose);
     },
     async transformHeaders(headers = {}) {
       const mutable = { ...headers };

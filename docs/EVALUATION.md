@@ -112,10 +112,11 @@ requires another Worker to restore the compacted Session while rebinding the
 same persistent Cube runtime.
 
 The latest run completed 11 coding Turns before threshold compaction reduced
-the estimated context from 120,984 to 23,524 tokens in 18.923 seconds. It then
-completed recall, post-compaction coding and cross-Worker coding. The run used
-150 real model attempts (147 completed; three transient upstream failures were
-recovered) and the final Pi JSONL was 768,395 bytes across 311 lines. See
+the estimated active context from 113,920 to 22,667 tokens in 18.294 seconds.
+It then completed recall, post-compaction coding and cross-Worker coding. The
+run used 165 real model attempts and ended with 524,224 bytes / 347 incremental
+PostgreSQL SessionStorage entries; only 136,471 bytes / 67 entries belonged to
+the final active branch. See
 [the acceptance report](reports/long-context-compaction-acceptance-latest.md).
 
 ## Sandbox security

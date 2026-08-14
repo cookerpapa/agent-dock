@@ -61,11 +61,19 @@ export {
   PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE,
   PI_TOOL_POLICY_CHANGED_CUSTOM_TYPE,
   PI_TOOL_POLICY_CHANGED_MESSAGE,
+  PI_WORLD_STATE_ENTRY_PROJECTORS,
+  PiSessionWorldStateController,
   PiStepWorldStateController,
   type PiRuntimeWorldState,
   type PiSandboxContinuity,
   type PiWorldStateModelMessage,
 } from "./pi-sandbox-continuity.ts";
+
+export {
+  PiCloudTurnRunner,
+  type PiCloudSessionHandle,
+  type PiCloudTurnRunnerOptions,
+} from "./pi-cloud-turn-runner.ts";
 
 export {
   CLOUD_MODEL_RETRY_POLICY,
@@ -104,6 +112,7 @@ export {
   PI_SETTLEMENT_GATE_CUSTOM_TYPE,
   SETTLEMENT_GATE_COMMAND_ID,
   createPiSettlementGateExtension,
+  PiSettlementGateController,
   settlementGatePolicyFromCommand,
   type PiSettlementGatePolicy,
 } from "./pi-settlement-gate.ts";
@@ -152,6 +161,7 @@ export {
 export {
   decodeSettledCheckpoint,
   decodeWorkspaceSnapshot,
+  encodePostgresSessionReference,
   encodeSettledCheckpoint,
   encodeWorkspaceSnapshot,
   validateLoadedCheckpoint,

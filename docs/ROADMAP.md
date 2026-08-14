@@ -18,14 +18,17 @@
 - [x] Remove Temporal and the duplicate Outbox handoff scheduler.
 - [x] Remove execution Cells and Worker affinity queues.
 - [x] Remove MinIO/S3 checkpoint runtime and Kopia Workspace copies.
-- [x] Move small Pi-native compatibility objects into PostgreSQL.
+- [x] Make PostgreSQL SessionStorage the production Pi conversation authority.
 - [x] Attach the same Workspace Volume across Cube activations and conversations.
 - [x] Enforce Pi Session mutations under transaction-scoped execution authority.
-- [x] Implement the complete Pi 0.84.1 AgentHarness surface over PostgreSQL
-      SessionStorage without forking Pi.
+- [x] Replace the full Harness experiment with a thin runtime composed from
+      Pi Agent, SessionStorage and compaction primitives.
+- [x] Remove lifetime JSONL download/restore from the production Worker path.
 - [x] Update Compose and Helm/KEDA to the new topology.
-- [ ] Complete full CI and fresh one-host installation acceptance.
-- [ ] Re-run token-consuming multi-round chat/coding and Cube restart acceptance.
+- [x] Complete full CI for the production cutover.
+- [ ] Repeat the clean one-host installer on a fresh machine.
+- [x] Re-run token-consuming multi-round chat/coding, native Compaction,
+      cross-Worker recovery and Cube restart acceptance.
 
 ## Next reliability work
 
@@ -35,9 +38,8 @@
 - publish PostgreSQL queue latency and Worker slot-density measurements;
 - validate Kafka broker/projector rebalance and Valkey rebuild at target load;
 - define Workspace snapshot/backup policy separately from normal Run commits;
-- switch production from transitional JSONL compatibility objects only after
-  the staged public-primitive Harness adapter passes Workspace-settlement,
-  real-model/Cube and cross-Worker parity gates; then delete the JSONL path.
+- remove the constant-size Workspace-version conversation reference after the
+  Workspace schema no longer requires a legacy Pi artifact foreign key.
 
 Every performance or availability claim must name the tested revision,
 topology, workload and observed result.

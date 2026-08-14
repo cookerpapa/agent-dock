@@ -18,7 +18,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import type { ExecutionAuthority } from "./execution-authority.ts";
 
-export type { ExecutionAuthority } from "./execution-authority.ts";
+export type { ActiveExecutionAuthority, ExecutionAuthority } from "./execution-authority.ts";
 
 export type AgentDockPiSessionMetadata = SessionMetadata & {
   tenantId: string;
@@ -688,19 +688,18 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
 
 export {
   PostgresRunExecutionAuthority,
-  PostgresRunExecutionAuthorityProvider,
   type PostgresRunExecutionAuthorityOptions,
 } from "./postgres-execution-authority.ts";
 export {
-  DurableAgentHarness,
-  FixedDurableAgentExecutionAuthorityProvider,
-  type DurableAgentExecutionAuthority,
-  type DurableAgentExecutionAuthorityProvider,
-  type DurableAgentExecutionScope,
-  type DurableAgentHarnessOptions,
-} from "./durable-agent-harness.ts";
+  CloudAgentRuntime,
+  type CloudAgentExecutionAuthority,
+  type CloudAgentRunResult,
+  type CloudAgentRuntimeEvent,
+  type CloudAgentRuntimeOptions,
+} from "./cloud-agent-runtime.ts";
 export {
   openPostgresDurableAgentSession,
+  type CloudAgentExecutionScope,
   type OpenPostgresDurableAgentSessionOptions,
   type PostgresDurableAgentSession,
 } from "./postgres-durable-agent-session.ts";

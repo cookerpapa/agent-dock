@@ -3479,3 +3479,49 @@
 - Kept the adapter staged: production cutover still requires atomic Workspace
   settlement and production event-map parity plus real model/Cube and
   cross-Worker acceptance.
+
+# 2026-08-14 — Thin PostgreSQL-native Pi production runtime
+
+- Archived the complete 231-message architecture discussion that narrowed the
+  actual product requirement from a generic Harness implementation to a thin
+  cloud runtime.
+- Removed the staged full `DurableAgentHarness` and its unused lanes,
+  navigation, templates, deferred-provider, manual-drive and generic Hook
+  machinery. Production now composes Pi's public `Agent`, `SessionStorage` and
+  compaction primitives directly.
+- Cut the trusted Worker over to PostgreSQL SessionStorage. A cold Run reads
+  only the latest compaction and its active suffix; it no longer downloads or
+  rewrites the lifetime `session.jsonl` transcript.
+- Kept one opaque execution authority at PostgreSQL Session writes and remote
+  Cube Tool effects. Tool intent is durable before execution, and an unresolved
+  Tool becomes an explicit unknown effect rather than an automatic replay.
+- Ported world-state capture, model sampling identity, active steer,
+  interruption, Workspace settlement and reviewed public event mapping to the
+  native runtime. Text deltas stay asynchronously coalesced while semantic Pi
+  boundaries await the durable event prefix.
+- Added PostgreSQL-backed runtime contracts and a full Pi/FakeModel event-path
+  integration test; production real-model/Cube and cross-Worker acceptance
+  remains the release gate for this cutover.
+
+# 2026-08-14 — PostgreSQL-native production acceptance
+
+- Completed the production cutover gate with real `deepseek-v4-flash` and
+  CubeSandbox KVM workloads. Pure chat bypassed Cube, multi-round coding reused
+  one persistent Workspace, and a stopped Worker was replaced without losing
+  Pi conversation state.
+- Grew one Session through 11 sorting, searching, tree and graph coding Turns.
+  Pi native threshold Compaction reduced the structurally estimated active
+  context from 113,920 to 22,667 tokens in 18.294 seconds; recall and further
+  Tool-driven coding succeeded afterward.
+- Stopped the Worker owning the compacted Session and proved that the surviving
+  Worker rebuilt the active branch directly from PostgreSQL SessionStorage,
+  recovered the early invariant and rebound the same persistent Cube runtime.
+- A real DeepSeek mid-stream failure exposed the missing high-level retry from
+  the removed coding-agent adapter. The thin runtime now retries only
+  retryable model transport failures with a fresh sampling attempt, excludes
+  the failed assistant from model context and leaves arbitrary Tool effects
+  non-replayable.
+- Corrected post-compaction telemetry: retained assistant usage still describes
+  the pre-compaction request, so the completion event now structurally
+  estimates the materialized summary and retained tail instead of reporting
+  the stale provider input count.

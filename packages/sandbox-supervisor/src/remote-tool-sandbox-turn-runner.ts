@@ -19,16 +19,16 @@ import { resolve } from "node:path";
 import type { SupervisorTurnRunner } from "./local-sandbox-supervisor.ts";
 import { PiTurnError, type PiEventPublisher, type PiTurnResult } from "./pi-turn-runtime.ts";
 import {
-  CLOUD_MODEL_RETRY_POLICY,
-  PiSdkTurnRunner,
-  type PiSdkIsolationFailure,
-  type PiSdkTurnRunnerOptions,
-} from "./pi-sdk-turn-runner.ts";
+  PiCloudTurnRunner,
+  type PiCloudSessionHandle,
+  type PiCloudTurnRunnerOptions,
+} from "./pi-cloud-turn-runner.ts";
 import {
-  createPiSettlementGateExtension,
+  PiSettlementGateController,
   settlementGatePolicyFromCommand,
 } from "./pi-settlement-gate.ts";
 import {
+  encodePostgresSessionReference,
   validateLoadedCheckpoint,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -45,7 +45,7 @@ import type {
   TrustedModelRuntimeLeaseResolver,
 } from "./agent-turn-runtime.ts";
 import type { RunAttemptPhaseObserver } from "./run-attempt-phase.ts";
-import { createTrustedRemoteToolsExtension } from "./trusted-remote-tools-extension.ts";
+import { createTrustedRemoteAgentTools } from "./trusted-remote-tools-extension.ts";
 import {
   createCloudAttemptContext,
   createCloudStepContext,
@@ -103,12 +103,12 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   modelRuntimeLeaseResolver?: TrustedModelRuntimeLeaseResolver;
   workspaceSeedResolver?: AgentWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
+  openAgentSession: (command: ExecuteTurnCommandMessage) => Promise<PiCloudSessionHandle>;
   runAttemptPhaseObserver?: RunAttemptPhaseObserver;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   idGenerator?: () => string;
   metrics?: AgentDockMetrics;
-  onPiSdkIsolationFailure?: (error: PiSdkIsolationFailure) => Promise<void> | void;
 };
 
 function assignment(
@@ -158,18 +158,17 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #modelRuntimeLeaseResolver: TrustedModelRuntimeLeaseResolver | undefined;
   readonly #workspaceSeedResolver: AgentWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
+  readonly #openAgentSession: RemoteToolSandboxTurnRunnerOptions["openAgentSession"];
   readonly #runAttemptPhaseObserver: RunAttemptPhaseObserver | undefined;
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
   readonly #idGenerator: () => string;
   readonly #metrics: AgentDockMetrics | undefined;
-  readonly #onPiSdkIsolationFailure:
-    ((error: PiSdkIsolationFailure) => Promise<void> | void) | undefined;
   readonly #activePiRunners = new Map<
     string,
     {
-      ready: Promise<PiSdkTurnRunner>;
-      resolve: (runner: PiSdkTurnRunner) => void;
+      ready: Promise<PiCloudTurnRunner>;
+      resolve: (runner: PiCloudTurnRunner) => void;
       reject: (error: Error) => void;
     }
   >();
@@ -182,12 +181,12 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#modelRuntimeLeaseResolver = options.modelRuntimeLeaseResolver;
     this.#workspaceSeedResolver = options.workspaceSeedResolver;
     this.#checkpointStore = options.checkpointStore;
+    this.#openAgentSession = options.openAgentSession;
     this.#runAttemptPhaseObserver = options.runAttemptPhaseObserver;
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#turnTimeoutMs = options.turnTimeoutMs;
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
     this.#metrics = options.metrics;
-    this.#onPiSdkIsolationFailure = options.onPiSdkIsolationFailure;
   }
 
   async run(
@@ -202,9 +201,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         false,
       );
     }
-    let resolveRunner!: (runner: PiSdkTurnRunner) => void;
+    let resolveRunner!: (runner: PiCloudTurnRunner) => void;
     let rejectRunner!: (error: Error) => void;
-    const ready = new Promise<PiSdkTurnRunner>((resolvePromise, rejectPromise) => {
+    const ready = new Promise<PiCloudTurnRunner>((resolvePromise, rejectPromise) => {
       resolveRunner = resolvePromise;
       rejectRunner = rejectPromise;
     });
@@ -277,7 +276,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     command: ExecuteTurnCommandMessage,
     publishEvent: PiEventPublisher,
     signal: AbortSignal,
-    onPiRunnerReady: (runner: PiSdkTurnRunner) => void,
+    onPiRunnerReady: (runner: PiCloudTurnRunner) => void,
   ): Promise<PiTurnResult> {
     const downstreamTrace = activeTraceCarrier() ?? command.payload.traceContext;
     const trustedWorkspace = await stat(this.#trustedWorkspaceDirectory).catch(() => undefined);
@@ -293,7 +292,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     if (this.#checkpointStore !== undefined) {
       const restoreStartedAt = performance.now();
       try {
-        loadedCheckpoint = validateLoadedCheckpoint(await this.#checkpointStore.load(command));
+        loadedCheckpoint = validateLoadedCheckpoint(
+          await this.#checkpointStore.load(command, { includeConversation: false }),
+        );
         this.#metrics?.checkpointRestoreDuration.observe(
           { outcome: loadedCheckpoint === undefined ? "empty" : "completed" },
           (performance.now() - restoreStartedAt) / 1_000,
@@ -464,7 +465,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         }
       }
 
-      const resolveModelRuntime: PiSdkTurnRunnerOptions["resolveModelRuntime"] = (model) =>
+      const resolveModelRuntime: PiCloudTurnRunnerOptions["resolveModelRuntime"] = (model) =>
         usesEmbeddedFake
           ? {
               provider: model.provider,
@@ -489,7 +490,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 ? {}
                 : { maxTokens: modelRuntimeLease!.runtime.maxTokens }),
             };
-      const onSettled: NonNullable<PiSdkTurnRunnerOptions["onSettled"]> = async ({ piSession }) => {
+      const onSettled: NonNullable<PiCloudTurnRunnerOptions["onSettled"]> = async (session) => {
         if (activation === undefined) {
           throw new PiTurnError(
             "tool_sandbox_unavailable",
@@ -524,15 +525,19 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           });
         if (this.#checkpointStore !== undefined) {
           try {
+            const conversationReference = encodePostgresSessionReference({
+              sessionId: command.payload.sessionId,
+              leafId: await session.getLeafId(),
+            });
             const saved =
               captured.type === "tool_sandbox.unused"
                 ? await this.#checkpointStore.saveConversation(
                     command,
                     loadedCheckpoint?.revision ?? null,
-                    piSession,
+                    conversationReference,
                   )
                 : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
-                    piSession,
+                    piSession: conversationReference,
                     workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
                     environment: captured.environment,
                     ...(captured.workspacePatch === undefined
@@ -565,15 +570,18 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
         }
       };
-      const onInterrupted: NonNullable<PiSdkTurnRunnerOptions["onInterrupted"]> = async ({
-        piSession,
-      }) => {
+      const onInterrupted: NonNullable<PiCloudTurnRunnerOptions["onInterrupted"]> = async (
+        session,
+      ) => {
         if (this.#checkpointStore === undefined) return;
         try {
           await this.#checkpointStore.saveInterruptedConversation(
             command,
             loadedCheckpoint?.revision ?? null,
-            piSession,
+            encodePostgresSessionReference({
+              sessionId: command.payload.sessionId,
+              leafId: await session.getLeafId(),
+            }),
           );
         } catch (error: unknown) {
           throw safePiError(
@@ -584,9 +592,14 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         }
       };
       const activeSandbox = activation;
+      const settlementPolicy = settlementGatePolicyFromCommand(command);
+      const settlementGate =
+        settlementPolicy === undefined
+          ? undefined
+          : new PiSettlementGateController(settlementPolicy);
       const commonRunnerOptions = {
-        resolveWorkspaceDirectory: () => this.#trustedWorkspaceDirectory,
         resolveModelRuntime,
+        openSession: this.#openAgentSession,
         collectWorkspacePatch: () => capturedPatch,
         ...(this.#checkpointStore?.saveToolOutput === undefined
           ? {}
@@ -594,12 +607,6 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               persistToolOutputArtifact: (output: { toolCallId: string; bytes: Uint8Array }) =>
                 this.#checkpointStore!.saveToolOutput!(command, output),
             }),
-        ...(loadedCheckpoint?.piSession === undefined
-          ? {}
-          : { restorePiSession: loadedCheckpoint.piSession }),
-        ...(loadedCheckpoint?.recoverySuffix === undefined
-          ? {}
-          : { recoverySuffix: loadedCheckpoint.recoverySuffix }),
         sandboxContinuity: {
           activationId: activeSandbox.activationId,
           continuity: activeSandbox.continuity,
@@ -609,7 +616,6 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         },
         onSettled,
         onInterrupted,
-        modelRetry: CLOUD_MODEL_RETRY_POLICY,
         ...(this.#requestTimeoutMs === undefined
           ? {
               requestTimeoutMs: usesEmbeddedFake
@@ -631,63 +637,62 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               ),
             }),
       };
-      const runner = new PiSdkTurnRunner({
+      const runner = new PiCloudTurnRunner({
         ...commonRunnerOptions,
-        createInlineExtensions: ({ toolOutputDirectory, stepWorldState, captureSamplingStep }) => {
-          if (stepWorldState === undefined) {
-            throw new PiTurnError(
-              "step_world_state_unavailable",
-              "Pi Step world state was not initialized",
-              false,
-            );
-          }
+        createAgentTools: ({ toolOutputDirectory, stepWorldState, captureSamplingStep }) => {
           let stepSequence = 0;
-          const settlementGate = settlementGatePolicyFromCommand(command);
-          return [
-            createTrustedRemoteToolsExtension({
-              operationUrl: this.#broker.operationUrlFor(activeSandbox.activationId),
-              activationId: activeSandbox.activationId,
-              capability: activeSandbox.capability,
-              turnContextSha256: cloudTurn.sha256,
-              attemptContextSha256: cloudAttempt.sha256,
-              captureStepContext: (activeTools, purpose = "agent") =>
-                captureSamplingStep(
-                  () => {
-                    const captured = stepWorldState.capture();
-                    const step = createCloudStepContext({
-                      sequence: (stepSequence += 1),
-                      turnContextSha256: cloudTurn.sha256,
-                      attemptContextSha256: cloudAttempt.sha256,
-                      activeTools,
-                      worldState: captured.worldState,
-                    });
-                    return { step, modelMessages: captured.modelMessages };
-                  },
-                  { publishEvent: purpose === "agent" },
-                ),
-              onToolOperationStarted: () => stepWorldState.recordActive(),
-              onToolOperationUnavailable: () => stepWorldState.recordUnavailable(),
-              remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
-              maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
-              toolOutputDirectory,
-              ...(projectInstructions === undefined ? {} : { projectInstructions }),
-              ...(downstreamTrace === undefined
-                ? {}
-                : {
-                    traceparent: downstreamTrace.traceparent,
-                    ...(downstreamTrace.tracestate === undefined
-                      ? {}
-                      : { tracestate: downstreamTrace.tracestate }),
-                  }),
-            }),
-            ...(settlementGate === undefined
-              ? []
-              : [createPiSettlementGateExtension(settlementGate)]),
-          ];
+          return createTrustedRemoteAgentTools({
+            operationUrl: this.#broker.operationUrlFor(activeSandbox.activationId),
+            activationId: activeSandbox.activationId,
+            capability: activeSandbox.capability,
+            turnContextSha256: cloudTurn.sha256,
+            attemptContextSha256: cloudAttempt.sha256,
+            captureStepContext: (activeTools, purpose = "agent") =>
+              captureSamplingStep(
+                async () => {
+                  const captured = await stepWorldState.capture();
+                  const step = createCloudStepContext({
+                    sequence: (stepSequence += 1),
+                    turnContextSha256: cloudTurn.sha256,
+                    attemptContextSha256: cloudAttempt.sha256,
+                    activeTools,
+                    worldState: captured.worldState,
+                  });
+                  return { step, modelMessages: captured.modelMessages };
+                },
+                { publishEvent: purpose === "agent" },
+              ),
+            onToolOperationStarted: () => stepWorldState.recordActive(),
+            onToolOperationUnavailable: () => stepWorldState.recordUnavailable(),
+            remainingToolCalls: command.payload.budgets?.remainingToolCalls ?? 128,
+            maximumToolOutputBytes: command.payload.budgets?.maximumToolOutputBytes ?? 65_536,
+            toolOutputDirectory,
+            ...(projectInstructions === undefined ? {} : { projectInstructions }),
+            ...(downstreamTrace === undefined
+              ? {}
+              : {
+                  traceparent: downstreamTrace.traceparent,
+                  ...(downstreamTrace.tracestate === undefined
+                    ? {}
+                    : { tracestate: downstreamTrace.tracestate }),
+                }),
+          });
         },
-        ...(this.#onPiSdkIsolationFailure === undefined
+        ...(settlementGate === undefined
           ? {}
-          : { onIsolationFailure: this.#onPiSdkIsolationFailure }),
+          : {
+              observeEvent: (event) => {
+                if (
+                  event.type !== "compaction_start" &&
+                  event.type !== "compaction_end" &&
+                  event.type !== "auto_retry_start" &&
+                  event.type !== "auto_retry_end"
+                ) {
+                  settlementGate.observe(event);
+                }
+              },
+              prepareFollowUp: () => settlementGate.prepareFollowUp(),
+            }),
       });
       onPiRunnerReady(runner);
       const result = await runner.run(command, publishEvent, signal);

@@ -23,9 +23,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [ ] Exercise PostgreSQL/PgBouncer failover while direct notification
       connections reconnect.
 - [x] Validate transaction-scoped SessionStorage authority through deterministic
-      Pi Agent Run, Tool, compaction, lane and deferred-recovery contracts.
-- [ ] Run the staged SessionStorage Harness through real model, Cube Tool,
-      Workspace settlement and cross-Worker recovery before production cutover.
+      Pi Agent Run, Tool, compaction and interrupted-effect recovery contracts.
+- [x] Re-run the production PostgreSQL-native Pi runtime through real model,
+      Cube Tool, Workspace settlement and cross-Worker recovery.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
 - [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
 

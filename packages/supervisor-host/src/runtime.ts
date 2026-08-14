@@ -21,6 +21,7 @@ import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/termi
 import { createDatabase, type Database } from "@agent-dock/database";
 import { GitHubGatewayClient } from "@agent-dock/github-gateway";
 import { operationalLog, type AgentDockMetrics } from "@agent-dock/observability";
+import { openPostgresDurableAgentSession } from "@agent-dock/pi-session-postgres";
 import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
 import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker";
 import {
@@ -28,7 +29,6 @@ import {
   LocalSandboxSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
-  type PiSdkIsolationFailure,
   type AgentTurnScenario,
   type AgentTurnScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
@@ -374,11 +374,24 @@ export class SupervisorHostRuntime {
       });
       await modelGateway.start();
       this.#modelGateway = modelGateway;
+      const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
       const runner = new RemoteToolSandboxTurnRunner({
         broker: this.#toolBroker,
         runtimeIdentity: identity,
         trustedWorkspaceDirectory: this.#config.trustedWorkspaceDirectory,
         checkpointStore,
+        openAgentSession: (command) =>
+          openPostgresDurableAgentSession({
+            database: this.#database,
+            scope: {
+              tenantId: command.payload.tenantId,
+              sessionId: command.payload.sessionId,
+              runId: command.payload.runId,
+              attemptId: command.payload.attemptId,
+            },
+            claimOwnerId: runWorkerIdentity,
+            fencingToken: command.payload.fencingToken,
+          }),
         runAttemptPhaseObserver: new PostgresRunAttemptPhaseObserver({
           database: this.#database,
         }),
@@ -386,7 +399,6 @@ export class SupervisorHostRuntime {
         modelRuntimeLeaseResolver: (command) => modelGateway.issue(command),
         workspaceSeedResolver: (command, signal) => workspaceSeedResolver.resolve(command, signal),
         turnTimeoutMs: this.#config.piTurnTimeoutMs,
-        onPiSdkIsolationFailure: (error) => this.#retireForPiSdkIsolationFailure(error),
         ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
       const spoolStore = new WalEventSpoolStore({
@@ -462,7 +474,6 @@ export class SupervisorHostRuntime {
             },
           }),
       });
-      const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
       const runWorker = this.#runWorkerFactory({
         database: this.#database,
         notificationConnectionString: this.#config.databaseNotificationUrl,
@@ -566,14 +577,6 @@ export class SupervisorHostRuntime {
       this.#state = "failed";
       this.#settleTerminal("connection_failed");
     }
-  }
-
-  #retireForPiSdkIsolationFailure(error: PiSdkIsolationFailure): void {
-    if (this.#state === "draining" || this.#state === "stopped") return;
-    this.#terminalFailureCode = error.code;
-    this.#state = "failed";
-    this.#client?.setAcceptingAssignments(false);
-    this.#settleTerminal("connection_failed");
   }
 
   #settleTerminal(reason: SupervisorHostTerminalReason): void {

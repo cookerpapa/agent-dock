@@ -17,6 +17,7 @@
   "dependencies": {
     "@agent-dock/fake-model-server": "0.1.0",
     "@agent-dock/observability": "0.1.0",
+    "@agent-dock/pi-session-postgres": "0.1.0",
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
     "@earendil-works/pi-agent-core": "0.84.1",

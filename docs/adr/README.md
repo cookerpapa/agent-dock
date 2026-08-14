@@ -18,7 +18,7 @@ are available in Git history rather than presented as current choices.
 - [ADR-0069](0069-cube-only-runtime-and-workspace-first-conversations.md)
   defines Workspace-first product behavior.
 
-## Cloud Agent Harness
+## Cloud Agent runtime
 
 - ADR-0070 through ADR-0087 cover terminal atomicity, SDK boundaries, trusted
   Git metadata, event WAL, steer, interruption semantics, Turn/Attempt/Step
@@ -44,9 +44,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0101](0101-postgres-native-agent-runtime-and-persistent-workspace-volumes.md)
   removes Temporal/Cells/S3/Kopia and establishes the PostgreSQL queue, Pi
   SessionStorage and persistent Cube Volume architecture.
-- [ADR-0102](0102-public-primitive-durable-agent-harness.md) implements Pi's
-  reserved Harness surface from public primitives while preserving one opaque
-  authority across conversation and Cube Tool effects.
+- [ADR-0103](0103-thin-postgres-native-pi-runtime.md) replaces the staged full
+  Harness experiment with the production PostgreSQL-native Pi runtime and one
+  opaque authority across conversation and Cube Tool effects.
 
 ## Optional modules
 

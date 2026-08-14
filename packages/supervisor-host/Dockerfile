@@ -12,6 +12,7 @@ COPY packages/domain/package.json packages/domain/package.json
 COPY packages/fake-model-server/package.json packages/fake-model-server/package.json
 COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/observability/package.json packages/observability/package.json
+COPY packages/pi-session-postgres/package.json packages/pi-session-postgres/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
 COPY packages/tool-broker/package.json packages/tool-broker/package.json
@@ -53,6 +54,8 @@ COPY packages/github-gateway/package.json packages/github-gateway/package.json
 COPY packages/github-gateway/src packages/github-gateway/src
 COPY packages/observability/package.json packages/observability/package.json
 COPY packages/observability/src packages/observability/src
+COPY packages/pi-session-postgres/package.json packages/pi-session-postgres/package.json
+COPY packages/pi-session-postgres/src packages/pi-session-postgres/src
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/protocol/src packages/protocol/src
 COPY packages/runtime-core/package.json packages/runtime-core/package.json
