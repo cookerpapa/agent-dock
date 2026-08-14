@@ -33,28 +33,37 @@ authority and extends it to the remote Tool effect boundary.
 
 Primary upstream references:
 
-- <https://github.com/earendil-works/pi/blob/main/packages/agent/docs/agent-harness.md>
-- <https://github.com/earendil-works/pi/blob/main/packages/agent/docs/harness.md>
-- <https://github.com/earendil-works/pi/blob/main/packages/agent/src/harness/agent-harness.ts>
-- <https://github.com/earendil-works/pi/tree/main/packages/session-backends/sqlite-node>
+- <https://github.com/earendil-works/pi/blob/dev/packages/agent/docs/harness.md>
+- <https://github.com/earendil-works/pi/blob/dev/packages/agent/src/harness/agent-harness.ts>
+- <https://github.com/earendil-works/pi/tree/dev/packages/agent/src/harness/session>
 
-## Implemented experiment
+## Implemented adapter
 
 `@agent-dock/pi-session-postgres` now contains an executable
 `DurableAgentHarness` built only from Pi's public primitives. It:
 
-1. acquires one opaque `DurableAgentExecutionAuthority` for a Run;
-2. closes an unfinished prior operation with an interruption result;
+1. acquires one opaque `DurableAgentExecutionAuthority` for each operation;
+2. resumes an unfinished Run, compaction or navigation operation from Pi's
+   durable operation records;
 3. reads the current branch directly from PostgreSQL, stopping at the latest
    compaction;
 4. reconstructs the in-memory model context from Pi-native Entries;
-5. persists every completed user, assistant and Tool-result message as a new
-   Pi Entry;
-6. writes `operation_started`, `tool_started` and `operation_finished` records;
-7. checks the same authority before Session mutation and before/after every
-   Tool effect;
-8. aborts the active agent loop when the authority provider observes expiry or
-   takeover.
+5. drives normal and deferred model responses, steer/follow-up/next-Run queues,
+   manual execution barriers, multiple lanes and live Session snapshots;
+6. implements every public Pi 0.84.1 Harness configuration and invocation
+   method, including skills and prompt templates;
+7. composes request, payload, response, Tool, compaction and navigation Hooks
+   in registration order and persists stable `before_run` recovery data for
+   `before_resume`;
+8. writes `operation_started`, assistant-attempt, `tool_started`, usage and
+   `operation_finished` records around external effects;
+9. checks the same authority before Session mutation and immediately around
+   every Tool effect;
+10. replays only Tools explicitly marked safe; an interrupted unsafe Tool gets
+    a synthetic error result describing unknown side effects so the model can
+    inspect rather than blindly repeat it;
+11. aborts the active Agent when authority expires and treats `close()` as a
+    controlled crash, leaving unfinished durable state resumable.
 
 The PostgreSQL branch walk was also changed from one point query per ancestor
 to one recursive CTE. Network round trips are now constant per restore query;
@@ -73,15 +82,20 @@ Automated evidence covers:
   provider context;
 - revoking authority between Tool intent and Tool execution prevents the Tool
   implementation from running;
-- the authority is closed at every terminal path.
+- a deferred response resumes through `Models` in a fresh Harness and receives
+  the correct extension-scoped resume data;
+- Hook-provided compaction/navigation results do not make redundant summary
+  requests;
+- lane configuration remains lane-local;
+- the authority is closed at every terminal or rejected path.
 
 ## Production migration boundary
 
-The experiment is intentionally not yet the default production Pi adapter.
-The current coding adapter still has behavior that must be moved before the
-switch is honest: automatic compaction/overflow recovery, interrupted-turn and
-world-state projections, settled Workspace commit coordination, active steer,
-model sampling identity and the full production event mapping.
+The adapter is intentionally not yet the default production Pi adapter. Its Pi
+runtime surface is complete, but the current coding adapter still owns cloud
+product semantics outside Pi: interrupted-turn/world-state projection,
+Workspace settlement in the terminal transaction, model sampling identity and
+the production Kafka/Valkey/SSE event mapping.
 
 The migration gate is feature parity plus a real-model/Cube acceptance run,
 not merely compiling a new class. Until that gate passes, production continues
@@ -108,4 +122,3 @@ Pi-native active context in Worker memory
 No lease ID or fencing token enters model context. The Harness and providers
 hold opaque authority; PostgreSQL and Tool Broker remain the components that
 validate the concrete claim/fence at their true effect boundaries.
-

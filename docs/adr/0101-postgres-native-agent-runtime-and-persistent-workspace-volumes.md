@@ -64,4 +64,6 @@ Workspace attachment independently of a microVM's lifetime.
   tenant/session/fence invariants and high-frequency event storage;
 - continuing S3/Kopia for small Sessions and persistent Volumes optimized for
   a scale not present in measurements;
-- privately implementing Pi AgentHarness would create an unsupported fork.
+- patching or forking Pi's private AgentHarness implementation would create an
+  unsupported fork; ADR-0102 later permits an AgentDock adapter composed only
+  from Pi's published primitives and contract.

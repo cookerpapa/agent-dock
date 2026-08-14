@@ -44,6 +44,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0101](0101-postgres-native-agent-runtime-and-persistent-workspace-volumes.md)
   removes Temporal/Cells/S3/Kopia and establishes the PostgreSQL queue, Pi
   SessionStorage and persistent Cube Volume architecture.
+- [ADR-0102](0102-public-primitive-durable-agent-harness.md) implements Pi's
+  reserved Harness surface from public primitives while preserving one opaque
+  authority across conversation and Cube Tool effects.
 
 ## Optional modules
 

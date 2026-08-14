@@ -57,10 +57,14 @@ notification cannot lose a Run.
 
 Pi's native `SessionStorage` port has a PostgreSQL implementation that stores
 entries, lanes, operation records, labels and compaction boundaries directly.
-The stable production Pi coding adapter still restores Pi-native JSONL from the
-same PostgreSQL object table until upstream's public `AgentHarness.prompt` path
-is executable; no S3 download is involved. The browser transcript is never used
-to synthesize model context.
+AgentDock also implements the complete Pi 0.84.1 `AgentHarness` surface over
+those public primitives: Agent Runs, queues, lanes, Hooks, compaction,
+navigation, deferred responses and crash recovery share one opaque execution
+authority with remote Tools. It remains a staged adapter until real-model/Cube
+and Workspace-settlement parity is complete; the default production adapter
+still restores Pi-native JSONL from the same PostgreSQL object table. No S3
+download is involved, and the browser transcript is never used to synthesize
+model context.
 
 The first Tool call attaches the Workspace's stable Cube Volume to a fresh or
 warm KVM. Stopping a Cube loses processes, sockets and memory, but not files.

@@ -21,6 +21,8 @@
 - [x] Move small Pi-native compatibility objects into PostgreSQL.
 - [x] Attach the same Workspace Volume across Cube activations and conversations.
 - [x] Enforce Pi Session mutations under transaction-scoped execution authority.
+- [x] Implement the complete Pi 0.84.1 AgentHarness surface over PostgreSQL
+      SessionStorage without forking Pi.
 - [x] Update Compose and Helm/KEDA to the new topology.
 - [ ] Complete full CI and fresh one-host installation acceptance.
 - [ ] Re-run token-consuming multi-round chat/coding and Cube restart acceptance.
@@ -33,8 +35,9 @@
 - publish PostgreSQL queue latency and Worker slot-density measurements;
 - validate Kafka broker/projector rebalance and Valkey rebuild at target load;
 - define Workspace snapshot/backup policy separately from normal Run commits;
-- delete transitional JSONL compatibility storage once upstream AgentHarness is
-  executable through a public supported API.
+- switch production from transitional JSONL compatibility objects only after
+  the staged public-primitive Harness adapter passes Workspace-settlement,
+  real-model/Cube and cross-Worker parity gates; then delete the JSONL path.
 
 Every performance or availability claim must name the tested revision,
 topology, workload and observed result.

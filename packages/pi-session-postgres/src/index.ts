@@ -698,7 +698,6 @@ export {
   type DurableAgentExecutionAuthorityProvider,
   type DurableAgentExecutionScope,
   type DurableAgentHarnessOptions,
-  type DurableAgentRunResult,
 } from "./durable-agent-harness.ts";
 export {
   openPostgresDurableAgentSession,

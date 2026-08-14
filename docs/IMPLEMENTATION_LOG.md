@@ -3459,3 +3459,23 @@
 - The accepted run made 150 real model attempts (147 completed and three
   transient upstream failures recovered), ended with a 768,395-byte native Pi
   JSONL and cleaned up the acceptance Session, API credential and retained KVM.
+
+# 2026-08-14 — Complete public-primitive AgentHarness adapter
+
+- Expanded `DurableAgentHarness` from the initial prompt/Tool experiment to the
+  complete Pi 0.84.1 surface: queues, resume/abort, deferred provider work,
+  manual drive, compaction, navigation, multiple lanes, configuration, watches,
+  Hooks, events and controlled close.
+- Implemented an effect sandwich around Tool calls. Hook-transformed arguments
+  are validated and persisted before execution; only explicitly safe Tools may
+  replay, while interrupted unsafe effects become model-visible synthetic error
+  results with unknown side effects.
+- Added extension-scoped `before_run`/`before_resume` data, ordered transforming
+  Hooks, Hook-supplied structural summaries, deferred-response identity checks,
+  lane-local configuration and usage-ledger attribution.
+- Added deterministic PostgreSQL-backed contracts for API completeness,
+  cross-Harness deferred recovery, authority revocation, compaction-bounded
+  context, queue persistence, manual execution and multi-lane behavior.
+- Kept the adapter staged: production cutover still requires atomic Workspace
+  settlement and production event-map parity plus real model/Cube and
+  cross-Worker acceptance.

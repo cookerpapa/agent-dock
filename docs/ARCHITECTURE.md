@@ -47,13 +47,20 @@ and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
 Every mutation checks an opaque `ExecutionAuthority` inside the same database
 transaction as the write.
 
-Upstream Pi 0.84 exposes `AgentHarness`, but its `prompt/resume` execution path
-still throws `HarnessNotImplemented`. Therefore the production coding adapter
-continues to use the stable Pi SDK/session-file entrypoint for model execution,
-with its Pi-native JSONL objects stored in PostgreSQL. Switching the active loop
-to `AgentHarness` is gated on an executable public upstream contract, not on a
-private fork. AgentDock's executable SessionStorage Harness bridge and its
-remaining production-parity gates are recorded in
+Upstream Pi 0.84.1 exposes the `AgentHarness` contract and its public Agent,
+Session, compaction and branch-summary primitives, while the published
+`AgentHarness` class still throws `HarnessNotImplemented`. AgentDock therefore
+implements an executable `DurableAgentHarness` adapter in its own package
+without patching Pi. It covers the complete 0.84.1 surface, including Agent
+Runs, queues, Hooks, lanes, compaction/navigation, deferred responses and
+effect-aware Tool recovery, with one opaque authority spanning Session writes
+and remote Tool admission.
+
+The default production coding adapter still uses the stable Pi SDK/session-file
+entrypoint, with Pi-native JSONL compatibility objects stored in PostgreSQL.
+Cutover is gated on Workspace/conversation terminal-commit parity plus real
+model/Cube and cross-Worker acceptance, not merely API completeness. The
+adapter and remaining parity gates are recorded in
 [`docs/research/2026-08-13-pi-session-storage-cloud-harness.md`](research/2026-08-13-pi-session-storage-cloud-harness.md).
 
 ### Worker Control Channel
