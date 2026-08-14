@@ -1,7 +1,7 @@
 # Long-context Pi compaction production acceptance
 
 - Checked at: 2026-08-14T15:23:57.775Z
-- Revision: `c83b6df2df418f0be215cb76c14aca421e2b14ee`
+- Tested source commit: `02603f56e881cb68e499fd9e96ad93963b430ffc`
 - Provider/model: deepseek / deepseek-v4-flash
 - Coding Turns before first completed compaction: 11
 - Compaction reason/tokens: threshold, 113920 -> 22667
