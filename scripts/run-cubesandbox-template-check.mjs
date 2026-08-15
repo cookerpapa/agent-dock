@@ -164,6 +164,8 @@ try {
     "768m",
     "--pids-limit",
     "128",
+    "--tmpfs",
+    "/workspace:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700",
     "--publish",
     "127.0.0.1:0:49984",
     image,
