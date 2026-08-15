@@ -912,11 +912,17 @@ export class ControlPlaneStore {
           "workspace_artifact.id",
           "current_version.workspace_artifact_id",
         )
+        .leftJoin(
+          "checkpoint_objects as workspace_checkpoint",
+          "workspace_checkpoint.object_key",
+          "workspace_artifact.object_key",
+        )
         .select([
           "workspace.id",
           "workspace.project_id",
           "workspace.current_workspace_version_id as currentVersionId",
           "workspace_artifact.object_key as workspaceSnapshotKey",
+          "workspace_checkpoint.object_key as durableWorkspaceSnapshotKey",
         ])
         .where("workspace.tenant_id", "=", this.#tenantId)
         .where("workspace.project_id", "=", projectId)
@@ -924,6 +930,9 @@ export class ControlPlaneStore {
         .forUpdate("workspace")
         .executeTakeFirst();
       if (!workspace) {
+        throw new ControlPlaneStoreError("not_found", "Project workspace was not found");
+      }
+      if (workspace.currentVersionId !== null && workspace.durableWorkspaceSnapshotKey === null) {
         throw new ControlPlaneStoreError("not_found", "Project workspace was not found");
       }
       const sessionCount = await transaction
@@ -1008,6 +1017,21 @@ export class ControlPlaneStore {
           .onRef("project.tenant_id", "=", "workspace.tenant_id")
           .onRef("project.id", "=", "workspace.project_id"),
       )
+      .leftJoin(
+        "workspace_versions as current_version",
+        "current_version.id",
+        "workspace.current_workspace_version_id",
+      )
+      .leftJoin(
+        "artifacts as workspace_artifact",
+        "workspace_artifact.id",
+        "current_version.workspace_artifact_id",
+      )
+      .leftJoin(
+        "checkpoint_objects as workspace_checkpoint",
+        "workspace_checkpoint.object_key",
+        "workspace_artifact.object_key",
+      )
       .leftJoin("sessions as session_row", (join) =>
         join
           .onRef("session_row.tenant_id", "=", "workspace.tenant_id")
@@ -1027,6 +1051,12 @@ export class ControlPlaneStore {
         )})`.as("lastActiveAt"),
       ])
       .where("workspace.tenant_id", "=", this.#tenantId)
+      .where((expression) =>
+        expression.or([
+          expression("workspace.current_workspace_version_id", "is", null),
+          expression("workspace_checkpoint.object_key", "is not", null),
+        ]),
+      )
       .groupBy(["workspace.id", "workspace.project_id", "project.name", "project.created_at"])
       .orderBy("lastActiveAt", "desc")
       .orderBy("workspace.id", "desc")
@@ -2261,6 +2291,19 @@ export class ControlPlaneStore {
         session.forked_from_session_id === null
           ? workspace.workspaceSnapshotKey
           : session.workspace_snapshot_key;
+      if (workspaceSnapshotKey !== null) {
+        const durableWorkspaceSnapshot = await transaction
+          .selectFrom("checkpoint_objects")
+          .select("object_key")
+          .where("object_key", "=", workspaceSnapshotKey)
+          .executeTakeFirst();
+        if (durableWorkspaceSnapshot === undefined) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Workspace checkpoint is unavailable; create a new Workspace",
+          );
+        }
+      }
       if (session.desired_model_profile_id !== this.#defaultModelProfileId) {
         throw new ControlPlaneStoreError(
           "control_plane_misconfigured",

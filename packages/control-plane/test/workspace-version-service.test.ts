@@ -179,6 +179,35 @@ async function seed(): Promise<void> {
     ])
     .execute();
   await database
+    .insertInto("checkpoint_objects")
+    .values([
+      {
+        object_key: "checkpoints/pi-1",
+        bytes: pi1,
+        sha256: hash(pi1),
+        size_bytes: pi1.byteLength,
+      },
+      {
+        object_key: "checkpoints/workspace-1",
+        bytes: first,
+        sha256: hash(first),
+        size_bytes: first.byteLength,
+      },
+      {
+        object_key: "checkpoints/pi-2",
+        bytes: pi2,
+        sha256: hash(pi2),
+        size_bytes: pi2.byteLength,
+      },
+      {
+        object_key: "checkpoints/workspace-2",
+        bytes: second,
+        sha256: hash(second),
+        size_bytes: second.byteLength,
+      },
+    ])
+    .execute();
+  await database
     .insertInto("workspace_versions")
     .values([
       {
@@ -336,6 +365,49 @@ describe.sequential("versioned Workspace service", () => {
       currentVersionId: IDS.version2,
       versions: [{ versionId: IDS.version2 }, { versionId: IDS.version1 }],
     });
+  });
+
+  it("keeps orphaned Workspace checkpoints out of new and existing conversations", async () => {
+    const store = new ControlPlaneStore({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+      idGenerator: randomUUID,
+    });
+    const conversation = await store.createSession(
+      IDS.project,
+      IDS.workspace,
+      "Checkpoint availability",
+      "ephemeral",
+    );
+    const bytes = objects.get("checkpoints/workspace-2")!;
+    await database
+      .deleteFrom("checkpoint_objects")
+      .where("object_key", "=", "checkpoints/workspace-2")
+      .executeTakeFirstOrThrow();
+
+    await expect(store.listWorkspaces()).resolves.toEqual({ workspaces: [], truncated: false });
+    await expect(
+      store.createSession(IDS.project, IDS.workspace, "Unavailable Workspace", "ephemeral"),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      store.acceptTurn(conversation.sessionId, "missing-workspace-checkpoint", {
+        prompt: "Do not enqueue this turn.",
+      }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "Workspace checkpoint is unavailable; create a new Workspace",
+    });
+
+    await database
+      .insertInto("checkpoint_objects")
+      .values({
+        object_key: "checkpoints/workspace-2",
+        bytes: Buffer.from(bytes),
+        sha256: hash(bytes),
+        size_bytes: bytes.byteLength,
+      })
+      .executeTakeFirstOrThrow();
   });
 
   it("lists persistent Volume revisions without pretending their file bytes are portable", async () => {
