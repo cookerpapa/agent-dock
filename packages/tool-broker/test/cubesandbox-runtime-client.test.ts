@@ -234,8 +234,8 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         "x-agent-dock-fencing-token": "7",
         "x-agent-dock-binding-sha256": "a".repeat(64),
       },
-      body: { rows: 24, cols: 100 },
     });
+    expect(start?.body).toEqual({ rows: 24, cols: 100 });
     expect(observed.find((request) => request.path === "/v1/terminal/input")).toMatchObject({
       body: { data: Buffer.from("pwd\r").toString("base64") },
     });

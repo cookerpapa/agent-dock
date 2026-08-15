@@ -347,7 +347,7 @@ function terminalSize(value: Readonly<{ rows: number; cols: number }>): Readonly
   ) {
     throw new TypeError("CubeSandbox PTY size was invalid");
   }
-  return value;
+  return { rows: value.rows, cols: value.cols };
 }
 
 export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClient {
