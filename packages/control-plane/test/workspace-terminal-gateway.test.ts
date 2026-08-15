@@ -115,10 +115,10 @@ async function seed(database: Kysely<Database>, toolBrokerBaseUrl: string): Prom
       spec_sha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
       recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
       recipe_sha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-      state: "validated",
+      state: "pending",
       active: true,
       created_by_user_id: IDS.user,
-      validated_at: new Date(),
+      validated_at: null,
       failure_code: null,
     })
     .execute();
@@ -143,7 +143,7 @@ async function seed(database: Kysely<Database>, toolBrokerBaseUrl: string): Prom
 }
 
 describe("WorkspaceTerminalGateway", () => {
-  it("derives terminal identity server-side and proxies only authenticated PTY frames", async () => {
+  it("admits a pending first-use environment, derives identity, and rejects failed environments", async () => {
     let observedOpen: Record<string, unknown> | undefined;
     let observedInput: Record<string, unknown> | undefined;
     const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
@@ -264,6 +264,27 @@ describe("WorkspaceTerminalGateway", () => {
     expect(observedInput).toEqual({
       workspaceTerminalProtocolVersion: 1,
       type: "workspace_terminal.ping",
+    });
+
+    await database
+      .updateTable("environment_versions")
+      .set({ state: "failed", failure_code: "environment_validation_failed" })
+      .where("id", "=", IDS.environment)
+      .executeTakeFirstOrThrow();
+    const failed = new WebSocket(terminalUrl, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    closeTasks.push(async () => {
+      if (failed.readyState === WebSocket.OPEN) failed.close();
+    });
+    const nextFailedFrame = queuedFrames(failed);
+    await new Promise<void>((resolve, reject) => {
+      failed.once("open", resolve);
+      failed.once("error", reject);
+    });
+    await expect(nextFailedFrame()).resolves.toMatchObject({
+      type: "workspace_terminal.error",
+      code: "workspace_terminal_unavailable",
     });
 
     const unauthorized = new WebSocket(terminalUrl);

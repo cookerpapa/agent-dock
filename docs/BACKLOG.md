@@ -33,6 +33,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
       Cube Tool, Workspace settlement and cross-Worker recovery.
 - [x] Add bounded human Session-tree projection, inherited transcript reads and
       transactional/idempotent conversation forks.
+- [x] Allow a new Workspace terminal to consume its active `pending`
+      deployment environment while continuing to reject `failed` versions;
+      keep formal validation evidence bound to a fenced Agent Run/Attempt.
 - [ ] Add branch rename and leaf-first deletion controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
 - [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.

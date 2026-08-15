@@ -106,7 +106,11 @@ view.
 The authenticated public path
 `/v1/conversations/:sessionId/terminal` is a WebSocket proxy, not a public Cube
 port. The Control Plane resolves tenant, Project, Workspace, Sandbox Domain and
-validated environment from PostgreSQL. It sends that trusted descriptor over a
+active environment from PostgreSQL. A newly-created deployment-owned
+environment may still be `pending`, matching the first Agent Run's admission
+rule; a `failed` environment is rejected. Terminal readiness is not persisted
+as Agent environment-validation evidence because that evidence remains bound
+to a fenced Run/Attempt. The Control Plane sends the trusted descriptor over a
 dedicated service credential to the Tool Broker, which lazily creates a Cube
 and opens a UID 1000 PTY in `/workspace` through the authenticated Cube Tool
 Service. The image continues to exclude Cube `envd`, so the terminal cannot

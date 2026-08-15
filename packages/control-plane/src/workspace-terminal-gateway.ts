@@ -112,7 +112,7 @@ export class WorkspaceTerminalGateway {
 
   async #proxy(
     browser: WebSocket,
-    _request: FastifyRequest,
+    request: FastifyRequest,
     identity: Readonly<{ tenantId: string; userId: string; sessionId: string }>,
   ): Promise<void> {
     let upstream: WebSocket | undefined;
@@ -137,7 +137,15 @@ export class WorkspaceTerminalGateway {
     let descriptor: TerminalDescriptor;
     try {
       descriptor = await this.#descriptor(identity);
-    } catch {
+    } catch (error) {
+      request.log.warn(
+        {
+          err: error,
+          tenantId: identity.tenantId,
+          sessionId: identity.sessionId,
+        },
+        "Workspace terminal descriptor resolution failed",
+      );
       if (closed) return;
       await send(browser, {
         workspaceTerminalProtocolVersion: 1,
@@ -266,14 +274,23 @@ export class WorkspaceTerminalGateway {
         "environment.spec_sha256 as environmentSpecSha256",
         "environment.recipe as environmentRecipe",
         "environment.recipe_sha256 as environmentRecipeSha256",
+        "environment.state as environmentState",
       ])
       .where("session_row.tenant_id", "=", identity.tenantId)
       .where("session_row.id", "=", identity.sessionId)
       .where("session_row.archived_at", "is", null)
       .where("workspace.deleted_at", "is", null)
       .where("domain.state", "=", "active")
-      .where("environment.state", "=", "validated")
       .executeTakeFirstOrThrow();
+    // A newly-created Workspace starts with the deployment-owned environment
+    // in `pending`, and ordinary Agent Runs are allowed to use that exact
+    // version for first-use validation. The terminal follows the same
+    // admission rule so it can be the first Workspace consumer. It must not
+    // promote the environment: durable validation evidence is intentionally
+    // tied to a fenced Run/Attempt and is committed by the normal Run path.
+    if (row.environmentState === "failed") {
+      throw new Error("Workspace environment failed validation");
+    }
     // The persistent Cube Volume is the Workspace authority. This seed is used
     // only when that volume has never been initialized; an attached volume
     // ignores it, so terminal startup never depends on legacy artifact bytes.
