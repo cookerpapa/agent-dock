@@ -5,6 +5,7 @@ import { EnvironmentRuntimeSnapshotSchema } from "./environment.ts";
 import { UuidSchema } from "./protocol-primitives.ts";
 
 export const MAX_WORKSPACE_TERMINAL_FRAME_BYTES = 64 * 1_024;
+export const TOOL_BROKER_TERMINAL_PATH = "/internal/v1/workspace-terminal";
 
 const Base64Schema = Type.String({
   maxLength: Math.ceil(MAX_WORKSPACE_TERMINAL_FRAME_BYTES / 3) * 4,

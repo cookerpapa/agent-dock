@@ -1,5 +1,6 @@
 import {
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  TOOL_BROKER_TERMINAL_PATH,
   parseWorkspaceTerminalClientFrame,
   parseWorkspaceTerminalOpenRequest,
   parseToolBrokerRequest,
@@ -27,7 +28,7 @@ import { ToolBrokerOwnerRedirectError, type ToolBroker } from "./tool-broker.ts"
 
 const DEFAULT_BODY_LIMIT = 5 * 1_024 * 1_024;
 const DEFAULT_TERMINAL_SEND_BUFFER_BYTES = 1 * 1_024 * 1_024;
-export const TOOL_BROKER_TERMINAL_PATH = "/internal/v1/workspace-terminal";
+export { TOOL_BROKER_TERMINAL_PATH };
 
 export type ToolBrokerServerOptions = {
   host: string;

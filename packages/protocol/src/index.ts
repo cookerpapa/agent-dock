@@ -43,6 +43,7 @@ export {
 
 export {
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  TOOL_BROKER_TERMINAL_PATH,
   WorkspaceTerminalClientFrameSchema,
   WorkspaceTerminalOpenRequestSchema,
   WorkspaceTerminalProtocolError,

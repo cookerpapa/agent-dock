@@ -1,13 +1,13 @@
 import type { Database } from "@agent-dock/database";
 import {
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  TOOL_BROKER_TERMINAL_PATH,
   parseEnvironmentRuntimeSnapshot,
   parseUuidPathParameter,
   parseWorkspaceTerminalClientFrame,
   parseWorkspaceTerminalServerFrame,
   type WorkspaceTerminalOpenRequest,
 } from "@agent-dock/protocol";
-import { TOOL_BROKER_TERMINAL_PATH } from "@agent-dock/tool-broker";
 import {
   createWorkspaceSnapshot,
   encodeWorkspaceSnapshotBlob,
