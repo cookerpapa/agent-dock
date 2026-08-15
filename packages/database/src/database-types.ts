@@ -382,10 +382,24 @@ export interface SessionTable {
   row_version: GeneratedInt8;
   current_workspace_version_id: GeneratedNullable<string>;
   forked_from_session_id: GeneratedNullable<string>;
+  conversation_parent_session_id: GeneratedNullable<string>;
+  conversation_fork_turn_id: GeneratedNullable<string>;
+  conversation_fork_entry_id: GeneratedNullable<string>;
   archived_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
   last_active_at: GeneratedTimestamp;
+}
+
+export interface ConversationForkOperationTable {
+  tenant_id: string;
+  source_session_id: string;
+  idempotency_key: string;
+  request_sha256: string;
+  source_turn_id: string;
+  source_entry_id: string;
+  child_session_id: string;
+  created_at: GeneratedTimestamp;
 }
 
 export interface TurnTable {
@@ -1197,6 +1211,7 @@ export interface Database {
   session_event_cursors: SessionEventCursorTable;
   worker_event_projection_offsets: WorkerEventProjectionOffsetTable;
   conversation_turn_projections: ConversationTurnProjectionTable;
+  conversation_fork_operations: ConversationForkOperationTable;
   session_terminal_events: SessionTerminalEventTable;
   session_live_stream_compactions: SessionLiveStreamCompactionTable;
   outbox: OutboxTable;

@@ -265,7 +265,15 @@ function AssistantItem({
   );
 }
 
-export function ConversationTurn({ turn }: { turn: TurnView }) {
+export function ConversationTurn({
+  turn,
+  canFork = false,
+  onFork,
+}: {
+  turn: TurnView;
+  canFork?: boolean;
+  onFork?: () => void;
+}) {
   const working =
     turn.status === "queued" || turn.status === "running" || turn.status === "cancelling";
   const lastToolIndex = turn.items.reduce(
@@ -320,6 +328,14 @@ export function ConversationTurn({ turn }: { turn: TurnView }) {
             </div>
           ) : null}
           {turn.cancellation ? <div className="product-muted-line">已停止生成</div> : null}
+          {turn.status === "completed" && turn.projection === "canonical" && onFork ? (
+            <div className="product-answer-actions">
+              <button disabled={!canFork} onClick={onFork} type="button">
+                <span aria-hidden="true">↳</span>
+                从此对话开始
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

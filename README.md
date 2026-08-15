@@ -21,6 +21,7 @@ path.
 
 - browser registration/login with tenant-isolated conversations and Workspaces;
 - Chat-style multi-round Pi conversations and resumable streaming;
+- Pi Session tree navigation with focused/full-tree views and conversation forks;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser and conversation deletion;
@@ -62,6 +63,11 @@ primitives: it reads only the newest compaction plus the active suffix and
 appends complete messages incrementally. It does not download a lifetime
 `session.jsonl`, synthesize model context from the browser transcript or
 reimplement Pi's unused generic Harness surface.
+
+The browser projects the same native parent-linked entries as a human-readable
+conversation tree. “从此对话开始” creates an idempotent child Session by copying
+the selected PostgreSQL branch; it does not download JSONL or copy/rewind the
+shared Workspace.
 
 The same opaque execution authority fences both Session mutations and remote
 Tool admission. Lease and fence representations stay out of model messages and

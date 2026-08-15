@@ -746,6 +746,7 @@ export const ConversationSummaryResourceSchema = Type.Object(
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
     lastActiveAt: UtcTimestampSchema,
+    parentSessionId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -770,6 +771,7 @@ export const ConversationSessionResourceSchema = Type.Object(
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
     lastActiveAt: UtcTimestampSchema,
+    parentSessionId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -897,6 +899,8 @@ export const ConversationTurnResourceSchema = Type.Object(
     rewoundFromRunId: Type.Optional(UuidSchema),
     transcript: Type.Optional(ConversationTurnTranscriptResourceSchema),
     acceptedAt: UtcTimestampSchema,
+    originSessionId: Type.Optional(UuidSchema),
+    forkEntryId: Type.Optional(UuidSchema),
   },
   { additionalProperties: false },
 );
@@ -908,6 +912,64 @@ export const ConversationDetailResourceSchema = Type.Object(
     turns: Type.Array(ConversationTurnResourceSchema, { maxItems: 200 }),
     historyTruncated: Type.Boolean(),
     replayAfterSequence: NonNegativeSafeIntegerSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationTreeViewSchema = Type.Union([Type.Literal("focus"), Type.Literal("full")]);
+
+export const ConversationTreeEntryResourceSchema = Type.Object(
+  {
+    entryId: UuidSchema,
+    parentEntryId: Type.Union([UuidSchema, Type.Null()]),
+    turnId: UuidSchema,
+    role: Type.Union([Type.Literal("user"), Type.Literal("assistant")]),
+    text: Type.String({ maxLength: 100_000 }),
+    finalAssistant: Type.Boolean(),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationTreeBranchResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
+    parentSessionId: Type.Union([UuidSchema, Type.Null()]),
+    forkedFromTurnId: Type.Union([UuidSchema, Type.Null()]),
+    forkedFromEntryId: Type.Union([UuidSchema, Type.Null()]),
+    current: Type.Boolean(),
+    entries: Type.Array(ConversationTreeEntryResourceSchema, { maxItems: 10_000 }),
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationTreeResourceSchema = Type.Object(
+  {
+    rootSessionId: UuidSchema,
+    currentSessionId: UuidSchema,
+    view: ConversationTreeViewSchema,
+    branches: Type.Array(ConversationTreeBranchResourceSchema, { maxItems: 100 }),
+  },
+  { additionalProperties: false },
+);
+
+export const CreateConversationForkRequestSchema = Type.Object(
+  {
+    turnId: UuidSchema,
+    entryId: UuidSchema,
+    title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationForkResourceSchema = Type.Object(
+  {
+    session: SessionResourceSchema,
+    parentSessionId: UuidSchema,
+    forkedFromTurnId: UuidSchema,
+    forkedFromEntryId: UuidSchema,
+    replayed: Type.Boolean(),
   },
   { additionalProperties: false },
 );
@@ -1777,6 +1839,12 @@ export type ConversationTurnTranscriptResource = Static<
 >;
 export type ConversationTurnResource = Static<typeof ConversationTurnResourceSchema>;
 export type ConversationDetailResource = Static<typeof ConversationDetailResourceSchema>;
+export type ConversationTreeView = Static<typeof ConversationTreeViewSchema>;
+export type ConversationTreeEntryResource = Static<typeof ConversationTreeEntryResourceSchema>;
+export type ConversationTreeBranchResource = Static<typeof ConversationTreeBranchResourceSchema>;
+export type ConversationTreeResource = Static<typeof ConversationTreeResourceSchema>;
+export type CreateConversationForkRequest = Static<typeof CreateConversationForkRequestSchema>;
+export type ConversationForkResource = Static<typeof ConversationForkResourceSchema>;
 export type LiveTurnSnapshotResource = Static<typeof LiveTurnSnapshotResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
@@ -2235,6 +2303,38 @@ export function parseConversationListResource(value: unknown): ConversationListR
 
 export function parseConversationDetailResource(value: unknown): ConversationDetailResource {
   return parseSchema(ConversationDetailResourceSchema, value, "conversation detail resource");
+}
+
+export function parseConversationTreeView(value: unknown): ConversationTreeView {
+  return value === undefined
+    ? "focus"
+    : parseSchema(ConversationTreeViewSchema, value, "conversation tree view");
+}
+
+export function parseConversationTreeResource(value: unknown): ConversationTreeResource {
+  return parseSchema(ConversationTreeResourceSchema, value, "conversation tree resource");
+}
+
+export function parseCreateConversationForkRequest(value: unknown): CreateConversationForkRequest {
+  const request = parseSchema(
+    CreateConversationForkRequestSchema,
+    value,
+    "create-conversation-fork request",
+  );
+  if (request.title === undefined) return request;
+  const title = request.title.trim();
+  if (
+    title.length === 0 ||
+    new TextEncoder().encode(title).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(title)
+  ) {
+    throw new ControlPlaneApiValidationError("Fork title must contain 1-256 safe UTF-8 bytes");
+  }
+  return { ...request, title };
+}
+
+export function parseConversationForkResource(value: unknown): ConversationForkResource {
+  return parseSchema(ConversationForkResourceSchema, value, "conversation fork resource");
 }
 
 export function parseLiveTurnSnapshotResource(value: unknown): LiveTurnSnapshotResource {

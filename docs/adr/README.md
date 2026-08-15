@@ -47,6 +47,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0103](0103-thin-postgres-native-pi-runtime.md) replaces the staged full
   Harness experiment with the production PostgreSQL-native Pi runtime and one
   opaque authority across conversation and Cube Tool effects.
+- [ADR-0104](0104-human-session-tree-and-conversation-forks.md) exposes Pi's
+  Session tree to human users and defines transactional conversation-only
+  forks without making tree control model-visible.
 
 ## Optional modules
 

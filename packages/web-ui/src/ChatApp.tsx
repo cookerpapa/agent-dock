@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ConversationTreeResource,
+  ConversationTreeView,
   ConversationSummaryResource,
   SandboxRetentionPolicy,
   TenantIdentityResource,
@@ -8,12 +10,13 @@ import type {
 import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
 import { AdminPage } from "./AdminPage.tsx";
 import { AuthScreen } from "./AuthScreen.tsx";
-import { ConversationOutline } from "./ConversationOutline.tsx";
+import { ConversationTreeNavigator } from "./ConversationTreeNavigator.tsx";
 import { ConversationTurn } from "./ConversationTurn.tsx";
 import { activeTurn, createInitialSessionView, sessionViewReducer } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { errorMessage } from "./ui-errors.ts";
 import { WorkspaceInspector } from "./WorkspaceInspector.tsx";
+import { useResizablePanel } from "./use-resizable-panel.ts";
 
 type AuthPhase = "checking" | "anonymous" | "authenticated";
 
@@ -45,11 +48,14 @@ export default function ChatApp() {
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [state, setState] = useState(createInitialSessionView);
   const [conversations, setConversations] = useState<readonly ConversationSummaryResource[]>([]);
+  const [conversationTree, setConversationTree] = useState<ConversationTreeResource | null>(null);
+  const [treeView, setTreeView] = useState<ConversationTreeView>("focus");
+  const [treeLoading, setTreeLoading] = useState(false);
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceSummaryResource[]>([]);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [operation, setOperation] = useState<
-    "creating" | "submitting" | "cancelling" | "steering" | null
+    "creating" | "submitting" | "cancelling" | "steering" | "forking" | null
   >(null);
   const [steerNotice, setSteerNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -63,10 +69,23 @@ export default function ChatApp() {
   const [sandboxRetention, setSandboxRetention] = useState<SandboxRetentionPolicy>("ephemeral");
   const [pendingInitialPrompt, setPendingInitialPrompt] = useState<string | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
+  const [pendingTreeJump, setPendingTreeJump] = useState<string | null>(null);
+  const [forkTarget, setForkTarget] = useState<{
+    sourceSessionId: string;
+    turnId: string;
+    entryId: string;
+  } | null>(null);
+  const [forkTitle, setForkTitle] = useState("");
   const lastSequenceRef = useRef(0);
   const chatScrollerRef = useRef<HTMLElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const currentTurn = activeTurn(state);
+  const conversationPanel = useResizablePanel({
+    storageKey: "agent-dock:conversation-list",
+    initialWidth: 260,
+    minimumWidth: 210,
+    maximumWidth: 420,
+  });
   const canMutate = identity?.role !== "viewer";
   const canQueue =
     state.session === null ||
@@ -75,7 +94,20 @@ export default function ChatApp() {
     state.sessionState === "running" ||
     state.sessionState === "waiting_approval" ||
     state.sessionState === "cancelling";
-  const outlineVisible = !inspectorOpen && state.turns.length > 0;
+  const forkTargets = useMemo(() => {
+    const targets = new Map<string, { sourceSessionId: string; turnId: string; entryId: string }>();
+    for (const branch of conversationTree?.branches ?? []) {
+      for (const entry of branch.entries) {
+        if (!entry.finalAssistant) continue;
+        targets.set(entry.turnId, {
+          sourceSessionId: branch.sessionId,
+          turnId: entry.turnId,
+          entryId: entry.entryId,
+        });
+      }
+    }
+    return targets;
+  }, [conversationTree]);
 
   const update = useCallback((action: Parameters<typeof sessionViewReducer>[1]) => {
     setState((current) => sessionViewReducer(current, action));
@@ -91,6 +123,18 @@ export default function ChatApp() {
     setWorkspaces(listed.workspaces);
     setSelectedWorkspaceId((current) => current || listed.workspaces[0]?.workspaceId || "");
   }, [api]);
+
+  const refreshConversationTree = useCallback(
+    async (sessionId: string, view: ConversationTreeView): Promise<void> => {
+      setTreeLoading(true);
+      try {
+        setConversationTree(await api.getConversationTree(sessionId, view));
+      } finally {
+        setTreeLoading(false);
+      }
+    },
+    [api],
+  );
 
   const loadConversation = useCallback(
     async (sessionId: string) => {
@@ -154,6 +198,32 @@ export default function ChatApp() {
 
   useEffect(() => {
     const sessionId = state.session?.sessionId;
+    if (authPhase !== "authenticated" || sessionId === undefined) {
+      setConversationTree(null);
+      return;
+    }
+    let cancelled = false;
+    setTreeLoading(true);
+    void api
+      .getConversationTree(sessionId, treeView)
+      .then(
+        (tree) => {
+          if (!cancelled) setConversationTree(tree);
+        },
+        (error: unknown) => {
+          if (!cancelled) update({ type: "api.error", message: errorMessage(error) });
+        },
+      )
+      .finally(() => {
+        if (!cancelled) setTreeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, authPhase, state.session?.sessionId, treeView, update]);
+
+  useEffect(() => {
+    const sessionId = state.session?.sessionId;
     if (sessionId === undefined || authPhase !== "authenticated") return;
     const controller = new AbortController();
     void streamSessionEvents({
@@ -170,6 +240,7 @@ export default function ChatApp() {
         ) {
           setInspectorRefreshSignal((value) => value + 1);
           void refreshConversations().catch(() => undefined);
+          void refreshConversationTree(sessionId, treeView).catch(() => undefined);
         }
       },
       onStatus(status) {
@@ -197,7 +268,9 @@ export default function ChatApp() {
     loadConversation,
     reconnectGeneration,
     refreshConversations,
+    refreshConversationTree,
     state.session?.sessionId,
+    treeView,
     update,
   ]);
 
@@ -250,12 +323,24 @@ export default function ChatApp() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.lastSequence, state.turns.length]);
 
+  useEffect(() => {
+    if (pendingTreeJump === null) return;
+    const target = chatScrollerRef.current?.querySelector<HTMLElement>(
+      `[data-conversation-turn-id="${pendingTreeJump}"]`,
+    );
+    if (target === undefined || target === null) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingTreeJump(null);
+  }, [pendingTreeJump, state.session?.sessionId, state.turns.length]);
+
   function resetConversation(): void {
     lastSequenceRef.current = 0;
     setState(createInitialSessionView());
     setPrompt("");
     setInspectorOpen(false);
     setSidebarOpen(false);
+    setConversationTree(null);
+    setPendingTreeJump(null);
   }
 
   async function logout(): Promise<void> {
@@ -271,23 +356,59 @@ export default function ChatApp() {
     setAuthPhase("anonymous");
   }
 
-  async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
-    if (conversationLoading !== null || operation !== null) return;
-    setConversationLoading(conversation.sessionId);
+  async function openConversationSession(
+    sessionId: string,
+    jumpToTurnId?: string,
+    allowDuringOperation = false,
+  ): Promise<void> {
+    if (conversationLoading !== null || (!allowDuringOperation && operation !== null)) return;
+    setConversationLoading(sessionId);
     update({ type: "api.error.cleared" });
     try {
-      const loaded = await loadConversation(conversation.sessionId);
+      const loaded = await loadConversation(sessionId);
       lastSequenceRef.current = loaded.replayAfterSequence;
       update({
         type: "conversation.loaded",
         conversation: loaded.conversation,
         ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
       });
+      if (jumpToTurnId !== undefined) setPendingTreeJump(jumpToTurnId);
       setSidebarOpen(false);
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {
       setConversationLoading(null);
+    }
+  }
+
+  async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
+    return openConversationSession(conversation.sessionId);
+  }
+
+  async function createConversationFork(): Promise<void> {
+    if (forkTarget === null || operation !== null) return;
+    setOperation("forking");
+    update({ type: "api.error.cleared" });
+    try {
+      const title = forkTitle.trim();
+      const forked = await api.forkConversation(
+        forkTarget.sourceSessionId,
+        forkTarget.turnId,
+        forkTarget.entryId,
+        title.length === 0 ? undefined : title,
+        newIdempotencyKey("fork"),
+      );
+      setTreeView("focus");
+      setForkTarget(null);
+      setForkTitle("");
+      await Promise.all([
+        openConversationSession(forked.session.sessionId, forkTarget.turnId, true),
+        refreshConversations(),
+      ]);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
     }
   }
 
@@ -479,70 +600,120 @@ export default function ChatApp() {
         onClick={() => setSidebarOpen(false)}
         type="button"
       />
-      <aside className={`product-sidebar ${sidebarOpen ? "open" : ""}`}>
-        <header className="product-sidebar-brand">
-          <div className="product-logo">A</div>
-          <strong>AgentDock</strong>
-        </header>
-        <div className="product-sidebar-actions">
-          <button className="product-new-chat" onClick={() => beginNewConversation()} type="button">
-            <span>＋</span> 新对话
-          </button>
+      <aside
+        className={`product-sidebar product-resizable-panel ${sidebarOpen ? "open" : ""}${
+          conversationPanel.collapsed ? " collapsed" : ""
+        }`}
+        style={{ width: conversationPanel.collapsed ? 42 : conversationPanel.width }}
+      >
+        <button
+          aria-label={conversationPanel.collapsed ? "展开会话列表" : "收起会话列表"}
+          className="product-panel-collapse"
+          onClick={conversationPanel.toggle}
+          title={conversationPanel.collapsed ? "展开会话列表" : "收起会话列表"}
+          type="button"
+        >
+          {conversationPanel.collapsed ? "›" : "‹"}
+        </button>
+        {conversationPanel.collapsed ? <span className="product-collapsed-label">会话</span> : null}
+        <div className="product-panel-content product-sidebar-content">
+          <header className="product-sidebar-brand">
+            <div className="product-logo">A</div>
+            <strong>AgentDock</strong>
+          </header>
+          <div className="product-sidebar-actions">
+            <button
+              className="product-new-chat"
+              onClick={() => beginNewConversation()}
+              type="button"
+            >
+              <span>＋</span> 新对话
+            </button>
+          </div>
+          <nav className="product-conversation-list" aria-label="对话列表">
+            <span className="product-sidebar-label">最近对话</span>
+            {conversations.length === 0 ? (
+              <div className="product-conversation-empty">还没有对话</div>
+            ) : (
+              conversations.map((conversation) => (
+                <div
+                  className={`product-conversation-row${
+                    conversation.parentSessionId === undefined ? "" : " branch"
+                  }${state.session?.sessionId === conversation.sessionId ? " active" : ""}`}
+                  key={conversation.sessionId}
+                >
+                  <button
+                    disabled={conversationLoading !== null || operation !== null}
+                    onClick={() => void openConversation(conversation)}
+                    type="button"
+                  >
+                    <strong>
+                      {conversation.parentSessionId === undefined ? null : (
+                        <span className="product-conversation-branch-mark">↳ </span>
+                      )}
+                      {conversation.title}
+                    </strong>
+                    <small>
+                      {conversation.workspaceName} · {relativeTime(conversation.lastActiveAt)}
+                    </small>
+                  </button>
+                  <button
+                    aria-label={`删除对话 ${conversation.title}`}
+                    className="product-delete-conversation"
+                    disabled={conversationLoading !== null || operation !== null}
+                    onClick={() => void deleteConversation(conversation)}
+                    title="删除对话"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </nav>
+          <footer className="product-account">
+            <div className="product-account-avatar">
+              {identity.displayName.slice(0, 1).toUpperCase()}
+            </div>
+            <div>
+              <strong>{identity.displayName}</strong>
+              <span>@{identity.tenantSlug}</span>
+            </div>
+            <button
+              aria-label="退出登录"
+              onClick={() => void logout()}
+              title="退出登录"
+              type="button"
+            >
+              ↪
+            </button>
+          </footer>
         </div>
-        <nav className="product-conversation-list" aria-label="对话列表">
-          <span className="product-sidebar-label">最近对话</span>
-          {conversations.length === 0 ? (
-            <div className="product-conversation-empty">还没有对话</div>
-          ) : (
-            conversations.map((conversation) => (
-              <div
-                className={`product-conversation-row ${
-                  state.session?.sessionId === conversation.sessionId ? "active" : ""
-                }`}
-                key={conversation.sessionId}
-              >
-                <button
-                  disabled={conversationLoading !== null || operation !== null}
-                  onClick={() => void openConversation(conversation)}
-                  type="button"
-                >
-                  <strong>{conversation.title}</strong>
-                  <small>
-                    {conversation.workspaceName} · {relativeTime(conversation.lastActiveAt)}
-                  </small>
-                </button>
-                <button
-                  aria-label={`删除对话 ${conversation.title}`}
-                  className="product-delete-conversation"
-                  disabled={conversationLoading !== null || operation !== null}
-                  onClick={() => void deleteConversation(conversation)}
-                  title="删除对话"
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-            ))
-          )}
-        </nav>
-        <footer className="product-account">
-          <div className="product-account-avatar">
-            {identity.displayName.slice(0, 1).toUpperCase()}
-          </div>
-          <div>
-            <strong>{identity.displayName}</strong>
-            <span>@{identity.tenantSlug}</span>
-          </div>
-          <button
-            aria-label="退出登录"
-            onClick={() => void logout()}
-            title="退出登录"
-            type="button"
-          >
-            ↪
-          </button>
-        </footer>
+        {conversationPanel.collapsed ? null : (
+          <div
+            aria-label="调整会话列表宽度"
+            className="product-panel-resizer"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft")
+                conversationPanel.setWidth(conversationPanel.width - 12);
+              if (event.key === "ArrowRight")
+                conversationPanel.setWidth(conversationPanel.width + 12);
+            }}
+            onPointerDown={conversationPanel.beginResize}
+            role="separator"
+            tabIndex={0}
+          />
+        )}
       </aside>
+
+      <ConversationTreeNavigator
+        loading={treeLoading}
+        onNavigate={(sessionId, turnId) => void openConversationSession(sessionId, turnId)}
+        onViewChange={setTreeView}
+        scrollerRef={chatScrollerRef}
+        tree={conversationTree}
+        view={treeView}
+      />
 
       <main className="product-main">
         <header className="product-topbar">
@@ -734,6 +905,65 @@ export default function ChatApp() {
           </div>
         ) : null}
 
+        {forkTarget === null ? null : (
+          <div className="product-modal-backdrop" role="presentation">
+            <form
+              className="product-workspace-modal product-fork-modal"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createConversationFork();
+              }}
+            >
+              <header>
+                <div>
+                  <h2>从此对话开始</h2>
+                  <p>复制这里之前的 Pi 对话上下文并创建一条新分支。</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setForkTarget(null);
+                    setForkTitle("");
+                  }}
+                  type="button"
+                >
+                  ×
+                </button>
+              </header>
+              <label>
+                <span>分支名称（可选）</span>
+                <input
+                  autoFocus
+                  maxLength={256}
+                  onChange={(event) => setForkTitle(event.target.value)}
+                  placeholder="例如：改用事件驱动方案"
+                  value={forkTitle}
+                />
+              </label>
+              <p className="product-fork-note">
+                Workspace 继续使用当前目录；此操作只分叉对话上下文，不会把文件回退到历史状态。
+              </p>
+              <footer>
+                <button
+                  onClick={() => {
+                    setForkTarget(null);
+                    setForkTitle("");
+                  }}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="product-primary-button"
+                  disabled={operation !== null}
+                  type="submit"
+                >
+                  {operation === "forking" ? "创建中…" : "创建分支"}
+                </button>
+              </footer>
+            </form>
+          </div>
+        )}
+
         {state.apiError ? (
           <div className="product-error-banner">
             <span>{state.apiError}</span>
@@ -743,11 +973,7 @@ export default function ChatApp() {
           </div>
         ) : null}
 
-        <div
-          className={`product-content ${
-            inspectorOpen ? "with-inspector" : outlineVisible ? "with-outline" : ""
-          }`}
-        >
+        <div className={`product-content ${inspectorOpen ? "with-inspector" : ""}`}>
           <section className="product-chat-scroll" ref={chatScrollerRef}>
             {state.turns.length === 0 ? (
               <div className="product-welcome">
@@ -765,9 +991,29 @@ export default function ChatApp() {
               </div>
             ) : (
               <div className="product-transcript">
-                {state.turns.map((turn) => (
-                  <ConversationTurn key={turn.turnId} turn={turn} />
-                ))}
+                {state.turns.map((turn) => {
+                  const target = forkTargets.get(turn.turnId);
+                  return (
+                    <ConversationTurn
+                      canFork={
+                        canMutate &&
+                        operation === null &&
+                        currentTurn === undefined &&
+                        target !== undefined
+                      }
+                      key={turn.turnId}
+                      {...(target === undefined
+                        ? {}
+                        : {
+                            onFork: () => {
+                              setForkTitle("");
+                              setForkTarget(target);
+                            },
+                          })}
+                      turn={turn}
+                    />
+                  );
+                })}
                 <div ref={transcriptEndRef} />
               </div>
             )}
@@ -781,8 +1027,6 @@ export default function ChatApp() {
               sessionId={state.session?.sessionId ?? null}
               workspaceName={state.project?.name ?? null}
             />
-          ) : outlineVisible ? (
-            <ConversationOutline scrollerRef={chatScrollerRef} turns={state.turns} />
           ) : null}
         </div>
 

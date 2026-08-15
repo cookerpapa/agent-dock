@@ -33,6 +33,7 @@ import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
 import type { TurnSteerBackend } from "./turn-steer.ts";
+import { ConversationTreeService } from "./conversation-tree-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -212,6 +213,13 @@ export class ControlPlaneModule {
             ...(options.turnSteerBackendFactory === undefined
               ? {}
               : { backendFactory: options.turnSteerBackendFactory }),
+            ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+          }),
+        },
+        {
+          provide: ConversationTreeService,
+          useValue: new ConversationTreeService({
+            database: options.database,
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
         },

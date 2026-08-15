@@ -5,6 +5,8 @@ import type {
   AcceptedTurnResource,
   ConversationDetailResource,
   ConversationListResource,
+  ConversationTreeResource,
+  ConversationForkResource,
   ProjectResource,
   SessionResource,
   TenantRegistrationResource,
@@ -73,7 +75,7 @@ beforeAll(async () => {
     maximumTenants: 4,
     tenantQuotas: {
       maximumProjects: 2,
-      maximumSessions: 4,
+      maximumSessions: 8,
       maximumUnsettledTurns: 2,
       maximumConcurrentTurns: 1,
       maximumActiveSandboxes: 1,
@@ -468,6 +470,268 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
     });
     expect(replacement.statusCode).toBe(201);
     expect(replacement.json<SessionResource>().sandboxRetention).toBe("ephemeral");
+  });
+
+  it("forks a settled Pi branch transactionally and renders inherited history", async () => {
+    const userEntryId = "10000000-0000-4000-8000-000000000001";
+    const assistantEntryId = "10000000-0000-4000-8000-000000000002";
+    const transcript = {
+      schemaVersion: 1,
+      throughSequence: 1,
+      items: [
+        {
+          kind: "text",
+          text: "alpha final answer",
+          firstSequence: 1,
+          lastSequence: 1,
+        },
+      ],
+      startedSequence: 1,
+      terminalSequence: 1,
+      stopReason: "stop",
+      failure: null,
+      cancellation: null,
+      workspacePatch: null,
+    };
+    await database.transaction().execute(async (transaction) => {
+      await transaction
+        .updateTable("commands")
+        .set({ state: "completed" })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaTurn.commandId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("turns")
+        .set({ state: "completed", stop_reason: "stop", settled_at: NOW })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaTurn.turnId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("runs")
+        .set({ state: "completed", stop_reason: "stop", settled_at: NOW })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaTurn.runId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("sessions")
+        .set({ state: "idle" })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaSession.sessionId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("conversation_turn_projections")
+        .values({
+          tenant_id: alpha.tenantId,
+          session_id: alphaSession.sessionId,
+          turn_id: alphaTurn.turnId,
+          schema_version: 1,
+          through_seq: 1,
+          source_event_count: 1,
+          transcript,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("pi_sessions")
+        .values({
+          tenant_id: alpha.tenantId,
+          id: alphaSession.sessionId,
+          created_at_ms: NOW.valueOf(),
+          parent_session_id: null,
+          next_seq: 3,
+          name: "Test conversation",
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("pi_session_entries")
+        .values([
+          {
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            id: userEntryId,
+            seq: 1,
+            parent_id: null,
+            type: "message",
+            custom_type: null,
+            timestamp_ms: NOW.valueOf(),
+            payload: {
+              id: userEntryId,
+              type: "message",
+              message: { role: "user", content: "alpha private prompt", timestamp: NOW.valueOf() },
+            },
+          },
+          {
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            id: assistantEntryId,
+            seq: 2,
+            parent_id: userEntryId,
+            type: "message",
+            custom_type: null,
+            timestamp_ms: NOW.valueOf() + 1,
+            payload: {
+              id: assistantEntryId,
+              type: "message",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "alpha final answer" }],
+                provider: "test",
+                model: "test",
+                api: "test",
+                usage: {
+                  input: 1,
+                  output: 1,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 2,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "stop",
+                timestamp: NOW.valueOf() + 1,
+              },
+            },
+          },
+        ])
+        .execute();
+      await transaction
+        .insertInto("pi_session_lanes")
+        .values({
+          tenant_id: alpha.tenantId,
+          session_id: alphaSession.sessionId,
+          lane: "main",
+          leaf_id: assistantEntryId,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("pi_session_log")
+        .values([
+          {
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            seq: 1,
+            kind: "entry",
+            payload: { entry: { id: userEntryId, type: "message" } },
+          },
+          {
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            seq: 2,
+            kind: "entry",
+            payload: { entry: { id: assistantEntryId, type: "message" } },
+          },
+        ])
+        .execute();
+    });
+
+    const beforeFork = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${alphaSession.sessionId}/tree?view=full`,
+      headers: authorization(alpha.apiToken),
+    });
+    expect(beforeFork.statusCode).toBe(200);
+    expect(beforeFork.json<ConversationTreeResource>()).toMatchObject({
+      rootSessionId: alphaSession.sessionId,
+      currentSessionId: alphaSession.sessionId,
+      view: "full",
+      branches: [
+        {
+          sessionId: alphaSession.sessionId,
+          current: true,
+          entries: [
+            { role: "user", turnId: alphaTurn.turnId },
+            {
+              role: "assistant",
+              turnId: alphaTurn.turnId,
+              entryId: assistantEntryId,
+              finalAssistant: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    const forkRequest = {
+      method: "POST" as const,
+      url: `/v1/conversations/${alphaSession.sessionId}/forks`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "fork-alpha-final",
+      },
+      payload: {
+        turnId: alphaTurn.turnId,
+        entryId: assistantEntryId,
+        title: "Alternative alpha branch",
+      },
+    };
+    const forkResponse = await http.inject(forkRequest);
+    expect(forkResponse.statusCode).toBe(201);
+    const forked = forkResponse.json<ConversationForkResource>();
+    expect(forked).toMatchObject({
+      parentSessionId: alphaSession.sessionId,
+      forkedFromTurnId: alphaTurn.turnId,
+      forkedFromEntryId: assistantEntryId,
+      replayed: false,
+      session: {
+        title: "Alternative alpha branch",
+        workspaceId: alphaProject.workspaceId,
+      },
+    });
+    const replay = await http.inject(forkRequest);
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json<ConversationForkResource>()).toMatchObject({
+      replayed: true,
+      session: { sessionId: forked.session.sessionId },
+    });
+
+    const childDetail = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${forked.session.sessionId}`,
+      headers: authorization(alpha.apiToken),
+    });
+    expect(childDetail.statusCode).toBe(200);
+    expect(childDetail.json<ConversationDetailResource>()).toMatchObject({
+      session: {
+        sessionId: forked.session.sessionId,
+        parentSessionId: alphaSession.sessionId,
+      },
+      turns: [{ turnId: alphaTurn.turnId, originSessionId: alphaSession.sessionId }],
+    });
+    const fullTree = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${forked.session.sessionId}/tree?view=full`,
+      headers: authorization(alpha.apiToken),
+    });
+    expect(fullTree.json<ConversationTreeResource>().branches).toEqual([
+      expect.objectContaining({ sessionId: alphaSession.sessionId, current: false }),
+      expect.objectContaining({
+        sessionId: forked.session.sessionId,
+        parentSessionId: alphaSession.sessionId,
+        forkedFromEntryId: assistantEntryId,
+        current: true,
+      }),
+    ]);
+    const copiedEntries = await database
+      .selectFrom("pi_session_entries")
+      .select("id")
+      .where("tenant_id", "=", alpha.tenantId)
+      .where("session_id", "=", forked.session.sessionId)
+      .orderBy("seq")
+      .execute();
+    expect(copiedEntries.map((entry) => entry.id)).toEqual([userEntryId, assistantEntryId]);
+    expect(
+      await database
+        .selectFrom("pi_session_records")
+        .select("id")
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", forked.session.sessionId)
+        .execute(),
+    ).toEqual([]);
+
+    const foreignTree = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${forked.session.sessionId}/tree`,
+      headers: authorization(bravo.apiToken),
+    });
+    expect(foreignTree.statusCode).toBe(404);
   });
 
   it("serializes concurrent registration at the configured total-tenant cap", async () => {

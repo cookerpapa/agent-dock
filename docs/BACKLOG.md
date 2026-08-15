@@ -28,6 +28,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
       commit a minimal failure boundary and let later Turns start after it.
 - [x] Re-run the production PostgreSQL-native Pi runtime through real model,
       Cube Tool, Workspace settlement and cross-Worker recovery.
+- [x] Add bounded human Session-tree projection, inherited transcript reads and
+      transactional/idempotent conversation forks.
+- [ ] Add branch rename and leaf-first deletion controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
 - [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
 

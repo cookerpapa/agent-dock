@@ -811,6 +811,7 @@ export class WorkspaceVersionService {
             "sandbox_retention_policy",
             "archived_at",
             "current_workspace_version_id",
+            "conversation_parent_session_id",
           ])
           .where("tenant_id", "=", tenantId)
           .where("id", "=", sessionId)
@@ -825,7 +826,40 @@ export class WorkspaceVersionService {
           throw new WorkspaceVersionError("conflict", "Session archive state already matches");
         }
         await this.#assertNoUnsettledTurns(transaction, tenantId, sessionId);
+        if (request.archived) {
+          const child = await transaction
+            .selectFrom("sessions")
+            .select("id")
+            .where("tenant_id", "=", tenantId)
+            .where("conversation_parent_session_id", "=", sessionId)
+            .where("archived_at", "is", null)
+            .executeTakeFirst();
+          if (child !== undefined) {
+            throw new WorkspaceVersionError(
+              "conflict",
+              "Delete child conversation branches before deleting their parent",
+            );
+          }
+        }
         if (!request.archived) {
+          const parent =
+            session.conversation_parent_session_id === null
+              ? undefined
+              : await transaction
+                  .selectFrom("sessions")
+                  .select("archived_at")
+                  .where("tenant_id", "=", tenantId)
+                  .where("id", "=", session.conversation_parent_session_id)
+                  .executeTakeFirst();
+          if (parent === undefined && session.conversation_parent_session_id !== null) {
+            throw new WorkspaceVersionError("not_found", "Parent conversation was not found");
+          }
+          if (parent?.archived_at !== null && parent !== undefined) {
+            throw new WorkspaceVersionError(
+              "conflict",
+              "Parent conversation must be restored before its child branch",
+            );
+          }
           await transaction
             .selectFrom("workspaces")
             .select("id")

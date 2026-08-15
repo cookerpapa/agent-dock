@@ -23,6 +23,8 @@ import {
   parseCreateSessionRequest,
   parseCreateTurnCancellationRequest,
   parseCreateTurnSteerRequest,
+  parseCreateConversationForkRequest,
+  parseConversationTreeView,
   parseIdempotencyKey,
   parseLastEventIdHeader,
   parseReplaceModelConfigurationRequest,
@@ -35,6 +37,8 @@ import {
   type TurnSteerResource,
   type ConversationDetailResource,
   type ConversationListResource,
+  type ConversationTreeResource,
+  type ConversationForkResource,
   type ProjectResource,
   type ModelConfigurationResource,
   type CubeProxyConfigurationResource,
@@ -61,6 +65,7 @@ import { WorkspaceVersionService } from "./workspace-version-service.ts";
 import { readWebSessionCookie, WebAuthenticationService } from "./web-authentication.ts";
 import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
+import { ConversationTreeService } from "./conversation-tree-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -80,6 +85,8 @@ export class ControlPlaneController {
     private readonly platformRuntimeSettings: PlatformRuntimeSettingsService,
     @Inject(TurnSteeringService)
     private readonly turnSteering: TurnSteeringService,
+    @Inject(ConversationTreeService)
+    private readonly conversationTrees: ConversationTreeService,
   ) {}
 
   @Post("auth/register")
@@ -219,6 +226,38 @@ export class ControlPlaneController {
     const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).getConversation(sessionId);
+  }
+
+  @Get("conversations/:sessionId/tree")
+  async getConversationTree(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Query("view") viewValue: unknown,
+  ): Promise<ConversationTreeResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.conversationTrees.tree(
+      identity.tenantId,
+      sessionId,
+      parseConversationTreeView(viewValue),
+    );
+  }
+
+  @Post("conversations/:sessionId/forks")
+  async forkConversation(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<ConversationForkResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.conversationTrees.fork(
+      identity.tenantId,
+      sessionId,
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseCreateConversationForkRequest(body),
+    );
   }
 
   @Get("sessions/:sessionId/runs")

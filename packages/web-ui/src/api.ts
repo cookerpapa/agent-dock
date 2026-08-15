@@ -6,6 +6,8 @@ import {
   parseArchiveSessionRequest,
   parseConversationDetailResource,
   parseConversationListResource,
+  parseConversationTreeResource,
+  parseConversationForkResource,
   parseLiveTurnSnapshotResource,
   parseControlPlaneApiError,
   parseModelConfigurationResource,
@@ -25,6 +27,9 @@ import {
   type ConversationDetailResource,
   type AuthSessionResource,
   type ConversationListResource,
+  type ConversationTreeResource,
+  type ConversationTreeView,
+  type ConversationForkResource,
   type LiveTurnSnapshotResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
@@ -313,6 +318,37 @@ export class AgentDockApi {
     );
   }
 
+  async getConversationTree(
+    sessionId: string,
+    view: ConversationTreeView,
+  ): Promise<ConversationTreeResource> {
+    return parseConversationTreeResource(
+      await request(
+        this.#fetch,
+        `/v1/conversations/${encodeURIComponent(sessionId)}/tree?view=${encodeURIComponent(view)}`,
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async forkConversation(
+    sessionId: string,
+    turnId: string,
+    entryId: string,
+    title: string | undefined,
+    idempotencyKey: string,
+  ): Promise<ConversationForkResource> {
+    return parseConversationForkResource(
+      await request(
+        this.#fetch,
+        `/v1/conversations/${encodeURIComponent(sessionId)}/forks`,
+        jsonRequest({ turnId, entryId, ...(title === undefined ? {} : { title }) }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async getLiveTurnSnapshot(sessionId: string): Promise<LiveTurnSnapshotResource> {
     return parseLiveTurnSnapshotResource(
       await request(
@@ -493,7 +529,7 @@ export class AgentDockApi {
 }
 
 export function newIdempotencyKey(
-  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry",
+  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry" | "fork",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

@@ -363,6 +363,82 @@ describe("tenant-aware browser API", () => {
     ).resolves.toMatchObject({ session: { state: "idle" } });
   });
 
+  it("loads a Pi tree and creates an idempotent conversation fork", async () => {
+    const sessionId = "20000000-0000-4000-8000-000000000011";
+    const childSessionId = "20000000-0000-4000-8000-000000000012";
+    const turnId = "20000000-0000-4000-8000-000000000013";
+    const entryId = "20000000-0000-4000-8000-000000000014";
+    const createdAt = "2026-08-15T00:00:00.000Z";
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      const path = String(input);
+      if (init?.method === "GET") {
+        expect(path).toBe(`/v1/conversations/${sessionId}/tree?view=full`);
+        return new Response(
+          JSON.stringify({
+            rootSessionId: sessionId,
+            currentSessionId: sessionId,
+            view: "full",
+            branches: [
+              {
+                sessionId,
+                title: "Root",
+                parentSessionId: null,
+                forkedFromTurnId: null,
+                forkedFromEntryId: null,
+                current: true,
+                entries: [
+                  {
+                    entryId,
+                    parentEntryId: null,
+                    turnId,
+                    role: "assistant",
+                    text: "done",
+                    finalAssistant: true,
+                    createdAt,
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      expect(path).toBe(`/v1/conversations/${sessionId}/forks`);
+      expect(new Headers(init?.headers).get("idempotency-key")).toBe("fork:test");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        turnId,
+        entryId,
+        title: "Alternative",
+      });
+      return new Response(
+        JSON.stringify({
+          session: {
+            sessionId: childSessionId,
+            title: "Alternative",
+            projectId: "30000000-0000-4000-8000-000000000001",
+            workspaceId: "40000000-0000-4000-8000-000000000001",
+            state: "cold",
+            sandboxRetention: "ephemeral",
+            modelProfileId: "50000000-0000-4000-8000-000000000001",
+            createdAt,
+          },
+          parentSessionId: sessionId,
+          forkedFromTurnId: turnId,
+          forkedFromEntryId: entryId,
+          replayed: false,
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation);
+    await expect(api.getConversationTree(sessionId, "full")).resolves.toMatchObject({
+      branches: [{ entries: [{ entryId }] }],
+    });
+    await expect(
+      api.forkConversation(sessionId, turnId, entryId, "Alternative", "fork:test"),
+    ).resolves.toMatchObject({ session: { sessionId: childSessionId } });
+  });
+
   it("loads binary Workspace content", async () => {
     const versionId = "20000000-0000-4000-8000-000000000001";
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;

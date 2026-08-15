@@ -4,6 +4,7 @@ import { AdminPage } from "../src/AdminPage.tsx";
 import { AuthScreen } from "../src/AuthScreen.tsx";
 import ChatApp from "../src/ChatApp.tsx";
 import { ConversationOutline } from "../src/ConversationOutline.tsx";
+import { ConversationTreeNavigator } from "../src/ConversationTreeNavigator.tsx";
 import { ConversationTurn, ToolActivity } from "../src/ConversationTurn.tsx";
 import { AgentDockApi } from "../src/api.ts";
 import type { TurnView } from "../src/session-view.ts";
@@ -110,6 +111,73 @@ describe("product chat experience", () => {
     expect(markup).toContain('aria-current="true"');
   });
 
+  it("renders Pi conversation forks in focused and whole-tree navigation", () => {
+    const rootSessionId = "10000000-0000-4000-8000-000000000021";
+    const childSessionId = "10000000-0000-4000-8000-000000000022";
+    const rootTurnId = "10000000-0000-4000-8000-000000000023";
+    const rootEntryId = "10000000-0000-4000-8000-000000000024";
+    const markup = renderToStaticMarkup(
+      <ConversationTreeNavigator
+        loading={false}
+        onNavigate={() => undefined}
+        onViewChange={() => undefined}
+        scrollerRef={{ current: null }}
+        tree={{
+          rootSessionId,
+          currentSessionId: childSessionId,
+          view: "full",
+          branches: [
+            {
+              sessionId: rootSessionId,
+              title: "排序算法",
+              parentSessionId: null,
+              forkedFromTurnId: null,
+              forkedFromEntryId: null,
+              current: false,
+              entries: [
+                {
+                  entryId: "10000000-0000-4000-8000-000000000025",
+                  parentEntryId: null,
+                  turnId: rootTurnId,
+                  role: "user",
+                  text: "写一个插入排序并测试",
+                  finalAssistant: false,
+                  createdAt: "2026-08-15T00:00:00.000Z",
+                },
+                {
+                  entryId: rootEntryId,
+                  parentEntryId: "10000000-0000-4000-8000-000000000025",
+                  turnId: rootTurnId,
+                  role: "assistant",
+                  text: "插入排序已经通过测试。",
+                  finalAssistant: true,
+                  createdAt: "2026-08-15T00:00:01.000Z",
+                },
+              ],
+            },
+            {
+              sessionId: childSessionId,
+              title: "改用泛型实现",
+              parentSessionId: rootSessionId,
+              forkedFromTurnId: rootTurnId,
+              forkedFromEntryId: rootEntryId,
+              current: true,
+              entries: [],
+            },
+          ],
+        }}
+        view="full"
+      />,
+    );
+    expect(markup).toContain("对话导航");
+    expect(markup).toContain("当前分支");
+    expect(markup).toContain("整棵树");
+    expect(markup).toContain("写一个插入排序并测试");
+    expect(markup).toContain("改用泛型实现");
+    expect(markup).toContain("product-tree-user");
+    expect(markup).toContain("product-tree-assistant");
+  });
+
   it("does not render the removed per-turn patch viewer", () => {
     const renderedTurn = {
       ...turn("10000000-0000-4000-8000-000000000013", "修改代码"),
@@ -123,6 +191,17 @@ describe("product chat experience", () => {
     expect(markup).toContain("修改代码");
     expect(markup).not.toContain("查看本轮代码修改");
     expect(markup).not.toContain("secret.ts");
+  });
+
+  it("offers a fork action only after a completed final response", () => {
+    const markup = renderToStaticMarkup(
+      <ConversationTurn
+        canFork
+        onFork={() => undefined}
+        turn={turn("10000000-0000-4000-8000-000000000026", "保留这一条路径")}
+      />,
+    );
+    expect(markup).toContain("从此对话开始");
   });
 
   it("renders Pi-style command output instead of a collapsed JSON tool card", () => {

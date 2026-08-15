@@ -12,6 +12,7 @@
 - lazy/warm/persistent Cube lifecycle and model-visible reset semantics;
 - Kubernetes/KEDA deployment with PostgreSQL backlog scaling;
 - one-host installer, configuration UI and real Cube/model acceptance.
+- human Pi Session tree navigation and transactional conversation forks.
 
 ## Current release gate
 
@@ -29,6 +30,8 @@
 - [ ] Repeat the clean one-host installer on a fresh machine.
 - [x] Re-run token-consuming multi-round chat/coding, native Compaction,
       cross-Worker recovery and Cube restart acceptance.
+- [x] Expose focused/full Pi Session trees and fork settled assistant responses
+      without making tree control model-visible.
 
 ## Next reliability work
 

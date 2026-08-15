@@ -245,22 +245,100 @@ button:disabled {
 }
 
 .product-shell {
-  display: grid;
+  display: flex;
   width: 100%;
   height: 100dvh;
-  grid-template-columns: 260px minmax(0, 1fr);
   overflow: hidden;
   background: #212121;
   color: #ececec;
 }
 
 .product-sidebar {
+  position: relative;
   z-index: 30;
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  background: #171717;
+}
+
+.product-sidebar-content {
   display: grid;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  background: #171717;
+}
+
+.product-resizable-panel {
+  position: relative;
+  min-width: 0;
+  border-right: 1px solid #2d2d2d;
+}
+
+.product-resizable-panel.collapsed {
+  flex-basis: 42px !important;
+  width: 42px !important;
+}
+
+.product-resizable-panel.collapsed .product-panel-content {
+  display: none;
+}
+
+.product-panel-collapse {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  right: -11px;
+  display: grid;
+  width: 21px;
+  height: 27px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #3b3b3b;
+  border-radius: 7px;
+  background: #202020;
+  color: #8c8c8c;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.product-panel-collapse:hover {
+  border-color: #595959;
+  background: #292929;
+  color: #d3d3d3;
+}
+
+.product-collapsed-label {
+  display: block;
+  margin: 54px auto 0;
+  color: #717171;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  writing-mode: vertical-rl;
+}
+
+.product-panel-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.product-panel-resizer:hover,
+.product-panel-resizer:focus-visible {
+  background: rgba(118, 100, 209, 0.38);
+  outline: 0;
+}
+
+body.product-panel-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .product-sidebar-brand {
@@ -343,6 +421,15 @@ button:disabled {
 
 .product-conversation-row.active {
   background: #2b2b2b;
+}
+
+.product-conversation-row.branch > button:first-child {
+  padding-left: 17px;
+}
+
+.product-conversation-branch-mark {
+  color: #8c7bd0;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 .product-conversation-row > button:first-child {
@@ -454,6 +541,7 @@ button:disabled {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  flex: 1 1 auto;
   background: #212121;
 }
 
@@ -547,10 +635,6 @@ button:disabled {
 
 .product-content.with-inspector {
   grid-template-columns: minmax(0, 1fr) minmax(360px, min(440px, 42vw));
-}
-
-.product-content.with-outline {
-  grid-template-columns: minmax(0, 1fr) minmax(210px, min(260px, 24vw));
 }
 
 .product-chat-scroll {
@@ -673,6 +757,32 @@ button:disabled {
   color: #dedede;
   font-size: 14px;
   line-height: 1.72;
+}
+
+.product-answer-actions {
+  display: flex;
+  margin-top: 10px;
+}
+
+.product-answer-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #777;
+  font-size: 10px;
+}
+
+.product-answer-actions button:hover:not(:disabled) {
+  background: #2b2b2b;
+  color: #bfb7e8;
+}
+
+.product-answer-actions button:disabled {
+  display: none;
 }
 
 .product-markdown > :first-child {
@@ -1133,6 +1243,21 @@ button:disabled {
   color: #888;
   font-size: 12px;
 }
+
+.product-fork-modal {
+  width: min(92vw, 470px);
+}
+
+.product-workspace-modal .product-fork-note {
+  margin: -2px 0 2px;
+  padding: 9px 10px;
+  border: 1px solid #383343;
+  border-radius: 8px;
+  background: #24212c;
+  color: #aaa2bd;
+  font-size: 10px;
+  line-height: 1.5;
+}
 .product-workspace-modal header > button {
   width: 30px;
   height: 30px;
@@ -1460,6 +1585,175 @@ button:disabled {
   -webkit-line-clamp: 2;
 }
 
+.product-tree-panel {
+  z-index: 20;
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  background: #1b1b1b;
+}
+
+.product-tree-panel .product-panel-content {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.product-tree-header {
+  display: grid;
+  gap: 11px;
+  padding: 15px 14px 11px;
+  border-bottom: 1px solid #2d2d2d;
+}
+
+.product-tree-header > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-tree-header strong {
+  color: #d8d8d8;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.product-tree-header span {
+  color: #696969;
+  font-size: 9px;
+}
+
+.product-tree-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  border: 1px solid #303030;
+  border-radius: 8px;
+  background: #161616;
+}
+
+.product-tree-view-switch button {
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #747474;
+  font-size: 9px;
+}
+
+.product-tree-view-switch button.active {
+  background: #302b46;
+  color: #d8d1ff;
+}
+
+.product-tree-nav {
+  min-height: 0;
+  overflow: auto;
+  padding: 9px 7px 18px;
+  scrollbar-color: #444 transparent;
+  scrollbar-width: thin;
+}
+
+.product-tree-empty {
+  padding: 14px 9px;
+  color: #686868;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.product-tree-branch {
+  position: relative;
+  margin-left: calc(var(--tree-depth) * 13px);
+}
+
+.product-tree-branch:not(:first-child) {
+  margin-top: 3px;
+  padding-left: 9px;
+  border-left: 1px solid #4a426d;
+}
+
+.product-tree-branch-label,
+.product-tree-entry {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.product-tree-branch-label {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 3px;
+  padding: 4px 5px 3px;
+  color: #a795e9;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.product-tree-branch-label.current {
+  color: #c9bfff;
+}
+
+.product-tree-branch-label strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-tree-entry {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 4px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  color: #909090;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.product-tree-entry:hover {
+  background: #252525;
+  color: #c9c9c9;
+}
+
+.product-tree-entry.active {
+  background: #302b46;
+  color: #e0dbf8;
+}
+
+.product-tree-entry > span:last-child {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.product-tree-connector {
+  color: #696969;
+  font-weight: 700;
+}
+
+.product-tree-user .product-tree-connector {
+  color: #77b9d8;
+}
+
+.product-tree-assistant .product-tree-connector {
+  color: #d4b96f;
+}
+
+.product-tree-entry-wrap > .product-tree-branch {
+  margin-top: 2px;
+  margin-bottom: 3px;
+}
+
 .workspace-directory-header {
   display: flex;
   align-items: flex-start;
@@ -1630,18 +1924,25 @@ button:disabled {
 
 @media (max-width: 900px) {
   .product-shell {
-    grid-template-columns: minmax(0, 1fr);
+    display: block;
   }
   .product-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: min(86vw, 300px);
+    width: min(86vw, 300px) !important;
     transform: translateX(-105%);
     transition: transform 180ms ease;
     box-shadow: 18px 0 50px rgba(0, 0, 0, 0.35);
   }
   .product-sidebar.open {
     transform: translateX(0);
+  }
+  .product-sidebar.open .product-panel-content {
+    display: grid;
+  }
+  .product-sidebar .product-collapsed-label,
+  .product-sidebar .product-panel-resizer {
+    display: none;
   }
   .product-sidebar-backdrop {
     z-index: 25;
@@ -1660,13 +1961,11 @@ button:disabled {
   .product-content.with-inspector {
     grid-template-columns: minmax(0, 1fr);
   }
-  .product-content.with-outline {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .product-content.with-inspector .product-chat-scroll {
     display: none;
   }
-  .product-conversation-outline {
+  .product-conversation-outline,
+  .product-tree-panel {
     display: none;
   }
   .workspace-directory {

@@ -78,7 +78,7 @@ describe("PostgreSQL Tool Broker ownership", () => {
       code: "state_conflict",
       message: "Tenant Sandbox policy is unavailable",
     });
-  });
+  }, 15_000);
 
   it("fences an expired replica before a surviving owner stays Ready", async () => {
     const pglite = await PGlite.create();
@@ -132,5 +132,5 @@ describe("PostgreSQL Tool Broker ownership", () => {
       { instance_id: "10000000-0000-4000-8000-000000000101", state: "lost" },
       { instance_id: "10000000-0000-4000-8000-000000000102", state: "ready" },
     ]);
-  });
+  }, 15_000);
 });

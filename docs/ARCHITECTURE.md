@@ -13,7 +13,8 @@ business/Run-state authority. There is no second workflow scheduler.
 
 ### Web and Control Plane
 
-The Web product provides authentication, conversations, named Workspaces,
+The Web product provides authentication, resizable conversation/tree panels,
+focused or whole-tree navigation, conversation forks, named Workspaces,
 resumable output, file browsing and administrator settings. The Control Plane
 commits each idempotent message and its Run command in one PostgreSQL
 transaction. It enforces tenant quota and same-Session serialization.
@@ -54,6 +55,12 @@ result entries back to PostgreSQL. It reuses Pi's public Agent Loop and
 compaction primitives rather than recreating the generic `AgentHarness`
 surface. No historical `session.jsonl` is downloaded, rewritten or used as
 model-context authority.
+
+Human tree navigation is a bounded projection of the same parent-linked Pi
+entries. Forking a settled final response creates a child product/Pi Session
+and transactionally copies the selected root-to-leaf branch. The child shares
+the Workspace and begins with no open operation records. Tree navigation is
+not exposed to the model or added to its context.
 
 The runtime keeps only the cloud behavior the product needs: automatic
 compaction, model retry, active steer, reviewed event mapping, remote Tools,
@@ -120,6 +127,7 @@ not an authority.
 | tenants, users, sessions, quotas | PostgreSQL |
 | Runs, Attempts, leases, fences, ready queue | PostgreSQL |
 | Pi Session entries/compaction/operation records | PostgreSQL SessionStorage |
+| conversation parent/fork graph | PostgreSQL |
 | canonical completed conversation | PostgreSQL |
 | retained high-frequency Worker events | Kafka |
 | bounded live SSE replay | Valkey, rebuildable from Kafka |
@@ -154,7 +162,12 @@ claimed as durable.
   an unfinished Tool becomes an explicit unknown effect, never a fabricated
   success or an automatic replay;
 - Cube/process loss preserves files only; the next model is told when the
-  execution world materially changed.
+execution world materially changed.
+
+A conversation fork resumes through the same path as any other Session. Its
+Pi branch already contains the selected inherited context, while its product
+transcript renders the parent history through the fork Turn followed by child
+Turns. SSE sequence numbers remain local to the child Session.
 
 ## Scaling
 
