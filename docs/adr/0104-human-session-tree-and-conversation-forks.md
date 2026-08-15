@@ -63,6 +63,14 @@ bounded, local database copy rather than a full JSONL download or an object
 store checkpoint. It keeps the production Pi runtime unchanged: each child is
 still opened on its `main` lane by the existing Worker.
 
+All branches share one logical Workspace and therefore one writable execution
+slot. When a branch first invokes a tool, Tool Broker retires an ordinary warm
+activation owned by another branch before reserving the new activation. A
+persistent activation may be transferred only when PostgreSQL proves that both
+Sessions belong to the same conversation tree. The old process world is stopped
+and its durable reservation is released; files continue from the authoritative
+Workspace revision, while background processes do not migrate between branches.
+
 Workspace files reflect the latest shared Workspace state, not historical file
 state at the fork point. The UI states this explicitly. Historical Workspace
 fork/rollback remains a separate product concern.
@@ -70,4 +78,3 @@ fork/rollback remains a separate product concern.
 Runtime-native tree navigation, branch summaries and model-visible tree tools
 are intentionally deferred until they have their own authority, context-budget
 and safety design.
-

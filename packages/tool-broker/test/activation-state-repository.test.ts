@@ -42,6 +42,92 @@ describe("PostgreSQL Tool Broker ownership", () => {
         object_snapshot_key: null,
       })
       .execute();
+    const credentialId = "20000000-0000-4000-8000-000000000010";
+    const profileId = "20000000-0000-4000-8000-000000000011";
+    const rootSessionId = "20000000-0000-4000-8000-000000000012";
+    const childSessionId = "20000000-0000-4000-8000-000000000013";
+    const unrelatedSessionId = "20000000-0000-4000-8000-000000000014";
+    const forkTurnId = "20000000-0000-4000-8000-000000000015";
+    await database
+      .insertInto("credential_bindings")
+      .values({
+        id: credentialId,
+        tenant_id: tenantId,
+        provider: "test",
+        kind: "api_key",
+        secret_ref: "test://credential",
+        version: 1,
+        status: "active",
+      })
+      .execute();
+    await database
+      .insertInto("model_profiles")
+      .values({
+        id: profileId,
+        tenant_id: tenantId,
+        name: "tree-reservation",
+        provider: "test",
+        model_id: "test-model",
+        default_thinking_level: "off",
+        allowed_thinking_levels: ["off"],
+        credential_binding_id: credentialId,
+        credential_binding_version: 1,
+      })
+      .execute();
+    await database
+      .insertInto("sessions")
+      .values(
+        [rootSessionId, unrelatedSessionId].map((id) => ({
+          id,
+          tenant_id: tenantId,
+          project_id: projectId,
+          workspace_id: workspaceId,
+          desired_model_profile_id: profileId,
+          state: "idle" as const,
+          pi_session_snapshot_key: null,
+          workspace_snapshot_key: null,
+        })),
+      )
+      .execute();
+    await database
+      .insertInto("turns")
+      .values({
+        id: forkTurnId,
+        tenant_id: tenantId,
+        session_id: rootSessionId,
+        state: "completed",
+        input_kind: "prompt",
+        input_text: "seed",
+        model_profile_id: profileId,
+        provider: "test",
+        model_id: "test-model",
+        thinking_level: "off",
+        credential_binding_id: credentialId,
+        credential_binding_version: 1,
+        stop_reason: "stop",
+        failure_code: null,
+        failure_message: null,
+        failure_retryable: null,
+        started_at: new Date(),
+        settled_at: new Date(),
+      })
+      .execute();
+    await database
+      .insertInto("sessions")
+      .values({
+        id: childSessionId,
+        tenant_id: tenantId,
+        project_id: projectId,
+        workspace_id: workspaceId,
+        desired_model_profile_id: profileId,
+        state: "idle",
+        pi_session_snapshot_key: null,
+        workspace_snapshot_key: null,
+        conversation_parent_session_id: rootSessionId,
+        conversation_fork_turn_id: forkTurnId,
+        conversation_fork_entry_id: "20000000-0000-4000-8000-000000000016",
+      })
+      .execute();
 
     const repository = new PostgresSandboxActivationStateRepository({
       database,
@@ -51,6 +137,23 @@ describe("PostgreSQL Tool Broker ownership", () => {
     });
     resources.push(async () => repository.close());
     await repository.start();
+
+    await expect(
+      repository.allowsPersistentConversationHandoff({
+        tenantId,
+        workspaceId,
+        currentSessionId: rootSessionId,
+        nextSessionId: childSessionId,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      repository.allowsPersistentConversationHandoff({
+        tenantId,
+        workspaceId,
+        currentSessionId: rootSessionId,
+        nextSessionId: unrelatedSessionId,
+      }),
+    ).resolves.toBe(false);
 
     await expect(
       repository.reserve({

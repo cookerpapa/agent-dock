@@ -349,11 +349,19 @@ export class ToolBroker {
       inherited?.retention === "persistent" &&
       inherited.handle.assignment.sessionId !== request.assignment.sessionId
     ) {
-      throw new ToolBrokerError(
-        "tool_sandbox_workspace_pinned",
-        "Workspace is pinned to another persistent Sandbox conversation",
-        false,
-      );
+      const handoffAllowed = await this.#stateRepository.allowsPersistentConversationHandoff({
+        tenantId: request.assignment.tenantId,
+        workspaceId: request.assignment.workspaceId,
+        currentSessionId: inherited.handle.assignment.sessionId,
+        nextSessionId: request.assignment.sessionId,
+      });
+      if (!handoffAllowed) {
+        throw new ToolBrokerError(
+          "tool_sandbox_workspace_pinned",
+          "Workspace is pinned to another persistent Sandbox conversation",
+          false,
+        );
+      }
     }
     if (
       inherited !== undefined &&
@@ -362,9 +370,7 @@ export class ToolBroker {
         request.workspaceRevision !== inherited.workspaceRevision ||
         !sameEnvironment(request.environment, inherited.environment))
     ) {
-      this.#warm.delete(key);
-      await this.#provider.stop(inherited.handle);
-      this.#releaseAdmission(inherited.handle.activationId);
+      await this.#discardWarm(key, inherited);
       inherited = undefined;
     }
     if (inherited !== undefined) this.#warm.delete(key);
@@ -585,8 +591,7 @@ export class ToolBroker {
       const key = workspaceKey(request.assignment);
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {
-        await this.#provider.stop(previous.handle);
-        this.#releaseAdmission(previous.handle.activationId);
+        await this.#discardWarm(key, previous);
       }
       const now = this.#now();
       this.#warm.set(key, {
@@ -785,10 +790,7 @@ export class ToolBroker {
     );
     for (const [key, warm] of expired) {
       if (this.#warm.get(key) !== warm) continue;
-      this.#warm.delete(key);
-      await this.#provider.stop(warm.handle);
-      this.#releaseAdmission(warm.handle.activationId);
-      await this.#stateRepository.setActivationState(warm.handle.activationId, "released");
+      await this.#discardWarm(key, warm);
     }
   }
 
@@ -797,10 +799,7 @@ export class ToolBroker {
     if (retired.size === 0) return;
     for (const [key, warm] of this.#warm) {
       if (!retired.has(warm.handle.activationId) || this.#warm.get(key) !== warm) continue;
-      this.#warm.delete(key);
-      await this.#provider.stop(warm.handle);
-      this.#releaseAdmission(warm.handle.activationId);
-      await this.#stateRepository.setActivationState(warm.handle.activationId, "released");
+      await this.#discardWarm(key, warm);
     }
   }
 
@@ -931,10 +930,7 @@ export class ToolBroker {
         .filter(([, warm]) => warm.retention === "ephemeral")
         .sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt)[0];
       if (oldest === undefined) return;
-      this.#warm.delete(oldest[0]);
-      await this.#provider.stop(oldest[1].handle);
-      this.#releaseAdmission(oldest[1].handle.activationId);
-      await this.#stateRepository.setActivationState(oldest[1].handle.activationId, "released");
+      await this.#discardWarm(oldest[0], oldest[1]);
     }
   }
 
@@ -973,9 +969,7 @@ export class ToolBroker {
         .sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt)[0];
       if (oldest === undefined) break;
       if (this.#warm.get(oldest[0]) !== oldest[1]) continue;
-      this.#warm.delete(oldest[0]);
-      await this.#provider.stop(oldest[1].handle);
-      this.#releaseAdmission(oldest[1].handle.activationId);
+      await this.#discardWarm(oldest[0], oldest[1]);
       if (signal?.aborted) {
         throw new ToolBrokerError(
           "tool_sandbox_admission_cancelled",
@@ -1013,6 +1007,13 @@ export class ToolBroker {
       }
       this.#admissionWaiters.push(waiter);
     });
+  }
+
+  async #discardWarm(key: string, warm: WarmActivation): Promise<void> {
+    if (this.#warm.get(key) === warm) this.#warm.delete(key);
+    await this.#provider.stop(warm.handle);
+    this.#releaseAdmission(warm.handle.activationId);
+    await this.#stateRepository.setActivationState(warm.handle.activationId, "released");
   }
 
   #releaseAdmission(activationId: string): void {

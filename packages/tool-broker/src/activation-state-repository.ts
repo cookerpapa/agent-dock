@@ -5,7 +5,7 @@ import type {
 } from "@agent-dock/database";
 import type { SupervisorRuntimeAssignment, ToolSandboxAssignment } from "@agent-dock/protocol";
 import type { SandboxHandle } from "./sandbox-provider.ts";
-import type { Kysely, Transaction } from "kysely";
+import { sql, type Kysely, type Transaction } from "kysely";
 
 export type SandboxActivationReservation = {
   activationId: string;
@@ -29,10 +29,18 @@ export type SandboxOrphanedActivation = Readonly<{
   assignment: ToolSandboxAssignment;
 }>;
 
+export type PersistentConversationHandoff = Readonly<{
+  tenantId: string;
+  workspaceId: string;
+  currentSessionId: string;
+  nextSessionId: string;
+}>;
+
 export interface SandboxActivationStateRepository {
   start(): Promise<void>;
   checkHealth(): Promise<void>;
   reserve(input: SandboxActivationReservation): Promise<SandboxActivationReservationResult>;
+  allowsPersistentConversationHandoff(input: PersistentConversationHandoff): Promise<boolean>;
   setActivationState(
     activationId: string,
     state: ToolBrokerActivationState,
@@ -73,7 +81,14 @@ export class InMemorySandboxActivationStateRepository implements SandboxActivati
   async reserve(): Promise<SandboxActivationReservationResult> {
     return { status: "reserved" };
   }
-  async setActivationState(): Promise<void> {}
+  async allowsPersistentConversationHandoff(): Promise<boolean> {
+    return false;
+  }
+  async setActivationState(
+    _activationId: string,
+    _state: ToolBrokerActivationState,
+    _detail?: { handle?: SandboxHandle; workspaceRevision?: string; failureCode?: string },
+  ): Promise<void> {}
   async beginOperation(
     _activationId: string,
     operationId: string,
@@ -229,15 +244,15 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         ])
         .executeTakeFirst();
       if (existing !== undefined) {
+        if (existing.state === "warm" && existing.owner_instance_id !== this.#instanceId) {
+          return { status: "redirect", ownerBaseUrl: existing.owner_base_url };
+        }
         const reusable =
           existing.state === "warm" &&
           existing.session_id === input.assignment.sessionId &&
           existing.workspace_revision === (input.workspaceRevision ?? null) &&
           existing.environment_sha256 === input.environmentSha256;
         if (!reusable) return { status: "busy" };
-        if (existing.owner_instance_id !== this.#instanceId) {
-          return { status: "redirect", ownerBaseUrl: existing.owner_base_url };
-        }
         if (existing.activation_id !== input.activationId) {
           throw new SandboxActivationStateRepositoryError(
             "state_conflict",
@@ -354,6 +369,57 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         .executeTakeFirstOrThrow();
       return { status: "reserved" };
     });
+  }
+
+  async allowsPersistentConversationHandoff(
+    input: PersistentConversationHandoff,
+  ): Promise<boolean> {
+    if (input.currentSessionId === input.nextSessionId) return false;
+    const result = await sql<{
+      start_session_id: string;
+      root_session_id: string;
+    }>`
+      with recursive lineage as (
+        select
+          sessions.id as start_session_id,
+          sessions.id as session_id,
+          sessions.conversation_parent_session_id as parent_session_id,
+          array[sessions.id]::uuid[] as path,
+          0 as depth
+        from sessions
+        where sessions.tenant_id = ${input.tenantId}
+          and sessions.workspace_id = ${input.workspaceId}
+          and sessions.archived_at is null
+          and sessions.id in (${input.currentSessionId}, ${input.nextSessionId})
+
+        union all
+
+        select
+          lineage.start_session_id,
+          parent.id as session_id,
+          parent.conversation_parent_session_id as parent_session_id,
+          lineage.path || parent.id,
+          lineage.depth + 1
+        from lineage
+        join sessions as parent
+          on parent.tenant_id = ${input.tenantId}
+         and parent.workspace_id = ${input.workspaceId}
+         and parent.id = lineage.parent_session_id
+         and parent.archived_at is null
+        where lineage.parent_session_id is not null
+          and lineage.depth < 100
+          and not (parent.id = any(lineage.path))
+      )
+      select
+        start_session_id,
+        session_id as root_session_id
+      from lineage
+      where parent_session_id is null
+    `.execute(this.#database);
+    if (result.rows.length !== 2) return false;
+    const roots = new Map(result.rows.map((row) => [row.start_session_id, row.root_session_id]));
+    const currentRoot = roots.get(input.currentSessionId);
+    return currentRoot !== undefined && currentRoot === roots.get(input.nextSessionId);
   }
 
   async setActivationState(

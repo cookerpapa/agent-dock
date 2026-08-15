@@ -941,6 +941,8 @@ export default function ChatApp() {
               </label>
               <p className="product-fork-note">
                 Workspace 继续使用当前目录；此操作只分叉对话上下文，不会把文件回退到历史状态。
+                分支首次调用工具时会取得这个 Workspace
+                的执行权；其他分支持久沙箱里的后台进程不会跨分支保留。
               </p>
               <footer>
                 <button
