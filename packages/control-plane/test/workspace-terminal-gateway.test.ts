@@ -197,7 +197,9 @@ describe("WorkspaceTerminalGateway", () => {
     await seed(database, `http://127.0.0.1:${String(upstreamAddress.port)}`);
 
     const server = Fastify({ logger: false });
-    await server.register(fastifyWebsocket);
+    // Match production: the plugin and route are queued before Fastify becomes
+    // ready, rather than awaiting plugin registration in isolation.
+    server.register(fastifyWebsocket);
     new ProductionHttpGateway({
       authenticator: {
         authenticate: async (token) =>

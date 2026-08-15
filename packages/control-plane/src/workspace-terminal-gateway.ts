@@ -83,26 +83,32 @@ export class WorkspaceTerminalGateway {
   install(fastify: FastifyInstance): void {
     if (this.#installed) throw new Error("Workspace terminal gateway is already installed");
     this.#installed = true;
-    fastify.get(WORKSPACE_TERMINAL_PATH, { websocket: true }, (socket, request) => {
-      const identity = tenantRequestIdentity(request);
-      if (identity === undefined || identity.role === "viewer") {
-        socket.close(1_008, "workspace terminal is not authorized");
-        return;
-      }
-      let sessionId: string;
-      try {
-        sessionId = parseUuidPathParameter(
-          (request.params as { sessionId?: unknown }).sessionId,
-          "sessionId",
-        );
-      } catch {
-        socket.close(1_008, "workspace terminal session is invalid");
-        return;
-      }
-      void this.#proxy(socket, request, {
-        tenantId: identity.tenantId,
-        userId: identity.userId,
-        sessionId,
+    // The production application queues @fastify/websocket registration before
+    // this gateway. Put the route in a subsequent plugin scope so Avvio first
+    // installs the WebSocket route decorator; registering it directly on the
+    // parent would make Fastify treat it as an ordinary HTTP handler.
+    fastify.register(async (scope) => {
+      scope.get(WORKSPACE_TERMINAL_PATH, { websocket: true }, (socket, request) => {
+        const identity = tenantRequestIdentity(request);
+        if (identity === undefined || identity.role === "viewer") {
+          socket.close(1_008, "workspace terminal is not authorized");
+          return;
+        }
+        let sessionId: string;
+        try {
+          sessionId = parseUuidPathParameter(
+            (request.params as { sessionId?: unknown }).sessionId,
+            "sessionId",
+          );
+        } catch {
+          socket.close(1_008, "workspace terminal session is invalid");
+          return;
+        }
+        void this.#proxy(socket, request, {
+          tenantId: identity.tenantId,
+          userId: identity.userId,
+          sessionId,
+        });
       });
     });
   }
