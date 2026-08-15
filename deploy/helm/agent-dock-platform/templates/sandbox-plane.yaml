@@ -189,6 +189,8 @@ spec:
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS, value: {{ .Values.sandboxPlane.volumeGatewayMaximumConcurrentOperations | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS, value: {{ .Values.sandboxPlane.volumeGatewayMaximumQueuedOperations | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS, value: {{ .Values.sandboxPlane.volumeGatewayQueueWaitTimeoutMs | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_DELETION_REAPER_INTERVAL_MS, value: {{ .Values.sandboxPlane.workspaceDeletionReaperIntervalMs | quote }} }
+            - { name: AGENT_DOCK_WORKSPACE_DELETION_REAPER_BATCH_SIZE, value: {{ .Values.sandboxPlane.workspaceDeletionReaperBatchSize | quote }} }
             - { name: AGENT_DOCK_WORKSPACE_POSIX_ROOT, value: /data/workspaces }
             - { name: AGENT_DOCK_METRICS_HOST, value: 0.0.0.0 }
             - { name: AGENT_DOCK_METRICS_PORT, value: "9469" }

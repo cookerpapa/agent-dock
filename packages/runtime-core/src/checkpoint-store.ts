@@ -1247,6 +1247,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         "lease.fencing_token as fencingToken",
         "lease.valid_until as validUntil",
       ])
+      .where("workspace_row.deleted_at", "is", null)
       .where("session_row.id", "=", command.payload.sessionId)
       .where("turn_row.id", "=", command.payload.turnId)
       .where("command_row.id", "=", command.payload.commandId)

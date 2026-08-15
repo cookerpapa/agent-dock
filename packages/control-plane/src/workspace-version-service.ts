@@ -239,6 +239,7 @@ export class WorkspaceVersionService {
       ])
       .where("session_row.tenant_id", "=", tenantId)
       .where("session_row.id", "=", sessionId)
+      .where("workspace.deleted_at", "is", null)
       .executeTakeFirst();
     if (session === undefined)
       throw new WorkspaceVersionError("not_found", "Session was not found");
@@ -640,6 +641,7 @@ export class WorkspaceVersionService {
           ])
           .where("session_row.tenant_id", "=", tenantId)
           .where("session_row.id", "=", sessionId)
+          .where("workspace.deleted_at", "is", null)
           .forUpdate(["session_row", "workspace"])
           .executeTakeFirst();
         if (session === undefined)
@@ -865,6 +867,7 @@ export class WorkspaceVersionService {
             .select("id")
             .where("tenant_id", "=", tenantId)
             .where("id", "=", session.workspace_id)
+            .where("deleted_at", "is", null)
             .forUpdate()
             .executeTakeFirstOrThrow();
           const liveWorkspaceSessions = await transaction

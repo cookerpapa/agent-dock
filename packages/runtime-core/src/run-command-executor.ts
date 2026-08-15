@@ -654,6 +654,7 @@ export class RunCommandExecutor {
           "policy.compaction_reserve_tokens as compactionReserveTokens",
           "policy.compaction_keep_recent_tokens as compactionKeepRecentTokens",
         ])
+        .where("workspace_row.deleted_at", "is", null)
         .where("policy.enabled", "=", true)
         .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
         .where("outbox.published_at", "is", null)
@@ -767,6 +768,7 @@ export class RunCommandExecutor {
           .select("id")
           .where("tenant_id", "=", row.tenantId)
           .where("id", "=", row.workspaceId)
+          .where("deleted_at", "is", null)
           .forUpdate()
           .executeTakeFirstOrThrow();
         const workspaceBlocked = await transaction

@@ -6,9 +6,11 @@ export {
   type WorkspaceVolumeGatewayIdentity,
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
+  type WorkspaceVolumeGatewayDeleteInput,
   type WorkspaceVolumeGatewayLock,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
+  type WorkspaceVolumeGatewayVolumeIdentity,
 } from "./workspace-volume-gateway-contract.ts";
 export { PersistentVolumeWorkspaceVolumeGateway } from "./persistent-volume-workspace-volume-gateway.ts";
 export { PostgresWorkspaceVolumeGatewayLock } from "./postgres-workspace-volume-gateway-lock.ts";

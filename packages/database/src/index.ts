@@ -100,6 +100,8 @@ export {
   downUnlimitedDefaultDailyTokens,
   upCodingRunModelRequestLimit,
   downCodingRunModelRequestLimit,
+  upWorkspaceDeletion,
+  downWorkspaceDeletion,
 } from "./migrations/index.ts";
 
 export {

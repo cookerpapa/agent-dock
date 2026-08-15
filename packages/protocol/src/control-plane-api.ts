@@ -796,6 +796,17 @@ export const WorkspaceListResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const WorkspaceDeletionResourceSchema = Type.Object(
+  {
+    operationId: UuidSchema,
+    workspaceId: UuidSchema,
+    storageState: Type.Union([Type.Literal("pending"), Type.Literal("purged")]),
+    replayed: Type.Boolean(),
+    deletedAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const ConversationTranscriptItemResourceSchema = Type.Union([
   Type.Object(
     {
@@ -1827,6 +1838,7 @@ export type CreateSessionRequest = Static<typeof CreateSessionRequestSchema>;
 export type SessionResource = Static<typeof SessionResourceSchema>;
 export type WorkspaceSummaryResource = Static<typeof WorkspaceSummaryResourceSchema>;
 export type WorkspaceListResource = Static<typeof WorkspaceListResourceSchema>;
+export type WorkspaceDeletionResource = Static<typeof WorkspaceDeletionResourceSchema>;
 export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
 export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
 export type ConversationListResource = Static<typeof ConversationListResourceSchema>;
@@ -2295,6 +2307,10 @@ export function parseSessionResource(value: unknown): SessionResource {
 
 export function parseWorkspaceListResource(value: unknown): WorkspaceListResource {
   return parseSchema(WorkspaceListResourceSchema, value, "workspace list resource");
+}
+
+export function parseWorkspaceDeletionResource(value: unknown): WorkspaceDeletionResource {
+  return parseSchema(WorkspaceDeletionResourceSchema, value, "workspace deletion resource");
 }
 
 export function parseConversationListResource(value: unknown): ConversationListResource {

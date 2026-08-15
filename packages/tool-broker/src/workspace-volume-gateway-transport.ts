@@ -14,6 +14,7 @@ import {
   TOKEN_PATTERN,
   WORKSPACE_VOLUME_GATEWAY_INITIALIZE_BASELINE_PATH,
   WORKSPACE_VOLUME_GATEWAY_MATERIALIZE_PATH,
+  WORKSPACE_VOLUME_GATEWAY_DELETE_PATH,
   WORKSPACE_VOLUME_GATEWAY_PREPARE_PATH,
   WORKSPACE_VOLUME_GATEWAY_SNAPSHOT_PATH,
   WorkspaceVolumeGatewayError,
@@ -23,6 +24,7 @@ import {
   type WorkspaceVolumeGateway,
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
+  type WorkspaceVolumeGatewayDeleteInput,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
 } from "./workspace-volume-gateway-contract.ts";
@@ -39,7 +41,7 @@ export type WorkspaceVolumeGatewayServerOptions = Readonly<{
 }>;
 
 type WorkspaceVolumeGatewayOperation =
-  "prepare" | "initialize_baseline" | "snapshot" | "materialize";
+  "prepare" | "initialize_baseline" | "snapshot" | "materialize" | "delete";
 
 function boundedInteger(value: number, name: string, minimum: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
@@ -176,6 +178,15 @@ export class WorkspaceVolumeGatewayServer {
           .header("content-type", "application/octet-stream")
           .header("content-length", result.bytes.byteLength)
           .send(Buffer.from(result.bytes));
+      } catch (error: unknown) {
+        return this.#failure(reply, error);
+      }
+    });
+    this.#server.post(WORKSPACE_VOLUME_GATEWAY_DELETE_PATH, async (request, reply) => {
+      try {
+        return await this.#run("delete", () =>
+          this.#gateway.delete(request.body as WorkspaceVolumeGatewayDeleteInput),
+        );
       } catch (error: unknown) {
         return this.#failure(reply, error);
       }
@@ -469,6 +480,22 @@ export class HttpWorkspaceVolumeGateway implements WorkspaceVolumeGateway {
       );
     }
     return { bytes, sha256 };
+  }
+
+  async delete(input: WorkspaceVolumeGatewayDeleteInput): Promise<{ deleted: boolean }> {
+    const response = await this.#request(WORKSPACE_VOLUME_GATEWAY_DELETE_PATH, input);
+    if (
+      !isRecord(response) ||
+      Object.keys(response).length !== 1 ||
+      typeof response.deleted !== "boolean"
+    ) {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_volume_gateway_response_invalid",
+        "Workspace Volume Gateway response was invalid",
+        false,
+      );
+    }
+    return { deleted: response.deleted };
   }
 
   async close(): Promise<void> {}

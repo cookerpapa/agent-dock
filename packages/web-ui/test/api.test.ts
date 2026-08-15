@@ -144,6 +144,30 @@ describe("tenant-aware browser API", () => {
     ).resolves.toMatchObject({ sandboxRetention: "persistent" });
   });
 
+  it("deletes a Workspace with an idempotency key", async () => {
+    const workspaceId = "30000000-0000-4000-8000-000000000001";
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(`/v1/workspaces/${workspaceId}`);
+      expect(init?.method).toBe("DELETE");
+      expect(new Headers(init?.headers).get("idempotency-key")).toBe("delete-workspace-once");
+      return new Response(
+        JSON.stringify({
+          operationId: "40000000-0000-4000-8000-000000000001",
+          workspaceId,
+          storageState: "pending",
+          replayed: false,
+          deletedAt: "2026-08-15T00:00:00.000Z",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new AgentDockApi(fetchImplementation);
+    await expect(api.deleteWorkspace(workspaceId, "delete-workspace-once")).resolves.toMatchObject({
+      workspaceId,
+      storageState: "pending",
+    });
+  });
+
   it("reads safe model metadata and submits a write-only provider credential", async () => {
     const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const providerKey = `sk-${"p".repeat(48)}`;

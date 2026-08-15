@@ -24,7 +24,7 @@ path.
 - Pi Session tree navigation with focused/full-tree views and conversation forks;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
-- a Workspace directory/source browser and conversation deletion;
+- a Workspace directory/source browser plus conversation and safe Workspace deletion;
 - administrator-only hot model credentials and Cube proxy configuration.
 
 ## One user message

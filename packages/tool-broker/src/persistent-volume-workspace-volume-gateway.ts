@@ -34,12 +34,14 @@ import {
   validatedAbsoluteDirectory,
   validatedGitBaselineCommit,
   validatedIdentity,
+  validatedVolumeIdentity,
   type PersistentVolumeWorkspaceVolumeGatewayOptions,
   type VolumeState,
   type WorkspaceVolumeGateway,
   type WorkspaceVolumeGatewayLock,
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
+  type WorkspaceVolumeGatewayDeleteInput,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
 } from "./workspace-volume-gateway-contract.ts";
@@ -242,6 +244,48 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
     });
   }
 
+  async delete(input: WorkspaceVolumeGatewayDeleteInput): Promise<{ deleted: boolean }> {
+    const identity = validatedVolumeIdentity(input);
+    return this.#withVolumeLock(identity.volumeId, async () => {
+      const directory = this.#volumeDirectory(identity.volumeId);
+      let metadata;
+      try {
+        metadata = await lstat(directory);
+      } catch (error: unknown) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "ENOENT"
+        ) {
+          return { deleted: false };
+        }
+        throw error;
+      }
+      const state = await this.#readState(directory);
+      const generation = await this.#readVolumeGeneration(directory);
+      if (
+        !metadata.isDirectory() ||
+        metadata.isSymbolicLink() ||
+        state === undefined ||
+        generation === undefined ||
+        state.tenantId !== identity.tenantId ||
+        state.workspaceId !== identity.workspaceId ||
+        state.volumeId !== identity.volumeId ||
+        state.volumeGeneration !== generation ||
+        !(await this.#hasValidWorkspaceDirectory(directory))
+      ) {
+        throw new WorkspaceVolumeGatewayError(
+          "workspace_volume_binding_invalid",
+          "Persistent Workspace Volume identity was invalid",
+          false,
+        );
+      }
+      await rm(directory, { recursive: true, force: false });
+      return { deleted: true };
+    });
+  }
+
   async close(): Promise<void> {}
 
   async #validatedVolume(identity: ReturnType<typeof validatedIdentity>): Promise<string> {
@@ -267,14 +311,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
   }
 
   async #ensureVolumeDirectory(volumeId: string): Promise<string> {
-    const directory = resolve(this.#workspaceRoot, `agentdock-posix-${volumeId}`);
-    if (!directory.startsWith(`${this.#workspaceRoot}${sep}`)) {
-      throw new WorkspaceVolumeGatewayError(
-        "workspace_volume_path_invalid",
-        "Workspace Volume path was invalid",
-        false,
-      );
-    }
+    const directory = this.#volumeDirectory(volumeId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const metadata = await lstat(directory);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
@@ -285,6 +322,18 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
       );
     }
     await chmod(directory, 0o700);
+    return directory;
+  }
+
+  #volumeDirectory(volumeId: string): string {
+    const directory = resolve(this.#workspaceRoot, `agentdock-posix-${volumeId}`);
+    if (!directory.startsWith(`${this.#workspaceRoot}${sep}`)) {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_volume_path_invalid",
+        "Workspace Volume path was invalid",
+        false,
+      );
+    }
     return directory;
   }
 

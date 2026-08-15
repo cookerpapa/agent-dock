@@ -55,7 +55,7 @@ export default function ChatApp() {
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [operation, setOperation] = useState<
-    "creating" | "submitting" | "cancelling" | "steering" | "forking" | null
+    "creating" | "submitting" | "cancelling" | "steering" | "forking" | "deleting-workspace" | null
   >(null);
   const [steerNotice, setSteerNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -80,6 +80,9 @@ export default function ChatApp() {
   const chatScrollerRef = useRef<HTMLElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const currentTurn = activeTurn(state);
+  const selectedWorkspace = workspaces.find(
+    (workspace) => workspace.workspaceId === selectedWorkspaceId,
+  );
   const conversationPanel = useResizablePanel({
     storageKey: "agent-dock:conversation-list",
     initialWidth: 260,
@@ -121,7 +124,11 @@ export default function ChatApp() {
   const refreshWorkspaces = useCallback(async (): Promise<void> => {
     const listed = await api.listWorkspaces();
     setWorkspaces(listed.workspaces);
-    setSelectedWorkspaceId((current) => current || listed.workspaces[0]?.workspaceId || "");
+    setSelectedWorkspaceId((current) =>
+      listed.workspaces.some((workspace) => workspace.workspaceId === current)
+        ? current
+        : (listed.workspaces[0]?.workspaceId ?? ""),
+    );
   }, [api]);
 
   const refreshConversationTree = useCallback(
@@ -495,6 +502,27 @@ export default function ChatApp() {
     }
   }
 
+  async function deleteWorkspace(workspace: WorkspaceSummaryResource): Promise<void> {
+    if (
+      operation !== null ||
+      workspace.sessionCount > 0 ||
+      !window.confirm(`永久删除 Workspace“${workspace.name}”及其中的全部文件？此操作无法撤销。`)
+    ) {
+      return;
+    }
+    setOperation("deleting-workspace");
+    update({ type: "api.error.cleared" });
+    try {
+      await api.deleteWorkspace(workspace.workspaceId, newIdempotencyKey("delete"));
+      await refreshWorkspaces();
+      if (workspaces.length === 1) setWorkspaceChoice("new");
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
   async function submitTurn(): Promise<void> {
     const text = prompt.trim();
     if (!text || !canMutate || !canQueue || operation !== null) return;
@@ -805,19 +833,43 @@ export default function ChatApp() {
                   </label>
                 ) : null}
                 {workspaceChoice === "existing" && workspaces.length > 0 ? (
-                  <label>
-                    <span>目录</span>
-                    <select
-                      onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-                      value={selectedWorkspaceId}
-                    >
-                      {workspaces.map((workspace) => (
-                        <option key={workspace.workspaceId} value={workspace.workspaceId}>
-                          {workspace.name}（{String(workspace.sessionCount)} 个对话）
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="product-workspace-selection">
+                    <label>
+                      <span>目录</span>
+                      <select
+                        onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+                        value={selectedWorkspaceId}
+                      >
+                        {workspaces.map((workspace) => (
+                          <option key={workspace.workspaceId} value={workspace.workspaceId}>
+                            {workspace.name}（{String(workspace.sessionCount)} 个对话）
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedWorkspace === undefined ? null : (
+                      <div className="product-workspace-delete">
+                        <button
+                          className="product-danger-button"
+                          disabled={
+                            !canMutate || selectedWorkspace.sessionCount > 0 || operation !== null
+                          }
+                          onClick={() => void deleteWorkspace(selectedWorkspace)}
+                          title={
+                            selectedWorkspace.sessionCount > 0
+                              ? "请先删除这个 Workspace 下的所有对话"
+                              : undefined
+                          }
+                          type="button"
+                        >
+                          {operation === "deleting-workspace" ? "删除中…" : "删除 Workspace"}
+                        </button>
+                        {selectedWorkspace.sessionCount > 0 ? (
+                          <small>请先删除这个 Workspace 下的所有对话。</small>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
                 ) : null}
                 <label className="product-choice-card">
                   <input

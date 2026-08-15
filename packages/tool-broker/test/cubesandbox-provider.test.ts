@@ -100,6 +100,7 @@ function fakeWorkspaceVolumeGateway(): WorkspaceVolumeGateway {
         sha256: createHash("sha256").update(bytes).digest("hex"),
       };
     }),
+    delete: vi.fn(async ({ volumeId }) => ({ deleted: volumes.delete(volumeId) })),
     close: vi.fn(async () => undefined),
   };
 }

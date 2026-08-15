@@ -232,6 +232,7 @@ export interface ProjectTable {
   id: string;
   tenant_id: string;
   name: string;
+  deleted_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -290,8 +291,19 @@ export interface WorkspaceTable {
   object_snapshot_key: string | null;
   current_workspace_version_id: GeneratedNullable<string>;
   row_version: GeneratedInt8;
+  deleted_at: NullableTimestamp;
+  storage_purged_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
+}
+
+export interface WorkspaceDeleteOperationTable {
+  operation_id: string;
+  tenant_id: string;
+  workspace_id: string;
+  idempotency_key: string;
+  deleted_at: Timestamp;
+  created_at: GeneratedTimestamp;
 }
 
 export interface WorkspaceSourceTable {
@@ -1181,6 +1193,7 @@ export interface Database {
   workspace_repository_sources: WorkspaceRepositorySourceTable;
   workspace_versions: WorkspaceVersionTable;
   workspace_operations: WorkspaceOperationTable;
+  workspace_delete_operations: WorkspaceDeleteOperationTable;
   credential_bindings: CredentialBindingTable;
   model_profiles: ModelProfileTable;
   tenant_model_credentials: TenantModelCredentialTable;

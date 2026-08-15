@@ -349,6 +349,7 @@ export class PostgresWorkspaceSeedResolver {
         "source.github_repository_id as repositoryId",
         "run.source_set_snapshot as sourceSet",
       ])
+      .where("workspace.deleted_at", "is", null)
       .where("workspace.tenant_id", "=", command.payload.tenantId)
       .where("workspace.project_id", "=", command.payload.projectId)
       .where("workspace.id", "=", command.payload.workspaceId)

@@ -27,6 +27,7 @@ Important operator values include:
 - Tool, model and Turn timeouts;
 - Cube warm/persistent retention and capacity;
 - Workspace Volume gateway concurrency;
+- Workspace deletion reaper interval and batch size;
 - Kafka/Valkey event retention and projection settings;
 - optional GitHub and observability profiles.
 

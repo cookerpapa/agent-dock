@@ -11,6 +11,7 @@ import type {
   SessionResource,
   TenantRegistrationResource,
   WorkspaceListResource,
+  WorkspaceDeletionResource,
 } from "@agent-dock/protocol";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
@@ -469,7 +470,88 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       },
     });
     expect(replacement.statusCode).toBe(201);
-    expect(replacement.json<SessionResource>().sandboxRetention).toBe("ephemeral");
+    const replacementSession = replacement.json<SessionResource>();
+    expect(replacementSession.sandboxRetention).toBe("ephemeral");
+
+    const blockedDeletion = await http.inject({
+      method: "DELETE",
+      url: `/v1/workspaces/${project.workspaceId}`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "delete-live-persistent-workspace",
+      },
+    });
+    expect(blockedDeletion.statusCode).toBe(409);
+    expect(blockedDeletion.json()).toMatchObject({ error: { code: "conflict" } });
+
+    const foreignDeletion = await http.inject({
+      method: "DELETE",
+      url: `/v1/workspaces/${project.workspaceId}`,
+      headers: {
+        ...authorization(bravo.apiToken),
+        "idempotency-key": "delete-foreign-workspace",
+      },
+    });
+    expect(foreignDeletion.statusCode).toBe(404);
+
+    const archiveReplacement = await http.inject({
+      method: "DELETE",
+      url: `/v1/conversations/${replacementSession.sessionId}`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "archive-replacement-devbox",
+      },
+    });
+    expect(archiveReplacement.statusCode).toBe(200);
+
+    const deletionHeaders = {
+      ...authorization(alpha.apiToken),
+      "idempotency-key": "delete-persistent-workspace",
+    };
+    const deletedWorkspace = await http.inject({
+      method: "DELETE",
+      url: `/v1/workspaces/${project.workspaceId}`,
+      headers: deletionHeaders,
+    });
+    expect(deletedWorkspace.statusCode).toBe(200);
+    const deletion = deletedWorkspace.json<WorkspaceDeletionResource>();
+    expect(deletion).toMatchObject({
+      workspaceId: project.workspaceId,
+      storageState: "pending",
+      replayed: false,
+    });
+    const replay = await http.inject({
+      method: "DELETE",
+      url: `/v1/workspaces/${project.workspaceId}`,
+      headers: deletionHeaders,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json<WorkspaceDeletionResource>()).toMatchObject({
+      operationId: deletion.operationId,
+      workspaceId: project.workspaceId,
+      replayed: true,
+    });
+
+    const visibleWorkspaces = await http.inject({
+      method: "GET",
+      url: "/v1/workspaces",
+      headers: authorization(alpha.apiToken),
+    });
+    expect(
+      visibleWorkspaces
+        .json<WorkspaceListResource>()
+        .workspaces.some((workspace) => workspace.workspaceId === project.workspaceId),
+    ).toBe(false);
+    expect(
+      (
+        await http.inject({
+          method: "POST",
+          url: `/v1/projects/${project.projectId}/sessions`,
+          headers: authorization(alpha.apiToken),
+          payload: { workspaceId: project.workspaceId, title: "Cannot restore deleted files" },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
   it("forks a settled Pi branch transactionally and renders inherited history", async () => {

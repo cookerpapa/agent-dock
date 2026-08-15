@@ -263,6 +263,8 @@
         "volumeGatewayMaximumConcurrentOperations",
         "volumeGatewayMaximumQueuedOperations",
         "volumeGatewayQueueWaitTimeoutMs",
+        "workspaceDeletionReaperIntervalMs",
+        "workspaceDeletionReaperBatchSize",
         "volumeGatewayRequestTimeoutMs",
         "maximumActivePerReplica",
         "maximumWarmPerReplica",
@@ -291,6 +293,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 600000
+        },
+        "workspaceDeletionReaperIntervalMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "workspaceDeletionReaperBatchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
         },
         "volumeGatewayRequestTimeoutMs": {
           "type": "integer",

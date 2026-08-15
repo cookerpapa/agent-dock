@@ -8,6 +8,7 @@ import {
 import { createDatabase } from "@agent-dock/database";
 import { startServiceObservability } from "@agent-dock/observability";
 import { PostgresWorkspaceVolumeGatewayLock } from "./postgres-workspace-volume-gateway-lock.ts";
+import { WorkspaceVolumeDeletionReaper } from "./workspace-volume-deletion-reaper.ts";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -75,18 +76,31 @@ const server = new WorkspaceVolumeGatewayServer({
   ),
   metrics: observability.metrics,
 });
+const deletionReaper = new WorkspaceVolumeDeletionReaper({
+  database,
+  gateway,
+  intervalMs: integer("AGENT_DOCK_WORKSPACE_DELETION_REAPER_INTERVAL_MS", 30_000, 1_000, 3_600_000),
+  batchSize: integer("AGENT_DOCK_WORKSPACE_DELETION_REAPER_BATCH_SIZE", 16, 1, 256),
+});
 try {
   await server.listen();
+  deletionReaper.start();
 } catch (error: unknown) {
-  await Promise.allSettled([server.close(), observability.close(), database.destroy()]);
+  await Promise.allSettled([
+    deletionReaper.close(),
+    server.close(),
+    observability.close(),
+    database.destroy(),
+  ]);
   throw error;
 }
 process.stdout.write("AgentDock Workspace Volume Gateway ready\n");
 
 let closing: Promise<void> | undefined;
 const closeService = (): Promise<void> =>
-  (closing ??= server
+  (closing ??= deletionReaper
     .close()
+    .then(() => server.close())
     .finally(() => Promise.allSettled([observability.close(), database.destroy()]))
     .then(() => undefined));
 process.once("SIGTERM", () => void closeService());

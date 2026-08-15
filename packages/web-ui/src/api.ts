@@ -20,6 +20,7 @@ import {
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
   parseWorkspaceFileListResource,
+  parseWorkspaceDeletionResource,
   parseWorkspaceListResource,
   parseWorkspaceOperationResource,
   parseWorkspaceVersionListResource,
@@ -47,6 +48,7 @@ import {
   type TenantRegistrationResource,
   type TurnThinkingLevel,
   type WorkspaceFileListResource,
+  type WorkspaceDeletionResource,
   type WorkspaceListResource,
   type WorkspaceOperationResource,
   type WorkspaceSourceRequest,
@@ -287,6 +289,23 @@ export class AgentDockApi {
   async listWorkspaces(): Promise<WorkspaceListResource> {
     return parseWorkspaceListResource(
       await request(this.#fetch, "/v1/workspaces", { method: "GET" }, this.#authorizationToken),
+    );
+  }
+
+  async deleteWorkspace(
+    workspaceId: string,
+    idempotencyKey: string,
+  ): Promise<WorkspaceDeletionResource> {
+    return parseWorkspaceDeletionResource(
+      await request(
+        this.#fetch,
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+        {
+          method: "DELETE",
+          headers: { "idempotency-key": idempotencyKey },
+        },
+        this.#authorizationToken,
+      ),
     );
   }
 

@@ -100,6 +100,7 @@ Volume gateway. It does not copy Workspaces to Kopia or object storage. It:
 
 - prepares and verifies the stable tenant/Workspace Volume identity;
 - initializes an empty/imported Workspace once;
+- purges a deleted Workspace only after every live Cube activation has retired;
 - captures a bounded file/hash index and external Git patch;
 - reads selected current files for the UI without following symlink escapes;
 - serializes operations with a process lock and PostgreSQL advisory lock.

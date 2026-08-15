@@ -156,6 +156,8 @@ sandboxPlane:
   volumeGatewayMaximumConcurrentOperations: 2
   volumeGatewayMaximumQueuedOperations: 32
   volumeGatewayQueueWaitTimeoutMs: 30000
+  workspaceDeletionReaperIntervalMs: 30000
+  workspaceDeletionReaperBatchSize: 16
   volumeGatewayRequestTimeoutMs: 660000
   maximumActivePerReplica: 128
   maximumWarmPerReplica: 128

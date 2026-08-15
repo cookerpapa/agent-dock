@@ -31,13 +31,18 @@ export const WORKSPACE_VOLUME_GATEWAY_INITIALIZE_BASELINE_PATH =
   "/v1/workspaces/initialize-baseline";
 export const WORKSPACE_VOLUME_GATEWAY_SNAPSHOT_PATH = "/v1/workspaces/snapshot";
 export const WORKSPACE_VOLUME_GATEWAY_MATERIALIZE_PATH = "/v1/workspaces/materialize";
+export const WORKSPACE_VOLUME_GATEWAY_DELETE_PATH = "/v1/workspaces/delete";
 
-export type WorkspaceVolumeGatewayIdentity = Readonly<{
+export type WorkspaceVolumeGatewayVolumeIdentity = Readonly<{
   tenantId: string;
   workspaceId: string;
-  sessionId: string;
   volumeId: string;
 }>;
+
+export type WorkspaceVolumeGatewayIdentity = WorkspaceVolumeGatewayVolumeIdentity &
+  Readonly<{
+    sessionId: string;
+  }>;
 
 export type WorkspaceVolumeGatewayPrepareInput = WorkspaceVolumeGatewayIdentity;
 
@@ -57,6 +62,8 @@ export type WorkspaceVolumeGatewayMaterializeInput = WorkspaceVolumeGatewayIdent
     maximumBytes: number;
   }>;
 
+export type WorkspaceVolumeGatewayDeleteInput = WorkspaceVolumeGatewayVolumeIdentity;
+
 export interface WorkspaceVolumeGateway {
   checkHealth(): Promise<void>;
   prepare(input: WorkspaceVolumeGatewayPrepareInput): Promise<{ attached: boolean }>;
@@ -72,6 +79,7 @@ export interface WorkspaceVolumeGateway {
   materialize(
     input: WorkspaceVolumeGatewayMaterializeInput,
   ): Promise<{ bytes: Uint8Array; sha256: string }>;
+  delete(input: WorkspaceVolumeGatewayDeleteInput): Promise<{ deleted: boolean }>;
   close(): Promise<void>;
 }
 
@@ -139,6 +147,27 @@ export function validatedIdentity(
     tenantId: boundedOpaque(input.tenantId, "tenantId"),
     workspaceId: boundedOpaque(input.workspaceId, "workspaceId"),
     sessionId: boundedOpaque(input.sessionId, "sessionId"),
+    volumeId: input.volumeId,
+  });
+  if (
+    !VOLUME_ID_PATTERN.test(identity.volumeId) ||
+    workspaceVolumeId(identity) !== identity.volumeId
+  ) {
+    throw new WorkspaceVolumeGatewayError(
+      "workspace_data_binding_invalid",
+      "Workspace volume binding was invalid",
+      false,
+    );
+  }
+  return identity;
+}
+
+export function validatedVolumeIdentity(
+  input: WorkspaceVolumeGatewayVolumeIdentity,
+): WorkspaceVolumeGatewayVolumeIdentity {
+  const identity = Object.freeze({
+    tenantId: boundedOpaque(input.tenantId, "tenantId"),
+    workspaceId: boundedOpaque(input.workspaceId, "workspaceId"),
     volumeId: input.volumeId,
   });
   if (

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -90,6 +90,19 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
       code: "workspace_data_binding_invalid",
     });
   });
+
+  it("deletes only the persistently bound Workspace volume and is idempotent", async () => {
+    const workspaceRoot = await root();
+    const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
+    const first = identity("session-delete");
+    await mover.prepare(first);
+    const volumeRoot = join(workspaceRoot, `agentdock-posix-${first.volumeId}`);
+    await writeFile(join(volumeRoot, "workspace", "private.txt"), "delete me\n");
+
+    await expect(mover.delete(first)).resolves.toEqual({ deleted: true });
+    await expect(lstat(volumeRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(mover.delete(first)).resolves.toEqual({ deleted: false });
+  });
 });
 
 describe("HttpWorkspaceVolumeGateway", () => {
@@ -119,6 +132,9 @@ describe("HttpWorkspaceVolumeGateway", () => {
       async materialize() {
         return { bytes: new Uint8Array(), sha256: createHash("sha256").digest("hex") };
       },
+      async delete() {
+        return { deleted: true };
+      },
       async close() {},
     };
     const serviceToken = "v".repeat(48);
@@ -138,6 +154,9 @@ describe("HttpWorkspaceVolumeGateway", () => {
         bindingSha256: "3".repeat(64),
       });
       expect(snapshot.files).toHaveLength(files.length);
+      await expect(client.delete(identity("session-large-index"))).resolves.toEqual({
+        deleted: true,
+      });
     } finally {
       await client.close();
       await server.close();

@@ -69,8 +69,14 @@ export {
   type WorkspaceVolumeGatewayIdentity,
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
+  type WorkspaceVolumeGatewayDeleteInput,
   type WorkspaceVolumeGatewayLock,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
+  type WorkspaceVolumeGatewayVolumeIdentity,
 } from "./workspace-volume-gateway.ts";
 export { PostgresWorkspaceVolumeGatewayLock } from "./workspace-volume-gateway.ts";
+export {
+  WorkspaceVolumeDeletionReaper,
+  type WorkspaceVolumeDeletionReaperOptions,
+} from "./workspace-volume-deletion-reaper.ts";

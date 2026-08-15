@@ -29,6 +29,7 @@ import type {
   TestResultListResource,
   WorkspaceSourceResource,
   WorkspaceSourceSetSnapshot,
+  WorkspaceDeletionResource,
   WorkspaceListResource,
 } from "@agent-dock/protocol";
 import {
@@ -649,6 +650,7 @@ export class ControlPlaneStore {
           .selectFrom("projects")
           .select((expression) => expression.fn.countAll<string>().as("count"))
           .where("tenant_id", "=", this.#tenantId)
+          .where("deleted_at", "is", null)
           .executeTakeFirstOrThrow();
         if (
           nonNegativeSafeInteger(projectCount.count, "Tenant project count") >=
@@ -868,7 +870,7 @@ export class ControlPlaneStore {
         };
       });
     } catch (error) {
-      if (isPostgresConstraint(error, "projects_tenant_name_unique")) {
+      if (isPostgresConstraint(error, "projects_tenant_live_name_unique")) {
         throw new ControlPlaneStoreError("conflict", "A project with this name already exists");
       }
       throw error;
@@ -948,6 +950,7 @@ export class ControlPlaneStore {
         .where("workspace.tenant_id", "=", this.#tenantId)
         .where("workspace.project_id", "=", projectId)
         .where("workspace.id", "=", workspaceId)
+        .where("workspace.deleted_at", "is", null)
         .forUpdate("workspace")
         .executeTakeFirst();
       if (!workspace) {
@@ -1072,6 +1075,7 @@ export class ControlPlaneStore {
         )})`.as("lastActiveAt"),
       ])
       .where("workspace.tenant_id", "=", this.#tenantId)
+      .where("workspace.deleted_at", "is", null)
       .where((expression) =>
         expression.or([
           expression("workspace.current_workspace_version_id", "is", null),
@@ -1094,6 +1098,157 @@ export class ControlPlaneStore {
       })),
       truncated: rows.length > MAX_WORKSPACE_SUMMARIES,
     };
+  }
+
+  async deleteWorkspace(
+    workspaceId: string,
+    idempotencyKey: string,
+  ): Promise<WorkspaceDeletionResource> {
+    const operationId = this.#idGenerator();
+    try {
+      return await this.#database.transaction().execute(async (transaction) => {
+        const replay = await transaction
+          .selectFrom("workspace_delete_operations as operation")
+          .innerJoin("workspaces as workspace", (join) =>
+            join
+              .onRef("workspace.tenant_id", "=", "operation.tenant_id")
+              .onRef("workspace.id", "=", "operation.workspace_id"),
+          )
+          .select([
+            "operation.operation_id as operationId",
+            "operation.workspace_id as workspaceId",
+            "operation.deleted_at as deletedAt",
+            "workspace.storage_purged_at as storagePurgedAt",
+          ])
+          .where("operation.tenant_id", "=", this.#tenantId)
+          .where("operation.workspace_id", "=", workspaceId)
+          .where("operation.idempotency_key", "=", idempotencyKey)
+          .executeTakeFirst();
+        if (replay !== undefined) {
+          return {
+            operationId: replay.operationId,
+            workspaceId: replay.workspaceId,
+            storageState: replay.storagePurgedAt === null ? "pending" : "purged",
+            replayed: true,
+            deletedAt: isoTimestamp(replay.deletedAt),
+          };
+        }
+
+        const workspace = await transaction
+          .selectFrom("workspaces")
+          .select(["id", "project_id", "sandbox_domain_id", "deleted_at", "storage_purged_at"])
+          .where("tenant_id", "=", this.#tenantId)
+          .where("id", "=", workspaceId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (workspace === undefined) {
+          throw new ControlPlaneStoreError("not_found", "Workspace was not found");
+        }
+
+        let deletedAt = workspace.deleted_at;
+        if (deletedAt === null) {
+          const liveSession = await transaction
+            .selectFrom("sessions")
+            .select("id")
+            .where("tenant_id", "=", this.#tenantId)
+            .where("workspace_id", "=", workspaceId)
+            .where("archived_at", "is", null)
+            .limit(1)
+            .executeTakeFirst();
+          if (liveSession !== undefined) {
+            throw new ControlPlaneStoreError(
+              "conflict",
+              "Delete every conversation in this Workspace before deleting the Workspace",
+            );
+          }
+
+          deletedAt = new Date();
+          await transaction
+            .updateTable("workspaces")
+            .set({
+              deleted_at: deletedAt,
+              updated_at: deletedAt,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            })
+            .where("tenant_id", "=", this.#tenantId)
+            .where("id", "=", workspaceId)
+            .where("deleted_at", "is", null)
+            .executeTakeFirstOrThrow();
+          await transaction
+            .updateTable("sandbox_domains")
+            .set({
+              assigned_workspaces: sql<string>`greatest(${sql.ref("assigned_workspaces")} - 1, 0)`,
+              updated_at: deletedAt,
+            })
+            .where("id", "=", workspace.sandbox_domain_id)
+            .executeTakeFirst();
+
+          const remainingWorkspace = await transaction
+            .selectFrom("workspaces")
+            .select("id")
+            .where("tenant_id", "=", this.#tenantId)
+            .where("project_id", "=", workspace.project_id)
+            .where("deleted_at", "is", null)
+            .limit(1)
+            .executeTakeFirst();
+          if (remainingWorkspace === undefined) {
+            await transaction
+              .updateTable("projects")
+              .set({ deleted_at: deletedAt, updated_at: deletedAt })
+              .where("tenant_id", "=", this.#tenantId)
+              .where("id", "=", workspace.project_id)
+              .where("deleted_at", "is", null)
+              .executeTakeFirst();
+          }
+        }
+
+        await transaction
+          .insertInto("workspace_delete_operations")
+          .values({
+            operation_id: operationId,
+            tenant_id: this.#tenantId,
+            workspace_id: workspaceId,
+            idempotency_key: idempotencyKey,
+            deleted_at: deletedAt,
+          })
+          .executeTakeFirstOrThrow();
+        return {
+          operationId,
+          workspaceId,
+          storageState: workspace.storage_purged_at === null ? "pending" : "purged",
+          replayed: false,
+          deletedAt: isoTimestamp(deletedAt),
+        };
+      });
+    } catch (error) {
+      if (!isPostgresConstraint(error, "workspace_delete_operations_scope_key_unique")) {
+        throw error;
+      }
+      const replay = await this.#database
+        .selectFrom("workspace_delete_operations as operation")
+        .innerJoin("workspaces as workspace", (join) =>
+          join
+            .onRef("workspace.tenant_id", "=", "operation.tenant_id")
+            .onRef("workspace.id", "=", "operation.workspace_id"),
+        )
+        .select([
+          "operation.operation_id as operationId",
+          "operation.workspace_id as workspaceId",
+          "operation.deleted_at as deletedAt",
+          "workspace.storage_purged_at as storagePurgedAt",
+        ])
+        .where("operation.tenant_id", "=", this.#tenantId)
+        .where("operation.workspace_id", "=", workspaceId)
+        .where("operation.idempotency_key", "=", idempotencyKey)
+        .executeTakeFirstOrThrow();
+      return {
+        operationId: replay.operationId,
+        workspaceId: replay.workspaceId,
+        storageState: replay.storagePurgedAt === null ? "pending" : "purged",
+        replayed: true,
+        deletedAt: isoTimestamp(replay.deletedAt),
+      };
+    }
   }
 
   async listConversations(): Promise<ConversationListResource> {
@@ -2378,6 +2533,7 @@ export class ControlPlaneStore {
         ])
         .where("workspace.tenant_id", "=", this.#tenantId)
         .where("workspace.id", "=", session.workspace_id)
+        .where("workspace.deleted_at", "is", null)
         .forUpdate("workspace")
         .executeTakeFirstOrThrow();
       if (session.archived_at !== null) {
@@ -2920,6 +3076,7 @@ export class ControlPlaneStore {
       .where("workspace.tenant_id", "=", this.#tenantId)
       .where("workspace.project_id", "=", projectId)
       .where("workspace.id", "=", workspaceId)
+      .where("workspace.deleted_at", "is", null)
       .executeTakeFirst();
     if (row === undefined) {
       throw new ControlPlaneStoreError("not_found", "Workspace source was not found");

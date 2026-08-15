@@ -56,6 +56,7 @@ import * as postgresCheckpointObjects from "./054_postgres_checkpoint_objects.ts
 import * as unlimitedDefaultDailyTokens from "./055_unlimited_default_daily_tokens.ts";
 import * as codingRunModelRequestLimit from "./056_coding_run_model_request_limit.ts";
 import * as conversationTreeForks from "./057_conversation_tree_forks.ts";
+import * as workspaceDeletion from "./058_workspace_deletion.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -117,6 +118,7 @@ export const migrationProvider: MigrationProvider = {
       "055_unlimited_default_daily_tokens": unlimitedDefaultDailyTokens,
       "056_coding_run_model_request_limit": codingRunModelRequestLimit,
       "057_conversation_tree_forks": conversationTreeForks,
+      "058_workspace_deletion": workspaceDeletion,
     };
   },
 };
@@ -341,3 +343,8 @@ export {
   down as downConversationTreeForks,
   up as upConversationTreeForks,
 } from "./057_conversation_tree_forks.ts";
+
+export {
+  down as downWorkspaceDeletion,
+  up as upWorkspaceDeletion,
+} from "./058_workspace_deletion.ts";

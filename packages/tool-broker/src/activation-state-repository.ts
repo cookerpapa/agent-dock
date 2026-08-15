@@ -221,6 +221,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         .select("sandbox_domain_id")
         .where("workspaces.tenant_id", "=", input.assignment.tenantId)
         .where("workspaces.id", "=", input.assignment.workspaceId)
+        .where("workspaces.deleted_at", "is", null)
         .forUpdate()
         .executeTakeFirst();
       if (workspace?.sandbox_domain_id !== this.#sandboxDomainId) {

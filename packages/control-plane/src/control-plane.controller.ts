@@ -54,6 +54,7 @@ import {
   type WorkspaceVersionListResource,
   type WorkspaceVersionResource,
   type WorkspaceListResource,
+  type WorkspaceDeletionResource,
 } from "@agent-dock/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -200,6 +201,19 @@ export class ControlPlaneController {
   async listWorkspaces(@Req() request: FastifyRequest): Promise<WorkspaceListResource> {
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).listWorkspaces();
+  }
+
+  @Delete("workspaces/:workspaceId")
+  async deleteWorkspace(
+    @Req() request: FastifyRequest,
+    @Param("workspaceId") workspaceIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+  ): Promise<WorkspaceDeletionResource> {
+    const workspaceId = parseUuidPathParameter(workspaceIdValue, "workspaceId");
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.controlPlaneStores
+      .forIdentity(identity)
+      .deleteWorkspace(workspaceId, parseIdempotencyKey(idempotencyKeyValue));
   }
 
   @Delete("conversations/:sessionId")
