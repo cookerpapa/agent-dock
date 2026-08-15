@@ -903,6 +903,150 @@ describe("PostgreSQL interrupted conversation checkpoint store", () => {
       await rm(isolatedObjectRoot, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("does not copy Pi history from a shared Workspace after a failed Run", async () => {
+    const isolatedPglite = await PGlite.create();
+    const isolatedSocket = new PGLiteSocketServer({
+      db: isolatedPglite,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    let isolatedDatabase: Kysely<Database> | undefined;
+    try {
+      await isolatedSocket.start();
+      isolatedDatabase = createDatabase({
+        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
+        maxConnections: 2,
+      });
+      await runMigrations(isolatedDatabase, "up");
+      await seed(isolatedDatabase);
+
+      const sourceSessionId = "81000000-0000-4000-8000-000000000001";
+      const sourcePiArtifactId = "81000000-0000-4000-8000-000000000002";
+      const sourceWorkspaceArtifactId = "81000000-0000-4000-8000-000000000003";
+      const sourceWorkspaceVersionId = "81000000-0000-4000-8000-000000000004";
+      const sourcePiKey = "checkpoints/source-conversation/pi.jsonl";
+      const sourceWorkspaceKey = "checkpoints/source-conversation/workspace.json";
+      const sourcePi = Buffer.from("source conversation only\n");
+      const sourceWorkspace = workspace("shared workspace");
+      await isolatedDatabase
+        .insertInto("sessions")
+        .values({
+          id: sourceSessionId,
+          tenant_id: IDS.tenant,
+          project_id: IDS.project,
+          workspace_id: IDS.workspace,
+          desired_model_profile_id: IDS.profile,
+          state: "idle",
+          pi_session_snapshot_key: sourcePiKey,
+          workspace_snapshot_key: sourceWorkspaceKey,
+        })
+        .executeTakeFirstOrThrow();
+      await isolatedDatabase
+        .insertInto("artifacts")
+        .values([
+          {
+            id: sourcePiArtifactId,
+            tenant_id: IDS.tenant,
+            session_id: sourceSessionId,
+            turn_id: null,
+            run_id: null,
+            kind: "pi_session_snapshot",
+            object_key: sourcePiKey,
+            sha256: createHash("sha256").update(sourcePi).digest("hex"),
+            size_bytes: sourcePi.byteLength,
+            file_name: "session.jsonl",
+            media_type: "application/x-ndjson",
+          },
+          {
+            id: sourceWorkspaceArtifactId,
+            tenant_id: IDS.tenant,
+            session_id: sourceSessionId,
+            turn_id: null,
+            run_id: null,
+            kind: "workspace_snapshot",
+            object_key: sourceWorkspaceKey,
+            sha256: createHash("sha256").update(sourceWorkspace).digest("hex"),
+            size_bytes: sourceWorkspace.byteLength,
+            file_name: "workspace.json",
+            media_type: "application/json",
+          },
+        ])
+        .execute();
+      await isolatedDatabase
+        .insertInto("workspace_versions")
+        .values({
+          id: sourceWorkspaceVersionId,
+          tenant_id: IDS.tenant,
+          workspace_id: IDS.workspace,
+          session_id: sourceSessionId,
+          version_number: 1,
+          parent_version_id: null,
+          source_version_id: null,
+          origin_kind: "migration",
+          run_id: null,
+          attempt_id: null,
+          turn_id: null,
+          pi_artifact_id: sourcePiArtifactId,
+          workspace_artifact_id: sourceWorkspaceArtifactId,
+          patch_artifact_id: null,
+          revision: createHash("sha256").update(sourceWorkspace).digest("hex"),
+          file_count: 1,
+          state: "settled",
+          settled_at: new Date(),
+        })
+        .executeTakeFirstOrThrow();
+      await isolatedDatabase
+        .updateTable("workspaces")
+        .set({ current_workspace_version_id: sourceWorkspaceVersionId })
+        .where("id", "=", IDS.workspace)
+        .executeTakeFirstOrThrow();
+      await isolatedDatabase
+        .updateTable("sessions")
+        .set({
+          current_workspace_version_id: sourceWorkspaceVersionId,
+          workspace_snapshot_key: sourceWorkspaceKey,
+          pi_session_snapshot_key: null,
+        })
+        .where("id", "=", IDS.session)
+        .executeTakeFirstOrThrow();
+
+      await isolatedDatabase.transaction().execute((transaction) =>
+        transitionCurrentRunAttempt(
+          transaction,
+          {
+            tenantId: IDS.tenant,
+            runId: IDS.run1,
+            attemptId: IDS.attempt1,
+            leaseId: IDS.lease1,
+            fencingToken: 1,
+          },
+          {
+            runState: "failed",
+            attemptState: "failed",
+            reason: "test_shared_workspace_failure",
+            now: new Date(),
+            failure: { code: "test_failure", message: "test failure", retryable: false },
+          },
+        ),
+      );
+
+      await expect(
+        isolatedDatabase
+          .selectFrom("sessions")
+          .select(["pi_session_snapshot_key", "workspace_snapshot_key"])
+          .where("id", "=", IDS.session)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toEqual({
+        pi_session_snapshot_key: null,
+        workspace_snapshot_key: sourceWorkspaceKey,
+      });
+    } finally {
+      await isolatedDatabase?.destroy();
+      await isolatedSocket.stop().catch(() => undefined);
+      await isolatedPglite.close().catch(() => undefined);
+    }
+  }, 30_000);
 });
 
 describe("PostgreSQL hard-crash semantic recovery", () => {

@@ -297,12 +297,11 @@ export async function transitionCurrentRunAttempt(
           "version.id",
           "session_row.current_workspace_version_id",
         )
-        .leftJoin("artifacts as version_pi", "version_pi.id", "version.pi_artifact_id")
         .leftJoin("artifacts as workspace", "workspace.id", "version.workspace_artifact_id")
         .select([
           "session_row.id",
+          "session_row.pi_session_snapshot_key as sessionPiKey",
           "session_row.current_workspace_version_id as currentVersionId",
-          "version_pi.object_key as versionPiKey",
           "workspace.object_key as workspaceKey",
         ])
         .where("session_row.tenant_id", "=", identity.tenantId)
@@ -359,7 +358,7 @@ export async function transitionCurrentRunAttempt(
           .updateTable("sessions")
           .set({
             pi_session_snapshot_key:
-              currentInterruptedPi?.objectKey ?? priorPi?.objectKey ?? session.versionPiKey,
+              currentInterruptedPi?.objectKey ?? priorPi?.objectKey ?? session.sessionPiKey,
             workspace_snapshot_key: session.workspaceKey,
             row_version: sql<string>`${sql.ref("row_version")} + 1`,
             updated_at: now,
