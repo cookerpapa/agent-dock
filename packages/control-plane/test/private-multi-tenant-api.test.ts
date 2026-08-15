@@ -125,7 +125,6 @@ beforeAll(async () => {
 
   application = await createControlPlaneApplication({
     database,
-    advancedModulesEnabled: true,
     productionHttpGateway: new ProductionHttpGateway({
       authenticator: new PostgresTenantApiAuthenticator({ database, clock: () => NOW }),
       readiness: () => true,
@@ -248,17 +247,6 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
     expect(alphaTurn.statusCode).toBe(202);
     turnA = alphaTurn.json<AcceptedTurnResource>();
 
-    const viewerRewind = await http.inject({
-      method: "POST",
-      url: `/v1/runs/${turnA.runId}/rewinds`,
-      headers: {
-        ...authorization(viewerAToken),
-        "idempotency-key": "viewer-rewind-denied",
-      },
-      payload: { sourceAttemptId: TENANT_A_IDS[0] },
-    });
-    expect(viewerRewind.statusCode).toBe(403);
-
     const foreignProbes = [
       await http.inject({
         method: "POST",
@@ -291,20 +279,6 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
           ...authorization(tenantB.credential.token),
           "last-event-id": "0",
         },
-      }),
-      await http.inject({
-        method: "GET",
-        url: `/v1/runs/${turnA.runId}/review-bundle`,
-        headers: authorization(tenantB.credential.token),
-      }),
-      await http.inject({
-        method: "POST",
-        url: `/v1/runs/${turnA.runId}/rewinds`,
-        headers: {
-          ...authorization(tenantB.credential.token),
-          "idempotency-key": "foreign-rewind-probe",
-        },
-        payload: { sourceAttemptId: TENANT_B_IDS[0] },
       }),
     ];
     for (const response of foreignProbes) {
@@ -348,48 +322,6 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
     });
     expect(newTurn.statusCode).toBe(429);
     expect(newTurn.json()).toMatchObject({ error: { code: "tenant_quota_exceeded" } });
-  });
-
-  it("restricts operational insights to owners and keeps them tenant scoped", async () => {
-    const denied = await http.inject({
-      method: "GET",
-      url: "/v1/operations/summary",
-      headers: authorization(memberAToken),
-    });
-    expect(denied.statusCode).toBe(403);
-    expect(denied.json()).toMatchObject({ error: { code: "authorization_denied" } });
-    const auditDenied = await http.inject({
-      method: "GET",
-      url: "/v1/operations/audit",
-      headers: authorization(memberAToken),
-    });
-    expect(auditDenied.statusCode).toBe(403);
-
-    const bravo = await http.inject({
-      method: "GET",
-      url: "/v1/operations/summary",
-      headers: authorization(tenantB.credential.token),
-    });
-    expect(bravo.statusCode).toBe(200);
-    expect(bravo.json()).toMatchObject({
-      runs: { queued: 0, active: 0 },
-      model: { requests: 0, costMicrousd: 0 },
-      tools: { calls: 0, failures: 0 },
-      activeSandboxAssignments: 0,
-      failures: [],
-    });
-    expect(bravo.body).not.toContain(tenantA.tenantId);
-    const bravoAudit = await http.inject({
-      method: "GET",
-      url: "/v1/operations/audit",
-      headers: authorization(tenantB.credential.token),
-    });
-    expect(bravoAudit.statusCode).toBe(200);
-    expect(bravoAudit.json()).toEqual({
-      tenantId: tenantB.tenantId,
-      events: [],
-      truncated: false,
-    });
   });
 
   it("invalidates a revoked tenant credential without affecting another tenant", async () => {

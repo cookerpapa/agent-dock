@@ -214,7 +214,6 @@ export async function startControlPlane(): Promise<void> {
           };
         },
       },
-      advancedModulesEnabled: config.advancedModulesEnabled,
       maintenance: {
         onActivity: (activity) =>
           operationalLog({

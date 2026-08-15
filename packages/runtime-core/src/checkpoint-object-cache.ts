@@ -48,8 +48,8 @@ function boundedCacheInteger(
  * A Worker-local, bounded cache for immutable checkpoint objects.
  *
  * PostgreSQL still resolves and rechecks the current checkpoint head on every
- * Run. This cache only avoids downloading an already-selected immutable
- * manifest, JSONL segment, or Workspace object from S3 again.
+ * Run. This cache only avoids reading an already-selected immutable Workspace,
+ * Tool-output, or compact Pi Session-reference object again.
  */
 export class TtlCheckpointObjectStore implements CheckpointObjectStore {
   readonly #objectStore: CheckpointObjectStore;

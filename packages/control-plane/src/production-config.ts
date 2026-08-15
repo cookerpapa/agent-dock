@@ -18,7 +18,6 @@ export type ProductionControlPlaneConfig = {
   toolBrokerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
   workspaceTerminalToken: string;
-  advancedModulesEnabled: boolean;
   externalWorkerEventLog: boolean;
   workerEventIngestBaseUrl?: string;
   workerEventIngestToken?: string;
@@ -376,7 +375,6 @@ export async function loadProductionControlPlaneConfig(
       "AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN",
       allowInlineSecrets,
     ),
-    advancedModulesEnabled: booleanValue(environment, "AGENT_DOCK_ADVANCED_MODULES_ENABLED"),
     supervisorIdPrefix: supervisorIdPrefixValue(
       required(environment, "AGENT_DOCK_SUPERVISOR_ID_PREFIX"),
     ),

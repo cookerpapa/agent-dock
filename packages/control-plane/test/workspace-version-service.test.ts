@@ -1,22 +1,14 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import type { GitHubGatewayClient, GitHubGatewayRequest } from "@agent-dock/github-gateway";
 import {
   createPersistentVolumeReference,
   createWorkspaceSnapshot,
 } from "@agent-dock/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
-import Fastify from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
-import {
-  ControlPlaneStore,
-  GitHubIntegrationService,
-  GitHubWebhookIngestGateway,
-  WorkspaceVersionError,
-  WorkspaceVersionService,
-} from "../src/index.ts";
+import { ControlPlaneStore, WorkspaceVersionService } from "../src/index.ts";
 
 const IDS = {
   tenant: "11000000-0000-4000-8000-000000000001",
@@ -26,9 +18,7 @@ const IDS = {
   session: "14000000-0000-4000-8000-000000000001",
   credential: "15000000-0000-4000-8000-000000000001",
   profile: "16000000-0000-4000-8000-000000000001",
-  pi1: "17000000-0000-4000-8000-000000000001",
   workspace1: "18000000-0000-4000-8000-000000000001",
-  pi2: "17000000-0000-4000-8000-000000000002",
   workspace2: "18000000-0000-4000-8000-000000000002",
   version1: "19000000-0000-4000-8000-000000000001",
   version2: "19000000-0000-4000-8000-000000000002",
@@ -55,11 +45,7 @@ async function seed(): Promise<void> {
     { path: "README.md", executable: false, content: Buffer.from("second\n") },
     { path: "bin/run.sh", executable: true, content: Buffer.from("#!/bin/sh\n") },
   ]);
-  const pi1 = Buffer.from("pi-one\n");
-  const pi2 = Buffer.from("pi-two\n");
-  objects.set("checkpoints/pi-1", pi1);
   objects.set("checkpoints/workspace-1", first);
-  objects.set("checkpoints/pi-2", pi2);
   objects.set("checkpoints/workspace-2", second);
   await database
     .insertInto("tenants")
@@ -146,14 +132,13 @@ async function seed(): Promise<void> {
       workspace_id: IDS.workspace,
       desired_model_profile_id: IDS.profile,
       state: "idle",
-      pi_session_snapshot_key: "checkpoints/pi-2",
       workspace_snapshot_key: "checkpoints/workspace-2",
     })
     .execute();
   await database.insertInto("session_event_cursors").values({ session_id: IDS.session }).execute();
   const artifact = (
     id: string,
-    kind: "pi_session_snapshot" | "workspace_snapshot",
+    kind: "workspace_snapshot",
     objectKey: string,
     bytes: Uint8Array,
   ) => ({
@@ -166,15 +151,13 @@ async function seed(): Promise<void> {
     object_key: objectKey,
     sha256: hash(bytes),
     size_bytes: bytes.byteLength,
-    file_name: kind === "workspace_snapshot" ? "workspace.json" : "pi.jsonl",
+    file_name: "workspace.json",
     media_type: "application/octet-stream",
   });
   await database
     .insertInto("artifacts")
     .values([
-      artifact(IDS.pi1, "pi_session_snapshot", "checkpoints/pi-1", pi1),
       artifact(IDS.workspace1, "workspace_snapshot", "checkpoints/workspace-1", first),
-      artifact(IDS.pi2, "pi_session_snapshot", "checkpoints/pi-2", pi2),
       artifact(IDS.workspace2, "workspace_snapshot", "checkpoints/workspace-2", second),
     ])
     .execute();
@@ -182,22 +165,10 @@ async function seed(): Promise<void> {
     .insertInto("checkpoint_objects")
     .values([
       {
-        object_key: "checkpoints/pi-1",
-        bytes: pi1,
-        sha256: hash(pi1),
-        size_bytes: pi1.byteLength,
-      },
-      {
         object_key: "checkpoints/workspace-1",
         bytes: first,
         sha256: hash(first),
         size_bytes: first.byteLength,
-      },
-      {
-        object_key: "checkpoints/pi-2",
-        bytes: pi2,
-        sha256: hash(pi2),
-        size_bytes: pi2.byteLength,
       },
       {
         object_key: "checkpoints/workspace-2",
@@ -222,7 +193,6 @@ async function seed(): Promise<void> {
         run_id: null,
         attempt_id: null,
         turn_id: null,
-        pi_artifact_id: IDS.pi1,
         workspace_artifact_id: IDS.workspace1,
         patch_artifact_id: null,
         revision: hash(first),
@@ -242,7 +212,6 @@ async function seed(): Promise<void> {
         run_id: null,
         attempt_id: null,
         turn_id: null,
-        pi_artifact_id: IDS.pi2,
         workspace_artifact_id: IDS.workspace2,
         patch_artifact_id: null,
         revision: hash(second),
@@ -293,7 +262,7 @@ afterAll(async () => {
 });
 
 describe.sequential("versioned Workspace service", () => {
-  it("lists immutable history and exposes tenant-scoped files, compare and artifacts", async () => {
+  it("lists immutable history and exposes tenant-scoped files", async () => {
     await expect(service.list(IDS.tenant, IDS.session)).resolves.toMatchObject({
       currentVersionId: IDS.version2,
       archived: false,
@@ -321,18 +290,12 @@ describe.sequential("versioned Workspace service", () => {
     await expect(service.file(IDS.tenant, IDS.version2, "README.md")).resolves.toMatchObject({
       bytes: Buffer.from("second\n"),
     });
-    await expect(service.compare(IDS.tenant, IDS.version1, IDS.version2)).resolves.toMatchObject({
-      summary: { added: 1, modified: 1, deleted: 1, modeChanged: 0 },
-    });
-    await expect(service.artifact(IDS.tenant, IDS.workspace2)).resolves.toMatchObject({
-      resource: { artifactId: IDS.workspace2 },
-    });
     await expect(service.get(IDS.otherTenant, IDS.version2)).rejects.toMatchObject({
       code: "not_found",
     });
   });
 
-  it("starts a new conversation from the shared Workspace head without copying Pi history", async () => {
+  it("starts a new conversation from the shared Workspace head", async () => {
     const store = new ControlPlaneStore({
       database,
       tenantId: IDS.tenant,
@@ -347,16 +310,10 @@ describe.sequential("versioned Workspace service", () => {
     );
     const persisted = await database
       .selectFrom("sessions")
-      .select([
-        "pi_session_snapshot_key",
-        "workspace_snapshot_key",
-        "current_workspace_version_id",
-        "forked_from_session_id",
-      ])
+      .select(["workspace_snapshot_key", "current_workspace_version_id", "forked_from_session_id"])
       .where("id", "=", conversation.sessionId)
       .executeTakeFirstOrThrow();
     expect(persisted).toEqual({
-      pi_session_snapshot_key: null,
       workspace_snapshot_key: "checkpoints/workspace-2",
       current_workspace_version_id: IDS.version2,
       forked_from_session_id: null,
@@ -465,7 +422,6 @@ describe.sequential("versioned Workspace service", () => {
         run_id: null,
         attempt_id: null,
         turn_id: null,
-        pi_artifact_id: IDS.pi2,
         workspace_artifact_id: IDS.workspace3,
         patch_artifact_id: null,
         revision: hash(checkpoint),
@@ -484,9 +440,6 @@ describe.sequential("versioned Workspace service", () => {
           sha256: hash(readme),
         },
       ],
-    });
-    await expect(service.compare(IDS.tenant, IDS.version2, IDS.version3)).resolves.toMatchObject({
-      summary: { added: 0, modified: 1, deleted: 1, modeChanged: 0 },
     });
     await expect(service.file(IDS.tenant, IDS.version3, "README.md")).rejects.toMatchObject({
       code: "artifact_unavailable",
@@ -552,171 +505,13 @@ describe.sequential("versioned Workspace service", () => {
     });
   });
 
-  it("registers an allowlisted GitHub App source and idempotently delivers an immutable version", async () => {
-    const requests: GitHubGatewayRequest[] = [];
-    const gateway = {
-      request: async (request: GitHubGatewayRequest) => {
-        requests.push(request);
-        if (request.type === "installation.inspect") {
-          return {
-            type: "installation.inspected" as const,
-            requestId: request.requestId,
-            installation: {
-              installationId: 7,
-              accountId: 9,
-              accountLogin: "acme",
-              targetType: "Organization" as const,
-              repositorySelection: "selected" as const,
-              suspended: false,
-              permissions: { contents: "write", pull_requests: "write", checks: "write" },
-              repositories: [
-                {
-                  repositoryId: 42,
-                  installationId: 7,
-                  fullName: "acme/private-repo",
-                  ownerLogin: "acme",
-                  name: "private-repo",
-                  private: true,
-                  defaultBranch: "main",
-                },
-              ],
-            },
-          };
-        }
-        if (request.type === "pull_request.deliver") {
-          return {
-            type: "pull_request.delivered" as const,
-            requestId: request.requestId,
-            deliveryId: request.deliveryId,
-            commitSha: "b".repeat(40),
-            pullRequestNumber: 12,
-            pullRequestUrl: "https://github.com/acme/private-repo/pull/12",
-            checkRunId: 99,
-          };
-        }
-        throw new Error("unexpected request");
-      },
-    } as GitHubGatewayClient;
-    const integration = new GitHubIntegrationService({
-      database,
-      gateway,
-      workspaceVersions: service,
-    });
-    await expect(integration.registerInstallation(IDS.tenant, 7)).resolves.toMatchObject({
-      installationId: 7,
-      repositories: [{ repositoryId: 42, enabled: true }],
-    });
-    await database
-      .updateTable("workspace_sources")
-      .set({
-        kind: "github_app",
-        repository: "acme/private-repo",
-        commit_sha: "a".repeat(40),
-        github_installation_id: 7,
-        github_repository_id: 42,
-        status: "pending",
-      })
-      .where("tenant_id", "=", IDS.tenant)
-      .where("workspace_id", "=", IDS.workspace)
-      .executeTakeFirstOrThrow();
-    const request = {
-      repositoryId: 42,
-      baseBranch: "main",
-      baseCommitSha: "a".repeat(40),
-      headBranch: "agent/version-two",
-      title: "Deliver version two",
-      body: "Immutable AgentDock checkpoint",
-    };
-    await expect(
-      integration.deliverPullRequest(IDS.tenant, IDS.version2, "deliver-version-two", request),
-    ).resolves.toMatchObject({
-      state: "completed",
-      commitSha: "b".repeat(40),
-      pullRequestNumber: 12,
-      replayed: false,
-    });
-    await expect(
-      integration.deliverPullRequest(IDS.tenant, IDS.version2, "deliver-version-two", request),
-    ).resolves.toMatchObject({ state: "completed", replayed: true });
-    expect(requests.filter((entry) => entry.type === "pull_request.deliver")).toHaveLength(1);
-  });
-
-  it("accepts a follow-up from the durable Pi checkpoint of an interrupted Run", async () => {
-    const store = new ControlPlaneStore({
-      database,
-      tenantId: IDS.tenant,
-      defaultModelProfileId: IDS.profile,
-      idGenerator: randomUUID,
-    });
-    const project = await store.createProject(`interrupted-${randomUUID()}`);
-    const conversation = await store.createSession(
-      project.projectId,
-      project.workspaceId,
-      "Interrupted conversation",
-      "ephemeral",
-    );
-    const artifactId = randomUUID();
-    const objectKey = `checkpoints/${conversation.sessionId}/interrupted-pi.jsonl`;
-    const bytes = Buffer.from('{"type":"session","version":3}\n');
-    await database
-      .insertInto("artifacts")
-      .values({
-        id: artifactId,
-        tenant_id: IDS.tenant,
-        session_id: conversation.sessionId,
-        turn_id: null,
-        run_id: null,
-        kind: "pi_interrupted_session_snapshot",
-        object_key: objectKey,
-        sha256: hash(bytes),
-        size_bytes: bytes.byteLength,
-        file_name: "session.jsonl",
-        media_type: "application/x-ndjson",
-      })
-      .executeTakeFirstOrThrow();
-    await database
-      .updateTable("sessions")
-      .set({ pi_session_snapshot_key: objectKey })
-      .where("tenant_id", "=", IDS.tenant)
-      .where("id", "=", conversation.sessionId)
-      .executeTakeFirstOrThrow();
-
-    const accepted = await store.acceptTurn(conversation.sessionId, "resume-interrupted", {
-      prompt: "Inspect the interrupted state and continue.",
-    });
-    await expect(
-      database
-        .selectFrom("runs")
-        .select("pi_session_base_artifact_id")
-        .where("tenant_id", "=", IDS.tenant)
-        .where("id", "=", accepted.runId)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toEqual({ pi_session_base_artifact_id: artifactId });
-  });
-
-  it("forks idempotently, rolls back with CAS, archives, and blocks archived turns", async () => {
-    const fork = await service.fork(IDS.tenant, "fork-version-one", IDS.session, {
-      versionId: IDS.version1,
-    });
-    expect(fork.forkedSessionId).toBeDefined();
-    await expect(
-      service.fork(IDS.tenant, "fork-version-one", IDS.session, { versionId: IDS.version1 }),
-    ).resolves.toMatchObject({ replayed: true, forkedSessionId: fork.forkedSessionId });
-    await expect(
-      service.rollback(IDS.tenant, "rollback-version-one", IDS.session, {
-        versionId: IDS.version1,
-        expectedCurrentVersionId: IDS.version2,
-      }),
-    ).resolves.toMatchObject({ versionId: IDS.version1, replayed: false });
-    await expect(
-      service.rollback(IDS.tenant, "stale-rollback", IDS.session, {
-        versionId: IDS.version2,
-        expectedCurrentVersionId: IDS.version2,
-      }),
-    ).rejects.toBeInstanceOf(WorkspaceVersionError);
+  it("archives a conversation idempotently and blocks later turns", async () => {
     await expect(
       service.archive(IDS.tenant, "archive-session", IDS.session, { archived: true }),
     ).resolves.toMatchObject({ kind: "archive" });
+    await expect(
+      service.archive(IDS.tenant, "archive-session", IDS.session, { archived: true }),
+    ).resolves.toMatchObject({ kind: "archive", replayed: true });
     const store = new ControlPlaneStore({
       database,
       tenantId: IDS.tenant,
@@ -726,64 +521,6 @@ describe.sequential("versioned Workspace service", () => {
     await expect(
       store.acceptTurn(IDS.session, "archived-turn", { prompt: "must reject" }),
     ).rejects.toMatchObject({ code: "conflict" });
-  });
-
-  it("authenticates, deduplicates, and applies normalized GitHub webhook events", async () => {
-    const token = "g".repeat(64);
-    const gateway = new GitHubWebhookIngestGateway({ database, serviceToken: token });
-    const server = Fastify({ logger: false });
-    gateway.install(server);
-    try {
-      const event = {
-        deliveryId: "github-delivery-one",
-        eventName: "repository",
-        action: "deleted",
-        installationId: 7,
-        repositoryId: 42,
-        repositoryFullName: "acme/private-repo",
-        payloadSha256: "a".repeat(64),
-      };
-      await expect(
-        server.inject({
-          method: "POST",
-          url: "/internal/v1/github/webhook-events",
-          payload: event,
-        }),
-      ).resolves.toMatchObject({ statusCode: 401 });
-      const accepted = await server.inject({
-        method: "POST",
-        url: "/internal/v1/github/webhook-events",
-        headers: { authorization: `Bearer ${token}` },
-        payload: event,
-      });
-      expect(accepted.statusCode).toBe(202);
-      expect(accepted.json()).toMatchObject({ replayed: false, status: "processed" });
-      await expect(
-        database
-          .selectFrom("github_repositories")
-          .select("enabled")
-          .where("tenant_id", "=", IDS.tenant)
-          .where("repository_id", "=", "42")
-          .executeTakeFirstOrThrow(),
-      ).resolves.toEqual({ enabled: false });
-      const replay = await server.inject({
-        method: "POST",
-        url: "/internal/v1/github/webhook-events",
-        headers: { authorization: `Bearer ${token}` },
-        payload: event,
-      });
-      expect(replay.statusCode).toBe(202);
-      expect(replay.json()).toMatchObject({ replayed: true, status: "processed" });
-      const conflict = await server.inject({
-        method: "POST",
-        url: "/internal/v1/github/webhook-events",
-        headers: { authorization: `Bearer ${token}` },
-        payload: { ...event, payloadSha256: "b".repeat(64) },
-      });
-      expect(conflict.statusCode).toBe(409);
-    } finally {
-      await server.close();
-    }
   });
 
   it("detects corrupt trusted artifact bytes", async () => {

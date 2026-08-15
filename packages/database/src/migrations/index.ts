@@ -59,6 +59,8 @@ import * as conversationTreeForks from "./057_conversation_tree_forks.ts";
 import * as workspaceDeletion from "./058_workspace_deletion.ts";
 import * as piSessionOpaqueIdentifiers from "./059_pi_session_opaque_identifiers.ts";
 import * as workspaceTerminalLeases from "./060_workspace_terminal_leases.ts";
+import * as removeDormantAdvancedFeatures from "./061_remove_dormant_advanced_features.ts";
+import * as postgresSessionStorageOnly from "./062_postgres_session_storage_only.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -123,6 +125,8 @@ export const migrationProvider: MigrationProvider = {
       "058_workspace_deletion": workspaceDeletion,
       "059_pi_session_opaque_identifiers": piSessionOpaqueIdentifiers,
       "060_workspace_terminal_leases": workspaceTerminalLeases,
+      "061_remove_dormant_advanced_features": removeDormantAdvancedFeatures,
+      "062_postgres_session_storage_only": postgresSessionStorageOnly,
     };
   },
 };
@@ -213,11 +217,6 @@ export {
 } from "./017_multi_repository_source_sets.ts";
 
 export {
-  down as downAttemptRewindsAndReviewBundles,
-  up as upAttemptRewindsAndReviewBundles,
-} from "./018_attempt_rewinds_and_review_bundles.ts";
-
-export {
   down as downLegacyEnvironmentValidationEvidence,
   up as upLegacyEnvironmentValidationEvidence,
 } from "./019_legacy_environment_validation_evidence.ts";
@@ -226,11 +225,6 @@ export {
   down as downSemanticConversationProjections,
   up as upSemanticConversationProjections,
 } from "./020_semantic_conversation_projections.ts";
-
-export {
-  down as downParallelCandidateRaces,
-  up as upParallelCandidateRaces,
-} from "./021_parallel_candidate_races.ts";
 
 export {
   down as downHorizontalSupervisorPool,
@@ -352,3 +346,12 @@ export {
   down as downWorkspaceDeletion,
   up as upWorkspaceDeletion,
 } from "./058_workspace_deletion.ts";
+
+export {
+  down as downRemoveDormantAdvancedFeatures,
+  up as upRemoveDormantAdvancedFeatures,
+} from "./061_remove_dormant_advanced_features.ts";
+export {
+  down as downPostgresSessionStorageOnly,
+  up as upPostgresSessionStorageOnly,
+} from "./062_postgres_session_storage_only.ts";

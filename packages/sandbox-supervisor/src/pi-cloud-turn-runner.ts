@@ -62,7 +62,6 @@ export type PiCloudTurnRunnerOptions = Readonly<{
   sandboxContinuity: PiSandboxContinuity;
   collectWorkspacePatch?: () => Promise<WorkspacePatch | undefined> | WorkspacePatch | undefined;
   onSettled?: (session: Session) => Promise<void> | void;
-  onInterrupted?: (session: Session, reason: string) => Promise<void> | void;
   persistToolOutputArtifact?: (output: PiToolOutputCapture) => Promise<PiToolOutputArtifact>;
   observeEvent?: (event: CloudAgentRuntimeEvent) => void;
   prepareFollowUp?: () => AgentMessage | undefined | Promise<AgentMessage | undefined>;
@@ -526,7 +525,6 @@ export class PiCloudTurnRunner {
       combined.addEventListener("abort", abort, { once: true });
       if (combined.aborted) abort();
 
-      let interruptedSaved = false;
       try {
         const result = await runtime.run(command.payload.input.text);
         flushPendingText();
@@ -538,8 +536,6 @@ export class PiCloudTurnRunner {
           await sessionHandle.authority.assertCurrent();
         } else {
           if (toolStarted) await worldState.recordUnavailable().catch(() => undefined);
-          await this.#options.onInterrupted?.(sessionHandle.session, result.kind);
-          interruptedSaved = true;
         }
         const settled = await publishMapped({ type: "agent_settled" });
         if (settled.kind !== "settled")
@@ -559,14 +555,6 @@ export class PiCloudTurnRunner {
         };
       } catch (error: unknown) {
         if (toolStarted) await worldState.recordUnavailable().catch(() => undefined);
-        if (!interruptedSaved) {
-          await Promise.resolve(
-            this.#options.onInterrupted?.(
-              sessionHandle.session,
-              error instanceof Error ? error.name : "failed",
-            ),
-          ).catch(() => undefined);
-        }
         throw error;
       } finally {
         clearTimeout(timer);

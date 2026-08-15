@@ -14,12 +14,6 @@ export {
 
 export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 export {
-  CandidateRaceError,
-  CandidateRaceService,
-  type CandidateRaceErrorCode,
-  type CandidateRaceServiceOptions,
-} from "./candidate-race-service.ts";
-export {
   PublicTenantRegistrationError,
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,
@@ -42,10 +36,6 @@ export {
   TenantModelConfigurationService,
   type TenantModelConfigurationServiceOptions,
 } from "./tenant-model-configuration.ts";
-
-export { ModelGovernanceError, ModelGovernanceService } from "./model-governance-service.ts";
-export { OperationalInsightsService } from "./operational-insights-service.ts";
-export { ProjectEnvironmentService } from "./project-environment-service.ts";
 
 export {
   TenantAdministrationError,
@@ -104,22 +94,6 @@ export {
   type TtlCheckpointObjectStoreOptions,
   type TtlCheckpointObjectStoreSnapshot,
 } from "@agent-dock/runtime-core/checkpoint-object-cache";
-export {
-  PI_SESSION_MANIFEST_FORMAT,
-  PI_SESSION_MANIFEST_MAX_BYTES,
-  PI_SESSION_MANIFEST_MAX_SEGMENTS,
-  PI_SESSION_MANIFEST_MEDIA_TYPE,
-  PI_SESSION_SEGMENT_TARGET_BYTES,
-  PiSessionManifestError,
-  decodePiSessionManifest,
-  preparePiSessionManifest,
-  restorePiSessionManifest,
-  type PiSessionManifest,
-  type PiSessionSegment,
-  type PiSessionSegmentDescriptor,
-  type PreparedPiSessionManifest,
-  type PreviousPiSessionManifest,
-} from "@agent-dock/runtime-core/pi-session-manifest";
 export {
   SessionLiveStreamCompactionError,
   SessionLiveStreamCompactionService,
@@ -351,12 +325,3 @@ export {
   WorkspaceTerminalGateway,
   type WorkspaceTerminalGatewayOptions,
 } from "./workspace-terminal-gateway.ts";
-export {
-  GitHubIntegrationError,
-  GitHubIntegrationService,
-  type GitHubIntegrationServiceOptions,
-} from "./github-integration-service.ts";
-export {
-  CONTROL_PLANE_GITHUB_WEBHOOK_PATH,
-  GitHubWebhookIngestGateway,
-} from "./github-webhook-gateway.ts";

@@ -38,21 +38,10 @@ export {
   type PiModelRuntimeConfig,
   type PiCancellationSignal,
   type PiEventPublisher,
-  type PiInterruptedCheckpoint,
-  type PiSettledCheckpoint,
   type PiToolOutputArtifact,
   type PiToolOutputCapture,
   type PiTurnResult,
-  type PiTurnRuntimeOptions,
 } from "./pi-turn-runtime.ts";
-export {
-  appendPiInterruption,
-  PI_INTERRUPTION_CUSTOM_TYPE,
-  PI_INTERRUPTION_MESSAGE,
-  piInterruptionMessage,
-  piSessionEntryIds,
-} from "./pi-interrupted-session.ts";
-export { appendPiDurableRecovery, PI_DURABLE_RECOVERY_CUSTOM_TYPE } from "./pi-durable-recovery.ts";
 export {
   PI_ENVIRONMENT_CHANGED_CUSTOM_TYPE,
   PI_ENVIRONMENT_CHANGED_MESSAGE,
@@ -74,13 +63,6 @@ export {
   type PiCloudSessionHandle,
   type PiCloudTurnRunnerOptions,
 } from "./pi-cloud-turn-runner.ts";
-
-export {
-  CLOUD_MODEL_RETRY_POLICY,
-  PiSdkIsolationFailure,
-  PiSdkTurnRunner,
-  type PiSdkTurnRunnerOptions,
-} from "./pi-sdk-turn-runner.ts";
 
 export {
   CLOUD_TOOL_EXECUTION_MODE,
@@ -159,19 +141,13 @@ export {
 } from "./run-attempt-phase.ts";
 
 export {
-  decodeSettledCheckpoint,
   decodeWorkspaceSnapshot,
-  encodePostgresSessionReference,
-  encodeSettledCheckpoint,
   encodeWorkspaceSnapshot,
   validateLoadedCheckpoint,
-  validatePiSessionSnapshot,
   type CapturedSandboxCheckpoint,
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
-  type PiDurableRecoverySuffix,
-  type PiDurableRecoveryTurn,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,

@@ -249,9 +249,6 @@ export async function createControlPlaneRuntime(
       ...(options.providerSnapshotReader === undefined
         ? {}
         : { providerSnapshotReader: options.providerSnapshotReader }),
-      ...(options.advancedModulesEnabled === undefined
-        ? {}
-        : { advancedModulesEnabled: options.advancedModulesEnabled }),
     });
   } catch (error: unknown) {
     gateway.shutdown();

@@ -175,10 +175,7 @@ for (const concurrency of [10, 50, 100]) {
 }
 
 await new Promise((resolvePromise) => setTimeout(resolvePromise, 16_000));
-const [operations, metrics] = await Promise.all([
-  request("/v1/operations/summary"),
-  prometheusSnapshot(),
-]);
+const metrics = await prometheusSnapshot();
 const allSummaries = stages.flatMap((stage) => [stage.sessionCreation, stage.conversationRead]);
 const report = {
   format: "agent-dock.control-plane-load-report.v1",
@@ -194,7 +191,6 @@ const report = {
   stages,
   totalRequests: allSummaries.reduce((sum, summary) => sum + summary.requests, 0),
   totalErrors: allSummaries.reduce((sum, summary) => sum + summary.errors, 0),
-  operationalSummary: operations.success ? operations.body : { unavailable: operations.failure },
   prometheus: metrics,
 };
 const markdown =

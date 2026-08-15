@@ -58,8 +58,8 @@ npm run typecheck --workspace @agent-dock/web-ui
 npm run test --workspace @agent-dock/web-ui
 ```
 
-Settled checkpoints permit later turns on the same Session and restore Pi JSONL
-plus the Workspace into the Session's Cube activation. Recent discovery
+PostgreSQL SessionStorage permits later turns on the same Session while
+Workspace checkpoints restore files into the Session's Cube activation. Recent discovery
 survives a page reload after the user presents the token again. Arbitrary Git
 URLs, executable live previews, Diff/Artifact/test navigation, Fork/Rollback,
 GitHub PR delivery, organization/RBAC administration, public identity recovery,

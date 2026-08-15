@@ -64,7 +64,6 @@ for (const runtimeDependency of ["sandbox-supervisor", "tool-broker"]) {
 
 const dockerfileCandidates = [
   resolve(repositoryRoot, "deploy", "cubesandbox", "Dockerfile.tool"),
-  resolve(repositoryRoot, "spikes", "pi-embedded-rehydrate", "Dockerfile"),
   ...packageDirectories
     .filter((entry) => entry.isDirectory())
     .map((entry) => resolve(packagesDirectory, entry.name, "Dockerfile")),

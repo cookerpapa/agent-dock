@@ -125,10 +125,9 @@ async function evaluate(task) {
       202,
     );
     const run = await waitForRun(accepted.runId);
-    const [tests, versions, usage] = await Promise.all([
+    const [tests, versions] = await Promise.all([
       request(`/v1/runs/${encodeURIComponent(accepted.runId)}/test-results`),
       request(`/v1/sessions/${encodeURIComponent(session.sessionId)}/workspace-versions`),
-      request(`/v1/runs/${encodeURIComponent(accepted.runId)}/usage`),
     ]);
     const currentVersionId = versions.currentVersionId;
     let expectedEditPresent = false;
@@ -156,13 +155,6 @@ async function evaluate(task) {
       attempts: run.attemptCount,
       focusedTestResults: focused.map((result) => result.status),
       expectedEditPresent,
-      modelRequests: usage.totals.requests,
-      tokens:
-        usage.totals.inputTokens +
-        usage.totals.outputTokens +
-        usage.totals.cacheReadTokens +
-        usage.totals.cacheWriteTokens,
-      costMicrousd: usage.totals.costMicrousd,
       durationMs: Math.round(performance.now() - startedAt),
     };
   } catch (error) {
@@ -206,9 +198,6 @@ const report = {
   concurrency,
   p50DurationMs: percentile(0.5),
   p95DurationMs: percentile(0.95),
-  totalModelRequests: results.reduce((sum, result) => sum + (result.modelRequests ?? 0), 0),
-  totalTokens: results.reduce((sum, result) => sum + (result.tokens ?? 0), 0),
-  totalCostMicrousd: results.reduce((sum, result) => sum + (result.costMicrousd ?? 0), 0),
   results,
 };
 const markdown =

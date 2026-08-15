@@ -8,8 +8,7 @@
     "node": ">=22.19.0"
   },
   "workspaces": [
-    "packages/*",
-    "spikes/*"
+    "packages/*"
   ],
   "dependencies": {
     "pi-security-brace-expansion": "npm:brace-expansion@5.0.9",
@@ -50,7 +49,6 @@
     "kubernetes:distributed:deploy": "node scripts/distributed-kubernetes.mjs deploy",
     "kubernetes:distributed:status": "node scripts/distributed-kubernetes.mjs status",
     "runtime-policy:check": "node scripts/check-runtime-time-budgets.mjs && node scripts/check-cubesandbox-template-retention.mjs",
-    "benchmark:pi-session-storage": "node scripts/run-pi-session-storage-benchmark.mjs",
     "benchmark:event-spool": "node --experimental-strip-types scripts/run-event-spool-benchmark.mjs",
     "benchmark:postgres-event-log": "tsx scripts/run-postgres-event-log-benchmark.ts",
     "eval:kafka-events": "tsx scripts/run-kafka-event-log-acceptance.ts",
@@ -77,7 +75,6 @@
     "production:control-plane-restart-check": "node scripts/run-live-control-plane-restart-check.mjs",
     "production:multi-tenant-model-load": "node scripts/run-live-multi-tenant-model-load.mjs",
     "production:long-context-check": "node scripts/run-live-long-context-compaction-check.mjs",
-    "production:parallel-check": "node scripts/run-live-candidate-race-check.mjs",
     "production:backup": "node scripts/production-backup.mjs",
     "production:restore": "node scripts/production-restore.mjs",
     "backup:crypto-check": "node scripts/run-backup-crypto-check.mjs",
@@ -86,23 +83,22 @@
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "spike:embedded": "npm run spike --workspace @agent-dock/pi-embedded-rehydrate-spike",
-    "spike:density": "npm run density --workspace @agent-dock/pi-embedded-rehydrate-spike",
-    "spike:runtime-benchmark": "npm run runtime-benchmark --workspace @agent-dock/pi-embedded-rehydrate-spike",
-    "spike:live-model": "npm run live-model --workspace @agent-dock/pi-embedded-rehydrate-spike",
     "fake-model:start": "npm run start --workspace @agent-dock/fake-model-server",
     "db:migrate": "npm run migrate --workspace @agent-dock/database",
     "db:migrate:down": "npm run migrate:down --workspace @agent-dock/database",
     "demo": "npm run production:deploy",
-    "check": "npm run typecheck && npm test && npm run spike:embedded",
+    "check": "npm run typecheck && npm test",
     "security:audit": "node scripts/run-security-audit.mjs",
     "eval:coding": "node scripts/run-coding-eval.mjs",
     "eval:faults": "node scripts/run-fault-eval.mjs",
     "eval:load": "node scripts/run-control-plane-load.mjs"
   },
   "devDependencies": {
+    "@confluentinc/kafka-javascript": "1.10.0",
     "@types/node": "24.12.4",
+    "kysely": "0.29.4",
     "prettier": "3.9.5",
+    "tsx": "4.23.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7",
     "yaml": "2.9.0"

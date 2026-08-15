@@ -96,9 +96,9 @@ The implementation survey found three useful mature patterns:
   one event insert and one cursor/Session advance.
 - A real Worker-process `SIGKILL` test proves that a locally fsynced, unacknowledged
   event is replayable. Browser visibility still begins only after PostgreSQL ACK.
-- AgentDock does not maintain a parallel `messages[]`; it restores Pi JSONL and
-  lets Pi construct the effective model messages, including the one-time durable
-  recovery bridge.
+- AgentDock does not maintain a parallel `messages[]`; it opens Pi's PostgreSQL
+  Session branch and lets Pi construct the effective model messages, including
+  the one-time durable recovery bridge.
 - Kafka/NATS remain unnecessary until measured PostgreSQL saturation, independent
   stream consumers or retention requirements justify moving the event authority.
 

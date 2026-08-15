@@ -1,6 +1,7 @@
 # ADR-0054: Horizontal Pi Worker pool and native session checkpoints
 
-- Status: accepted
+- Status: superseded by ADR-0103 and ADR-0109 for conversation storage; retained
+  as historical rationale for replaceable Workers
 - Date: 2026-07-25
 - Supersedes: the original single fixed Supervisor identity and fixed
   management URL

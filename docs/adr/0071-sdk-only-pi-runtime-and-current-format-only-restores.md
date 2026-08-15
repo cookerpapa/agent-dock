@@ -1,50 +1,31 @@
-# ADR-0071: SDK-only Pi runtime and current-format-only restores
+# ADR-0071: Embedded Pi SDK runtime
 
 Status: accepted
 
 ## Context
 
-AgentDock completed two production cutovers:
+The repository once carried both an embedded Pi SDK runtime and a Pi RPC
+subprocess runtime, plus several JSONL restore formats. Those branches doubled
+the executable and test surface and allowed deployment configuration to select
+an unmaintained path.
 
-- trusted Pi Workers now run the public embedded Pi SDK directly;
-- Pi conversation checkpoints now use content-addressed JSONL segments and the
-  compressed `agent-dock.pi-session-manifest.v3` manifest.
-
-The repository nevertheless retained a complete Pi RPC subprocess runner,
-environment-configured extension entrypoint, RPC-only UI adapter and spike.
-The production Runner also exposed an execution-mode switch whose default was
-the superseded RPC path. Checkpoint loading similarly accepted an untyped
-whole-file object when the current manifest media type was absent.
-
-Those branches doubled the executable and test surface, obscured the actual
-security model and allowed a missing deployment variable to select an
-unmaintained runtime.
+The production runtime now stores Pi entries and Compaction boundaries directly
+through PostgreSQL SessionStorage.
 
 ## Decision
 
-Pi SDK execution is the only supported Agent Loop:
-
-- every Pi Worker runs a bounded set of independent `PiSdkTurnRunner` slots;
-- Tool implementations are registered as activation-local inline extensions;
-- shared errors, cancellation, checkpoint and event contracts use neutral
-  `Pi*` names rather than `PiRpc*`;
-- there is no execution-mode environment variable, subprocess runner,
-  environment-configured Tool extension, or RPC compatibility spike.
-
-Conversation restore accepts only the current manifest media type and pinned Pi
-version. Older development snapshots fail closed with
-`checkpoint_incompatible`; no migration reader remains.
-
-Implementation logs and completed backlog entries remain as decision history.
-They are not executable compatibility promises.
+- Pi SDK execution is the only supported Agent Loop.
+- Each trusted Pi Worker runs a bounded set of `PiCloudTurnRunner` slots.
+- Tools are registered against the current remote Sandbox activation.
+- Conversation restore opens the tenant-scoped PostgreSQL Session branch.
+- No Pi subprocess, Worker-local JSONL, manifest reader or object-store
+  conversation fallback remains.
 
 ## Consequences
 
-- A missing environment variable can no longer reactivate the old runtime.
-- Pi SDK isolation is provided by a replaceable Worker process (one Pod in
-  Kubernetes); an SDK isolation failure poisons and retires that Worker and
-  its bounded active slots resume from committed state.
-- Upgrading Pi or the checkpoint format requires an explicit new decision,
-  migration and contract test.
-- Existing development data written in the old whole-file format must be
-  discarded instead of silently imported.
+- A missing setting cannot reactivate the retired subprocess runtime.
+- A poisoned Worker can be replaced while durable Session state remains in
+  PostgreSQL.
+- Upgrading Pi or the SessionStorage schema requires an explicit migration and
+  backend conformance test.
+- Development JSONL checkpoints are discarded rather than silently imported.

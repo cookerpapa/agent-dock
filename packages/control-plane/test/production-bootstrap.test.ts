@@ -262,7 +262,6 @@ describe.sequential("production bootstrap and configuration", () => {
       toolBrokerBaseUrls: ["http://tool-broker:4300/"],
       host: "0.0.0.0",
       port: 3000,
-      advancedModulesEnabled: false,
       platformModelSourceTenantId: CONFIG.tenantId,
       platformOperatorTenantId: CONFIG.tenantId,
       webSessionCookieSecure: false,

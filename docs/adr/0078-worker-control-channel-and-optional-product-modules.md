@@ -1,6 +1,6 @@
 # ADR-0078: Worker Control Channel and optional product modules
 
-Status: accepted
+Status: accepted; product-module portion amended by ADR-0107
 
 ## Context
 
@@ -17,10 +17,10 @@ product did not complete.
 2. PostgreSQL is the only Run queue and execution authority. The old remote
    Supervisor execution backend and its execute/cancel command handlers are
    deleted; the WebSocket cannot dispatch a Run.
-3. Candidate Race, Rewind, Review Bundle, model governance/usage and Project
-   Environment APIs move to one explicitly enabled advanced controller.
-4. The core deployment defaults that module off. Observability and GitHub
-   infrastructure use explicit Compose profiles.
+3. Candidate Race, Rewind, Review Bundle and backend-only governance/insight
+   experiments are removed by ADR-0107 rather than hidden behind a flag.
+4. Observability and repository-import infrastructure use explicit Compose
+   profiles.
 5. Unfinished Preview, Diff, Artifact/test navigation, Fork/Rollback, GitHub PR
    and organization/RBAC/audit-search product routes and browser clients are
    deleted.
@@ -29,6 +29,5 @@ product did not complete.
 
 The default topology and public API are smaller, and there is one fewer Run
 execution authority to reason about. Active steer still has a fenced two-phase
-control exchange. Research code remains testable without being part of the
-ordinary product. Historical ADRs describe their original implementation but
-do not override this current boundary.
+control exchange. Removed experiments remain available in Git history instead
+of increasing the compiled or tested product surface.

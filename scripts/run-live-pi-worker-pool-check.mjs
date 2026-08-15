@@ -230,16 +230,16 @@ async function runTurn(sessionId, prompt, afterSequence = 0) {
 async function runEvidence(runId) {
   const row = await psql(
     `select s.supervisor_id || '|' ||
-            coalesce(r.pi_session_base_artifact_id::text, '') || '|' ||
+            coalesce(r.workspace_base_version_id::text, '') || '|' ||
             coalesce(a.checkpoint_revision, '')
        from runs r
        join run_attempts a on a.id = r.current_attempt_id
        join sandboxes s on s.id = a.sandbox_id
       where r.id = ${sqlLiteral(runId)}`,
   );
-  const [supervisorId, baseArtifactId, checkpointRevision] = row.split("|");
+  const [supervisorId, baseWorkspaceVersionId, checkpointRevision] = row.split("|");
   assert(supervisorId, `Run ${runId} has no Supervisor assignment`);
-  return { supervisorId, baseArtifactId, checkpointRevision };
+  return { supervisorId, baseWorkspaceVersionId, checkpointRevision };
 }
 
 async function activeWorkers() {

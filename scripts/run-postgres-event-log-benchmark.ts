@@ -228,7 +228,6 @@ try {
       workspace_id: project.workspaceId,
       desired_model_profile_id: profileId,
       state: "running" as const,
-      pi_session_snapshot_key: null,
       workspace_snapshot_key: null,
       last_fencing_token: 1,
     }));

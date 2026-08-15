@@ -1,5 +1,4 @@
 import type { AgentDockEvent } from "@agent-dock/protocol";
-import type { OnApplicationShutdown } from "@nestjs/common";
 
 export type SessionEventWake = {
   throughSequence: number | null;
@@ -98,7 +97,7 @@ export class SessionEventSubscription {
   }
 }
 
-export class SessionEventHub implements OnApplicationShutdown {
+export class SessionEventHub {
   readonly #subscriptions = new Map<string, Set<SessionEventSubscription>>();
 
   subscribe(tenantId: string, sessionId: string): SessionEventSubscription {

@@ -57,8 +57,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
       explicit authorities.
 - [ ] Define a separate trust policy before enabling user Pi extensions.
 
-## Optional modules
+## Product expansion rule
 
-Candidate Race, review bundles, GitHub delivery and advanced governance remain
-default-off experiments. Promotion requires a complete user workflow, measured
-benefit and an amended architecture decision.
+Candidate races, Run rewind, Review Bundles and advanced governance were removed
+from the current product because they had no user workflow or measured benefit.
+A future expansion requires an end-to-end product decision, public contract and
+acceptance suite instead of a dormant backend module.

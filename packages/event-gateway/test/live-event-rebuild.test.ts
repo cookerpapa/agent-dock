@@ -112,7 +112,6 @@ beforeAll(async () => {
       workspace_id: IDS.workspace,
       desired_model_profile_id: IDS.profile,
       state: "running",
-      pi_session_snapshot_key: null,
       workspace_snapshot_key: null,
       next_event_seq: 3,
       last_fencing_token: 1,

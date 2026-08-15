@@ -55,9 +55,8 @@ must not be confused with running project code in a restricted Tool Sandbox.
    operations and audit. Tool Sandboxes remain credential-free and subject to
    the fixed Cube template, resource and network policy.
 9. The public API and Web UI expose the project environment identity and latest
-   validation evidence. This ADR's original slice did not expose mutation;
-   ADR-0043 later adds bounded recipe candidates and owner-controlled activation
-   without exposing operator image locations or Pod policy.
+   validation evidence. Later backend-only recipe-management experiments were
+   removed because they never formed a supported product workflow.
 
 ## Consequences
 

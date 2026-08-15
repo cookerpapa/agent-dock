@@ -95,25 +95,6 @@
       "test": "terminates expired and orphan runtimes before settling a lost assignment",
       "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
       "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated."
-    },
-    {
-      "id": "attempt-rewind-boundary",
-      "workspace": "@agent-dock/control-plane",
-      "file": "test/control-plane-api.test.ts",
-      "test": "publishes an immutable Review Bundle and atomically rewinds the latest Run",
-      "setupTests": [
-        "creates a project and workspace atomically, then creates a cold session",
-        "returns 202 only after the turn, command, and outbox record are durable",
-        "dispatches a durable command through ACK to a completed turn"
-      ],
-      "invariant": "Rewind restores the explicit committed bases, supersedes the old projection, and creates one idempotent replacement Run."
-    },
-    {
-      "id": "immutable-review-bundle",
-      "workspace": "@agent-dock/database",
-      "file": "test/attempt-rewinds-review-bundles-migration.test.ts",
-      "test": "captures explicit bases and makes Review Bundles append-only",
-      "invariant": "A completed Run's content-verified Review Bundle cannot be updated or deleted."
     }
   ]
 }

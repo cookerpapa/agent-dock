@@ -89,7 +89,6 @@ describe("PostgreSQL Tool Broker ownership", () => {
           workspace_id: workspaceId,
           desired_model_profile_id: profileId,
           state: "idle" as const,
-          pi_session_snapshot_key: null,
           workspace_snapshot_key: null,
         })),
       )
@@ -126,7 +125,6 @@ describe("PostgreSQL Tool Broker ownership", () => {
         workspace_id: workspaceId,
         desired_model_profile_id: profileId,
         state: "idle",
-        pi_session_snapshot_key: null,
         workspace_snapshot_key: null,
         conversation_parent_session_id: rootSessionId,
         conversation_fork_turn_id: forkTurnId,

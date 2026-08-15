@@ -36,7 +36,6 @@ export type ControlPlaneApplicationOptions = Omit<
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
   providerSnapshotReader?: TrustedProviderSnapshotReader;
-  advancedModulesEnabled?: boolean;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;

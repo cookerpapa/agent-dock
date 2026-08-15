@@ -136,7 +136,6 @@ describe("session transcript reducer", () => {
           mailboxPosition: 8,
           prompt: "Historical private prompt",
           state: "running",
-          projection: "canonical",
           acceptedAt: CREATED_AT,
         },
       ],
@@ -180,7 +179,6 @@ describe("session transcript reducer", () => {
           mailboxPosition: 1,
           prompt: "Long-running repair",
           state: "running",
-          projection: "canonical",
           acceptedAt: CREATED_AT,
         },
       ],
@@ -290,7 +288,6 @@ describe("session transcript reducer", () => {
           mailboxPosition: 1,
           prompt: "Historical projected prompt",
           state: "completed",
-          projection: "canonical",
           transcript: {
             schemaVersion: 1,
             throughSequence: 6,

@@ -42,8 +42,6 @@
 - publish PostgreSQL queue latency and Worker slot-density measurements;
 - validate Kafka broker/projector rebalance and Valkey rebuild at target load;
 - define Workspace snapshot/backup policy separately from normal Run commits;
-- remove the constant-size Workspace-version conversation reference after the
-  Workspace schema no longer requires a legacy Pi artifact foreign key.
 
 Every performance or availability claim must name the tested revision,
 topology, workload and observed result.

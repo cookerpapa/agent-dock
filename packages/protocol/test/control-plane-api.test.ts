@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  canonicalReviewBundleManifestJson,
   canonicalWorkspaceSourceSetJson,
   ControlPlaneApiValidationError,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
@@ -11,13 +10,10 @@ import {
   parseAcceptTurnRequest,
   parseAcceptedTurnCancellationResource,
   parseAcceptedTurnResource,
-  parseCandidateRaceResource,
   parseConversationDetailResource,
   parseConversationListResource,
   parseControlPlaneApiError,
   parseCreateProjectRequest,
-  parseCreateCandidateRaceRequest,
-  parseCreateRunRewindRequest,
   parseCreateSessionRequest,
   parseCreateTenantRegistrationRequest,
   parseCreateTurnCancellationRequest,
@@ -25,12 +21,9 @@ import {
   parseLastEventIdHeader,
   parseLiveTurnSnapshotResource,
   parseModelConfigurationResource,
-  parseReplaceModelGovernanceRequest,
   parseProjectResource,
   parseReplaceModelConfigurationRequest,
   parseRunResource,
-  parseRunRewindResource,
-  parseReviewBundleResource,
   parseSessionResource,
   parseTenantIdentityResource,
   parseTenantRegistrationResource,
@@ -79,128 +72,6 @@ describe("control-plane public API schemas", () => {
         },
       }),
     ).toMatchObject({ replayAfterSequence: 2, turn: { transcript: { throughSequence: 2 } } });
-  });
-
-  it("validates bounded candidate races and their deterministic acceptance projection", () => {
-    const request = {
-      baseWorkspaceVersionId: UUID,
-      prompt: "Implement and test a bounded change.",
-      candidates: [
-        { label: "Minimal", strategy: "Keep the patch small." },
-        { label: "Tests first", strategy: "Write a regression test before the fix." },
-      ],
-      maximumConcurrentCandidates: 2,
-      acceptance: {
-        requirePatch: true,
-        requireTests: true,
-        maximumChangedPaths: 20,
-        protectedPathPrefixes: [".github"],
-      },
-    };
-    expect(parseCreateCandidateRaceRequest(request)).toEqual(request);
-    expect(() =>
-      parseCreateCandidateRaceRequest({
-        ...request,
-        maximumConcurrentCandidates: 3,
-      }),
-    ).toThrow(/cannot exceed/);
-    expect(() =>
-      parseCreateCandidateRaceRequest({
-        ...request,
-        candidates: [
-          { label: "Same", strategy: "One" },
-          { label: "same", strategy: "Two" },
-        ],
-      }),
-    ).toThrow(/unique/);
-
-    const createdAt = "2026-07-23T00:00:00.000Z";
-    expect(
-      parseCandidateRaceResource({
-        orchestrationId: "21111111-1111-4111-8111-111111111111",
-        kind: "candidate_race",
-        state: "awaiting_decision",
-        projectId: "31111111-1111-4111-8111-111111111111",
-        workspaceId: "41111111-1111-4111-8111-111111111111",
-        parentSessionId: "51111111-1111-4111-8111-111111111111",
-        baseWorkspaceVersionId: UUID,
-        prompt: request.prompt,
-        maximumConcurrentCandidates: 2,
-        acceptancePolicy: request.acceptance,
-        candidates: [
-          {
-            candidateId: "61111111-1111-4111-8111-111111111111",
-            ordinal: 1,
-            label: "Minimal",
-            strategy: "Keep the patch small.",
-            sessionId: "71111111-1111-4111-8111-111111111111",
-            runId: "81111111-1111-4111-8111-111111111111",
-            dispatchId: "91111111-1111-4111-8111-111111111111",
-            dispatchGeneration: 1,
-            dispatchState: "settled",
-            runState: "completed",
-            workspaceVersionId: "a1111111-1111-4111-8111-111111111111",
-            acceptance: {
-              verdict: "passed",
-              reviewBundleId: "b1111111-1111-4111-8111-111111111111",
-              evaluatedAt: createdAt,
-              scorecard: {
-                reasons: [],
-                metrics: {
-                  runState: "completed",
-                  changedPaths: 2,
-                  tests: { total: 3, passed: 3, failed: 0, errored: 0 },
-                  modelRequests: 2,
-                  tokens: 1_200,
-                  costMicrousd: 80_000,
-                  durationMs: 4_000,
-                },
-              },
-            },
-            createdAt,
-          },
-          {
-            candidateId: "c1111111-1111-4111-8111-111111111111",
-            ordinal: 2,
-            label: "Tests first",
-            strategy: "Write a regression test before the fix.",
-            sessionId: "d1111111-1111-4111-8111-111111111111",
-            runId: "e1111111-1111-4111-8111-111111111111",
-            dispatchId: "f1111111-1111-4111-8111-111111111111",
-            dispatchGeneration: 1,
-            dispatchState: "settled",
-            runState: "failed",
-            acceptance: {
-              verdict: "failed",
-              evaluatedAt: createdAt,
-              scorecard: {
-                reasons: ["run_failed"],
-                metrics: {
-                  runState: "failed",
-                  changedPaths: 0,
-                  tests: { total: 0, passed: 0, failed: 0, errored: 0 },
-                  modelRequests: 1,
-                  tokens: 300,
-                  costMicrousd: 20_000,
-                  durationMs: 1_000,
-                },
-              },
-            },
-            createdAt,
-          },
-        ],
-        recommendedCandidateId: "61111111-1111-4111-8111-111111111111",
-        decisionGate: {
-          gateId: "12111111-1111-4111-8111-111111111111",
-          state: "pending",
-        },
-        createdAt,
-        updatedAt: createdAt,
-      }),
-    ).toMatchObject({
-      state: "awaiting_decision",
-      recommendedCandidateId: "61111111-1111-4111-8111-111111111111",
-    });
   });
 
   it("validates public resources before a browser consumes them", () => {
@@ -335,7 +206,6 @@ describe("control-plane public API schemas", () => {
             mailboxPosition: 1,
             prompt: "repair it",
             state: "running",
-            projection: "canonical",
             transcript: {
               schemaVersion: 1,
               throughSequence: 4,
@@ -379,7 +249,6 @@ describe("control-plane public API schemas", () => {
         turnId: "50000000-0000-4000-8000-000000000001",
         commandId: "60000000-0000-4000-8000-000000000001",
         state: "running",
-        projection: "canonical",
         environment: ENVIRONMENT_SNAPSHOT,
         sourceSet: {
           schemaVersion: 1,
@@ -644,45 +513,6 @@ describe("control-plane public API schemas", () => {
     ).toThrow(ControlPlaneApiValidationError);
   });
 
-  it("removes the obsolete cumulative per-Run token setting from governance", () => {
-    const governance = {
-      limits: {
-        maximumModelRequestsPerRun: 32,
-        maximumCostMicrousdPerRun: 5_000_000,
-        dailyTokenBudget: 2_000_000,
-        monthlyCostMicrousdBudget: 50_000_000,
-        maximumToolCallsPerRun: 128,
-        maximumToolOutputBytes: 65_536,
-        maximumRunDurationMs: 900_000,
-        compactionReserveTokens: 16_384,
-        compactionKeepRecentTokens: 20_000,
-      },
-      rates: [
-        {
-          provider: "deepseek" as const,
-          modelId: "deepseek-v4-flash" as const,
-          inputMicrousdPerMillion: 0,
-          outputMicrousdPerMillion: 0,
-          cacheReadMicrousdPerMillion: 0,
-          cacheWriteMicrousdPerMillion: 0,
-        },
-      ],
-      fallback: {
-        enabled: false,
-        onRateLimit: true,
-        onServerError: true,
-        onTimeout: true,
-      },
-    };
-    expect(parseReplaceModelGovernanceRequest(governance)).toEqual(governance);
-    expect(() =>
-      parseReplaceModelGovernanceRequest({
-        ...governance,
-        limits: { ...governance.limits, maximumTokensPerRun: 200_000 },
-      }),
-    ).toThrow(ControlPlaneApiValidationError);
-  });
-
   it("validates workspace and path identities as UUIDs", () => {
     expect(parseCreateSessionRequest({ workspaceId: UUID, title: "  Fix checkout  " })).toEqual({
       workspaceId: UUID,
@@ -767,92 +597,6 @@ describe("control-plane public API schemas", () => {
     );
     expect(() => parseCreateTurnCancellationRequest({ reason: "shutdown" })).toThrow(
       ControlPlaneApiValidationError,
-    );
-  });
-
-  it("validates explicit rewind boundaries and canonical immutable review manifests", () => {
-    const sourceAttemptId = "50000000-0000-4000-8000-000000000011";
-    expect(parseCreateRunRewindRequest({ sourceAttemptId })).toEqual({ sourceAttemptId });
-    const createdAt = "2026-07-19T00:00:00.000Z";
-    const acceptedTurn = {
-      runId: "50000000-0000-4000-8000-000000000020",
-      turnId: "50000000-0000-4000-8000-000000000021",
-      sessionId: "30000000-0000-4000-8000-000000000001",
-      commandId: "60000000-0000-4000-8000-000000000021",
-      mailboxPosition: 2,
-      state: "queued",
-      acceptedAt: createdAt,
-      replayed: false,
-    } as const;
-    expect(
-      parseRunRewindResource({
-        rewindId: "70000000-0000-4000-8000-000000000021",
-        sourceRunId: "50000000-0000-4000-8000-000000000010",
-        sourceAttemptId,
-        replacementRunId: acceptedTurn.runId,
-        conversationBoundarySeq: 0,
-        acceptedTurn,
-        replayed: false,
-        createdAt,
-      }),
-    ).toMatchObject({ conversationBoundarySeq: 0, replacementRunId: acceptedTurn.runId });
-
-    const manifest = {
-      schemaVersion: 1,
-      run: {
-        runId: acceptedTurn.runId,
-        traceId: "1".repeat(32),
-        projectId: "10000000-0000-4000-8000-000000000001",
-        workspaceId: "20000000-0000-4000-8000-000000000001",
-        sessionId: acceptedTurn.sessionId,
-        turnId: acceptedTurn.turnId,
-        attemptId: sourceAttemptId,
-        stopReason: "stop",
-        queuedAt: createdAt,
-        settledAt: createdAt,
-      },
-      environment: ENVIRONMENT_SNAPSHOT,
-      sourceSet: { schemaVersion: 1, entries: [{ root: ".", kind: "sample_java" }] },
-      attempts: [
-        {
-          attemptId: sourceAttemptId,
-          attemptNumber: 1,
-          state: "completed",
-          projection: "canonical",
-          claimedAt: createdAt,
-          settledAt: createdAt,
-        },
-      ],
-      assistant: {
-        text: "done",
-        textSha256: "a".repeat(64),
-        firstSeq: 1,
-        lastSeq: 2,
-        truncated: false,
-      },
-      changes: { changedPaths: ["src/App.ts"] },
-      tests: [],
-      artifacts: [],
-      usage: {
-        requests: 1,
-        inputTokens: 2,
-        outputTokens: 3,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        costMicrousd: 4,
-      },
-      createdAt,
-    } as const;
-    expect(
-      parseReviewBundleResource({
-        reviewBundleId: "70000000-0000-4000-8000-000000000022",
-        manifestSha256: "b".repeat(64),
-        manifest,
-        createdAt,
-      }).manifest.assistant.text,
-    ).toBe("done");
-    expect(canonicalReviewBundleManifestJson(manifest)).toBe(
-      canonicalReviewBundleManifestJson({ ...manifest, usage: { ...manifest.usage } }),
     );
   });
 

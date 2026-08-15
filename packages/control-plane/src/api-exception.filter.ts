@@ -7,10 +7,7 @@ import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
 import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";
 import { WorkspaceVersionError } from "./workspace-version-service.ts";
-import { GitHubIntegrationError } from "./github-integration-service.ts";
-import { ModelGovernanceError } from "./model-governance-service.ts";
 import { WebAuthenticationError } from "./web-authentication.ts";
-import { CandidateRaceError } from "./candidate-race-service.ts";
 import { PlatformRuntimeSettingsError } from "./platform-runtime-settings.ts";
 import { TurnSteeringError } from "./turn-steering-service.ts";
 
@@ -45,17 +42,6 @@ function mappedError(error: unknown): ErrorResponse {
         : error.code === "cube_proxy_configuration_invalid"
           ? 400
           : 503;
-    return { status, body: { error: { code: error.code, message: error.message } } };
-  }
-  if (error instanceof ModelGovernanceError) {
-    const status =
-      error.code === "authorization_denied"
-        ? 403
-        : error.code === "not_found"
-          ? 404
-          : error.code === "invalid_request"
-            ? 400
-            : 503;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof PublicTenantRegistrationError) {
@@ -102,17 +88,6 @@ function mappedError(error: unknown): ErrorResponse {
           : 503;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
-  if (error instanceof CandidateRaceError) {
-    const status =
-      error.code === "not_found"
-        ? 404
-        : error.code === "tenant_quota_exceeded"
-          ? 429
-          : error.code === "conflict" || error.code === "idempotency_conflict"
-            ? 409
-            : 503;
-    return { status, body: { error: { code: error.code, message: error.message } } };
-  }
   if (error instanceof WorkspaceVersionError) {
     const status =
       error.code === "not_found"
@@ -122,17 +97,6 @@ function mappedError(error: unknown): ErrorResponse {
           : error.code === "tenant_quota_exceeded"
             ? 429
             : 503;
-    return { status, body: { error: { code: error.code, message: error.message } } };
-  }
-  if (error instanceof GitHubIntegrationError) {
-    const status =
-      error.code === "not_found"
-        ? 404
-        : error.code === "idempotency_conflict" || error.code === "conflict"
-          ? 409
-          : error.code === "github_app_not_configured" || error.retryable
-            ? 503
-            : 502;
     return { status, body: { error: { code: error.code, message: error.message } } };
   }
   if (error instanceof DurableEventStoreError) {

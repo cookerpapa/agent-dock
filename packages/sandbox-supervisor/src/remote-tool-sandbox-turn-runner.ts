@@ -28,7 +28,6 @@ import {
   settlementGatePolicyFromCommand,
 } from "./pi-settlement-gate.ts";
 import {
-  encodePostgresSessionReference,
   validateLoadedCheckpoint,
   type LoadedSandboxCheckpoint,
   type SandboxCheckpointStore,
@@ -292,9 +291,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     if (this.#checkpointStore !== undefined) {
       const restoreStartedAt = performance.now();
       try {
-        loadedCheckpoint = validateLoadedCheckpoint(
-          await this.#checkpointStore.load(command, { includeConversation: false }),
-        );
+        loadedCheckpoint = validateLoadedCheckpoint(await this.#checkpointStore.load(command));
         this.#metrics?.checkpointRestoreDuration.observe(
           { outcome: loadedCheckpoint === undefined ? "empty" : "completed" },
           (performance.now() - restoreStartedAt) / 1_000,
@@ -490,24 +487,13 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 ? {}
                 : { maxTokens: modelRuntimeLease!.runtime.maxTokens }),
             };
-      const onSettled: NonNullable<PiCloudTurnRunnerOptions["onSettled"]> = async (session) => {
+      const onSettled: NonNullable<PiCloudTurnRunnerOptions["onSettled"]> = async () => {
         if (activation === undefined) {
           throw new PiTurnError(
             "tool_sandbox_unavailable",
             "Tool Sandbox was unavailable at settlement",
             true,
           );
-        }
-        if (this.#runAttemptPhaseObserver !== undefined) {
-          try {
-            await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
-          } catch (error: unknown) {
-            throw safePiError(
-              error,
-              "run_phase_persist_failed",
-              "Run checkpoint phase could not be persisted",
-            );
-          }
         }
         const checkpointStartedAt = performance.now();
         const captured = await this.#broker
@@ -523,29 +509,39 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               "The Tool Workspace checkpoint could not be captured",
             );
           });
+        if (captured.type === "tool_sandbox.unused") {
+          retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
+          this.#metrics?.checkpointDuration.observe(
+            { outcome: "completed" },
+            (performance.now() - checkpointStartedAt) / 1_000,
+          );
+          return;
+        }
+        if (this.#runAttemptPhaseObserver !== undefined) {
+          try {
+            await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
+          } catch (error: unknown) {
+            throw safePiError(
+              error,
+              "run_phase_persist_failed",
+              "Run checkpoint phase could not be persisted",
+            );
+          }
+        }
         if (this.#checkpointStore !== undefined) {
           try {
-            const conversationReference = encodePostgresSessionReference({
-              sessionId: command.payload.sessionId,
-              leafId: await session.getLeafId(),
-            });
-            const saved =
-              captured.type === "tool_sandbox.unused"
-                ? await this.#checkpointStore.saveConversation(
-                    command,
-                    loadedCheckpoint?.revision ?? null,
-                    conversationReference,
-                  )
-                : await this.#checkpointStore.save(command, loadedCheckpoint?.revision ?? null, {
-                    piSession: conversationReference,
-                    workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
-                    environment: captured.environment,
-                    ...(captured.workspacePatch === undefined
-                      ? {}
-                      : { workspacePatch: captured.workspacePatch }),
-                  });
-            capturedPatch =
-              captured.type === "tool_sandbox.captured" ? captured.workspacePatch : undefined;
+            const saved = await this.#checkpointStore.save(
+              command,
+              loadedCheckpoint?.revision ?? null,
+              {
+                workspace: decodeWorkspaceSnapshotBlob(captured.workspace),
+                environment: captured.environment,
+                ...(captured.workspacePatch === undefined
+                  ? {}
+                  : { workspacePatch: captured.workspacePatch }),
+              },
+            );
+            capturedPatch = captured.workspacePatch;
             retainedWorkspaceRevision = saved.workspaceRevision;
             await this.#runAttemptPhaseObserver?.checkpointCommitted(command, saved.revision);
             this.#metrics?.checkpointDuration.observe(
@@ -563,32 +559,9 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               "The settled checkpoint could not be committed",
             );
           }
-        } else if (captured.type === "tool_sandbox.captured") {
+        } else {
           capturedPatch = captured.workspacePatch;
           retainedWorkspaceRevision = captured.workspace.sha256;
-        } else {
-          retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
-        }
-      };
-      const onInterrupted: NonNullable<PiCloudTurnRunnerOptions["onInterrupted"]> = async (
-        session,
-      ) => {
-        if (this.#checkpointStore === undefined) return;
-        try {
-          await this.#checkpointStore.saveInterruptedConversation(
-            command,
-            loadedCheckpoint?.revision ?? null,
-            encodePostgresSessionReference({
-              sessionId: command.payload.sessionId,
-              leafId: await session.getLeafId(),
-            }),
-          );
-        } catch (error: unknown) {
-          throw safePiError(
-            error,
-            "checkpoint_save_failed",
-            "The interrupted conversation checkpoint could not be committed",
-          );
         }
       };
       const activeSandbox = activation;
@@ -615,7 +588,6 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           toolPolicySha256: cloudTurn.toolPolicySha256,
         },
         onSettled,
-        onInterrupted,
         ...(this.#requestTimeoutMs === undefined
           ? {
               requestTimeoutMs: usesEmbeddedFake

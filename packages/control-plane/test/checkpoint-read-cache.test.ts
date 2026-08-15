@@ -31,7 +31,7 @@ describe("Worker-local immutable checkpoint read cache", () => {
   it("reuses immutable bytes for ten minutes without sharing mutable buffers", async () => {
     let now = 1_000;
     const objectStore = new CountingObjectStore();
-    objectStore.objects.set("pi/session/segment.jsonl", Uint8Array.from([1, 2, 3]));
+    objectStore.objects.set("workspace/checkpoint.bin", Uint8Array.from([1, 2, 3]));
     const events: TtlCheckpointObjectStoreEvent[] = [];
     const cache = new TtlCheckpointObjectStore({
       objectStore,
@@ -40,26 +40,26 @@ describe("Worker-local immutable checkpoint read cache", () => {
       observe: (event) => events.push(event),
     });
 
-    const first = await cache.get("pi/session/segment.jsonl");
+    const first = await cache.get("workspace/checkpoint.bin");
     first[0] = 99;
-    const second = await cache.get("pi/session/segment.jsonl");
+    const second = await cache.get("workspace/checkpoint.bin");
 
     expect([...second]).toEqual([1, 2, 3]);
-    expect(objectStore.gets.get("pi/session/segment.jsonl")).toBe(1);
+    expect(objectStore.gets.get("workspace/checkpoint.bin")).toBe(1);
     expect(cache.snapshot()).toEqual({ entries: 1, bytes: 3, pending: 0 });
     expect(events.map((event) => event.result)).toEqual(["miss", "hit"]);
 
     now += 600_001;
-    await expect(cache.get("pi/session/segment.jsonl")).resolves.toEqual(
+    await expect(cache.get("workspace/checkpoint.bin")).resolves.toEqual(
       Uint8Array.from([1, 2, 3]),
     );
-    expect(objectStore.gets.get("pi/session/segment.jsonl")).toBe(2);
+    expect(objectStore.gets.get("workspace/checkpoint.bin")).toBe(2);
     expect(events.map((event) => event.result)).toEqual(["miss", "hit", "evicted", "miss"]);
   });
 
   it("coalesces concurrent misses into one object-store request", async () => {
     const objectStore = new CountingObjectStore();
-    objectStore.objects.set("pi/session/manifest.json", Uint8Array.from([4, 5, 6]));
+    objectStore.objects.set("pi/session/reference.json", Uint8Array.from([4, 5, 6]));
     let release!: () => void;
     objectStore.gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -70,10 +70,10 @@ describe("Worker-local immutable checkpoint read cache", () => {
       observe: (event) => results.push(event.result),
     });
 
-    const first = cache.get("pi/session/manifest.json");
-    const second = cache.get("pi/session/manifest.json");
+    const first = cache.get("pi/session/reference.json");
+    const second = cache.get("pi/session/reference.json");
     await Promise.resolve();
-    expect(objectStore.gets.get("pi/session/manifest.json")).toBe(1);
+    expect(objectStore.gets.get("pi/session/reference.json")).toBe(1);
     release();
 
     await expect(Promise.all([first, second])).resolves.toEqual([

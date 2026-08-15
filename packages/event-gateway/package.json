@@ -23,6 +23,7 @@
     "tsx": "4.23.1"
   },
   "devDependencies": {
+    "@agent-dock/protocol": "0.1.0",
     "@electric-sql/pglite": "0.5.4",
     "@electric-sql/pglite-socket": "0.2.7"
   }

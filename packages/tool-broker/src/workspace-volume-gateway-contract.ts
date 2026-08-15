@@ -8,7 +8,6 @@ import { isAbsolute, resolve } from "node:path";
 
 const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
@@ -19,7 +18,6 @@ export const VOLUME_METADATA_DIRECTORY = ".agent-dock-runtime";
 export const VOLUME_WORKSPACE_DIRECTORY = "workspace";
 export const VOLUME_GENERATION_FILE = "generation";
 export const VOLUME_GIT_DIRECTORY = "git";
-export const MAXIMUM_COMMAND_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 export const MAXIMUM_REQUEST_BYTES = 32 * 1_024;
 // A snapshot response carries the bounded persistent-volume reference metadata
 // plus its bounded diff. Workspace file bytes never cross this interface.
@@ -183,17 +181,6 @@ export function validatedVolumeIdentity(
   return identity;
 }
 
-export function validatedSnapshotId(value: string): string {
-  if (!SNAPSHOT_ID_PATTERN.test(value)) {
-    throw new WorkspaceVolumeGatewayError(
-      "workspace_snapshot_identity_invalid",
-      "Workspace snapshot identity was invalid",
-      false,
-    );
-  }
-  return value;
-}
-
 export function validatedGitBaselineCommit(value: string): string {
   if (!GIT_COMMIT_PATTERN.test(value)) {
     throw new WorkspaceVolumeGatewayError(
@@ -239,10 +226,4 @@ export function safeRelativeFile(value: string): string {
     );
   }
   return value;
-}
-
-export function commandOutput(error: unknown): string {
-  if (!isRecord(error)) return "";
-  const stderr = error.stderr;
-  return typeof stderr === "string" ? stderr.slice(0, 2_048) : "";
 }

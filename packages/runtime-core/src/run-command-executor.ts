@@ -11,7 +11,6 @@ import {
   type TurnState,
 } from "@agent-dock/domain";
 import {
-  TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
   parseEnvironmentRuntimeSnapshot,
   parseTurnCommandOutboxPayload,
@@ -25,10 +24,9 @@ import type { EnvironmentRuntimeSnapshot, TraceContext } from "@agent-dock/proto
 import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
 import type { AgentDockMetrics } from "@agent-dock/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
-import { createCompletedRunReviewBundle } from "./review-bundle.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 import type {
@@ -38,21 +36,6 @@ import type {
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
-const CANDIDATE_RACE_CANCELLATION_GRACE_PERIOD_MS = 2_000;
-
-function candidateRaceCancellationFingerprint(): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        schemaVersion: 1,
-        kind: "turn.cancel",
-        reason: "user_request",
-        gracePeriodMs: CANDIDATE_RACE_CANCELLATION_GRACE_PERIOD_MS,
-      }),
-    )
-    .digest("hex");
-}
-
 export type TurnExecutionRequest = {
   tenantId: string;
   projectId: string;
@@ -723,38 +706,6 @@ export class RunCommandExecutor {
               and tenant_active_turn.state in ('dispatching', 'running', 'waiting_approval', 'cancelling')
           ) < ${sql.ref("policy.maximum_concurrent_turns")}`,
         )
-        .where(
-          sql<boolean>`not exists (
-            select 1
-            from orchestration_candidates as candidate_admission
-            inner join orchestration_runs as orchestration_admission
-              on orchestration_admission.tenant_id = candidate_admission.tenant_id
-              and orchestration_admission.id = candidate_admission.orchestration_id
-            where candidate_admission.tenant_id = ${sql.ref("command.tenant_id")}
-              and candidate_admission.run_id = ${sql.ref("run.id")}
-              and (
-                orchestration_admission.state <> 'running'
-                or (
-                  select count(*)
-                  from orchestration_candidates as sibling_candidate
-                  inner join runs as sibling_run
-                    on sibling_run.tenant_id = sibling_candidate.tenant_id
-                    and sibling_run.id = sibling_candidate.run_id
-                  where sibling_candidate.tenant_id = candidate_admission.tenant_id
-                    and sibling_candidate.orchestration_id = candidate_admission.orchestration_id
-                    and sibling_candidate.run_id <> candidate_admission.run_id
-                    and sibling_run.state in (
-                      'claimed',
-                      'provisioning',
-                      'restoring',
-                      'running',
-                      'checkpointing',
-                      'cancel_requested'
-                    )
-                ) >= orchestration_admission.maximum_concurrent_candidates
-              )
-          )`,
-        )
         .limit(1)
         .forUpdate(["outbox", "session_row", "run"])
         .skipLocked()
@@ -1151,76 +1102,6 @@ export class RunCommandExecutor {
         .where("published_at", "is", null)
         .executeTakeFirst();
       expectOne(outboxUpdate.numUpdatedRows, "publishing an acknowledged outbox record");
-
-      // A race can be cancelled after this command was claimed but before the
-      // remote backend acknowledges it. Queued withdrawal can no longer own
-      // that lifecycle pair, so atomically create the ordinary durable
-      // cancellation at the acknowledgement boundary. This closes the gap
-      // without inventing a second cancellation protocol.
-      const cancelledCandidate = await transaction
-        .selectFrom("orchestration_candidates as candidate")
-        .innerJoin("orchestration_runs as orchestration", (join) =>
-          join
-            .onRef("orchestration.tenant_id", "=", "candidate.tenant_id")
-            .onRef("orchestration.id", "=", "candidate.orchestration_id"),
-        )
-        .select(["candidate.id as candidateId", "orchestration.id as orchestrationId"])
-        .where("candidate.tenant_id", "=", claim.request.tenantId)
-        .where("candidate.run_id", "=", claim.request.runId)
-        .where("orchestration.state", "=", "cancel_requested")
-        .executeTakeFirst();
-      if (cancelledCandidate !== undefined) {
-        const cancellationCommandId = this.#idGenerator();
-        const cancellationOutboxId = this.#idGenerator();
-        const idempotencyKey = `race-cancel:${cancelledCandidate.orchestrationId}:${cancelledCandidate.candidateId}`;
-        const cancellation = await transaction
-          .insertInto("commands")
-          .values({
-            id: cancellationCommandId,
-            tenant_id: claim.request.tenantId,
-            session_id: claim.request.sessionId,
-            turn_id: claim.request.turnId,
-            idempotency_key: idempotencyKey,
-            kind: "turn.cancel",
-            state: "pending",
-            payload: {
-              schemaVersion: 1,
-              requestHash: candidateRaceCancellationFingerprint(),
-              targetCommandId: claim.request.commandId,
-              reason: "user_request",
-              gracePeriodMs: CANDIDATE_RACE_CANCELLATION_GRACE_PERIOD_MS,
-            },
-            dispatched_at: null,
-            acknowledged_at: null,
-            completed_at: null,
-            failure_code: null,
-          })
-          .onConflict((conflict) => conflict.columns(["session_id", "idempotency_key"]).doNothing())
-          .returning("id")
-          .executeTakeFirst();
-        if (cancellation !== undefined) {
-          await transaction
-            .insertInto("outbox")
-            .values({
-              id: cancellationOutboxId,
-              tenant_id: claim.request.tenantId,
-              aggregate_type: "session",
-              aggregate_id: claim.request.sessionId,
-              topic: TURN_CANCELLATION_OUTBOX_TOPIC,
-              payload: {
-                schemaVersion: 1,
-                commandId: cancellation.id,
-                targetCommandId: claim.request.commandId,
-                sessionId: claim.request.sessionId,
-                turnId: claim.request.turnId,
-                kind: "turn.cancel",
-              },
-              published_at: null,
-              last_error: null,
-            })
-            .executeTakeFirstOrThrow();
-        }
-      }
     });
   }
 
@@ -1353,21 +1234,6 @@ export class RunCommandExecutor {
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),
       });
-      await createCompletedRunReviewBundle(
-        transaction,
-        {
-          tenantId: claim.request.tenantId,
-          projectId: claim.request.projectId,
-          workspaceId: claim.request.workspaceId,
-          sessionId: claim.request.sessionId,
-          runId: claim.request.runId,
-          turnId: claim.request.turnId,
-          attemptId: claim.request.attemptId,
-          environment: claim.request.environment,
-        },
-        result.stopReason,
-        now,
-      );
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
         await this.#leaseManager.releaseCurrent(transaction, claim.request, acknowledgement, now);
       }

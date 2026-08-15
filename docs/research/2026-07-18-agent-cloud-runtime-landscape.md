@@ -277,8 +277,9 @@ event spool 都可以保留；Pi RPC supervisor 只是一个 ExecutionBackend，
 
 ## 8. Embedded Pi 实验结果
 
-同日完成了 [`spikes/pi-embedded-rehydrate`](../../spikes/pi-embedded-rehydrate)
-可执行实验，固定 Pi SDK `0.80.10`，不调用模型，也不启动 Pi 子进程。
+同日完成的 embedded-runtime Spike 已在生产 SDK 路径稳定后从工作树移除，
+其实现仍可从 Git 历史查阅。
+该实验固定 Pi SDK `0.80.10`，不调用模型，也不启动 Pi 子进程。
 
 实测结果：
 

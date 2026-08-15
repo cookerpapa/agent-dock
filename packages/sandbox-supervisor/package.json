@@ -21,6 +21,7 @@
     "@agent-dock/protocol": "0.1.0",
     "@agent-dock/workspace-runtime": "0.1.0",
     "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
     "ws": "8.21.1"
   },

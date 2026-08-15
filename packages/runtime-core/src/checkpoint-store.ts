@@ -4,45 +4,28 @@ import {
   MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
-  parseConversationTurnTranscriptResource,
   parseEnvironmentValidationReport,
 } from "@agent-dock/protocol";
 import {
-  validatePiSessionSnapshot,
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
   type LoadedSandboxCheckpoint,
-  type PiDurableRecoverySuffix,
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,
 } from "@agent-dock/sandbox-supervisor/sandbox-checkpoint";
-import {
-  PINNED_PI_CODING_AGENT_VERSION,
-  PiTurnError,
-} from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
+import { PiTurnError } from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
 import { validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor/workspace-snapshot";
 import { createHash, randomUUID } from "node:crypto";
 import { workspaceSnapshotFileCount } from "@agent-dock/workspace-runtime";
 import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
-import {
-  PI_SESSION_MANIFEST_MEDIA_TYPE,
-  PI_SESSION_MANIFEST_MAX_BYTES,
-  PiSessionManifestError,
-  decodePiSessionManifest,
-  preparePiSessionManifest,
-  restorePiSessionManifest,
-  type PiSessionManifest,
-  type PiSessionSegmentDescriptor,
-} from "./pi-session-manifest.ts";
 
-// One object is either an 8 MiB Pi segment, a bounded manifest, or a compressed
-// event archive whose uncompressed limit is 128 MiB. Keep the object-store
-// guard comfortably above those payloads without permitting unbounded reads.
+// Workspace snapshots and archived Tool output are the largest supported
+// checkpoint objects. Keep one shared guard comfortably above their bounded
+// payloads without permitting unbounded reads.
 export const MAX_CHECKPOINT_OBJECT_BYTES = 136 * 1_024 * 1_024;
-const PI_SEGMENT_UPLOAD_CONCURRENCY = 4;
 
 export interface CheckpointObjectStore {
   put(objectKey: string, bytes: Uint8Array): Promise<void>;
@@ -66,30 +49,12 @@ type ArtifactReference = {
   objectKey: string;
   sha256: string;
   sizeBytes: number;
-  mediaType?: string;
 };
 
 type CheckpointMetadata = {
-  piSession?: ArtifactReference;
-  piSessionThroughSequence: number;
   workspace?: ArtifactReference;
   revision: string;
   workspaceRevision?: string;
-};
-
-type LoadedPiSessionState = {
-  bytes: Uint8Array;
-  manifest: PiSessionManifest;
-  manifestSha256: string;
-};
-
-type LoadedPiSessionManifestState = Omit<LoadedPiSessionState, "bytes">;
-
-type PreparedPiSessionArtifact = {
-  artifactId: string;
-  reference: ArtifactReference;
-  fileName: string;
-  mediaType: string;
 };
 
 export class SandboxCheckpointStoreError extends PiTurnError {
@@ -123,12 +88,10 @@ function safeSize(value: string | number | bigint, maximum: number, description:
   return parsed;
 }
 
-function revisionFor(piSessionKey?: string, workspaceKey?: string): string {
+function revisionFor(workspaceKey: string): string {
   return createHash("sha256")
-    .update("agent-dock.checkpoint-revision.v1\0")
-    .update(piSessionKey ?? "pi-session-absent")
-    .update("\0")
-    .update(workspaceKey ?? "workspace-absent")
+    .update("agent-dock.workspace-checkpoint-revision.v1\0")
+    .update(workspaceKey)
     .digest("hex");
 }
 
@@ -244,33 +207,19 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     this.#idGenerator = options.idGenerator ?? randomUUID;
   }
 
-  async load(
-    command: ExecuteTurnCommandMessage,
-    options?: Readonly<{ includeConversation?: boolean }>,
-  ): Promise<LoadedSandboxCheckpoint | undefined> {
+  async load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined> {
     const metadata = await this.#database.transaction().execute(async (transaction) => {
       return this.#loadMetadata(transaction, command, validDate(this.#clock));
     });
-    const includeConversation = options?.includeConversation ?? true;
-    const recoverySuffix = includeConversation
-      ? await this.#loadRecoverySuffix(command, metadata?.piSessionThroughSequence ?? 0)
-      : undefined;
-    if (metadata === undefined) {
-      return recoverySuffix === undefined ? undefined : { recoverySuffix };
-    }
+    if (metadata === undefined) return undefined;
 
-    const [piState, workspace] = await Promise.all([
-      !includeConversation || metadata.piSession === undefined
-        ? Promise.resolve(undefined)
-        : this.#loadPiSession(command, metadata.piSession),
+    const workspace =
       metadata.workspace === undefined
-        ? Promise.resolve(undefined)
-        : this.#objectStore.get(metadata.workspace.objectKey),
-    ]);
+        ? undefined
+        : await this.#objectStore.get(metadata.workspace.objectKey);
     if (workspace !== undefined && metadata.workspace !== undefined) {
       this.#verifyObject(workspace, metadata.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "workspace");
     }
-    if (piState !== undefined) validatePiSessionSnapshot(piState.bytes);
     if (workspace !== undefined) validateWorkspaceSnapshot(workspace);
 
     await this.#database.transaction().execute(async (transaction) => {
@@ -285,192 +234,11 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     });
     return {
       revision: metadata.revision,
-      ...(piState === undefined ? {} : { piSession: piState.bytes }),
       ...(workspace === undefined ? {} : { workspace }),
       ...(metadata.workspaceRevision === undefined
         ? {}
         : { workspaceRevision: metadata.workspaceRevision }),
-      ...(recoverySuffix === undefined ? {} : { recoverySuffix }),
     };
-  }
-
-  async #loadRecoverySuffix(
-    command: ExecuteTurnCommandMessage,
-    checkpointThroughSequence: number,
-  ): Promise<PiDurableRecoverySuffix | undefined> {
-    const rows = await this.#database
-      .selectFrom("conversation_turn_projections as projection")
-      .innerJoin("turns as turn_row", (join) =>
-        join
-          .onRef("turn_row.tenant_id", "=", "projection.tenant_id")
-          .onRef("turn_row.session_id", "=", "projection.session_id")
-          .onRef("turn_row.id", "=", "projection.turn_id"),
-      )
-      .select([
-        "projection.turn_id as turnId",
-        "projection.through_seq as throughSequence",
-        "projection.transcript",
-        "turn_row.input_text as input",
-      ])
-      .where("projection.tenant_id", "=", command.payload.tenantId)
-      .where("projection.session_id", "=", command.payload.sessionId)
-      .where("projection.through_seq", ">", String(checkpointThroughSequence))
-      .where("turn_row.id", "!=", command.payload.turnId)
-      .where("turn_row.state", "in", ["completed", "failed", "cancelled"])
-      .orderBy("projection.through_seq", "asc")
-      .limit(33)
-      .execute();
-    if (rows.length === 0) return undefined;
-    if (rows.length > 32) {
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_recovery_overflow",
-        "Too many terminal Turns exist beyond the Pi checkpoint",
-        false,
-      );
-    }
-    const turns = rows.map((row) => {
-      if (row.input === null || row.input.length === 0) {
-        throw new SandboxCheckpointStoreError(
-          "checkpoint_recovery_invalid",
-          "A recoverable Turn has no accepted prompt",
-          false,
-        );
-      }
-      return {
-        turnId: row.turnId,
-        input: row.input,
-        transcript: parseConversationTurnTranscriptResource(row.transcript),
-      };
-    });
-    const recoveredThroughSequence = Number(rows.at(-1)!.throughSequence);
-    if (
-      !Number.isSafeInteger(recoveredThroughSequence) ||
-      recoveredThroughSequence <= checkpointThroughSequence
-    ) {
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_recovery_invalid",
-        "Pi recovery event sequence is invalid",
-        false,
-      );
-    }
-    return {
-      checkpointThroughSequence,
-      recoveredThroughSequence,
-      turns,
-    };
-  }
-
-  async saveConversation(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-  ): Promise<SavedSandboxCheckpoint> {
-    return this.#saveConversationArtifact(
-      command,
-      baseRevision,
-      piSession,
-      "pi_session_snapshot",
-      false,
-    );
-  }
-
-  async saveInterruptedConversation(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-  ): Promise<SavedSandboxCheckpoint> {
-    return this.#saveConversationArtifact(
-      command,
-      baseRevision,
-      piSession,
-      "pi_interrupted_session_snapshot",
-      true,
-    );
-  }
-
-  async #saveConversationArtifact(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-    kind: "pi_session_snapshot" | "pi_interrupted_session_snapshot",
-    allowCancellation: boolean,
-  ): Promise<SavedSandboxCheckpoint> {
-    validatePiSessionSnapshot(piSession);
-    const piArtifact = await this.#preparePiSessionArtifact(
-      command,
-      baseRevision,
-      piSession,
-      allowCancellation,
-    );
-    const { artifactId, reference } = piArtifact;
-    let saved: SavedSandboxCheckpoint | undefined;
-    try {
-      saved = await this.#database.transaction().execute(async (transaction) => {
-        const now = validDate(this.#clock);
-        const current = await this.#assertCurrentSession(
-          transaction,
-          command,
-          now,
-          true,
-          allowCancellation,
-        );
-        const settled = await this.#settledMetadata(transaction, command, current);
-        if ((settled?.revision ?? null) !== baseRevision) {
-          throw new SandboxCheckpointStoreError(
-            "checkpoint_conflict",
-            "Settled checkpoint base revision is stale",
-            false,
-          );
-        }
-        await transaction
-          .insertInto("artifacts")
-          .values({
-            id: artifactId,
-            tenant_id: command.payload.tenantId,
-            session_id: command.payload.sessionId,
-            turn_id: command.payload.turnId,
-            run_id: command.payload.runId,
-            kind,
-            object_key: reference.objectKey,
-            sha256: reference.sha256,
-            size_bytes: reference.sizeBytes,
-            file_name: piArtifact.fileName,
-            media_type: piArtifact.mediaType,
-          })
-          .executeTakeFirstOrThrow();
-        const updated = await transaction
-          .updateTable("sessions")
-          .set({
-            pi_session_snapshot_key: reference.objectKey,
-            row_version: sql<string>`${sql.ref("row_version")} + 1`,
-            updated_at: now,
-            last_active_at: now,
-          })
-          .where("id", "=", command.payload.sessionId)
-          .where("tenant_id", "=", command.payload.tenantId)
-          .where("row_version", "=", current.rowVersion)
-          .executeTakeFirst();
-        if (updated.numUpdatedRows !== 1n) {
-          throw new SandboxCheckpointStoreError(
-            "checkpoint_conflict",
-            "Session changed before its conversation checkpoint commit",
-            true,
-          );
-        }
-        return {
-          revision: revisionFor(reference.objectKey, settled?.workspace?.objectKey),
-          ...(settled?.workspaceRevision === undefined
-            ? {}
-            : { workspaceRevision: settled.workspaceRevision }),
-        };
-      });
-    } catch (error: unknown) {
-      // Content-addressed Pi segments/manifests may already be referenced by a
-      // committed checkpoint. A later orphan collector, not a failed writer,
-      // decides when an unreferenced object is safe to remove.
-      throw error;
-    }
-    return saved;
   }
 
   async saveToolOutput(
@@ -547,14 +315,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         false,
       );
     }
-    validatePiSessionSnapshot(checkpoint.piSession);
     validateWorkspaceSnapshot(checkpoint.workspace);
-    const piArtifact = await this.#preparePiSessionArtifact(
-      command,
-      baseRevision,
-      checkpoint.piSession,
-    );
-    const piArtifactId = piArtifact.artifactId;
     const workspaceArtifactId = this.#idGenerator();
     const rawPatchBytes =
       checkpoint.workspacePatch === undefined
@@ -571,7 +332,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       command.payload.sessionId,
       command.payload.turnId,
     ].map((segment) => segment.replace(/[^A-Za-z0-9._-]/g, "-"));
-    const piReference = piArtifact.reference;
     const workspaceReference: ArtifactReference = {
       objectKey: `${prefix.join("/")}/${workspaceArtifactId}-workspace-${sha256(checkpoint.workspace)}.json`,
       sha256: sha256(checkpoint.workspace),
@@ -592,7 +352,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             sha256: sha256(patchBytes),
             sizeBytes: patchBytes.byteLength,
           };
-    validateCheckpointObjectKey(piReference.objectKey);
     validateCheckpointObjectKey(workspaceReference.objectKey);
     if (patchReference !== undefined) validateCheckpointObjectKey(patchReference.objectKey);
 
@@ -623,21 +382,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             false,
           );
         }
-        const revision = revisionFor(piReference.objectKey, workspaceReference.objectKey);
+        const revision = revisionFor(workspaceReference.objectKey);
         const artifacts = [
-          {
-            id: piArtifactId,
-            tenant_id: command.payload.tenantId,
-            session_id: command.payload.sessionId,
-            turn_id: command.payload.turnId,
-            run_id: command.payload.runId,
-            kind: "pi_session_snapshot" as const,
-            object_key: piReference.objectKey,
-            sha256: piReference.sha256,
-            size_bytes: piReference.sizeBytes,
-            file_name: piArtifact.fileName,
-            media_type: piArtifact.mediaType,
-          },
           {
             id: workspaceArtifactId,
             tenant_id: command.payload.tenantId,
@@ -731,7 +477,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             run_id: command.payload.runId,
             attempt_id: command.payload.attemptId,
             turn_id: command.payload.turnId,
-            pi_artifact_id: piArtifactId,
             workspace_artifact_id: workspaceArtifactId,
             patch_artifact_id: patchArtifactId ?? null,
             revision,
@@ -743,7 +488,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         const updated = await transaction
           .updateTable("sessions")
           .set({
-            pi_session_snapshot_key: piReference.objectKey,
             workspace_snapshot_key: workspaceReference.objectKey,
             row_version: sql<string>`${sql.ref("row_version")} + 1`,
             updated_at: now,
@@ -772,7 +516,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     }
 
     return {
-      revision: revisionFor(piReference.objectKey, workspaceReference.objectKey),
+      revision: revisionFor(workspaceReference.objectKey),
       workspaceRevision: workspaceReference.sha256,
     };
   }
@@ -781,15 +525,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     transaction: Transaction<Database>,
     command: ExecuteTurnCommandMessage,
     now: Date,
-    allowCancellation = false,
   ): Promise<CheckpointMetadata | undefined> {
-    const session = await this.#assertCurrentSession(
-      transaction,
-      command,
-      now,
-      false,
-      allowCancellation,
-    );
+    const session = await this.#assertCurrentSession(transaction, command, now, false);
     return this.#settledMetadata(transaction, command, session);
   }
 
@@ -797,103 +534,11 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     transaction: Transaction<Database>,
     command: ExecuteTurnCommandMessage,
     session: {
-      piSessionKey: string | null;
       workspaceKey: string | null;
       rowVersion: string;
       currentVersionId: string | null;
     },
   ): Promise<CheckpointMetadata | undefined> {
-    let pi =
-      session.piSessionKey === null
-        ? undefined
-        : await transaction
-            .selectFrom("artifacts as artifact")
-            .innerJoin("turns as terminal", (join) =>
-              join
-                .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
-                .onRef("terminal.session_id", "=", "artifact.session_id")
-                .onRef("terminal.id", "=", "artifact.turn_id"),
-            )
-            .leftJoin("session_terminal_events as terminal_event", (join) =>
-              join
-                .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
-                .onRef("terminal_event.session_id", "=", "artifact.session_id")
-                .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
-                .on("terminal_event.type", "in", [
-                  "turn.completed",
-                  "turn.failed",
-                  "turn.cancelled",
-                ]),
-            )
-            .select([
-              "artifact.object_key",
-              "artifact.sha256",
-              "artifact.size_bytes",
-              "artifact.media_type",
-              "terminal_event.seq as terminal_seq",
-            ])
-            .where("artifact.tenant_id", "=", command.payload.tenantId)
-            .where("artifact.session_id", "=", command.payload.sessionId)
-            .where("artifact.object_key", "=", session.piSessionKey)
-            .where((expression) =>
-              expression.or([
-                expression.and([
-                  expression("artifact.kind", "=", "pi_session_snapshot"),
-                  expression("terminal_event.type", "=", "turn.completed"),
-                ]),
-                expression.and([
-                  expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
-                  expression("terminal.state", "in", ["failed", "cancelled"]),
-                  expression("terminal_event.type", "in", ["turn.failed", "turn.cancelled"]),
-                ]),
-              ]),
-            )
-            .executeTakeFirst();
-    if (pi === undefined) {
-      pi = await transaction
-        .selectFrom("artifacts as artifact")
-        .innerJoin("turns as terminal", (join) =>
-          join
-            .onRef("terminal.tenant_id", "=", "artifact.tenant_id")
-            .onRef("terminal.session_id", "=", "artifact.session_id")
-            .onRef("terminal.id", "=", "artifact.turn_id"),
-        )
-        .leftJoin("session_terminal_events as terminal_event", (join) =>
-          join
-            .onRef("terminal_event.tenant_id", "=", "artifact.tenant_id")
-            .onRef("terminal_event.session_id", "=", "artifact.session_id")
-            .onRef("terminal_event.turn_id", "=", "artifact.turn_id")
-            .on("terminal_event.type", "in", ["turn.completed", "turn.failed", "turn.cancelled"]),
-        )
-        .select([
-          "artifact.object_key",
-          "artifact.sha256",
-          "artifact.size_bytes",
-          "artifact.media_type",
-          "terminal_event.seq as terminal_seq",
-        ])
-        .where("artifact.tenant_id", "=", command.payload.tenantId)
-        .where("artifact.session_id", "=", command.payload.sessionId)
-        .where((expression) =>
-          expression.or([
-            expression.and([
-              expression("artifact.kind", "=", "pi_session_snapshot"),
-              expression("terminal_event.type", "=", "turn.completed"),
-            ]),
-            expression.and([
-              expression("artifact.kind", "=", "pi_interrupted_session_snapshot"),
-              expression("terminal.state", "in", ["failed", "cancelled"]),
-              expression("terminal_event.type", "in", ["turn.failed", "turn.cancelled"]),
-            ]),
-          ]),
-        )
-        .orderBy(
-          sql<Date>`coalesce(${sql.ref("terminal.settled_at")}, ${sql.ref("terminal_event.occurred_at")})`,
-          "desc",
-        )
-        .orderBy("artifact.created_at", "desc")
-        .executeTakeFirst();
-    }
     let workspace:
       { object_key: string; sha256: string; size_bytes: string | number | bigint } | undefined;
     if (session.currentVersionId !== null) {
@@ -960,186 +605,12 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
               "Workspace checkpoint",
             ),
           };
-    if (pi === undefined && workspaceReference === undefined) return undefined;
+    if (workspaceReference === undefined) return undefined;
     return {
-      ...(pi === undefined
-        ? {}
-        : {
-            piSession: {
-              objectKey: pi.object_key,
-              sha256: pi.sha256,
-              sizeBytes: safeSize(
-                pi.size_bytes,
-                PI_SESSION_MANIFEST_MAX_BYTES,
-                "Pi session checkpoint",
-              ),
-              ...(pi.media_type === null ? {} : { mediaType: pi.media_type }),
-            },
-          }),
-      ...(workspaceReference === undefined ? {} : { workspace: workspaceReference }),
-      piSessionThroughSequence:
-        pi === undefined
-          ? 0
-          : safeSize(pi.terminal_seq ?? 0, Number.MAX_SAFE_INTEGER, "Pi event cursor"),
-      revision: revisionFor(pi?.object_key, workspaceReference?.objectKey),
-      ...(workspaceReference === undefined ? {} : { workspaceRevision: workspaceReference.sha256 }),
+      workspace: workspaceReference,
+      revision: revisionFor(workspaceReference.objectKey),
+      workspaceRevision: workspaceReference.sha256,
     };
-  }
-
-  async #preparePiSessionArtifact(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-    allowCancellation = false,
-  ): Promise<PreparedPiSessionArtifact> {
-    let previous: LoadedPiSessionManifestState | undefined;
-    if (baseRevision !== null) {
-      const metadata = await this.#database
-        .transaction()
-        .execute(async (transaction) =>
-          this.#loadMetadata(transaction, command, validDate(this.#clock), allowCancellation),
-        );
-      if (metadata?.revision !== baseRevision) {
-        throw new SandboxCheckpointStoreError(
-          "checkpoint_conflict",
-          "Settled checkpoint base revision is stale",
-          false,
-        );
-      }
-      if (metadata.piSession !== undefined) {
-        previous = await this.#loadPiSessionManifest(metadata.piSession);
-      }
-    }
-
-    const prepared = preparePiSessionManifest(piSession, PINNED_PI_CODING_AGENT_VERSION, previous);
-    for (
-      let index = 0;
-      index < prepared.newSegments.length;
-      index += PI_SEGMENT_UPLOAD_CONCURRENCY
-    ) {
-      const batch = prepared.newSegments.slice(index, index + PI_SEGMENT_UPLOAD_CONCURRENCY);
-      await Promise.all(
-        batch.map(async (segment) => {
-          const objectKey = this.#piSegmentObjectKey(command, segment.descriptor);
-          await this.#putContentAddressed(objectKey, segment.bytes);
-        }),
-      );
-    }
-    const objectKey = this.#piManifestObjectKey(command, prepared.manifestSha256);
-    await this.#putContentAddressed(objectKey, prepared.manifestBytes);
-    return {
-      artifactId: this.#idGenerator(),
-      reference: {
-        objectKey,
-        sha256: prepared.manifestSha256,
-        sizeBytes: prepared.manifestBytes.byteLength,
-        mediaType: PI_SESSION_MANIFEST_MEDIA_TYPE,
-      },
-      fileName: "pi-session.manifest.json",
-      mediaType: PI_SESSION_MANIFEST_MEDIA_TYPE,
-    };
-  }
-
-  async #loadPiSession(
-    command: ExecuteTurnCommandMessage,
-    reference: ArtifactReference,
-  ): Promise<LoadedPiSessionState> {
-    const loaded = await this.#loadPiSessionManifest(reference);
-    try {
-      const bytes = await restorePiSessionManifest(loaded.manifest, async (descriptor) =>
-        this.#objectStore.get(this.#piSegmentObjectKey(command, descriptor)),
-      );
-      return { bytes, ...loaded };
-    } catch (error: unknown) {
-      if (!(error instanceof PiSessionManifestError)) throw error;
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_corrupt",
-        "Pi session checkpoint failed integrity validation",
-        false,
-      );
-    }
-  }
-
-  async #loadPiSessionManifest(
-    reference: ArtifactReference,
-  ): Promise<LoadedPiSessionManifestState> {
-    const stored = await this.#objectStore.get(reference.objectKey);
-    this.#verifyObject(stored, reference, PI_SESSION_MANIFEST_MAX_BYTES, "Pi session manifest");
-    if (reference.mediaType !== PI_SESSION_MANIFEST_MEDIA_TYPE) {
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_incompatible",
-        "Pi session checkpoint format is unsupported",
-        false,
-      );
-    }
-    try {
-      const manifest = decodePiSessionManifest(stored);
-      if (manifest.piVersion !== PINNED_PI_CODING_AGENT_VERSION) {
-        throw new PiSessionManifestError("Pi session manifest version is incompatible");
-      }
-      return {
-        manifest,
-        manifestSha256: reference.sha256,
-      };
-    } catch (error: unknown) {
-      if (!(error instanceof PiSessionManifestError)) throw error;
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_corrupt",
-        "Pi session checkpoint failed integrity validation",
-        false,
-      );
-    }
-  }
-
-  async #putContentAddressed(objectKey: string, bytes: Uint8Array): Promise<void> {
-    validateCheckpointObjectKey(objectKey);
-    try {
-      await this.#objectStore.put(objectKey, bytes);
-      return;
-    } catch (error: unknown) {
-      const code =
-        typeof error === "object" && error !== null && "code" in error
-          ? String((error as { code?: unknown }).code)
-          : undefined;
-      if (code !== "EEXIST" && code !== "checkpoint_object_exists") throw error;
-    }
-    const existing = await this.#objectStore.get(objectKey);
-    if (existing.byteLength !== bytes.byteLength || sha256(existing) !== sha256(bytes)) {
-      throw new SandboxCheckpointStoreError(
-        "checkpoint_corrupt",
-        "Content-addressed checkpoint object did not match its key",
-        false,
-      );
-    }
-  }
-
-  #piSegmentObjectKey(
-    command: ExecuteTurnCommandMessage,
-    descriptor: PiSessionSegmentDescriptor,
-  ): string {
-    return validateCheckpointObjectKey(
-      [
-        "pi-sessions",
-        command.payload.tenantId,
-        command.payload.sessionId,
-        "segments",
-        descriptor.encoding === "gzip"
-          ? `${descriptor.sha256}.jsonl.gz`
-          : `${descriptor.sha256}.jsonl`,
-      ].join("/"),
-    );
-  }
-
-  #piManifestObjectKey(command: ExecuteTurnCommandMessage, digest: string): string {
-    return validateCheckpointObjectKey(
-      [
-        "pi-sessions",
-        command.payload.tenantId,
-        command.payload.sessionId,
-        "manifests",
-        `${digest}.json`,
-      ].join("/"),
-    );
   }
 
   async #lockSession(
@@ -1147,7 +618,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     now: Date,
   ) {
-    return this.#assertCurrentSession(transaction, command, now, true, false);
+    return this.#assertCurrentSession(transaction, command, now, true);
   }
 
   async #assertCurrentSession(
@@ -1155,9 +626,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
     command: ExecuteTurnCommandMessage,
     now: Date,
     lock: boolean,
-    allowCancellation = false,
   ): Promise<{
-    piSessionKey: string | null;
     workspaceKey: string | null;
     rowVersion: string;
     currentVersionId: string | null;
@@ -1217,7 +686,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
         "session_row.tenant_id as tenantId",
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
-        "session_row.pi_session_snapshot_key as piSessionKey",
         "session_row.row_version as rowVersion",
         sql<string | null>`case
           when ${sql.ref("session_row.forked_from_session_id")} is null
@@ -1263,9 +731,8 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       row.leaseId !== command.payload.leaseId ||
       Number(row.fencingToken) !== command.payload.fencingToken ||
       Number(row.sessionFencingToken) !== command.payload.fencingToken ||
-      (row.sessionState !== "running" &&
-        !(allowCancellation && row.sessionState === "cancelling")) ||
-      (row.turnState !== "running" && !(allowCancellation && row.turnState === "cancelling")) ||
+      row.sessionState !== "running" ||
+      row.turnState !== "running" ||
       row.commandKind !== "turn.execute" ||
       row.commandState !== "acknowledged" ||
       row.runId !== command.payload.runId ||
@@ -1277,13 +744,11 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       (row.runState !== "provisioning" &&
         row.runState !== "restoring" &&
         row.runState !== "running" &&
-        row.runState !== "checkpointing" &&
-        !(allowCancellation && row.runState === "cancel_requested")) ||
+        row.runState !== "checkpointing") ||
       (row.attemptState !== "provisioning" &&
         row.attemptState !== "restoring" &&
         row.attemptState !== "running" &&
-        row.attemptState !== "checkpointing" &&
-        !(allowCancellation && row.attemptState === "cancel_requested")) ||
+        row.attemptState !== "checkpointing") ||
       new Date(row.validUntil).valueOf() <= now.valueOf()
     ) {
       throw new SandboxCheckpointStoreError(
@@ -1293,7 +758,6 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
       );
     }
     return {
-      piSessionKey: row.piSessionKey,
       workspaceKey: row.workspaceKey,
       rowVersion: row.rowVersion,
       currentVersionId: row.currentVersionId,

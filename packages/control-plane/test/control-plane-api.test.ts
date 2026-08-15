@@ -1,7 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
 import type {
   AcceptedTurnResource,
   AcceptedTurnCancellationResource,
@@ -10,19 +9,14 @@ import type {
   EventPublishBatchMessage,
   EventPublishMessage,
   ProjectResource,
-  RunResource,
   SessionResource,
 } from "@agent-dock/protocol";
-import {
-  parseControlToSupervisorMessage,
-  parseSupervisorToControlMessage,
-} from "@agent-dock/protocol";
+import { parseControlToSupervisorMessage } from "@agent-dock/protocol";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
   PiTurnCancelledError,
   PiTurnError,
-  PiSdkTurnRunner,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
 } from "@agent-dock/sandbox-supervisor";
@@ -43,7 +37,6 @@ import {
   RunCommandExecutorStaleClaimError,
   PostgresSessionEventNotifications,
   PostgresRunAttemptPhaseObserver,
-  SessionEventHub,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
   type TurnCancellationBackend,
@@ -87,6 +80,10 @@ const IDS = {
   batchSandboxBoot: "60000000-0000-4000-8000-000000000013",
   externalEventSandbox: "50000000-0000-4000-8000-000000000014",
   externalEventSandboxBoot: "60000000-0000-4000-8000-000000000014",
+  heartbeatSandbox: "50000000-0000-4000-8000-000000000015",
+  heartbeatSandboxBoot: "60000000-0000-4000-8000-000000000015",
+  expiredLeaseSandbox: "50000000-0000-4000-8000-000000000016",
+  expiredLeaseSandboxBoot: "60000000-0000-4000-8000-000000000016",
 };
 
 let pglite: PGlite | undefined;
@@ -95,7 +92,6 @@ let database: Kysely<Database>;
 let databaseConnectionString: string;
 let application: NestFastifyApplication;
 let http: FastifyInstance;
-let baseUrl: string;
 let durableEventStore: DurableEventStore;
 let project: ProjectResource;
 let session: SessionResource;
@@ -169,6 +165,24 @@ async function seedSingleUserProfile(): Promise<void> {
       maximum_sessions: 10_000,
       maximum_unsettled_turns: 10_000,
       maximum_concurrent_turns: 256,
+    })
+    .executeTakeFirstOrThrow();
+}
+
+async function createReadySandbox(options: {
+  id: string;
+  bootId: string;
+  supervisorId: string;
+}): Promise<void> {
+  await database
+    .insertInto("sandboxes")
+    .values({
+      id: options.id,
+      supervisor_id: options.supervisorId,
+      boot_id: options.bootId,
+      state: "ready",
+      max_concurrent_sessions: 1,
+      active_sessions: 0,
     })
     .executeTakeFirstOrThrow();
 }
@@ -535,12 +549,10 @@ beforeAll(async () => {
     database,
     tenantId: IDS.tenant,
     defaultModelProfileId: IDS.profile,
-    advancedModulesEnabled: true,
     ...(sessionEventNotifications === undefined ? {} : { sessionEventNotifications }),
   });
   await application.listen(0, "127.0.0.1");
   http = application.getHttpAdapter().getInstance() as FastifyInstance;
-  baseUrl = await application.getUrl();
   durableEventStore = application.get(DurableEventStore);
 }, 30_000);
 
@@ -552,27 +564,6 @@ afterAll(async () => {
 });
 
 describe.sequential("single-user durable turn intake API", () => {
-  it("keeps research APIs outside the default core product", async () => {
-    const coreApplication = await createControlPlaneApplication({
-      database,
-      tenantId: IDS.tenant,
-      defaultModelProfileId: IDS.profile,
-    });
-    try {
-      const coreHttp = coreApplication.getHttpAdapter().getInstance() as FastifyInstance;
-      const response = await coreHttp.inject({ method: "GET", url: "/v1/usage" });
-      expect(response.statusCode).toBe(404);
-      expect(response.json()).toEqual({
-        error: {
-          code: "route_not_found",
-          message: "The requested API route was not found",
-        },
-      });
-    } finally {
-      await coreApplication.close();
-    }
-  });
-
   it("creates a project and workspace atomically, then creates a cold session", async () => {
     const projectResponse = await http.inject({
       method: "POST",
@@ -618,115 +609,6 @@ describe.sequential("single-user durable turn intake API", () => {
       .where("session_id", "=", session.sessionId)
       .executeTakeFirstOrThrow();
     expect(cursor).toEqual({ last_persisted_seq: "0", acknowledged_through_seq: "0" });
-  });
-
-  it("exposes owner-managed model governance and tenant-scoped usage/context views", async () => {
-    const governance = await http.inject({ method: "GET", url: "/v1/model-governance" });
-    expect(governance.statusCode).toBe(200);
-    expect(governance.json()).toMatchObject({
-      limits: {
-        maximumModelRequestsPerRun: 128,
-        maximumToolCallsPerRun: 128,
-      },
-      fallback: { enabled: false },
-    });
-    const replaced = await http.inject({
-      method: "PUT",
-      url: "/v1/model-governance",
-      payload: {
-        limits: {
-          maximumModelRequestsPerRun: 40,
-          maximumCostMicrousdPerRun: 6_000_000,
-          dailyTokenBudget: 3_000_000,
-          monthlyCostMicrousdBudget: 60_000_000,
-          maximumToolCallsPerRun: 160,
-          maximumToolOutputBytes: 65_536,
-          maximumRunDurationMs: 900_000,
-          compactionReserveTokens: 16_384,
-          compactionKeepRecentTokens: 20_000,
-        },
-        rates: [
-          {
-            provider: "deepseek",
-            modelId: "deepseek-v4-flash",
-            inputMicrousdPerMillion: 1_000_000,
-            outputMicrousdPerMillion: 2_000_000,
-            cacheReadMicrousdPerMillion: 500_000,
-            cacheWriteMicrousdPerMillion: 2_500_000,
-          },
-        ],
-        fallback: {
-          enabled: false,
-          onRateLimit: true,
-          onServerError: true,
-          onTimeout: true,
-        },
-      },
-    });
-    expect(replaced.statusCode).toBe(200);
-    expect(replaced.json()).toMatchObject({
-      limits: { maximumModelRequestsPerRun: 40 },
-      rates: [
-        expect.objectContaining({
-          modelId: "deepseek-v4-flash",
-          inputMicrousdPerMillion: 1_000_000,
-        }),
-      ],
-    });
-
-    const usage = await http.inject({ method: "GET", url: "/v1/usage" });
-    expect(usage.statusCode).toBe(200);
-    expect(usage.json()).toEqual({
-      tenantId: IDS.tenant,
-      totals: {
-        requests: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        costMicrousd: 0,
-      },
-      byModel: [],
-    });
-    const context = await http.inject({
-      method: "GET",
-      url: `/v1/sessions/${session.sessionId}/context`,
-    });
-    expect(context.statusCode).toBe(200);
-    expect(context.json()).toEqual({
-      sessionId: session.sessionId,
-      compaction: { reserveTokens: 16_384, keepRecentTokens: 20_000 },
-      layers: [
-        { order: 0, kind: "platform_system", source: "pi+agent-dock", availability: "always" },
-        {
-          order: 1,
-          kind: "project_instructions",
-          source: "workspace:AGENTS.md",
-          availability: "when_available",
-          maximumBytes: 16_384,
-        },
-        {
-          order: 2,
-          kind: "session_summary",
-          source: "pi-native-compaction",
-          availability: "when_available",
-        },
-        {
-          order: 3,
-          kind: "recent_messages",
-          source: "pi-session-jsonl",
-          availability: "always",
-        },
-        {
-          order: 4,
-          kind: "tool_results",
-          source: "bounded-tool-results",
-          availability: "when_available",
-        },
-        { order: 5, kind: "current_task", source: "accepted-turn", availability: "always" },
-      ],
-      history: [],
-    });
   });
 
   it("persists a public GitHub exact commit as pending source metadata", async () => {
@@ -1039,16 +921,6 @@ describe.sequential("single-user durable turn intake API", () => {
         kind: "turn.execute",
       },
     });
-    const usage = await http.inject({
-      method: "GET",
-      url: `/v1/runs/${firstAccepted.runId}/usage`,
-    });
-    expect(usage.statusCode).toBe(200);
-    expect(usage.json()).toMatchObject({
-      runId: firstAccepted.runId,
-      totals: { requests: 0, costMicrousd: 0 },
-      modelRequests: [],
-    });
     const queuedRuns = await http.inject({
       method: "GET",
       url: `/v1/sessions/${session.sessionId}/runs`,
@@ -1077,21 +949,6 @@ describe.sequential("single-user durable turn intake API", () => {
       state: "queued",
       attemptCount: 0,
     });
-    const operations = await http.inject({ method: "GET", url: "/v1/operations/summary" });
-    expect(operations.statusCode).toBe(200);
-    expect(operations.json()).toMatchObject({
-      runs: {
-        queued: expect.any(Number),
-        active: expect.any(Number),
-        queueWait: { sampleCount: expect.any(Number), p50Ms: expect.any(Number) },
-      },
-      model: { requests: expect.any(Number), costMicrousd: expect.any(Number) },
-      tools: { calls: expect.any(Number), failures: expect.any(Number) },
-      failures: expect.any(Array),
-    });
-    const audit = await http.inject({ method: "GET", url: "/v1/operations/audit" });
-    expect(audit.statusCode).toBe(200);
-    expect(audit.json()).toEqual({ tenantId: IDS.tenant, events: [], truncated: false });
     expect(JSON.stringify(durable.outboxPayload)).not.toContain("fix the failing test");
   });
 
@@ -1200,96 +1057,6 @@ describe.sequential("single-user durable turn intake API", () => {
       },
     ]);
     expect(JSON.stringify(backend.records)).not.toContain("fix the failing test");
-  });
-
-  it("publishes an immutable Review Bundle and atomically rewinds the latest Run", async () => {
-    const sourceResponse = await http.inject({
-      method: "GET",
-      url: `/v1/runs/${firstAccepted.runId}`,
-    });
-    expect(sourceResponse.statusCode).toBe(200);
-    const source = sourceResponse.json() as RunResource;
-    expect(source).toMatchObject({ state: "completed", projection: "canonical" });
-    expect(source.currentAttemptId).toEqual(expect.any(String));
-
-    const reviewResponse = await http.inject({
-      method: "GET",
-      url: `/v1/runs/${firstAccepted.runId}/review-bundle`,
-    });
-    expect(reviewResponse.statusCode).toBe(200);
-    expect(reviewResponse.json()).toMatchObject({
-      manifest: {
-        schemaVersion: 1,
-        run: { runId: firstAccepted.runId, attemptId: source.currentAttemptId },
-        attempts: [{ projection: "canonical", state: "completed" }],
-        usage: { requests: 0, inputTokens: 0, outputTokens: 0 },
-      },
-      manifestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-    });
-    const rewind = await http.inject({
-      method: "POST",
-      url: `/v1/runs/${firstAccepted.runId}/rewinds`,
-      headers: { "idempotency-key": "rewind-repair-request-1" },
-      payload: { sourceAttemptId: source.currentAttemptId },
-    });
-    expect(rewind.statusCode, rewind.body).toBe(202);
-    const rewound = rewind.json() as {
-      replacementRunId: string;
-      conversationBoundarySeq: number;
-      acceptedTurn: AcceptedTurnResource;
-      replayed: boolean;
-    };
-    expect(rewound).toMatchObject({
-      conversationBoundarySeq: 0,
-      replayed: false,
-      acceptedTurn: { mailboxPosition: 2, replayed: false },
-    });
-    expect(rewound.acceptedTurn.runId).toBe(rewound.replacementRunId);
-    const replay = await http.inject({
-      method: "POST",
-      url: `/v1/runs/${firstAccepted.runId}/rewinds`,
-      headers: { "idempotency-key": "rewind-repair-request-1" },
-      payload: { sourceAttemptId: source.currentAttemptId },
-    });
-    expect(replay.statusCode).toBe(202);
-    expect(replay.json()).toMatchObject({
-      replacementRunId: rewound.replacementRunId,
-      replayed: true,
-      acceptedTurn: { runId: rewound.replacementRunId, replayed: true },
-    });
-
-    const originalProjection = await http.inject({
-      method: "GET",
-      url: `/v1/runs/${firstAccepted.runId}`,
-    });
-    expect(originalProjection.json()).toMatchObject({
-      projection: "superseded",
-      supersededByRunId: rewound.replacementRunId,
-      attempts: [{ projection: "superseded" }],
-    });
-    const replacementProjection = await http.inject({
-      method: "GET",
-      url: `/v1/runs/${rewound.replacementRunId}`,
-    });
-    expect(replacementProjection.json()).toMatchObject({
-      projection: "canonical",
-      rewoundFrom: {
-        sourceRunId: firstAccepted.runId,
-        sourceAttemptId: source.currentAttemptId,
-        conversationBoundarySeq: 0,
-      },
-    });
-
-    const dispatcher = new RunCommandExecutor({
-      database,
-      backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "rewound" }]),
-    });
-    await expect(dispatcher.dispatchCommand(rewound.acceptedTurn.commandId)).resolves.toMatchObject(
-      {
-        status: "completed",
-        commandId: rewound.acceptedTurn.commandId,
-      },
-    );
   });
 
   it("does not let two dispatchers execute the same claimed turn", async () => {
@@ -2162,428 +1929,6 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(failedCancellation.publishedAt).not.toBeNull();
   });
 
-  it("executes a fenced command through pinned Pi SDK and the loopback fake model", async () => {
-    const sessionResponse = await http.inject({
-      method: "POST",
-      url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
-    });
-    expect(sessionResponse.statusCode).toBe(201);
-    const piSession = sessionResponse.json() as SessionResource;
-    const turnResponse = await http.inject({
-      method: "POST",
-      url: `/v1/sessions/${piSession.sessionId}/turns`,
-      headers: { "idempotency-key": "pinned-pi-fake-model" },
-      payload: { prompt: "Return the deterministic fake response." },
-    });
-    expect(turnResponse.statusCode).toBe(202);
-    const accepted = turnResponse.json() as AcceptedTurnResource;
-
-    await database
-      .insertInto("sandboxes")
-      .values({
-        id: IDS.sandbox,
-        supervisor_id: "local-pi-sdk-test",
-        boot_id: IDS.sandboxBoot,
-        state: "ready",
-        max_concurrent_sessions: 1,
-        active_sessions: 0,
-      })
-      .executeTakeFirstOrThrow();
-
-    const fakeModel = new FakeModelServer();
-    const workspaceDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-workspace-"));
-    const events: EventPublishMessage[] = [];
-    const acknowledgedSequences: number[] = [];
-    const persistedSequencesBeforeAck: number[] = [];
-    let rejectedGap = false;
-    let rejectedStaleFence = false;
-    const durableStatesAtPublish: Array<{
-      commandState: string;
-      turnState: string;
-      sessionState: string;
-      publishedAt: Date | string | null;
-    }> = [];
-    const leaseCoordinator = new SessionLeaseCoordinator({
-      database,
-      sandboxId: IDS.sandbox,
-      leaseDurationMs: 120_000,
-    });
-
-    try {
-      await fakeModel.start();
-      const runner = new PiSdkTurnRunner({
-        resolveWorkspaceDirectory: () => workspaceDirectory,
-        resolveModelRuntime: (model) => ({
-          provider: model.provider,
-          modelId: model.modelId,
-          baseUrl: fakeModel.baseUrl,
-          api: "openai-completions",
-          apiKey: FAKE_MODEL_API_KEY,
-          reasoning: false,
-        }),
-      });
-      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
-      const backend = new LocalSupervisorExecutionBackend({
-        supervisor,
-        leaseCoordinator,
-        eventIngestor: {
-          async ingest(value) {
-            const message = parseSupervisorToControlMessage(value);
-            if (message.type !== "event.publish" && message.type !== "event.publish_batch") {
-              throw new Error("Expected event publication");
-            }
-            const publications =
-              message.type === "event.publish"
-                ? [message]
-                : message.payload.events.map((event) => ({
-                    protocolVersion: 1 as const,
-                    messageId: message.messageId,
-                    sentAt: message.sentAt,
-                    type: "event.publish" as const,
-                    payload: {
-                      leaseId: message.payload.leaseId,
-                      fencingToken: message.payload.fencingToken,
-                      ...(message.payload.commandId === undefined
-                        ? {}
-                        : { commandId: message.payload.commandId }),
-                      event,
-                    },
-                  }));
-            const first = publications.find((publication) => publication.payload.event.seq === 1);
-            if (first !== undefined) {
-              const gap = structuredClone(first);
-              gap.messageId = globalThis.crypto.randomUUID();
-              gap.payload.event.eventId = globalThis.crypto.randomUUID();
-              gap.payload.event.seq = 2;
-              await expect(durableEventStore.ingest(gap)).rejects.toMatchObject({
-                code: "sequence_gap",
-              });
-              rejectedGap = true;
-
-              const stale = structuredClone(first);
-              stale.messageId = globalThis.crypto.randomUUID();
-              stale.payload.fencingToken += 1;
-              await expect(durableEventStore.ingest(stale)).rejects.toMatchObject({
-                code: "stale_fence",
-              });
-              rejectedStaleFence = true;
-            }
-            const acknowledgement = await durableEventStore.ingest(message);
-            for (const publication of publications) {
-              const persisted = await database
-                .selectFrom("session_events")
-                .select(["event_id", "seq"])
-                .where("session_id", "=", publication.payload.event.sessionId)
-                .where("seq", "=", String(publication.payload.event.seq))
-                .executeTakeFirstOrThrow();
-              expect(persisted.event_id).toBe(publication.payload.event.eventId);
-              persistedSequencesBeforeAck.push(Number(persisted.seq));
-            }
-            acknowledgedSequences.push(acknowledgement.payload.acknowledgedThroughSeq);
-            return acknowledgement;
-          },
-        },
-        async onEvent(message) {
-          events.push(message);
-          const state = await readTurnExecution(accepted);
-          durableStatesAtPublish.push({
-            commandState: state.commandState,
-            turnState: state.turnState,
-            sessionState: state.sessionState,
-            publishedAt: state.publishedAt,
-          });
-        },
-      });
-      const dispatcher = new RunCommandExecutor({
-        database,
-        backend,
-        leaseManager: leaseCoordinator,
-        eventNotificationPublisher: sessionEventNotifications!,
-      });
-
-      const liveAbort = new AbortController();
-      const liveResponse = await fetch(`${baseUrl}/v1/sessions/${piSession.sessionId}/events`, {
-        signal: liveAbort.signal,
-      });
-      expect(liveResponse.status).toBe(200);
-      expect(liveResponse.headers.get("content-type")).toContain("text/event-stream");
-      const liveEventsPromise = readSseEvents(liveResponse, 4);
-      const dispatchResult = await dispatchNextTestCommand(database, dispatcher, IDS.tenant);
-      expect(dispatchResult).toEqual({
-        status: "completed",
-        commandId: accepted.commandId,
-        sessionId: piSession.sessionId,
-        turnId: accepted.turnId,
-        attempt: 1,
-      });
-      application.get(SessionEventHub).notifyThrough(IDS.tenant, piSession.sessionId, 4);
-      const liveEvents = await liveEventsPromise;
-      liveAbort.abort();
-
-      expect(events.map((message) => message.payload.event.type)).toEqual([
-        "turn.started",
-        "assistant.text.delta",
-        "assistant.text.delta",
-      ]);
-      expect(events.map((message) => message.payload.event.seq)).toEqual([1, 2, 3]);
-      expect(acknowledgedSequences.at(-1)).toBe(3);
-      expect(acknowledgedSequences.length).toBeLessThan(4);
-      expect(persistedSequencesBeforeAck).toEqual([1, 2, 3]);
-      expect(rejectedGap).toBe(true);
-      expect(rejectedStaleFence).toBe(true);
-      expect(liveEvents.map((event) => event.id)).toEqual([1, 2, 3, 4]);
-      expect(liveEvents.map((event) => event.event)).toEqual([
-        "turn.started",
-        "assistant.text.delta",
-        "assistant.text.delta",
-        "turn.completed",
-      ]);
-      expect(liveEvents.map((event) => event.data.seq)).toEqual([1, 2, 3, 4]);
-      expect(
-        events
-          .filter((message) => message.payload.event.type === "assistant.text.delta")
-          .map((message) =>
-            message.payload.event.type === "assistant.text.delta"
-              ? message.payload.event.payload.text
-              : "",
-          )
-          .join(""),
-      ).toBe("AgentDock fake stream OK.");
-      expect(
-        events.every(
-          (message) =>
-            message.payload.commandId === accepted.commandId &&
-            message.payload.leaseId === events[0]?.payload.leaseId &&
-            message.payload.fencingToken === 1,
-        ),
-      ).toBe(true);
-      expect(durableStatesAtPublish).toHaveLength(3);
-      expect(
-        durableStatesAtPublish.every(
-          (state) =>
-            state.commandState === "acknowledged" &&
-            state.turnState === "running" &&
-            state.sessionState === "running" &&
-            state.publishedAt !== null,
-        ),
-      ).toBe(true);
-      expect(fakeModel.observations).toHaveLength(1);
-      expect(fakeModel.observations[0]).toMatchObject({
-        model: "agent-dock-fake",
-        messageCount: 2,
-        toolCount: 0,
-        authorizationPresent: true,
-        completion: "completed",
-      });
-
-      const durable = await readTurnExecution(accepted);
-      expect(durable).toMatchObject({
-        commandState: "completed",
-        turnState: "completed",
-        sessionState: "idle",
-        stopReason: "stop",
-        attempts: 1,
-      });
-      const sandbox = await database
-        .selectFrom("sandboxes")
-        .select(["state", "active_sessions"])
-        .where("id", "=", IDS.sandbox)
-        .executeTakeFirstOrThrow();
-      expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
-      const persistedSession = await database
-        .selectFrom("sessions")
-        .select(["last_fencing_token", "next_event_seq"])
-        .where("id", "=", piSession.sessionId)
-        .executeTakeFirstOrThrow();
-      expect(persistedSession).toEqual({ last_fencing_token: "1", next_event_seq: "5" });
-      const persistedEvents = await database
-        .selectFrom("session_events")
-        .select(["seq", "type", "agent_id", "command_id", "lease_id", "fencing_token"])
-        .where("session_id", "=", piSession.sessionId)
-        .orderBy("seq", "asc")
-        .execute();
-      expect(persistedEvents).toEqual([
-        ...events.map((message) => ({
-          seq: String(message.payload.event.seq),
-          type: message.payload.event.type,
-          agent_id: "root",
-          command_id: accepted.commandId,
-          lease_id: message.payload.leaseId,
-          fencing_token: String(message.payload.fencingToken),
-        })),
-        {
-          seq: "4",
-          type: "turn.completed",
-          agent_id: "root",
-          command_id: accepted.commandId,
-          lease_id: events[0]?.payload.leaseId,
-          fencing_token: "1",
-        },
-      ]);
-      const cursor = await database
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "acknowledged_through_seq"])
-        .where("session_id", "=", piSession.sessionId)
-        .executeTakeFirstOrThrow();
-      expect(cursor).toEqual({ last_persisted_seq: "4", acknowledged_through_seq: "4" });
-      const projection = await database
-        .selectFrom("conversation_turn_projections")
-        .select(["through_seq", "source_event_count", "transcript"])
-        .where("tenant_id", "=", IDS.tenant)
-        .where("session_id", "=", piSession.sessionId)
-        .where("turn_id", "=", accepted.turnId)
-        .executeTakeFirstOrThrow();
-      expect(projection).toMatchObject({
-        through_seq: "4",
-        source_event_count: 4,
-        transcript: {
-          schemaVersion: 1,
-          throughSequence: 4,
-          items: [
-            {
-              kind: "text",
-              text: "AgentDock fake stream OK.",
-              firstSequence: 2,
-              lastSequence: 3,
-            },
-          ],
-          startedSequence: 1,
-          terminalSequence: 4,
-          stopReason: "stop",
-        },
-      });
-      const projectedConversation = await http.inject({
-        method: "GET",
-        url: `/v1/conversations/${piSession.sessionId}`,
-      });
-      expect(projectedConversation.statusCode).toBe(200);
-      expect(projectedConversation.json<ConversationDetailResource>()).toMatchObject({
-        replayAfterSequence: 4,
-        turns: [
-          {
-            turnId: accepted.turnId,
-            transcript: {
-              throughSequence: 4,
-              items: [{ kind: "text", text: "AgentDock fake stream OK." }],
-            },
-          },
-        ],
-      });
-      await database
-        .deleteFrom("conversation_turn_projections")
-        .where("turn_id", "=", accepted.turnId)
-        .executeTakeFirstOrThrow();
-      const repairedConversation = await http.inject({
-        method: "GET",
-        url: `/v1/conversations/${piSession.sessionId}`,
-      });
-      expect(repairedConversation.statusCode).toBe(200);
-      expect(repairedConversation.json<ConversationDetailResource>()).toMatchObject({
-        replayAfterSequence: 4,
-        turns: [
-          {
-            turnId: accepted.turnId,
-            transcript: {
-              throughSequence: 4,
-              items: [{ kind: "text", text: "AgentDock fake stream OK." }],
-            },
-          },
-        ],
-      });
-      expect(
-        await database
-          .selectFrom("conversation_turn_projections")
-          .select("source_event_count")
-          .where("turn_id", "=", accepted.turnId)
-          .executeTakeFirstOrThrow(),
-      ).toEqual({ source_event_count: 4 });
-
-      const duplicate = structuredClone(events[2]!);
-      duplicate.messageId = globalThis.crypto.randomUUID();
-      await expect(durableEventStore.ingest(duplicate)).resolves.toMatchObject({
-        type: "event.ack",
-        payload: { acknowledgedThroughSeq: 3 },
-      });
-      const conflict = structuredClone(events[2]!);
-      conflict.messageId = globalThis.crypto.randomUUID();
-      if (conflict.payload.event.type !== "assistant.text.delta") {
-        throw new Error("Expected assistant text event");
-      }
-      conflict.payload.event.payload.text = "conflicting-redelivery";
-      await expect(durableEventStore.ingest(conflict)).rejects.toMatchObject({
-        code: "event_conflict",
-      });
-
-      const replayAbort = new AbortController();
-      const replayResponse = await fetch(`${baseUrl}/v1/sessions/${piSession.sessionId}/events`, {
-        headers: { "Last-Event-ID": "2" },
-        signal: replayAbort.signal,
-      });
-      expect(replayResponse.status).toBe(200);
-      const replayedEvents = await readSseEvents(replayResponse, 2);
-      replayAbort.abort();
-      expect(replayedEvents.map((event) => event.id)).toEqual([3, 4]);
-
-      const malformedCursor = await http.inject({
-        method: "GET",
-        url: `/v1/sessions/${piSession.sessionId}/events`,
-        headers: { "last-event-id": "01" },
-      });
-      expect(malformedCursor.statusCode).toBe(400);
-      const futureCursor = await http.inject({
-        method: "GET",
-        url: `/v1/sessions/${piSession.sessionId}/events`,
-        headers: { "last-event-id": "5" },
-      });
-      expect(futureCursor.statusCode).toBe(409);
-      await expect(
-        leaseCoordinator.assertCurrentLease(
-          {
-            tenantId: IDS.tenant,
-            projectId: project.projectId,
-            workspaceId: project.workspaceId,
-            sessionId: piSession.sessionId,
-            runId: accepted.runId,
-            turnId: accepted.turnId,
-            attemptId: "50000000-0000-4000-8000-000000000001",
-            attemptNumber: 1,
-            commandId: accepted.commandId,
-            idempotencyKey: "pinned-pi-fake-model",
-            nextEventSeq: "1",
-            input: { kind: "prompt", prompt: "Return the deterministic fake response." },
-            sandboxRetention: "ephemeral",
-            model: {
-              profileId: IDS.profile,
-              provider: "agent-dock-fake",
-              modelId: "agent-dock-fake",
-              thinkingLevel: "off",
-              credentialBindingId: IDS.credential,
-              credentialBindingVersion: "1",
-            },
-            environment: {
-              environmentVersionId: project.environment.environmentVersionId,
-              versionNumber: project.environment.versionNumber,
-              profileKey: project.environment.profileKey,
-              profileVersion: project.environment.profileVersion,
-              imageRevision: project.environment.imageRevision,
-              specSha256: project.environment.specSha256,
-              recipe: project.environment.recipe,
-              recipeSha256: project.environment.recipeSha256,
-            },
-          },
-          {
-            leaseId: events[0]!.payload.leaseId,
-            fencingToken: events[0]!.payload.fencingToken,
-          },
-        ),
-      ).rejects.toThrow("stale");
-    } finally {
-      await fakeModel.stop();
-      await rm(workspaceDirectory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
   it("recovers a cross-replica SSE stream from PostgreSQL on its bounded heartbeat", async () => {
     const assigned = await createAssignedTurn({
       sandboxId: IDS.notificationFallbackSandbox,
@@ -3097,314 +2442,12 @@ describe.sequential("single-user durable turn intake API", () => {
     10_000,
   );
 
-  it("durably cancels a live Pi turn globally even after tenant intake is disabled", async () => {
-    const sessionResponse = await http.inject({
-      method: "POST",
-      url: `/v1/projects/${project.projectId}/sessions`,
-      payload: { workspaceId: project.workspaceId, title: "Test conversation" },
-    });
-    expect(sessionResponse.statusCode).toBe(201);
-    const cancellationSession = sessionResponse.json() as SessionResource;
-    const turnResponse = await http.inject({
-      method: "POST",
-      url: `/v1/sessions/${cancellationSession.sessionId}/turns`,
-      headers: { "idempotency-key": "live-pi-cancellation-target" },
-      payload: { prompt: "Wait until this turn is cancelled." },
-    });
-    expect(turnResponse.statusCode).toBe(202);
-    const accepted = turnResponse.json() as AcceptedTurnResource;
-
-    await database
-      .insertInto("sandboxes")
-      .values({
-        id: IDS.cancellationSandbox,
-        supervisor_id: "local-pi-sdk-cancellation-test",
-        boot_id: IDS.cancellationSandboxBoot,
-        state: "ready",
-        max_concurrent_sessions: 1,
-        active_sessions: 0,
-      })
-      .executeTakeFirstOrThrow();
-
-    const fakeModel = new FakeModelServer({ defaultScenario: "timeout" });
-    const workspaceDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-cancel-workspace-"));
-    const events: EventPublishMessage[] = [];
-    let rejectedLateCompletion = false;
-    const leaseCoordinator = new SessionLeaseCoordinator({
-      database,
-      sandboxId: IDS.cancellationSandbox,
-      leaseDurationMs: 120_000,
-    });
-    try {
-      await fakeModel.start();
-      const runner = new PiSdkTurnRunner({
-        resolveWorkspaceDirectory: () => workspaceDirectory,
-        resolveModelRuntime: (model) => ({
-          provider: model.provider,
-          modelId: model.modelId,
-          baseUrl: fakeModel.baseUrl,
-          api: "openai-completions",
-          apiKey: FAKE_MODEL_API_KEY,
-          reasoning: false,
-        }),
-        turnTimeoutMs: 20_000,
-      });
-      const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
-      const backend = new LocalSupervisorExecutionBackend({
-        supervisor,
-        leaseCoordinator,
-        eventIngestor: durableEventStore,
-        onEvent(message) {
-          events.push(message);
-        },
-      });
-      const executionDispatcher = new RunCommandExecutor({
-        database,
-        backend,
-        leaseManager: leaseCoordinator,
-        eventNotificationPublisher: sessionEventNotifications!,
-      });
-      const cancellationDispatcher = new RunCancellationExecutor({
-        database,
-        backend,
-        leaseManager: leaseCoordinator,
-        eventNotificationPublisher: sessionEventNotifications!,
-      });
-
-      const liveAbort = new AbortController();
-      const liveResponse = await fetch(
-        `${baseUrl}/v1/sessions/${cancellationSession.sessionId}/events`,
-        { signal: liveAbort.signal },
-      );
-      expect(liveResponse.status).toBe(200);
-      const liveEventsPromise = readSseEvents(liveResponse, 2);
-      const execution = dispatchNextTestCommand(database, executionDispatcher, IDS.tenant);
-      void execution.catch(() => undefined);
-      await waitForCondition(async () => {
-        const lifecycle = await readTurnExecution(accepted);
-        return (
-          lifecycle.commandState === "acknowledged" &&
-          lifecycle.turnState === "running" &&
-          lifecycle.sessionState === "running" &&
-          fakeModel.activeRequests === 1
-        );
-      });
-      await waitForCondition(() => events.length === 1);
-      const startedPublication = events[0];
-      if (startedPublication === undefined) throw new Error("Expected a started event");
-      await expect(
-        durableEventStore.ingest({
-          protocolVersion: 1,
-          messageId: globalThis.crypto.randomUUID(),
-          sentAt: startedPublication.sentAt,
-          type: "event.publish",
-          payload: {
-            leaseId: startedPublication.payload.leaseId,
-            fencingToken: startedPublication.payload.fencingToken,
-            commandId: accepted.commandId,
-            event: {
-              ...startedPublication.payload.event,
-              eventId: globalThis.crypto.randomUUID(),
-              seq: 2,
-              type: "turn.completed",
-              payload: { stopReason: "late_completion" },
-            },
-          },
-        }),
-      ).rejects.toMatchObject({ code: "invalid_event" });
-      rejectedLateCompletion = true;
-
-      const cancellationResponse = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
-        headers: { "idempotency-key": "cancel-live-pi-turn" },
-        payload: { gracePeriodMs: 2_000 },
-      });
-      expect(cancellationResponse.statusCode).toBe(202);
-      const cancellation = cancellationResponse.json() as AcceptedTurnCancellationResource;
-      expect(cancellation).toMatchObject({
-        targetCommandId: accepted.commandId,
-        sessionId: cancellationSession.sessionId,
-        turnId: accepted.turnId,
-        state: "pending",
-        replayed: false,
-      });
-
-      const durableIntent = await database
-        .selectFrom("commands as cancellation")
-        .innerJoin("outbox", (join) =>
-          join
-            .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
-            .on(
-              sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
-            ),
-        )
-        .select([
-          "cancellation.kind as kind",
-          "cancellation.state as commandState",
-          "cancellation.payload as commandPayload",
-          "outbox.topic as topic",
-          "outbox.payload as outboxPayload",
-          "outbox.published_at as publishedAt",
-        ])
-        .where("cancellation.id", "=", cancellation.commandId)
-        .executeTakeFirstOrThrow();
-      expect(durableIntent).toMatchObject({
-        kind: "turn.cancel",
-        commandState: "pending",
-        commandPayload: {
-          schemaVersion: 1,
-          targetCommandId: accepted.commandId,
-          reason: "user_request",
-          gracePeriodMs: 2_000,
-        },
-        topic: "control.command.cancel.pending.v1",
-        outboxPayload: {
-          schemaVersion: 1,
-          commandId: cancellation.commandId,
-          targetCommandId: accepted.commandId,
-          sessionId: cancellationSession.sessionId,
-          turnId: accepted.turnId,
-          kind: "turn.cancel",
-        },
-        publishedAt: null,
-      });
-      expect(JSON.stringify(durableIntent)).not.toContain("Wait until this turn is cancelled.");
-
-      const replayResponse = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
-        headers: { "idempotency-key": "cancel-live-pi-turn" },
-        payload: { gracePeriodMs: 2_000 },
-      });
-      expect(replayResponse.statusCode).toBe(202);
-      expect(replayResponse.json()).toMatchObject({
-        commandId: cancellation.commandId,
-        replayed: true,
-      });
-      const changedReplay = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
-        headers: { "idempotency-key": "cancel-live-pi-turn" },
-        payload: { gracePeriodMs: 1 },
-      });
-      expect(changedReplay.statusCode).toBe(409);
-      const competingCancellation = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
-        headers: { "idempotency-key": "competing-live-pi-cancel" },
-        payload: {},
-      });
-      expect(competingCancellation.statusCode).toBe(409);
-
-      await database
-        .updateTable("tenant_runtime_policies")
-        .set({ enabled: false })
-        .where("tenant_id", "=", IDS.tenant)
-        .executeTakeFirstOrThrow();
-
-      const cancellationDispatch = cancellationDispatcher.dispatchTargetCommand(accepted.commandId);
-      const [cancellationResult, executionResult] = await Promise.all([
-        cancellationDispatch,
-        execution,
-      ]);
-      application.get(SessionEventHub).notifyThrough(IDS.tenant, cancellationSession.sessionId, 2);
-      const liveEvents = await liveEventsPromise;
-      liveAbort.abort();
-      expect(cancellationResult).toMatchObject({
-        status: "cancelled",
-        commandId: cancellation.commandId,
-        targetCommandId: accepted.commandId,
-        sessionId: cancellationSession.sessionId,
-        turnId: accepted.turnId,
-        attempt: 1,
-        forced: false,
-      });
-      expect(["cancellation_pending", "cancelled"]).toContain(executionResult.status);
-      expect(liveEvents.map((event) => event.event)).toEqual(["turn.started", "turn.cancelled"]);
-      expect(liveEvents.map((event) => event.id)).toEqual([1, 2]);
-      expect(liveEvents[1]?.data).toMatchObject({
-        type: "turn.cancelled",
-        payload: { reason: "user_request", forced: false },
-      });
-
-      const executionState = await readTurnExecution(accepted);
-      expect(executionState).toMatchObject({
-        commandState: "completed",
-        turnState: "cancelled",
-        sessionState: "idle",
-        stopReason: "cancelled",
-        attempts: 1,
-      });
-      const cancellationState = await database
-        .selectFrom("commands as cancellation")
-        .innerJoin("outbox", (join) =>
-          join
-            .onRef("outbox.tenant_id", "=", "cancellation.tenant_id")
-            .on(
-              sql<boolean>`${sql.ref("outbox.payload")} ->> 'commandId' = ${cancellation.commandId}`,
-            ),
-        )
-        .select([
-          "cancellation.state as commandState",
-          "cancellation.acknowledged_at as acknowledgedAt",
-          "cancellation.completed_at as completedAt",
-          "outbox.attempts as attempts",
-          "outbox.published_at as publishedAt",
-        ])
-        .where("cancellation.id", "=", cancellation.commandId)
-        .executeTakeFirstOrThrow();
-      expect(cancellationState).toMatchObject({
-        commandState: "completed",
-        attempts: 1,
-      });
-      expect(cancellationState.acknowledgedAt).not.toBeNull();
-      expect(cancellationState.completedAt).not.toBeNull();
-      expect(cancellationState.publishedAt).not.toBeNull();
-      expect(events.map((message) => message.payload.event.type)).toEqual(["turn.started"]);
-      expect(rejectedLateCompletion).toBe(true);
-      expect(events.every((message) => message.payload.commandId === accepted.commandId)).toBe(
-        true,
-      );
-      await waitForCondition(() => fakeModel.observations[0]?.completion === "client_aborted");
-      expect(fakeModel.observations[0]).toMatchObject({ completion: "client_aborted" });
-
-      const leaseCount = await database
-        .selectFrom("session_leases")
-        .select((expression) => expression.fn.countAll<string>().as("count"))
-        .where("session_id", "=", cancellationSession.sessionId)
-        .executeTakeFirstOrThrow();
-      expect(leaseCount.count).toBe("0");
-      const sandbox = await database
-        .selectFrom("sandboxes")
-        .select(["state", "active_sessions"])
-        .where("id", "=", IDS.cancellationSandbox)
-        .executeTakeFirstOrThrow();
-      expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
-
-      const replayAfterSettlement = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${cancellationSession.sessionId}/turns/${accepted.turnId}/cancellations`,
-        headers: { "idempotency-key": "cancel-live-pi-turn" },
-        payload: { gracePeriodMs: 2_000 },
-      });
-      expect(replayAfterSettlement.statusCode).toBe(202);
-      expect(replayAfterSettlement.json()).toMatchObject({
-        commandId: cancellation.commandId,
-        replayed: true,
-      });
-    } finally {
-      await database
-        .updateTable("tenant_runtime_policies")
-        .set({ enabled: true })
-        .where("tenant_id", "=", IDS.tenant)
-        .execute();
-      await fakeModel.stop();
-      await rm(workspaceDirectory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
   it("releases the fenced lease after a post-ACK supervisor failure", async () => {
+    await createReadySandbox({
+      id: IDS.sandbox,
+      bootId: IDS.sandboxBoot,
+      supervisorId: "post-ack-failure-test",
+    });
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
@@ -3555,6 +2598,11 @@ describe.sequential("single-user durable turn intake API", () => {
   });
 
   it("renews a running assignment beyond its initial lease deadline", async () => {
+    await createReadySandbox({
+      id: IDS.heartbeatSandbox,
+      bootId: IDS.heartbeatSandboxBoot,
+      supervisorId: "lease-heartbeat-test",
+    });
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
@@ -3576,7 +2624,7 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     const leaseCoordinator = new SessionLeaseCoordinator({
       database,
-      sandboxId: IDS.sandbox,
+      sandboxId: IDS.heartbeatSandbox,
       leaseDurationMs: 90,
     });
     const supervisor = new LocalSandboxSupervisor({
@@ -3641,6 +2689,11 @@ describe.sequential("single-user durable turn intake API", () => {
   }, 15_000);
 
   it("never revives an expired lease and quarantines the stopped session", async () => {
+    await createReadySandbox({
+      id: IDS.expiredLeaseSandbox,
+      bootId: IDS.expiredLeaseSandboxBoot,
+      supervisorId: "expired-lease-test",
+    });
     const sessionResponse = await http.inject({
       method: "POST",
       url: `/v1/projects/${project.projectId}/sessions`,
@@ -3658,7 +2711,7 @@ describe.sequential("single-user durable turn intake API", () => {
     const accepted = turnResponse.json() as AcceptedTurnResource;
     const leaseCoordinator = new SessionLeaseCoordinator({
       database,
-      sandboxId: IDS.sandbox,
+      sandboxId: IDS.expiredLeaseSandbox,
       leaseDurationMs: 60,
     });
     const supervisor = new LocalSandboxSupervisor({
@@ -4189,13 +3242,6 @@ describe.sequential("single-user durable turn intake API", () => {
         .selectFrom("conversation_turn_projections")
         .select((expression) => expression.fn.countAll<string>().as("count"))
         .where("turn_id", "=", accepted.turnId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "0" });
-    expect(
-      await database
-        .selectFrom("review_bundles")
-        .select((expression) => expression.fn.countAll<string>().as("count"))
-        .where("run_id", "=", accepted.runId)
         .executeTakeFirstOrThrow(),
     ).toEqual({ count: "0" });
   });

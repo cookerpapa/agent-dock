@@ -16,11 +16,9 @@ untrusted shell could still list it because Cube mounted the entire physical
 Volume. This mixed platform checkpoint metadata with user-visible files and
 made `/workspace` less clean than its product contract.
 
-The root `.git` directory is different. AgentDock uses the baseline repository
-to create the private Workspace patch consumed by terminal Run settlement,
-Review Bundles, Candidate Race evaluation and production acceptance. Removing
-it merely because the current browser does not render a per-Run diff would
-silently remove those backend semantics.
+At the time of this decision, the root `.git` directory still held AgentDock's
+private Workspace baseline. ADR-0073 subsequently moved that metadata beside
+the user-visible tree as well.
 
 ## Decision
 
@@ -62,9 +60,7 @@ migration branch is retained.
 - An untrusted command cannot read, delete or forge the generation marker.
 - Workspace bytes stay on the persistent Volume; PostgreSQL receives only the
   bounded immutable reference and file index.
-- Root `.git` remains part of the user-visible Workspace because it still
-  powers backend review and evaluation behavior and remains useful to coding
-  tools.
+- Root `.git` handling is superseded by ADR-0073.
 - Existing development Workspace heads, old checkpoint references and local POSIX
   Volumes from the previous layout must be discarded during deployment
   cutover.
@@ -77,6 +73,6 @@ migration branch is retained.
 3. persistent Volume reattachment and file materialization use the envelope layout;
 4. missing, linked or mismatched envelope components fail closed;
 5. warm same-Session reuse and post-checkpoint background writes still work;
-6. Git Patch and Review Bundle behavior remains unchanged; and
+6. Workspace Patch behavior remains unchanged; and
 7. source tests and the live Cube production gate prove fresh-Cube recovery
    after the source VM is destroyed.

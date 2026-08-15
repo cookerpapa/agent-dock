@@ -709,9 +709,6 @@ body.product-panel-resizing {
 .product-turn + .product-turn {
   margin-top: 34px;
 }
-.product-turn-superseded {
-  opacity: 0.62;
-}
 .product-message {
   display: flex;
   width: 100%;

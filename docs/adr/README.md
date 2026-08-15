@@ -56,8 +56,16 @@ are available in Git history rather than presented as current choices.
 - [ADR-0106](0106-workspace-web-terminal.md) adds a brokered Workspace Web
   Terminal with a separate human lease, exclusive writer admission and Cube
   PTY execution without exposing runtime credentials to the browser.
+- [ADR-0107](0107-remove-dormant-advanced-api.md) removes backend-only product
+  experiments that had no supported Web workflow.
+- [ADR-0108](0108-workspace-api-matches-the-file-browser.md) narrows the public
+  Workspace API to the file-browser and archive behavior the product exposes.
+- [ADR-0109](0109-postgres-session-reference-checkpoints.md) removes the old Pi
+  JSONL pipeline and synthetic Artifact bridge now that PostgreSQL
+  SessionStorage is the sole conversation authority.
 
 ## Optional modules
 
-ADR-0032, ADR-0033, ADR-0042, ADR-0043, ADR-0047 and ADR-0051 document
-default-off GitHub, governance, environment, review and candidate-race work.
+Only the separately deployed observability and repository-import helpers remain
+optional. Removed product experiments are retained in Git history, not as
+compiled modules or current architecture choices.

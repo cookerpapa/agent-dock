@@ -282,21 +282,10 @@ export function ConversationTurn({
   );
   return (
     <section
-      className={`product-turn${turn.projection === "superseded" ? " product-turn-superseded" : ""}`}
+      className="product-turn"
       data-conversation-turn-id={turn.turnId}
       id={`turn-${turn.turnId}`}
     >
-      {turn.projection === "superseded" ? (
-        <div className="product-muted-line">
-          此运行已被 {turn.supersededByRunId?.slice(0, 8) ?? "后续运行"}{" "}
-          回退替代；原始记录仅供审计。
-        </div>
-      ) : null}
-      {turn.rewoundFromRunId ? (
-        <div className="product-muted-line">
-          已恢复到运行 {turn.rewoundFromRunId.slice(0, 8)} 之前的对话与工作区。
-        </div>
-      ) : null}
       <div className="product-message product-user-message">
         <div className="product-user-bubble">{turn.prompt}</div>
       </div>
@@ -328,7 +317,7 @@ export function ConversationTurn({
             </div>
           ) : null}
           {turn.cancellation ? <div className="product-muted-line">已停止生成</div> : null}
-          {turn.status === "completed" && turn.projection === "canonical" && onFork ? (
+          {turn.status === "completed" && onFork ? (
             <div className="product-answer-actions">
               <button disabled={!canFork} onClick={onFork} type="button">
                 <span aria-hidden="true">↳</span>

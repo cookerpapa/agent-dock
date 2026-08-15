@@ -13,14 +13,6 @@ const piRoots = [
     "@earendil-works",
     "pi-coding-agent",
   ),
-  join(
-    repositoryRoot,
-    "spikes",
-    "pi-embedded-rehydrate",
-    "node_modules",
-    "@earendil-works",
-    "pi-coding-agent",
-  ),
 ].filter((path) => existsSync(path));
 const checkOnly = process.argv.slice(2).includes("--check");
 

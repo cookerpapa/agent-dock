@@ -1,5 +1,4 @@
 import { Module, type DynamicModule } from "@nestjs/common";
-import { AdvancedControlPlaneController } from "./advanced-control-plane.controller.ts";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -19,16 +18,12 @@ import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
 import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
-import { ModelGovernanceService } from "./model-governance-service.ts";
-import { OperationalInsightsService } from "./operational-insights-service.ts";
 import {
   WorkspaceVersionService,
   type TrustedArtifactReader,
   type TrustedProviderSnapshotReader,
 } from "./workspace-version-service.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
-import { ProjectEnvironmentService } from "./project-environment-service.ts";
-import { CandidateRaceService } from "./candidate-race-service.ts";
 import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
@@ -47,7 +42,6 @@ export type ControlPlaneModuleOptions = Omit<
   modelCredentialVault?: TenantModelCredentialVault;
   artifactReader?: TrustedArtifactReader;
   providerSnapshotReader?: TrustedProviderSnapshotReader;
-  advancedModulesEnabled?: boolean;
   webAuthentication?: WebAuthenticationService;
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;
@@ -94,41 +88,9 @@ export class ControlPlaneModule {
         : { environmentImageRevision: options.environmentImageRevision }),
       ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     });
-    const advancedProviders =
-      options.advancedModulesEnabled === true
-        ? [
-            {
-              provide: CandidateRaceService,
-              useValue: new CandidateRaceService({
-                database: options.database,
-                controlPlaneStores,
-                ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
-              }),
-            },
-            {
-              provide: ModelGovernanceService,
-              useValue: new ModelGovernanceService({ database: options.database }),
-            },
-            {
-              provide: OperationalInsightsService,
-              useValue: new OperationalInsightsService({ database: options.database }),
-            },
-            {
-              provide: ProjectEnvironmentService,
-              useValue: new ProjectEnvironmentService({
-                database: options.database,
-                imageRevision: options.environmentImageRevision ?? "development",
-                ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
-              }),
-            },
-          ]
-        : [];
     return {
       module: ControlPlaneModule,
-      controllers: [
-        ControlPlaneController,
-        ...(options.advancedModulesEnabled === true ? [AdvancedControlPlaneController] : []),
-      ],
+      controllers: [ControlPlaneController],
       providers: [
         {
           provide: ControlPlaneStoreFactory,
@@ -227,7 +189,6 @@ export class ControlPlaneModule {
           provide: WorkspaceVersionService,
           useValue: workspaceVersions,
         },
-        ...advancedProviders,
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
         {
@@ -243,15 +204,7 @@ export class ControlPlaneModule {
               },
             ]),
       ],
-      exports: [
-        DurableEventStore,
-        SessionEventHub,
-        SessionEventStream,
-        WorkspaceVersionService,
-        ...(options.advancedModulesEnabled === true
-          ? [ProjectEnvironmentService, CandidateRaceService]
-          : []),
-      ],
+      exports: [DurableEventStore, SessionEventHub, SessionEventStream, WorkspaceVersionService],
     };
   }
 }

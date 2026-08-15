@@ -2,17 +2,17 @@
 
 ## Status
 
-Accepted and released on 2026-08-14. Supersedes ADR-0102's decision to
-implement the full Pi `AgentHarness` surface. Real model/Cube, native
-Compaction and cross-Worker acceptance completed before the production JSONL
-path was retired.
+Accepted and released on 2026-08-14. Supersedes the earlier full
+`AgentHarness` experiment, which remains available in Git history. Real
+model/Cube, native Compaction and cross-Worker acceptance completed before the
+production JSONL path was retired.
 
 ## Context
 
 Pi 0.84.1 exposes useful public primitives: `Agent`, `Session`,
 `SessionStorage`, context projection and compaction. Its packaged
-`AgentHarness` still reserves the execution methods, so ADR-0102 implemented
-the complete public Harness contract inside AgentDock.
+`AgentHarness` still reserves the execution methods, so an earlier experiment
+implemented the complete public Harness contract inside AgentDock.
 
 That implementation proved that Pi-native entries can live in PostgreSQL, but
 it also reproduced lanes, navigation, templates, skills, manual drive,

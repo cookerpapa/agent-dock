@@ -1,6 +1,7 @@
 # ADR-0070: Atomic terminal events and hard-crash recovery suffix
 
-- Status: accepted
+- Status: superseded by ADR-0103, amended ADR-0079 and ADR-0109; retained as
+  historical context for terminal-event ordering
 - Date: 2026-07-29
 
 ## Context

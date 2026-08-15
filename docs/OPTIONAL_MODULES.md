@@ -8,29 +8,9 @@ Web → Control Plane → PostgreSQL queue → Pi Worker → Tool Broker → Cub
                     ↘ PostgreSQL / Kafka / Valkey
 ```
 
-The default Control Plane exposes authentication, model/proxy settings,
-projects, conversations, Workspaces, Runs, cancellation, steer and durable SSE.
-It does not instantiate research-only services.
-
-## Advanced research API
-
-Set this only for a private research deployment:
-
-```bash
-AGENT_DOCK_ADVANCED_MODULES_ENABLED=true
-```
-
-This registers:
-
-- Candidate Race orchestration and promotion;
-- Attempt rewind and immutable Review Bundles;
-- model governance, usage and Session context inspection;
-- Project Environment history/validation;
-- operational summary and audit data APIs.
-
-The module reuses the same tenant boundary, PostgreSQL execution state and
-Cube isolation. Disabling it removes controllers and providers;
-it is not a UI feature flag and no dormant route remains reachable.
+The Control Plane exposes authentication, model/proxy settings, projects,
+conversations, Workspaces, Runs, cancellation, steer and durable SSE. Dormant
+research APIs are not compiled into the product.
 
 ## Observability
 

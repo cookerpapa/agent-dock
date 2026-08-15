@@ -1,41 +1,21 @@
 import {
-  MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
-  MAX_PI_SESSION_SNAPSHOT_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type ExecuteTurnCommandMessage,
   type EnvironmentValidationReport,
   type SandboxCheckpointBlob,
-  type SandboxSettledCheckpoint,
-  type ConversationTurnTranscriptResource,
   type WorkspacePatch,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
-import { TextDecoder } from "node:util";
 import { PiTurnError } from "./pi-turn-runtime.ts";
 import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";
 
 export type LoadedSandboxCheckpoint = {
   revision?: string;
-  piSession?: Uint8Array;
   workspace?: Uint8Array;
   workspaceRevision?: string;
-  recoverySuffix?: PiDurableRecoverySuffix;
-};
-
-export type PiDurableRecoveryTurn = {
-  turnId: string;
-  input: string;
-  transcript: ConversationTurnTranscriptResource;
-};
-
-export type PiDurableRecoverySuffix = {
-  checkpointThroughSequence: number;
-  recoveredThroughSequence: number;
-  turns: readonly PiDurableRecoveryTurn[];
 };
 
 export type CapturedSandboxCheckpoint = {
-  piSession: Uint8Array;
   workspace: Uint8Array;
   workspacePatch?: WorkspacePatch;
 };
@@ -60,48 +40,8 @@ export type SavedToolOutputArtifact = {
   sizeBytes: number;
 };
 
-/**
- * Small schema bridge for Workspace versions that still require a Pi artifact
- * foreign key. Model context lives in PostgreSQL SessionStorage; this object is
- * never used to reconstruct messages and remains constant-size.
- */
-export function encodePostgresSessionReference(input: {
-  sessionId: string;
-  leafId: string | null;
-}): Uint8Array {
-  const timestamp = new Date().toISOString();
-  return Buffer.from(
-    `${JSON.stringify({ type: "session", version: 3, id: input.sessionId, timestamp, cwd: "/workspace" })}\n${JSON.stringify(
-      {
-        type: "custom_message",
-        id: globalThis.crypto.randomUUID(),
-        parentId: null,
-        timestamp,
-        customType: "agent-dock.postgres_session_reference",
-        content: "Conversation context is stored in PostgreSQL SessionStorage.",
-        display: false,
-        details: { schemaVersion: 1, leafId: input.leafId },
-      },
-    )}\n`,
-    "utf8",
-  );
-}
-
 export interface SandboxCheckpointStore {
-  load(
-    command: ExecuteTurnCommandMessage,
-    options?: Readonly<{ includeConversation?: boolean }>,
-  ): Promise<LoadedSandboxCheckpoint | undefined>;
-  saveConversation(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-  ): Promise<SavedSandboxCheckpoint>;
-  saveInterruptedConversation(
-    command: ExecuteTurnCommandMessage,
-    baseRevision: string | null,
-    piSession: Uint8Array,
-  ): Promise<SavedSandboxCheckpoint>;
+  load(command: ExecuteTurnCommandMessage): Promise<LoadedSandboxCheckpoint | undefined>;
   save(
     command: ExecuteTurnCommandMessage,
     baseRevision: string | null,
@@ -163,94 +103,6 @@ function decodeBlob(
   return bytes;
 }
 
-function jsonRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function validatePiSessionSnapshot(bytes: Uint8Array): void {
-  assertNonEmptyBounded(bytes, MAX_PI_SESSION_SNAPSHOT_BYTES, "Pi session snapshot");
-  if (bytes.at(-1) !== 0x0a) throw checkpointError("Pi session snapshot is not settled");
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let hasAssistant = false;
-  let hasInterruptionMarker = false;
-  let hasPostgresSessionReference = false;
-  let lineStart = 0;
-  let parsedLines = 0;
-  for (let index = 0; index < buffer.byteLength; index += 1) {
-    if (buffer[index] !== 0x0a) continue;
-    const line = buffer.subarray(lineStart, index);
-    lineStart = index + 1;
-    if (line.byteLength === 0) continue;
-    if (line.includes(0)) throw checkpointError("Pi session snapshot contains a NUL byte");
-    let text: string;
-    try {
-      text = decoder.decode(line);
-    } catch {
-      throw checkpointError("Pi session snapshot is not valid UTF-8");
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text) as unknown;
-    } catch {
-      throw checkpointError("Pi session snapshot contains malformed JSONL");
-    }
-    if (!jsonRecord(parsed)) throw checkpointError("Pi session JSONL entry is not an object");
-    if (parsedLines === 0) {
-      if (
-        parsed.type !== "session" ||
-        typeof parsed.id !== "string" ||
-        parsed.id.length === 0 ||
-        parsed.cwd !== "/workspace"
-      ) {
-        throw checkpointError("Pi session header does not belong to the sandbox workspace");
-      }
-      parsedLines += 1;
-      continue;
-    }
-    if (
-      parsed.type === "message" &&
-      jsonRecord(parsed.message) &&
-      parsed.message.role === "assistant"
-    ) {
-      hasAssistant = true;
-    }
-    if (parsed.type === "custom_message" && parsed.customType === "agent-dock.run_interrupted") {
-      hasInterruptionMarker = true;
-    }
-    if (
-      parsed.type === "custom_message" &&
-      parsed.customType === "agent-dock.postgres_session_reference"
-    ) {
-      hasPostgresSessionReference = true;
-    }
-    parsedLines += 1;
-  }
-  if (parsedLines < 2) throw checkpointError("Pi session snapshot is not settled");
-  if (!hasAssistant && !hasInterruptionMarker && !hasPostgresSessionReference) {
-    throw checkpointError("Pi session snapshot has no assistant message or interruption boundary");
-  }
-}
-
-export function encodeSettledCheckpoint(
-  checkpoint: CapturedSandboxCheckpoint,
-): SandboxSettledCheckpoint {
-  validatePiSessionSnapshot(checkpoint.piSession);
-  validateWorkspaceSnapshot(checkpoint.workspace);
-  return {
-    format: "agent-dock.settled-checkpoint.v1",
-    piSession: encodeBlob(
-      checkpoint.piSession,
-      MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
-      "Pi session snapshot",
-    ),
-    workspace: encodeBlob(checkpoint.workspace, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot"),
-    ...(checkpoint.workspacePatch === undefined
-      ? {}
-      : { workspacePatch: checkpoint.workspacePatch }),
-  };
-}
-
 export function encodeWorkspaceSnapshot(snapshot: Uint8Array): SandboxCheckpointBlob {
   validateWorkspaceSnapshot(snapshot);
   return encodeBlob(snapshot, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot");
@@ -260,33 +112,6 @@ export function decodeWorkspaceSnapshot(blob: SandboxCheckpointBlob): Uint8Array
   const snapshot = decodeBlob(blob, MAX_WORKSPACE_SNAPSHOT_BYTES, "Workspace snapshot");
   validateWorkspaceSnapshot(snapshot);
   return snapshot;
-}
-
-export function decodeSettledCheckpoint(
-  checkpoint: SandboxSettledCheckpoint,
-): CapturedSandboxCheckpoint {
-  if (checkpoint.format !== "agent-dock.settled-checkpoint.v1") {
-    throw checkpointError("Checkpoint format is unsupported");
-  }
-  const piSession = decodeBlob(
-    checkpoint.piSession,
-    MAX_INLINE_PI_SESSION_SNAPSHOT_BYTES,
-    "Pi session snapshot",
-  );
-  const workspace = decodeBlob(
-    checkpoint.workspace,
-    MAX_WORKSPACE_SNAPSHOT_BYTES,
-    "Workspace snapshot",
-  );
-  validatePiSessionSnapshot(piSession);
-  validateWorkspaceSnapshot(workspace);
-  return {
-    piSession,
-    workspace,
-    ...(checkpoint.workspacePatch === undefined
-      ? {}
-      : { workspacePatch: checkpoint.workspacePatch }),
-  };
 }
 
 export function validateLoadedCheckpoint(
@@ -301,14 +126,10 @@ export function validateLoadedCheckpoint(
   }
   if (
     checkpoint.revision === undefined &&
-    (checkpoint.piSession !== undefined ||
-      checkpoint.workspace !== undefined ||
-      checkpoint.workspaceRevision !== undefined)
+    (checkpoint.workspace !== undefined || checkpoint.workspaceRevision !== undefined)
   ) {
     throw checkpointError("Checkpoint revision is missing");
   }
-  const restoredPiSession = checkpoint.piSession;
-  if (restoredPiSession !== undefined) validatePiSessionSnapshot(restoredPiSession);
   if (checkpoint.workspace !== undefined) validateWorkspaceSnapshot(checkpoint.workspace);
   if (
     checkpoint.workspaceRevision !== undefined &&
@@ -323,41 +144,7 @@ export function validateLoadedCheckpoint(
     return {
       ...checkpoint,
       workspaceRevision: sha256(checkpoint.workspace),
-      ...(checkpoint.recoverySuffix === undefined
-        ? {}
-        : { recoverySuffix: validateRecoverySuffix(checkpoint.recoverySuffix) }),
     };
   }
-  return {
-    ...checkpoint,
-    ...(checkpoint.recoverySuffix === undefined
-      ? {}
-      : { recoverySuffix: validateRecoverySuffix(checkpoint.recoverySuffix) }),
-  };
-}
-
-function validateRecoverySuffix(suffix: PiDurableRecoverySuffix): PiDurableRecoverySuffix {
-  if (
-    !Number.isSafeInteger(suffix.checkpointThroughSequence) ||
-    suffix.checkpointThroughSequence < 0 ||
-    !Number.isSafeInteger(suffix.recoveredThroughSequence) ||
-    suffix.recoveredThroughSequence <= suffix.checkpointThroughSequence ||
-    suffix.turns.length < 1 ||
-    suffix.turns.length > 32
-  ) {
-    throw checkpointError("Pi durable recovery suffix is invalid");
-  }
-  for (const turn of suffix.turns) {
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        turn.turnId,
-      ) ||
-      turn.input.length < 1 ||
-      Buffer.byteLength(turn.input, "utf8") > 100_000 ||
-      turn.transcript.throughSequence > suffix.recoveredThroughSequence
-    ) {
-      throw checkpointError("Pi durable recovery turn is invalid");
-    }
-  }
-  return suffix;
+  return checkpoint;
 }

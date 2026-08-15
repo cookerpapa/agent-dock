@@ -1,7 +1,6 @@
 import type {
   CancelTurnCommandMessage,
   EventPublishMessage,
-  ExecuteTurnCommandMessage,
   WorkspacePatch,
 } from "@agent-dock/protocol";
 
@@ -14,14 +13,6 @@ export type PiModelRuntimeConfig = {
   reasoning?: boolean;
   contextWindow?: number;
   maxTokens?: number;
-};
-
-export type PiSettledCheckpoint = {
-  piSession: Uint8Array;
-};
-
-export type PiInterruptedCheckpoint = PiSettledCheckpoint & {
-  reason: string;
 };
 
 export type PiToolOutputCapture = {
@@ -47,13 +38,6 @@ export type PiCancellationSignal = {
 };
 
 export type PiEventPublisher = (message: EventPublishMessage) => Promise<void> | void;
-
-export type PiTurnRuntimeOptions = {
-  resolveModelRuntime: (
-    model: ExecuteTurnCommandMessage["payload"]["model"],
-  ) => Promise<PiModelRuntimeConfig> | PiModelRuntimeConfig;
-  resolveWorkspaceDirectory: (command: ExecuteTurnCommandMessage) => Promise<string> | string;
-};
 
 export const PINNED_PI_CODING_AGENT_VERSION = "0.84.1";
 

@@ -11,19 +11,16 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@agent-dock/protocol";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
 import {
   FileCheckpointObjectStore,
-  PI_SESSION_MANIFEST_MEDIA_TYPE,
   PostgresSandboxCheckpointStore,
   SessionLiveStreamCompactionService,
-  decodePiSessionManifest,
 } from "../src/index.ts";
-import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",
@@ -118,50 +115,6 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
   };
 }
 
-function piSession(label: string): Uint8Array {
-  const labels = label === "second" ? ["first", "second"] : [label];
-  return Buffer.from(
-    [
-      JSON.stringify({ type: "session", version: 3, id: "pi-checkpoint", cwd: "/workspace" }),
-      ...labels.map((entry, index) =>
-        JSON.stringify({
-          type: "message",
-          id: `assistant-${entry}`,
-          parentId: index === 0 ? null : `assistant-${labels[index - 1]}`,
-          timestamp: "2026-07-19T00:00:00.000Z",
-          message: { role: "assistant", content: [{ type: "text", text: entry }] },
-        }),
-      ),
-      "",
-    ].join("\n"),
-  );
-}
-
-function interruptedPiSession(label: string): Uint8Array {
-  return Buffer.from(
-    [
-      JSON.stringify({ type: "session", version: 3, id: "pi-checkpoint", cwd: "/workspace" }),
-      JSON.stringify({
-        type: "message",
-        id: `user-${label}`,
-        parentId: null,
-        timestamp: "2026-07-28T00:00:00.000Z",
-        message: { role: "user", content: [{ type: "text", text: label }] },
-      }),
-      JSON.stringify({
-        type: "custom_message",
-        id: `interrupted-${label}`,
-        parentId: `user-${label}`,
-        timestamp: "2026-07-28T00:00:01.000Z",
-        customType: "agent-dock.run_interrupted",
-        content: "<turn_aborted>The previous turn was interrupted.</turn_aborted>",
-        display: false,
-      }),
-      "",
-    ].join("\n"),
-  );
-}
-
 function workspace(label: string): Uint8Array {
   const content = Buffer.from(label).toString("base64");
   const fileHash = createHash("sha256").update(label).digest("hex");
@@ -252,7 +205,6 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       workspace_id: IDS.workspace,
       desired_model_profile_id: IDS.profile,
       state: "running",
-      pi_session_snapshot_key: null,
       workspace_snapshot_key: null,
       next_event_seq: 1,
       next_mailbox_position: 3,
@@ -436,130 +388,6 @@ async function insertCompletedEvent(
     .execute();
 }
 
-async function activateSecondTurnAfterHardCrash(targetDatabase: Kysely<Database>): Promise<void> {
-  const now = new Date();
-  await targetDatabase.transaction().execute(async (transaction) => {
-    await transaction.deleteFrom("session_leases").where("session_id", "=", IDS.session).execute();
-    await transaction
-      .updateTable("turns")
-      .set({
-        state: "failed",
-        failure_code: "assignment_lost",
-        failure_message: "The Worker disappeared before saving Pi state",
-        failure_retryable: true,
-        settled_at: now,
-      })
-      .where("id", "=", IDS.turn1)
-      .executeTakeFirstOrThrow();
-    await transaction
-      .updateTable("turns")
-      .set({ state: "running", started_at: now })
-      .where("id", "=", IDS.turn2)
-      .executeTakeFirstOrThrow();
-    await transaction
-      .updateTable("commands")
-      .set({ state: "acknowledged", acknowledged_at: now })
-      .where("id", "=", IDS.command2)
-      .executeTakeFirstOrThrow();
-    await transaction
-      .updateTable("sessions")
-      .set({ state: "running", last_fencing_token: 2 })
-      .where("id", "=", IDS.session)
-      .executeTakeFirstOrThrow();
-    await transaction
-      .insertInto("session_leases")
-      .values({
-        session_id: IDS.session,
-        lease_id: IDS.lease2,
-        sandbox_id: IDS.sandbox,
-        fencing_token: 2,
-        valid_until: new Date(now.valueOf() + 60_000),
-      })
-      .executeTakeFirstOrThrow();
-    await transaction
-      .insertInto("run_attempts")
-      .values({
-        id: IDS.attempt2,
-        tenant_id: IDS.tenant,
-        run_id: IDS.run2,
-        attempt_number: 1,
-        state: "running",
-        claim_owner_id: "checkpoint-test",
-        claim_expires_at: new Date(now.valueOf() + 60_000),
-        sandbox_id: IDS.sandbox,
-        lease_id: IDS.lease2,
-        fencing_token: 2,
-        checkpoint_revision: null,
-        failure_code: null,
-        failure_message: null,
-        failure_retryable: null,
-        provisioning_at: now,
-        restoring_at: now,
-        running_at: now,
-        checkpointing_at: null,
-        last_heartbeat_at: now,
-        settled_at: null,
-        claimed_at: now,
-        created_at: now,
-        updated_at: now,
-      })
-      .executeTakeFirstOrThrow();
-    await transaction
-      .updateTable("runs")
-      .set({
-        state: "running",
-        current_attempt_id: IDS.attempt2,
-        attempt_count: 1,
-        started_at: now,
-      })
-      .where("id", "=", IDS.run2)
-      .executeTakeFirstOrThrow();
-    await transaction
-      .insertInto("conversation_turn_projections")
-      .values({
-        turn_id: IDS.turn1,
-        tenant_id: IDS.tenant,
-        session_id: IDS.session,
-        schema_version: 1,
-        through_seq: 3,
-        source_event_count: 3,
-        transcript: {
-          schemaVersion: 1,
-          throughSequence: 3,
-          startedSequence: 1,
-          terminalSequence: 3,
-          stopReason: null,
-          failure: {
-            code: "assignment_lost",
-            message: "The Worker disappeared before saving Pi state",
-            retryable: true,
-          },
-          cancellation: null,
-          workspacePatch: null,
-          items: [
-            {
-              kind: "text",
-              text: "I began changing the repository.",
-              firstSequence: 2,
-              lastSequence: 2,
-            },
-            {
-              kind: "tool",
-              toolCallId: "hard-crash-call",
-              toolName: "bash",
-              input: { command: "npm test" },
-              status: "running",
-              firstSequence: 2,
-              startedAt: now.toISOString(),
-            },
-          ],
-        },
-        projected_at: now,
-      })
-      .executeTakeFirstOrThrow();
-  });
-}
-
 const s3Only = process.env.AGENT_DOCK_TEST_S3_ONLY === "true";
 
 beforeAll(async () => {
@@ -603,7 +431,6 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       sizeBytes: 2_048,
     });
     const first = await store.save(command(1), null, {
-      piSession: piSession("first"),
       workspace: workspace("first"),
       environment: ENVIRONMENT_VALIDATION,
     });
@@ -616,7 +443,7 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       .select(["id", "kind", "run_id"])
       .where("turn_id", "=", IDS.turn1)
       .execute();
-    expect(firstArtifacts).toHaveLength(3);
+    expect(firstArtifacts).toHaveLength(2);
     expect(firstArtifacts).toContainEqual({
       id: savedToolOutput.artifactId,
       kind: "tool_output",
@@ -717,80 +544,37 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     const restored = await freshStore.load(command(2));
     expect(restored).toEqual({
       revision: first.revision,
-      piSession: piSession("first"),
       workspace: workspace("first"),
       workspaceRevision: createHash("sha256").update(workspace("first")).digest("hex"),
     });
     const second = await freshStore.save(command(2), first.revision, {
-      piSession: piSession("second"),
       workspace: workspace("second"),
       environment: ENVIRONMENT_VALIDATION,
     });
     expect(second.revision).not.toBe(first.revision);
-    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
+    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(3);
     await expect(freshStore.load(command(2))).resolves.toMatchObject({ revision: first.revision });
     await insertCompletedEvent(2);
     await expect(freshStore.load(command(2))).resolves.toMatchObject({
       revision: second.revision,
-      piSession: piSession("second"),
+      workspace: workspace("second"),
     });
-    const piArtifacts = await database
-      .selectFrom("artifacts")
-      .select(["object_key", "media_type"])
-      .where("kind", "=", "pi_session_snapshot")
-      .orderBy("created_at")
-      .execute();
-    expect(piArtifacts).toHaveLength(2);
-    expect(
-      piArtifacts.every((artifact) => artifact.media_type === PI_SESSION_MANIFEST_MEDIA_TYPE),
-    ).toBe(true);
-    const firstManifest = decodePiSessionManifest(
-      await readFile(resolve(objectRoot, piArtifacts[0]!.object_key)),
-    );
-    const secondManifest = decodePiSessionManifest(
-      await readFile(resolve(objectRoot, piArtifacts[1]!.object_key)),
-    );
-    expect(firstManifest.mode).toBe("rebase");
-    expect(secondManifest.mode).toBe("append");
-    expect(secondManifest.previousManifestSha256).toBe(
-      createHash("sha256")
-        .update(await readFile(resolve(objectRoot, piArtifacts[0]!.object_key)))
-        .digest("hex"),
-    );
-    expect(firstManifest.segments).toHaveLength(1);
-    expect(secondManifest.segments).toHaveLength(1);
-    expect(secondManifest.segments[0]).not.toEqual(firstManifest.segments[0]);
 
     await expect(
       freshStore.save(command(2), first.revision, {
-        piSession: piSession("stale"),
         workspace: workspace("stale"),
         environment: ENVIRONMENT_VALIDATION,
       }),
     ).rejects.toMatchObject({ code: "checkpoint_conflict" });
-    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(5);
+    expect(await database.selectFrom("artifacts").selectAll().execute()).toHaveLength(3);
 
     const session = await database
       .selectFrom("sessions")
-      .select(["pi_session_snapshot_key", "workspace_snapshot_key"])
+      .select("workspace_snapshot_key")
       .where("id", "=", IDS.session)
       .executeTakeFirstOrThrow();
-    expect(session.pi_session_snapshot_key).not.toBeNull();
-    await database
-      .updateTable("artifacts")
-      .set({ media_type: "application/json" })
-      .where("object_key", "=", session.pi_session_snapshot_key!)
-      .executeTakeFirstOrThrow();
-    await expect(freshStore.load(command(2))).rejects.toMatchObject({
-      code: "checkpoint_incompatible",
-      retryable: false,
-    });
-    await database
-      .updateTable("artifacts")
-      .set({ media_type: PI_SESSION_MANIFEST_MEDIA_TYPE })
-      .where("object_key", "=", session.pi_session_snapshot_key!)
-      .executeTakeFirstOrThrow();
-    await writeFile(resolve(objectRoot, session.pi_session_snapshot_key!), "corrupt");
+    expect(session.workspace_snapshot_key).not.toBeNull();
+    await writeFile(resolve(objectRoot, session.workspace_snapshot_key!), "corrupt");
     await expect(freshStore.load(command(2))).rejects.toMatchObject({ code: "checkpoint_corrupt" });
 
     const expiredStore = new PostgresSandboxCheckpointStore({
@@ -802,309 +586,6 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
       code: "stale_checkpoint_fence",
     });
   }, 30_000);
-});
-
-describe("PostgreSQL interrupted conversation checkpoint store", () => {
-  it("commits a typed Pi artifact while the current fenced Run is cancelling", async () => {
-    const isolatedPglite = await PGlite.create();
-    const isolatedSocket = new PGLiteSocketServer({
-      db: isolatedPglite,
-      host: "127.0.0.1",
-      port: 0,
-    });
-    const isolatedObjectRoot = await mkdtemp(
-      resolve(tmpdir(), "agent-dock-interrupted-checkpoint-test-"),
-    );
-    let isolatedDatabase: Kysely<Database> | undefined;
-    try {
-      await isolatedSocket.start();
-      isolatedDatabase = createDatabase({
-        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
-        maxConnections: 2,
-      });
-      await runMigrations(isolatedDatabase, "up");
-      await seed(isolatedDatabase);
-      await isolatedDatabase.transaction().execute(async (transaction) => {
-        await transaction
-          .updateTable("sessions")
-          .set({ state: "cancelling" })
-          .where("id", "=", IDS.session)
-          .executeTakeFirstOrThrow();
-        await transaction
-          .updateTable("turns")
-          .set({ state: "cancelling" })
-          .where("id", "=", IDS.turn1)
-          .executeTakeFirstOrThrow();
-        await transaction
-          .updateTable("runs")
-          .set({ state: "cancel_requested" })
-          .where("id", "=", IDS.run1)
-          .executeTakeFirstOrThrow();
-        await transaction
-          .updateTable("run_attempts")
-          .set({ state: "cancel_requested" })
-          .where("id", "=", IDS.attempt1)
-          .executeTakeFirstOrThrow();
-      });
-
-      const store = new PostgresSandboxCheckpointStore({
-        database: isolatedDatabase,
-        objectStore: new FileCheckpointObjectStore({ rootDirectory: isolatedObjectRoot }),
-        idGenerator: () => "80000000-0000-4000-8000-000000000001",
-      });
-      await expect(
-        store.saveInterruptedConversation(
-          command(1),
-          null,
-          interruptedPiSession("cancelled request"),
-        ),
-      ).resolves.toMatchObject({ revision: expect.stringMatching(/^[0-9a-f]{64}$/) });
-      const artifact = await isolatedDatabase
-        .selectFrom("artifacts")
-        .select(["kind", "object_key"])
-        .where("run_id", "=", IDS.run1)
-        .executeTakeFirstOrThrow();
-      expect(artifact.kind).toBe("pi_interrupted_session_snapshot");
-      const session = await isolatedDatabase
-        .selectFrom("sessions")
-        .select("pi_session_snapshot_key")
-        .where("id", "=", IDS.session)
-        .executeTakeFirstOrThrow();
-      expect(session.pi_session_snapshot_key).toBe(artifact.object_key);
-      await isolatedDatabase.transaction().execute((transaction) =>
-        transitionCurrentRunAttempt(
-          transaction,
-          {
-            tenantId: IDS.tenant,
-            runId: IDS.run1,
-            attemptId: IDS.attempt1,
-            leaseId: IDS.lease1,
-            fencingToken: 1,
-          },
-          {
-            runState: "cancelled",
-            attemptState: "cancelled",
-            reason: "test_cancellation_confirmed",
-            now: new Date(),
-            stopReason: "cancelled",
-          },
-        ),
-      );
-      const retained = await isolatedDatabase
-        .selectFrom("sessions")
-        .select("pi_session_snapshot_key")
-        .where("id", "=", IDS.session)
-        .executeTakeFirstOrThrow();
-      expect(retained.pi_session_snapshot_key).toBe(artifact.object_key);
-    } finally {
-      await isolatedDatabase?.destroy();
-      await isolatedSocket.stop().catch(() => undefined);
-      await isolatedPglite.close().catch(() => undefined);
-      await rm(isolatedObjectRoot, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  it("does not copy Pi history from a shared Workspace after a failed Run", async () => {
-    const isolatedPglite = await PGlite.create();
-    const isolatedSocket = new PGLiteSocketServer({
-      db: isolatedPglite,
-      host: "127.0.0.1",
-      port: 0,
-    });
-    let isolatedDatabase: Kysely<Database> | undefined;
-    try {
-      await isolatedSocket.start();
-      isolatedDatabase = createDatabase({
-        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
-        maxConnections: 2,
-      });
-      await runMigrations(isolatedDatabase, "up");
-      await seed(isolatedDatabase);
-
-      const sourceSessionId = "81000000-0000-4000-8000-000000000001";
-      const sourcePiArtifactId = "81000000-0000-4000-8000-000000000002";
-      const sourceWorkspaceArtifactId = "81000000-0000-4000-8000-000000000003";
-      const sourceWorkspaceVersionId = "81000000-0000-4000-8000-000000000004";
-      const sourcePiKey = "checkpoints/source-conversation/pi.jsonl";
-      const sourceWorkspaceKey = "checkpoints/source-conversation/workspace.json";
-      const sourcePi = Buffer.from("source conversation only\n");
-      const sourceWorkspace = workspace("shared workspace");
-      await isolatedDatabase
-        .insertInto("sessions")
-        .values({
-          id: sourceSessionId,
-          tenant_id: IDS.tenant,
-          project_id: IDS.project,
-          workspace_id: IDS.workspace,
-          desired_model_profile_id: IDS.profile,
-          state: "idle",
-          pi_session_snapshot_key: sourcePiKey,
-          workspace_snapshot_key: sourceWorkspaceKey,
-        })
-        .executeTakeFirstOrThrow();
-      await isolatedDatabase
-        .insertInto("artifacts")
-        .values([
-          {
-            id: sourcePiArtifactId,
-            tenant_id: IDS.tenant,
-            session_id: sourceSessionId,
-            turn_id: null,
-            run_id: null,
-            kind: "pi_session_snapshot",
-            object_key: sourcePiKey,
-            sha256: createHash("sha256").update(sourcePi).digest("hex"),
-            size_bytes: sourcePi.byteLength,
-            file_name: "session.jsonl",
-            media_type: "application/x-ndjson",
-          },
-          {
-            id: sourceWorkspaceArtifactId,
-            tenant_id: IDS.tenant,
-            session_id: sourceSessionId,
-            turn_id: null,
-            run_id: null,
-            kind: "workspace_snapshot",
-            object_key: sourceWorkspaceKey,
-            sha256: createHash("sha256").update(sourceWorkspace).digest("hex"),
-            size_bytes: sourceWorkspace.byteLength,
-            file_name: "workspace.json",
-            media_type: "application/json",
-          },
-        ])
-        .execute();
-      await isolatedDatabase
-        .insertInto("workspace_versions")
-        .values({
-          id: sourceWorkspaceVersionId,
-          tenant_id: IDS.tenant,
-          workspace_id: IDS.workspace,
-          session_id: sourceSessionId,
-          version_number: 1,
-          parent_version_id: null,
-          source_version_id: null,
-          origin_kind: "migration",
-          run_id: null,
-          attempt_id: null,
-          turn_id: null,
-          pi_artifact_id: sourcePiArtifactId,
-          workspace_artifact_id: sourceWorkspaceArtifactId,
-          patch_artifact_id: null,
-          revision: createHash("sha256").update(sourceWorkspace).digest("hex"),
-          file_count: 1,
-          state: "settled",
-          settled_at: new Date(),
-        })
-        .executeTakeFirstOrThrow();
-      await isolatedDatabase
-        .updateTable("workspaces")
-        .set({ current_workspace_version_id: sourceWorkspaceVersionId })
-        .where("id", "=", IDS.workspace)
-        .executeTakeFirstOrThrow();
-      await isolatedDatabase
-        .updateTable("sessions")
-        .set({
-          current_workspace_version_id: sourceWorkspaceVersionId,
-          workspace_snapshot_key: sourceWorkspaceKey,
-          pi_session_snapshot_key: null,
-        })
-        .where("id", "=", IDS.session)
-        .executeTakeFirstOrThrow();
-
-      await isolatedDatabase.transaction().execute((transaction) =>
-        transitionCurrentRunAttempt(
-          transaction,
-          {
-            tenantId: IDS.tenant,
-            runId: IDS.run1,
-            attemptId: IDS.attempt1,
-            leaseId: IDS.lease1,
-            fencingToken: 1,
-          },
-          {
-            runState: "failed",
-            attemptState: "failed",
-            reason: "test_shared_workspace_failure",
-            now: new Date(),
-            failure: { code: "test_failure", message: "test failure", retryable: false },
-          },
-        ),
-      );
-
-      await expect(
-        isolatedDatabase
-          .selectFrom("sessions")
-          .select(["pi_session_snapshot_key", "workspace_snapshot_key"])
-          .where("id", "=", IDS.session)
-          .executeTakeFirstOrThrow(),
-      ).resolves.toEqual({
-        pi_session_snapshot_key: null,
-        workspace_snapshot_key: sourceWorkspaceKey,
-      });
-    } finally {
-      await isolatedDatabase?.destroy();
-      await isolatedSocket.stop().catch(() => undefined);
-      await isolatedPglite.close().catch(() => undefined);
-    }
-  }, 30_000);
-});
-
-describe("PostgreSQL hard-crash semantic recovery", () => {
-  it("returns a durable semantic suffix when no newer Pi JSONL checkpoint exists", async () => {
-    const isolatedPglite = await PGlite.create();
-    const isolatedSocket = new PGLiteSocketServer({
-      db: isolatedPglite,
-      host: "127.0.0.1",
-      port: 0,
-    });
-    const isolatedObjectRoot = await mkdtemp(
-      resolve(tmpdir(), "agent-dock-hard-crash-checkpoint-test-"),
-    );
-    let isolatedDatabase: Kysely<Database> | undefined;
-    try {
-      await isolatedSocket.start();
-      isolatedDatabase = createDatabase({
-        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
-        maxConnections: 2,
-      });
-      await runMigrations(isolatedDatabase, "up");
-      await seed(isolatedDatabase);
-      await activateSecondTurnAfterHardCrash(isolatedDatabase);
-      const store = new PostgresSandboxCheckpointStore({
-        database: isolatedDatabase,
-        objectStore: new FileCheckpointObjectStore({ rootDirectory: isolatedObjectRoot }),
-      });
-
-      await expect(store.load(command(2))).resolves.toEqual({
-        recoverySuffix: {
-          checkpointThroughSequence: 0,
-          recoveredThroughSequence: 3,
-          turns: [
-            expect.objectContaining({
-              turnId: IDS.turn1,
-              input: "turn one",
-              transcript: expect.objectContaining({
-                throughSequence: 3,
-                failure: expect.objectContaining({ code: "assignment_lost" }),
-                items: expect.arrayContaining([
-                  expect.objectContaining({
-                    kind: "tool",
-                    toolCallId: "hard-crash-call",
-                    status: "running",
-                  }),
-                ]),
-              }),
-            }),
-          ],
-        },
-      });
-    } finally {
-      await isolatedDatabase?.destroy();
-      await isolatedSocket.stop();
-      await isolatedPglite.close();
-      await rm(isolatedObjectRoot, { recursive: true, force: true });
-    }
-  });
 });
 
 describe("Valkey Session live-stream compaction", () => {

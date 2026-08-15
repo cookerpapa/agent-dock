@@ -528,7 +528,6 @@ export class ConversationTreeService {
             desired_model_profile_id: source.desired_model_profile_id,
             state: "cold",
             sandbox_retention_policy: source.sandbox_retention_policy,
-            pi_session_snapshot_key: null,
             workspace_snapshot_key: source.workspace_snapshot_key,
             current_workspace_version_id: source.current_workspace_version_id,
             conversation_parent_session_id: sourceSessionId,

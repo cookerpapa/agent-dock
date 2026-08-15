@@ -51,13 +51,7 @@ export type CommandState = DomainCommandState;
 export type ApprovalKind = "confirm" | "select" | "input" | "editor";
 export type ApprovalOutcome = "approved" | "rejected" | "cancelled";
 export type ArtifactKind =
-  | "pi_session_snapshot"
-  | "pi_interrupted_session_snapshot"
-  | "workspace_snapshot"
-  | "tool_output"
-  | "patch"
-  | "report"
-  | "crash_bundle";
+  "workspace_snapshot" | "tool_output" | "patch" | "report" | "crash_bundle";
 export type SupervisorConnectionState = "active" | "superseded" | "fenced";
 export type SupervisorConnectionCloseReason = "reconnected" | "heartbeat_timeout" | "new_boot";
 export type SandboxRetirementReason = "heartbeat_timeout" | "new_boot";
@@ -76,11 +70,6 @@ export type ContextCompactionState = "running" | "completed" | "aborted" | "fail
 export type EnvironmentVersionState = "pending" | "validated" | "failed";
 export type EnvironmentValidationStatus = "validated" | "failed";
 export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "validate";
-export type OrchestrationState =
-  "running" | "cancel_requested" | "awaiting_decision" | "completed" | "failed" | "cancelled";
-export type OrchestrationDispatchState = "accepted" | "running" | "settled" | "cancelled";
-export type OrchestrationAcceptanceVerdict = "passed" | "failed";
-export type OrchestrationDecisionGateState = "pending" | "resolved" | "cancelled";
 export type SandboxDomainState = "active" | "draining" | "disabled";
 export type SandboxRetentionPolicy = "ephemeral" | "persistent";
 
@@ -408,7 +397,6 @@ export interface SessionTable {
   desired_model_profile_id: string;
   state: SessionState;
   sandbox_retention_policy: Generated<SandboxRetentionPolicy>;
-  pi_session_snapshot_key: string | null;
   workspace_snapshot_key: string | null;
   next_event_seq: GeneratedInt8;
   next_mailbox_position: GeneratedInt8;
@@ -470,7 +458,6 @@ export interface RunTable {
   source_set_snapshot: GeneratedJsonObject;
   conversation_base_seq: GeneratedInt8;
   workspace_base_version_id: GeneratedNullable<string>;
-  pi_session_base_artifact_id: GeneratedNullable<string>;
   idempotency_key: string;
   trace_id: Generated<string>;
   state: RunState;
@@ -523,121 +510,6 @@ export interface RunAttemptTransitionTable {
   to_state: RunAttemptState;
   reason: string;
   occurred_at: GeneratedTimestamp;
-}
-
-export interface RunRewindTable {
-  id: string;
-  tenant_id: string;
-  session_id: string;
-  source_run_id: string;
-  source_attempt_id: string;
-  replacement_run_id: string;
-  conversation_boundary_seq: Int8;
-  workspace_base_version_id: string | null;
-  pi_session_base_artifact_id: string | null;
-  actor_user_id: string;
-  idempotency_key: string;
-  created_at: GeneratedTimestamp;
-}
-
-export interface ReviewBundleTable {
-  id: string;
-  tenant_id: string;
-  project_id: string;
-  workspace_id: string;
-  session_id: string;
-  run_id: string;
-  attempt_id: string;
-  workspace_version_id: string | null;
-  manifest: JsonObject;
-  manifest_sha256: string;
-  created_at: GeneratedTimestamp;
-}
-
-export interface OrchestrationRunTable {
-  id: string;
-  tenant_id: string;
-  project_id: string;
-  workspace_id: string;
-  parent_session_id: string;
-  base_workspace_version_id: string;
-  kind: "candidate_race";
-  state: OrchestrationState;
-  prompt: string;
-  candidate_specs: JsonObject;
-  acceptance_policy: JsonObject;
-  candidate_count: number;
-  maximum_concurrent_candidates: number;
-  created_by_user_id: string;
-  idempotency_key: string;
-  request_fingerprint: string;
-  winner_candidate_id: string | null;
-  cancel_idempotency_key: string | null;
-  cancel_requested_by_user_id: string | null;
-  cancel_requested_at: NullableTimestamp;
-  created_at: GeneratedTimestamp;
-  updated_at: GeneratedTimestamp;
-  settled_at: NullableTimestamp;
-}
-
-export interface OrchestrationCandidateTable {
-  id: string;
-  tenant_id: string;
-  orchestration_id: string;
-  ordinal: number;
-  label: string;
-  strategy: string;
-  child_session_id: string;
-  run_id: string;
-  created_at: GeneratedTimestamp;
-}
-
-export interface OrchestrationDispatchTable {
-  id: string;
-  tenant_id: string;
-  orchestration_id: string;
-  candidate_id: string;
-  run_id: string;
-  generation: GeneratedInteger;
-  state: OrchestrationDispatchState;
-  accepted_at: GeneratedTimestamp;
-  settled_at: NullableTimestamp;
-}
-
-export interface OrchestrationAcceptanceResultTable {
-  candidate_id: string;
-  tenant_id: string;
-  orchestration_id: string;
-  verdict: OrchestrationAcceptanceVerdict;
-  review_bundle_id: string | null;
-  workspace_version_id: string | null;
-  scorecard: JsonObject;
-  evaluated_at: GeneratedTimestamp;
-}
-
-export interface OrchestrationDecisionGateTable {
-  id: string;
-  tenant_id: string;
-  orchestration_id: string;
-  state: OrchestrationDecisionGateState;
-  selected_candidate_id: string | null;
-  resolved_by_user_id: string | null;
-  created_at: GeneratedTimestamp;
-  resolved_at: NullableTimestamp;
-}
-
-export interface CandidatePromotionTable {
-  id: string;
-  tenant_id: string;
-  orchestration_id: string;
-  candidate_id: string;
-  parent_session_id: string;
-  from_workspace_version_id: string;
-  candidate_workspace_version_id: string;
-  promoted_workspace_version_id: string;
-  actor_user_id: string;
-  idempotency_key: string;
-  created_at: GeneratedTimestamp;
 }
 
 export interface AgentNodeTable {
@@ -903,7 +775,6 @@ export interface WorkspaceVersionTable {
   run_id: string | null;
   attempt_id: string | null;
   turn_id: string | null;
-  pi_artifact_id: string;
   workspace_artifact_id: string;
   patch_artifact_id: string | null;
   revision: string;
@@ -1225,14 +1096,6 @@ export interface Database {
   runs: RunTable;
   run_attempts: RunAttemptTable;
   run_attempt_transitions: RunAttemptTransitionTable;
-  run_rewinds: RunRewindTable;
-  review_bundles: ReviewBundleTable;
-  orchestration_runs: OrchestrationRunTable;
-  orchestration_candidates: OrchestrationCandidateTable;
-  orchestration_dispatches: OrchestrationDispatchTable;
-  orchestration_acceptance_results: OrchestrationAcceptanceResultTable;
-  orchestration_decision_gates: OrchestrationDecisionGateTable;
-  candidate_promotions: CandidatePromotionTable;
   agent_nodes: AgentNodeTable;
   sandboxes: SandboxTable;
   supervisor_connections: SupervisorConnectionTable;

@@ -9,7 +9,7 @@
 AgentDock creates a synthetic root Git repository for every Workspace. It is
 not a repository supplied by the user: its baseline commit represents the
 accepted source state, and its cumulative binary diff feeds terminal Run
-settlement, Review Bundles, Candidate Race evaluation and delivery evidence.
+settlement and recovery evidence.
 
 ADR-0072 moved the Volume generation marker outside the Cube-visible
 `/workspace`, but retained this synthetic `.git` directory inside the user
@@ -73,7 +73,7 @@ for product source changes.
 
 - A fresh `/workspace` contains only user files.
 - Cube cannot read, corrupt or forge the platform baseline/index/object store.
-- Patch, Review Bundle and Candidate semantics remain available.
+- bounded Workspace Patch semantics remain available.
 - Root `git status` no longer discovers AgentDock's synthetic repository.
   Coding Tools use AgentDock's Patch result for platform review, while user
   Git commands continue to work in repositories the user creates or clones.

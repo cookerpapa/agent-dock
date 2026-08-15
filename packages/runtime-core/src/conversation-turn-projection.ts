@@ -84,9 +84,9 @@ function toolItemIndex(
 
 /**
  * Reduces the durable public event history for one Turn into the bounded
- * semantic transcript used by conversation discovery. Pi JSONL remains the
- * model-context authority; Kafka/Valkey supplies live deltas in the
- * distributed profile and PostgreSQL stores this canonical terminal view.
+ * semantic transcript used by conversation discovery. Pi SessionStorage
+ * remains the model-context authority; Kafka/Valkey supplies live deltas and
+ * PostgreSQL stores this canonical terminal view.
  */
 export function projectConversationTurnTranscript(
   events: readonly AgentDockEvent[],
