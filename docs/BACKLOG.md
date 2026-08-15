@@ -24,6 +24,8 @@ retired and remain only in Git history or explicitly superseded ADRs.
       connections reconnect.
 - [x] Validate transaction-scoped SessionStorage authority through deterministic
       Pi Agent Run, Tool, compaction and interrupted-effect recovery contracts.
+- [x] Ensure a secondary terminal-projection outage cannot strand a failed Run;
+      commit a minimal failure boundary and let later Turns start after it.
 - [x] Re-run the production PostgreSQL-native Pi runtime through real model,
       Cube Tool, Workspace settlement and cross-Worker recovery.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.

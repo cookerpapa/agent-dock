@@ -3475,6 +3475,85 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
   });
 
+  it("settles the original failure when terminal projection preparation also fails", async () => {
+    const projectResponse = await http.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: { name: "Projection failure project" },
+    });
+    expect(projectResponse.statusCode).toBe(201);
+    const failedProject = projectResponse.json() as ProjectResource;
+    const sessionResponse = await http.inject({
+      method: "POST",
+      url: `/v1/projects/${failedProject.projectId}/sessions`,
+      payload: {
+        workspaceId: failedProject.workspaceId,
+        title: "Projection failure settlement",
+      },
+    });
+    expect(sessionResponse.statusCode).toBe(201);
+    const failedSession = sessionResponse.json() as SessionResource;
+    const turnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${failedSession.sessionId}/turns`,
+      headers: { "idempotency-key": "terminal-projection-secondary-failure" },
+      payload: { prompt: "Exercise terminal projection failure settlement." },
+    });
+    expect(turnResponse.statusCode).toBe(202);
+    const accepted = turnResponse.json() as AcceptedTurnResource;
+    const dispatcher = new RunCommandExecutor({
+      database,
+      backend: {
+        async execute(_request, lifecycle) {
+          await lifecycle.started();
+          throw new PiTurnError("model_timeout", "Model request timed out", true);
+        },
+      },
+      terminalTurnProjectionSource: {
+        async prepare() {
+          throw new Error("terminal projection unavailable");
+        },
+      },
+    });
+
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      failureCode: "model_timeout",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      turnState: "failed",
+      sessionState: "idle",
+      turnFailureCode: "model_timeout",
+      failureMessage: "Model request timed out",
+    });
+    await expect(
+      database
+        .selectFrom("session_terminal_events")
+        .select(["type", "turn_id"])
+        .where("session_id", "=", failedSession.sessionId)
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ type: "turn.failed", turn_id: accepted.turnId });
+    await expect(
+      database
+        .selectFrom("conversation_turn_projections")
+        .select(["source_event_count", "transcript"])
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({
+      source_event_count: 1,
+      transcript: {
+        failure: {
+          code: "model_timeout",
+          message: "Model request timed out",
+          retryable: true,
+        },
+      },
+    });
+  });
+
   it("renews a running assignment beyond its initial lease deadline", async () => {
     const sessionResponse = await http.inject({
       method: "POST",
@@ -3657,6 +3736,11 @@ describe.sequential("single-user durable turn intake API", () => {
       database,
       sandboxId: IDS.reconciliationSandbox,
       inventory,
+      terminalTurnProjectionSource: {
+        async prepare() {
+          throw new Error("terminal projection unavailable");
+        },
+      },
     });
 
     await expect(reconciler.reconcileExpiredAssignments()).resolves.toEqual({
@@ -3675,6 +3759,14 @@ describe.sequential("single-user durable turn intake API", () => {
       failureRetryable: false,
       sessionState: "failed",
     });
+    await expect(
+      database
+        .selectFrom("session_terminal_events")
+        .select("type")
+        .where("session_id", "=", fixture.assignedSession.sessionId)
+        .where("turn_id", "=", fixture.accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ type: "turn.failed" });
     expect(
       await database
         .selectFrom("sandboxes")

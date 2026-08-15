@@ -1390,17 +1390,24 @@ export class RunCommandExecutor {
       },
     } as const;
     let preparedProjection: PreparedTerminalTurnProjection | undefined;
+    let terminalOnlyProjection = false;
     if (!shouldRetry) {
-      preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
-        tenantId: claim.request.tenantId,
-        sessionId: claim.request.sessionId,
-        turnId: claim.request.turnId,
-        commandId: claim.request.commandId,
-        agentId: "root",
-        body: terminalBody,
-        eventId: terminalEventId,
-        occurredAt: now.toISOString(),
-      });
+      try {
+        preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+          tenantId: claim.request.tenantId,
+          sessionId: claim.request.sessionId,
+          turnId: claim.request.turnId,
+          commandId: claim.request.commandId,
+          agentId: "root",
+          body: terminalBody,
+          eventId: terminalEventId,
+          occurredAt: now.toISOString(),
+        });
+      } catch {
+        // The original execution failure is authoritative. A secondary live-event
+        // projection outage must not strand the Run in a non-terminal state.
+        terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+      }
     }
 
     await this.#database.transaction().execute(async (transaction) => {
@@ -1619,6 +1626,7 @@ export class RunCommandExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
+        ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

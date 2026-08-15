@@ -24,7 +24,10 @@ import type {
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
-import type { TerminalTurnProjectionSource } from "./terminal-turn-projection.ts";
+import type {
+  PreparedTerminalTurnProjection,
+  TerminalTurnProjectionSource,
+} from "./terminal-turn-projection.ts";
 
 const DEFAULT_CLAIM_LEASE_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
@@ -678,16 +681,22 @@ export class RunCancellationExecutor {
       type: "turn.cancelled",
       payload: { reason: result.reason, forced: result.forced },
     } as const;
-    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
-      tenantId: claim.request.target.tenantId,
-      sessionId: claim.request.target.sessionId,
-      turnId: claim.request.target.turnId,
-      commandId: claim.request.target.commandId,
-      agentId: "root",
-      body: terminalBody,
-      eventId: terminalEventId,
-      occurredAt: now.toISOString(),
-    });
+    let preparedProjection: PreparedTerminalTurnProjection | undefined;
+    let terminalOnlyProjection = false;
+    try {
+      preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+        tenantId: claim.request.target.tenantId,
+        sessionId: claim.request.target.sessionId,
+        turnId: claim.request.target.turnId,
+        commandId: claim.request.target.commandId,
+        agentId: "root",
+        body: terminalBody,
+        eventId: terminalEventId,
+        occurredAt: now.toISOString(),
+      });
+    } catch {
+      terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+    }
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (
@@ -788,6 +797,7 @@ export class RunCancellationExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
+        ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

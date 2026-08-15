@@ -19,7 +19,10 @@ import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
 import type { SessionEventNotificationPublisher } from "@agent-dock/runtime-core/session-event-notifications";
 import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
-import type { TerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
+import type {
+  PreparedTerminalTurnProjection,
+  TerminalTurnProjectionSource,
+} from "@agent-dock/runtime-core/terminal-turn-projection";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =
@@ -669,16 +672,22 @@ export class AssignmentReconciler {
         retryable: false,
       },
     } as const;
-    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
-      tenantId: session.tenant_id,
-      sessionId: candidate.sessionId,
-      turnId: turn.id,
-      commandId: executeCommand.id,
-      agentId: "root",
-      body: terminalBody,
-      eventId: terminalEventId,
-      occurredAt: now.toISOString(),
-    });
+    let preparedProjection: PreparedTerminalTurnProjection | undefined;
+    let terminalOnlyProjection = false;
+    try {
+      preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
+        tenantId: session.tenant_id,
+        sessionId: candidate.sessionId,
+        turnId: turn.id,
+        commandId: executeCommand.id,
+        agentId: "root",
+        body: terminalBody,
+        eventId: terminalEventId,
+        occurredAt: now.toISOString(),
+      });
+    } catch {
+      terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+    }
     await commitTerminalTurnEvent(transaction, {
       tenantId: session.tenant_id,
       sessionId: candidate.sessionId,
@@ -691,6 +700,7 @@ export class AssignmentReconciler {
       now,
       eventId: terminalEventId,
       ...(preparedProjection === undefined ? {} : { preparedProjection }),
+      ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
       ...(this.#eventNotificationPublisher === undefined
         ? {}
         : { notificationPublisher: this.#eventNotificationPublisher }),
