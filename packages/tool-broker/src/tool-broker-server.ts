@@ -122,6 +122,19 @@ function safeDiagnostic(error: unknown): Readonly<{
   return cause === undefined ? primary : { ...primary, cause };
 }
 
+function reportFailure(event: string, failure: ToolBrokerError, error: unknown): void {
+  process.stderr.write(
+    `${JSON.stringify({
+      level: "error",
+      service: "agent-dock-tool-broker",
+      event,
+      publicCode: failure.code,
+      retryable: failure.retryable,
+      diagnostic: safeDiagnostic(error),
+    })}\n`,
+  );
+}
+
 export class ToolBrokerServer {
   readonly #host: string;
   readonly #port: number;
@@ -236,16 +249,7 @@ export class ToolBrokerServer {
     ) {
       this.#metrics?.sandboxAdmissionRejected.inc({ reason: failure.code });
     }
-    process.stderr.write(
-      `${JSON.stringify({
-        level: "error",
-        service: "agent-dock-tool-broker",
-        event: "operation_failed",
-        publicCode: failure.code,
-        retryable: failure.retryable,
-        diagnostic: safeDiagnostic(error),
-      })}\n`,
-    );
+    reportFailure("operation_failed", failure, error);
     await reply.code(failure.retryable ? 503 : 409).send({
       error: {
         code: failure.code,
@@ -617,6 +621,7 @@ export class ToolBrokerServer {
         });
       } else {
         const failure = safeFailure(error);
+        reportFailure("workspace_terminal_failed", failure, error);
         await send({
           workspaceTerminalProtocolVersion: 1,
           type: "workspace_terminal.error",

@@ -207,6 +207,10 @@ describe("credential-free Tool Sandbox worker", () => {
     try {
       await mkdir(resolve(workspace, "nested-repository"));
       await expect(validateAttachedWorkspaceRoot(workspace)).resolves.toBeUndefined();
+      await expect(validateAttachedWorkspaceRoot(workspace, true)).rejects.toMatchObject({
+        code: "workspace_attach_invalid",
+        retryable: false,
+      });
       await symlink(workspace, linkedWorkspace, "dir");
       await expect(validateAttachedWorkspaceRoot(linkedWorkspace)).rejects.toMatchObject({
         code: "workspace_attach_invalid",

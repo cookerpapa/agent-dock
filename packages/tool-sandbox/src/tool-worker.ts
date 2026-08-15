@@ -34,6 +34,7 @@ import {
   lstat,
   mkdir,
   open,
+  readFile,
   readdir,
   realpath,
   rename,
@@ -634,15 +635,26 @@ async function assertRealPathInsideWorkspace(
 
 export async function validateAttachedWorkspaceRoot(
   path = TOOL_WORKSPACE_DIRECTORY,
+  requireMountPoint = false,
 ): Promise<void> {
   const metadata = await lstat(path).catch(() => undefined);
   const canonical = await realpath(path).catch(() => undefined);
+  const mountInfo = requireMountPoint
+    ? await readFile("/proc/self/mountinfo", "utf8").catch(() => "")
+    : "";
+  const mounted =
+    !requireMountPoint ||
+    mountInfo.split("\n").some((line) => {
+      const mountPath = line.split(" ")[4];
+      return mountPath?.replaceAll("\\040", " ").replaceAll("\\134", "\\") === resolve(path);
+    });
   if (
     metadata === undefined ||
     canonical === undefined ||
     metadata.isSymbolicLink() ||
     !metadata.isDirectory() ||
-    canonical !== resolve(path)
+    canonical !== resolve(path) ||
+    !mounted
   ) {
     throw new ToolWorkerError(
       "workspace_attach_invalid",
@@ -1169,8 +1181,7 @@ export async function runToolWorker(): Promise<void> {
           if (
             message.workspaceRestore !== undefined ||
             message.dependencyProxy !== undefined ||
-            message.environmentStage !== undefined ||
-            (await readdir(TOOL_WORKSPACE_DIRECTORY)).length === 0
+            message.environmentStage !== undefined
           ) {
             throw new ToolWorkerError(
               "workspace_attach_invalid",
@@ -1178,7 +1189,7 @@ export async function runToolWorker(): Promise<void> {
               false,
             );
           }
-          await validateAttachedWorkspaceRoot();
+          await validateAttachedWorkspaceRoot(TOOL_WORKSPACE_DIRECTORY, true);
           environment.recipeCommands = [...message.workspaceAttach.recipeCommands];
         }
         initialized = true;
