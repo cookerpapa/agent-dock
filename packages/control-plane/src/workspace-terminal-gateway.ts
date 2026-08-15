@@ -24,7 +24,6 @@ const MAXIMUM_REDIRECTS = 3;
 
 export type WorkspaceTerminalGatewayOptions = Readonly<{
   database: Kysely<Database>;
-  checkpointReader: { get(objectKey: string): Promise<Uint8Array> };
   terminalToken: string;
   allowInsecureInternalHttp: boolean;
 }>;
@@ -65,7 +64,6 @@ function send(socket: WebSocket, value: unknown): Promise<void> {
 
 export class WorkspaceTerminalGateway {
   readonly #database: Kysely<Database>;
-  readonly #checkpointReader: WorkspaceTerminalGatewayOptions["checkpointReader"];
   readonly #terminalToken: string;
   readonly #allowInsecureInternalHttp: boolean;
   #installed = false;
@@ -75,7 +73,6 @@ export class WorkspaceTerminalGateway {
       throw new TypeError("Workspace terminal gateway token is invalid");
     }
     this.#database = options.database;
-    this.#checkpointReader = options.checkpointReader;
     this.#terminalToken = options.terminalToken;
     this.#allowInsecureInternalHttp = options.allowInsecureInternalHttp;
   }
@@ -256,16 +253,6 @@ export class WorkspaceTerminalGateway {
           .onRef("environment.project_id", "=", "workspace.project_id")
           .on("environment.active", "=", true),
       )
-      .leftJoin(
-        "workspace_versions as workspace_version",
-        "workspace_version.id",
-        "workspace.current_workspace_version_id",
-      )
-      .leftJoin(
-        "artifacts as workspace_artifact",
-        "workspace_artifact.id",
-        "workspace_version.workspace_artifact_id",
-      )
       .select([
         "workspace.project_id as projectId",
         "workspace.id as workspaceId",
@@ -279,7 +266,6 @@ export class WorkspaceTerminalGateway {
         "environment.spec_sha256 as environmentSpecSha256",
         "environment.recipe as environmentRecipe",
         "environment.recipe_sha256 as environmentRecipeSha256",
-        "workspace_artifact.object_key as workspaceObjectKey",
       ])
       .where("session_row.tenant_id", "=", identity.tenantId)
       .where("session_row.id", "=", identity.sessionId)
@@ -288,10 +274,10 @@ export class WorkspaceTerminalGateway {
       .where("domain.state", "=", "active")
       .where("environment.state", "=", "validated")
       .executeTakeFirstOrThrow();
-    const workspace =
-      row.workspaceObjectKey === null
-        ? createWorkspaceSnapshot([])
-        : await this.#checkpointReader.get(row.workspaceObjectKey);
+    // The persistent Cube Volume is the Workspace authority. This seed is used
+    // only when that volume has never been initialized; an attached volume
+    // ignores it, so terminal startup never depends on legacy artifact bytes.
+    const workspace = createWorkspaceSnapshot([]);
     return {
       domainId: row.domainId,
       toolBrokerBaseUrl: row.toolBrokerBaseUrl,

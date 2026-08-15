@@ -219,7 +219,6 @@ describe("WorkspaceTerminalGateway", () => {
     }).install(server);
     new WorkspaceTerminalGateway({
       database,
-      checkpointReader: { get: async () => Buffer.alloc(0) },
       terminalToken: TERMINAL_TOKEN,
       allowInsecureInternalHttp: true,
     }).install(server);

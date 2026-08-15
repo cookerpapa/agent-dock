@@ -157,7 +157,6 @@ export async function startControlPlane(): Promise<void> {
     });
     const workspaceTerminalGateway = new WorkspaceTerminalGateway({
       database,
-      checkpointReader: objectStore,
       terminalToken: config.workspaceTerminalToken,
       allowInsecureInternalHttp: config.allowInsecureInternalHttp,
     });
