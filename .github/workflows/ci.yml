@@ -18,6 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    services:
+      postgres:
+        image: postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env:
+          POSTGRES_DB: pi_conformance
+          POSTGRES_USER: pi_conformance
+          POSTGRES_PASSWORD: pi_conformance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pi_conformance -d pi_conformance"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -36,6 +51,8 @@ jobs:
 
       - name: Run reproducible local CI checks
         run: npm run ci
+        env:
+          AGENT_DOCK_PI_SESSION_CONFORMANCE_DATABASE_URL: postgresql://pi_conformance:pi_conformance@127.0.0.1:5432/pi_conformance
 
       - name: Prepare root evidence directory
         run: mkdir -p dist/ci-evidence

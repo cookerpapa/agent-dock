@@ -64,6 +64,11 @@ appends complete messages incrementally. It does not download a lifetime
 `session.jsonl`, synthesize model context from the browser transcript or
 reimplement Pi's unused generic Harness surface.
 
+The tenant-scoped PostgreSQL adapter implements Pi's public `SessionRepo` and
+`SessionStorage` ports. CI runs Pi 0.84.1's unmodified backend conformance suite
+against it; AgentDock then adds separate transaction-scoped authority and
+tenant-isolation contracts required by the cloud Worker path.
+
 The browser projects the same native parent-linked entries as a human-readable
 conversation tree. “从此对话开始” creates an idempotent child Session by copying
 the selected PostgreSQL branch; it does not download JSONL or copy/rewind the
@@ -159,6 +164,7 @@ See [Distributed deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
 ```bash
 npm ci
 npm run ci
+npm run test --workspace @agent-dock/pi-session-postgres
 npm run cubesandbox:template-check
 npm run production:check
 ```

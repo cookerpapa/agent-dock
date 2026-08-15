@@ -24,6 +24,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
       connections reconnect.
 - [x] Validate transaction-scoped SessionStorage authority through deterministic
       Pi Agent Run, Tool, compaction and interrupted-effect recovery contracts.
+- [x] Run Pi 0.84.1's published Session backend conformance suite unchanged
+      against the tenant-scoped PostgreSQL `SessionRepo` and retain separate
+      authority/isolation contracts.
 - [x] Ensure a secondary terminal-projection outage cannot strand a failed Run;
       commit a minimal failure boundary and let later Turns start after it.
 - [x] Re-run the production PostgreSQL-native Pi runtime through real model,

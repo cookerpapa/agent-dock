@@ -3525,3 +3525,22 @@
   the pre-compaction request, so the completion event now structurally
   estimates the materialized summary and retained tail instead of reporting
   the stale provider input count.
+
+# 2026-08-15 — Pi-conformant PostgreSQL Session repository
+
+- Added a tenant-scoped PostgreSQL implementation of Pi 0.84.1's public
+  `SessionRepo` lifecycle and moved the production Worker open/create path
+  through it.
+- Ran Pi's unmodified published backend conformance suite against PostgreSQL,
+  covering Entries, lanes, records, queries, immutable reads, usage, ordered
+  mutation logs, repository lifecycle and branch/tree forks.
+- Removed accidental UUID restrictions from Pi-owned identifiers. Session,
+  Entry, parent, Record and run IDs are opaque `text`, while AgentDock's product
+  UUIDs remain valid values.
+- Corrected contract differences found by the suite: one ID namespace across
+  Entries and Records, usage-ledger statistics and operation-finish ordering.
+- Aligned the Control Plane's atomic product-conversation fork with Pi's fork
+  mutation order by renumbering copied Entries and recording Lane, name and
+  label mutations in the child Session log.
+- Retained AgentDock's stronger cloud rules as separate tests: tenant-scoped
+  repository reads and transaction-scoped execution authority on mutations.

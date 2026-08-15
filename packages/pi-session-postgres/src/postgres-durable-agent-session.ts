@@ -2,7 +2,7 @@ import type { Database } from "@agent-dock/database";
 import type { Session } from "@earendil-works/pi-agent-core";
 import type { Kysely } from "kysely";
 import { PostgresRunExecutionAuthority } from "./postgres-execution-authority.ts";
-import { PostgresPiSessionStorage } from "./index.ts";
+import { PostgresPiSessionRepository } from "./postgres-session-repository.ts";
 
 export type CloudAgentExecutionScope = Readonly<{
   tenantId: string;
@@ -46,14 +46,14 @@ export async function openPostgresDurableAgentSession(
   await authority.assertCurrent();
   authority.start();
   try {
-    const storage = await PostgresPiSessionStorage.openOrCreate({
+    const repository = new PostgresPiSessionRepository({
       database: options.database,
       tenantId: options.scope.tenantId,
-      sessionId: options.scope.sessionId,
       authority,
     });
+    const session = await repository.openOrCreate({ id: options.scope.sessionId });
     return {
-      session: storage.asSession(),
+      session,
       authority,
     };
   } catch (error: unknown) {

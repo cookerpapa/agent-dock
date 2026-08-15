@@ -801,6 +801,20 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
     expect(copiedEntries.map((entry) => entry.id)).toEqual([userEntryId, assistantEntryId]);
     expect(
       await database
+        .selectFrom("pi_session_log")
+        .select(["seq", "kind"])
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", forked.session.sessionId)
+        .orderBy("seq")
+        .execute(),
+    ).toEqual([
+      { seq: "1", kind: "entry" },
+      { seq: "2", kind: "entry" },
+      { seq: "3", kind: "lane" },
+      { seq: "4", kind: "fact" },
+    ]);
+    expect(
+      await database
         .selectFrom("pi_session_records")
         .select("id")
         .where("tenant_id", "=", alpha.tenantId)

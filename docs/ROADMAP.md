@@ -5,7 +5,8 @@
 - multi-tenant Web Coding Agent using Pi SDK;
 - PostgreSQL Run/Attempt/Event state, leases/fences and same-Session ordering;
 - one shared, horizontally scalable PostgreSQL-backed Pi Worker queue;
-- official Pi `SessionStorage` PostgreSQL adapter with compaction-bounded reads;
+- official Pi `SessionRepo`/`SessionStorage` PostgreSQL adapter with
+  compaction-bounded reads and upstream backend conformance;
 - resumable Kafka/Valkey/SSE event path with canonical terminal Turns;
 - CubeSandbox KVM-only Tool execution;
 - persistent Cube Volumes as Workspace byte authority;

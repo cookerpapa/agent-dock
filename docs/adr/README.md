@@ -50,6 +50,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0104](0104-human-session-tree-and-conversation-forks.md) exposes Pi's
   Session tree to human users and defines transactional conversation-only
   forks without making tree control model-visible.
+- [ADR-0105](0105-pi-session-backend-conformance.md) makes the tenant-scoped
+  PostgreSQL Session repository conform to Pi's published backend contract
+  while retaining AgentDock's transaction-scoped execution authority.
 
 ## Optional modules
 

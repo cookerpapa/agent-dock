@@ -3,7 +3,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PostgresPiSessionStorage } from "../src/index.ts";
+import { PostgresPiSessionRepository, PostgresPiSessionStorage } from "../src/index.ts";
 
 const TENANT_ID = "d1000000-0000-4000-8000-000000000001";
 const SESSION_ID = "d1000000-0000-4000-8000-000000000002";
@@ -243,5 +243,88 @@ describe.sequential("PostgresPiSessionStorage", () => {
         start: "d1000000-0000-4000-8000-000000000039",
       }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("uses the official repository lifecycle while keeping tenants isolated", async () => {
+    const otherTenantId = globalThis.crypto.randomUUID();
+    await database
+      .insertInto("tenants")
+      .values({ id: otherTenantId, slug: `pi-session-other-${otherTenantId}` })
+      .executeTakeFirstOrThrow();
+    try {
+      const repository = new PostgresPiSessionRepository({
+        database,
+        tenantId: TENANT_ID,
+      });
+      const session = await repository.openOrCreate({ id: "opaque-session-id" });
+      const entryId = await session.appendCustomEntry("contract", { value: 1 });
+      const reopened = await repository.openOrCreate({ id: "opaque-session-id" });
+      expect(await reopened.getEntry(entryId)).toMatchObject({
+        type: "custom",
+        customType: "contract",
+        data: { value: 1 },
+      });
+
+      const otherRepository = new PostgresPiSessionRepository({
+        database,
+        tenantId: otherTenantId,
+      });
+      expect(await otherRepository.list()).toEqual([]);
+      await expect(
+        otherRepository.open({
+          ...(await session.getMetadata()),
+          tenantId: otherTenantId,
+        }),
+      ).rejects.toMatchObject({ code: "not_found" });
+    } finally {
+      await database.deleteFrom("pi_sessions").where("tenant_id", "=", otherTenantId).execute();
+      await database.deleteFrom("tenants").where("id", "=", otherTenantId).execute();
+    }
+  });
+
+  it("checks repository mutation authority in each mutation transaction", async () => {
+    const sourceRepository = new PostgresPiSessionRepository({
+      database,
+      tenantId: TENANT_ID,
+    });
+    const source = await sourceRepository.create({ id: "authority-source" });
+    await source.appendMessage({ role: "user", content: "source", timestamp: 1 });
+    const sourceMetadata = await source.getMetadata();
+    let receivedTransaction = false;
+    const repository = new PostgresPiSessionRepository({
+      database,
+      tenantId: TENANT_ID,
+      authority: {
+        async assertCurrent(transaction) {
+          receivedTransaction = transaction !== undefined;
+          throw new Error("stale repository authority");
+        },
+      },
+    });
+    await expect(repository.create({ id: "rejected-session" })).rejects.toThrow(
+      "stale repository authority",
+    );
+    expect(receivedTransaction).toBe(true);
+    await expect(
+      repository.fork(sourceMetadata, { id: "rejected-fork", scope: "tree" }),
+    ).rejects.toThrow("stale repository authority");
+    await expect(repository.delete(sourceMetadata)).rejects.toThrow("stale repository authority");
+    expect(
+      await database
+        .selectFrom("pi_sessions")
+        .select("id")
+        .where("tenant_id", "=", TENANT_ID)
+        .where("id", "=", "rejected-session")
+        .executeTakeFirst(),
+    ).toBeUndefined();
+    expect(
+      await database
+        .selectFrom("pi_sessions")
+        .select("id")
+        .where("tenant_id", "=", TENANT_ID)
+        .where("id", "=", "rejected-fork")
+        .executeTakeFirst(),
+    ).toBeUndefined();
+    expect(await sourceRepository.open(sourceMetadata)).toBeDefined();
   });
 });

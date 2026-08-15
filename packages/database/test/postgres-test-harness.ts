@@ -18,11 +18,11 @@ function createPostgresCompilationDialect(): Dialect {
   };
 }
 
-export async function compileMigration(
-  migration: (db: Kysely<unknown>) => Promise<void>,
+export async function compileMigration<TDatabase = unknown>(
+  migration: (db: Kysely<TDatabase>) => Promise<void>,
 ): Promise<readonly CompiledQuery[]> {
   const queries: CompiledQuery[] = [];
-  const db = new Kysely<unknown>({
+  const db = new Kysely<TDatabase>({
     dialect: createPostgresCompilationDialect(),
     log(event) {
       if (event.level === "query") {

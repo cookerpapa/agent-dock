@@ -57,6 +57,7 @@ import * as unlimitedDefaultDailyTokens from "./055_unlimited_default_daily_toke
 import * as codingRunModelRequestLimit from "./056_coding_run_model_request_limit.ts";
 import * as conversationTreeForks from "./057_conversation_tree_forks.ts";
 import * as workspaceDeletion from "./058_workspace_deletion.ts";
+import * as piSessionOpaqueIdentifiers from "./059_pi_session_opaque_identifiers.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -119,6 +120,7 @@ export const migrationProvider: MigrationProvider = {
       "056_coding_run_model_request_limit": codingRunModelRequestLimit,
       "057_conversation_tree_forks": conversationTreeForks,
       "058_workspace_deletion": workspaceDeletion,
+      "059_pi_session_opaque_identifiers": piSessionOpaqueIdentifiers,
     };
   },
 };

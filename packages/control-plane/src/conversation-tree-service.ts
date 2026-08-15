@@ -500,10 +500,22 @@ export class ConversationTreeService {
         const childSessionId = this.#idGenerator();
         const title = request.title ?? `${source.title} · 分支`;
         const createdAt = new Date();
-        const maximumSequence = copiedBranch.reduce(
-          (maximum, entry) => Math.max(maximum, safeInteger(entry.seq, "Pi entry sequence")),
-          0,
-        );
+        const copiedEntries = copiedBranch.map((entry, index) => {
+          const sequence = index + 1;
+          const timestamp = safeInteger(entry.timestampMs, "Pi entry timestamp");
+          return {
+            ...entry,
+            sequence,
+            completePayload: {
+              ...structuredClone(entry.payload),
+              id: entry.id,
+              type: entry.type,
+              parentId: entry.parentId,
+              seq: sequence,
+              timestamp,
+            },
+          };
+        });
 
         const child = await transaction
           .insertInto("sessions")
@@ -536,10 +548,40 @@ export class ConversationTreeService {
             id: childSessionId,
             created_at_ms: createdAt.valueOf(),
             parent_session_id: sourceSessionId,
-            next_seq: maximumSequence + 1,
+            next_seq: 1,
             name: title,
           })
           .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("pi_session_entries")
+          .values(
+            copiedEntries.map((entry) => ({
+              tenant_id: tenantId,
+              session_id: childSessionId,
+              id: entry.id,
+              seq: entry.sequence,
+              parent_id: entry.parentId,
+              type: entry.type,
+              custom_type: entry.customType,
+              timestamp_ms: entry.timestampMs,
+              payload: entry.completePayload,
+            })),
+          )
+          .execute();
+        await transaction
+          .insertInto("pi_session_log")
+          .values(
+            copiedEntries.map((entry) => ({
+              tenant_id: tenantId,
+              session_id: childSessionId,
+              seq: entry.sequence,
+              kind: "entry",
+              payload: { entry: entry.completePayload },
+            })),
+          )
+          .execute();
+        let nextSequence = copiedEntries.length + 1;
+        const laneSequence = nextSequence++;
         await transaction
           .insertInto("pi_session_lanes")
           .values({
@@ -550,55 +592,66 @@ export class ConversationTreeService {
           })
           .executeTakeFirstOrThrow();
         await transaction
-          .insertInto("pi_session_entries")
-          .values(
-            copiedBranch.map((entry) => ({
-              tenant_id: tenantId,
-              session_id: childSessionId,
-              id: entry.id,
-              seq: entry.seq,
-              parent_id: entry.parentId,
-              type: entry.type,
-              custom_type: entry.customType,
-              timestamp_ms: entry.timestampMs,
-              payload: entry.payload,
-            })),
-          )
-          .execute();
+          .insertInto("pi_session_log")
+          .values({
+            tenant_id: tenantId,
+            session_id: childSessionId,
+            seq: laneSequence,
+            kind: "lane",
+            payload: { lane: "main", leafId: request.entryId },
+          })
+          .executeTakeFirstOrThrow();
+        const nameSequence = nextSequence++;
         await transaction
           .insertInto("pi_session_log")
-          .values(
-            copiedBranch.map((entry) => ({
-              tenant_id: tenantId,
-              session_id: childSessionId,
-              seq: entry.seq,
-              kind: "entry",
-              payload: { entry: entry.payload },
-            })),
-          )
-          .execute();
-        const copiedEntryIds = copiedBranch.map((entry) => entry.id);
+          .values({
+            tenant_id: tenantId,
+            session_id: childSessionId,
+            seq: nameSequence,
+            kind: "fact",
+            payload: { fact: "name", name: title },
+          })
+          .executeTakeFirstOrThrow();
+        const copiedEntryIds = copiedEntries.map((entry) => entry.id);
         const labels = await transaction
           .selectFrom("pi_session_labels")
-          .select(["target_id", "label", "updated_seq"])
+          .select(["target_id", "label"])
           .where("tenant_id", "=", tenantId)
           .where("session_id", "=", sourceSessionId)
           .where("target_id", "in", copiedEntryIds)
           .execute();
-        if (labels.length > 0) {
+        const labelsByTarget = new Map(labels.map((label) => [label.target_id, label.label]));
+        for (const entry of copiedEntries) {
+          const label = labelsByTarget.get(entry.id);
+          if (label === undefined) continue;
+          const labelSequence = nextSequence++;
           await transaction
             .insertInto("pi_session_labels")
-            .values(
-              labels.map((label) => ({
-                tenant_id: tenantId,
-                session_id: childSessionId,
-                target_id: label.target_id,
-                label: label.label,
-                updated_seq: label.updated_seq,
-              })),
-            )
-            .execute();
+            .values({
+              tenant_id: tenantId,
+              session_id: childSessionId,
+              target_id: entry.id,
+              label,
+              updated_seq: labelSequence,
+            })
+            .executeTakeFirstOrThrow();
+          await transaction
+            .insertInto("pi_session_log")
+            .values({
+              tenant_id: tenantId,
+              session_id: childSessionId,
+              seq: labelSequence,
+              kind: "fact",
+              payload: { fact: "label", targetId: entry.id, label },
+            })
+            .executeTakeFirstOrThrow();
         }
+        await transaction
+          .updateTable("pi_sessions")
+          .set({ next_seq: nextSequence })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", childSessionId)
+          .executeTakeFirstOrThrow();
         await transaction
           .insertInto("conversation_fork_operations")
           .values({

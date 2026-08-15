@@ -48,6 +48,14 @@ and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
 Every mutation checks an opaque `ExecutionAuthority` inside the same database
 transaction as the write.
 
+The same package implements Pi's tenant-scoped `SessionRepo`; Workers open or
+create Sessions through that repository rather than through a second
+AgentDock-only lifecycle. Pi's pinned, unmodified backend conformance suite
+defines the baseline CRUD, fork, query, ledger and ordering semantics. Opaque
+Pi identifiers are stored as `text`; AgentDock product UUIDs are one valid
+subset. Tenant isolation and execution-authority fencing are additional cloud
+contracts layered around the official port.
+
 The production coding adapter is a deliberately thin `CloudAgentRuntime`. It
 loads only the newest native compaction plus its active suffix, constructs one
 Pi `Agent` for the active Run, and appends complete user, assistant and Tool
