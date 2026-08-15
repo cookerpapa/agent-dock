@@ -39,6 +39,8 @@ import {
   type SandboxPolicy,
   type SandboxProvider,
   type SandboxReadFileInput,
+  type SandboxTerminalSession,
+  type SandboxTerminalSize,
   type SandboxWriteFileInput,
 } from "./sandbox-provider.ts";
 
@@ -971,6 +973,35 @@ export class CubeSandboxProvider implements SandboxProvider {
         false,
       );
     }
+  }
+
+  async openTerminal(
+    handle: SandboxHandle,
+    size: SandboxTerminalSize,
+  ): Promise<SandboxTerminalSession> {
+    const activation = await this.#owned(handle);
+    if (activation.state !== "running") {
+      throw new ToolBrokerError(
+        "workspace_terminal_runtime_unavailable",
+        "Workspace terminal runtime was not active",
+        true,
+      );
+    }
+    const terminal = await this.#client.openTerminal(activation.instance, {
+      rows: size.rows,
+      cols: size.cols,
+      authority: this.#authority(activation),
+    });
+    return Object.freeze({
+      pid: terminal.pid,
+      output: terminal.output,
+      sendInput: (data: Uint8Array) => terminal.sendInput(data),
+      resize: (next: SandboxTerminalSize) => terminal.resize(next),
+      kill: async () => {
+        await terminal.kill();
+      },
+      disconnect: () => terminal.disconnect(),
+    });
   }
 
   async snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse> {

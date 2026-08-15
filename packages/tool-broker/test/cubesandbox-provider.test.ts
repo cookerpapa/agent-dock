@@ -250,6 +250,28 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     throw new Error(`unexpected path ${input.path}`);
   }
 
+  async openTerminal(): Promise<{
+    pid: number;
+    output: AsyncIterable<Uint8Array>;
+    sendInput(data: Uint8Array): Promise<void>;
+    resize(size: Readonly<{ rows: number; cols: number }>): Promise<void>;
+    kill(): Promise<void>;
+    disconnect(): void;
+  }> {
+    return {
+      pid: 41,
+      output: {
+        async *[Symbol.asyncIterator]() {
+          yield Buffer.from("terminal ready\n");
+        },
+      },
+      async sendInput() {},
+      async resize() {},
+      async kill() {},
+      disconnect() {},
+    };
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }

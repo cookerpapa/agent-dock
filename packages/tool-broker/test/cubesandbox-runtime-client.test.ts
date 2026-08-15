@@ -36,6 +36,20 @@ beforeAll(async () => {
         return;
       }
       if (host.startsWith("49984-cube-runtime-1.")) {
+        if (request.url === "/v1/terminal/open") {
+          response.writeHead(200, { "content-type": "application/x-ndjson" });
+          response.write(`${JSON.stringify({ type: "ready", pid: 73 })}\n`);
+          response.write(
+            `${JSON.stringify({ type: "output", data: Buffer.from("cube shell\r\n").toString("base64") })}\n`,
+          );
+          response.end(`${JSON.stringify({ type: "exit", exitCode: 0, signal: null })}\n`);
+          return;
+        }
+        if (request.url?.startsWith("/v1/terminal/") === true) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end("{}");
+          return;
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end('{"kernelRelease":"cube-guest"}');
         return;
@@ -193,6 +207,40 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         "x-agent-dock-fencing-token": "7",
         "x-agent-dock-binding-sha256": "a".repeat(64),
       },
+    });
+    const terminal = await client.openTerminal(instance, {
+      rows: 24,
+      cols: 100,
+      authority: {
+        handoffSecret: `adch_${"h".repeat(43)}`,
+        fencingToken: 7,
+        bindingSha256: "a".repeat(64),
+      },
+    });
+    expect(terminal.pid).toBe(73);
+    const output: Buffer[] = [];
+    for await (const chunk of terminal.output) output.push(Buffer.from(chunk));
+    expect(Buffer.concat(output).toString("utf8")).toBe("cube shell\r\n");
+    await terminal.sendInput(Buffer.from("pwd\r"));
+    await terminal.resize({ rows: 40, cols: 120 });
+    await terminal.kill();
+    const start = observed.find((request) => request.path === "/v1/terminal/open");
+    expect(start).toMatchObject({
+      headers: {
+        host: "49984-cube-runtime-1.cube.test",
+        "e2b-traffic-access-token": "private-traffic-token",
+        "cube-traffic-access-token": "private-traffic-token",
+        "x-agent-dock-handoff-secret": `adch_${"h".repeat(43)}`,
+        "x-agent-dock-fencing-token": "7",
+        "x-agent-dock-binding-sha256": "a".repeat(64),
+      },
+      body: { rows: 24, cols: 100 },
+    });
+    expect(observed.find((request) => request.path === "/v1/terminal/input")).toMatchObject({
+      body: { data: Buffer.from("pwd\r").toString("base64") },
+    });
+    expect(observed.find((request) => request.path === "/v1/terminal/resize")).toMatchObject({
+      body: { rows: 40, cols: 120 },
     });
     await expect(client.read(instance.sandboxId)).resolves.toMatchObject({
       sandboxId: "cube-runtime-1",

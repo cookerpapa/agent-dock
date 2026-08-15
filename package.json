@@ -27,7 +27,7 @@
     "ci": "npm run dependencies:harden && npm run format:check && npm run production:install:check && npm run runtime-policy:check && npm run helm:check && npm run image:closure-check && npm run build && npm run check && npm run backup:crypto-check && npm run security:audit",
     "build": "npm run build --workspaces --if-present",
     "cubesandbox:template-check": "node scripts/run-cubesandbox-template-check.mjs",
-    "cubesandbox:live-check": "AGENT_DOCK_CUBESANDBOX_TEST=1 npm run test --workspace @agent-dock/tool-broker -- cubesandbox-live-provider.integration.test.ts",
+    "cubesandbox:live-check": "node scripts/run-cubesandbox-provider-live-check.mjs",
     "cubesandbox:init": "node scripts/init-cubesandbox-runtime.mjs",
     "cubesandbox:images": "node scripts/prefetch-cubesandbox-images.mjs",
     "cubesandbox:cluster-install": "node scripts/install-cubesandbox-k3s.mjs",

@@ -43,6 +43,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
   subPath: sandbox-materializer-token
   readOnly: true
 - name: platform-secrets
+  mountPath: /run/agent-dock-secrets/workspace-terminal-token
+  subPath: workspace-terminal-token
+  readOnly: true
+- name: platform-secrets
   mountPath: /run/agent-dock-secrets/metrics-token
   subPath: metrics-token
   readOnly: true

@@ -17,6 +17,7 @@ import type {
   TrustedProviderSnapshotReader,
 } from "./workspace-version-service.ts";
 import type { WebAuthenticationService } from "./web-authentication.ts";
+import type { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
   ControlPlaneStoreOptions,
@@ -40,6 +41,7 @@ export type ControlPlaneApplicationOptions = Omit<
   platformOperatorTenantId?: string;
   platformModelSourceTenantId?: string;
   cubeEgressConfigToken?: string;
+  workspaceTerminalGateway?: WorkspaceTerminalGateway;
 };
 
 export async function createControlPlaneApplication(
@@ -49,6 +51,7 @@ export async function createControlPlaneApplication(
   options.productionHttpGateway?.install(adapter.getInstance());
   options.supervisorProvisioningGateway?.install(adapter.getInstance());
   options.supervisorWebSocketGateway?.install(adapter.getInstance());
+  options.workspaceTerminalGateway?.install(adapter.getInstance());
   let staticRequestIdentity;
   if (options.productionHttpGateway === undefined) {
     if (options.tenantId === undefined || options.defaultModelProfileId === undefined) {

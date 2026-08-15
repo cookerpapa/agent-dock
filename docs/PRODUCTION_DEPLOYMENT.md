@@ -18,6 +18,10 @@ the application. It is resumable and supports a read-only preflight:
 Open `http://127.0.0.1:8080`, register the designated administrator and set the
 model provider/key in the administrator page.
 
+The installer also creates a private Workspace-terminal service credential.
+Users open the terminal from the Workspace panel; there is no SSH listener or
+manual Cube credential to configure.
+
 ## Services
 
 The default topology includes PostgreSQL, Kafka, Valkey, Event Gateway,

@@ -1537,7 +1537,7 @@ body.product-panel-resizing {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   border-left: 1px solid #383838;
   background: #191919;
 }
@@ -1843,6 +1843,102 @@ body.product-panel-resizing {
 .workspace-directory-meta {
   color: #747474;
   font-size: 10px;
+}
+
+.workspace-view-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.workspace-view-tabs button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #858585;
+  font-size: 11px;
+}
+
+.workspace-view-tabs button:hover,
+.workspace-view-tabs button.active {
+  background: #292929;
+  color: #e2e2e2;
+}
+
+.workspace-terminal-panel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: #171917;
+}
+
+.workspace-terminal-loading {
+  display: grid;
+  min-height: 100%;
+  place-content: center;
+  color: #777;
+  font-size: 11px;
+}
+
+.workspace-terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2d302d;
+}
+
+.workspace-terminal-toolbar > div {
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-terminal-toolbar strong {
+  color: #dadcd8;
+  font-size: 11px;
+}
+
+.workspace-terminal-toolbar small,
+.workspace-terminal-notice {
+  color: #777b75;
+  font-size: 9px;
+}
+
+.workspace-terminal-toolbar button {
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1px solid #454945;
+  border-radius: 6px;
+  background: #252825;
+  color: #d8dad6;
+  font-size: 10px;
+}
+
+.workspace-terminal-toolbar button:disabled {
+  opacity: 0.45;
+}
+
+.workspace-terminal-notice {
+  margin: 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid #292c29;
+  line-height: 1.45;
+}
+
+.workspace-terminal-host {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 4px 6px 8px;
+  overflow: hidden;
+}
+
+.workspace-terminal-host .xterm {
+  height: 100%;
 }
 
 .workspace-directory-header > div:last-child {

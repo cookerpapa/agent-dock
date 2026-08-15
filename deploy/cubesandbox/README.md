@@ -168,26 +168,21 @@ create a second command/file channel outside AgentDock's Tool Broker.
 
 ## 4. Run the real KVM gate
 
-The live gate requires CubeAPI plus at least two real platform endpoints that
-are reachable from the trusted host but forbidden from a Tool guest:
+After production initialization and startup, the gate reads the private
+cluster/template evidence and service credentials from the configured runtime
+directory. It also discovers the running Workspace Volume Gateway without
+printing any secret:
 
 ```bash
-AGENT_DOCK_CUBESANDBOX_TEST=1 \
-AGENT_DOCK_IMAGE_REVISION="$(git rev-parse HEAD)" \
-AGENT_DOCK_CUBESANDBOX_API_URL="http://<cube-api>:3000" \
-AGENT_DOCK_CUBESANDBOX_API_KEY_FILE="deploy/production/runtime/secrets/cubesandbox-api-key" \
-AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID="<ready-template-id>" \
-AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP="<cube-proxy>" \
-AGENT_DOCK_CUBESANDBOX_PROXY_PORT=80 \
-AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS="<control-plane>:8080,<postgres>:5432" \
 npm run cubesandbox:live-check
 ```
 
-The gate creates real microVMs for two tenants and proves:
+The gate creates real microVMs for isolated tenants and proves:
 
 - a guest kernel distinct from the host and `cubesandbox-kvm` evidence;
 - uid/gid 1000, no new privileges and zero effective capabilities;
 - no Docker socket, Kubernetes token or platform/model credential;
+- a fenced interactive PTY works while the unmediated envd channel remains absent;
 - same-path canaries remain different across tenant Workspaces;
 - a stable public HTTPS endpoint is reachable;
 - CubeAPI, platform endpoints, private/link-local networks and metadata are denied;

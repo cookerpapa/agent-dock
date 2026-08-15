@@ -130,6 +130,23 @@ async function ensureSandboxMaterializerToken(runtimeDirectory) {
   return true;
 }
 
+async function ensureWorkspaceTerminalToken(runtimeDirectory) {
+  const path = resolve(runtimeDirectory, "secrets/workspace-terminal-token");
+  try {
+    const existing = (await readPrivateFile(path)).trim();
+    if (!/^[A-Za-z0-9_-]{64}$/.test(existing)) {
+      throw new Error("Production Workspace terminal token is invalid");
+    }
+    return false;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writePrivateFile(path, `${randomSecret()}\n`);
+  const application = applicationIdentity();
+  if (application.changeOwnership) await chown(path, application.uid, application.gid);
+  return true;
+}
+
 async function ensureWorkspaceVolumeGatewayState(runtimeDirectory) {
   const application = applicationIdentity();
   for (const relativePath of [
@@ -384,6 +401,7 @@ if (await validateExisting(runtimeDirectory)) {
   const modelCredentialMasterKeyCreated = await ensureModelCredentialMasterKey(runtimeDirectory);
   const toolBrokerTokenCreated = await ensureToolBrokerToken(runtimeDirectory);
   const sandboxMaterializerTokenCreated = await ensureSandboxMaterializerToken(runtimeDirectory);
+  const workspaceTerminalTokenCreated = await ensureWorkspaceTerminalToken(runtimeDirectory);
   await ensureWorkspaceVolumeGatewayState(runtimeDirectory);
   const workspaceVolumeGatewaySecretsCreated =
     await ensureWorkspaceVolumeGatewaySecrets(runtimeDirectory);
@@ -398,6 +416,7 @@ if (await validateExisting(runtimeDirectory)) {
       modelCredentialMasterKeyCreated,
       toolBrokerTokenCreated,
       sandboxMaterializerTokenCreated,
+      workspaceTerminalTokenCreated,
       workspaceVolumeGatewaySecretsCreated,
       cubeEgressConfigTokenCreated,
       githubGatewaySecretsCreated,
@@ -515,6 +534,10 @@ await writePrivateFile(
 await writePrivateFile(resolve(secretsDirectory, "tool-broker-token"), `${randomSecret()}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "sandbox-materializer-token"),
+  `${randomSecret()}\n`,
+);
+await writePrivateFile(
+  resolve(secretsDirectory, "workspace-terminal-token"),
   `${randomSecret()}\n`,
 );
 await writePrivateFile(

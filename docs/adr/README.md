@@ -53,6 +53,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0105](0105-pi-session-backend-conformance.md) makes the tenant-scoped
   PostgreSQL Session repository conform to Pi's published backend contract
   while retaining AgentDock's transaction-scoped execution authority.
+- [ADR-0106](0106-workspace-web-terminal.md) adds a brokered Workspace Web
+  Terminal with a separate human lease, exclusive writer admission and Cube
+  PTY execution without exposing runtime credentials to the browser.
 
 ## Optional modules
 

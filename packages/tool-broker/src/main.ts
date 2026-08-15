@@ -60,6 +60,7 @@ const server = new ToolBrokerServer({
   host: config.host,
   port: config.port,
   serviceToken: config.serviceToken,
+  terminalToken: config.terminalToken,
   ...(config.materializerToken === undefined
     ? {}
     : { materializerToken: config.materializerToken }),

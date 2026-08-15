@@ -39,6 +39,8 @@ rebuildable. There is no competing workflow or checkpoint head.
 | shell escapes container boundary | Cube KVM hardware boundary and hardened template |
 | Cube reads platform secrets | no secret mounts/service account/platform route |
 | cross-tenant Workspace access | stable tenant/Workspace Volume identity and broker checks |
+| browser forges terminal identity | Control Plane derives tenant/Workspace/Session; browser frames carry only input/resize/control |
+| terminal races an Agent writer | PostgreSQL-backed human-terminal lease and shared Workspace writer exclusion |
 | stale Worker mutation | transaction-scoped authority and monotonically increasing fence |
 | duplicate queue delivery | idempotent command plus transactional RunAttempt claim |
 | ambiguous shell result | `UNKNOWN`; no automatic replay |
@@ -54,6 +56,13 @@ Public network mode can still upload the current tenant's code to public
 destinations. KVM isolation protects the platform and other tenants; it is not
 a data-loss-prevention system. Enterprise deployments should add explicit
 destination allowlists and audit.
+
+Workspace Web Terminal access does not expose SSH or Cube envd to the public;
+the AgentDock image does not run envd at all. It uses the logged-in user's
+tenant role, the fenced Cube Tool Service, a separate Control
+Plane-to-Tool-Broker credential and bounded WebSocket frames. Terminal output
+is intentionally not a durable conversation record; ordinary Workspace file
+persistence and platform audit metadata remain authoritative.
 
 ## Not guaranteed
 

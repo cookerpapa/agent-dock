@@ -79,6 +79,26 @@ mounted while the activation is warm. At a commit boundary:
 Background processes can remain alive during a warm idle window. They are not
 promised across activation destruction or failure.
 
+## Interactive terminal
+
+AgentDock allocates a real guest PTY through its fenced Cube Tool Service for
+the Workspace Web Terminal. The browser never connects to Cube or a public port
+directly: authenticated browser WebSocket → Control Plane proxy → Tool Broker →
+authenticated Cube Tool Service → guest PTY. The PTY starts an interactive
+login shell as the fixed unprivileged user in `/workspace` and supports bounded
+input, output and resize frames.
+
+Cube's general-purpose `envd` remains absent from the AgentDock image.
+Re-enabling it would create a second command channel outside the Tool handoff
+secret and fencing checks. Terminal open, input, resize and close therefore use
+the same private port 49984 and current activation authority as every other
+mutable Tool request.
+
+The Tool Broker gives this human session its own short lease and excludes Agent
+Tool writers for the same Workspace. Closing or losing the terminal destroys
+the Cube activation but not the persistent Volume. This is a development shell,
+not a promise of persistent VM process state and not an SSH service.
+
 ## Network
 
 Cube is created with Internet support, while Web traffic is explicitly routed

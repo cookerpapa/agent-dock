@@ -35,6 +35,7 @@ export {
   type CubeSandboxDataRequest,
   type CubeSandboxInstance,
   type CubeSandboxRuntimeClient,
+  type CubeSandboxTerminal,
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "./cubesandbox-runtime-client.ts";
 export {
@@ -50,12 +51,21 @@ export {
   type SandboxProvider,
   type SandboxReadFileInput,
   type SandboxResourceLimits,
+  type SandboxTerminalSession,
+  type SandboxTerminalSize,
   type SandboxWriteFileInput,
 } from "./sandbox-provider.ts";
-export { ToolBrokerOwnerRedirectError, ToolBroker, type ToolBrokerOptions } from "./tool-broker.ts";
+export {
+  ToolBrokerOwnerRedirectError,
+  ToolBroker,
+  type ToolBrokerOptions,
+  type WorkspaceTerminalConnection,
+  type WorkspaceTerminalOpenInput,
+} from "./tool-broker.ts";
 export { loadToolBrokerConfig, type ToolBrokerConfig } from "./tool-broker-config.ts";
 export {
   ToolBrokerServer,
+  TOOL_BROKER_TERMINAL_PATH,
   type ToolBrokerBackend,
   type ToolBrokerServerOptions,
 } from "./tool-broker-server.ts";

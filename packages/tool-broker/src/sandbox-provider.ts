@@ -154,6 +154,20 @@ export type SandboxWriteFileInput = Readonly<{
   content: string;
 }>;
 
+export type SandboxTerminalSize = Readonly<{
+  rows: number;
+  cols: number;
+}>;
+
+export type SandboxTerminalSession = Readonly<{
+  pid: number;
+  output: AsyncIterable<Uint8Array>;
+  sendInput(data: Uint8Array): Promise<void>;
+  resize(size: SandboxTerminalSize): Promise<void>;
+  kill(): Promise<void>;
+  disconnect(): void;
+}>;
+
 /**
  * Provider-neutral execution contract owned by the trusted Tool Broker.
  * Implementations must not expose their native SDK/client objects through a
@@ -195,6 +209,8 @@ export interface SandboxProvider {
     input: SandboxWriteFileInput,
     signal?: AbortSignal,
   ): Promise<void>;
+  /** Open a human-operated PTY without granting Agent Tool authority. */
+  openTerminal?(handle: SandboxHandle, size: SandboxTerminalSize): Promise<SandboxTerminalSession>;
   snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse>;
   stop(handle: SandboxHandle): Promise<void>;
   destroy(handle: SandboxHandle): Promise<void>;

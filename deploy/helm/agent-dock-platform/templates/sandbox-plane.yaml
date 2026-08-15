@@ -93,6 +93,7 @@ spec:
             - { name: AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, value: {{ .Values.sandboxPlane.maximumWarmPerReplica | quote }} }
             - { name: AGENT_DOCK_TOOL_BROKER_TOKEN_FILE, value: /run/agent-dock-secrets/tool-broker-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
+            - { name: AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-terminal-token }
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL, value: http://workspace-volume-gateway:4500 }
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-volume-gateway-token }
             - { name: AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS, value: {{ .Values.sandboxPlane.volumeGatewayRequestTimeoutMs | quote }} }
@@ -120,6 +121,7 @@ spec:
             - { name: secrets, mountPath: /run/agent-dock-secrets/database-url, subPath: database-url, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/tool-broker-token, subPath: tool-broker-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/sandbox-materializer-token, subPath: sandbox-materializer-token, readOnly: true }
+            - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-terminal-token, subPath: workspace-terminal-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/workspace-volume-gateway-token, subPath: workspace-volume-gateway-token, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/cubesandbox-api-key, subPath: cubesandbox-api-key, readOnly: true }
             - { name: secrets, mountPath: /run/agent-dock-secrets/metrics-token, subPath: metrics-token, readOnly: true }

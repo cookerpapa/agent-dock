@@ -1,4 +1,5 @@
 import type {
+  AgentWorkspaceSeed,
   EnvironmentRuntimeSnapshot,
   GitHubRepositorySource,
   SupervisorRuntimeAssignment,
@@ -26,6 +27,8 @@ import {
   type SandboxHandle,
   type SandboxInspection,
   type SandboxProvider,
+  type SandboxTerminalSession,
+  type SandboxTerminalSize,
 } from "./sandbox-provider.ts";
 import {
   InMemorySandboxActivationStateRepository,
@@ -79,6 +82,33 @@ type WarmActivation = {
   retention: "ephemeral" | "persistent";
   expiresAt: number | null;
   lastUsedAt: number;
+};
+
+export type WorkspaceTerminalOpenInput = Readonly<{
+  tenantId: string;
+  userId: string;
+  projectId: string;
+  workspaceId: string;
+  sessionId: string;
+  environment: EnvironmentRuntimeSnapshot;
+  workspaceSeed: AgentWorkspaceSeed;
+  size: SandboxTerminalSize;
+}>;
+
+export type WorkspaceTerminalConnection = Readonly<{
+  terminalId: string;
+  pid: number;
+  output: AsyncIterable<Uint8Array>;
+  sendInput(data: Uint8Array): Promise<void>;
+  resize(size: SandboxTerminalSize): Promise<void>;
+  close(): Promise<void>;
+}>;
+
+type ManagedWorkspaceTerminal = {
+  assignment: ToolSandboxAssignment;
+  handle: SandboxHandle;
+  session: SandboxTerminalSession;
+  closing?: Promise<void>;
 };
 
 type AdmissionWaiter = {
@@ -219,6 +249,26 @@ function sameSupervisorAssignment(
   );
 }
 
+function terminalAssignment(
+  terminalId: string,
+  input: Pick<WorkspaceTerminalOpenInput, "tenantId" | "projectId" | "workspaceId" | "sessionId">,
+): ToolSandboxAssignment {
+  return {
+    tenantId: input.tenantId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    supervisorId: "workspace-terminal",
+    bootId: terminalId,
+    sandboxId: terminalId,
+    commandId: terminalId,
+    sessionId: input.sessionId,
+    turnId: terminalId,
+    attemptId: terminalId,
+    leaseId: terminalId,
+    fencingToken: 1,
+  };
+}
+
 export class ToolBroker {
   readonly #provider: SandboxProvider;
   readonly #ownerBaseUrl: string;
@@ -232,6 +282,7 @@ export class ToolBroker {
   readonly #imageRevision: string;
   readonly #activations = new Map<string, ManagedActivation>();
   readonly #warm = new Map<string, WarmActivation>();
+  readonly #terminals = new Map<string, ManagedWorkspaceTerminal>();
   readonly #admitted = new Map<string, ToolSandboxAssignment>();
   readonly #admissionWaiters: AdmissionWaiter[] = [];
   readonly #reaper: NodeJS.Timeout;
@@ -273,6 +324,7 @@ export class ToolBroker {
           this.reapWarm(),
           this.reapRetiredWarm(),
           this.#reapOrphanedActivations(),
+          this.#reapOrphanedTerminals(),
         ]).catch(() => undefined),
       30_000,
     );
@@ -287,7 +339,7 @@ export class ToolBroker {
     const activeHandles = [...this.#activations.values()].filter(
       (activation) => activation.handle !== undefined || activation.materializing !== undefined,
     ).length;
-    return activeHandles + this.#warm.size;
+    return activeHandles + this.#warm.size + this.#terminals.size;
   }
 
   get admittedCount(): number {
@@ -316,6 +368,129 @@ export class ToolBroker {
 
   async checkHealth(): Promise<void> {
     await Promise.all([this.#provider.checkHealth(), this.#stateRepository.checkHealth()]);
+  }
+
+  async openTerminal(input: WorkspaceTerminalOpenInput): Promise<WorkspaceTerminalConnection> {
+    await Promise.all([
+      this.reapWarm(),
+      this.reapRetiredWarm(),
+      this.#reapOrphanedActivations(),
+      this.#reapOrphanedTerminals(),
+    ]);
+    if (this.#provider.openTerminal === undefined) {
+      throw new ToolBrokerError(
+        "workspace_terminal_unsupported",
+        "The configured Sandbox Provider does not support interactive terminals",
+        false,
+      );
+    }
+    if (
+      input.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
+      input.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
+      input.environment.specSha256 !== DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 ||
+      input.environment.imageRevision !== this.#imageRevision ||
+      createHash("sha256")
+        .update(canonicalEnvironmentRecipeJson(input.environment.recipe))
+        .digest("hex") !== input.environment.recipeSha256
+    ) {
+      throw new ToolBrokerError(
+        "environment_policy_mismatch",
+        "Workspace environment is not served by this Tool Broker",
+        false,
+      );
+    }
+    const terminalId = validActivationId(this.#idGenerator());
+    const assignment = terminalAssignment(terminalId, input);
+    const reservation = await this.#stateRepository.reserveTerminal({
+      terminalId,
+      tenantId: input.tenantId,
+      userId: input.userId,
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+    });
+    if (reservation.status === "redirect") {
+      throw new ToolBrokerOwnerRedirectError(reservation.ownerBaseUrl);
+    }
+    if (reservation.status === "busy") {
+      throw new ToolBrokerError(
+        "workspace_terminal_busy",
+        "Workspace is currently owned by an Agent or another terminal",
+        true,
+      );
+    }
+    if (reservation.status === "capacity") {
+      throw new ToolBrokerError(
+        "sandbox_domain_capacity_exhausted",
+        "Sandbox Domain has reached its active Sandbox limit",
+        true,
+      );
+    }
+    if (reservation.status === "tenant_capacity") {
+      throw new ToolBrokerError(
+        "tenant_sandbox_capacity_exhausted",
+        "Tenant has reached its active Sandbox limit",
+        true,
+      );
+    }
+    let admitted = false;
+    let handle: SandboxHandle | undefined;
+    let terminal: SandboxTerminalSession | undefined;
+    try {
+      if (reservation.retiredActivation !== undefined) {
+        const retired = reservation.retiredActivation;
+        const warmEntry = [...this.#warm.entries()].find(
+          ([, warm]) => warm.handle.activationId === retired.activationId,
+        );
+        if (warmEntry === undefined) {
+          await this.#provider.destroyActivation(retired.activationId, retired.assignment);
+        } else {
+          this.#warm.delete(warmEntry[0]);
+          await this.#provider.stop(warmEntry[1].handle);
+          this.#releaseAdmission(retired.activationId);
+        }
+        await this.#stateRepository.setActivationState(retired.activationId, "released");
+      }
+      await this.#stateRepository.setTerminalState(terminalId, "materializing");
+      await this.#acquireAdmission(terminalId, assignment);
+      admitted = true;
+      handle = await this.#provider.create({
+        activationId: terminalId,
+        assignment,
+        environment: input.environment,
+        workspaceSeed: input.workspaceSeed,
+        policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
+      });
+      terminal = await this.#provider.openTerminal(handle, input.size);
+      const activeTerminal = terminal;
+      const managed: ManagedWorkspaceTerminal = { assignment, handle, session: activeTerminal };
+      await this.#stateRepository.setTerminalState(terminalId, "active", { handle });
+      this.#terminals.set(terminalId, managed);
+      return Object.freeze({
+        terminalId,
+        pid: activeTerminal.pid,
+        output: activeTerminal.output,
+        sendInput: async (data: Uint8Array) => {
+          this.#stateRepository.assertLocalOwnership();
+          await activeTerminal.sendInput(data);
+        },
+        resize: async (size: SandboxTerminalSize) => {
+          this.#stateRepository.assertLocalOwnership();
+          await activeTerminal.resize(size);
+        },
+        close: () => this.#closeTerminal(terminalId, managed),
+      });
+    } catch (error: unknown) {
+      this.#terminals.delete(terminalId);
+      terminal?.disconnect();
+      await terminal?.kill().catch(() => undefined);
+      if (handle !== undefined) await this.#provider.destroy(handle).catch(() => undefined);
+      if (admitted) this.#releaseAdmission(terminalId);
+      await this.#stateRepository
+        .setTerminalState(terminalId, "unknown", { failureCode: operationFailureCode(error) })
+        .catch(() => undefined);
+      throw error;
+    }
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
@@ -758,6 +933,11 @@ export class ToolBroker {
 
   async close(): Promise<void> {
     clearInterval(this.#reaper);
+    await Promise.all(
+      [...this.#terminals.entries()].map(([terminalId, terminal]) =>
+        this.#closeTerminal(terminalId, terminal).catch(() => undefined),
+      ),
+    );
     const ownedActivationIds = new Set([
       ...this.#activations.keys(),
       ...[...this.#warm.values()].map((warm) => warm.handle.activationId),
@@ -948,6 +1128,45 @@ export class ToolBroker {
           .catch(() => undefined);
       }
     }
+  }
+
+  async #reapOrphanedTerminals(): Promise<void> {
+    const orphaned = await this.#stateRepository.claimOrphanedTerminals(16);
+    for (const terminal of orphaned) {
+      const assignment = terminalAssignment(terminal.terminalId, terminal);
+      try {
+        await this.#provider.destroyActivation(terminal.terminalId, assignment);
+        await this.#stateRepository.setTerminalState(terminal.terminalId, "released");
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setTerminalState(terminal.terminalId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  #closeTerminal(terminalId: string, terminal: ManagedWorkspaceTerminal): Promise<void> {
+    terminal.closing ??= (async () => {
+      this.#terminals.delete(terminalId);
+      await this.#stateRepository.setTerminalState(terminalId, "cleaning").catch(() => undefined);
+      terminal.session.disconnect();
+      await terminal.session.kill().catch(() => undefined);
+      try {
+        await this.#provider.destroy(terminal.handle);
+        this.#releaseAdmission(terminalId);
+        await this.#stateRepository.setTerminalState(terminalId, "released");
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setTerminalState(terminalId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+    })();
+    return terminal.closing;
   }
 
   async #acquireAdmission(

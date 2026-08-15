@@ -42,6 +42,20 @@ export {
 } from "./agent-runtime.ts";
 
 export {
+  MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  WorkspaceTerminalClientFrameSchema,
+  WorkspaceTerminalOpenRequestSchema,
+  WorkspaceTerminalProtocolError,
+  WorkspaceTerminalServerFrameSchema,
+  parseWorkspaceTerminalClientFrame,
+  parseWorkspaceTerminalOpenRequest,
+  parseWorkspaceTerminalServerFrame,
+  type WorkspaceTerminalClientFrame,
+  type WorkspaceTerminalOpenRequest,
+  type WorkspaceTerminalServerFrame,
+} from "./workspace-terminal.ts";
+
+export {
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,

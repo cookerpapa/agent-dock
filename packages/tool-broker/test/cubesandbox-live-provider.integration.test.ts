@@ -412,6 +412,50 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
       let secondToolMs = 0;
       try {
         await provider.checkHealth();
+        const terminalAssignment = assignment(testRun, 3);
+        const terminalEnvironment = createRequest(
+          terminalAssignment,
+          config.imageRevision,
+        ).environment;
+        const terminal = await manager.openTerminal({
+          tenantId: terminalAssignment.tenantId,
+          userId: `cube-live-${testRun}-user-3`,
+          projectId: terminalAssignment.projectId,
+          workspaceId: terminalAssignment.workspaceId,
+          sessionId: terminalAssignment.sessionId,
+          environment: terminalEnvironment,
+          workspaceSeed: { kind: "sample_java" },
+          size: { rows: 24, cols: 100 },
+        });
+        activationIds.add(terminal.terminalId);
+        try {
+          const terminalOutput = (async (): Promise<string> => {
+            const chunks: Buffer[] = [];
+            for await (const chunk of terminal.output) {
+              chunks.push(Buffer.from(chunk));
+              if (chunks.reduce((sum, value) => sum + value.byteLength, 0) > 256 * 1_024) {
+                throw new Error("CubeSandbox live PTY exceeded its output bound");
+              }
+            }
+            return Buffer.concat(chunks).toString("utf8");
+          })();
+          await terminal.sendInput(
+            Buffer.from("printf '__agentdock_terminal_ok__\\n'; exit\n", "utf8"),
+          );
+          await expect(
+            Promise.race([
+              terminalOutput,
+              new Promise<string>((_resolve, reject) =>
+                setTimeout(
+                  () => reject(new Error("CubeSandbox live PTY did not exit")),
+                  15_000,
+                ).unref(),
+              ),
+            ]),
+          ).resolves.toContain("__agentdock_terminal_ok__");
+        } finally {
+          await terminal.close().catch(() => undefined);
+        }
         const firstRequest = createRequest(firstAssignment, config.imageRevision);
         first = await manager.create(firstRequest);
         const secondRequest = createRequest(secondAssignment, config.imageRevision);
@@ -718,6 +762,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             forbiddenEndpointCount: config.forbiddenEndpoints.length,
             publicInternetReachable: true,
             privateAndPlatformEgressDenied: true,
+            fencedPtyValidated: true,
             persistentProcessSurvivedIdleTtlAndRunBoundary: true,
             staleToolAuthorityRejected: true,
             cancellationDestroyedMicroVm: true,

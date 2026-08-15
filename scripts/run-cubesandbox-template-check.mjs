@@ -332,6 +332,48 @@ try {
     "An unmediated envd service was reachable",
   );
 
+  const terminalResponse = await fetch(`${baseUrl}/v1/terminal/open`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-agent-dock-handoff-secret": currentAuthority.handoffSecret,
+      "x-agent-dock-fencing-token": String(currentAuthority.fencingToken),
+      "x-agent-dock-binding-sha256": currentAuthority.bindingSha256,
+    },
+    body: JSON.stringify({ rows: 24, cols: 100 }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  assert(
+    terminalResponse.ok && terminalResponse.body !== null,
+    `Fenced Workspace terminal failed to open: HTTP ${String(terminalResponse.status)}`,
+  );
+  const terminalOutput = (async () => {
+    const frames = (await terminalResponse.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert(
+      frames[0]?.type === "ready" && Number.isSafeInteger(frames[0]?.pid),
+      "Workspace terminal did not report a PID",
+    );
+    return Buffer.concat(
+      frames
+        .filter((frame) => frame.type === "output" && typeof frame.data === "string")
+        .map((frame) => Buffer.from(frame.data, "base64")),
+    ).toString("utf8");
+  })();
+  // The control request below can fail before the stream is awaited. Attach a
+  // rejection observer now so cleanup does not mask the actionable RPC error.
+  void terminalOutput.catch(() => undefined);
+  await jsonRequest(baseUrl, "/v1/terminal/resize", { rows: 40, cols: 120 });
+  await jsonRequest(baseUrl, "/v1/terminal/input", {
+    data: Buffer.from("printf '__agentdock_terminal_ok__\\n'; exit\n", "utf8").toString("base64"),
+  });
+  assert(
+    (await terminalOutput).includes("__agentdock_terminal_ok__"),
+    "Fenced Workspace terminal output was missing",
+  );
+
   const escaped = await jsonRequest(
     baseUrl,
     "/v1/operation",
@@ -495,6 +537,7 @@ try {
       execution: { exitCode: executed.exitCode, output: output.trim() },
       coldWorkspaceAttach: true,
       unmediatedEnvdAbsent: true,
+      fencedWorkspaceTerminal: true,
       pathTraversalRejected: true,
       sessionHandoff: {
         previousFence: previousAuthority.fencingToken,

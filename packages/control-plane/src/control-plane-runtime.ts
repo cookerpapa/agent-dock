@@ -235,6 +235,9 @@ export async function createControlPlaneRuntime(
       ...(options.cubeEgressConfigToken === undefined
         ? {}
         : { cubeEgressConfigToken: options.cubeEgressConfigToken }),
+      ...(options.workspaceTerminalGateway === undefined
+        ? {}
+        : { workspaceTerminalGateway: options.workspaceTerminalGateway }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

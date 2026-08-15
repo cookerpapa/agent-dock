@@ -12,6 +12,7 @@ export type ToolBrokerConfig = {
   ownershipHeartbeatMs: number;
   serviceToken: string;
   materializerToken?: string;
+  terminalToken: string;
   imageRevision: string;
   maximumActiveSandboxes: number;
   warmTtlMs: number;
@@ -193,6 +194,9 @@ export async function loadToolBrokerConfig(
     ownershipLeaseMs,
     ownershipHeartbeatMs,
     serviceToken: await readSecret(required(environment, "AGENT_DOCK_TOOL_BROKER_TOKEN_FILE")),
+    terminalToken: await readSecret(
+      required(environment, "AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE"),
+    ),
     ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
       ? {}
       : {

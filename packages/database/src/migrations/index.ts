@@ -58,6 +58,7 @@ import * as codingRunModelRequestLimit from "./056_coding_run_model_request_limi
 import * as conversationTreeForks from "./057_conversation_tree_forks.ts";
 import * as workspaceDeletion from "./058_workspace_deletion.ts";
 import * as piSessionOpaqueIdentifiers from "./059_pi_session_opaque_identifiers.ts";
+import * as workspaceTerminalLeases from "./060_workspace_terminal_leases.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -121,6 +122,7 @@ export const migrationProvider: MigrationProvider = {
       "057_conversation_tree_forks": conversationTreeForks,
       "058_workspace_deletion": workspaceDeletion,
       "059_pi_session_opaque_identifiers": piSessionOpaqueIdentifiers,
+      "060_workspace_terminal_leases": workspaceTerminalLeases,
     };
   },
 };

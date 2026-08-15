@@ -17,6 +17,7 @@ export type ProductionControlPlaneConfig = {
   cubeEgressConfigToken: string;
   toolBrokerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
+  workspaceTerminalToken: string;
   advancedModulesEnabled: boolean;
   externalWorkerEventLog: boolean;
   workerEventIngestBaseUrl?: string;
@@ -368,6 +369,11 @@ export async function loadProductionControlPlaneConfig(
     sandboxMaterializerToken: await secret(
       environment,
       "AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN",
+      allowInlineSecrets,
+    ),
+    workspaceTerminalToken: await secret(
+      environment,
+      "AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN",
       allowInlineSecrets,
     ),
     advancedModulesEnabled: booleanValue(environment, "AGENT_DOCK_ADVANCED_MODULES_ENABLED"),

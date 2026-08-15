@@ -28,6 +28,7 @@ import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
 import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker/client";
 import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
+import { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -154,6 +155,12 @@ export async function startControlPlane(): Promise<void> {
         return true;
       },
     });
+    const workspaceTerminalGateway = new WorkspaceTerminalGateway({
+      database,
+      checkpointReader: objectStore,
+      terminalToken: config.workspaceTerminalToken,
+      allowInsecureInternalHttp: config.allowInsecureInternalHttp,
+    });
     const workerEventIngestor = config.externalWorkerEventLog
       ? new HttpDurableEventIngestor({
           baseUrl: config.workerEventIngestBaseUrl!,
@@ -186,6 +193,7 @@ export async function startControlPlane(): Promise<void> {
       platformOperatorTenantId: config.platformOperatorTenantId,
       platformModelSourceTenantId: config.platformModelSourceTenantId,
       cubeEgressConfigToken: config.cubeEgressConfigToken,
+      workspaceTerminalGateway,
       environmentImageRevision: config.environmentImageRevision,
       metrics: observability.metrics,
       artifactReader: { get: (objectKey) => objectStore.get(objectKey) },

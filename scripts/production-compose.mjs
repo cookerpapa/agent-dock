@@ -76,6 +76,7 @@ const applicationSecretNames = [
   "model-credential-master-key",
   "tool-broker-token",
   "sandbox-materializer-token",
+  "workspace-terminal-token",
   "workspace-volume-gateway-token",
   "supervisor-enrollment-token",
   "supervisor-management-token",

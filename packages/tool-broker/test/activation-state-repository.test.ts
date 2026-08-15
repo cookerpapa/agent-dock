@@ -27,7 +27,12 @@ describe("PostgreSQL Tool Broker ownership", () => {
     const tenantId = "20000000-0000-4000-8000-000000000001";
     const projectId = "20000000-0000-4000-8000-000000000002";
     const workspaceId = "20000000-0000-4000-8000-000000000003";
+    const userId = "20000000-0000-4000-8000-000000000020";
     await database.insertInto("tenants").values({ id: tenantId, slug: "reservation" }).execute();
+    await database
+      .insertInto("users")
+      .values({ id: userId, tenant_id: tenantId, display_name: "Terminal Owner" })
+      .execute();
     await database
       .insertInto("projects")
       .values({ id: projectId, tenant_id: tenantId, name: "reservation" })
@@ -155,32 +160,58 @@ describe("PostgreSQL Tool Broker ownership", () => {
       }),
     ).resolves.toBe(false);
 
-    await expect(
-      repository.reserve({
-        activationId: "20000000-0000-4000-8000-000000000005",
-        assignment: {
-          tenantId,
-          projectId,
-          workspaceId,
-          supervisorId: "supervisor-reservation",
-          bootId: "20000000-0000-4000-8000-000000000006",
-          sandboxId: "20000000-0000-4000-8000-000000000007",
-          commandId: "command-reservation",
-          sessionId: "session-reservation",
-          turnId: "turn-reservation",
-          attemptId: "20000000-0000-4000-8000-000000000008",
-          leaseId: "20000000-0000-4000-8000-000000000009",
-          fencingToken: 1,
-        },
-        capabilitySha256: "a".repeat(64),
-        turnContextSha256: "b".repeat(64),
-        attemptContextSha256: "c".repeat(64),
-        environmentSha256: "d".repeat(64),
-      }),
-    ).rejects.toMatchObject({
+    const activation = {
+      activationId: "20000000-0000-4000-8000-000000000005",
+      assignment: {
+        tenantId,
+        projectId,
+        workspaceId,
+        supervisorId: "supervisor-reservation",
+        bootId: "20000000-0000-4000-8000-000000000006",
+        sandboxId: "20000000-0000-4000-8000-000000000007",
+        commandId: "command-reservation",
+        sessionId: rootSessionId,
+        turnId: "turn-reservation",
+        attemptId: "20000000-0000-4000-8000-000000000008",
+        leaseId: "20000000-0000-4000-8000-000000000009",
+        fencingToken: 1,
+      },
+      capabilitySha256: "a".repeat(64),
+      turnContextSha256: "b".repeat(64),
+      attemptContextSha256: "c".repeat(64),
+      environmentSha256: "d".repeat(64),
+    } as const;
+    await expect(repository.reserve(activation)).rejects.toMatchObject({
       code: "state_conflict",
       message: "Tenant Sandbox policy is unavailable",
     });
+    await database
+      .insertInto("tenant_runtime_policies")
+      .values({
+        tenant_id: tenantId,
+        default_model_profile_id: profileId,
+        maximum_active_sandboxes: 2,
+      })
+      .execute();
+    await expect(
+      repository.reserveTerminal({
+        terminalId: "20000000-0000-4000-8000-000000000021",
+        tenantId,
+        userId,
+        projectId,
+        workspaceId,
+        sessionId: rootSessionId,
+      }),
+    ).resolves.toEqual({ status: "reserved" });
+    await expect(repository.reserve(activation)).resolves.toEqual({ status: "busy" });
+    await repository.setTerminalState("20000000-0000-4000-8000-000000000021", "released");
+    await expect(
+      database
+        .selectFrom("workspace_terminal_sessions")
+        .select("state")
+        .where("terminal_id", "=", "20000000-0000-4000-8000-000000000021")
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ state: "released" });
   }, 15_000);
 
   it("fences an expired replica before a surviving owner stays Ready", async () => {
@@ -209,8 +240,12 @@ describe("PostgreSQL Tool Broker ownership", () => {
     resources.push(async () => first.close());
     await first.start();
     await expect(first.checkHealth()).resolves.toBeUndefined();
+    expect(() => first.assertLocalOwnership()).not.toThrow();
 
     now = new Date("2026-08-09T00:00:04.000Z");
+    expect(() => first.assertLocalOwnership()).toThrowError(
+      "Tool Broker locally confirmed ownership lease expired",
+    );
     const second = new PostgresSandboxActivationStateRepository({
       database,
       sandboxDomainId: "sandbox-domain-0001",
@@ -225,6 +260,7 @@ describe("PostgreSQL Tool Broker ownership", () => {
 
     await expect(first.checkHealth()).rejects.toMatchObject({ code: "ownership_lost" });
     await expect(second.checkHealth()).resolves.toBeUndefined();
+    expect(() => second.assertLocalOwnership()).not.toThrow();
     await expect(
       database
         .selectFrom("tool_broker_instances")

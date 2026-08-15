@@ -17,9 +17,11 @@ import {
   type TelemetryRuntime,
   type TraceCarrier,
 } from "@agent-dock/observability";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
+import WebSocket, { type RawData } from "ws";
 import {
+  TOOL_BROKER_TERMINAL_PATH,
   TOOL_BROKER_SERVICE_PATH,
   ReplicatedToolBrokerClient,
   ToolBrokerClient,
@@ -30,6 +32,7 @@ import {
 
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
 const MATERIALIZER_TOKEN = `materializer-${"m".repeat(48)}`;
+const TERMINAL_TOKEN = `terminal-${"t".repeat(48)}`;
 const CAPABILITY = `adts_${"c".repeat(43)}`;
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
@@ -155,6 +158,140 @@ function backend(ownerBaseUrl = "http://tool-broker.invalid"): ToolBrokerBackend
 }
 
 describe("Tool Broker authenticated RPC", () => {
+  it("bridges an authenticated WebSocket to one bounded human PTY session", async () => {
+    const terminalId = "10000000-0000-4000-8000-000000000080";
+    const sendInput = vi.fn(async () => undefined);
+    const resize = vi.fn(async () => undefined);
+    const closeTerminal = vi.fn(async () => undefined);
+    let finishOutput!: () => void;
+    const outputFinished = new Promise<void>((resolve) => {
+      finishOutput = resolve;
+    });
+    const terminalBackend: ToolBrokerBackend = {
+      ...backend(),
+      async openTerminal(input) {
+        expect(input).toMatchObject({
+          tenantId: "10000000-0000-4000-8000-000000000081",
+          workspaceId: "10000000-0000-4000-8000-000000000084",
+          size: { rows: 24, cols: 100 },
+        });
+        return {
+          terminalId,
+          pid: 73,
+          output: {
+            async *[Symbol.asyncIterator]() {
+              yield Buffer.from("shell ready\r\n");
+              await outputFinished;
+            },
+          },
+          sendInput,
+          resize,
+          close: closeTerminal,
+        };
+      },
+    };
+    const server = new ToolBrokerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: SERVICE_TOKEN,
+      terminalToken: TERMINAL_TOKEN,
+      broker: terminalBackend,
+    });
+    servers.push(server);
+    const address = await server.listen();
+    const url = new URL(TOOL_BROKER_TERMINAL_PATH, address);
+    url.protocol = "ws:";
+    const socket = new WebSocket(url, {
+      headers: { authorization: `Bearer ${TERMINAL_TOKEN}` },
+    });
+    const frames: unknown[] = [];
+    const waiters: Array<(value: unknown) => void> = [];
+    socket.on("message", (data: RawData) => {
+      const frame = JSON.parse(data.toString("utf8")) as unknown;
+      const waiter = waiters.shift();
+      if (waiter === undefined) frames.push(frame);
+      else waiter(frame);
+    });
+    const nextFrame = (): Promise<unknown> => {
+      const frame = frames.shift();
+      return frame === undefined
+        ? new Promise<unknown>((resolve) => waiters.push(resolve))
+        : Promise.resolve(frame);
+    };
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    socket.send(
+      JSON.stringify({
+        workspaceTerminalProtocolVersion: 1,
+        type: "workspace_terminal.open",
+        requestId: "10000000-0000-4000-8000-000000000088",
+        tenantId: "10000000-0000-4000-8000-000000000081",
+        userId: "10000000-0000-4000-8000-000000000082",
+        projectId: "10000000-0000-4000-8000-000000000083",
+        workspaceId: "10000000-0000-4000-8000-000000000084",
+        sessionId: "10000000-0000-4000-8000-000000000085",
+        environment: {
+          environmentVersionId: "10000000-0000-4000-8000-000000000086",
+          versionNumber: 1,
+          profileKey: "agent-dock-fullstack",
+          profileVersion: "1",
+          imageRevision: "development",
+          specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+          recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+          recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+        },
+        workspaceSeed: { kind: "sample_java" },
+        rows: 24,
+        cols: 100,
+      }),
+    );
+    await expect(nextFrame()).resolves.toMatchObject({
+      type: "workspace_terminal.ready",
+      terminalId,
+      pid: 73,
+    });
+    await expect(nextFrame()).resolves.toEqual({
+      workspaceTerminalProtocolVersion: 1,
+      type: "workspace_terminal.output",
+      data: Buffer.from("shell ready\r\n").toString("base64"),
+    });
+    socket.send(
+      JSON.stringify({
+        workspaceTerminalProtocolVersion: 1,
+        type: "workspace_terminal.input",
+        data: Buffer.from("pwd\r").toString("base64"),
+      }),
+    );
+    socket.send(
+      JSON.stringify({
+        workspaceTerminalProtocolVersion: 1,
+        type: "workspace_terminal.resize",
+        rows: 40,
+        cols: 120,
+      }),
+    );
+    socket.send(
+      JSON.stringify({
+        workspaceTerminalProtocolVersion: 1,
+        type: "workspace_terminal.ping",
+      }),
+    );
+    await expect(nextFrame()).resolves.toMatchObject({ type: "workspace_terminal.pong" });
+    expect(sendInput).toHaveBeenCalledWith(Buffer.from("pwd\r"));
+    expect(resize).toHaveBeenCalledWith({ rows: 40, cols: 120 });
+    socket.send(
+      JSON.stringify({
+        workspaceTerminalProtocolVersion: 1,
+        type: "workspace_terminal.close",
+      }),
+    );
+    await new Promise<void>((resolve) => socket.once("close", () => resolve()));
+    finishOutput();
+    expect(closeTerminal).toHaveBeenCalledOnce();
+  });
+
   it("stays ready while at least one Tool Broker replica is healthy", async () => {
     const server = new ToolBrokerServer({
       host: "127.0.0.1",

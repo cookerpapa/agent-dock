@@ -347,6 +347,11 @@ export {
   type WorkspaceVersionServiceOptions,
 } from "./workspace-version-service.ts";
 export {
+  WORKSPACE_TERMINAL_PATH,
+  WorkspaceTerminalGateway,
+  type WorkspaceTerminalGatewayOptions,
+} from "./workspace-terminal-gateway.ts";
+export {
   GitHubIntegrationError,
   GitHubIntegrationService,
   type GitHubIntegrationServiceOptions,

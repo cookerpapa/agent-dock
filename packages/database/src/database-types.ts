@@ -100,6 +100,8 @@ export type ToolBrokerInstanceState = "ready" | "stopped" | "lost";
 export type ToolBrokerActivationState =
   "reserved" | "materializing" | "active" | "warm" | "cleaning" | "released" | "unknown";
 export type ToolBrokerOperationState = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+export type WorkspaceTerminalState =
+  "reserved" | "materializing" | "active" | "cleaning" | "released" | "unknown";
 
 export interface ToolBrokerInstanceTable {
   instance_id: string;
@@ -151,6 +153,26 @@ export interface ToolBrokerOperationTable {
   failure_code: string | null;
   started_at: GeneratedTimestamp;
   settled_at: NullableTimestamp;
+}
+
+export interface WorkspaceTerminalSessionTable {
+  terminal_id: string;
+  sandbox_domain_id: string;
+  owner_instance_id: string;
+  owner_base_url: string;
+  tenant_id: string;
+  user_id: string;
+  project_id: string;
+  workspace_id: string;
+  session_id: string;
+  runtime_id: string | null;
+  runtime_name: string | null;
+  state: WorkspaceTerminalState;
+  lease_expires_at: Timestamp;
+  last_heartbeat_at: Timestamp;
+  failure_code: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface TenantTable {
@@ -1178,6 +1200,7 @@ export interface Database {
   tool_broker_instances: ToolBrokerInstanceTable;
   tool_broker_activations: ToolBrokerActivationTable;
   tool_broker_operations: ToolBrokerOperationTable;
+  workspace_terminal_sessions: WorkspaceTerminalSessionTable;
   tenants: TenantTable;
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;

@@ -88,6 +88,9 @@ function providerFixture() {
   let createSpec: SandboxCreateSpec | undefined;
   let createCount = 0;
   let stopped = false;
+  let destroyed = false;
+  const terminalInput = vi.fn(async () => undefined);
+  const terminalResize = vi.fn(async () => undefined);
   const exec = vi.fn<SandboxProvider["exec"]>(async (_handle, request) => ({
     toolBrokerProtocolVersion: 1,
     type: "tool_sandbox.operation_result",
@@ -126,13 +129,29 @@ function providerFixture() {
       return Buffer.alloc(0);
     },
     async writeFile() {},
+    async openTerminal() {
+      return {
+        pid: 77,
+        output: {
+          async *[Symbol.asyncIterator]() {
+            yield Buffer.from("shell\r\n");
+          },
+        },
+        sendInput: terminalInput,
+        resize: terminalResize,
+        async kill() {},
+        disconnect() {},
+      };
+    },
     async snapshot() {
       throw new Error("unused");
     },
     async stop() {
       stopped = true;
     },
-    async destroy() {},
+    async destroy() {
+      destroyed = true;
+    },
     async inspect(handle) {
       return {
         providerApiVersion: 1,
@@ -173,6 +192,8 @@ function providerFixture() {
     provider,
     exec,
     rebind,
+    terminalInput,
+    terminalResize,
     get createSpec() {
       return createSpec;
     },
@@ -181,6 +202,9 @@ function providerFixture() {
     },
     get stopped() {
       return stopped;
+    },
+    get destroyed() {
+      return destroyed;
     },
   };
 }
@@ -205,6 +229,40 @@ function operation(
 }
 
 describe("provider-backed Tool Tool Broker", () => {
+  it("opens a separate human terminal authority and excludes Agent writers", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const terminal = await manager.openTerminal({
+      tenantId: assignment.tenantId,
+      userId: "user-provider-test",
+      projectId: assignment.projectId,
+      workspaceId: assignment.workspaceId,
+      sessionId: assignment.sessionId,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      size: { rows: 24, cols: 100 },
+    });
+    expect(terminal).toMatchObject({ terminalId: ACTIVATION_ID, pid: 77 });
+    await terminal.sendInput(Buffer.from("pwd\r"));
+    await terminal.resize({ rows: 40, cols: 120 });
+    expect(fixture.terminalInput).toHaveBeenCalledWith(Buffer.from("pwd\r"));
+    expect(fixture.terminalResize).toHaveBeenCalledWith({ rows: 40, cols: 120 });
+    await expect(manager.create(createRequest)).rejects.toMatchObject({
+      code: "tool_sandbox_workspace_busy",
+    });
+    await terminal.close();
+    expect(fixture.destroyed).toBe(true);
+    await expect(manager.create(createRequest)).resolves.toMatchObject({
+      activationId: ACTIVATION_ID,
+    });
+    await manager.stop(ACTIVATION_ID, assignment);
+    await manager.close();
+  });
+
   it("rejects a new activation when the tenant holds its persistent Sandbox quota", async () => {
     class TenantCapacityRepository extends InMemorySandboxActivationStateRepository {
       override async reserve() {
@@ -962,6 +1020,9 @@ describe("provider-backed Tool Tool Broker", () => {
     try {
       await writeFile(tokenPath, `${"t".repeat(48)}\n`, { mode: 0o600 });
       await chmod(tokenPath, 0o600);
+      const terminalTokenPath = join(directory, "terminal-token");
+      await writeFile(terminalTokenPath, `${"w".repeat(48)}\n`, { mode: 0o600 });
+      await chmod(terminalTokenPath, 0o600);
       const cubeKeyPath = join(directory, "cube-api-key");
       await writeFile(cubeKeyPath, `${"k".repeat(48)}\n`, { mode: 0o600 });
       await chmod(cubeKeyPath, 0o600);
@@ -983,6 +1044,7 @@ describe("provider-backed Tool Tool Broker", () => {
           AGENT_DOCK_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
           AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
           AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
@@ -1018,6 +1080,7 @@ describe("provider-backed Tool Tool Broker", () => {
           AGENT_DOCK_TOOL_BROKER_OWNERSHIP_LEASE_MS: "10000",
           AGENT_DOCK_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS: "5000",
           AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
+          AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
           AGENT_DOCK_IMAGE_REVISION: "development",
           AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
           AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,

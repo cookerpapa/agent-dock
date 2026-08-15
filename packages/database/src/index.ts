@@ -34,6 +34,7 @@ export {
   type TurnInputKind,
   type WorkspaceImportStatus,
   type WorkspaceSourceKind,
+  type WorkspaceTerminalState,
 } from "./database-types.ts";
 
 export {

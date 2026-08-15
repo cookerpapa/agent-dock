@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceFileResource, WorkspaceVersionResource } from "@agent-dock/protocol";
 import { AgentDockApi, AgentDockApiError } from "./api.ts";
+
+const WorkspaceTerminal = lazy(async () => {
+  const module = await import("./WorkspaceTerminal.tsx");
+  return { default: module.WorkspaceTerminal };
+});
 
 export const MAXIMUM_WORKSPACE_PREVIEW_BYTES = 512 * 1_024;
 
@@ -126,6 +131,7 @@ export function WorkspaceInspector({
   );
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
+  const [view, setView] = useState<"files" | "terminal">("files");
   const onErrorRef = useRef(onError);
   const directoryLoadGeneration = useRef(0);
   const fileLoadGeneration = useRef(0);
@@ -147,6 +153,7 @@ export function WorkspaceInspector({
     setSelectedTooLarge(false);
     setLoading(false);
     setFileLoading(false);
+    setView("files");
   }, [sessionId]);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -281,88 +288,114 @@ export function WorkspaceInspector({
           ? "尚无已提交的文件版本"
           : `版本 ${String(version.versionNumber)} · ${String(version.fileCount)} 个文件`}
       </div>
-      <div className="workspace-directory-body">
-        <nav className="workspace-file-tree" aria-label="/workspace 文件">
-          <button
-            aria-expanded={rootExpanded}
-            className="workspace-root-row"
-            onClick={() => setRootExpanded((expanded) => !expanded)}
-            type="button"
-          >
-            <span>{rootExpanded ? "▾" : "▸"}</span>
-            <strong>/workspace</strong>
-          </button>
-          {loading ? (
-            <div className="workspace-empty">正在读取目录…</div>
-          ) : entries.length === 0 ? (
-            <div className="workspace-empty">
-              这个目录还是空的。让 Agent 创建文件后，完成的版本会显示在这里。
-            </div>
-          ) : (
-            visibleEntries.map((entry) =>
-              entry.kind === "directory" ? (
-                <button
-                  aria-expanded={expandedDirectories.has(entry.path)}
-                  className="workspace-tree-directory"
-                  key={`directory:${entry.path}`}
-                  onClick={() => toggleDirectory(entry.path)}
-                  style={{ paddingLeft: `${String(16 + entry.depth * 16)}px` }}
-                  title={entry.path}
-                  type="button"
-                >
-                  <span>{expandedDirectories.has(entry.path) ? "▾" : "▸"}</span>
-                  <span>{entry.name}</span>
-                </button>
-              ) : (
-                <button
-                  className={`workspace-tree-file${selectedPath === entry.path ? " active" : ""}`}
-                  key={`file:${entry.path}`}
-                  onClick={() => void openFile(entry.file)}
-                  style={{ paddingLeft: `${String(18 + entry.depth * 16)}px` }}
-                  title={entry.path}
-                  type="button"
-                >
-                  <span>{entry.file.executable ? "◆" : "·"}</span>
-                  <span>{entry.name}</span>
-                  <small>{sizeLabel(entry.file.sizeBytes)}</small>
-                </button>
-              ),
-            )
-          )}
-        </nav>
-        <section className="workspace-file-preview">
-          {selectedFile === null ? (
-            <div className="workspace-preview-empty">
-              <span>选择一个文件</span>
-              <small>文件内容来自当前已提交的 Workspace 版本。</small>
-            </div>
-          ) : (
-            <>
-              <header>
-                <strong>{selectedFile.path}</strong>
-                <span>{sizeLabel(selectedFile.sizeBytes)}</span>
-              </header>
-              {fileLoading ? (
-                <div className="workspace-preview-empty">正在读取文件…</div>
-              ) : selectedTooLarge ? (
-                <div className="workspace-preview-empty">
-                  <span>文件较大，无法在线预览</span>
-                  <small>
-                    网页预览上限为 {sizeLabel(MAXIMUM_WORKSPACE_PREVIEW_BYTES)}
-                    ，Agent 仍可在 Sandbox 中读取和处理此文件。
-                  </small>
-                </div>
-              ) : selectedBinary ? (
-                <div className="workspace-preview-empty">这是二进制文件，无法在此预览。</div>
-              ) : (
-                <pre>
-                  <code>{selectedText ?? ""}</code>
-                </pre>
-              )}
-            </>
-          )}
-        </section>
+      <div className="workspace-view-tabs" role="tablist" aria-label="Workspace 视图">
+        <button
+          aria-selected={view === "files"}
+          className={view === "files" ? "active" : ""}
+          onClick={() => setView("files")}
+          role="tab"
+          type="button"
+        >
+          文件
+        </button>
+        <button
+          aria-selected={view === "terminal"}
+          className={view === "terminal" ? "active" : ""}
+          onClick={() => setView("terminal")}
+          role="tab"
+          type="button"
+        >
+          终端
+        </button>
       </div>
+      {view === "terminal" ? (
+        <Suspense fallback={<div className="workspace-terminal-loading">正在载入终端…</div>}>
+          <WorkspaceTerminal sessionId={sessionId} onError={onError} />
+        </Suspense>
+      ) : (
+        <div className="workspace-directory-body">
+          <nav className="workspace-file-tree" aria-label="/workspace 文件">
+            <button
+              aria-expanded={rootExpanded}
+              className="workspace-root-row"
+              onClick={() => setRootExpanded((expanded) => !expanded)}
+              type="button"
+            >
+              <span>{rootExpanded ? "▾" : "▸"}</span>
+              <strong>/workspace</strong>
+            </button>
+            {loading ? (
+              <div className="workspace-empty">正在读取目录…</div>
+            ) : entries.length === 0 ? (
+              <div className="workspace-empty">
+                这个目录还是空的。让 Agent 创建文件后，完成的版本会显示在这里。
+              </div>
+            ) : (
+              visibleEntries.map((entry) =>
+                entry.kind === "directory" ? (
+                  <button
+                    aria-expanded={expandedDirectories.has(entry.path)}
+                    className="workspace-tree-directory"
+                    key={`directory:${entry.path}`}
+                    onClick={() => toggleDirectory(entry.path)}
+                    style={{ paddingLeft: `${String(16 + entry.depth * 16)}px` }}
+                    title={entry.path}
+                    type="button"
+                  >
+                    <span>{expandedDirectories.has(entry.path) ? "▾" : "▸"}</span>
+                    <span>{entry.name}</span>
+                  </button>
+                ) : (
+                  <button
+                    className={`workspace-tree-file${selectedPath === entry.path ? " active" : ""}`}
+                    key={`file:${entry.path}`}
+                    onClick={() => void openFile(entry.file)}
+                    style={{ paddingLeft: `${String(18 + entry.depth * 16)}px` }}
+                    title={entry.path}
+                    type="button"
+                  >
+                    <span>{entry.file.executable ? "◆" : "·"}</span>
+                    <span>{entry.name}</span>
+                    <small>{sizeLabel(entry.file.sizeBytes)}</small>
+                  </button>
+                ),
+              )
+            )}
+          </nav>
+          <section className="workspace-file-preview">
+            {selectedFile === null ? (
+              <div className="workspace-preview-empty">
+                <span>选择一个文件</span>
+                <small>文件内容来自当前已提交的 Workspace 版本。</small>
+              </div>
+            ) : (
+              <>
+                <header>
+                  <strong>{selectedFile.path}</strong>
+                  <span>{sizeLabel(selectedFile.sizeBytes)}</span>
+                </header>
+                {fileLoading ? (
+                  <div className="workspace-preview-empty">正在读取文件…</div>
+                ) : selectedTooLarge ? (
+                  <div className="workspace-preview-empty">
+                    <span>文件较大，无法在线预览</span>
+                    <small>
+                      网页预览上限为 {sizeLabel(MAXIMUM_WORKSPACE_PREVIEW_BYTES)}
+                      ，Agent 仍可在 Sandbox 中读取和处理此文件。
+                    </small>
+                  </div>
+                ) : selectedBinary ? (
+                  <div className="workspace-preview-empty">这是二进制文件，无法在此预览。</div>
+                ) : (
+                  <pre>
+                    <code>{selectedText ?? ""}</code>
+                  </pre>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </aside>
   );
 }

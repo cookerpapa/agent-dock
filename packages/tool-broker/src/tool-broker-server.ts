@@ -1,4 +1,7 @@
 import {
+  MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  parseWorkspaceTerminalClientFrame,
+  parseWorkspaceTerminalOpenRequest,
   parseToolBrokerRequest,
   parseToolBrokerMaterializeFileRequest,
   parseSupervisorManagementRequest,
@@ -6,9 +9,11 @@ import {
   type InternalServiceError,
   type SupervisorManagementResponse,
 } from "@agent-dock/protocol";
+import fastifyWebsocket from "@fastify/websocket";
 import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import type { RawData, WebSocket } from "ws";
 import {
   TOOL_BROKER_INVENTORY_PATH,
   TOOL_BROKER_LIVE_PATH,
@@ -21,12 +26,15 @@ import { ToolBrokerError } from "./sandbox-provider.ts";
 import { ToolBrokerOwnerRedirectError, type ToolBroker } from "./tool-broker.ts";
 
 const DEFAULT_BODY_LIMIT = 5 * 1_024 * 1_024;
+const DEFAULT_TERMINAL_SEND_BUFFER_BYTES = 1 * 1_024 * 1_024;
+export const TOOL_BROKER_TERMINAL_PATH = "/internal/v1/workspace-terminal";
 
 export type ToolBrokerServerOptions = {
   host: string;
   port: number;
   serviceToken: string;
   materializerToken?: string;
+  terminalToken?: string;
   broker: ToolBrokerBackend;
   bodyLimit?: number;
   metrics?: AgentDockMetrics;
@@ -52,7 +60,8 @@ export type ToolBrokerBackend = Pick<
   | "maximumActiveSandboxes"
   | "cleanPrewarmCount"
   | "providerId"
->;
+> &
+  Partial<Pick<ToolBroker, "openTerminal">>;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -117,6 +126,7 @@ export class ToolBrokerServer {
   readonly #port: number;
   readonly #serviceDigest: Buffer;
   readonly #materializerDigest: Buffer | undefined;
+  readonly #terminalDigest: Buffer | undefined;
   readonly #broker: ToolBrokerBackend;
   readonly #server: FastifyInstance;
   readonly #metrics: AgentDockMetrics | undefined;
@@ -136,6 +146,10 @@ export class ToolBrokerServer {
       options.materializerToken === undefined
         ? undefined
         : digest(validServiceToken(options.materializerToken));
+    this.#terminalDigest =
+      options.terminalToken === undefined
+        ? undefined
+        : digest(validServiceToken(options.terminalToken));
     this.#broker = options.broker;
     this.#metrics = options.metrics;
     this.#server = Fastify({
@@ -143,6 +157,12 @@ export class ToolBrokerServer {
       bodyLimit: options.bodyLimit ?? DEFAULT_BODY_LIMIT,
       requestTimeout: 320_000,
       keepAliveTimeout: 5_000,
+    });
+    this.#server.register(fastifyWebsocket, {
+      options: {
+        maxPayload: MAX_WORKSPACE_TERMINAL_FRAME_BYTES * 2,
+        perMessageDeflate: false,
+      },
     });
     this.#capacityMetrics = setInterval(() => this.#recordCapacityMetrics(), 1_000);
     this.#capacityMetrics.unref();
@@ -194,6 +214,16 @@ export class ToolBrokerServer {
       token !== undefined &&
       this.#materializerDigest !== undefined &&
       timingSafeEqual(this.#materializerDigest, candidate)
+    );
+  }
+
+  #terminalAuthorized(value: string | undefined): boolean {
+    const token = bearer(value);
+    const candidate = token === undefined ? Buffer.alloc(32) : digest(token);
+    return (
+      token !== undefined &&
+      this.#terminalDigest !== undefined &&
+      timingSafeEqual(this.#terminalDigest, candidate)
     );
   }
 
@@ -297,6 +327,19 @@ export class ToolBrokerServer {
         status: healthy ? "ready" : "not_ready",
       });
     });
+
+    if (this.#terminalDigest !== undefined && this.#broker.openTerminal !== undefined) {
+      this.#server.register(async (scope) => {
+        scope.addHook("preValidation", async (request, reply) => {
+          if (!this.#terminalAuthorized(request.headers.authorization)) {
+            await reply.code(401).send();
+          }
+        });
+        scope.get(TOOL_BROKER_TERMINAL_PATH, { websocket: true }, (socket) => {
+          this.#acceptTerminalSocket(socket);
+        });
+      });
+    }
 
     this.#server.post(TOOL_BROKER_SERVICE_PATH, async (request, reply) => {
       if (!this.#authorized(request.headers.authorization)) {
@@ -535,5 +578,142 @@ export class ToolBrokerServer {
         await this.#failure(reply, error);
       }
     });
+  }
+
+  #acceptTerminalSocket(socket: WebSocket): void {
+    let connection: Awaited<ReturnType<NonNullable<ToolBrokerBackend["openTerminal"]>>> | undefined;
+    let closed = false;
+    let initialized = false;
+    let processing = Promise.resolve();
+    const send = async (frame: unknown): Promise<void> => {
+      if (closed || socket.readyState !== socket.OPEN) return;
+      const payload = JSON.stringify(frame);
+      const bytes = Buffer.byteLength(payload, "utf8");
+      if (
+        bytes > DEFAULT_TERMINAL_SEND_BUFFER_BYTES ||
+        socket.bufferedAmount + bytes > DEFAULT_TERMINAL_SEND_BUFFER_BYTES
+      ) {
+        socket.close(4_002, "terminal send buffer overloaded");
+        return;
+      }
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        socket.send(payload, (error) => (error ? rejectPromise(error) : resolvePromise()));
+      });
+    };
+    const close = async (): Promise<void> => {
+      if (closed) return;
+      closed = true;
+      await connection?.close().catch(() => undefined);
+      if (socket.readyState === socket.OPEN) socket.close(1_000, "terminal closed");
+      else if (socket.readyState !== socket.CLOSED) socket.terminate();
+    };
+    const fail = async (error: unknown): Promise<void> => {
+      if (error instanceof ToolBrokerOwnerRedirectError) {
+        await send({
+          workspaceTerminalProtocolVersion: 1,
+          type: "workspace_terminal.owner_redirect",
+          ownerBaseUrl: error.ownerBaseUrl,
+        });
+      } else {
+        const failure = safeFailure(error);
+        await send({
+          workspaceTerminalProtocolVersion: 1,
+          type: "workspace_terminal.error",
+          code: failure.code,
+          message: failure.message,
+          retryable: failure.retryable,
+        });
+      }
+      await close();
+    };
+    socket.on("message", (data: RawData) => {
+      processing = processing
+        .then(async () => {
+          const raw =
+            data instanceof ArrayBuffer
+              ? Buffer.from(data).toString("utf8")
+              : Array.isArray(data)
+                ? Buffer.concat(data).toString("utf8")
+                : data.toString("utf8");
+          const parsed = JSON.parse(raw) as unknown;
+          if (!initialized) {
+            initialized = true;
+            const open = parseWorkspaceTerminalOpenRequest(parsed);
+            const openTerminal = this.#broker.openTerminal;
+            if (openTerminal === undefined) {
+              throw new ToolBrokerError(
+                "workspace_terminal_unsupported",
+                "Workspace terminal is unavailable",
+                false,
+              );
+            }
+            const opened = await openTerminal.call(this.#broker, {
+              tenantId: open.tenantId,
+              userId: open.userId,
+              projectId: open.projectId,
+              workspaceId: open.workspaceId,
+              sessionId: open.sessionId,
+              environment: open.environment,
+              workspaceSeed: open.workspaceSeed,
+              size: { rows: open.rows, cols: open.cols },
+            });
+            if (closed) {
+              await opened.close().catch(() => undefined);
+              return;
+            }
+            connection = opened;
+            await send({
+              workspaceTerminalProtocolVersion: 1,
+              type: "workspace_terminal.ready",
+              terminalId: connection.terminalId,
+              pid: connection.pid,
+              workspaceRoot: "/workspace",
+            });
+            void (async () => {
+              try {
+                for await (const chunk of connection!.output) {
+                  for (let offset = 0; offset < chunk.byteLength; offset += 48 * 1_024) {
+                    await send({
+                      workspaceTerminalProtocolVersion: 1,
+                      type: "workspace_terminal.output",
+                      data: Buffer.from(chunk.subarray(offset, offset + 48 * 1_024)).toString(
+                        "base64",
+                      ),
+                    });
+                  }
+                }
+                await send({
+                  workspaceTerminalProtocolVersion: 1,
+                  type: "workspace_terminal.exit",
+                });
+                await close();
+              } catch (error: unknown) {
+                await fail(error);
+              }
+            })();
+            return;
+          }
+          if (connection === undefined) {
+            throw new ToolBrokerError(
+              "workspace_terminal_not_ready",
+              "Workspace terminal is still starting",
+              true,
+            );
+          }
+          const frame = parseWorkspaceTerminalClientFrame(parsed);
+          if (frame.type === "workspace_terminal.input") {
+            await connection.sendInput(Buffer.from(frame.data, "base64"));
+          } else if (frame.type === "workspace_terminal.resize") {
+            await connection.resize({ rows: frame.rows, cols: frame.cols });
+          } else if (frame.type === "workspace_terminal.close") {
+            await close();
+          } else {
+            await send({ workspaceTerminalProtocolVersion: 1, type: "workspace_terminal.pong" });
+          }
+        })
+        .catch((error: unknown) => fail(error));
+    });
+    socket.once("close", () => void close());
+    socket.once("error", () => void close());
   }
 }

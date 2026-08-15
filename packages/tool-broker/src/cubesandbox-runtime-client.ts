@@ -1,6 +1,7 @@
 import { Agent, buildConnector, fetch, type Dispatcher } from "undici";
 
 export const CUBESANDBOX_TOOL_SERVICE_PORT = 49_984;
+const MAXIMUM_TERMINAL_FRAME_BYTES = 256 * 1_024;
 
 /**
  * Cube evaluates explicit allow entries before deny entries, so AgentDock
@@ -65,6 +66,8 @@ export type CubeSandboxDataRequest = Readonly<{
   }>;
 }>;
 
+export type CubeSandboxHandoffAuthority = NonNullable<CubeSandboxDataRequest["authority"]>;
+
 export interface CubeSandboxRuntimeClient {
   checkHealth(): Promise<void>;
   ensureVolume(volumeId: string, driver: string): Promise<CubeSandboxVolume>;
@@ -73,7 +76,24 @@ export interface CubeSandboxRuntimeClient {
   list(): Promise<readonly CubeSandboxInstance[]>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
+  openTerminal(
+    instance: CubeSandboxInstance,
+    input: Readonly<{
+      rows: number;
+      cols: number;
+      authority: CubeSandboxHandoffAuthority;
+    }>,
+  ): Promise<CubeSandboxTerminal>;
   close(): Promise<void>;
+}
+
+export interface CubeSandboxTerminal {
+  readonly pid: number;
+  readonly output: AsyncIterable<Uint8Array>;
+  sendInput(data: Uint8Array): Promise<void>;
+  resize(size: Readonly<{ rows: number; cols: number }>): Promise<void>;
+  kill(): Promise<void>;
+  disconnect(): void;
 }
 
 export type OfficialCubeSandboxRuntimeClientOptions = Readonly<{
@@ -263,6 +283,71 @@ function errorResponseDiagnostic(bytes: Buffer): string {
     // marker when the remote service did not return its documented envelope.
   }
   return "unstructured error response";
+}
+
+async function* terminalFrames(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<Record<string, unknown>> {
+  const reader = body.getReader();
+  let pending = Buffer.alloc(0);
+  try {
+    for (;;) {
+      let newline = pending.indexOf(0x0a);
+      while (newline >= 0) {
+        const line = pending.subarray(0, newline);
+        pending = pending.subarray(newline + 1);
+        if (line.byteLength < 2 || line.byteLength > MAXIMUM_TERMINAL_FRAME_BYTES) {
+          throw new CubeRuntimeClientError("CubeSandbox terminal frame exceeded its byte limit");
+        }
+        const value = parseJson(line, "CubeSandbox terminal frame");
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          throw new CubeRuntimeClientError("CubeSandbox terminal frame was invalid");
+        }
+        yield value as Record<string, unknown>;
+        newline = pending.indexOf(0x0a);
+      }
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value.byteLength > 0) {
+        if (pending.byteLength + next.value.byteLength > MAXIMUM_TERMINAL_FRAME_BYTES) {
+          throw new CubeRuntimeClientError("CubeSandbox terminal stream buffer exceeded its limit");
+        }
+        pending = Buffer.concat([pending, Buffer.from(next.value)]);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (pending.byteLength !== 0) {
+    throw new CubeRuntimeClientError("CubeSandbox terminal stream ended with a partial frame");
+  }
+}
+
+function authorityHeaders(
+  authority: CubeSandboxHandoffAuthority,
+): Readonly<Record<string, string>> {
+  return {
+    "x-agent-dock-handoff-secret": authority.handoffSecret,
+    "x-agent-dock-fencing-token": String(authority.fencingToken),
+    "x-agent-dock-binding-sha256": authority.bindingSha256,
+  };
+}
+
+function terminalSize(value: Readonly<{ rows: number; cols: number }>): Readonly<{
+  rows: number;
+  cols: number;
+}> {
+  if (
+    !Number.isSafeInteger(value.rows) ||
+    !Number.isSafeInteger(value.cols) ||
+    value.rows < 2 ||
+    value.rows > 500 ||
+    value.cols < 2 ||
+    value.cols > 1_000
+  ) {
+    throw new TypeError("CubeSandbox PTY size was invalid");
+  }
+  return value;
 }
 
 export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClient {
@@ -459,6 +544,151 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       );
     }
     return parseJson(bytes, "CubeSandbox Tool service");
+  }
+
+  async openTerminal(
+    instance: CubeSandboxInstance,
+    input: Readonly<{
+      rows: number;
+      cols: number;
+      authority: CubeSandboxHandoffAuthority;
+    }>,
+  ): Promise<CubeSandboxTerminal> {
+    const size = terminalSize(input);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#requestTimeoutMs);
+    timeout.unref();
+    let response: Awaited<ReturnType<typeof fetch>>;
+    try {
+      response = await this.#dataFetch(
+        instance,
+        CUBESANDBOX_TOOL_SERVICE_PORT,
+        "/v1/terminal/open",
+        {
+          headers: {
+            "content-type": "application/json",
+            ...authorityHeaders(input.authority),
+          },
+          body: Buffer.from(JSON.stringify(size), "utf8"),
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok || response.body === null) {
+        const bytes = await readBoundedResponse(response, 64 * 1_024);
+        throw new CubeRuntimeClientError(
+          `CubeSandbox PTY start failed with HTTP ${response.status}: ${errorResponseDiagnostic(bytes)}`,
+          response.status,
+        );
+      }
+      const events = terminalFrames(response.body as ReadableStream<Uint8Array>);
+      const first = await events.next();
+      const start = first.done ? undefined : first.value;
+      if (
+        typeof start !== "object" ||
+        start === null ||
+        start.type !== "ready" ||
+        !Number.isSafeInteger(start.pid) ||
+        (start.pid as number) < 1
+      ) {
+        throw new CubeRuntimeClientError("CubeSandbox PTY stream did not begin with a PID");
+      }
+      clearTimeout(timeout);
+      const pid = start.pid as number;
+      let disconnected = false;
+      let consumed = false;
+      const output: AsyncIterable<Uint8Array> = {
+        [Symbol.asyncIterator]: async function* () {
+          if (consumed) {
+            throw new CubeRuntimeClientError("CubeSandbox PTY output can only be consumed once");
+          }
+          consumed = true;
+          try {
+            for await (const event of events) {
+              if (event.type === "output" && typeof event.data === "string") {
+                const bytes = Buffer.from(event.data, "base64");
+                if (bytes.byteLength > 64 * 1_024 || bytes.toString("base64") !== event.data) {
+                  throw new CubeRuntimeClientError("CubeSandbox PTY output was invalid");
+                }
+                yield bytes;
+              }
+              if (event.type === "exit") return;
+            }
+          } catch (error: unknown) {
+            if (!disconnected) throw error;
+          }
+        },
+      };
+      const unary = async (
+        path: "/v1/terminal/input" | "/v1/terminal/resize" | "/v1/terminal/close",
+        payload: unknown,
+        allowAbsent = false,
+      ): Promise<void> => {
+        const result = await this.#dataFetch(instance, CUBESANDBOX_TOOL_SERVICE_PORT, path, {
+          headers: {
+            "content-type": "application/json",
+            ...authorityHeaders(input.authority),
+          },
+          body: Buffer.from(JSON.stringify(payload), "utf8"),
+          signal: AbortSignal.timeout(this.#requestTimeoutMs),
+        });
+        const bytes = await readBoundedResponse(result, 64 * 1_024);
+        if (!result.ok && !(allowAbsent && result.status === 409)) {
+          throw new CubeRuntimeClientError(
+            `CubeSandbox PTY request failed with HTTP ${result.status}: ${errorResponseDiagnostic(bytes)}`,
+            result.status,
+          );
+        }
+      };
+      return Object.freeze({
+        pid,
+        output,
+        sendInput: (data: Uint8Array) =>
+          unary("/v1/terminal/input", { data: Buffer.from(data).toString("base64") }),
+        resize: (next: Readonly<{ rows: number; cols: number }>) =>
+          unary("/v1/terminal/resize", terminalSize(next)),
+        kill: () => unary("/v1/terminal/close", {}, true),
+        disconnect: () => {
+          disconnected = true;
+          controller.abort();
+          void events.return(undefined).catch(() => undefined);
+        },
+      });
+    } catch (error: unknown) {
+      clearTimeout(timeout);
+      controller.abort();
+      if (error instanceof CubeRuntimeClientError) throw error;
+      throw new CubeRuntimeClientError(
+        `CubeSandbox PTY start failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
+    }
+  }
+
+  async #dataFetch(
+    instance: CubeSandboxInstance,
+    port: number,
+    path: string,
+    input: Readonly<{
+      headers: Readonly<Record<string, string>>;
+      body: Uint8Array;
+      signal: AbortSignal;
+    }>,
+  ): Promise<Awaited<ReturnType<typeof fetch>>> {
+    const token = instance.trafficAccessToken;
+    if (token === undefined) {
+      throw new CubeRuntimeClientError("CubeSandbox private-ingress token was unavailable");
+    }
+    const host = `${String(port)}-${instance.sandboxId}.${instance.domain}`;
+    return fetch(`${this.#proxyScheme}://${host}${path}`, {
+      method: "POST",
+      headers: {
+        "e2b-traffic-access-token": token,
+        "cube-traffic-access-token": token,
+        ...input.headers,
+      },
+      body: Buffer.from(input.body),
+      dispatcher: this.#dispatcher,
+      signal: input.signal,
+    });
   }
 
   async close(): Promise<void> {

@@ -33,6 +33,7 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/agent-dock-secrets/cube-egress-config-token
   AGENT_DOCK_TOOL_BROKER_URLS: http://tool-broker:4300
   AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
+  AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: /run/agent-dock-secrets/workspace-terminal-token
   AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
   AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
   AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
@@ -100,6 +101,10 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
     target: /run/agent-dock-secrets/sandbox-materializer-token
+    read_only: true
+  - type: bind
+    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
+    target: /run/agent-dock-secrets/workspace-terminal-token
     read_only: true
   - type: bind
     source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
@@ -839,6 +844,7 @@ services:
       AGENT_DOCK_MAXIMUM_WARM_SANDBOXES: "4"
       AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
       AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
+      AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: /run/agent-dock-secrets/workspace-terminal-token
       AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: http://workspace-volume-gateway:4500
       AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/workspace-volume-gateway-token
       AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS:-660000}
@@ -859,6 +865,10 @@ services:
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
         target: /run/agent-dock-secrets/sandbox-materializer-token
+        read_only: true
+      - type: bind
+        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
+        target: /run/agent-dock-secrets/workspace-terminal-token
         read_only: true
       - type: bind
         source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token

@@ -72,6 +72,7 @@ spec:
             - { name: AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE, value: /run/agent-dock-secrets/model-credential-master-key }
             - { name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE, value: /run/agent-dock-secrets/cube-egress-config-token }
             - { name: AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE, value: /run/agent-dock-secrets/sandbox-materializer-token }
+            - { name: AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE, value: /run/agent-dock-secrets/workspace-terminal-token }
             - name: AGENT_DOCK_TOOL_BROKER_URLS
               value: {{ join "," $toolBrokerUrls | quote }}
             - { name: AGENT_DOCK_IMAGE_REVISION, value: {{ .Values.global.imageRevision | quote }} }

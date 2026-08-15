@@ -236,6 +236,11 @@ describe.sequential("production bootstrap and configuration", () => {
         "sandbox-materializer-token",
         `materializer-${"s".repeat(48)}`,
       ),
+      AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: await secret(
+        root,
+        "workspace-terminal-token",
+        `terminal-${"w".repeat(48)}`,
+      ),
       AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
       AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
       AGENT_DOCK_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",

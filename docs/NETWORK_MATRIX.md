@@ -5,6 +5,7 @@
 | Browser | Web/Control Plane/Event Gateway | yes | product API and SSE |
 | Control Plane | PostgreSQL | yes | product/Run authority |
 | Control Plane | Event Gateway | yes | live projection coordination |
+| Control Plane | Tool Broker | yes | authenticated Workspace terminal proxy |
 | Pi Worker | PostgreSQL | yes | queue, Session and lifecycle state |
 | Pi Worker | Event Gateway | yes | authenticated event batches |
 | Pi Worker | Tool Broker | yes | fenced Tool RPC |

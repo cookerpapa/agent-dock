@@ -24,7 +24,7 @@ path.
 - Pi Session tree navigation with focused/full-tree views and conversation forks;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
-- a Workspace directory/source browser plus conversation and safe Workspace deletion;
+- a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
 - administrator-only hot model credentials and Cube proxy configuration.
 
 ## One user message
@@ -83,6 +83,14 @@ The first Tool call attaches the Workspace's stable Cube Volume to a fresh or
 warm KVM. Stopping a Cube loses processes, sockets and memory, but not files.
 The committed Workspace revision is a bounded file/hash/Git-baseline reference,
 not another archive of the directory.
+
+The Workspace panel can also open an interactive Web Terminal. The Control
+Plane derives tenant, Session and Workspace identity from the authenticated
+browser request, then proxies a separate short-lived human terminal authority
+through the Tool Broker to a fenced PTY inside Cube. A human terminal and an Agent Run
+cannot write the same Workspace concurrently. Closing the terminal destroys its
+Cube while retaining the persistent Workspace Volume; no public SSH port or
+platform credential is exposed.
 
 ## Recovery and correctness
 

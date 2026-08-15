@@ -101,6 +101,25 @@ guest contains normal development tools but no platform credential. The trusted
 Volume envelope holds generation and Git baseline metadata outside the guest's
 view.
 
+### Workspace Web Terminal
+
+The authenticated public path
+`/v1/conversations/:sessionId/terminal` is a WebSocket proxy, not a public Cube
+port. The Control Plane resolves tenant, Project, Workspace, Sandbox Domain and
+validated environment from PostgreSQL. It sends that trusted descriptor over a
+dedicated service credential to the Tool Broker, which lazily creates a Cube
+and opens a UID 1000 PTY in `/workspace` through the authenticated Cube Tool
+Service. The image continues to exclude Cube `envd`, so the terminal cannot
+bypass AgentDock's handoff authority and fencing boundary.
+
+Human terminal authority is deliberately separate from Agent Tool capability,
+Run lease and fence. PostgreSQL nevertheless enforces one shared Workspace
+writer invariant: an active Agent activation blocks a terminal, and an active
+terminal blocks Agent admission. A same-owner warm Agent Cube is retired before
+the terminal starts. Input, output and resize frames are bounded; the platform
+does not persist terminal transcripts. Disconnect kills the PTY and destroys
+that Cube, while the stable Workspace Volume remains available to later Runs.
+
 ### Persistent Workspace Volume gateway
 
 The service historically named Workspace Volume Gateway is now a narrow trusted

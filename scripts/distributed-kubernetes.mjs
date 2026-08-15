@@ -118,6 +118,7 @@ function preflight(namespace, values) {
     "model-credential-master-key",
     "tool-broker-token",
     "sandbox-materializer-token",
+    "workspace-terminal-token",
     "supervisor-enrollment-token",
     "supervisor-management-token",
     "worker-event-ingest-token",
